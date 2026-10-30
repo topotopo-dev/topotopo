@@ -349,7 +349,7 @@ section('a viewer whose graphs are in no package: nothing to show');
   try {
     const s = await (await fetch(`${lv.url}api/packages`)).json() as any;
     const c = await fetch(`${lv.url}api/packages/compare`, { method: 'POST', body: '{"package":"studio/trees"}' });
-    check(s.package === null && !s.packages.length && c.status === 400 && /in no package: topotopo init <folder> \(MCP: library \{action:"init"\} for the server's folder, when the person says so\) makes the folder a package/.test((await c.json() as any).error),
+    check(s.package === null && !s.packages.length && c.status === 400 && /in no package: topotopo init <folder> \(MCP: workspace \{action:"init"\} for the server's folder, when the person says so\) makes the folder a package/.test((await c.json() as any).error),
       'no package: no packages, and a before/after says how to make one');
   } finally { lv.close(); }
 }

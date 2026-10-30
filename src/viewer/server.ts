@@ -195,7 +195,7 @@ export interface Viewer {
   /** pages open now (event-stream connections) */
   clients: () => number;
   /**
-   * Show another package (the MCP library tool's open): the routes serve it from now on and every open page
+   * Show another package (the MCP workspace tool's open): the routes serve it from now on and every open page
    * reconnects and reloads, so the URL stays the same.
    */
   setSession: (ws: Session) => void;

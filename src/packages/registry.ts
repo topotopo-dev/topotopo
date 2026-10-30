@@ -64,7 +64,7 @@ export const MAX_VERSION_BYTES = 50 * 2 ** 20;
 /** The owner of TopoTopo's own packages: nobody else publishes under it. */
 export const RESERVED_OWNER = 'topotopo';
 /** How a folder becomes a package, said where only a package will do. */
-const makePackage = () => `${program()} init <folder> (MCP: library {action:"init"} for the server's folder, when the person says so) makes the folder a package (project.json)`;
+const makePackage = () => `${program()} init <folder> (MCP: workspace {action:"init"} for the server's folder, when the person says so) makes the folder a package (project.json)`;
 /** A library as messages name it: library "game", and TopoTopo's built-in library by its name and what it is. */
 export const libraryText = (name: string) => `library "${name}"${name === BUILTIN_LIBRARY.name ? ' (TopoTopo\'s built-in library)' : ''}`;
 
@@ -954,7 +954,7 @@ export class PackageUses implements SessionPackages {
       error: `package ${pkg} is not in this package's uses (project.json)${why ? `, and it could not be added: ${why}` : ''}`,
       hint: why
         ? 'a graph that names it adds it once that is solved'
-        : `${program()} use ${pkg} (MCP: library {action:"use", package:"${pkg}"}) adds its newest version from the libraries the package lists; build and edit add it when a graph first names it`,
+        : `${program()} use ${pkg} (MCP: workspace {action:"use", package:"${pkg}"}) adds its newest version from the libraries the package lists; build and edit add it when a graph first names it`,
     };
   }
 
@@ -1220,7 +1220,7 @@ export class PackageUses implements SessionPackages {
   use(pkg: string, o: { version?: string } = {}): UseResult {
     const { dir } = this.package();
     const at = /^([^@\s]+)@(.*)$/.exec(pkg);
-    if (at && isPackageName(at[1])) throw new Error(`"${pkg}" is not a package name: name the version apart, ${program()} use ${at[1]} --version ${at[2] || '<version>'} (MCP: library {action:"use", package:"${at[1]}", version:"${at[2]}"})`);
+    if (at && isPackageName(at[1])) throw new Error(`"${pkg}" is not a package name: name the version apart, ${program()} use ${at[1]} --version ${at[2] || '<version>'} (MCP: workspace {action:"use", package:"${at[1]}", version:"${at[2]}"})`);
     if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name (lower-case letters, digits, - and _)`);
     if (o.version !== undefined && !VERSION_RE.test(o.version)) throw new Error(`"${o.version}" is not a version: write big.small, such as ${/^\d+$/.test(o.version) ? `${o.version}.0` : '1.1'}`);
     const store = this.store!;
@@ -1433,7 +1433,7 @@ export class PackageUses implements SessionPackages {
       if (listed.has(path.resolve(lib.path).toLowerCase())) continue;
       if (scanLibrary(lib).packages.some((p) => p.manifest.package === pkg)) {
         const entry = entryFor(this.dir!, lib.path, lib.name);
-        throw new Error(`${pkg} is in library "${lib.name}" (${lib.path}), which this package does not list: ${program()} libraries add ${entry} lists it ("libraries": [${[...(this.manifest?.libraries ?? []), entry].map((e) => JSON.stringify(e)).join(', ')}] in project.json; MCP: library {action:"set", libraries:[...]}, when the person says so)${scanProblems}`);
+        throw new Error(`${pkg} is in library "${lib.name}" (${lib.path}), which this package does not list: ${program()} libraries add ${entry} lists it ("libraries": [${[...(this.manifest?.libraries ?? []), entry].map((e) => JSON.stringify(e)).join(', ')}] in project.json; MCP: workspace {action:"set", libraries:[...]}, when the person says so)${scanProblems}`);
       }
     }
     const s = didYouMean(pkg, [...others]);
@@ -1664,7 +1664,7 @@ export class PackageUses implements SessionPackages {
       target = all.filter((v) => bigOf(v) === bigOf(from) && compareVersions(v, from) > 0).at(-1);
       const big = all.filter((v) => bigOf(v) > bigOf(from)).at(-1);
       if (!target) throw new NothingToUpdate(big
-        ? `${pkg} ${from} is the newest ${bigOf(from)}.x in the package's libraries, and ${big} is a big version, a step of its own: name it, ${program()} update ${pkg} --to ${big} (library {action:"update", package:"${pkg}", to:"${big}"})`
+        ? `${pkg} ${from} is the newest ${bigOf(from)}.x in the package's libraries, and ${big} is a big version, a step of its own: name it, ${program()} update ${pkg} --to ${big} (workspace {action:"update", package:"${pkg}", to:"${big}"})`
         : `${pkg} ${from} is the newest version in the package's libraries: there is nothing to update`);
     } else if (target === from) throw new NothingToUpdate(`this package uses ${pkg} ${from} already: there is nothing to update`);
     const place = found.versions.get(target)?.[0];
@@ -2098,7 +2098,7 @@ export async function publishPackage(pk: PackageUses, o: PublishOptions): Promis
     if (!kit) r.blocks.push(`only a folder of TopoTopo's built-in library (${pk.builtin}) publishes one of TopoTopo's own packages, and ${dir} is none`);
     else if (m.package !== `${RESERVED_OWNER}/${inBuiltin}`) r.blocks.push(`the folder ${inBuiltin} of TopoTopo's built-in library holds the package ${RESERVED_OWNER}/${inBuiltin}, and its project.json names ${m.package}`);
   } else if (m.package.split('/')[0] === RESERVED_OWNER) r.blocks.push(`the owner "${RESERVED_OWNER}" is reserved for TopoTopo's own packages, which TopoTopo's repository publishes into its built-in library: publish under your own owner`);
-  if (!note && !dryRun) r.blocks.push('a version needs a note, one line on what changed: --note "..." (library {action:"publish", note})');
+  if (!note && !dryRun) r.blocks.push('a version needs a note, one line on what changed: --note "..." (workspace {action:"publish", note})');
   const live = pk.following();
   if (live.length) r.warnings.push(`this session shows ${live.map((f) => f.package).join(', ')} live from ${live.length === 1 ? 'its working folder' : 'their working folders'}: the version was checked with the published copies the package uses, which it holds`);
   // a package keeps its name: versions/ of another name are not this package's
@@ -2260,7 +2260,7 @@ export function kindChanges(a: Pick<VersionInfo, 'outputs' | 'default'>, b: Pick
   return out;
 }
 
-/** A publish result as the CLI and the library tool say it; a dry run says what publishing would do. */
+/** A publish result as the CLI and the workspace tool say it; a dry run says what publishing would do. */
 export function publishText(r: PublishResult): string {
   const kind = !r.previous ? 'the first version' : r.bigBecause.length ? `big, after ${r.previous}` : `small, after ${r.previous}`;
   const said = [
@@ -2302,7 +2302,7 @@ const standing = (o: Outdated) =>
   o.error ? 'could not check' : o.small || o.big ? [o.small ? `${o.small} is out` : '', o.big ? `${o.big} is out (big)` : ''].filter(Boolean).join(', ') : 'up to date';
 
 /**
- * The packages a package uses and can use, as `topotopo packages` and the library tool list them, one line each: those it uses (version,
+ * The packages a package uses and can use, as `topotopo packages` and the workspace tool list them, one line each: those it uses (version,
  * outputs, up to date or the newer version that is out), then the others in the libraries it looks in; the libraries;
  * what could not be checked. `packages owner/name` (packageText) shows one with its outputs.
  */
@@ -2317,7 +2317,7 @@ export function packagesText(pk: PackageUses, mcp = false): string {
   const late = outdated.filter((o) => o.small || o.big).length, unchecked = outdated.filter((o) => o.error).length;
   lines.push(outdated.length
     ? `uses ${outdated.length} package${outdated.length === 1 ? '' : 's'}: ${[late ? `${late} out of date` : '', outdated.length - late - unchecked ? `${outdated.length - late - unchecked} up to date` : '', unchecked ? `could not check ${unchecked}` : ''].filter(Boolean).join(', ')}`
-    : `uses no packages yet: a graph that names "owner/name/output" adds the package (${mcp ? 'library {action:"use", package}' : `${program()} use owner/name`} adds one by hand)`);
+    : `uses no packages yet: a graph that names "owner/name/output" adds the package (${mcp ? 'workspace {action:"use", package}' : `${program()} use owner/name`} adds one by hand)`);
   const width = Math.max(0, ...outdated.map((o) => `${o.package} ${o.version}`.length));
   for (const o of outdated) {
     const info = pk.copyInfo(o.package, o.version);
@@ -2342,10 +2342,10 @@ export function packagesText(pk: PackageUses, mcp = false): string {
   if (followed.length) lines.push('following this session:', ...followed.map((f) => `  ${f.package}  ${f.dir} (library "${f.library}")`));
   let libs: Libraries = { libs: [], problems: [] };
   try { libs = pk.libraries(); } catch (e: any) { problems.push(e.message); }
-  lines.push(`libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root}${l.name !== l.entry ? `, named "${l.name}"` : ''}${l.from === 'workspace' ? ', listed by the workspace' : ''})`).join(', ') : `none listed (${mcp ? 'library {action:"set", libraries:[...]}' : `${program()} libraries add <folder or registered name>`} lists one)`}; TopoTopo's built-in library is looked in as well`);
+  lines.push(`libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root}${l.name !== l.entry ? `, named "${l.name}"` : ''}${l.from === 'workspace' ? ', listed by the workspace' : ''})`).join(', ') : `none listed (${mcp ? 'workspace {action:"set", libraries:[...]}' : `${program()} libraries add <folder or registered name>`} lists one)`}; TopoTopo's built-in library is looked in as well`);
   const said = [...new Set(problems)];
   if (said.length) lines.push(`could not check ${said.length}:`, ...said.map((p) => `  ${p}`));
-  lines.push(mcp ? 'library {action:"packages", package:"owner/name"} shows one with its outputs; {action:"outdated"} the notes of the newer versions' : `${program()} packages owner/name shows one with its outputs; ${program()} outdated the notes of the newer versions`);
+  lines.push(mcp ? 'workspace {action:"packages", package:"owner/name"} shows one with its outputs; {action:"outdated"} the notes of the newer versions' : `${program()} packages owner/name shows one with its outputs; ${program()} outdated the notes of the newer versions`);
   return lines.join('\n');
 }
 
@@ -2515,19 +2515,19 @@ function entryFor(dir: string, root: string, name: string): string {
   return near ? (rel.startsWith('.') ? rel : `./${rel}`) : name;
 }
 
-/** A search as the CLI (or, `mcp`, the library tool) says it: the hits by library, and whether the package can use them. */
+/** A search as the CLI (or, `mcp`, the workspace tool) says it: the hits by library, and whether the package can use them. */
 export function searchText(r: SearchResult, mcp = false): string {
   const q = r.query, hits = r.libraries.flatMap((l) => l.hits);
   const asked = [q.query?.trim() ? `"${q.query.trim()}"` : '', q.kind ? `kind ${q.kind}` : '', q.tag ? `tag ${q.tag}` : ''].filter(Boolean).join(', ') || 'everything';
   const lines = [hits.length
     ? `search ${asked}: ${hits.length} output${hits.length === 1 ? '' : 's'} in ${r.libraries.filter((l) => l.hits.length).length} of the ${r.libraries.length} libraries looked in${r.package ? `, for ${r.package}` : ''}`
     : `search ${asked}: no output matches in ${r.libraries.map((l) => libraryText(l.name)).join(', ')}`];
-  if (!r.package) lines.push(`this folder is in no package, and only a package's graphs use packages: ${mcp ? "library {action:\"init\"} makes the server's folder one, when the person says so" : makePackage()}`);
+  if (!r.package) lines.push(`this folder is in no package, and only a package's graphs use packages: ${mcp ? "workspace {action:\"init\"} makes the server's folder one, when the person says so" : makePackage()}`);
   for (const l of r.libraries) {
     if (!l.hits.length) continue;
     const standing = l.standing === 'builtin' ? 'TopoTopo\'s own packages, which every package can use: a graph that names one adds it'
       : l.standing === 'listed' ? `${r.package} lists it: a graph that names one of these adds its package`
-      : r.package ? `${r.package} does not list it: to use these, ${mcp ? `library {action:"set", libraries:[…, "${l.entry ?? l.name}"]} lists it, when the person says so (the tools never add a library by themselves)` : `${program()} libraries add ${l.entry ?? l.name} lists it`}`
+      : r.package ? `${r.package} does not list it: to use these, ${mcp ? `workspace {action:"set", libraries:[…, "${l.entry ?? l.name}"]} lists it, when the person says so (the tools never add a library by themselves)` : `${program()} libraries add ${l.entry ?? l.name} lists it`}`
       : 'a registered library';
     lines.push(`${l.standing === 'builtin' ? `TopoTopo's built-in library "${l.name}"` : `library "${l.name}" (${l.root})`}: ${standing}`);
     for (const h of l.hits) {

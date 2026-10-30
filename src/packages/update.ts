@@ -380,7 +380,7 @@ export async function beforeAfter(pk: PackageUses, pkg: string, o: BeforeAfterOp
  * Apply an update, the step after its before/after, from the version in use to the version it showed (both named: what
  * the person saw, and refused when project.json uses another version now): copy the version in with what it uses, name
  * it in "uses" and the lock, delete the copies nothing uses any more, and say what the graphs must change for it (a big
- * version is applied anyway: the graphs report those errors until they change). The CLI, the library tool and the
+ * version is applied anyway: the graphs report those errors until they change). The CLI, the workspace tool and the
  * viewer apply updates through it.
  */
 export function applyUpdate(pk: PackageUses, pkg: string, o: { from: string; to: string }): { target: UpdateTarget; text: string; mustChange: string[] } {
@@ -418,7 +418,7 @@ export function setText(spec: NodeSpec): string {
   return s ? ` ${s.length > 120 ? `${s.slice(0, 117)}…` : s}` : '';
 }
 
-/** A before/after as the CLI and the library tool say it, ending with `closing` (how to apply it). */
+/** A before/after as the CLI and the workspace tool say it, ending with `closing` (how to apply it). */
 export function beforeAfterText(r: BeforeAfter, closing: string): string {
   const t = r.target, up = compareVersions(t.to, t.from) > 0;
   const kind = t.big ? (up ? 'a big update' : 'back to an older big version') : up ? 'a small update' : 'back to an older version';
@@ -469,7 +469,7 @@ export function overlayRenders(r: BeforeAfter, max = 6): { title: string; png: U
 }
 
 /**
- * The out-of-date packages of a package as the CLI (or, `mcp`, the library tool) says them: each with the notes of the
+ * The out-of-date packages of a package as the CLI (or, `mcp`, the workspace tool) says them: each with the notes of the
  * versions after the one in use (and the outputs of another kind), then one line for those up to date, what could not
  * be checked, and the update to run for each. `folder`: the package folder as the command named it, for those lines.
  */
@@ -496,9 +496,9 @@ export function outdatedText(pk: PackageUses, mcp = false, folder?: string): str
   for (const o of late) {
     const to = o.small ?? o.big!;
     lines.push(mcp
-      ? `library {action:"update", package:"${o.package}"${o.small ? '' : `, to:"${to}"`}} shows the before/after of ${o.version} → ${to}; nothing changes until the person says so`
+      ? `workspace {action:"update", package:"${o.package}"${o.small ? '' : `, to:"${to}"`}} shows the before/after of ${o.version} → ${to}; nothing changes until the person says so`
       : `${program()} update ${o.package}${at}${o.small ? '' : ` --to ${to}`} shows the before/after of ${o.version} → ${to}; nothing changes until you apply it`);
-    if (o.small && o.big) lines.push(mcp ? `  the big one: library {action:"update", package:"${o.package}", to:"${o.big}"}` : `  the big one: ${program()} update ${o.package}${at} --to ${o.big}`);
+    if (o.small && o.big) lines.push(mcp ? `  the big one: workspace {action:"update", package:"${o.package}", to:"${o.big}"}` : `  the big one: ${program()} update ${o.package}${at} --to ${o.big}`);
   }
   return lines.join('\n');
 }

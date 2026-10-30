@@ -15,7 +15,7 @@ import { TOPOTOPO_VERSION } from '../host/version.ts';
 import type { Session } from '../session.ts';
 import { makeTools } from './tools.ts';
 import type { ToolDef } from './tools.ts';
-import { libraryTool } from './library.ts';
+import { workspaceTool } from './workspace.ts';
 import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
@@ -36,17 +36,17 @@ setProgram(import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo');
 // is in), becomes a package when the server starts if it is in no package and holds nothing but what TopoTopo makes
 // itself (graphs/, assets/, exports/, inputs/), or nothing at all, as a new one does: then its graphs use packages,
 // TopoTopo's own among them, as they come. A folder in a package works in that package's folder. A folder with
-// anything else in it (a repository, a folder of the person's) stays as it is: library {action:"init"} makes it a
+// anything else in it (a repository, a folder of the person's) stays as it is: workspace {action:"init"} makes it a
 // package when the person says so (startPackage, src/package.ts). The first tool reply says what happened.
 const start = startPackage(path.resolve(named ?? path.join(process.cwd(), 'topotopo')), named ? {} : { name: path.basename(process.cwd()) });
 log(start.log);
 const wsDir = start.dir;
 let firstNote = start.note;
 
-// The folder can change while the server runs (library {action:"open"} opens a library package): every tool and
+// The folder can change while the server runs (workspace {action:"open"} opens a package of a library): every tool and
 // the live viewer then work on the new folder. Each session has its own engine (asset registry, base directory,
 // packages, cache); the worker pool is shared by the process. Sessions follow what other processes write into their folders
-// (Session.watch: the web app's editor, a person editing JSON). The packages a session follows (library
+// (Session.watch: the web app's editor, a person editing JSON). The packages a session follows (workspace
 // {action:"follow"}) resolve to their working folders as they are at each cook; the live viewer cooks its graphs again
 // when one of those folders changes.
 let engine: Engine, ws: Session, packages: PackageUses, tools: ToolDef[];
@@ -55,7 +55,7 @@ const ensureViewer = async () => {
   if (!viewer) { viewer = await startViewer(ws); log('preview at', viewer.url); }
   return viewer.url;
 };
-const library = libraryTool({ session: () => ws, packages: () => packages, open: (dir) => openSession(dir) });
+const workspaceTools = workspaceTool({ session: () => ws, packages: () => packages, open: (dir) => openSession(dir) });
 async function openSession(dir: string) {
   const e = new Engine(createNodeHost({ baseDir: dir }));
   if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) e.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
@@ -70,7 +70,7 @@ async function openSession(dir: string) {
   engine = e;
   ws = w;
   packages = pk;
-  tools = [...makeTools(w, { onPreview: ensureViewer }), library];
+  tools = [...makeTools(w, { onPreview: ensureViewer }), workspaceTools];
   viewer?.setSession(w);
   prev?.unwatch();
   return loaded;
@@ -90,7 +90,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const t = tools.find((x) => x.name === req.params.name);
   if (!t) return { content: [{ type: 'text', text: `unknown tool "${req.params.name}". Tools: ${tools.map((x) => x.name).join(', ')}` }], isError: true };
-  // a long call (library update) stops when the client cancels it, and says how far it is when the client asks to
+  // a long call (workspace update) stops when the client cancels it, and says how far it is when the client asks to
   const token = req.params._meta?.progressToken;
   const progress = token === undefined ? undefined : (done: number, total: number, message: string) => {
     extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: done, total, message } }).catch(() => {});

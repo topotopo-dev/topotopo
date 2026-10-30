@@ -133,7 +133,7 @@ export async function checkAll(start: string, o: { progress?: (what: string) => 
   return { scope, items, problems: [...new Set(problems)], ms: performance.now() - t0 };
 }
 
-/** A check as the CLI and the library tool say it: what broke first, with why, then what cooked. */
+/** A check as the CLI and the workspace tool say it: what broke first, with why, then what cooked. */
 export function checkText(r: CheckResult): string {
   const broke = r.items.filter((i) => i.failures.length), fine = r.items.filter((i) => !i.failures.length);
   const pk = r.items.filter((i) => i.what === 'version').length, pr = r.items.length - pk;

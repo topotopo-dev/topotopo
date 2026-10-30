@@ -229,7 +229,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
   const check = () => { if (!closed && stamp() !== lastStamp) changed(); };
   let soonTimer: ReturnType<typeof setTimeout> | undefined;
   const soon = () => { clearTimeout(soonTimer); soonTimer = setTimeout(check, 250); soonTimer.unref?.(); };
-  // in a package: a build, an edit or the library tool may add a package or update one; another process may too (the timer)
+  // in a package: a build, an edit or the workspace tool may add a package or update one; another process may too (the timer)
   const onGraph = () => soon();
   const timer = pk?.dir ? setInterval(check, 2000) : undefined;
   if (timer) { ws.listeners.add(onGraph); timer.unref(); }

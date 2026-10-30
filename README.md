@@ -211,7 +211,7 @@ When the server starts, it makes its folder a package (a `project.json` and a st
 graphs can use packages, TopoTopo's own among them) if the folder is in no package and holds nothing but these four
 folders, or nothing at all, as a new one does; the default folder, `<cwd>/topotopo`, takes the name of the
 folder it is in. A folder with anything else in it, such as a repository or a folder of your own files, stays as it is
-until you say so: `library {action: "init"}` (or `topotopo init <folder>`) makes it a package. A folder inside a package
+until you say so: `workspace {action: "init"}` (or `topotopo init <folder>`) makes it a package. A folder inside a package
 works in that package's folder. The first reply the agent gets says which of these happened.
 
 ## MCP tools
@@ -231,7 +231,7 @@ works in that package's folder. The first reply the agent gets says which of the
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, heightfields, images and SDF grids, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `library` | the person's libraries of packages (the web app): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a package the folder every tool and the viewer work in, or `init`, which makes the server's folder a package (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the open package's packages: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the package can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
+| `workspace` | the workspace (the game) around the open package: `show` it, or make a game's folder one with `init_workspace`; the person's libraries of packages (the web app): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a package the folder every tool and the viewer work in, or `init`, which makes the server's folder a package (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the open package's packages: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the package can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
 
 ## Graph format
 
@@ -413,7 +413,7 @@ Keep packages in libraries on your PC and browse them as a website: `topotopo we
 at http://127.0.0.1:7340 with a page, a thumbnail and an iframe embed for each, so a board or wiki can link a concept
 to the model. A package is a folder with a `project.json` (title, tags, links) and `attachments/` for
 concept art; previews bake by themselves when its graphs change, and agents reach every library through the MCP
-`library` tool.
+`workspace` tool.
 
 ```bash
 topotopo library add game D:/game-assets
@@ -460,12 +460,12 @@ Every package also looks in TopoTopo's built-in library, `topotopo`, which holds
 version in a TopoTopo release shows as an update). The first build or edit that names a package adds it, once the graph
 validates; a rejected graph adds and writes nothing. A graph-file cook adds it too and says so; `--locked` makes it fail
 instead, for a build machine. `topotopo remove` drops a package no graph names any more, with the copies nothing else
-uses. Only a package uses packages: `topotopo init` (MCP: `library {action: "init"}`) makes a folder one, and the MCP
+uses. Only a package uses packages: `topotopo init` (MCP: `workspace {action: "init"}`) makes a folder one, and the MCP
 server makes its folder one when it starts if the folder is in no package and holds nothing but `graphs/`,
 `assets/`, `exports/` and `inputs/`, or nothing at all. A package's own graphs name its other outputs the same way, a
 kit's house of the kit's walls: they resolve to the same version, with no entry in `uses`, and outputs that name each
 other in a loop are refused. To tune a package while looking at one that uses it, `--follow studio/trees` (or
-the MCP `library` tool's `follow`) uses the package's working folder for one session. Exports record the package
+the MCP `workspace` tool's `follow`) uses the package's working folder for one session. Exports record the package
 versions they used.
 
 Every published output says what it is. Publishing cooks it as a package that uses this one would, in the package's
@@ -480,7 +480,7 @@ it on its meshes through the `material` node's second input, and publishing reco
 outputs' declarations first and stops there when one is wrong, says each problem once, and names a version number only
 for what would publish. `topotopo publish --dry-run` (MCP: `publish {dry_run: true}`) runs every check and says the
 version number it would get, its changes, blocks and warnings, writing nothing. `topotopo search conifer --kind mesh`
-(MCP: `library {action: "search"}`) finds outputs in TopoTopo's built-in library, the libraries the package lists and
+(MCP: `workspace {action: "search"}`) finds outputs in TopoTopo's built-in library, the libraries the package lists and
 every registered library, and says for each whether the package can use it or the `libraries add` that lists its
 library.
 

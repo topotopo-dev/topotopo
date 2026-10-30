@@ -1,4 +1,5 @@
-// The `library` tool: the person's libraries of packages (src/web/library.ts) and the packages of the open package
+// The `workspace` tool: the workspace (the game) around the open package, the person's libraries of packages
+// (src/web/library.ts) and the packages of the open package
 // (src/packages/registry.ts, src/packages/update.ts). An agent lists and searches every library, reads a package, makes
 // new ones, edits their project.json, bakes previews, and opens a package: the server's folder becomes that package's
 // folder, so build/edit/render/export work on it; or it makes the server's folder a package (init), when the person says
@@ -22,7 +23,7 @@ import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) });
 
-export interface LibraryToolHost {
+export interface WorkspaceToolHost {
   /** the session the other tools use now (its folder, graphs, assets and engine) */
   session(): Session;
   /** the packages of the package the session's folder belongs to */
@@ -31,7 +32,7 @@ export interface LibraryToolHost {
   open(dir: string): Promise<{ graphs: number; assets: number }>;
 }
 
-export function libraryTool(host: LibraryToolHost): ToolDef {
+export function workspaceTool(host: WorkspaceToolHost): ToolDef {
   const scan = (): { cfg: WebConfig; scans: LibraryScan[] } => { const cfg = loadConfig(); return { cfg, scans: scanAll(cfg) }; };
   const urlsOf = (cfg: WebConfig, p: Package) => {
     const b = `http://127.0.0.1:${cfg.web.port}`;
@@ -48,10 +49,10 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
       const hits = scans().flatMap((s) => s.packages).filter((p) => p.id === a.id && (!a.library || p.lib === a.library));
       if (hits.length === 1) return hits[0];
       if (hits.length > 1) throw new Error(`id "${a.id}" is in several libraries (${hits.map((p) => p.lib).join(', ')}): give "library"`);
-      throw new Error(`no package "${a.id}"${a.library ? ` in library "${a.library}"` : ''}. library {action:"list"} lists them`);
+      throw new Error(`no package "${a.id}"${a.library ? ` in library "${a.library}"` : ''}. workspace {action:"list"} lists them`);
     }
     const dir = a.path ? packageDirOf(path.resolve(a.path)) : currentDir();
-    if (!dir) throw new Error(a.path ? `${a.path}: no project.json there or above` : 'give {library, id}: the server\'s folder is in no package (library {action:"init"} makes it one, when the person says so)');
+    if (!dir) throw new Error(a.path ? `${a.path}: no project.json there or above` : 'give {library, id}: the server\'s folder is in no package (workspace {action:"init"} makes it one, when the person says so)');
     let all: Package[] = [];
     try { all = scans().flatMap((s) => s.packages); } catch { /* named without its library */ }
     const p = all.find((x) => x.dir === dir);
@@ -62,21 +63,21 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
   };
 
   return {
-    name: 'library',
-    description: 'The person\'s libraries of packages (the web app shows them; a board links to them). A library is a folder; a package is a folder in it with project.json (title, description, tags, links to concept art/board pages) and its own graphs/, assets/, inputs/, exports/ and attachments/ (concept art and references). ' +
+    name: 'workspace',
+    description: 'The workspace: the game around the open package, the person\'s libraries of packages (the web app shows them; a board links to them) and the packages the open package uses and publishes. A library is a folder; a package is a folder in it with project.json (title, description, tags, links to concept art/board pages) and its own graphs/, assets/, inputs/, exports/ and attachments/ (concept art and references). ' +
       'list {query?, tag?, library?}: every package with status and web app URL. get {library, id} (or the open package): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
       'open {library, id} | {path}: make that package the folder every tool and the live viewer work in, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new package, opened. ' +
-      'workspace: the workspace (the game) around the open package: its engine project, the libraries every package inside looks in, its packages. workspace {init:true, path?, name?, engine?, assets?, libraries?} makes a game\'s folder (path, default: the folder above the open package that the person names) a workspace (topotopo-workspace.json; the engine project found when not given; its packages then share one copy of each package, in topotopo-packages/, and their own copies move there), when the person says so. ' +
+      'show: the workspace (the game) around the open package: its engine project, the libraries every package inside looks in, its packages. init_workspace {path, name?, engine?, assets?, libraries?, follow?} makes a game\'s folder (path: its root, as the person names it) a workspace (topotopo-workspace.json; the engine project found when not given; its packages then share one copy of each package, in topotopo-packages/, and their own copies move there), when the person says so. ' +
       'init {package?}: make the server\'s folder a package (project.json, graphs/main.json, .gitignore, .gitattributes), when it is none and the person says so: only a package\'s graphs use packages (TopoTopo\'s own included), and a build that names one in a package outside any package fails saying so. ' +
       'set {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?, libraries?}: edit project.json (graph = the graph its page shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the name the package publishes under, set once by its author; libraries = the libraries the package finds packages in, ["../lib", "game"]: a path from the package for a library in the same repository, else a registered name; set it only when the person names the library). bake {library?, id?}: render thumb.png and preview.glb now (the web app also bakes on its own after changes). ' +
       `Packages of the open package: packages (what it uses and can use, one line each: version, outputs, up to date or the newer version that is out), packages {package} (one package: its versions and notes, its outputs with their kinds, tags, params and inputs); search {query?, kind?, tag?}: the outputs of every library (TopoTopo\'s built-in one, those the package lists, every registered one) by words, kind (${KINDS.join(', ')}) and tag, each with its full name, kind, tags, label, version and description, and whether the package can use it, else the "libraries" entry that would list its library; use {package:"owner/name", version?} adds one (a graph that names "owner/name/output" adds it too); remove {package} removes one no graph of the package names; follow {package, on} uses a package\'s working folder instead of its copy for this session. ` +
       'publish {dry_run:true, note?, big?} is a dry run: every check and cook, the version number it would get, its changes, blocks and warnings, nothing written. Publishing is permanent: run the dry run first, show it to the person, and publish {note, big?} only when they say so. ' +
-      'outdated: the packages it uses that have newer versions, with their notes, and one line for those up to date. check: cook the newest version of every package in the libraries of the workspace (or the package) and every graph of its packages, and list what broke and why; it changes nothing (after a TopoTopo update, say). update {package, to?}: the before/after of updating it (to the newest version with the same big number; a big version needs "to"): every place the package uses it, cooked with the version in use and the new one, what changed in each, overlay renders, the notes of the versions between and, for a big version, what the graphs must change. It writes nothing. Show the before/after to the person and apply it only when they say so: update {package, from, to, apply:true} (the versions of the before/after they saw) copies the new version in, updates the uses and the lock, and deletes the copies nothing uses any more. See help topics "library" and "packages".',
+      'outdated: the packages it uses that have newer versions, with their notes, and one line for those up to date. check: cook the newest version of every package in the libraries of the workspace (or the package) and every graph of its packages, and list what broke and why; it changes nothing (after a TopoTopo update, say). update {package, to?}: the before/after of updating it (to the newest version with the same big number; a big version needs "to"): every place the package uses it, cooked with the version in use and the new one, what changed in each, overlay renders, the notes of the versions between and, for a big version, what the graphs must change. It writes nothing. Show the before/after to the person and apply it only when they say so: update {package, from, to, apply:true} (the versions of the before/after they saw) copies the new version in, updates the uses and the lock, and deletes the copies nothing uses any more. See help topics "workspace", "library" and "packages".',
     inputSchema: {
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'init', 'workspace', 'set', 'bake', 'packages', 'search', 'use', 'remove', 'follow', 'publish', 'outdated', 'check', 'update'] },
+        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'init', 'init_workspace', 'show', 'set', 'bake', 'packages', 'search', 'use', 'remove', 'follow', 'publish', 'outdated', 'check', 'update'] },
         library: { type: 'string', description: 'library name (list shows them)' },
         id: { type: 'string', description: 'package id' },
         path: { type: 'string', description: 'create: folder below the library ("props/lantern"); open/get: a package folder on disk instead of {library, id}' },
@@ -94,13 +95,12 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         graph: { type: 'string', description: 'set: the graph its page shows and bakes (default "main")' },
         bake: { type: 'object', properties: { graph: { type: 'string' }, node: { type: 'string' }, frame: { type: 'number' } }, description: 'set: what the preview shows instead of the graph output' },
         thumbnail: { type: 'boolean', description: 'get: include the baked thumbnail image' },
-        init: { type: 'boolean', description: 'workspace: make the folder (path) a workspace, or change it' },
-        name: { type: 'string', description: 'workspace init: its name (default: the folder\'s)' },
-        engine: { type: 'string', description: 'workspace init: the engine project, "godot:game/project.godot" or "unreal:Game.uproject" from the workspace folder, or "none" (default: the one found below it)' },
-        assets: { type: 'string', description: 'workspace init: the folder in the engine project exports may go to, from the workspace folder' },
-        follow: { type: 'boolean', description: 'workspace init: true shows the workspace\'s own packages live from their working folders, for looking (exports use the published versions); false stops it' },
+        name: { type: 'string', description: 'init_workspace: its name (default: the folder\'s)' },
+        engine: { type: 'string', description: 'init_workspace: the engine project, "godot:game/project.godot" or "unreal:Game.uproject" from the workspace folder, or "none" (default: the one found below it)' },
+        assets: { type: 'string', description: 'init_workspace: the folder in the engine project exports may go to, from the workspace folder' },
+        follow: { type: 'boolean', description: 'init_workspace: true shows the workspace\'s own packages live from their working folders, for looking (exports use the published versions); false stops it' },
         open: { type: 'boolean', description: 'create: open the new package (default true)' },
-        package: { type: 'string', description: 'use / remove / follow / update / packages: a package, "owner/name"; set and init: the package the package is' },
+        package: { type: 'string', description: 'use / remove / follow / update / packages: a package, "owner/name"; set and init: the name the package publishes under' },
         on: { type: 'boolean', description: 'follow: true to follow the package\'s working folder (default), false to go back to its copy' },
         note: { type: 'string', description: 'publish: one line on what changed (required)' },
         big: { type: 'boolean', description: 'publish: mark the version big (its meaning changed in a way the tools cannot see)' },
@@ -178,24 +178,25 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           if (a.open !== false) { await host.open(p.dir); opened = ' and opened it: build/edit now work in it (graph "main" is the one its page shows)'; }
           return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Package page: ${urlsOf(cfg, p).page}`);
         }
-        case 'workspace': {
-          const { initWorkspace, workspaceText } = await import('../workspace.ts');
-          if (a.init) {
-            if (!a.path) throw new Error('workspace {init:true} needs path: the game\'s folder (its root), as the person names it');
-            const r = initWorkspace(path.resolve(host.session().dir, String(a.path)), { name: a.name, engine: a.engine, assets: a.assets, libraries: Array.isArray(a.libraries) ? a.libraries : undefined, follow: typeof a.follow === 'boolean' ? a.follow : undefined });
-            host.packages().refresh();
-            return text(`${r.text}\n${workspaceText(r.dir)}`);
-          }
+        case 'show': {
+          const { workspaceText } = await import('../workspace.ts');
           return text(workspaceText(host.session().dir));
+        }
+        case 'init_workspace': {
+          const { initWorkspace, workspaceText } = await import('../workspace.ts');
+          if (!a.path) throw new Error('init_workspace needs path: the game\'s folder (its root), as the person names it');
+          const r = initWorkspace(path.resolve(host.session().dir, String(a.path)), { name: a.name, engine: a.engine, assets: a.assets, libraries: Array.isArray(a.libraries) ? a.libraries : undefined, follow: typeof a.follow === 'boolean' ? a.follow : undefined });
+          host.packages().refresh();
+          return text(`${r.text}\n${workspaceText(r.dir)}`);
         }
         case 'init': {
           const dir = host.session().dir, inside = packageDirOf(dir);
-          if (inside) throw new Error(`the folder ${dir} is in a package already: ${path.join(inside, 'project.json')}${a.package ? `; library {action:"set", package:"${a.package}"} names the package it is` : ''}`);
+          if (inside) throw new Error(`the folder ${dir} is in a package already: ${path.join(inside, 'project.json')}${a.package ? `; workspace {action:"set", package:"${a.package}"} names the package it is` : ''}`);
           const { manifest } = initPackage(dir, { package: a.package });
           // the tools take in the package (its packages) as a folder opened afresh
           const r = await host.open(dir);
           return text(`made the folder ${dir} a package, id "${manifest.id}"${manifest.package ? `, package ${manifest.package}` : ''} (project.json, graphs/${manifest.graph}.json; ${r.graphs} graphs, ${r.assets} assets): ` +
-            'its graphs use packages now. A build that names one adds it on first use: TopoTopo\'s own (topotopo/…) from TopoTopo\'s built-in library, others from the libraries its project.json lists, which library {action:"set", libraries:[...]} sets when the person names them. library {action:"packages"} shows them');
+            'its graphs use packages now. A build that names one adds it on first use: TopoTopo\'s own (topotopo/…) from TopoTopo\'s built-in library, others from the libraries its project.json lists, which workspace {action:"set", libraries:[...]} sets when the person names them. workspace {action:"packages"} shows them');
         }
         case 'set': {
           const p = pick(a, () => libs().scans);
@@ -211,7 +212,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           });
           const pk = host.packages();
           if (a.libraries !== undefined) {
-            if (pk.dir !== p.dir) throw new Error(`"libraries" is set for the open package only (${pk.dir ?? 'none is open'}): library {action:"open"} the package first`);
+            if (pk.dir !== p.dir) throw new Error(`"libraries" is set for the open package only (${pk.dir ?? 'none is open'}): workspace {action:"open"} the package first`);
             said.push(pk.setLibraries(Array.isArray(a.libraries) ? a.libraries.map(String) : a.libraries));
           }
           if (pk.dir === p.dir) pk.refresh();
@@ -237,7 +238,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           let r;
           try { r = await beforeAfter(host.packages(), pkg, { to, signal: call?.signal, progress: call?.progress }); }
           catch (e) { if (e instanceof NothingToUpdate) return text(e.message); throw e; }
-          const content: Content[] = [{ type: 'text', text: beforeAfterText(r, `Nothing was written. Show the person this before/after, and apply it only when they say so: library {action:"update", package:"${pkg}", from:"${r.target.from}", to:"${r.target.to}", apply:true}`) }];
+          const content: Content[] = [{ type: 'text', text: beforeAfterText(r, `Nothing was written. Show the person this before/after, and apply it only when they say so: workspace {action:"update", package:"${pkg}", from:"${r.target.from}", to:"${r.target.to}", apply:true}`) }];
           const renders = overlayRenders(r);
           if (renders.length) {
             const changed = r.compared.filter((c) => c.diff && !c.diff.identical).length;
@@ -250,7 +251,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         case 'use': {
           if (!a.package) throw new Error('"package" is required: "owner/name"');
           const r = host.packages().use(String(a.package), { version: a.version === undefined ? undefined : String(a.version) });
-          return text(`${r.text}. Its outputs are node types now: library {action:"packages", package:"${a.package}"} lists them, help {nodes:[...]} gives one's params`);
+          return text(`${r.text}. Its outputs are node types now: workspace {action:"packages", package:"${a.package}"} lists them, help {nodes:[...]} gives one's params`);
         }
         case 'remove': {
           if (!a.package) throw new Error('"package" is required: "owner/name", a package the package uses (packages lists them)');
@@ -283,7 +284,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           return { content };
         }
       }
-      return text(`unknown action "${a.action}": list, get, open, create, init, set, bake, packages, search, use, remove, follow, publish, outdated, check or update`, true);
+      return text(`unknown action "${a.action}": list, get, open, create, init, init_workspace, show, set, bake, packages, search, use, remove, follow, publish, outdated, check or update`, true);
     },
   };
 }

@@ -41,7 +41,7 @@ import { checkAll, checkText } from '../src/packages/check.ts';
 import { scanLibrary } from '../src/web/library.ts';
 import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/packages/registry.ts';
 import { makeTools } from '../src/mcp/tools.ts';
-import { libraryTool } from '../src/mcp/library.ts';
+import { workspaceTool } from '../src/mcp/workspace.ts';
 import { catalogText, topicText } from '../src/mcp/docs.ts';
 import { PACKAGE_COMMANDS, commands } from '../src/packages/commands.ts';
 import type { PackageUses, PublishResult } from '../src/packages/registry.ts';
@@ -1019,7 +1019,7 @@ section('TopoTopo\'s built-in library: looked in without listing it; copies and 
   fs.mkdirSync(loose);
   const lo = await open(loose, [], BUILTIN);
   const notHere = await lo.engine.cook(scene);
-  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no package, and only packages use packages \(hint: topotopo init <folder> \(MCP: library \{action:"init"\} for the server's folder, when the person says so\) makes the folder a package/.test(errorOf(notHere)),
+  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no package, and only packages use packages \(hint: topotopo init <folder> \(MCP: workspace \{action:"init"\} for the server's folder, when the person says so\) makes the folder a package/.test(errorOf(notHere)),
     `outside a package it is offered too, and naming it says how to make the folder a package: ${errorOf(notHere)}`);
   // a TopoTopo release with a new version: an update, never a silent change
   setGraph(KIT, 'main', cube(2));
@@ -1078,7 +1078,7 @@ section('search: every library, by words, kind and tag; what the package can use
     `each result: full name, kind, tags, label, version (${JSON.stringify(pine)})`);
   const text = searchText(s, true);
   check(/^search "conifer": 3 outputs in 2 of the 4 libraries looked in, for package finder\n/.test(text) && /\nTopoTopo's built-in library "topotopo": TopoTopo's own packages, which every package can use/.test(text)
-    && /\nlibrary "game" \(.*game\): package finder does not list it: to use these, library \{action:"set", libraries:\[…, "\.\.\/\.\.\/game"\]\} lists it, when the person says so \(the tools never add a library by themselves\)/.test(text)
+    && /\nlibrary "game" \(.*game\): package finder does not list it: to use these, workspace \{action:"set", libraries:\[…, "\.\.\/\.\.\/game"\]\} lists it, when the person says so \(the tools never add a library by themselves\)/.test(text)
     && /\nhelp \{nodes:\["topotopo\/woods\/fir"\]\} gives an output's params and inputs/.test(text)
     && /\n {2}studio\/trees\/pine {2}mesh \[conifer, tree\] {2}"Pine" {2}1\.1 {2}\(also studio\/trees, its default output\)\n/.test(text) && /\nnothing matches in library "\.\.\/lib", library "other"/.test(text),
     `it says which the package can use, and the entry it needs for the others:\n${text}`);
@@ -1314,7 +1314,7 @@ section('out of date: the newer versions of what a package uses, with their note
     `outdated lists only what is out of date, one line for the rest, and the update to run for each:\n${said}`);
   const listed = packagesText(o.pk);
   check(/\nuses 4 packages: 2 out of date, 2 up to date\n/.test(listed) && /\n {2}studio\/trees 1\.1 {2}1 output {2}1\.3 is out\n/.test(listed), `packages says on each line what is out of date:\n${listed}`);
-  check(/\n {2}library \{action:"update", package:"studio\/trees"\} shows the before\/after of 1\.1 → 1\.3; nothing changes until the person says so|\nlibrary \{action:"update", package:"studio\/trees"\} shows the before\/after of 1\.1 → 1\.3/.test(outdatedText(o.pk, true)), 'the library tool says it as an action');
+  check(/\n {2}workspace \{action:"update", package:"studio\/trees"\} shows the before\/after of 1\.1 → 1\.3; nothing changes until the person says so|\nworkspace \{action:"update", package:"studio\/trees"\} shows the before\/after of 1\.1 → 1\.3/.test(outdatedText(o.pk, true)), 'the workspace tool says it as an action');
 }
 
 section('Update: the before/after of a small update; nothing is written until it is applied');
@@ -1395,7 +1395,7 @@ section('Update: a big version is named, and says what the graphs must change');
   setGraph(dirs.forest, 'yard', { nodes: { g: { type: 'grid', params: { size: [10, 10] } }, p: { type: 'studio/trees/pine', in: ['g'], params: { height: 2 } }, s: { type: 'studio/trees/stump' }, out: { type: 'merge', in: ['p', 's'] } }, output: 'out' });
   const o = await open(dirs.forest);
   check(o.pk.outdated().find((x) => x.package === 'studio/trees')?.big === '2.0', 'outdated names the big update');
-  check(/studio\/trees 1\.3 is the newest 1\.x in the package's libraries, and 2\.0 is a big version, a step of its own: name it, topotopo update studio\/trees --to 2\.0 \(library \{action:"update", package:"studio\/trees", to:"2\.0"\}\)/.test(await rejection(beforeAfter(o.pk, 'studio/trees'))),
+  check(/studio\/trees 1\.3 is the newest 1\.x in the package's libraries, and 2\.0 is a big version, a step of its own: name it, topotopo update studio\/trees --to 2\.0 \(workspace \{action:"update", package:"studio\/trees", to:"2\.0"\}\)/.test(await rejection(beforeAfter(o.pk, 'studio/trees'))),
     'without "to", a big version is not taken: it says how to name it');
   const was = untouched(dirs.forest);
   const r = await beforeAfter(o.pk, 'studio/trees', { to: '2.0' });
@@ -1539,12 +1539,12 @@ section('the CLI: outdated, update and --apply');
   check(usage.code === 1 && /usage: topotopo update owner\/name \[folder\]/.test(usage.err), 'update without a package says how to use it');
 }
 
-section('the library tool: the libraries a package lists, set when the person says so; a broken config stops only the actions on registered libraries');
+section('the workspace tool: the libraries a package lists, set when the person says so; a broken config stops only the actions on registered libraries');
 {
   const LT = path.join(dirs.repo, 'tool-package');
   writePackage(LT, {}, {});
   const o = await open(LT);
-  const tool = libraryTool({ session: () => o.ws, packages: () => o.pk, open: async () => ({ graphs: 0, assets: 0 }) });
+  const tool = workspaceTool({ session: () => o.ws, packages: () => o.pk, open: async () => ({ graphs: 0, assets: 0 }) });
   const say = async (a: any) => { try { const r = await tool.run(a); return { err: !!r.isError, text: r.content.map((c: any) => c.text ?? '').join('\n') }; } catch (e: any) { return { err: true, text: String(e.message) }; } };
   const set = await say({ action: 'set', libraries: ['../lib', 'game'] });
   check(!set.err && JSON.stringify(readManifest(LT).libraries) === '["../lib","game"]' && /lists "\.\.\/lib", "game" in project\.json "libraries"/.test(set.text), `set {libraries} writes project.json: ${set.text.split('\n').at(-1)}`);
