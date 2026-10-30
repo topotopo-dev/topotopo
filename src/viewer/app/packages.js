@@ -223,7 +223,7 @@ export function createPackagesPanel(ctx, host) {
         const row = el('div', 'pkg-hit');
         const name = el('code', '', h.type), kind = h.kind ? el('span', 'badge kind', h.kind) : null, tags = el('span', 'pkg-tags line');
         for (const t of h.tags) tags.append(el('span', 'tag', t));
-        const state = h.used ? `in use (${h.used})` : h.self ? 'this package' : l.standing === 'unlisted' ? `its project.json would list library "${l.name}"` : 'ready to use';
+        const state = h.used ? `in use (${h.used})` : h.self ? 'this package' : l.standing === 'unlisted' ? `its manifest would list library "${l.name}"` : 'ready to use';
         row.append(name, ...(kind ? [kind] : []), el('span', 'pkg-hitstate dim', state), tags);
         row.title = `${h.type}${h.label ? ` (${h.label})` : ''} · ${kindTagsLine(h)}${h.description ? `\n${h.description}` : ''}\nTo use it, ask your agent: use ${h.type}`;
         row.append(button('Copy name', 'pkg-hitcopy', `copy ${h.type}: your agent uses it as a node type`, async () => {
@@ -246,14 +246,14 @@ export function createPackagesPanel(ctx, host) {
     count.textContent = rows.length ? String(rows.length) : '';
     count.classList.toggle('late', late > 0);
     count.classList.toggle('live', live > 0 && !late);
-    count.title = [late ? `${late} of the ${rows.length} packages the package uses ${late === 1 ? 'has' : 'have'} an update` : `the package uses ${rows.length === 1 ? '1 package' : `${rows.length} packages`}`, live ? `${live} live this session` : ''].filter(Boolean).join('; ');
+    count.title = [late ? `${late} of the ${rows.length} packages it uses ${late === 1 ? 'has' : 'have'} an update` : `it uses ${rows.length === 1 ? '1 package' : `${rows.length} packages`}`, live ? `${live} live this session` : ''].filter(Boolean).join('; ');
     if (P.package) {
       head.replaceChildren(el('strong', '', P.package.title || P.package.id), el('span', 'dim', ` · ${rows.length ? `${rows.length} package${rows.length === 1 ? '' : 's'} in use` : 'no packages yet'}`));
-      head.title = `${P.package.dir}\nThe package finds packages in TopoTopo's built-in library${P.package.libraries.length ? ` and in ${P.package.libraries.map((l) => `"${l}"`).join(', ')} (project.json "libraries")` : ''}; the copies of the versions it uses are in packages/.`;
+      head.title = `${P.package.dir}\nThe package finds packages in TopoTopo's built-in library${P.package.libraries.length ? ` and in ${P.package.libraries.map((l) => `"${l}"`).join(', ')}` : ''}; the copies of the versions it uses are in packages/.`;
     }
     const parts = [];
     if (P.problems.length) parts.push(list(P.problems, 'err'));
-    if (P.package?.package) parts.push(authorBox());
+    if (P.package?.name) parts.push(authorBox());
     if (!rows.length && P.package) {
       const e = el('div', 'pkg-empty');
       e.append(el('p', '', 'This package uses no packages yet.'), el('p', 'dim', 'Packages are ready-made parts: TopoTopo\'s built-in packages (houses, walls, trees, rocks, props, roads) and your team\'s libraries. Find one above, then ask your agent to use it, for example: "add topotopo/street/lamp_post along the road".'));
@@ -360,7 +360,7 @@ export function createPackagesPanel(ctx, host) {
   /** In a package that publishes versions: its last version, unpublished changes, and Check publish (the publish dry run). */
   let author = null, checking = false;
   function authorBox() {
-    const box = el('div', 'pkg-card pkg-author'), name = P.package.package;
+    const box = el('div', 'pkg-card pkg-author'), name = P.package.name;
     const h = el('div', 'pkg-head');
     h.append(el('span', 'pkg-name', name), el('span', 'pkg-ver', author?.last ?? '—'), el('span', 'pkg-state author', 'this package'));
     box.append(h);
@@ -413,11 +413,11 @@ export function createPackagesPanel(ctx, host) {
     const acts = el('div', 'pkg-actions');
     if (confirming.has(t.package)) {
       b.append(el('div', 'pkg-sub warn', `Update anyway? The graphs keep reporting these errors until they change.`));
-      const yes = button(`Yes, update to ${t.to}`, 'primary danger', `copy ${t.package} ${t.to} into the package and name it in project.json; the graphs report errors until they change`, () => P.update(r));
+      const yes = button(`Yes, update to ${t.to}`, 'primary danger', `copy ${t.package} ${t.to} into the package and name it in its manifest; the graphs report errors until they change`, () => P.update(r));
       yes.disabled = applying || !!P.running;
       acts.append(yes, button('Cancel', '', 'keep the version in use', () => { confirming.delete(t.package); render(); }));
     } else {
-      const update = button(`Update to ${t.to}${t.big ? ' (big)' : ''}`, 'primary', `copy ${t.package} ${t.to} into the package, name it in project.json and the lock, then cook the scene again`, () => {
+      const update = button(`Update to ${t.to}${t.big ? ' (big)' : ''}`, 'primary', `copy ${t.package} ${t.to} into the package, name it in its manifest and the lock, then cook the scene again`, () => {
         if (r.mustChange.length) { confirming.add(t.package); render(); } else P.update(r);
       });
       update.disabled = applying || !!P.running;

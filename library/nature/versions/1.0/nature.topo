@@ -1,5 +1,4 @@
 {
-  "id": "nature",
   "graph": "kit",
   "bake": {},
   "title": "Nature kit",
@@ -9,5 +8,5 @@
   ],
   "links": [],
   "created": "2026-10-28",
-  "package": "topotopo/nature"
+  "name": "topotopo/nature"
 }

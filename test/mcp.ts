@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { INPUTS_EXAMPLE } from '../src/mcp/docs.ts';
 import { builtinVersions } from '../src/packages/registry.ts';
+import { manifestAt } from '../src/package.ts';
 
 /** A 16-bit grey PNG made by hand (signature, IHDR, IDAT, IEND), the way a heightmap arrives. */
 function grey16PNG(w: number, h: number, values: number[]): Buffer {
@@ -57,7 +58,7 @@ const call = async (name: string, args: any) => {
 
 const info = client.getServerVersion();
 check(info?.name === 'topotopo', `server name ${info?.name}`);
-check(!fs.existsSync(path.join(wsDir, 'project.json')), 'a named folder that holds files of its own is not made a package');
+check(!manifestAt(wsDir), 'a named folder that holds files of its own is not made a package');
 check((client.getInstructions() ?? '').includes('WORKFLOW'), 'server instructions present');
 const { tools } = await client.listTools();
 check(tools.length >= 9, `tools: ${tools.map((t) => t.name).join(', ')}`);
@@ -211,10 +212,10 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   check(outside.isError && /package studio\/none: this graph is in no package, and only packages use packages/.test(outside.txt) && /workspace \{action:"init"\} for the server's folder/.test(outside.txt),
     `a package named outside a package says how the package becomes one: ${outside.txt.split('\n').slice(1, 3).join(' ')}`);
   const init = await call('workspace', { action: 'init' });
-  check(!init.isError && fs.existsSync(path.join(wsDir, 'project.json')) && /^made the folder .* a package, id "/.test(init.txt) && fs.existsSync(path.join(wsDir, 'assets', 'pills.json')),
+  check(!init.isError && !!manifestAt(wsDir) && /^made the folder .* a package, id "(.+)" \(\1\.topo, graphs\/main\.json/.test(init.txt) && fs.existsSync(path.join(wsDir, 'assets', 'pills.json')),
     `workspace init makes the server's folder a package: ${init.txt.slice(0, 80)}…`);
   const again = await call('workspace', { action: 'init' });
-  check(again.isError && /is in a package already: .*project\.json/.test(again.txt), 'init refuses a package that publishes versions');
+  check(again.isError && /is in a package already: .*\.topo/.test(again.txt), 'init refuses a package that publishes versions');
   const inside = await call('build', probe);
   check(inside.isError && /package studio\/none is not in this package's uses/.test(inside.txt), `in the package, a package is looked for in its libraries: ${inside.txt.split('\n')[1]}`);
   const kept = await call('build', { name: 'asset_test', graph: { nodes: { g: { type: 'grid', params: { divisions: [3, 3] } }, p: { type: 'pills', in: ['g'], params: { r: 0.2 } } } } });
@@ -258,7 +259,7 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const dry = await call('build', { name: 'land', graph: example, dry_run: true });
   check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV} to package .* on first use, from library "topotopo" \\(TopoTopo's built-in library\\): this dry run read it there and copied nothing`).test(dry.txt),
     `a dry run of the help inputs example validates the package's output where it lies: ${dry.txt.split('\n').slice(0, 2).join(' | ')}`);
-  check(!fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature')) && !JSON.parse(fs.readFileSync(path.join(wsDir, 'project.json'), 'utf8')).uses?.['topotopo/nature'] && !fs.existsSync(path.join(wsDir, 'graphs', 'land.json')),
+  check(!fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature')) && !JSON.parse(fs.readFileSync(manifestAt(wsDir)!.file, 'utf8')).uses?.['topotopo/nature'] && !fs.existsSync(path.join(wsDir, 'graphs', 'land.json')),
     'and writes nothing: no copy, no entry in uses, no graph');
   const dryTypo = await call('build', { name: 'land', graph: { nodes: { t: { type: 'topotopo/nature/tree_lowpoly', params: { heigth: 7 } } } }, dry_run: true });
   check(dryTypo.isError && /unknown param "heigth" for topotopo\/nature\/tree_lowpoly — did you mean "height"/.test(dryTypo.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV}`).test(dryTypo.txt),
@@ -342,13 +343,13 @@ if (url) {
   const names = ((await (await fetch(url + 'api/graphs')).json()) as any[]).map((g: any) => g.name);
   check(names.join() === 'main', `the live viewer shows the package (${names})`);
   const upd = await call('workspace', { action: 'set', description: 'An oil barrel', bake: { frame: 1 } });
-  check(!upd.isError && JSON.parse(fs.readFileSync(path.join(projDir, 'project.json'), 'utf8')).description === 'An oil barrel', "library set edits the open package's project.json");
+  check(!upd.isError && JSON.parse(fs.readFileSync(path.join(projDir, 'barrel.topo'), 'utf8')).description === 'An oil barrel', "workspace set edits the open package's manifest");
   const bk = await call('workspace', { action: 'bake' });
   check(!bk.isError && !!bk.img && fs.existsSync(path.join(projDir, '.web', 'preview.glb')), 'library bake renders the previews and shows the thumbnail');
   const got = await call('workspace', { action: 'get', library: 'game', id: 'barrel', thumbnail: true });
   check(got.txt.includes('(open)') && got.txt.includes('main (shown)') && got.txt.includes('board: http://board.local/1') && !!got.img, 'library get: manifest, graphs, links, thumbnail');
   const back = await call('workspace', { action: 'open', path: fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-loose-')) });
-  check(back.isError && back.txt.includes('no project.json'), 'open refuses a folder that is not a package');
+  check(back.isError && back.txt.includes('no .topo file there or above'), 'open refuses a folder that is not a package');
   const found = await call('workspace', { action: 'list', query: 'barrel' });
   check(found.txt.includes('barrel (open)') && found.txt.includes('baked'), 'library list finds it by words, marks the open one and its status');
   // the game around the open package: show says what the workspace holds, init_workspace makes a game's folder one
@@ -356,7 +357,7 @@ if (url) {
   check(outside.isError && /is in no workspace/.test(outside.txt), `workspace show outside a workspace says how to make one: ${outside.txt.slice(0, 90)}`);
   const game = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-game-'));
   fs.mkdirSync(path.join(game, 'art', 'crate'), { recursive: true });
-  fs.writeFileSync(path.join(game, 'art', 'crate', 'project.json'), JSON.stringify({ id: 'crate', title: 'Crate', graph: 'main' }));
+  fs.writeFileSync(path.join(game, 'art', 'crate', 'crate.topo'), JSON.stringify({ title: 'Crate', graph: 'main' }));
   const noPath = await call('workspace', { action: 'init_workspace' });
   check(noPath.isError && /init_workspace needs path/.test(noPath.txt), 'init_workspace names the game\'s folder as required');
   const mk = await call('workspace', { action: 'init_workspace', path: game, name: 'mcp-game' });
@@ -370,8 +371,8 @@ if (url) {
 {
   const crates = path.join(libDir, 'lib', 'shared', 'crates');
   await call('workspace', { action: 'create', library: 'game', path: 'shared/crates', title: 'Crates' });
-  const named = await call('workspace', { action: 'set', package: 'studio/crates' });
-  check(!named.isError && JSON.parse(fs.readFileSync(path.join(crates, 'project.json'), 'utf8')).package === 'studio/crates', 'library set names the package');
+  const named = await call('workspace', { action: 'set', name: 'studio/crates' });
+  check(!named.isError && JSON.parse(fs.readFileSync(path.join(crates, 'crates.topo'), 'utf8')).name === 'studio/crates', 'workspace set names the package');
   await call('build', { graph: {
     nodes: { c: { type: 'box', params: { size: '=s' } }, peek: { type: 'sphere' } }, output: 'c',
     vars: { s: 1 }, params: { s: { type: 'float', min: 0.1, max: 5, label: 'Size' } },
@@ -390,8 +391,8 @@ if (url) {
   const yard = path.join(libDir, 'lib', 'levels', 'yard');
   await call('workspace', { action: 'create', library: 'game', path: 'levels/yard', title: 'Yard' });
   // the person lists the library the package finds packages in
-  const pj = JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8'));
-  fs.writeFileSync(path.join(yard, 'project.json'), JSON.stringify({ ...pj, libraries: ['game'] }, null, 2));
+  const pj = JSON.parse(fs.readFileSync(path.join(yard, 'yard.topo'), 'utf8'));
+  fs.writeFileSync(path.join(yard, 'yard.topo'), JSON.stringify({ ...pj, libraries: ['game'] }, null, 2));
   const listed = await call('workspace', { action: 'packages' });
   check(!listed.isError && /\n {2}studio\/crates 1\.0 +1 output {2}\[library "game"\]/.test(listed.txt), `library packages lists the packages in the libraries the package lists: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
   const found = await call('workspace', { action: 'search', query: 'crate' });
@@ -432,7 +433,7 @@ if (url) {
     && /this session shows studio\/crates live from its working folder, for looking; the export used the published studio\/crates 1\.0/.test(xf.txt),
     `an export while following uses the published copy, records it and says so: ${JSON.stringify(frec.packages)}`);
   const tryPub = await call('workspace', { action: 'publish', note: 'while following', dry_run: true });
-  check(!/stop following it to publish/.test(tryPub.txt) && /"package"/.test(tryPub.txt), `publishing is not refused for following (this package has no name to publish under:${tryPub.txt.split('\n')[0]})`);
+  check(!/stop following it to publish/.test(tryPub.txt) && /yard\.topo has no "name"/.test(tryPub.txt), `publishing is not refused for following (this package has no name to publish under:${tryPub.txt.split('\n')[0]})`);
   const off = await call('workspace', { action: 'follow', package: 'studio/crates', on: false });
   check(!off.isError && /it resolves to its copy \(1\.0\) again/.test(off.txt), 'library follow on:false goes back to the copy');
 
@@ -445,7 +446,7 @@ if (url) {
   const od = await call('workspace', { action: 'outdated' });
   check(!od.isError && /studio\/crates 1\.0: 1\.1 is out {2}\[library "game"\]\n {4}1\.1 {2}"four times the size"/.test(od.txt) && /\nworkspace \{action:"update", package:"studio\/crates"\} shows the before\/after of 1\.0 → 1\.1/.test(od.txt),
     `library outdated: ${od.txt.split('\n').slice(0, 3).join(' | ')}`);
-  const pjBefore = fs.readFileSync(path.join(yard, 'project.json'), 'utf8');
+  const pjBefore = fs.readFileSync(path.join(yard, 'yard.topo'), 'utf8');
   const steps: { progress: number; total?: number; message?: string }[] = [];
   const ba: any = await client.callTool({ name: 'workspace', arguments: { action: 'update', package: 'studio/crates' } }, undefined, { onprogress: (p) => steps.push(p) });
   const baText = ba.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
@@ -455,12 +456,12 @@ if (url) {
     `library update shows the before/after:\n${baText.split('\n').slice(0, 6).join('\n')}`);
   check(baImages.length === 2 && baImages.every((x: any) => x.mimeType === 'image/png') && /overlay renders of the 2 places that changed, in order: graphs\/main\.json a, graphs\/main\.json d/.test(baText), `and an overlay render of each place that changed (${baImages.length})`);
   check(steps.length === 4 && steps.every((s, i) => s.progress === i && s.total === 4) && steps[0].message === 'graphs/main.json a with studio/crates 1.0', `progress notifications while it cooks (${steps.map((s) => `${s.progress}/${s.total}`).join(' ')})`);
-  check(fs.readFileSync(path.join(yard, 'project.json'), 'utf8') === pjBefore && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1')), 'the before/after writes nothing');
+  check(fs.readFileSync(path.join(yard, 'yard.topo'), 'utf8') === pjBefore && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1')), 'the before/after writes nothing');
   if (baImages[0]) fs.writeFileSync(path.join(wsDir, 'update.png'), Buffer.from(baImages[0].data, 'base64'));
   const noTo = await call('workspace', { action: 'update', package: 'studio/crates', apply: true });
   check(noTo.isError && /apply:true needs "from" and "to": the version in use and the version of the before\/after the person saw/.test(noTo.txt), 'applying names the version whose before/after the person saw');
   const ap = await call('workspace', { action: 'update', package: 'studio/crates', from: '1.0', to: '1.1', apply: true });
-  check(!ap.isError && /^updated studio\/crates 1\.0 → 1\.1 in package yard/.test(ap.txt) && JSON.parse(fs.readFileSync(path.join(yard, 'project.json'), 'utf8')).uses['studio/crates'] === '1.1'
+  check(!ap.isError && /^updated studio\/crates 1\.0 → 1\.1 in package yard/.test(ap.txt) && JSON.parse(fs.readFileSync(path.join(yard, 'yard.topo'), 'utf8')).uses['studio/crates'] === '1.1'
     && fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.1', 'version.json')) && !fs.existsSync(path.join(yard, 'packages', 'studio', 'crates', '1.0')), `library update with apply:true applies it: ${ap.txt.split('\n')[0]}`);
   const grown = await call('inspect', { node: 'a' });
   check(/size 8\.000 × 8\.000 × 8\.000 m/.test(grown.txt), 'the graphs cook with the new version at once');
@@ -477,8 +478,8 @@ for (const named of [false, true]) {
   await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts'), ...(named ? ['--package', dir] : [])], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile }, stderr: 'pipe' }));
   const r: any = await own.callTool({ name: 'workspace', arguments: { action: 'packages' } });
   const txt = r.content.map((c: any) => c.text ?? '').join('\n');
-  const pj = path.join(dir, 'project.json'), id = fs.existsSync(pj) ? JSON.parse(fs.readFileSync(pj, 'utf8')).id : null;
-  const title = fs.existsSync(pj) ? JSON.parse(fs.readFileSync(pj, 'utf8')).title : null;
+  const at = manifestAt(dir), id = at?.id ?? null;
+  const title = at ? JSON.parse(fs.readFileSync(at.file, 'utf8')).title : null;
   check(!r.isError && !!id && new RegExp(`^package ${id} \\(.*\\)\\nuses no packages yet`).test(txt) && /became a package, ".*", when the server started/.test(txt) && (named || title === path.basename(cwd)),
     `${named ? 'a named empty folder' : 'the default folder, <cwd>/topotopo (named after the folder it is in),'} is made a package, and the first reply says so: ${txt.split('\n')[0]}`);
   const b: any = await own.callTool({ name: 'build', arguments: { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } } } });

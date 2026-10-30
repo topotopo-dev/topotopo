@@ -78,7 +78,7 @@ let envPool: WorkerPool | undefined | null = null;
 
 /**
  * The folder relative file paths resolve against, for a graph (or a session's folder) in `dir`: its package folder, the nearest
- * folder at or above `dir` with a project.json, else `dir` itself. One rule for the CLI (the graph file's folder), the
+ * folder at or above `dir` with a .topo file, else `dir` itself. One rule for the CLI (the graph file's folder), the
  * MCP server (its folder) and the viewer (the graph file's folder): a graph in a package's graphs/ reads
  * "inputs/ref.png" from the package's inputs/, wherever it is cooked from, and exports into the package's exports/
  * (export-targets.ts exportsFolderFor).

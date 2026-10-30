@@ -1,5 +1,4 @@
 {
-  "id": "props",
   "graph": "kit",
   "bake": {},
   "title": "Props kit",
@@ -9,5 +8,5 @@
   ],
   "links": [],
   "created": "2026-10-28",
-  "package": "topotopo/props"
+  "name": "topotopo/props"
 }

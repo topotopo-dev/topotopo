@@ -113,7 +113,7 @@ try {
   fs.copyFileSync(path.join(ROOT, 'examples', 'skeleton_roofs.json'), path.join(app, 'roofs.json'));
   // the example names topotopo/architecture's outputs: only a package's graphs use packages
   const init = sh(`npm exec --no -- ${BIN} init .`, app);
-  check(/^package app → /.test(init) && fs.existsSync(path.join(app, 'project.json')), `init makes the temp folder a package (${init.split('\n')[0]})`);
+  check(/^package app → /.test(init) && fs.existsSync(path.join(app, 'app.topo')), `init makes the temp folder a package (${init.split('\n')[0]})`);
   const cook = sh(`npm exec --no -- ${BIN} roofs.json --render roofs.png --export roofs.glb`, app);
   const lock = fs.existsSync(path.join(app, 'packages', 'lock.json')) ? JSON.parse(fs.readFileSync(path.join(app, 'packages', 'lock.json'), 'utf8')) : {};
   const arch = newestOf('architecture');
@@ -239,7 +239,7 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     // an output of one of TopoTopo's own packages copies it in
     const rock = await call('build', { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' });
     const nature = newestOf('nature');
-    check(fs.existsSync(path.join(ws, 'project.json')) && !rock.isError && new RegExp(`note: added topotopo/nature ${re(nature)}`).test(rock.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', nature, 'version.json')),
+    check(fs.existsSync(path.join(ws, 'package.topo')) && !rock.isError && new RegExp(`note: added topotopo/nature ${re(nature)}`).test(rock.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', nature, 'version.json')),
       `a new folder is a package: the first build copies topotopo/nature in from the installed built-in library: ${rock.txt.split('\n')[0]}`);
     const b = await call('build', { graph: { nodes: { b: { type: 'box' }, g: { type: 'sdf_grid', in: ['b'], params: { voxel_size: 0.1 } }, m: { type: 'grid_to_mesh', in: ['g'] } } } });
     check(!b.isError && b.txt.includes('✓'), `build with sdf_grid (WASM kernels in the server): ${b.txt.split('\n')[0].slice(0, 80)}`);
@@ -251,7 +251,7 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
   } finally {
     await client.close().catch(() => {});
   }
-  check(/ready \(stdio\)/.test(serverLog) && /made the folder .* a package \(project\.json\)/.test(serverLog) && /session .*: \d+ graphs, \d+ assets; package /.test(serverLog),
+  check(/ready \(stdio\)/.test(serverLog) && /made the folder .* a package \(package\.topo\)/.test(serverLog) && /session .*: \d+ graphs, \d+ assets; package /.test(serverLog),
     `server log: ${serverLog.split('\n').filter((l) => l.includes('package') || l.includes('session')).map((l) => l.trim()).join(' | ')}`);
 } catch (e: any) {
   failures++;

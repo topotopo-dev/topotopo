@@ -101,7 +101,7 @@ const rows: Row[] = [];
 for (const k of kits) {
   if (filter && !k.outputs.some((o) => o.type.includes(filter))) continue;
   // ---- the built-in package: its package, one output per graph, the graph it shows, its default output
-  check(k.manifest.package === k.package && k.manifest.graph === SHOWN, `library/${k.name}/project.json: package ${k.package}, graph "${SHOWN}"`);
+  check(k.manifest.name === k.package && k.manifest.graph === SHOWN && fs.existsSync(path.join(k.dir, `${k.name}.topo`)), `library/${k.name}/${k.name}.topo: name ${k.package}, graph "${SHOWN}"`);
   for (const o of k.outputs) {
     const outs = Object.keys(o.graph.outputs ?? {});
     check(outs.length === 1 && outs[0] === o.name && o.graph.outputs![o.name].node === o.graph.output, `${o.file}: one output, named as its file, its graph's output node (${outs.join(', ')})`);

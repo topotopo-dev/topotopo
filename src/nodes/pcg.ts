@@ -303,7 +303,7 @@ defineNode({
   aliases: ['attribfrommap', 'attrib_from_image', 'texture_to_attrib', 'attrib_from_map', 'attribute_from_image', 'texture_sample'],
   inputs: [{ name: 'geo', desc: 'points or mesh' }],
   params: {
-    path: { type: 'path', default: '', desc: 'PNG file or URL; a relative path reads from the package folder (nearest project.json), else the graph\'s folder', aliases: ['file', 'filename', 'map', 'texture', 'image'] },
+    path: { type: 'path', default: '', desc: 'PNG file or URL; a relative path reads from the package folder (nearest .topo file), else the graph\'s folder', aliases: ['file', 'filename', 'map', 'texture', 'image'] },
     name: { type: 'string', default: '', desc: 'output attribute ("" = Cd for channel rgb, else mask)', aliases: ['attrib', 'attribute', 'output'] },
     channel: { type: 'enum', options: ['luminance', 'r', 'g', 'b', 'a', 'rgb'], default: 'luminance', desc: 'which channel (rgb writes a vector)' },
     projection: { type: 'enum', options: ['uv', 'xz', 'xy', 'yz'], default: 'uv', desc: 'uv attribute or a planar projection (xz = top view)', aliases: ['mapping'] },

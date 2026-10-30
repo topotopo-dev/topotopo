@@ -497,7 +497,7 @@ export class Engine {
     if (r && 'error' in r) return r;
     const n = parsePackageName(type);
     if (typeof n === 'string') return { error: n };
-    return { error: `"${type}" is an output of package ${n.package}, and this cook has no packages`, hint: 'a package uses packages (project.json "uses"); they are cooked by the TopoTopo CLI, viewer or MCP server' };
+    return { error: `"${type}" is an output of package ${n.package}, and this cook has no packages`, hint: 'a package uses packages (its manifest\'s "uses"); they are cooked by the TopoTopo CLI, viewer or MCP server' };
   }
 
   /**

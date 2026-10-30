@@ -25,7 +25,7 @@ export interface Urls {
 
 export interface CardData {
   lib: string; id: string; title: string; collection: string; tags: string[]; description: string; updated: number;
-  /** 'ok' | 'failed' | 'baking' | 'new', or 'empty': the package has not the graph project.json shows (nothing to bake yet) */
+  /** 'ok' | 'failed' | 'baking' | 'new', or 'empty': the package has not the graph its manifest shows (nothing to bake yet) */
   status: string; version: string;
   /** a package: its full name and newest version (null before the first is published) */
   pkg?: { name: string; version: string | null };
@@ -303,7 +303,7 @@ export function packagePage(p: PackageData, u: Urls): string {
   const snippet = (label: string, value: string) => `<label class="copy"><span>${label}</span><input readonly value="${esc(value)}"><button type="button" data-copy>Copy</button></label>`;
   const b = p.status === 'empty' ? null : p.bake;
   const bakeLine = p.status === 'empty'
-    ? (p.graphs.length ? `No default graph yet: project.json shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
+    ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
     : !b ? 'Not baked yet.'
     : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${b.points ?? 0} points, ${b.prims ?? 0} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
     : `Bake failed ${when(b.at)}`;

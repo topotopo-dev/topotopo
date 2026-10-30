@@ -1,11 +1,12 @@
 // TopoTopo's own packages, as the web app and the viewer list them: the packages of TopoTopo's built-in library (library/ in the checkout), which every package can use.
 // The viewer's welcome and its "Find packages", and the web app's search and kit pages list them from here: each package's
-// title and description (its project.json), its newest version and the outputs that version publishes, with their
+// title and description (its manifest), its newest version and the outputs that version publishes, with their
 // kinds, tags and the thumbnail the built-in package keeps of each (thumbs/<output>.png).
 import fs from 'node:fs';
 import path from 'node:path';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { readManifest } from '../package.ts';
+import { topoFiles } from '../session.ts';
 import { builtinVersions, isDefaultOutput } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 
@@ -42,23 +43,23 @@ export interface Kit {
 /** The packages of TopoTopo's built-in library, by name; unreadable ones are left out. */
 export function listKits(builtin = BUILTIN_LIBRARY.path): Kit[] {
   let dirs: string[] = [];
-  try { dirs = fs.readdirSync(builtin).filter((d) => fs.existsSync(path.join(builtin, d, 'project.json'))).sort(); } catch { return []; }
+  try { dirs = fs.readdirSync(builtin).filter((d) => topoFiles(path.join(builtin, d)).length).sort(); } catch { return []; }
   const kits: Kit[] = [];
   for (const id of dirs) {
     const dir = path.join(builtin, id);
     try {
       const m = readManifest(dir);
-      if (!m.package) continue;
-      const versions = builtinVersions(m.package, builtin), newest = versions.at(-1);
+      if (!m.name) continue;
+      const versions = builtinVersions(m.name, builtin), newest = versions.at(-1);
       const isDefault = (o: { graph: string; node: string }) => !!newest && isDefaultOutput(newest, o);
       const outputs: KitOutput[] = newest ? Object.entries(newest.outputs).map(([k, o]) => {
         const thumb = path.join(dir, 'thumbs', `${k}.png`);
         return {
-          type: `${m.package}/${k}`, id: k, label: o.label ?? k, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [],
+          type: `${m.name}/${k}`, id: k, label: o.label ?? k, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [],
           ...(o.description ? { description: o.description } : {}), ...(fs.existsSync(thumb) ? { thumb } : {}), default: isDefault(o),
         };
       }) : [];
-      kits.push({ name: m.package, id, title: m.title, description: m.description, tags: m.tags, dir, version: newest?.version ?? null, versions, outputs });
+      kits.push({ name: m.name, id, title: m.title, description: m.description, tags: m.tags, dir, version: newest?.version ?? null, versions, outputs });
     } catch { /* an unreadable package is left out */ }
   }
   return kits;

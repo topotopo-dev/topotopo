@@ -38,6 +38,7 @@ import type { VersionInfo } from '../packages/registry.ts';
 import { applyUpdate, beforeAfter, setText } from '../packages/update.ts';
 import type { BeforeAfter, CookedSide, UsePlace } from '../packages/update.ts';
 import { previewGLB } from '../render/preview.ts';
+import { MANIFEST_EXT } from '../session.ts';
 import type { Session } from '../session.ts';
 
 /** A version on a package's card: its number, note and date; `big` when it starts a big version, `marked` by its author. */
@@ -46,7 +47,7 @@ export interface VersionRow { version: string; note: string; published: string; 
 /** A package on the Packages tab. */
 export interface PackageRow {
   package: string;
-  /** the version in use (project.json "uses"); null for a package the session follows without using it yet */
+  /** the version in use (the manifest's "uses"); null for a package the session follows without using it yet */
   version: string | null;
   /** the note and date of the version in use, from the package's copy */
   note?: string;
@@ -70,7 +71,7 @@ export interface PackageRow {
   big?: string;
   /** every version after the one in use, oldest first */
   newer: VersionRow[];
-  /** the libraries that hold it, as project.json lists them */
+  /** the libraries that hold it, as the manifest lists them */
   libraries: string[];
   /** its working folders in those libraries: the follow switch needs exactly one */
   working: { library: string; dir: string }[];
@@ -105,8 +106,8 @@ export interface CompareProgress {
 }
 
 export interface PackagesState {
-  /** null: the viewer's graphs are in no package (nothing to show) */
-  package: { id: string; title: string; label: string; dir: string; libraries: string[]; package: string | null } | null;
+  /** the open package: its id, title, label, folder, the libraries it lists and the name it publishes under; null: the viewer's graphs are in no package (nothing to show) */
+  package: { id: string; title: string; label: string; dir: string; libraries: string[]; name: string | null } | null;
   packages: PackageRow[];
   problems: string[];
   /** the before/after in progress, and the last one finished (GET /api/packages/compare has it in full) */
@@ -114,8 +115,8 @@ export interface PackagesState {
   compare: { id: string; package: string; from: string; to: string } | null;
 }
 
-/** What a version holds besides its record: a change there is a save of the working folder (and versions/ a publish). */
-const SAVED = new Set(['project.json', 'graphs', 'assets', 'inputs', 'packages']);
+/** What a version holds besides its record and its manifest (<id>.topo): a change there is a save of the working folder (and versions/ a publish). */
+const SAVED = new Set(['graphs', 'assets', 'inputs', 'packages']);
 
 function err(status: number, message: string): never { throw Object.assign(new Error(message), { status }); }
 /** The registry's errors say what is wrong and what to do: they are the request's (400). */
@@ -169,7 +170,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     const base = { running: run?.progress ?? null, compare: last ? { id: last.id, package: last.result.target.package, from: last.result.target.from, to: last.result.target.to } : null };
     if (!pk?.dir) return { package: null, packages: [], problems: [], ...base };
     pk.refresh();
-    if (!pk.manifest) return { package: { id: '', title: '', label: pk.label, dir: pk.dir, libraries: [], package: null }, packages: [], problems: [pk.error ?? `${pk.dir}: project.json cannot be read`], ...base };
+    if (!pk.manifest) return { package: { id: '', title: '', label: pk.label, dir: pk.dir, libraries: [], name: null }, packages: [], problems: [pk.error ?? `the manifest of ${pk.dir} cannot be read`], ...base };
     const problems: string[] = [];
     let outdated: ReturnType<PackageUses['outdated']> = [];
     try { outdated = pk.outdated(); } catch (e: any) { problems.push(e.message); }
@@ -204,7 +205,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     for (const [p, f] of following) if (!packages.some((r) => r.package === p)) packages.push({ package: p, version: null, newer: [], libraries: [f.library], working: [f], followed: f, ...row({ package: p, working: [f] }, f) });
     problems.push(...pk.check());
     const m = pk.manifest;
-    return { package: { id: m.id, title: m.title, label: pk.label, dir: pk.dir, libraries: m.libraries, package: m.package ?? null }, packages: packages.sort(byName), problems: [...new Set(problems)], ...base };
+    return { package: { id: pk.id ?? '', title: m.title, label: pk.label, dir: pk.dir, libraries: m.libraries, name: m.name ?? null }, packages: packages.sort(byName), problems: [...new Set(problems)], ...base };
   }
 
   /** Tell the pages that what the tab shows changed (`force`: after something a page did), and watch its folders. */
@@ -220,7 +221,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     broadcast({ packages: ++n });
   }
 
-  /** What can change the state without the viewer: project.json, the lock, the versions published in the working folders. */
+  /** What can change the state without the viewer: the manifest, the lock, the versions published in the working folders. */
   const stamp = () => {
     if (!pk?.dir) return '';
     const published = [...watchers.keys()].map((d) => { try { return fs.readdirSync(path.join(d, 'versions')).sort().join(','); } catch { return '-'; } });
@@ -255,7 +256,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
   function onWorking(pkg: string, rel: string) {
     const parts = rel.split(/[\\/]+/);
     if (!rel || path.isAbsolute(rel) || parts[0] === 'versions') { soon(); return; }
-    if (!SAVED.has(parts[0]) || parts.some((x) => x.startsWith('.'))) return;
+    if (!(SAVED.has(parts[0]) || (parts.length === 1 && parts[0].endsWith(MANIFEST_EXT))) || parts.some((x) => x.startsWith('.'))) return;
     // a folder the session follows cooks the graphs again (pk.watch below); a save in another is offered to the person
     const followed = () => !!pk?.following().some((f) => f.package === pkg);
     if (followed()) return;
@@ -435,17 +436,17 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
   /** Its last published version, and whether its files changed since (a publish would make a new version). */
   function authorState() {
     const p = need(), m = p.manifest;
-    if (!m?.package) err(400, 'this package has no name to publish under: its project.json names none ("package": "owner/name")');
-    const last = publishedVersions(p.dir!, m.package).at(-1);
+    if (!m?.name) err(400, `this package has no name to publish under: ${p.usesFileName} names none ("name": "owner/name")`);
+    const last = publishedVersions(p.dir!, m.name).at(-1);
     let changed: boolean | null = null;
     try { changed = last ? workingHash(p.dir!) !== last.hash : null; } catch { /* unreadable files: the check says why */ }
-    return { ok: true, package: m.package, last: last?.version ?? null, published: last?.published ?? null, note: last?.note ?? '', changed };
+    return { ok: true, package: m.name, last: last?.version ?? null, published: last?.published ?? null, note: last?.note ?? '', changed };
   }
   /** The publish dry run: every check, every output cooked, the number it would get; nothing is written. */
   let checking: Promise<unknown> | null = null;
   async function checkPublish() {
     const p = need();
-    if (!p.manifest?.package) err(400, 'this package has no name to publish under: its project.json names none ("package": "owner/name")');
+    if (!p.manifest?.name) err(400, `this package has no name to publish under: ${p.usesFileName} names none ("name": "owner/name")`);
     checking ??= publishPackage(p, { dryRun: true }).finally(() => { checking = null; });
     return { ok: true, check: await checking };
   }

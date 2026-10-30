@@ -318,7 +318,7 @@ check(new ArtifactStore(cliExports).records().some((a) => a.output === 'ball' &&
   // a graph in a package exports into the package's exports/, not beside itself; the receipts hold package paths
   const proj = path.join(tmp, 'proj'), graphFile = path.join(proj, 'graphs', 'tower.json');
   fs.mkdirSync(path.dirname(graphFile), { recursive: true });
-  fs.writeFileSync(path.join(proj, 'project.json'), JSON.stringify({ id: 'proj', title: 'Proj', graph: 'tower' }));
+  fs.writeFileSync(path.join(proj, 'proj.topo'), JSON.stringify({ title: 'Proj', graph: 'tower' }));
   fs.writeFileSync(graphFile, JSON.stringify({ nodes: { b: { type: 'box' } }, output: 'b', export: 'glb' }));
   execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), graphFile, '--export-all'], { stdio: 'pipe' });
   const receipts = fs.readFileSync(path.join(proj, 'exports', '.outputs.json'), 'utf8');

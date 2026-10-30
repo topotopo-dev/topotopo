@@ -377,7 +377,7 @@ export function inputsTool(ws: Session): ToolDef {
         `inputs/ (${ws.inputDir}): ${plural(files.length, 'file')} (${kinds.map(([k, c]) => `${c} ${k}`).join(', ')})`,
         ...rows,
         ...(skipped ? [`${plural(skipped, 'file')} not summarised within ${LIST_BUDGET_MS / 1000} s; list again (summaries are cached) or describe them one by one.`] : []),
-        `A file node reads one: {"type":"file","params":{"path":"${inputRef(ws, '<path>')}"}} (relative paths read from the package folder: the nearest project.json at or above the server's folder, else that folder). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.`,
+        `A file node reads one: {"type":"file","params":{"path":"${inputRef(ws, '<path>')}"}} (relative paths read from the package folder: the nearest folder with a .topo file at or above the server's folder, else that folder). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.`,
         'OBJ/STL from Blender (Up = Z) and Unreal are Z-up: add "up_axis":"z". A .blend needs Blender installed (converted headlessly).',
       ].join('\n'));
     },

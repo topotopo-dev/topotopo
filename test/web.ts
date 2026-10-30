@@ -115,12 +115,12 @@ try {
     check(state?.ok === true && fs.existsSync(path.join(shiny.dir, '.web', 'thumb.png')), `the bake needs no preload script (${state?.error ?? 'ok'})`);
   }
 
-  section('a package without its default graph, and graph files beside project.json');
+  section('a package without its default graph, and graph files beside its manifest');
   {
     const empty = createPackage(lib, 'props/empty', { title: 'Empty' });
     const beside = createPackage(lib, 'props/beside', { title: 'Beside' });
     fs.writeFileSync(path.join(beside.dir, 'tower.json'), JSON.stringify(BOX));
-    const file = path.join(beside.dir, 'project.json'), m = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const file = path.join(beside.dir, 'beside.topo'), m = JSON.parse(fs.readFileSync(file, 'utf8'));
     fs.writeFileSync(file, JSON.stringify({ ...m, graph: 'tower' }, null, 2));
     g.rescan();
     await sleep(1500);
@@ -132,7 +132,7 @@ try {
       'its page says what to do, not an error');
     check(!fs.existsSync(path.join(empty.dir, '.web', 'bake.json')), 'nothing is baked before it has a default graph');
     const bp = (await req('/p/game/beside')).body.toString();
-    check(/<h3>tower <span class="tag">default<\/span>/.test(bp), 'a graph file beside project.json is a graph of the package, here its default one');
+    check(/<h3>tower <span class="tag">default<\/span>/.test(bp), 'a graph file beside the manifest is a graph of the package, here its default one');
     check(await until(() => fs.existsSync(path.join(beside.dir, '.web', 'thumb.png')), 60000), 'and is baked');
   }
 
@@ -144,9 +144,9 @@ try {
     const rec = (version: string, note: string, published: string) => ({ package: 'studio/trees', version, note, published, big: false, hash: `h${version}`, outputs: { pine }, default: pine, topotopo: '0' });
     const trees = createPackage(lib, 'nature/trees', { title: 'Trees', graph: BOX });
     const forest = createPackage(lib, 'levels/forest', { title: 'Forest', graph: BOX });
-    const edit = (dir: string, f: (m: any) => void) => { const file = path.join(dir, 'project.json'); const m = JSON.parse(fs.readFileSync(file, 'utf8')); f(m); fs.writeFileSync(file, JSON.stringify(m, null, 2)); };
+    const edit = (dir: string, f: (m: any) => void) => { const file = path.join(dir, `${path.basename(dir)}.topo`); const m = JSON.parse(fs.readFileSync(file, 'utf8')); f(m); fs.writeFileSync(file, JSON.stringify(m, null, 2)); };
     const write = (file: string, v: unknown) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(v)); };
-    edit(trees.dir, (m) => { m.package = 'studio/trees'; });
+    edit(trees.dir, (m) => { m.name = 'studio/trees'; });
     write(path.join(trees.dir, 'versions', '1.0', 'version.json'), rec('1.0', 'first trees', '2026-10-20T10:00:00.000Z'));
     write(path.join(trees.dir, 'versions', '1.1', 'version.json'), rec('1.1', 'rounder <crowns>', '2026-10-22T10:00:00.000Z'));
     edit(forest.dir, (m) => { m.uses = { 'studio/trees': '1.0' }; });
@@ -179,7 +179,7 @@ try {
     check(/<h1>Props kit<\/h1>/.test(kp) && /<code>topotopo\/props\/barrel<\/code>/.test(kp) && /<img src="\/k\/props\/thumbs\/barrel\.png"/.test(kp) && /<h2>Used by <span class="count">0<\/span>/.test(kp),
       'a built-in package\'s page: its outputs with their thumbnails, its versions, the packages that use it');
     const th = await req('/k/props/thumbs/barrel.png');
-    check(th.status === 200 && th.headers['content-type'] === 'image/png' && (await req('/k/props/thumbs/..%2Fproject.json')).status === 404 && (await req('/k/nope')).status === 404,
+    check(th.status === 200 && th.headers['content-type'] === 'image/png' && (await req('/k/props/thumbs/..%2Fprops.topo')).status === 404 && (await req('/k/nope')).status === 404,
       'a built-in package\'s thumbnails are served, nothing else of its folder');
     edit(forest.dir, (m) => { m.uses = { ...m.uses, 'topotopo/props': '1.0' }; });
     g.rescan();
@@ -196,7 +196,7 @@ try {
     const ws = path.join(tmp, 'hunt');
     fs.mkdirSync(path.join(ws, 'scenes', 'hall'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'topotopo-workspace.json'), JSON.stringify({ name: 'hunt', libraries: [], engine: { type: 'godot', project: 'game/project.godot', assets: 'game/assets/topotopo' }, uses: { 'topotopo/props': '1.0' } }));
-    fs.writeFileSync(path.join(ws, 'scenes', 'hall', 'project.json'), JSON.stringify({ id: 'hall', title: 'Pump hall' }));
+    fs.writeFileSync(path.join(ws, 'scenes', 'hall', 'hall.topo'), JSON.stringify({ title: 'Pump hall' }));
     cfg.workspaces.push({ name: 'hunt', path: ws });
     g.rescan();
     const home = (await req('/')).body.toString();

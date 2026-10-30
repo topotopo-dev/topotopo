@@ -1,7 +1,7 @@
 // A session: a folder's named graphs (persisted as JSON files), saved assets, the human's input files, and the engine
 // that cooks them. Shared by the MCP server, the live viewer and the CLI.
 //   <dir>/graphs/<name>.json   graphs        <dir>/assets/<name>.json   saved assets
-//   <dir>/<name>.json          in a package (a folder with project.json), its graph files beside project.json are
+//   <dir>/<name>.json          in a package (a folder with an <id>.topo file), its graph files beside that file are
 //                              graphs too (examples/ keeps its graphs there); graphs/ wins a name both have
 //   <dir>/inputs/…             files people drop in (meshes, guide curves, PNG masks), read with file nodes; or a
 //                              folder given to the constructor (`topotopo view`: inputs/ beside the graph file)
@@ -162,12 +162,21 @@ export class EditRejected extends Error {
 /** The folders a package makes in its own folder (Session.load): graphs, assets, exports and inputs. */
 export const PACKAGE_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
 
-/** A graph file's text holds a graph: an object with "nodes" (project.json and other JSON files do not). */
+/** The extension of a package's manifest: a package is a folder holding one <id>.topo file (src/package.ts). */
+export const MANIFEST_EXT = '.topo';
+
+/** The .topo files directly in a folder, by name, sorted: one makes it a package. */
+export function topoFiles(dir: string): string[] {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith(MANIFEST_EXT) && e.name.length > MANIFEST_EXT.length).map((e) => e.name).sort(); }
+  catch { return []; }
+}
+
+/** A graph file's text holds a graph: an object with "nodes" (other JSON files do not). */
 const holdsGraph = (j: unknown) => !!j && typeof j === 'object' && !Array.isArray(j) && !!(j as any).nodes && typeof (j as any).nodes === 'object';
 
 /**
- * The graph files of a folder by graph name: graphs/<name>.json, and in a package (a folder holding project.json) the
- * graph files beside project.json, not below it, whose name graphs/ does not have. A file there is a graph when it
+ * The graph files of a folder by graph name: graphs/<name>.json, and in a package (a folder holding a .topo file) the
+ * graph files beside that file, not below it, whose name graphs/ does not have. A file there is a graph when it
  * holds an object with "nodes"; an unreadable one is left out. The web app, `topotopo edit` and the MCP server read a
  * package's graphs here.
  */
@@ -178,10 +187,10 @@ export function graphFiles(dir: string): Map<string, string> {
     const name = f.slice(0, -'.json'.length);
     if (NAME_RE.test(name)) out.set(name, path.join(dir, 'graphs', f));
   }
-  if (!fs.existsSync(path.join(dir, 'project.json'))) return out;
+  if (!topoFiles(dir).length) return out;
   for (const f of json(dir)) {
     const name = f.slice(0, -'.json'.length), file = path.join(dir, f);
-    if (f === 'project.json' || out.has(name) || !NAME_RE.test(name)) continue;
+    if (out.has(name) || !NAME_RE.test(name)) continue;
     try { if (fs.statSync(file).isFile() && holdsGraph(JSON.parse(fs.readFileSync(file, 'utf8')))) out.set(name, file); } catch { /* not a graph */ }
   }
   return out;
@@ -210,7 +219,7 @@ export interface SessionPackages {
   describe(name: string): NodeDef | null;
   /** why the package's graphs cannot use packages, and how that changes (null when they can) */
   notice(): string | null;
-  /** read again what changed on disk (project.json, the lock, working folders followed this session); true if anything did */
+  /** read again what changed on disk (the manifest, the lock, working folders followed this session); true if anything did */
   refresh(): boolean;
   /**
    * a stamp of what package names resolve to (the uses, the copies, the followed working folders): a result that may use
@@ -293,7 +302,7 @@ export class Session {
     return { graphs: this.graphs.size, assets: this.engine.assetsIn().length, assetErrors, graphErrors };
   }
 
-  /** Where a graph is saved: its file beside project.json, or graphs/<name>.json. */
+  /** Where a graph is saved: its file beside the package's manifest, or graphs/<name>.json. */
   graphFile(name: string): string {
     return this.besidePackage.get(name) ?? path.join(this.graphDir, name + '.json');
   }
@@ -712,7 +721,7 @@ export class Session {
   private watchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
-   * Follow what other processes write into graphs/ and assets/, and in a package the graph files beside project.json (a
+   * Follow what other processes write into graphs/ and assets/, and in a package the graph files beside its manifest (a
    * second Session on the same folder: the web app's editor next to an MCP server, or a person editing the JSON). A
    * graph file whose content differs from the stored graph replaces it and notifies the listeners; a removed file
    * removes the graph. Our own writes read back equal, so they change nothing. An asset whose content changed is
@@ -762,9 +771,9 @@ export class Session {
       this.bump(name);
     };
     on(this.graphDir, graphChanged);
-    // a package's graph files beside project.json, when graphs/ has no graph of that name
-    if (fs.existsSync(path.join(this.dir, 'project.json'))) on(this.dir, (name, file) => {
-      if (name === 'project' || fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
+    // a package's graph files beside its manifest, when graphs/ has no graph of that name
+    if (topoFiles(this.dir).length) on(this.dir, (name, file) => {
+      if (fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
       if (!this.graphs.has(name) && fs.existsSync(file)) this.besidePackage.set(name, file);
       graphChanged(name, file);
     });

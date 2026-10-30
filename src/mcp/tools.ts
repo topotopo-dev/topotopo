@@ -626,7 +626,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
   for (const t of tools) {
     const run = t.run;
     t.run = async (args) => {
-      // what changed on disk since the last call (a followed working folder, project.json): every tool sees it
+      // what changed on disk since the last call (a followed working folder, the manifest): every tool sees it
       ws.packages?.refresh();
       const result = await run(args);
       const note = inputsNote(t.name);

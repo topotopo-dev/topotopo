@@ -429,7 +429,7 @@ defineNode({
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {
-    path: { type: 'path', default: '', desc: 'file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a project.json at or above the graph), else from the graph\'s folder (MCP: the package); folder mode needs directory support in the host', aliases: ['file', 'filename'] },
+    path: { type: 'path', default: '', desc: 'file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a .topo file at or above the graph), else from the graph\'s folder (MCP: the package); folder mode needs directory support in the host', aliases: ['file', 'filename'] },
     format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },

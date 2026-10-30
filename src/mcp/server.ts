@@ -38,7 +38,7 @@ setProgram(import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo');
 // TopoTopo's own among them, as they come. A folder in a package works in that package's folder. A folder with
 // anything else in it (a repository, a folder of the person's) stays as it is: workspace {action:"init"} makes it a
 // package when the person says so (startPackage, src/package.ts). The first tool reply says what happened.
-const start = startPackage(path.resolve(named ?? path.join(process.cwd(), 'topotopo')), named ? {} : { name: path.basename(process.cwd()) });
+const start = startPackage(path.resolve(named ?? path.join(process.cwd(), 'topotopo')), named ? {} : { title: path.basename(process.cwd()) });
 log(start.log);
 const wsDir = start.dir;
 let firstNote = start.note;

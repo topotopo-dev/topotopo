@@ -24,7 +24,7 @@ const packages = openPackages(engine, dir);
 for (const p of packages.check()) console.log(`warning: ${p}`);
 const filter = process.argv[2];
 let failed = 0;
-for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && x !== 'project.json' && (!filter || x.includes(filter)))) {
+for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && (!filter || x.includes(filter)))) {
   const name = path.basename(f, '.json');
   const graph = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
   const r = await engine.cook(graph, { frame: graph.meta?.frame }); // animated examples name their display frame

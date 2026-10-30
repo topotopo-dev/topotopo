@@ -117,7 +117,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (p) broadcast({ package: keyOf(p), ok: state?.ok ?? false, version: state?.at ?? 0 });
     },
   });
-  /** A package's graphs (graphs/, and graph files beside project.json), and whether it has the one project.json shows. */
+  /** A package's graphs (graphs/, and graph files beside its manifest), and whether it has the one its manifest shows. */
   const graphsOf = (p: Package) => graphFiles(p.dir);
   const hasDefault = (p: Package) => graphsOf(p).has(p.manifest.bake.graph ?? p.manifest.graph);
   const bakeIfStale = (p: Package) => {
@@ -128,7 +128,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   rescan();
   for (const p of packages.values()) bakeIfStale(p);
 
-  // A change below a library: project.json, graphs/, assets/ and inputs/ may need a bake; anything else may be a
+  // A change below a library: a manifest, graphs/, assets/ and inputs/ may need a bake; anything else may be a
   // package made, moved or removed, or attachments: read the libraries again and tell the pages.
   const touched = new Set<string>();
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -228,7 +228,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const byDir = new Map([...packages.values()].map((p) => [path.resolve(p.dir).toLowerCase(), p]));
     const inside = (g.scan?.packages ?? []).map((p) => {
       const at = byDir.get(path.resolve(p.dir).toLowerCase());
-      return { title: p.manifest.title, rel: p.rel, ...(at ? { url: urls.package(at.lib, at.id) } : {}), ...(p.manifest.package ? { pkg: p.manifest.package } : {}) };
+      return { title: p.manifest.title, rel: p.rel, ...(at ? { url: urls.package(at.lib, at.id) } : {}), ...(p.manifest.name ? { pkg: p.manifest.name } : {}) };
     });
     const uses = Object.entries(g.m.uses).map(([name, v]) => {
       const newest = newestOf(name, homes, all), home = homes.get(name), kit = kitOf(name, all);
@@ -251,9 +251,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const s = readBakeState(p.dir);
     const m = p.manifest;
     // a package: its full name, its newest version and its outputs (its published versions' records)
-    const newest = m.package ? publishedVersions(p.dir, m.package).at(-1) : undefined;
-    const pkg = m.package ? { name: m.package, version: newest?.version ?? null } : undefined;
-    const outputs = m.package && newest ? outputsOf(m.package, newest).map((o) => ({ type: o.type, ...(o.alias ? { alias: o.alias } : {}), label: o.label, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags })) : undefined;
+    const newest = m.name ? publishedVersions(p.dir, m.name).at(-1) : undefined;
+    const pkg = m.name ? { name: m.name, version: newest?.version ?? null } : undefined;
+    const outputs = m.name && newest ? outputsOf(m.name, newest).map((o) => ({ type: o.type, ...(o.alias ? { alias: o.alias } : {}), label: o.label, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags })) : undefined;
     // the packages it uses, and those of them with a newer version: the card says so
     const uses = Object.keys(m.uses);
     const updates = uses.flatMap((name) => { const n = newestOf(name); return n && compareVersions(n, m.uses[name]) > 0 ? [{ name, version: m.uses[name], newest: n }] : []; });
@@ -265,7 +265,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   /** The packages that publish versions, by full name: the first library's when two hold one. */
   const packageHomes = () => {
     const homes = new Map<string, Package>();
-    for (const p of packages.values()) if (p.manifest.package && !homes.has(p.manifest.package)) homes.set(p.manifest.package, p);
+    for (const p of packages.values()) if (p.manifest.name && !homes.has(p.manifest.name)) homes.set(p.manifest.name, p);
     return homes;
   };
   /** A version's published outputs, each by the node type a graph names it with; "owner/name" alone is the default. */
@@ -293,7 +293,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     });
     const abs = (u: string) => base + u;
     const m = p.manifest, homes = packageHomes();
-    const versions = m.package ? publishedVersions(p.dir, m.package) : [];
+    const versions = m.name ? publishedVersions(p.dir, m.name) : [];
     // the packages it uses: the version in use (its copy's record), and the newest the web app knows of (TopoTopo's own
     // also in TopoTopo's built-in library)
     const all = kits();
@@ -308,11 +308,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       attachments: listFiles(path.join(p.dir, 'attachments')), exports: listFiles(path.join(p.dir, 'exports')),
       glb: fs.existsSync(path.join(webDir(p.dir), 'preview.glb')), bake: s,
       share: { link: abs(urls.package(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
-      package: m.package ? {
-        name: m.package,
-        versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(m.package!, v) })),
-        outputs: versions.length ? outputsOf(m.package, versions.at(-1)!) : [],
-        usedBy: usersOf(m.package),
+      package: m.name ? {
+        name: m.name,
+        versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(m.name!, v) })),
+        outputs: versions.length ? outputsOf(m.name, versions.at(-1)!) : [],
+        usedBy: usersOf(m.name),
       } : null,
       uses,
     };

@@ -215,7 +215,7 @@ export function workspaceText(start: string): string {
       const own = copiesFor(path.join(ws, p.rel)).workspace === null;
       const uses = Object.entries(p.manifest.uses);
       const listed = uses.map(([k, v]) => `${k} ${v}`).join(', ');
-      return `  ${p.rel}${p.manifest.package ? `  package ${p.manifest.package}` : ''}${!uses.length ? '' : own ? `  uses ${listed} (its own copies)` : `  its project.json still uses ${listed}: ${program()} workspace init ${ws} moves them into the workspace's`}`;
+      return `  ${p.rel}${p.manifest.name ? `  package ${p.manifest.name}` : ''}${!uses.length ? '' : own ? `  uses ${listed} (its own copies)` : `  its manifest still uses ${listed}: ${program()} workspace init ${ws} moves them into the workspace's`}`;
     }),
     ...(scan.packages.length > 40 ? [`  … ${scan.packages.length - 40} more`] : []),
   ];

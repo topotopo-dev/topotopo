@@ -57,7 +57,7 @@ defineNode({
 //              package, and an asset of it), and a graph file scene.json beside graphs/
 const LIB = path.join(tmp, 'lib'), TREES = path.join(LIB, 'trees'), ROCKS = path.join(LIB, 'rocks'), SLOW = path.join(LIB, 'slow'), FOREST = path.join(tmp, 'forest');
 const writePackage = (dir: string, manifest: Record<string, unknown>, graphs: Record<string, GraphSpec>) => {
-  json(path.join(dir, 'project.json'), { id: path.basename(dir), title: path.basename(dir), graph: 'main', ...manifest });
+  json(path.join(dir, `${path.basename(dir)}.topo`), { title: path.basename(dir), graph: 'main', ...manifest });
   for (const [n, g] of Object.entries(graphs)) json(path.join(dir, 'graphs', `${n}.json`), g);
 };
 const setGraph = (dir: string, name: string, g: GraphSpec) => json(path.join(dir, 'graphs', `${name}.json`), g);
@@ -90,9 +90,9 @@ const rocks = (slider: string): GraphSpec => ({
 });
 const slow = (ms: number): GraphSpec => ({ nodes: { w: { type: 'test_pkg_wait', params: { ms: '=ms' } } }, output: 'w', vars: { ms }, params: { ms: { type: 'int', min: 0, max: 5000 } }, outputs: { wait: { node: 'w' } } });
 
-writePackage(TREES, { package: 'studio/trees' }, { main: trees(1) });
-writePackage(ROCKS, { package: 'studio/rocks' }, { main: rocks('size') });
-writePackage(SLOW, { package: 'studio/slow' }, { main: slow(20) });
+writePackage(TREES, { name: 'studio/trees' }, { main: trees(1) });
+writePackage(ROCKS, { name: 'studio/rocks' }, { main: rocks('size') });
+writePackage(SLOW, { name: 'studio/slow' }, { main: slow(20) });
 for (const d of [TREES, ROCKS, SLOW]) await publish(d, 'first');
 const forestMain: GraphSpec = {
   nodes: {
@@ -143,7 +143,7 @@ const get = async (p: string) => { const r = await fetch(url + p); return { stat
 const post = async (p: string, body: unknown) => { const r = await fetch(url + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, j: await r.json() as any }; };
 const packages = async () => (await get('/api/packages')).j;
 const row = async (pkg: string) => (await packages()).packages.find((p: any) => p.package === pkg);
-const files = (dir: string) => JSON.stringify([fs.readFileSync(path.join(dir, 'project.json'), 'utf8'), fs.readFileSync(path.join(dir, 'packages', 'lock.json'), 'utf8'), fs.readdirSync(path.join(dir, 'packages', 'studio')).sort()]);
+const files = (dir: string) => JSON.stringify([fs.readFileSync(path.join(dir, `${path.basename(dir)}.topo`), 'utf8'), fs.readFileSync(path.join(dir, 'packages', 'lock.json'), 'utf8'), fs.readdirSync(path.join(dir, 'packages', 'studio')).sort()]);
 const info = async (graph = 'main') => (await get(`/api/info?graph=${graph}`)).j.summary as string;
 
 try {
@@ -162,7 +162,7 @@ try {
       `the outputs of the version in use, with their kinds and tags, marked where the package uses them (${JSON.stringify(t.outputs)})`);
     check(JSON.stringify(t.usedBy.map((u: any) => `${u.graph} › ${u.node}`).sort()) === JSON.stringify(['main › pine', 'main › small_pine', 'scene › t', 'yard › t']) && t.usedBy.every((u: any) => u.type === 'studio/trees/pine'),
       `the nodes of the package's graphs that use a package (${t.usedBy.map((u: any) => `${u.graph} › ${u.node}`)})`);
-    check(!t.kit && t.canFollow && s.package.title === 'forest' && s.package.package === null, 'a package with one working folder can show it live; the package by its title');
+    check(!t.kit && t.canFollow && s.package.title === 'forest' && s.package.name === null, 'a package with one working folder can show it live; the package by its title');
     const found = (await get('/api/packages/search?q=tree')).j;
     const hits = found.libraries.flatMap((l: any) => l.hits.map((h: any) => `${l.standing}:${h.type}${h.used ? `@${h.used}` : ''}`));
     check(hits.includes('listed:studio/trees/pine@1.0') && hits.some((h: string) => h.startsWith('builtin:topotopo/nature/')),
@@ -196,7 +196,7 @@ try {
     const progress = events.filter((e) => e.compare);
     check(progress.some((e) => e.compare.running && e.compare.total === 8 && /^graphs\/main\.json pine with studio\/trees 1\.(0|1)$/.test(e.compare.what)) && progress.at(-1).compare.running === false && progress.at(-1).compare.id === j.id,
       `{compare} events say how far it is, and when it ended (${progress.length} events)`);
-    check(files(FOREST) === was, 'nothing is written: project.json, the lock and the copies are as they were');
+    check(files(FOREST) === was, 'nothing is written: the manifest, the lock and the copies are as they were');
     const geo = async (side: string, id = j.id, place = pine.index) => { const res = await fetch(`${url}/api/packages/compare/geo?id=${id}&place=${place}&side=${side}`); return { status: res.status, magic: res.status === 200 ? Buffer.from(await res.arrayBuffer()).toString('latin1', 0, 4) : (await res.json() as any).error }; };
     const [a, b, ov] = await Promise.all(['a', 'b', 'overlay'].map((s) => geo(s)));
     check(a.magic === 'glTF' && b.magic === 'glTF' && ov.magic === 'glTF', 'GET /api/packages/compare/geo: the place with each version, and both overlaid, as GLBs');
@@ -263,13 +263,13 @@ try {
   {
     const stale = await post('/api/packages/update', { package: 'studio/trees', from: '1.1', to: '1.1' });
     const noTo = await post('/api/packages/update', { package: 'studio/trees' });
-    check(stale.status === 409 && /project\.json uses studio\/trees 1\.0 now, not 1\.1: look at the before\/after again/.test(stale.j.error) && noTo.status === 400 && /"from" and "to" are required/.test(noTo.j.error),
+    check(stale.status === 409 && /forest\.topo uses studio\/trees 1\.0 now, not 1\.1: look at the before\/after again/.test(stale.j.error) && noTo.status === 400 && /"from" and "to" are required/.test(noTo.j.error),
       `an update of what the person did not look at is refused (${stale.j.error})`);
     const h0 = height(await info()), version0 = (await get('/api/report?graph=main')).j.version;
     events.length = 0;
     const r = await post('/api/packages/update', { package: 'studio/trees', from: '1.0', to: '1.1' });
     check(r.status === 200 && r.j.ok && /^updated studio\/trees 1\.0 → 1\.1 in package forest/.test(r.j.text) && !r.j.mustChange.length && readManifest(FOREST).uses['studio/trees'] === '1.1'
-      && exists(FOREST, 'packages', 'studio', 'trees', '1.1', 'version.json') && !exists(FOREST, 'packages', 'studio', 'trees', '1.0'), `applied: the copy of 1.1 in, 1.0 out, project.json (${r.j.text})`);
+      && exists(FOREST, 'packages', 'studio', 'trees', '1.1', 'version.json') && !exists(FOREST, 'packages', 'studio', 'trees', '1.0'), `applied: the copy of 1.1 in, 1.0 out, the manifest (${r.j.text})`);
     check(await until(() => events.some((e) => e.graph === 'main') && events.some((e) => e.packages !== undefined), 8000), 'the pages hear it: the packages, and the graphs that use it');
     const rep = (await get('/api/report?graph=main')).j;
     check(rep.version > version0 && rep.ok && height(await info()) > h0, `the graph cooked again with 1.1: its crown is rounder (height ${h0} → ${height(await info())})`);
@@ -290,10 +290,10 @@ try {
 
   section('follow: the working folder for this session; a save there cooks the scene again; off: the copy');
   {
-    const was = fs.readFileSync(path.join(FOREST, 'project.json'), 'utf8');
+    const was = fs.readFileSync(path.join(FOREST, 'forest.topo'), 'utf8');
     const on = await post('/api/packages/follow', { package: 'studio/trees', on: true });
     const t = await row('studio/trees');
-    check(on.j.ok && on.j.followed && /^following studio\/trees for this session: its working folder/.test(on.j.text) && t.followed?.dir === TREES && fs.readFileSync(path.join(FOREST, 'project.json'), 'utf8') === was,
+    check(on.j.ok && on.j.followed && /^following studio\/trees for this session: its working folder/.test(on.j.text) && t.followed?.dir === TREES && fs.readFileSync(path.join(FOREST, 'forest.topo'), 'utf8') === was,
       `on: it shows as followed, nothing is saved (${on.j.text?.slice(0, 60)}…)`);
     await until(() => !o.ws.activity('main'), 5000);
     const h1 = height(await info());

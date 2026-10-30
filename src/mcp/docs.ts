@@ -74,8 +74,8 @@ export function graphLines(g: GraphSpec): string {
 export const TOPICS: Record<string, string> = {
   library: `LIBRARIES AND THE WEB APP
 A library is a folder the person listed (\`topotopo library add <name> <folder>\`, kept in ~/.topotopo/config.json). A
-package is any folder in it holding project.json, with the folders TopoTopo works with:
-  props/lantern/project.json    {id, title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
+package is any folder in it holding one <id>.topo file, its manifest, with the folders TopoTopo works with:
+  props/lantern/lantern.topo    {title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
   props/lantern/graphs/ assets/ inputs/ exports/  as in any package
   props/lantern/attachments/    concept art, references, source files (shown on the package's page)
   props/lantern/.web/           thumb.png, preview.glb, bake.json: derived, never edit
@@ -91,12 +91,12 @@ WORKING IN A PACKAGE
 - workspace {action:"open", library, id} → every tool (build, edit, render, export, inputs, assets, preview) now works
   in that folder. Build the package's model into graph "main" (or the manifest's "graph").
 - workspace {action:"create", library, path:"props/barrel", title, tags, links} → a new package, opened.
-- workspace {action:"init"} → the server's folder becomes a package where it is none (project.json in its folder), when
+- workspace {action:"init"} → the server's folder becomes a package where it is none (<id>.topo in its folder), when
   the person wants its graphs to use packages. When the server starts it makes its folder, named or not, a package
   if the folder is in no package and holds nothing but what TopoTopo makes itself (graphs/, assets/, exports/,
   inputs/), or nothing at all; a folder with anything else in it (a repository, the person's own files) stays as it is
   until the person says so.
-- workspace {action:"set", tags, links, description, bake:{frame: 48}} → edit project.json (bake.frame for
+- workspace {action:"set", tags, links, description, bake:{frame: 48}} → edit the manifest (bake.frame for
   simulations that settle after frame 1; bake.node to show one part).
 - workspace {action:"bake"} → render the previews now and see the thumbnail.
 Put reference images the person gives you in attachments/, guide files in inputs/. Links in "links" point back to the
@@ -165,7 +165,7 @@ heightmaps. Every tool answer ends with a note when inputs/ has files new or cha
 landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path} tells what one holds (polygons, open
 polylines, loose points, packed prims; bbox in metres; attributes; every name and role value; materials). Read a file
 with a file node: {"type":"file","params":{"path":"inputs/guides.glb"}} (relative paths read from the package folder,
-the nearest folder with a project.json at or above the graph, else the graph's folder; the list gives the exact path).
+the nearest folder with a .topo file at or above the graph, else the graph's folder; the list gives the exact path).
 MARKERS: what a person places by clicking in the live viewer (Site / Path / Zone / Volume modes) is written as
   inputs/markers.json with the same name and role attributes (sites: points with pscale and orient; paths open and
   zones closed polylines; volumes closed boxes), so describe it and read it like any other input.
@@ -927,7 +927,7 @@ assets {action:"get", name:"my_stairs"} shows it, assets {action:"save", name:"m
 {"type": "my_stairs"} uses it.`,
 
   packages: `PACKAGES (a package uses another package's published outputs by name)
-A published package has a full name and versions. Its author names it once in project.json, "package":
+A published package has a full name and versions. Its author names it once in its manifest, <id>.topo, "name":
 "owner/name" (lower-case letters, digits, - and _; the owner "topotopo" is reserved for TopoTopo's own), and publishes:
   workspace {action:"publish", dry_run:true}               CLI: topotopo publish [folder] --dry-run
   workspace {action:"publish", note:"taller pines"}        CLI: topotopo publish [folder] --note "taller pines" [--big]
@@ -940,7 +940,7 @@ version and its note, also for an output search found in a library the package l
 nothing copied); catalog {category:"package"} lists the outputs of the packages in use and TopoTopo's own.
 
 WHAT A PACKAGE PUBLISHES: every named output ("outputs") of every graph in graphs/ but those marked "publish": false
-(viewer-only previews), and the default output: the output node ("output") of the graph project.json shows ("graph"),
+(viewer-only previews), and the default output: the output node ("output") of the graph the manifest shows ("graph"),
 which must be set. Output names follow the same rule as the package name and are unique in the package. A graph that
 holds several outputs gives each the vars its node reads: publishing warns about an output that does not read some of
 its graph's vars (they are not its params; give it a graph of its own for params of its own).
@@ -955,7 +955,7 @@ WHAT AN OUTPUT IS: its kind, its tags and its description, which search, the cat
   and the viewer warn before that. A kind not on the list is an error wherever the graph is read.
 - tags: free words search finds the output by: lower-case letters, digits and -, starting with a letter or digit, at
   most 64 characters, at most 16 per output, each once ("low-poly", "street-furniture"); a malformed one is an error. A
-  package's own "tags" in project.json stay the web app's; search matches both.
+  package's own "tags" in its manifest stay the web app's; search matches both.
 - description: the output's "description", else its graph's "description" (a built-in package's outputs, one graph each, need no
   more). The default output carries the tags and description of the named output it is, if any.
 Every listing says an output's kind and tags the same way: mesh [conifer, low-poly].
@@ -966,7 +966,7 @@ resolve to the same version, with no entry in "uses"; in the package that publis
 (its working folder), and in a followed working folder to that folder. Outputs that name each other in a loop (a names
 b and b names a, or a names itself) do not resolve, and publishing refuses them.
 
-VERSIONS: big.small from 1.0, each a folder versions/<version>/ in the package that is never written over: project.json,
+VERSIONS: big.small from 1.0, each a folder versions/<version>/ in the package that is never written over: <id>.topo,
 graphs/, assets/, inputs/, the copies the package uses (packages/) and version.json (the note, the time, a hash of every
 other file, each output's graph, node, kind, tags, description, params and inputs). The hash reads text files with LF
 line ends, so a checkout that turns them into CRLF changes nothing; binary files count as they are. exports/,
@@ -988,20 +988,20 @@ not read some of its graph's vars, an output of another kind than before, URLs a
 nodes read (a version holds no copy of them) and a version above 50 MB. A DRY RUN, workspace {action:"publish",
 dry_run:true, note?, big?} (CLI: topotopo publish --dry-run), goes through every step and writes nothing.
 
-USING PACKAGES: project.json "uses" holds the version the package uses of each ({"studio/trees": "1.3"}), and packages/
+USING PACKAGES: the manifest's "uses" holds the version the package uses of each ({"studio/trees": "1.3"}), and packages/
 its own copy of each, and of the packages those use, flat: packages/<owner>/<name>/<version>/, each version once, with
 packages/lock.json (each copy's hash, the library it came from, its own uses). The copies are committed with the package,
 so it cooks anywhere without the libraries, and what it uses never changes by itself; a copy edited by hand is warned
 about, and the warning goes once the copy is restored. init writes a .gitattributes that keeps versions/ and packages/
 byte for byte, and a .gitignore for packages/.cache.json (the hashes of the copies' files, kept between runs) and
-packages/.lock (held while a command, the viewer or an MCP server writes project.json and the lock).
+packages/.lock (held while a command, the viewer or an MCP server writes the manifest and the lock).
 IN A WORKSPACE (a game's folder with topotopo-workspace.json; CLI: topotopo workspace init): its packages share one copy
 of each package version, in topotopo-packages/ beside that file, whose "uses" names the version the whole game uses.
 A first use in any of its packages adds the package there; Update compares every place every package uses it and
 changes them all; remove is refused while a package still names it. A package that publishes versions keeps its own "uses"
 and copies, which are published with it. workspace init moves the copies of the packages inside that kept their own
 (two packages that used different versions get the newer, said).
-LIBRARIES: a package finds packages only in the libraries its project.json lists, "libraries": ["../shared/library",
+LIBRARIES: a package finds packages only in the libraries its manifest lists, "libraries": ["../shared/library",
 "game"]: a path written from the package ("./lib", "../lib") for a library in the same repository (every checkout and
 worktree uses its own), else a registered library's name. An entry that does not work (no such folder, a name not
 registered, a package's folder instead of its library's) is reported, and the others still count. A library with a
@@ -1040,7 +1040,7 @@ must start a word of an output's full name, label, description or tags, or of it
 {query:"brick", tag:"masonry"}. Results come by library, the open package's own first (those it lists, then TopoTopo's
 built-in library), each with its full name, kind, tags, label, version and description, and say whether the package can
 use it: TopoTopo's own packages and those of a library it lists, yes (a graph that names one adds it); another
-library's only once its project.json lists it, and the result says the entry that lists it.
+library's only once its manifest lists it, and the result says the entry that lists it.
 
 TOPOTOPO'S OWN PACKAGES: four built-in packages in TopoTopo's built-in library, every one a package of the owner "topotopo"; their
 outputs are listed by the catalog (category "package") and help even where the package does not use them yet:
@@ -1084,7 +1084,7 @@ OUT OF DATE AND UPDATE: what a package uses changes only by an update, after a b
 - Show the before/after to the person and apply it only when they say so, naming the versions it showed:
   {action:"update", package, from, to, apply:true} (CLI: the command the before/after ends with, --from 1.3 --to 1.4
   --apply) copies the new version in with the versions it uses, sets "uses" and the lock, and deletes the copies
-  nothing uses any more. It is refused when project.json uses another version by then. After a big update the graphs
+  nothing uses any more. It is refused when the manifest uses another version by then. After a big update the graphs
   report what they must change until they do.
 
 IN THE VIEWER (preview, topotopo edit, topotopo view on a graph in a package): the Packages tab, in every package, has
@@ -1113,7 +1113,7 @@ Paths are written from the workspace's folder. The person makes one: CLI topotop
 [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow]; MCP workspace
 {action:"init_workspace", path, ...} when the person says so. workspace {action:"show"} (CLI: topotopo
 workspace) says what the open package's workspace holds.
-- LIBRARIES: every package inside looks for packages in its own project.json "libraries", then in the workspace's, then
+- LIBRARIES: every package inside looks for packages in its own manifest's "libraries", then in the workspace's, then
   in TopoTopo's built-in library.
 - ONE COPY PER GAME: the packages inside share one copy of each package version, in topotopo-packages/ beside the
   file, whose "uses" names one version of each package for the whole game. A first use in any package adds it there;
@@ -1265,7 +1265,7 @@ CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pie
 export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic
   "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
 PATHS: one rule for the CLI, the MCP server and the viewer: relative paths inside a graph (file nodes, material maps,
-  image files) read from its package folder, the nearest folder with a project.json at or above the graph file, else
+  image files) read from its package folder, the nearest folder with a .topo file at or above the graph file, else
   the graph file's folder (MCP: the server's folder); exports/ is that package's (a graph in <package>/graphs/ exports into
   <package>/exports/, never beside itself), and exports/.outputs.json records the files by their package paths. The
   CLI's own --render / --export / --underlay paths are relative to the current folder.

@@ -24,7 +24,7 @@ export function welcomeOf(info) {
   if (info?.package) {
     const p = info.package;
     return {
-      kind: 'package', title: p.title || p.id, sub: `package ${p.id}${p.package ? ` · publishes as ${p.package}` : ''}`, kits,
+      kind: 'package', title: p.title || p.id, sub: `package ${p.id}${p.name ? ` · publishes as ${p.name}` : ''}`, kits,
       lead: 'This package has no graphs yet.',
       steps: [
         'Ask your agent to build one here, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s built-in packages."',

@@ -50,7 +50,7 @@ export async function bakePackage(dir: string): Promise<BakeState> {
     const ws = openPackage(engine, dir).session;
     const name = m.bake.graph ?? m.graph;
     const g = ws.graphs.get(name);
-    if (!g) return finish({ ok: false, error: `no default graph yet: the package has no graph "${name}" (project.json "graph")` });
+    if (!g) return finish({ ok: false, error: `no default graph yet: the package has no graph "${name}" (its manifest's "graph")` });
     const r = await engine.cook(g, { target: m.bake.node, frame: m.bake.frame });
     if (!r.ok || !r.geo) return finish({ ok: false, error: r.errors.map((e) => `[${e.node}] ${e.message}`).join('\n') || 'the cook gave no geometry' });
     // the asynchronous render: shading "pbr" needs MikkTSpace and the material's textures, which it loads (a package

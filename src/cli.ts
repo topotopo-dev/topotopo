@@ -33,7 +33,7 @@
 //   node src/cli.ts workspace [folder]
 //   node src/cli.ts workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 //   node src/cli.ts workspace add|list [folder]
-//   node src/cli.ts init [folder] [--package owner/name]
+//   node src/cli.ts init [folder] [--name owner/name]
 //   node src/cli.ts libraries add|remove <folder or name> [folder]
 //   node src/cli.ts use owner/name [folder] [--version 1.1]
 //   node src/cli.ts remove owner/name [folder]
@@ -108,7 +108,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
-    '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a project.json at or',
+    '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
     '         [--follow owner/name] (show that package\'s working folder in the package\'s libraries instead of its copy, for this run: renders and inspect use it, exports the published copy; repeat it)',
     '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added)',

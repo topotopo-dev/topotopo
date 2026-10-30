@@ -10,7 +10,7 @@
 //   topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 //                                                                     make a game's folder a workspace, or change one
 //   topotopo workspace add|list [folder]                              register a workspace for the web app's front page; list them
-//   topotopo init [folder] [--package owner/name]                     make a folder a package, or set the name it publishes under
+//   topotopo init [folder] [--name owner/name]                        make a folder a package, or set the name it publishes under
 //   topotopo libraries add|remove <folder or name> [folder]           the libraries the package finds packages in
 //   topotopo use owner/name [folder] [--version 1.1]                  add a package from the libraries the package lists
 //   topotopo remove owner/name [folder]                               remove a package no graph of the package names
@@ -30,7 +30,7 @@ import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig } from '../config.ts';
 import { createPackage, isStale, readBakeState, scanAll } from '../web/library.ts';
-import { initPackage, libraryEntryFor, packageDirOf, readManifest, slugify } from '../package.ts';
+import { initPackage, libraryEntryFor, manifestFile, oldManifestAbove, packageDirOf, readManifest, slugify } from '../package.ts';
 import type { WebConfig } from '../config.ts';
 
 /**
@@ -41,7 +41,7 @@ export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'workspace [folder]', what: 'the workspace (the game) around a folder: its engine project, the libraries every package inside looks in, its packages' },
   { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]', what: 'make a game\'s folder a workspace (topotopo-workspace.json; the engine project is found when not given; its packages share one copy of each package, moved into topotopo-packages/; --follow shows its own packages live from their working folders, for looking), or change one' },
   { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the web app\'s front page, or list the registered ones' },
-  { usage: 'init [folder] [--package owner/name]', what: 'make a folder a package (project.json, graphs/main.json), or set the name an existing package publishes under' },
+  { usage: 'init [folder] [--name owner/name]', what: 'make a folder a package (<id>.topo, graphs/main.json), or set the name an existing package publishes under' },
   { usage: 'libraries add|remove <folder or name> [folder]', what: 'list or unlist a library the package finds packages in: a folder by its path from the package, else a registered library\'s name' },
   { usage: 'use owner/name [folder] [--version 1.1]', what: 'add a package: its newest version (or --version) in the libraries the package lists, copied into packages/' },
   { usage: 'remove owner/name [folder]', what: 'remove a package no graph of the package names: its copy goes, with the copies nothing else uses' },
@@ -98,7 +98,7 @@ function args(argv: string[], valued: string[], flags: string[], usage: string) 
 function packageOf(folder: string | undefined, prog: string): string {
   const abs = path.resolve(folder ?? '.');
   if (folder !== undefined && !isDir(abs)) fail(`no folder ${abs}`);
-  return packageDirOf(abs) ?? fail(`${abs} is in no package: ${prog} init${folder === undefined ? '' : ` ${quoted(folder)}`} makes the folder a package (project.json)`);
+  return packageDirOf(abs) ?? fail(`${abs} is in no package: ${prog} init${folder === undefined ? '' : ` ${quoted(folder)}`} makes the folder a package (<id>.topo)${oldManifestAbove(abs)}`);
 }
 
 const isDir = (abs: string) => !!fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory();
@@ -228,11 +228,11 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
 
 // ---------------------------------------------------------------------------------------------------- packages
 
-/** `init [folder] [--package owner/name]`: make a folder a package, or set the name an existing package publishes under. */
+/** `init [folder] [--name owner/name]`: make a folder a package, or set the name an existing package publishes under. */
 export async function initCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
-    const a = args(argv, ['--package'], [], `usage: ${prog} init [folder] [--package owner/name]`);
-    const r = initPackage(a.rest[0] ?? '.', { package: a.opt('--package') });
+    const a = args(argv, ['--name'], [], `usage: ${prog} init [folder] [--name owner/name]`);
+    const r = initPackage(a.rest[0] ?? '.', { name: a.opt('--name') });
     io.out(r.said);
     if (!/ publishes as \S+ (already|now)$/.test(r.said))
       io.out(`  graphs go in graphs/ (it shows "${r.manifest.graph}"); ${prog} libraries add <folder> lists a library it finds packages in; TopoTopo's own packages need none`);
@@ -253,13 +253,13 @@ export async function librariesCommand(argv: string[], prog: string, io: Io = co
     try {
       if (sub === 'add') {
         const entry = libraryEntryFor(packageDir, given);
-        if (listed.includes(entry)) { io.out(`project.json lists "${entry}" already`); return 0; }
+        if (listed.includes(entry)) { io.out(`${path.basename(manifestFile(packageDir))} lists "${entry}" already`); return 0; }
         io.out(pk.setLibraries([...listed, entry]));
       } else {
         // the entry as listed, or the folder or registered name it stands for
         const abs = path.resolve(given);
         const entry = listed.find((e) => e === given || e === given.replace(/\\/g, '/') || path.resolve(packageDir, e) === abs);
-        if (!entry) fail(`project.json does not list "${given}": it lists ${listed.map((e) => `"${e}"`).join(', ') || 'no libraries'}`);
+        if (!entry) fail(`${path.basename(manifestFile(packageDir))} does not list "${given}": it lists ${listed.map((e) => `"${e}"`).join(', ') || 'no libraries'}`);
         io.out(pk.setLibraries(listed.filter((e) => e !== entry)));
       }
       return 0;

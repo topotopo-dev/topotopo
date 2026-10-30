@@ -79,7 +79,7 @@ const kitOutputs = kits.flatMap((k) => k.outputs);
 const byAnchor = new Map(defs.map((d) => [anchorOf(d.type), d.type]));
 
 interface Example { name: string; graph: any; description: string; types: string[]; nodes: number; render: string | null }
-const examples: Example[] = fs.readdirSync(path.join(ROOT, 'examples')).filter((f) => f.endsWith('.json') && f !== 'project.json').sort().map((f) => {
+const examples: Example[] = fs.readdirSync(path.join(ROOT, 'examples')).filter((f) => f.endsWith('.json')).sort().map((f) => {
   const name = f.slice(0, -'.json'.length);
   const graph = JSON.parse(read(`examples/${f}`));
   const render = exists(`examples/renders/${name}.png`) ? `examples/renders/${name}.png` : null;

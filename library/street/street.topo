@@ -1,5 +1,4 @@
 {
-  "id": "street",
   "graph": "kit",
   "bake": {},
   "title": "Street kit",
@@ -9,5 +8,5 @@
   ],
   "links": [],
   "created": "2026-10-28",
-  "package": "topotopo/street"
+  "name": "topotopo/street"
 }

@@ -364,7 +364,7 @@ section('the tab\'s title, the welcome, and messages that clear themselves (sect
 {
   const welcome = await import('../src/viewer/app/welcome.js');
   const kits = [{ name: 'topotopo/street', title: 'Street kit', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
-  const proj = { package: { id: 'lantern', title: 'Lantern', graph: 'main', package: null }, folder: 'C:\\work\\lantern', file: null, kits };
+  const proj = { package: { id: 'lantern', title: 'Lantern', graph: 'main', name: null }, folder: 'C:\\work\\lantern', file: null, kits };
   const loose = { package: null, folder: '/home/me/stuff', file: null, kits };
   check(welcome.pageTitle(proj) === 'Lantern · TopoTopo' && welcome.pageTitle(loose) === 'stuff · TopoTopo' && welcome.pageTitle({ package: null, folder: '/tmp/x', file: 'house.json' }) === 'house.json · TopoTopo',
     'the tab is titled after the package (a graph file, a folder)');

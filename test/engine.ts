@@ -30,7 +30,7 @@ import { Geometry } from '../src/core/geometry.ts';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 /** The graphs TopoTopo ships: examples/*.json and the graphs of its own packages (library/<name>/graphs/), by path. */
 const shippedGraphs = (): [string, any][] => [
-  ...fs.readdirSync(path.join(root, 'examples')).filter((f) => f.endsWith('.json') && f !== 'project.json').map((f) => `examples/${f}`),
+  ...fs.readdirSync(path.join(root, 'examples')).filter((f) => f.endsWith('.json')).map((f) => `examples/${f}`),
   ...fs.readdirSync(path.join(root, 'library')).flatMap((k) => fs.readdirSync(path.join(root, 'library', k, 'graphs')).filter((f) => f.endsWith('.json')).map((f) => `library/${k}/graphs/${f}`)),
 ].map((rel) => [rel, JSON.parse(fs.readFileSync(path.join(root, rel), 'utf8'))]);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-engine-'));
@@ -947,7 +947,7 @@ section('relative paths read from the package folder');
   const r = cli(g, '--export-all');
   check(init.status === 0 && r.status === 0 && /3 points, 1 prims/.test(r.stdout) && fs.existsSync(path.join(proj, 'exports', 'piece.obj')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
     `a graph in graphs/ reads inputs/ of its package, and --export-all writes the package's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
-  check(packageBaseDir(path.join(proj, 'graphs')) === proj && packageBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'packageBaseDir: the nearest project.json, else the folder itself');
+  check(packageBaseDir(path.join(proj, 'graphs')) === proj && packageBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'packageBaseDir: the nearest folder with a .topo file, else the folder itself');
   const e = new Engine(createNodeHost({ baseDir: path.join(proj, 'graphs') }));
   check(e.host.resolvePath('inputs/tri.obj') === path.join(proj, 'inputs', 'tri.obj'), 'the node host resolves relative paths against the package folder');
 }

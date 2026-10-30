@@ -38,7 +38,7 @@ import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
 import { PackageUses } from '../packages/registry.ts';
 import { listKits, kitOutputsText } from '../web/kits.ts';
-import { packageDirOf, readManifest } from '../package.ts';
+import { packageDirOf, packageId, readManifest } from '../package.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';
@@ -220,7 +220,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     const dir = pk ? pk.dir : packageDirOf(ws.dir);
     let m = pk?.manifest ?? null;
     if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no package to name */ }
-    return m && dir ? { id: m.id, title: m.title, description: m.description, graph: m.graph, package: m.package ?? null, dir } : null;
+    return m && dir ? { id: packageId(dir), title: m.title, description: m.description, graph: m.graph, name: m.name ?? null, dir } : null;
   };
   // TopoTopo's built-in packages, read once: they change only with TopoTopo itself
   let kits: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;

@@ -130,7 +130,7 @@ const MAPS: Record<string, NodeSpec> = {
   const lib = path.join(tmp, 'lib'), mats = path.join(lib, 'mats'), house = path.join(tmp, 'house');
   const json = (f: string, d: unknown) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(d, null, 1)); };
   const matGraph: GraphSpec = { nodes: structuredClone(MAPS), output: 'brick', outputs: { brick: { node: 'brick', kind: 'material', tags: ['brick'], description: 'Old brick.' } } };
-  json(path.join(mats, 'project.json'), { id: 'mats', title: 'mats', graph: 'main', package: 'studio/mats' });
+  json(path.join(mats, 'mats.topo'), { title: 'mats', graph: 'main', name: 'studio/mats' });
   json(path.join(mats, 'graphs', 'main.json'), matGraph);
   const e1 = new Engine(createNodeHost({ baseDir: mats }));
   await e1.init();
@@ -147,7 +147,7 @@ const MAPS: Record<string, NodeSpec> = {
   check(bad.blocks.some((b) => /its "kind" is "material", and it cooks to mesh/.test(b)), 'pinned material that cooks to a mesh: publishing blocks');
   json(path.join(mats, 'graphs', 'main.json'), matGraph);
   // another package uses it by name on its own mesh
-  json(path.join(house, 'project.json'), { id: 'house', title: 'house', graph: 'main', libraries: ['../lib'] });
+  json(path.join(house, 'house.topo'), { title: 'house', graph: 'main', libraries: ['../lib'] });
   const houseGraph: GraphSpec = {
     nodes: {
       box: { type: 'box' }, uv: { type: 'uv_project', in: ['box'], params: { method: 'box' } },

@@ -1,5 +1,4 @@
 {
-  "id": "architecture",
   "graph": "kit",
   "bake": {},
   "title": "Architecture kit",
@@ -9,5 +8,5 @@
   ],
   "links": [],
   "created": "2026-10-28",
-  "package": "topotopo/architecture"
+  "name": "topotopo/architecture"
 }

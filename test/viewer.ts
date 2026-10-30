@@ -705,7 +705,7 @@ section('two packages on one folder (Session.watch)');
   } finally { a.unwatch(); b.unwatch(); }
 }
 
-section('a package\'s graph files beside project.json (examples/ keeps its graphs there)');
+section('a package\'s graph files beside its manifest (examples/ keeps its graphs there)');
 {
   const dir = path.join(tmp, 'beside');
   fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
@@ -717,10 +717,10 @@ section('a package\'s graph files beside project.json (examples/ keeps its graph
   fs.mkdirSync(path.join(dir, 'more'));
   fs.writeFileSync(path.join(dir, 'more', 'deep.json'), box(5));
   check(!graphFiles(dir).has('tower'), 'a folder that is no package: only graphs/ holds graphs');
-  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify({ id: 'beside', title: 'Beside', graph: 'tower' }));
+  fs.writeFileSync(path.join(dir, 'beside.topo'), JSON.stringify({ title: 'Beside', graph: 'tower' }));
   const files = graphFiles(dir);
   check([...files.keys()].sort().join() === 'tower,twice' && files.get('twice') === path.join(dir, 'graphs', 'twice.json') && files.get('tower') === path.join(dir, 'tower.json'),
-    `in a package: graph files beside project.json too, not below it, not other JSON; graphs/ wins a name both have (${[...files].map(([k, f]) => `${k}=${path.relative(dir, f)}`).join(', ')})`);
+    `in a package: graph files beside its manifest too, not below it, not other JSON; graphs/ wins a name both have (${[...files].map(([k, f]) => `${k}=${path.relative(dir, f)}`).join(', ')})`);
   const open = async () => { const e = new Engine(createNodeHost({ baseDir: dir })); await e.init(); const w = new Session(dir, e); w.load(); w.watch(); return w; };
   const a = await open(), b = await open();
   try {
@@ -730,7 +730,7 @@ section('a package\'s graph files beside project.json (examples/ keeps its graph
       'an edit is saved into the graph\'s own file, not into graphs/');
     check(await until(() => b.graphs.get('tower')?.nodes.b.params?.size?.[0] === 2, 5000), 'another package on the package follows the file');
     fs.writeFileSync(path.join(dir, 'gate.json'), box(6));
-    check(await until(() => b.graphs.has('gate'), 5000), 'a graph file saved beside project.json appears');
+    check(await until(() => b.graphs.has('gate'), 5000), 'a graph file saved beside the manifest appears');
     fs.rmSync(path.join(dir, 'gate.json'));
     check(await until(() => !b.graphs.has('gate'), 5000), 'and goes when its file is removed');
     a.setGraph('fresh', JSON.parse(box(1)));

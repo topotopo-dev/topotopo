@@ -72,7 +72,7 @@ async function checkPackages(libs: { name: string; root: string }[], problems: s
     const scan = scanLibrary({ name: lib.name, path: lib.root });
     problems.push(...scan.problems.map((p) => `${libraryText(lib.name)}: ${p}`));
     for (const p of scan.packages) {
-      const pkg = p.manifest.package;
+      const pkg = p.manifest.name;
       if (!pkg || seen.has(pkg)) continue;
       seen.add(pkg);
       const v = publishedVersions(p.dir, pkg).at(-1);
@@ -89,7 +89,7 @@ async function checkPackages(libs: { name: string; root: string }[], problems: s
   return items;
 }
 
-/** A package's graphs (graphs/, and graph files beside project.json), each cooked to its output. */
+/** A package's graphs (graphs/, and graph files beside its manifest), each cooked to its output. */
 async function checkPackage(dir: string, name: string): Promise<CheckItem> {
   const jobs = [...graphFiles(dir).keys()].map((g) => ({ graph: g, label: `graph ${g}` }));
   return { what: 'package', name, ...(await cookIn(dir, jobs)) };

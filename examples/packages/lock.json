@@ -2,28 +2,28 @@
   "packages": {
     "topotopo/architecture": {
       "1.0": {
-        "hash": "ab39f6679415448adf2a15d681297d47c707182f3e9bfe8d0a38de64bfe0145e",
+        "hash": "1c25c304ad82e30ff1ee5f00943442501496cc228d652704ee69f3252aa4e1a6",
         "library": "topotopo",
         "uses": {}
       }
     },
     "topotopo/nature": {
       "1.0": {
-        "hash": "202baabb479135c7a8c95f65277d388ecce0f0123a53fa8330ac73000e6febe0",
+        "hash": "3239ab8956e8f641eb816c15a267319d2fa5d45d9075e30bcd717097469fa9a4",
         "library": "topotopo",
         "uses": {}
       }
     },
     "topotopo/props": {
       "1.0": {
-        "hash": "3d535352af055a4531f206484e1748748e33b9b14911c3b71eef9036b377586f",
+        "hash": "147e1557815c4e597b47d45388bc212eaeadec1fd45f5c7f2ef7a395ab282ac8",
         "library": "topotopo",
         "uses": {}
       }
     },
     "topotopo/street": {
       "1.0": {
-        "hash": "7acd8c90db7e910ac64ffd3c3d754c27eaac3622f49c714dc5985057c2232ece",
+        "hash": "1c4fd042666677ca770f286f27da632a8642ecf34fee16b63615edf730601a2a",
         "library": "topotopo",
         "uses": {}
       }

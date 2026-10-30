@@ -23,7 +23,7 @@ await engine.init();
 const { session: ws, packages } = openPackage(engine, wsDir);
 if (argv.includes('--examples')) {
   const dir = path.join(root, 'examples');
-  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && x !== 'project.json')) {
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json'))) {
     const name = path.basename(f, '.json');
     const graph = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
     for (const n of packages.addFor(graph)) console.log(n);

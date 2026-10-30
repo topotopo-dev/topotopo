@@ -34,7 +34,7 @@ for (const def of allNodeDefs()) {
   if (SKIP.has(def.type)) continue;
   cases.push({ name: `node.${def.type}`, graph: fixtureGraphFor(def.type), engine, source: `fixture for node type "${def.type}" (test/fixtures.ts)` });
 }
-for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json') && x !== 'project.json').sort()) {
+for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json')).sort()) {
   const graph = JSON.parse(fs.readFileSync(path.join(examplesDir, f), 'utf8'));
   cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}` });
 }

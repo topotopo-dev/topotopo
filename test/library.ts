@@ -1,12 +1,12 @@
 // Libraries of the web app (src/web/library.ts, bake.ts): the config, scanning a library (packages, collections, what a
-// scan skips, id collisions), project.json validation, creating packages, the MCP server's package rule, the bake
+// scan skips, id collisions), manifest validation, creating packages, the MCP server's package rule, the bake
 // key, and baking previews (a valid PNG and meshopt GLB; a failed bake keeps the previous files and says why).
 //   node test/library.ts
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { addLibrary, loadConfig } from '../src/config.ts';
-import { startPackage, notPackageFiles, parseManifest, packageDirOf, readManifest, slugify, writeManifest } from '../src/package.ts';
+import { initPackage, manifestAt, manifestFile, oldManifest, packageId, startPackage, notPackageFiles, parseManifest, packageDirOf, readManifest, slugify, writeManifest } from '../src/package.ts';
 import { bakeKey, createPackage, isStale, readBakeState, scanLibrary } from '../src/web/library.ts';
 import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/package.ts';
 import { initWorkspace, parseWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
@@ -52,39 +52,62 @@ section('create and scan');
   createPackage(lib, 'Crate Big');
   // things a scan must not enter or take as packages
   fs.mkdirSync(path.join(lib.path, '.hidden', 'p'), { recursive: true });
-  fs.writeFileSync(path.join(lib.path, '.hidden', 'p', 'project.json'), '{}');
+  fs.writeFileSync(path.join(lib.path, '.hidden', 'p', 'p.topo'), '{}');
   fs.mkdirSync(path.join(lib.path, 'node_modules', 'p'), { recursive: true });
-  fs.writeFileSync(path.join(lib.path, 'node_modules', 'p', 'project.json'), '{}');
+  fs.writeFileSync(path.join(lib.path, 'node_modules', 'p', 'p.topo'), '{}');
   fs.mkdirSync(path.join(lantern.dir, 'attachments', 'nested'), { recursive: true });
-  fs.writeFileSync(path.join(lantern.dir, 'attachments', 'nested', 'project.json'), '{}');
+  fs.writeFileSync(path.join(lantern.dir, 'attachments', 'nested', 'nested.topo'), '{}');
   // a folder copied in Explorer: same id; and a broken manifest
   fs.cpSync(lantern.dir, path.join(lib.path, 'props', 'lantern - Copy'), { recursive: true });
   fs.mkdirSync(path.join(lib.path, 'broken'));
-  fs.writeFileSync(path.join(lib.path, 'broken', 'project.json'), '{"graph": 5}');
+  fs.writeFileSync(path.join(lib.path, 'broken', 'broken.topo'), '{"graph": 5}');
+  // a package of before .topo files: no package, said with what to rename
+  fs.mkdirSync(path.join(lib.path, 'old'));
+  fs.writeFileSync(path.join(lib.path, 'old', 'project.json'), '{"id": "barrel", "package": "studio/barrel"}');
   const s = scanLibrary(lib);
   check(s.packages.map((p) => p.id).join() === 'crate-big,lantern', `packages found, skipped folders ignored (${s.packages.map((p) => p.rel)})`);
   check(s.problems.some((p) => p.includes('lantern - Copy') && p.includes('already used')), 'a copied folder\'s duplicate id is a problem; the first path keeps it');
-  check(s.problems.some((p) => p.includes('broken') && p.includes('"graph"')), 'a bad project.json is a problem naming the key');
+  check(s.problems.some((p) => p.includes('broken') && p.includes('"graph"')), 'a bad manifest is a problem naming the key');
+  check(s.problems.some((p) => /old holds project\.json, which TopoTopo no longer reads: rename it to barrel\.topo and, in it, "package" to "name" and remove "id"$/.test(p)) && !s.packages.some((p) => p.rel === 'old'),
+    'a folder with project.json is no package: the scan says what to rename it to');
+  fs.rmSync(path.join(lib.path, 'old'), { recursive: true });
   check(s.packages.find((p) => p.id === 'lantern')!.manifest.links[0].label === 'concept', 'links are read');
   fs.rmSync(path.join(lib.path, 'props', 'lantern - Copy'), { recursive: true });
   fs.rmSync(path.join(lib.path, 'broken'), { recursive: true });
-  check(packageDirOf(path.join(lantern.dir, 'graphs')) === lantern.dir, 'packageDirOf finds the package above a folder');
+  check(packageDirOf(path.join(lantern.dir, 'graphs')) === lantern.dir && manifestFile(lantern.dir) === path.join(lantern.dir, 'lantern.topo') && packageId(lantern.dir) === 'lantern',
+    'packageDirOf finds the package above a folder: the nearest folder with a .topo file, whose name is the package id');
   check(scanLibrary({ name: 'none', path: path.join(tmp, 'missing') }).problems[0].includes('no folder'), 'a missing library folder is a problem');
 }
 
 section('manifest');
 {
   check(parseManifest({}, 'x').graph === 'main' && parseManifest({}, 'x').title === 'x', 'defaults: graph main, title = id');
-  check(throws(() => parseManifest({ id: 'Bad Id' }, 'x'), /"id"/), 'ids are checked');
+  check(throws(() => parseManifest({ id: 'x' }, 'x'), /"id": the file's name is the package id; remove "id"/), 'the id is the file\'s name, never a field');
   check(throws(() => parseManifest({ graph: '../x' }, 'x'), /graph name/), 'graph names are checked');
   check(throws(() => parseManifest({ bake: { frame: 'a' } }, 'x'), /bake.frame/), 'bake.frame is a number');
   const dir = path.join(lib.path, 'props', 'lantern');
-  const raw = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(path.join(dir, 'lantern.topo'), 'utf8'));
   raw.custom = { keep: true };
-  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(raw));
+  fs.writeFileSync(path.join(dir, 'lantern.topo'), JSON.stringify(raw));
   writeManifest(dir, { ...readManifest(dir), description: 'Oil lantern' });
-  const back = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8'));
-  check(back.description === 'Oil lantern' && back.custom?.keep === true, 'writing a manifest keeps keys it does not know');
+  const back = JSON.parse(fs.readFileSync(path.join(dir, 'lantern.topo'), 'utf8'));
+  check(back.description === 'Oil lantern' && back.custom?.keep === true && !('id' in back), 'writing a manifest keeps keys it does not know, and writes no id');
+  // where a package is: one .topo file in its folder
+  const two = path.join(tmp, 'two-manifests');
+  fs.mkdirSync(path.join(two, 'graphs'), { recursive: true });
+  fs.writeFileSync(path.join(two, 'a.topo'), '{}');
+  fs.writeFileSync(path.join(two, 'b.topo'), '{}');
+  check(throws(() => packageDirOf(path.join(two, 'graphs')), /two-manifests holds a\.topo and b\.topo: a package has one \.topo file, whose name is its id/), 'a folder with two .topo files is an error naming both');
+  const bad = path.join(tmp, 'bad-name');
+  fs.mkdirSync(bad);
+  fs.writeFileSync(path.join(bad, 'Big Crate.topo'), '{}');
+  check(throws(() => manifestAt(bad), /Big Crate\.topo: the file's name is the package id: .* \("big-crate\.topo"\)/), 'a .topo file whose name is no id says the name to give it');
+  const old = path.join(tmp, 'old-manifest');
+  fs.mkdirSync(old);
+  fs.writeFileSync(path.join(old, 'project.json'), '{"title": "Old"}');
+  check(packageDirOf(old) === null && manifestAt(old) === null && /old-manifest holds project\.json, which TopoTopo no longer reads: rename it to old-manifest\.topo$/.test(oldManifest(old) ?? '')
+    && throws(() => readManifest(old), /rename it to old-manifest\.topo/) && throws(() => initPackage(old), /rename it to old-manifest\.topo/),
+    'a folder with project.json and no .topo file is no package: reading it or making it one says to rename the file after the folder');
 }
 
 section('the package of the MCP server: a package when it holds nothing but what a package makes itself');
@@ -102,21 +125,21 @@ section('the package of the MCP server: a package when it holds nothing but what
   check(notPackageFiles(repo).join() === 'README.md' && notPackageFiles(git).join() === '.git/', `anything else is: ${notPackageFiles(repo)}, ${notPackageFiles(git)}`);
   for (const d of [fresh, empty, own]) {
     const s = startPackage(d);
-    check(/^made the folder .* a package \(project\.json\)/.test(s.log) && s.dir === d && /became a package, ".*", when the server started .* Next: build into graph "main"/.test(s.note ?? '') && fs.existsSync(path.join(d, 'project.json')),
+    check(/^made the folder .* a package \([a-z]+\.topo\)/.test(s.log) && s.dir === d && /became a package, ".*", when the server started .* Next: build into graph "main"/.test(s.note ?? '') && fs.existsSync(path.join(d, `${path.basename(d)}.topo`)),
       `${path.basename(d)}: made a package, and the first reply will say so and what to do next`);
   }
-  check(readManifest(own).id === 'own' && fs.existsSync(path.join(own, 'graphs', 'main.json')) && fs.existsSync(path.join(own, 'assets', 'rock.json')), 'its graphs and assets stay where they are');
-  check(readManifest(fresh).graph === 'main' && JSON.parse(fs.readFileSync(path.join(fresh, 'graphs', 'main.json'), 'utf8')).output === 'box', 'a new one gets a starter graph, the one project.json shows');
+  check(packageId(own) === 'own' && fs.existsSync(path.join(own, 'graphs', 'main.json')) && fs.existsSync(path.join(own, 'assets', 'rock.json')), 'its graphs and assets stay where they are');
+  check(readManifest(fresh).graph === 'main' && JSON.parse(fs.readFileSync(path.join(fresh, 'graphs', 'main.json'), 'utf8')).output === 'box', 'a new one gets a starter graph, the one its manifest shows');
   const named = ws('parent/package');
-  check(readManifest(startPackage(named, { name: 'parent' }).dir).id === 'parent' && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
+  check(packageId(startPackage(named, { title: 'parent' }).dir) === 'parent' && fs.existsSync(path.join(named, 'parent.topo')) && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
   for (const d of [repo, git]) {
     const s = startPackage(d);
-    check(/is in no package and holds .*, which TopoTopo does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own packages .* Ask the person before making it a package; workspace \{action:"init"\} then does it/.test(s.note ?? '') && !fs.existsSync(path.join(d, 'project.json')),
+    check(/is in no package and holds .*, which TopoTopo does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own packages .* Ask the person before making it a package; workspace \{action:"init"\} then does it/.test(s.note ?? '') && !manifestAt(d),
       `${path.basename(d)}: left as it is (${s.log.slice(s.log.indexOf(' holds'))})`);
   }
   check(/^the folder .* is a package$/.test(startPackage(own).log) && startPackage(own).note === null, 'a package stays as it is, with nothing to tell');
   const sub = ws('own/levels'), inSub = startPackage(sub);
-  check(inSub.dir === own && /is in the package .*own: working in the package's folder$/.test(inSub.log) && /The server works in the package .*own, the package that holds the folder it was given/.test(inSub.note ?? '') && !fs.existsSync(path.join(sub, 'project.json')),
+  check(inSub.dir === own && /is in the package .*own: working in the package's folder$/.test(inSub.log) && /The server works in the package .*own, the package that holds the folder it was given/.test(inSub.note ?? '') && !manifestAt(sub),
     'a folder in a package becomes no package of its own: the server works in the package\'s folder, and says so');
 }
 
@@ -178,7 +201,7 @@ section('bake queue (child processes)');
   w(path.join(game, 'art', 'materials', LIBRARY_FILE), { name: 'game-materials' });
   fs.mkdirSync(path.join(game, 'art', 'shared'), { recursive: true });
   fs.mkdirSync(path.join(game, 'art', 'props-lib'), { recursive: true });
-  w(path.join(game, 'art', 'props', 'crate', 'project.json'), { id: 'crate', libraries: ['../../props-lib', '../../shared'] });
+  w(path.join(game, 'art', 'props', 'crate', 'crate.topo'), { libraries: ['../../props-lib', '../../shared'] });
   const crate = path.join(game, 'art', 'props', 'crate');
   const at = locate(path.join(crate, 'graphs'));
   check(at.package === crate && at.workspace === game, `locate: the package and the workspace around it (${at.package}, ${at.workspace})`);
@@ -198,7 +221,7 @@ section('bake queue (child processes)');
   fs.writeFileSync(path.join(game, 'godot', 'project.godot'), '[application]\n');
   fs.mkdirSync(path.join(game, 'art', 'lib'), { recursive: true });
   fs.mkdirSync(path.join(game, 'art', 'props', 'crate'), { recursive: true });
-  fs.writeFileSync(path.join(game, 'art', 'props', 'crate', 'project.json'), JSON.stringify({ id: 'crate', package: 'game/crate' }));
+  fs.writeFileSync(path.join(game, 'art', 'props', 'crate', 'crate.topo'), JSON.stringify({ name: 'game/crate' }));
   const made = initWorkspace(game, { libraries: ['./art/lib'], assets: 'godot/assets/topotopo' });
   const m = readWorkspace(game);
   check(m.name === 'ws-game' && m.libraries.join() === './art/lib' && m.engine?.type === 'godot' && m.engine.project === 'godot/project.godot' && m.engine.assets === 'godot/assets/topotopo' && !m.follow,

@@ -120,7 +120,7 @@ npm run preview
 
 The viewer opens a package (`topotopo edit <package>`, the MCP server's package, or `topotopo view graph.json`) with
 the package's default graph in view; the browser tab is named after the package. A package's graphs are the files in
-`graphs/` and the graph files beside its `project.json`. A package without graphs shows its name, a pointer to
+`graphs/` and the graph files beside its manifest, `<id>.topo`. A package without graphs shows its name, a pointer to
 TopoTopo's built-in packages and what to ask your agent; a folder that is no package says so and how to make it one. The left panel
 has four tabs: **Scene** (the graph's nodes and guides), **Outputs**, **Inputs** and, in a package, **Packages** (see
 [Packages](#packages)). **Outputs**, the default, shows each graph's results, one card per result, and their textures;
@@ -143,7 +143,7 @@ A heightfield's details have a layer picker: the terrain shows that layer (the m
 lists your files in `inputs/`, with **Add input** (or drop files anywhere on the page); the agent is told about new
 ones in its next tool answer. Images open in a 2D viewer with layers and channels (generated textures default to
 RGB; use A to inspect packed alpha/AO); JPEG/WebP are for viewing only. Exports always go into the package's
-`exports/`: the folder of the nearest `project.json` above the graph, from the viewer, the CLI and the agent alike (a
+`exports/`: the folder of the nearest `.topo` file above the graph, from the viewer, the CLI and the agent alike (a
 graph file in no package exports beside itself). For `topotopo view graph.json`, `inputs/` is beside that graph.
 
 The **Controls** panel, at the top of the right column, holds the graph's exposed vars; **Properties** below it says
@@ -207,7 +207,7 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 `file` node reads one as `inputs/<file>` (a PNG as an image for the texture nodes). Naming objects `path.river`, `zone.park`, `site.well`, `volume.no_trees` or
 `blockout.house` tells the agent what they mean (help topic `inputs`).
 
-When the server starts, it makes its folder a package (a `project.json` and a starter `graphs/main.json`, so that its
+When the server starts, it makes its folder a package (an `<id>.topo` and a starter `graphs/main.json`, so that its
 graphs can use packages, TopoTopo's own among them) if the folder is in no package and holds nothing but these four
 folders, or nothing at all, as a new one does; the default folder, `<cwd>/topotopo`, takes the name of the
 folder it is in. A folder with anything else in it, such as a repository or a folder of your own files, stays as it is
@@ -373,7 +373,7 @@ node src/cli.ts --help-topic export   # a help topic; --catalog ends with the li
 values are parsed, other text is a string; an unknown name lists the graph's vars). `--output <name>` renders, exports
 and inspects a named output (the graph's `"outputs"`) instead of the default one; `--output` naming a node (or `--node`
 naming an output) says which flag to use. Relative paths inside a graph (file nodes, texture maps) read from its package
-folder: the nearest folder with a `project.json` at or above the graph file, else the graph file's folder (the MCP server
+folder: the nearest folder with a `.topo` file at or above the graph file, else the graph file's folder (the MCP server
 and the viewer use the same rule), and `--export-all` writes into that folder's `exports/`. Several `--render` flags
 share one cook: the options after a `--render` apply to that render, those before the first to every render (a warning
 names options left after the last of several). Renders draw heightfields at up to
@@ -411,7 +411,7 @@ package; copy it into your Unreal project's `Plugins/` directory.
 
 Keep packages in libraries on your PC and browse them as a website: `topotopo web` serves every library's packages
 at http://127.0.0.1:7340 with a page, a thumbnail and an iframe embed for each, so a board or wiki can link a concept
-to the model. A package is a folder with a `project.json` (title, tags, links) and `attachments/` for
+to the model. A package is a folder with one `<id>.topo` file, its manifest (title, tags, links), and `attachments/` for
 concept art; previews bake by themselves when its graphs change, and agents reach every library through the MCP
 `workspace` tool.
 
@@ -426,18 +426,18 @@ Each package has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id
 A package's page lists its versions (each opens to the outputs it published), the outputs of the newest with
 their kinds and tags, the packages that use it and the packages it uses. The grid marks
 packages with their full name and packages that have an update; its search finds packages by the packages they use and
-the outputs of packages and built-in packages by name, kind and tag. A package without the graph its `project.json` shows says "no
+the outputs of packages and built-in packages by name, kind and tag. A package without the graph its manifest shows says "no
 default graph yet" instead of a failed bake.
 
 ## Packages
 
 A package can use the published outputs of other packages by name, as node types: `{"type": "studio/trees/pine"}`, or
 `studio/trees` for the package's default output. An output's params are the vars of its graph that its node reads, and
-its inputs are that graph's input nodes. A package that publishes versions has its author name it once in `project.json` (`"package":
+its inputs are that graph's input nodes. A package that publishes versions has its author name it once in its manifest (`"name":
 "studio/trees"`); each version is a frozen copy in its `versions/` folder, numbered big.small
 by what changed for the packages that use it (a removed or renamed output, param or input, a narrower range or a
 removed option makes a big version). A package that uses another keeps its own copy of the version it uses in
-`packages/` and names it in `project.json`, so it cooks the same on every machine and what it uses never changes by
+`packages/` and names it in its manifest, so it cooks the same on every machine and what it uses never changes by
 itself. Hashes read text files with LF line ends, so a checkout that turns them into CRLF changes nothing, and `init`
 writes a `.gitattributes` that keeps `versions/` and `packages/` byte for byte.
 
@@ -450,7 +450,7 @@ are published with it. With `--engine godot:game/project.godot --assets game/ass
 the engine project and the folder in it that exports may go to: an export target whose path starts with `engine:`
 (`"export": {"format": "glb", "path": "engine:props/crate.glb"}`) is written there, where Godot imports it.
 
-A package finds packages in the libraries its `project.json` lists, `"libraries": ["../shared/library", "game"]`: a
+A package finds packages in the libraries its manifest lists, `"libraries": ["../shared/library", "game"]`: a
 path written from the package (`./lib`, `../lib`) for a library in the same repository, so every checkout and worktree
 reads its own, else a registered library's name. `topotopo libraries add ../shared/library` lists one when you say so;
 the tools never add a library by themselves. An entry that does not work is reported, and the others still count. A
@@ -508,7 +508,7 @@ The commands (a folder named must exist; without one, the current folder's packa
 topotopo workspace [folder]
 topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 topotopo workspace add|list [folder]
-topotopo init [folder] [--package owner/name]
+topotopo init [folder] [--name owner/name]
 topotopo libraries add|remove <folder or name> [folder]
 topotopo use owner/name [folder] [--version 1.1]
 topotopo remove owner/name [folder]
@@ -522,7 +522,7 @@ topotopo update owner/name [folder] --from 1.3 --to 1.4 --apply
 ```
 
 ```bash
-topotopo init props/trees --package studio/trees
+topotopo init props/trees --name studio/trees
 topotopo publish props/trees --dry-run
 topotopo publish props/trees --note "first version"
 topotopo libraries add props levels/forest

@@ -29,7 +29,7 @@ import type { PackageResolver, Scope } from '../graph/scope.ts';
 import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
-import { NAME_RE } from '../session.ts';
+import { NAME_RE, topoFiles } from '../session.ts';
 import { copiesFor, program } from '../package.ts';
 import { scanLibrary } from '../web/library.ts';
 import { compareInterfaces, compareVersions, kindChanges, libraryText, loadPackage } from './registry.ts';
@@ -178,8 +178,8 @@ function graphsNaming(dir: string, pkg: string, problems: string[]): PackageGrap
       if (e.name.startsWith('.')) continue;
       const abs = path.join(d, e.name), r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
-        if (!NO_GRAPHS.has(e.name) && !(depth === 0 && OWN.has(e.name)) && depth < 8 && !fs.existsSync(path.join(abs, 'project.json'))) walk(abs, r, depth + 1);
-      } else if (e.isFile() && e.name.endsWith('.json') && e.name !== 'project.json') read(abs, r, 'file');
+        if (!NO_GRAPHS.has(e.name) && !(depth === 0 && OWN.has(e.name)) && depth < 8 && !topoFiles(abs).length) walk(abs, r, depth + 1);
+      } else if (e.isFile() && e.name.endsWith('.json')) read(abs, r, 'file');
     }
   };
   walk(dir, '', 0);
@@ -378,7 +378,7 @@ export async function beforeAfter(pk: PackageUses, pkg: string, o: BeforeAfterOp
 
 /**
  * Apply an update, the step after its before/after, from the version in use to the version it showed (both named: what
- * the person saw, and refused when project.json uses another version now): copy the version in with what it uses, name
+ * the person saw, and refused when the manifest uses another version now): copy the version in with what it uses, name
  * it in "uses" and the lock, delete the copies nothing uses any more, and say what the graphs must change for it (a big
  * version is applied anyway: the graphs report those errors until they change). The CLI, the workspace tool and the
  * viewer apply updates through it.
