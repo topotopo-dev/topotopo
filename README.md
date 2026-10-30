@@ -81,8 +81,8 @@ npx topotopo view graph.json                                # live 3D viewer, re
 npx topotopo mcp --project /absolute/path/to/project    # the MCP server over stdio
 ```
 
-The current release is v0.3 ([release notes](docs/release/v0.3-release-notes.md)); v0.2 was the first tagged release
-([release notes](docs/release/v0.2-release-notes.md)). To try unreleased changes, build the tarball from a clone: `npm pack`, then
+The current release is v0.4 ([release notes](docs/release/v0.4-release-notes.md)); earlier ones:
+[v0.3](docs/release/v0.3-release-notes.md), [v0.2](docs/release/v0.2-release-notes.md), the first tagged release. To try unreleased changes, build the tarball from a clone: `npm pack`, then
 `npm install -g ./topotopo-<version>.tgz` (or into a project).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations, and
 `import { createNodeHost, openProject } from 'topotopo/node'` the Node host and projects with their packages, for a
@@ -439,7 +439,9 @@ writes a `.gitattributes` that keeps `versions/` and `packages/` byte for byte.
 A project finds packages in the libraries its `project.json` lists, `"libraries": ["../shared/library", "game"]`: a
 path written from the project (`./lib`, `../lib`) for a library in the same repository, so every checkout and worktree
 reads its own, else a registered library's name. `topotopo libraries add ../shared/library` lists one when you say so;
-the tools never add a library by themselves. An entry that does not work is reported, and the others still count.
+the tools never add a library by themselves. An entry that does not work is reported, and the others still count. A
+library with a `library.json` (`{"name": "game-materials"}`) is known by that name in the lock and the listings,
+however a project reaches it.
 Every project also looks in TopoTopo's built-in library, `topotopo`, which holds TopoTopo's own packages (a newer
 version in a TopoTopo release shows as an update). The first build or edit that names a package adds it, once the graph
 validates; a rejected graph adds and writes nothing. A graph-file cook adds it too and says so; `--locked` makes it fail
@@ -453,11 +455,14 @@ the MCP `library` tool's `follow`) uses the package's working folder for one ses
 versions they used.
 
 Every published output says what it is. Publishing cooks it as a project that uses the package does, in the package's
-own scope, and records its kind (`mesh`, `instances`, `points`, `curves`, `terrain`, `textures`, `volume`, or `scene`
-for several of these), its tags and its description, from the graph's `outputs`: `{"pine": {"node": "out", "kind":
+own scope, and records its kind (`mesh`, `instances`, `points`, `curves`, `terrain`, `textures`, `material`, `volume`, or
+`scene` for several of these), its tags and its description, from the graph's `outputs`: `{"pine": {"node": "out", "kind":
 "mesh", "tags": ["conifer", "low-poly"], "description": "…"}}`. A `kind` written there is checked: publishing refuses
 an output of another kind, or one that cooks to nothing, and build and the viewer warn before that. An output of
-another kind than before makes the version big; tags and descriptions are small changes. Publishing checks the
+another kind than before makes the version big; tags and descriptions are small changes. A `material` output holds
+materials and their maps with no geometry (texture nodes into `texture_to_material` with no mesh); another project puts
+it on its meshes through the `material` node's second input, and publishing records each map's size (help topic
+`materials`). Publishing checks the
 outputs' declarations first and stops there when one is wrong, says each problem once, and names a version number only
 for what would publish. `topotopo publish --dry-run` (MCP: `publish {dry_run: true}`) runs every check and says the
 version number it would get, its changes, blocks and warnings, writing nothing. `topotopo search conifer --kind mesh`
