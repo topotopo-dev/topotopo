@@ -19,7 +19,7 @@ import {
 import type { CellsJob, NoiseJob, Stamp } from '../core/texture.ts';
 import {
   BEVEL_PROFILES, EDGE_MODES, FLOOD_OUTPUTS, SDF_BOOLEANS, SDF_OPS, SDF_RENDER, SDF_SHAPES, bevelHeight, edgeBand, floodFill, profileFn, propagate,
-  sdfBoolean, sdfOp, sdfShape, sdfToMask, signedDistance,
+  sdfBoolean, sdfOp, sdfShape, sdfToMask, shapeReach, signedDistance,
 } from '../core/texsdf.ts';
 import { texNoise } from '../core/texnoise.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
@@ -537,10 +537,13 @@ defineNode({
   cook: (ctx) => {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
-    const C = sdfShape({
-      shape: p.shape, radius: p.radius, extent: [p.extent[0], p.extent[1]], sides: p.sides, inner: p.inner_radius, corner: p.corner,
-      rotation: p.rotation, center: [p.center[0], p.center[1]], tile: [p.tile[0], p.tile[1]], size: p.size, wrap: !!p.tileable,
-    }, w, h);
+    const o = {
+      shape: p.shape, radius: p.radius, extent: [p.extent[0], p.extent[1]] as [number, number], sides: p.sides, inner: p.inner_radius, corner: p.corner,
+      rotation: p.rotation, center: [p.center[0], p.center[1]] as [number, number], tile: [p.tile[0], p.tile[1]] as [number, number], size: p.size, wrap: !!p.tileable,
+    };
+    const { kx, ky } = shapeReach(o, w, h), per = (2 * kx + 1) * (2 * ky + 1);
+    if (per > 289) ctx.warn(`${type}: each shape reaches over ${2 * kx + 1} × ${2 * ky + 1} cells of the tile grid, so every pixel measures ${per} instances (slow at high resolutions): fewer tiles, or a smaller shape`);
+    const C = sdfShape(o, w, h);
     return imageGeo(new Image(w, h, outName(ctx)).set(MAIN_LAYER, C));
   },
 });
@@ -1150,10 +1153,15 @@ defineNode({
     let out: Float32Array;
     if (p.per_channel && s.ch === 4) {
       out = s.data.slice();
+      let low = Infinity, high = -Infinity, flat = 0;
       for (let c = 0; c < 3; c++) {
         const [lo, hi] = valueRange(s.data, 4, p.clip, c), f = stretch(lo, hi);
+        if (!(hi > lo)) flat++;
+        low = Math.min(low, lo); high = Math.max(high, hi);
         for (let i = c; i < out.length; i += 4) out[i] = f(s.data[i]);
       }
+      if (flat) ctx.warn(`${type}: ${flat === 3 ? 'every channel' : `${flat} channel${flat > 1 ? 's' : ''}`} of the image ${flat > 1 ? 'are' : 'is'} flat; ${flat > 1 ? 'they are' : 'it is'} set to 0.5`);
+      ctx.stat('range_min', low); ctx.stat('range_max', high);
     } else {
       const [lo, hi] = valueRange(s.data, s.ch, p.clip);
       if (!(hi > lo)) ctx.warn(`${type}: the image is flat (every value ${lo.toFixed(4)}); it is set to 0.5`);

@@ -10,7 +10,7 @@ import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Image, findImage, resizeLayer } from '../src/core/image.ts';
-import { edt, signedDistance } from '../src/core/texsdf.ts';
+import { edt, sdfShape, signedDistance } from '../src/core/texsdf.ts';
 import { genShape, heightFromNormal, normalFromHeight, poisson, valueRange } from '../src/core/texture.ts';
 import { allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
@@ -688,6 +688,55 @@ section('grunge');
   }
   const leaks = await image({ g: { type: 'tex_grunge', params: { resolution: 128, style: 'leaks', detail: 0 } } }, 'g');
   check(seamU(C(leaks), 128, 128) > 0 && (() => { let v = 0, hz = 0; for (let j = 0; j < 127; j++) for (let i = 0; i < 127; i++) { v += Math.abs(C(leaks)[j * 128 + i] - C(leaks)[(j + 1) * 128 + i]); hz += Math.abs(C(leaks)[j * 128 + i] - C(leaks)[j * 128 + i + 1]); } return v < hz * 0.5; })(), 'leaks run vertically');
+}
+
+section('flood fill keys, AO with one step, a scale of 0, shapes that reach many cells, a gradient across a full-width tile');
+{
+  // tiles closer than 1/128 of the image each get their own value, the same at twice the resolution
+  const tiles = (res: number) => ({ b: { type: 'tex_pattern', params: { pattern: 'tiles', resolution: res, count: [160, 160], gap: 0.5, bevel: 0 } }, f: { type: 'tex_flood_fill', in: ['b'] } });
+  const lo = C(await image(tiles(640), 'f')), hi = C(await image(tiles(1280), 'f'));
+  const vals = new Set<number>();
+  let same = 0;
+  for (let j = 0; j < 160; j++) for (let i = 0; i < 160; i++) {
+    const v = lo[(j * 4 + 2) * 640 + i * 4 + 2];
+    vals.add(v);
+    if (Math.abs(v - hi[(j * 8 + 4) * 1280 + i * 8 + 4]) < 1e-6) same++;
+  }
+  check(vals.size > 160 * 160 * 0.995 && same > 160 * 160 * 0.99, `160 × 160 tiles (centres 1/160 apart) get ${vals.size} values, ${same} the same at twice the resolution`);
+  // AO: one step samples inside the radius, not at it (where a sample counts for nothing)
+  const pits = { h: { type: 'tex_pattern', params: { pattern: 'tiles', resolution: 128, count: [4, 4], gap: 0.1, bevel: 0 } } };
+  const [aoLo] = range(C(await image({ ...pits, a: { type: 'tex_ao', in: ['h'], params: { steps: 1, radius: 0.05, depth: 0.02 } } }, 'a')));
+  check(aoLo < 0.95, `tex_ao with steps 1 darkens the gaps (min ${f3(aoLo)})`);
+  // tile sampler: a scale map of 0 places no instance (a dot was stamped)
+  const zero = await image({ a: { type: 'tex_shape', params: { resolution: 32 } }, z: { type: 'tex_constant', params: { resolution: 128, value: 0 } },
+    s: { type: 'tex_tile_sampler', in: ['a', null, 'z'], params: { resolution: 128, count: [4, 4], rotation: 0, jitter: 0, scale: [1, 1], intensity: [1, 1] } } }, 's');
+  check(range(C(zero))[1] === 0, 'tex_tile_sampler: a scale map of 0 places nothing');
+  // a long rotated capsule on a 16 × 16 grid reaches 11 cells: every one is measured (the search stopped at 8)
+  const o = { shape: 'capsule', radius: 0.3, extent: [1.2, 0.02] as [number, number], sides: 6, inner: 0.15, corner: 0, rotation: 30, center: [0.5, 0.5] as [number, number], tile: [16, 16] as [number, number], size: 1, wrap: true };
+  const field = sdfShape(o, 64, 64), cw = 1 / 16, rad = 0.01, half = 0.6 - rad, ang = (-30 * Math.PI) / 180, cr = Math.cos(ang), sr = Math.sin(ang);
+  let worst = 0;
+  for (let j = 0; j < 64; j++) for (let i = 0; i < 64; i++) {
+    const x = (i + 0.5) / 64, y = 1 - (j + 0.5) / 64;
+    let best = Infinity;
+    for (let cj = -16; cj < 32; cj++) for (let ci = -16; ci < 32; ci++) {
+      const lx = x - (ci + 0.5) * cw, ly = y - (cj + 0.5) * cw, rx = lx * cr - ly * sr, ry = lx * sr + ly * cr;
+      best = Math.min(best, Math.hypot(Math.max(Math.abs(rx) - half, 0), ry) - rad);
+    }
+    worst = Math.max(worst, Math.abs(best - field[j * 64 + i]));
+  }
+  check(worst < 1e-5, `tex_sdf_shape: a capsule 1.2 m long on a 16 × 16 grid matches every instance measured (largest difference ${worst.toExponential(1)} m)`);
+  const crowded = await cook({ s: { type: 'tex_sdf_shape', params: { resolution: 32, shape: 'disc', radius: 0.3, tile: [64, 64] } } }, 's');
+  check(crowded.warnings.some((w) => /every pixel measures \d+ instances \(slow at high resolutions\): fewer tiles, or a smaller shape/.test(w)), 'a shape far larger than its cell says it is slow');
+  // flood fill gradient: a full-width band jumps at the border, not in the middle where the fill met itself
+  const band = { s: { type: 'tex_sdf_shape', params: { resolution: 128, shape: 'box', extent: [2, 0.2], center: [0.5, 0.5] } }, m: { type: 'tex_sdf_to_mask', in: ['s'] }, f: { type: 'tex_flood_fill', in: ['m'], params: { output: 'gradient', angle: 0 } } };
+  const gr = C(await image(band, 'f')), row = 64 * 128;
+  let rises = true;
+  for (let i = 1; i < 128; i++) if (gr[row + i] < gr[row + i - 1] - 1e-6) rises = false;
+  check(rises && gr[row] < 0.05 && gr[row + 127] > 0.95, `a full-width band's gradient rises across the image (${f3(gr[row])} … ${f3(gr[row + 64])} … ${f3(gr[row + 127])})`);
+  // auto levels per channel says its range
+  const pc = await cook({ n: { type: 'tex_noise', params: { resolution: 64 } }, c: { type: 'tex_colorize', in: ['n'], params: { ramp: [[0, '#203040'], [1, '#c0a080']] } },
+    l: { type: 'tex_auto_levels', in: ['c'], params: { per_channel: true } } }, 'l');
+  check(typeof pc.stats.range_min === 'number' && pc.stats.range_max > pc.stats.range_min, `tex_auto_levels per_channel records range_min and range_max (${f3(pc.stats.range_min)}..${f3(pc.stats.range_max)})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

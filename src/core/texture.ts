@@ -855,6 +855,7 @@ export function tileSampler(stamps: Stamp[], w: number, h: number, o: TileSample
       if (mask && R(3) >= mask[at]) continue;
       let sc = lerp(o.scale[0], o.scale[1], R(4));
       if (o.scaleMap) sc *= Math.max(0, o.scaleMap[at]);
+      if (!(sc > 0)) continue; // scaled to nothing: no instance
       let rot = ((R(5) * 2 - 1) * o.rotation * Math.PI) / 180;
       if (o.rotationMap) rot += o.rotationMap[at] * 2 * Math.PI;
       let inten = lerp(o.intensity[0], o.intensity[1], R(6));
@@ -1076,7 +1077,8 @@ export function heightAO(g: Float32Array, w: number, h: number, o: AOOptions): F
   const rpx = Math.max(1e-6, o.radius / o.texel), z = o.depth; // heights in metres; distances in pixels × texel
   const dirs: [number, number][] = [];
   for (let d = 0; d < D; d++) { const a = ((d + 0.5) * Math.PI) / D + 0.37; dirs.push([Math.cos(a), Math.sin(a)]); }
-  const rs = Array.from({ length: S }, (_, s) => rpx * ((s + 1) / S) ** 2);
+  // samples up to the radius, the last short of it (a sample at the radius has faded to nothing)
+  const rs = Array.from({ length: S }, (_, s) => rpx * ((s + 1) / (S + 1)) ** 2);
   const fade = rs.map((r) => smooth(0.6, 1, r / rpx)); // samples count fully up to 60 % of the radius, then fade out
   const rms = rs.map((r) => r * o.texel);
   // samples that do not fade only need the steepest tangent; the angle is taken once (atan is monotonic)

@@ -245,6 +245,16 @@ function shapeFn(o: SdfShapeOptions): { f: (x: number, y: number) => number; bou
 }
 
 /**
+ * The cells around a pixel that its shape can reach, along x and y (the shape's bound over a cell, and one more):
+ * every pixel measures (2kx + 1) × (2ky + 1) instances.
+ */
+export function shapeReach(o: SdfShapeOptions, w: number, h: number): { kx: number; ky: number } {
+  const nx = Math.max(1, Math.round(o.tile[0])), ny = Math.max(1, Math.round(o.tile[1]));
+  const W = Math.max(1e-9, o.size), H = (W * h) / w, { bound } = shapeFn(o);
+  return { kx: Math.ceil(bound / (W / nx)) + 1, ky: Math.ceil(bound / (H / ny)) + 1 };
+}
+
+/**
  * Signed distance in metres to a shape, or a tile[0] × tile[1] grid of them, on a w × h image whose width covers
  * `size` metres (y up, the image height covers size · h / w). Each pixel takes the nearest instance among the cells
  * around it (as many as the shape's size reaches), so repeats that overlap their cells union correctly; with wrap
@@ -257,7 +267,7 @@ export function sdfShape(o: SdfShapeOptions, w: number, h: number): Float32Array
   const cw = W / nx, chh = H / ny;
   const { f, bound } = shapeFn(o);
   const rot = (o.rotation * Math.PI) / 180, cr = Math.cos(-rot), sr = Math.sin(-rot);
-  const kx = Math.min(8, Math.ceil(bound / cw) + 1), ky = Math.min(8, Math.ceil(bound / chh) + 1);
+  const { kx, ky } = shapeReach(o, w, h);
   for (let j = 0; j < h; j++) {
     const y = (1 - (j + 0.5) / h) * H;
     const cj0 = Math.round(y / chh - o.center[1]);
@@ -509,6 +519,16 @@ export function floodFill(a: Float32Array, w: number, h: number, o: FloodOptions
     const qx = wrapI(Math.floor(u * 128 + 0.5), 128), qy = wrapI(Math.floor(v * 128 + 0.5), 128);
     key[t] = hash32(Math.imul(qx, 0x27d4eb2d) ^ Math.imul(qy, 0x165667b1) ^ seedH);
   }
+  // tiles whose centres fall in one cell of the grid (tiles closer than 1/128 of the image, a ring around a disc) are
+  // told apart by their order in it: by centre (rounded, so the order holds at any resolution), then by area
+  const cells = new Map<number, number[]>();
+  for (let t = 0; t < nt; t++) { const l = cells.get(key[t]); if (l) l.push(t); else cells.set(key[t], [t]); }
+  const fine = (x: number) => Math.round(x * 2048);
+  for (const l of cells.values()) {
+    if (l.length < 2) continue;
+    l.sort((a, b) => fine(cv[a]) - fine(cv[b]) || fine(cu[a]) - fine(cu[b]) || tiles[a].sw - tiles[b].sw);
+    l.forEach((t, k) => { key[t] = hash32(key[t] ^ Math.imul(k + 1, 0x85ebca6b)); });
+  }
   const R = (t: number, k: number) => hash32(key[t] ^ Math.imul(k + 1, 0x9e3779b9)) / 4294967296;
   const id = new Float32Array(n);
   const ch: 1 | 4 = o.output === 'color' || o.output === 'position' ? 4 : 1;
@@ -516,11 +536,15 @@ export function floodFill(a: Float32Array, w: number, h: number, o: FloodOptions
   for (let t = 0; t < nt; t++) {
     const T = tiles[t], r = R(t, 0);
     let dx = 0, dy = 0, pmin = Infinity, pmax = -Infinity;
+    // a tile that wraps all the way round an axis is read at its pixels' own positions along it: its gradient jumps at
+    // the border (a full-width band cannot ramp and tile), not in the middle where the fill met itself
+    const fx = wrap && T.x1 - T.x0 + 1 >= w, fy = wrap && T.y1 - T.y0 + 1 >= h;
+    const X = (p: number) => (fx ? p % w : ux[p]), Y = (p: number) => (fy ? Math.floor(p / w) : uy[p]);
     if (o.output === 'gradient') {
       const ang = ((o.angle + (R(t, 4) * 2 - 1) * o.angleRandom) * Math.PI) / 180;
       dx = Math.cos(ang); dy = -Math.sin(ang); // v up = rows down
       for (let q = T.start; q < T.start + T.count; q++) {
-        const p = order[q], pr = (ux[p] + 0.5) * dx + (uy[p] + 0.5) * dy;
+        const p = order[q], pr = (X(p) + 0.5) * dx + (Y(p) + 0.5) * dy;
         if (pr < pmin) pmin = pr; if (pr > pmax) pmax = pr;
       }
       const pad = 0.5 * (Math.abs(dx) + Math.abs(dy)); // pixel centres to pixel edges
@@ -534,7 +558,7 @@ export function floodFill(a: Float32Array, w: number, h: number, o: FloodOptions
       switch (o.output) {
         case 'color': C[p * 4] = c1; C[p * 4 + 1] = c2; C[p * 4 + 2] = c3; C[p * 4 + 3] = 1; break;
         case 'position': C[p * 4] = cu[t]; C[p * 4 + 1] = cv[t]; C[p * 4 + 2] = 0; C[p * 4 + 3] = 1; break;
-        case 'gradient': C[p] = clamp01(((ux[p] + 0.5) * dx + (uy[p] + 0.5) * dy - pmin) / (pmax - pmin || 1)); break;
+        case 'gradient': C[p] = clamp01(((X(p) + 0.5) * dx + (Y(p) + 0.5) * dy - pmin) / (pmax - pmin || 1)); break;
         case 'bbox_size': C[p] = bbox; break;
         default: C[p] = r;
       }

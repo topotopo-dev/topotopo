@@ -44,7 +44,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "2cbc6f9acbaf1860"
+          "C": "da8ab07fdc6c618d"
         },
         "name": "metal_color"
       },
@@ -74,7 +74,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "48af55de2d40898c"
+          "C": "7c9cdb8ef4eccf10"
         },
         "name": "metal_orm"
       }
