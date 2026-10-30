@@ -1,5 +1,6 @@
 node_modules/
-workspace/
+/project/
+/topotopo/
 examples/inputs/
 examples/exports/
 tmp/

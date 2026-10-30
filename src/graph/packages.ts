@@ -1,5 +1,5 @@
 // Packages, the engine side: the node type of a package output, and the packages a graph names and uses. The host's
-// package registry (src/gallery/packages.ts) reads the versions from disk and gives each scope its PackageResolver
+// package registry (src/packages/registry.ts) reads the versions from disk and gives each scope its PackageResolver
 // (src/graph/scope.ts): the project's root resolves names by the project's uses, a version by its own.
 //
 // A package is a project with a full name ("owner/name") and published versions: frozen copies of its graphs, assets
@@ -12,6 +12,7 @@
 // A package's graphs name its own outputs by full name too (a kit whose pieces build on each other: a house of the
 // kit's walls): they resolve to the same version, or the same working folder, with no entry in its uses. Outputs that
 // name each other in a loop do not resolve (ownOutputsNamed finds what each output names).
+import { isGraph } from './types.ts';
 import { Geometry } from '../core/geometry.ts';
 import { rebaseTexturePaths } from '../core/materials.ts';
 import { codeVarNames } from '../core/usercode.ts';
@@ -114,7 +115,6 @@ export function packageOutputDef(o: PackageOutput): NodeDef {
   };
 }
 
-const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';
 
 /** The packages ("owner/name") a graph names as node types, in its nested graphs too (foreach and solver bodies). */
 export function packagesNamedIn(graph: GraphSpec): string[] {
@@ -207,7 +207,7 @@ export function ownOutputsNamed(pkg: string, graph: GraphSpec, node: string, sco
         const n = parsePackageName(spec.type);
         if (typeof n !== 'string' && n.package === pkg) out.add(n.output ?? '');
       } else {
-        const asset = scope.assets.get(spec.type) ?? scope.assets.get(spec.type.replace(/^asset:/, ''));
+        const asset = scope.assets.get(spec.type);
         if (asset) visit(asset.graph, at(asset.graph, asset.graph.output), depth + 1);
         else if (getNodeDef(spec.type)?.type === 'graph_ref' && typeof spec.params?.graph === 'string') {
           const ref = scope.graphs?.(spec.params.graph);
@@ -247,7 +247,7 @@ export function packagesUsed(engine: Engine, graph: GraphSpec, scope: Scope = en
         once(o.spec, o.scope, depth + 1);
       } else if (def) {
         // an asset's graph and a graph_ref's graph cook in the same scope
-        const asset = engine.asset(node.type, s) ?? engine.asset(node.type.replace(/^asset:/, ''), s);
+        const asset = engine.asset(node.type, s);
         if (asset?.def === def) once(asset.graph, s, depth + 1);
         else if (def.type === 'graph_ref' && typeof node.params?.graph === 'string') {
           const ref = s.graphs?.(node.params.graph);

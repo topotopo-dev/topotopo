@@ -1,10 +1,10 @@
-// The human-input layer for agents: the files people drop into <workspace>/inputs (meshes, guide curves and points,
+// The human-input layer for agents: the files people drop into <project>/inputs (meshes, guide curves and points,
 // PNG masks and heightmaps) and what each one holds: curves vs meshes vs points, bbox, names and roles, attributes,
 // materials. Registered by makeTools in tools.ts; help topic "inputs" (docs.ts) explains the guide conventions.
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Workspace, InputFile } from '../workspace.ts';
-import { inputExt, inputKind } from '../workspace.ts';
+import type { Session, InputFile } from '../session.ts';
+import { inputExt, inputKind } from '../session.ts';
 import type { Geometry, Attribute } from '../core/geometry.ts';
 import { decodePNG } from '../io/png-decode.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
@@ -54,9 +54,9 @@ interface Described {
 
 /**
  * The path a file node reads an input with: relative to the folder the host resolves paths against (the project folder,
- * host/node.ts projectBaseDir), "inputs/<path>" when the workspace is the project, as most are.
+ * host/node.ts projectBaseDir), "inputs/<path>" when the server's folder is the project, as it mostly is.
  */
-export function inputRef(ws: Workspace, rel: string): string {
+export function inputRef(ws: Session, rel: string): string {
   const base = ws.engine.host.resolvePath('.'), dir = path.relative(base, ws.inputDir);
   const d = !dir ? '' : dir.startsWith('..') || path.isAbsolute(dir) ? ws.inputDir : dir;
   return [d.split(path.sep).join('/'), rel].filter(Boolean).join('/');
@@ -64,10 +64,10 @@ export function inputRef(ws: Workspace, rel: string): string {
 
 /** inputs/ file → its description, keyed by path and invalidated by the host's file stamp (mtime + size). */
 export class InputDescriber {
-  ws: Workspace;
+  ws: Session;
   private cache = new Map<string, { stamp: string; d: Promise<Described> }>();
 
-  constructor(ws: Workspace) { this.ws = ws; }
+  constructor(ws: Session) { this.ws = ws; }
 
   /** Describe one file (cached while its stamp holds). */
   describe(f: InputFile): Promise<Described> {
@@ -94,7 +94,7 @@ export class InputDescriber {
     for (const k of [...this.cache.keys()]) if (!live.has(k)) this.cache.delete(k);
   }
 
-  /** Cook the one-node graph a file node would be (never a workspace graph) and read the result. */
+  /** Cook the one-node graph a file node would be (never a graph of the project) and read the result. */
   private async geometry(rel: string, ext: string): Promise<Described> {
     const r = await this.ws.engine.cook({ nodes: { f: { type: 'file', params: { path: rel } } }, output: 'f' });
     const warnings = r.warnings.map((w) => w.message);
@@ -318,7 +318,7 @@ function geometryText(g: Geometry, rel: string, ext: string, warnings: string[])
 }
 
 /** "inputs/a.obj", "./a.obj", "a.obj" → "a.obj" (posix, inside inputs/), or an Error naming the files there. */
-function resolveInput(ws: Workspace, p: unknown, files: InputFile[]): InputFile {
+function resolveInput(ws: Session, p: unknown, files: InputFile[]): InputFile {
   if (typeof p !== 'string' || !p.trim()) throw new Error('"path" is required: a file under inputs/ (inputs {action:"list"} lists them)');
   const rel = p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
   if (path.isAbsolute(rel) || /^[a-z]:\//i.test(rel) || rel.split('/').includes('..')) throw new Error(`"${p}": give a path inside inputs/, relative to it (e.g. "guides.glb")`);
@@ -338,11 +338,11 @@ function resolveInput(ws: Workspace, p: unknown, files: InputFile[]): InputFile 
   throw new Error(`no input "${rel}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}. ${files.length ? `Files: ${files.slice(0, 20).map((f) => f.path).join(', ')}${files.length > 20 ? ', …' : ''}` : `inputs/ is empty (${ws.inputDir})`}`);
 }
 
-export function inputsTool(ws: Workspace): ToolDef {
+export function inputsTool(ws: Session): ToolDef {
   const describer = new InputDescriber(ws);
   return {
     name: 'inputs',
-    description: 'The human\'s own material: files people drop into the workspace inputs/ folder (meshes, guide curves and points from Blender/Houdini/Unreal, blockouts, PNG masks and heightmaps). list: every file with kind (geometry/image/metadata/other; metadata = an export\'s sidecar such as a heightmap\'s .json or <file>.source.json), size, date and a summary (counts, curves vs meshes, bbox, object names; PNG size and bit depth). describe {path}: what a file node reads from it: polygons vs open polylines vs loose points vs packed prims, bbox in metres, attributes, groups, every name and role value, materials, warnings. Call list FIRST when building a landscape or scene: guides mark sites, paths, zones, volumes and blockouts (help topic "inputs"). Read a file with {type:"file", params:{path:"inputs/<path>"}}.',
+    description: 'The human\'s own material: files people drop into the project inputs/ folder (meshes, guide curves and points from Blender/Houdini/Unreal, blockouts, PNG masks and heightmaps). list: every file with kind (geometry/image/metadata/other; metadata = an export\'s sidecar such as a heightmap\'s .json or <file>.source.json), size, date and a summary (counts, curves vs meshes, bbox, object names; PNG size and bit depth). describe {path}: what a file node reads from it: polygons vs open polylines vs loose points vs packed prims, bbox in metres, attributes, groups, every name and role value, materials, warnings. Call list FIRST when building a landscape or scene: guides mark sites, paths, zones, volumes and blockouts (help topic "inputs"). Read a file with {type:"file", params:{path:"inputs/<path>"}}.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -377,7 +377,7 @@ export function inputsTool(ws: Workspace): ToolDef {
         `inputs/ (${ws.inputDir}): ${plural(files.length, 'file')} (${kinds.map(([k, c]) => `${c} ${k}`).join(', ')})`,
         ...rows,
         ...(skipped ? [`${plural(skipped, 'file')} not summarised within ${LIST_BUDGET_MS / 1000} s; list again (summaries are cached) or describe them one by one.`] : []),
-        `A file node reads one: {"type":"file","params":{"path":"${inputRef(ws, '<path>')}"}} (relative paths read from the project folder: the nearest project.json at or above the workspace, else the workspace). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.`,
+        `A file node reads one: {"type":"file","params":{"path":"${inputRef(ws, '<path>')}"}} (relative paths read from the project folder: the nearest project.json at or above the server's folder, else that folder). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.`,
         'OBJ/STL from Blender (Up = Z) and Unreal are Z-up: add "up_axis":"z". A .blend needs Blender installed (converted headlessly).',
       ].join('\n'));
     },

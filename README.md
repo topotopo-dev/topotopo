@@ -56,7 +56,7 @@ graph and its seeds, and the core is browser-ready.
   see its result. A graph's exposed `params` appear as sliders, checkboxes, selects and colour pickers; dragging one
   re-cooks only the nodes that read it, the newest value replacing a cook still running, and the page shows which
   node is cooking and for how long, with a Stop button. Drop your own files
-  anywhere on the page: they land in the workspace `inputs/` folder (with `topotopo view`, the `inputs/` folder beside
+  anywhere on the page: they land in the project `inputs/` folder (with `topotopo view`, the `inputs/` folder beside
   the graph file), show as grey reference layers (a PNG as a flat picture), and `file` nodes read them as
   `inputs/<name>`.
 
@@ -78,13 +78,16 @@ npx topotopo --help-topic export                            # a help topic (the 
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
 npx topotopo graph.json --export-all                        # every output's export target, into its project's exports/
 npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
-npx topotopo mcp --workspace /absolute/path/to/workspace    # the MCP server over stdio
+npx topotopo mcp --project /absolute/path/to/project    # the MCP server over stdio
 ```
 
 The current release is v0.3 ([release notes](docs/release/v0.3-release-notes.md)); v0.2 was the first tagged release
 ([release notes](docs/release/v0.2-release-notes.md)). To try unreleased changes, build the tarball from a clone: `npm pack`, then
 `npm install -g ./topotopo-<version>.tgz` (or into a project).
-`import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations.
+`import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations, and
+`import { createNodeHost, openProject } from 'topotopo/node'` the Node host and projects with their packages, for a
+script that cooks package outputs itself (a world generator): `openProject(engine, dir)` puts the project's packages,
+graphs and assets in the engine's root scope, and `packages.addFor(graph)` adds what a graph names on first use.
 
 **From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for
 working on the code or running the tests. `npm run build` (run by `npm pack`) compiles `src/` to `dist/` for the package.
@@ -167,14 +170,14 @@ thread.
 With the package, the server is the `mcp` subcommand of the `topotopo` command:
 
 ```bash
-claude mcp add topotopo -- npx -y topotopo mcp --workspace /absolute/path/to/workspace
+claude mcp add topotopo -- npx -y topotopo mcp --project /absolute/path/to/project
 ```
 
 From a clone, the repository includes [.mcp.json](.mcp.json) (it runs `node src/mcp/server.ts`), so opening a Claude
 Code session in this folder offers the `topotopo` server. To register a clone from anywhere, use an absolute path:
 
 ```bash
-claude mcp add topotopo -- node /absolute/path/to/topotopo/src/mcp/server.ts --workspace /absolute/path/to/topotopo/workspace
+claude mcp add topotopo -- node /absolute/path/to/topotopo/src/mcp/server.ts --project /absolute/path/to/topotopo/project
 ```
 
 ### Other MCP clients (Claude Desktop, …)
@@ -184,26 +187,26 @@ With the package:
   "mcpServers": {
     "topotopo": {
       "command": "npx",
-      "args": ["-y", "topotopo", "mcp", "--workspace", "C:/path/to/workspace"]
+      "args": ["-y", "topotopo", "mcp", "--project", "C:/path/to/project"]
     }
   }
 }
 ```
 From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/to/topotopo/src/mcp/server.ts",
-"--workspace", "C:/path/to/topotopo/workspace"]` (`node src/cli.ts mcp …` is the same server).
+"--project", "C:/path/to/topotopo/project"]` (`node src/cli.ts mcp …` is the same server).
 
-Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_WORKSPACE`,
+Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_PROJECT`,
 `TOPOTOPO_SCRIPT_TIMEOUT_MS`, `TOPOTOPO_SIM_TIMEOUT_MS` and `TOPOTOPO_WORKERS`. The server exits when the client closes its stdin.
 
-The workspace folder holds `graphs/` (one JSON file per graph), `assets/` (saved assets), `inputs/` and `exports/`.
+The project folder holds `graphs/` (one JSON file per graph), `assets/` (saved assets), `inputs/` and `exports/`.
 `inputs/` is where you put your own material: meshes, guide curves and points, blockouts and PNG masks from Blender,
 Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` tool lists and describes them, and a
 `file` node reads one as `inputs/<file>` (a PNG as an image for the texture nodes). Naming objects `path.river`, `zone.park`, `site.well`, `volume.no_trees` or
 `blockout.house` tells the agent what they mean (help topic `inputs`).
 
-When the server starts, it makes the workspace a project (a `project.json` and a starter `graphs/main.json`, so that its
+When the server starts, it makes its folder a project (a `project.json` and a starter `graphs/main.json`, so that its
 graphs can use packages, TopoTopo's own among them) if the folder is in no project and holds nothing but these four
-folders, or nothing at all, as a new workspace does; the default workspace, `<cwd>/workspace`, takes the name of the
+folders, or nothing at all, as a new one does; the default folder, `<cwd>/topotopo`, takes the name of the
 folder it is in. A folder with anything else in it, such as a repository or a folder of your own files, stays as it is
 until you say so: `library {action: "init"}` (or `topotopo init <folder>`) makes it a project. A folder inside a project
 works in that project's folder. The first reply the agent gets says which of these happened.
@@ -216,16 +219,16 @@ works in that project's folder. The first reply the agent gets says which of the
 | `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, packages, uv, render, export, verify, cloth, library, recipes; a package output's params, inputs, version and note, also one search found that the project does not use yet |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
-| `inputs` | `list` the files in the workspace `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
+| `inputs` | `list` the files in the project `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
 | `inspect` | one-screen summary (counts, triangles, bbox to the millimetre, parts, materials, images, uv state, open edges), `detail: "budget"` (triangles per part, per LOD and per node), `detail: "scene"` (the glb export read back: nodes, sockets, parents, meshes, materials, images), attribute stats, topology health (a closed solid or why not: open edges counted after welding uv/normal seam splits, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part and world position of the first one and the fix; pieces, volume, genus, render/export triangle slivers), element listings, images (size and per-layer ranges), `detail: "uv"` (exact uv overlaps split into in-tile, tiling and across-LOD overlap with parts and positions, collapsed and out-of-tile triangles, charts, utilization, per-piece texel density; `json: true`) |
 | `render` | PNG with persp/front/right/top views (every 3D view fits the bounds; `zoom` is relative to that fit), three-quarter views (`front_left`, `back_right`, …), `size: "1600x600"` for wide views, `transparent` background, `grid: false`, a reference image behind the views (`underlay`, `underlay_opacity`, `underlay_fit`), scene empties as labelled dots (`sockets`), `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `shading: "pbr"` (the exported metallic-roughness material with its base colour, normal, orm and roughness maps under a fixed studio rig; deterministic, `exposure` in stops), `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the kits' thumbnails), `heightfield_res` (heightfield quads drawn per side, default 256, or `"full"`), `heightfield_layer` (the heightfield layer drawn in red, default the mask, or `"none"`); a footer line names what is shown (help topic `render`) |
 | `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json (packed instances: instance rows + meshes sidecar + one GLB per source); heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png / unreal_landscape (a directory bundle); images: textures (one PNG per image; glb/gltf embed and usda writes the textures materials use); every export records its source (graph, vars, seeds, frame, version) to be made again |
-| `graphs` | list / get / delete / rename / duplicate workspace graphs (stored as JSON in `workspace/graphs`) |
-| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a package output's graph (TopoTopo's own included) into the workspace's assets to edit |
+| `graphs` | list / get / delete / rename / duplicate project graphs (stored as JSON in the project's `graphs/`) |
+| `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a package output's graph (TopoTopo's own included) into the project's assets to edit |
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, heightfields, images and SDF grids, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a project the workspace of every tool and the viewer, or `init`, which makes the open workspace a project (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the open project's packages: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the project can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
+| `library` | the person's libraries of projects (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a project the folder every tool and the viewer work in, or `init`, which makes the server's folder a project (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the open project's packages: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the project can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
 
 ## Graph format
 
@@ -403,7 +406,7 @@ package; copy it into your Unreal project's `Plugins/` directory.
 
 Keep projects in libraries on your PC and browse them as a website: `topotopo gallery` serves every library's projects
 at http://127.0.0.1:7340 with a page, a thumbnail and an iframe embed for each, so a board or wiki can link a concept
-to the model. A project is a workspace folder with a `project.json` (title, tags, links) and `attachments/` for
+to the model. A project is a folder with a `project.json` (title, tags, links) and `attachments/` for
 concept art; previews bake by themselves when its graphs change, and agents reach every library through the MCP
 `library` tool.
 
@@ -442,7 +445,7 @@ version in a TopoTopo release shows as an update). The first build or edit that 
 validates; a rejected graph adds and writes nothing. A graph-file cook adds it too and says so; `--locked` makes it fail
 instead, for a build machine. `topotopo remove` drops a package no graph names any more, with the copies nothing else
 uses. Only a project uses packages: `topotopo init` (MCP: `library {action: "init"}`) makes a folder one, and the MCP
-server makes its workspace one when it starts if the folder is in no project and holds nothing but `graphs/`,
+server makes its folder one when it starts if the folder is in no project and holds nothing but `graphs/`,
 `assets/`, `exports/` and `inputs/`, or nothing at all. A package's own graphs name its other outputs the same way, a
 kit's house of the kit's walls: they resolve to the same version, with no entry in `uses`, and outputs that name each
 other in a loop are refused. To tune a package while looking at a project that uses it, `--follow studio/trees` (or
@@ -527,7 +530,7 @@ TopoTopo carries them built in, so they work offline and every project finds the
 graph that names an output copies its kit's version into the project's `packages/` and locks it, as for any package,
 and a newer version in a TopoTopo release shows as an update (`topotopo outdated`) instead of changing a scene by
 itself. A graph outside a project cannot use them: `topotopo init` makes its folder one (the MCP server makes a
-workspace one that holds nothing but a workspace's own folders). Each output documents its typed parameters (`help {nodes: ["topotopo/architecture/stairs"]}`, or
+folder one that holds nothing but TopoTopo's own folders). Each output documents its typed parameters (`help {nodes: ["topotopo/architecture/stairs"]}`, or
 [docs/nodes.md](docs/nodes.md#package-nodes)), puts its pivot at the base (Y up, metres), and tags every piece with
 `name` and `material` attributes, so exports split and shade cleanly. Outputs that follow a curve (`railing`, `fence`,
 `pipe_run`, `road_strip`) take it as input 0 and those that dress a surface (`scatter_rocks`, `forest_patch`,

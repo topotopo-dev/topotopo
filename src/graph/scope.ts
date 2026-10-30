@@ -2,7 +2,7 @@
 //
 // A scope has asset node types of its own (by bare name), the graphs graph_ref reads, and the files relative paths
 // read (a folder of its own, through Host.filesAt). A node type resolves in the scope's own assets first, then in the
-// built-in nodes. The engine's root scope (Engine.root, id "") is the workspace's; other scopes come from
+// built-in nodes. The engine's root scope (Engine.root, id "") is the project's; other scopes come from
 // Engine.createScope. A cook runs in CookOptions.scope (default: the root), and its nested cooks (assets, foreach and
 // solver bodies, graph_ref, lib.run) run in the same scope unless they are given another.
 //

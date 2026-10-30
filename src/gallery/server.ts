@@ -17,11 +17,13 @@ import type { ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
-import { galleryDir, isStale, listFiles, loadConfig, readBakeState, scanLibrary } from './library.ts';
-import { graphFiles } from '../workspace.ts';
-import type { BakeState, GalleryConfig, LibraryScan, Project } from './library.ts';
-import { builtinVersions, compareVersions, copyRecord, publishedVersions, startsBigVersion } from './packages.ts';
-import type { VersionInfo } from './packages.ts';
+import { galleryDir, isStale, listFiles, readBakeState, scanLibrary } from './library.ts';
+import { loadConfig } from '../config.ts';
+import { graphFiles } from '../session.ts';
+import type { BakeState, LibraryScan, Project } from './library.ts';
+import type { GalleryConfig } from '../config.ts';
+import { builtinVersions, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion } from '../packages/registry.ts';
+import type { VersionInfo } from '../packages/registry.ts';
 import { BakeQueue } from './bake.ts';
 import { embedPage, galleryPage, kitPage, projectPage } from './pages.ts';
 import type { CardData, KitCardData, OutputRow, ProjectData, Urls, UserRow } from './pages.ts';
@@ -235,7 +237,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   };
   /** A version's published outputs, each by the node type a graph names it with; "owner/name" alone is the default. */
   const outputsOf = (name: string, v: VersionInfo): OutputRow[] => {
-    const isDefault = (o: { graph: string; node: string }) => o.graph === v.default.graph && o.node === v.default.node;
+    const isDefault = (o: { graph: string; node: string }) => isDefaultOutput(v, o);
     const row = (type: string, o: VersionInfo['default'], dflt: boolean): OutputRow => ({
       type, ...(dflt ? { alias: name } : {}), label: o.label ?? '', ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [],
       graph: o.graph, node: o.node, params: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`),

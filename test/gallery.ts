@@ -8,7 +8,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createProject } from '../src/gallery/library.ts';
-import type { GalleryConfig } from '../src/gallery/library.ts';
+import type { GalleryConfig } from '../src/config.ts';
 import { startGallery, runningGallery } from '../src/gallery/server.ts';
 import { esc, galleryPage } from '../src/gallery/pages.ts';
 

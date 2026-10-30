@@ -13,9 +13,7 @@ import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
 import { createNodeHost, projectBaseDir } from '../src/host/node.ts';
 import { replayArgs } from '../src/io/source.ts';
 import { exportOptionFlags } from '../src/io/targets.ts';
-import { GRAPH_VERSION } from '../src/graph/types.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { migrateGraph, migrateGraphDetailed } from '../src/graph/migrate.ts';
 import { scanExpr } from '../src/graph/params.ts';
 import { EXPR_HELPERS, REF_FUNCS, evalExpr, isSimpleExpr } from '../src/graph/expr.ts';
 import type { Host } from '../src/host/types.ts';
@@ -25,7 +23,7 @@ import { catalogText, nodeDoc, TOPICS } from '../src/mcp/docs.ts';
 import { SNIPPET_LIB_NAMES } from '../src/core/snippet-lib.ts';
 import { JS_GLOBALS } from '../src/core/usercode.ts';
 import { renderNodeReference } from '../scripts/gen-docs.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
 
@@ -680,26 +678,18 @@ section('param coercion');
 }
 
 // ------------------------------------------------------------------ versioning and deprecation
-section('graph versioning');
+section('graph version field');
 {
-  const m = migrateGraphDetailed({ nodes: { b: { type: 'box' } } });
-  check(m.graph.version === GRAPH_VERSION && GRAPH_VERSION === 1 && m.applied.length === 1 && /v0 → v1/.test(m.applied[0]), 'unversioned graph migrates 0 → 1 and is stamped');
-  const same = { version: 1, nodes: {} } as GraphSpec;
-  check(migrateGraph(same) === same, 'current-version graph is returned unchanged');
-  const newer = migrateGraphDetailed({ version: 99, nodes: { b: { type: 'box' } } });
-  check(newer.graph.version === 99 && /newer than this engine/.test(newer.notes[0] ?? ''), 'newer graph versions are cooked as is, with a note');
+  // graphs are read as they are: no migrations (no backwards compatibility for now); a version, when given, is a number
+  const any = await engine.cook({ version: 7, nodes: { b: { type: 'box' } } });
+  check(any.ok, 'a graph cooks whatever version it says');
   const badV = await engine.cook({ version: -1 as any, nodes: { b: { type: 'box' } } });
-  check(badV.ok && badV.notes.some((n) => /non-negative integer/.test(n)), 'invalid version: note, treated as current');
+  check(!badV.ok && badV.errors.some((e) => /"version" must be a non-negative integer/.test(e.message)), 'a malformed version is an error');
 
   const wsDir = path.join(tmp, 'ws');
   fs.mkdirSync(path.join(wsDir, 'graphs'), { recursive: true });
-  fs.writeFileSync(path.join(wsDir, 'graphs', 'old.json'), JSON.stringify({ nodes: { b: { type: 'box' } } }));
-  const ws = new Workspace(wsDir, await newEngine());
+  const ws = new Session(wsDir, await newEngine());
   ws.load();
-  check(ws.getGraph('old').version === 1, 'workspace load migrates graphs');
-  ws.setGraph('fresh', { nodes: { b: { type: 'box' } } });
-  const saved = JSON.parse(fs.readFileSync(path.join(wsDir, 'graphs', 'fresh.json'), 'utf8'));
-  check(saved.version === 1, 'workspace save writes the version');
 
   // rename keeps expression references working
   ws.setGraph('refs', { nodes: { base: { type: 'box' }, top: { type: 'sphere', params: { center: [0, "=bbox('base').max.y", 0], radius: "=ch('base/size')[0] / 4" } } }, output: 'top' });

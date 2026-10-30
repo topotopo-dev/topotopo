@@ -1,4 +1,4 @@
-// Out of date and Update (the registry is src/gallery/packages.ts): the newer versions of the packages a project uses,
+// Out of date and Update (the registry is src/packages/registry.ts): the newer versions of the packages a project uses,
 // and the before/after of an update. The before/after finds every place the project uses the package (each node of
 // its type in the project's graphs, assets and graph files, nested graphs included, with its params and inputs as they
 // are), cooks each with the version in use and with the version the update goes to, says what changed (diffGeometry)
@@ -6,12 +6,13 @@
 // must change. Nothing is written: the new version is read where its library holds it. Applying is a step of its own,
 // taken when the person says so.
 //
-// Graphs and assets cook in the project's root scope (as the workspace has them; a command reads them with
+// Graphs and assets cook in the project's root scope (as a session has them; a command reads them with
 // loadProject, the viewer of a graph file into a scope of their own: BeforeAfterOptions.project), with the version in
 // use, and in a scope like it whose packages resolve the update's version. A graph file elsewhere in the folder cooks
 // in a scope of its folder, as `topotopo <file>` cooks it. A use inside a nested graph (a foreach or solver body) is
 // compared through the node that holds it. Each cook gets only what its node needs, so another node's error stays out
 // of it, and reuses the engine's cache.
+import { isGraph } from '../graph/types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -21,7 +22,6 @@ import { diffGeometry, diffOverlay } from '../explain.ts';
 import type { DiffResult } from '../explain.ts';
 import { wiringOf } from '../graph/engine.ts';
 import type { CookReport, NodeProgress, StopSignal } from '../graph/engine.ts';
-import { migrateGraph } from '../graph/migrate.ts';
 import { upstreamOf } from '../graph/packages.ts';
 import { didYouMean, resolveParamName } from '../graph/params.ts';
 import { parsePackageName } from '../graph/scope.ts';
@@ -29,10 +29,10 @@ import type { PackageResolver, Scope } from '../graph/scope.ts';
 import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
-import { NAME_RE } from '../workspace.ts';
-import { program } from './library.ts';
-import { compareInterfaces, compareVersions, kindChanges, libraryText } from './packages.ts';
-import type { ProjectPackages, UpdateTarget } from './packages.ts';
+import { NAME_RE } from '../session.ts';
+import { program } from '../project.ts';
+import { compareInterfaces, compareVersions, kindChanges, libraryText } from './registry.ts';
+import type { ProjectPackages, UpdateTarget } from './registry.ts';
 
 /**
  * Folders a search for graph files does not enter: anywhere, those holding data and exports (a graph file has its own
@@ -46,7 +46,6 @@ const MAX_GRAPH_BYTES = 16 * 2 ** 20;
 /** Packed results are compared expanded, up to this many triangles. */
 const MAX_TRIANGLES = 4_000_000;
 
-const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object' && !Array.isArray((v as GraphSpec).nodes);
 
 type GraphKind = 'graph' | 'asset' | 'file';
 
@@ -119,7 +118,7 @@ export interface BeforeAfterOptions {
   progress?: (done: number, total: number, what: string) => void;
   /**
    * Where the project's graphs and assets are when the engine's root does not hold them (the viewer of a graph file
-   * keeps its workspace in a scratch folder): a scope that holds them (loadProject), whose packages are the project's
+   * keeps its session in a scratch folder): a scope that holds them (loadProject), whose packages are the project's
    * resolver, and the project folder their relative paths read.
    */
   project?: { scope: Scope; folder: string };
@@ -141,7 +140,7 @@ function graphsNaming(dir: string, pkg: string, problems: string[]): ProjectGrap
     let spec: unknown;
     try { spec = JSON.parse(text); } catch (e: any) { if (kind !== 'file') problems.push(`${file}: ${e.message}`); return; }
     if (!isGraph(spec)) return;
-    try { out.push({ file, kind, spec: migrateGraph(spec), ...(kind === 'file' ? { folder: path.dirname(abs) } : {}) }); }
+    try { out.push({ file, kind, spec: spec, ...(kind === 'file' ? { folder: path.dirname(abs) } : {}) }); }
     catch (e: any) { problems.push(`${file}: ${e.message}`); }
   };
   for (const [sub, kind] of [['graphs', 'graph'], ['assets', 'asset']] as const) {

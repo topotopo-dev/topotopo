@@ -5,9 +5,6 @@ import type { Kind } from './outputs.ts';
 import type { KernelJob, ParallelOptions, ParallelRun } from './parallel.ts';
 import type { Scope } from './scope.ts';
 
-/** Current graph format version. Bump it together with a migration in migrate.ts. */
-export const GRAPH_VERSION = 1;
-
 export type ParamType =
   | 'float' | 'int' | 'bool' | 'string' | 'enum'
   | 'vec2' | 'vec3' | 'vec4' | 'ivec2' | 'ivec3' | 'color'
@@ -134,8 +131,11 @@ export interface GraphMeta {
  */
 export type ExportTarget = string | { format: string; path?: string; [option: string]: unknown };
 
+/** A value shaped like a graph: an object with a nodes object (a nested graph in a node's params). */
+export const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';
+
 export interface GraphSpec {
-  /** graph format version (see GRAPH_VERSION); missing = 0, migrated on load */
+  /** the graph format a tool wrote it in (informational: graphs are read as they are, with no migrations) */
   version?: number;
   nodes: Record<string, NodeSpec>;
   output?: string;

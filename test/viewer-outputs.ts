@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import type { JSONEdit } from '../src/viewer/json-edit.ts';
 import { Image } from '../src/core/image.ts';
 import { GeoBuilder } from '../src/core/geometry.ts';
@@ -38,7 +38,7 @@ import { channelPixels, zoomImage } from '../src/viewer/app/image-view.js';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-outputs-'));
 const host = createNodeHost({ baseDir: tmp, workers: 0 }), engine = new Engine(host);
 await engine.init();
-const ws = new Workspace(path.join(tmp, 'workspace'), engine, { exports: path.join(tmp, 'exports') }); ws.load();
+const ws = new Session(path.join(tmp, 'project'), engine, { exports: path.join(tmp, 'exports') }); ws.load();
 let checks = 0;
 function check(value: unknown, label: string) { assert.ok(value, label); checks++; console.log('PASS ' + label); }
 const img = new Image(2, 1, 'atlas'); img.set('C', Float32Array.from([.2, .4, .6, .25, 1, .25, 0, 0])); img.set('AO', Float32Array.from([.25, .75]));
@@ -278,7 +278,7 @@ try {
   ws.deleteGraph('pinned'); ws.bump('pinned');
   fs.writeFileSync(path.join(ws.exportDir, 'agent.txt'), 'result');
   check((await list()).some((x: any) => x.label === 'agent.txt'), 'external agent-written outputs discovered');
-  viewer.close(); viewer = await startViewer(new Workspace(path.join(tmp, 'other'), engine, { exports: ws.exportDir }), 0);
+  viewer.close(); viewer = await startViewer(new Session(path.join(tmp, 'other'), engine, { exports: ws.exportDir }), 0);
   check((await list()).some((x: any) => x.origin === 'saved' && x.label === 'asset.glb'), 'saved outputs survive server restart');
 } finally { viewer.close(); }
 
@@ -395,13 +395,13 @@ fs.writeFileSync(path.join(ws.inputDir, 'more.json'), exportGeometry(box, 'json'
 await listenTools.find((t) => t.name === 'inputs')!.run({ action: 'list' });
 check(!/new or changed in inputs/.test(await noteOf()), 'the inputs tool\'s own answer counts as hearing');
 
-// A scan that fails (a file vanishing mid-scan) must not throw from the workspace listener; the timer shares the guard.
-const broken = new Workspace(path.join(tmp, 'broken'), engine, { exports: path.join(tmp, 'broken-exports') }); broken.load();
+// A scan that fails (a file vanishing mid-scan) must not throw from the project listener; the timer shares the guard.
+const broken = new Session(path.join(tmp, 'broken'), engine, { exports: path.join(tmp, 'broken-exports') }); broken.load();
 const brokenOutputs = createOutputs(broken, () => {});
 broken.listInputs = () => { throw new Error('vanished mid-scan'); };
 let threw = false;
 try { for (const l of broken.listeners) l({ graph: 'main', version: 1 }); } catch { threw = true; } finally { brokenOutputs.close(); }
-check(!threw, 'a failing outputs scan never throws from the workspace listener or the refresh timer');
+check(!threw, 'a failing outputs scan never throws from the project listener or the refresh timer');
 
 // UTF-8 text saved twice as Latin-1 ("Â·", "Ã—") showed up in the Properties panel once.
 const appDir = fileURLToPath(new URL('../src/viewer/app/', import.meta.url));

@@ -22,7 +22,7 @@ import { renderGeometry } from '../src/render/raster.ts';
 import { summarize } from '../src/inspect.ts';
 import { topologyReport } from '../src/core/topology.ts';
 import { TriBVH } from '../src/core/spatial.ts';
-import { Workspace } from '../src/workspace.ts';
+import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { fingerprint } from './fingerprint.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
@@ -840,7 +840,7 @@ section('render, inspect, fingerprints, MCP export');
   check(fp3.volumes![0].layers!.mask !== fp1.volumes![0].layers!.mask && fp3.volumes![0].layers!.height === fp1.volumes![0].layers!.height, 'fingerprint changes when (only) a layer changes');
 
   const wsDir = path.join(tmp, 'ws');
-  const ws = new Workspace(wsDir, engine);
+  const ws = new Session(wsDir, engine);
   ws.load();
   const tools = makeTools(ws);
   const call = async (name: string, a: any) => {

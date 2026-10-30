@@ -20,8 +20,8 @@ import { GeoBuilder } from '../src/core/geometry.ts';
 import { primNormals } from '../src/core/topology.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
-import { Workspace, graphFiles, varDeclaration } from '../src/workspace.ts';
-import type { EditOp } from '../src/workspace.ts';
+import { Session, graphFiles, varDeclaration } from '../src/session.ts';
+import type { EditOp } from '../src/session.ts';
 import { inputFileName, startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
 
@@ -264,7 +264,7 @@ section('session values: kept by var name, dropped when their declaration change
 {
   const engine = new Engine(createNodeHost({ baseDir: tmp, workers: 0 }));
   await engine.init();
-  const ws = new Workspace(path.join(tmp, 'session_ws'), engine);
+  const ws = new Session(path.join(tmp, 'session_ws'), engine);
   ws.load();
   const spec = (over: any = {}): any => ({
     nodes: { b: { type: 'box', params: { size: '=s' } } },
@@ -431,7 +431,7 @@ section('GET /api/input: "inputs/<rel>" through the host, the path a graph uses'
   const cookedPath = async (wsDir: string, baseDir: string, inputs?: string) => {
     const engine = new Engine(createNodeHost({ baseDir }));
     await engine.init();
-    const ws = new Workspace(wsDir, engine, { inputs });
+    const ws = new Session(wsDir, engine, { inputs });
     ws.load();
     const seen: unknown[] = [];
     const cook = engine.cook.bind(engine);
@@ -450,7 +450,7 @@ section('GET /api/input: "inputs/<rel>" through the host, the path a graph uses'
   const mcp = await cookedPath(path.join(tmp, 'mcp_ws'), path.join(tmp, 'mcp_ws'));
   const other = await cookedPath(path.join(tmp, 'embedded_ws'), path.join(tmp, 'elsewhere'));
   check(view.ok && view.path === 'inputs/tri.obj' && mcp.ok && mcp.path === 'inputs/tri.obj',
-    `inputs/ beside the graph file (view) and in an MCP workspace: cooked as "inputs/tri.obj" (${view.path}, ${mcp.path})`);
+    `inputs/ beside the graph file (view) and in an MCP project: cooked as "inputs/tri.obj" (${view.path}, ${mcp.path})`);
   check(other.ok && other.path === path.join(tmp, 'embedded_ws', 'inputs', 'tri.obj'), `an engine based elsewhere: the absolute path (${other.path})`);
   check(mcp.where === 'in this folder' && view.where === `in ${graphDir}`,
     `the page's default words for the folder: "${mcp.where}", or the folder holding a given one ("${view.where}")`);
@@ -461,7 +461,7 @@ section('inputs/ watch: files copied in by hand, also after the folder was delet
   const base = path.join(tmp, 'watched'), inputs = path.join(base, 'inputs');
   const engine = new Engine(createNodeHost({ baseDir: base }));
   await engine.init();
-  const ws = new Workspace(path.join(tmp, 'watched_scratch'), engine, { inputs });
+  const ws = new Session(path.join(tmp, 'watched_scratch'), engine, { inputs });
   ws.load();
   const v = await startViewer(ws, 0);
   const ac = new AbortController();
@@ -504,7 +504,7 @@ section('POST /api/vars: a burst during a cook is applied by one more cook');
 {
   const engine = new Engine(createNodeHost({ baseDir: tmp }));
   await engine.init();
-  const ws = new Workspace(path.join(tmp, 'ws'), engine);
+  const ws = new Session(path.join(tmp, 'ws'), engine);
   ws.load();
   ws.setGraph('g', { nodes: { b: { type: 'box', params: { size: '=s' } } }, vars: { s: 1 } });
   // every edit takes a while, so the next requests arrive while one runs
@@ -527,7 +527,7 @@ section('POST /api/vars: a burst during a cook is applied by one more cook');
     const g = ws.getGraph('g');
     check(g.vars?.s === 5 && g.vars?.t === 1, 'the latest values are stored');
     const stored = JSON.parse(fs.readFileSync(path.join(ws.graphDir, 'g.json'), 'utf8'));
-    check(stored.vars.s === 5 && stored.vars.t === 1, 'and persisted in the workspace');
+    check(stored.vars.s === 5 && stored.vars.t === 1, 'and persisted in the project');
   } finally { v.close(); }
 }
 
@@ -535,7 +535,7 @@ section('a dropped PNG and an image-only graph show as textured quads');
 {
   const engine = new Engine(createNodeHost({ baseDir: path.join(tmp, 'wspng') }));
   await engine.init();
-  const ws = new Workspace(path.join(tmp, 'wspng'), engine);
+  const ws = new Session(path.join(tmp, 'wspng'), engine);
   ws.load();
   ws.setGraph('tex', { nodes: { noise: { type: 'tex_noise', params: { resolution: [32, 16] } } } });
   const v = await startViewer(ws, 0);
@@ -563,11 +563,11 @@ section('a dropped PNG and an image-only graph show as textured quads');
 
 section('markers: POST /api/markers writes inputs/markers.json, read back through a file node');
 {
-  // the engine the CLI and the MCP server use, its base directory the workspace: agents read "inputs/markers.json"
+  // the engine the CLI and the MCP server use, its base directory the project: agents read "inputs/markers.json"
   const dir = path.join(tmp, 'mk');
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
-  const ws = new Workspace(dir, engine);
+  const ws = new Session(dir, engine);
   ws.load();
   const v = await startViewer(ws, 0);
   const api = async (method: string, body?: unknown, headers: Record<string, string> = {}) => {
@@ -676,13 +676,13 @@ section('markers: POST /api/markers writes inputs/markers.json, read back throug
   }
 }
 
-section('two workspaces on one folder (Workspace.watch)');
+section('two projects on one folder (Session.watch)');
 {
   const dir = path.join(tmp, 'shared');
   const open = async () => {
     const e = new Engine(createNodeHost({ baseDir: dir }));
     await e.init();
-    const w = new Workspace(dir, e);
+    const w = new Session(dir, e);
     w.load();
     w.watch();
     return w;
@@ -721,14 +721,14 @@ section('a project\'s graph files beside project.json (examples/ keeps its graph
   const files = graphFiles(dir);
   check([...files.keys()].sort().join() === 'tower,twice' && files.get('twice') === path.join(dir, 'graphs', 'twice.json') && files.get('tower') === path.join(dir, 'tower.json'),
     `in a project: graph files beside project.json too, not below it, not other JSON; graphs/ wins a name both have (${[...files].map(([k, f]) => `${k}=${path.relative(dir, f)}`).join(', ')})`);
-  const open = async () => { const e = new Engine(createNodeHost({ baseDir: dir })); await e.init(); const w = new Workspace(dir, e); w.load(); w.watch(); return w; };
+  const open = async () => { const e = new Engine(createNodeHost({ baseDir: dir })); await e.init(); const w = new Session(dir, e); w.load(); w.watch(); return w; };
   const a = await open(), b = await open();
   try {
-    check(a.graphs.has('tower') && a.graphs.has('twice') && !a.graphs.has('notes') && !a.graphs.has('deep'), 'a workspace on the project loads them');
+    check(a.graphs.has('tower') && a.graphs.has('twice') && !a.graphs.has('notes') && !a.graphs.has('deep'), 'a project on the project loads them');
     await a.edit('tower', [{ op: 'set', node: 'b', params: { size: [2, 2, 2] } }]);
     check(JSON.parse(fs.readFileSync(path.join(dir, 'tower.json'), 'utf8')).nodes.b.params.size[0] === 2 && !fs.existsSync(path.join(dir, 'graphs', 'tower.json')),
       'an edit is saved into the graph\'s own file, not into graphs/');
-    check(await until(() => b.graphs.get('tower')?.nodes.b.params?.size?.[0] === 2, 5000), 'another workspace on the project follows the file');
+    check(await until(() => b.graphs.get('tower')?.nodes.b.params?.size?.[0] === 2, 5000), 'another project on the project follows the file');
     fs.writeFileSync(path.join(dir, 'gate.json'), box(6));
     check(await until(() => b.graphs.has('gate'), 5000), 'a graph file saved beside project.json appears');
     fs.rmSync(path.join(dir, 'gate.json'));
@@ -745,13 +745,13 @@ section('a project\'s graph files beside project.json (examples/ keeps its graph
   } finally { a.unwatch(); b.unwatch(); }
 }
 
-section('viewer setWorkspace');
+section('viewer setSession');
 {
   const mk = async (name: string, graph: string) => {
     const dir = path.join(tmp, name);
     const e = new Engine(createNodeHost({ baseDir: dir }));
     await e.init();
-    const w = new Workspace(dir, e);
+    const w = new Session(dir, e);
     w.load();
     w.setGraph(graph, { nodes: { s: { type: 'sphere' } }, output: 's' });
     return w;
@@ -761,15 +761,15 @@ section('viewer setWorkspace');
   const ac = new AbortController();
   try {
     const names = async () => ((await (await fetch(v.url + 'api/graphs')).json()) as any[]).map((g: any) => g.name).join();
-    check(await names() === 'first', 'serves the first workspace');
+    check(await names() === 'first', 'serves the first project');
     let ended = false;
     const stream = fetch(v.url + 'api/events', { signal: ac.signal }).then(async (r) => { for await (const _ of r.body as any) { /* read */ } ended = true; }).catch(() => {});
     check(await until(() => v.clients() === 1, 3000), 'clients() counts the open page');
-    v.setWorkspace(two);
-    check(await names() === 'second', 'after setWorkspace the routes serve the new workspace at the same URL');
+    v.setSession(two);
+    check(await names() === 'second', 'after setSession the routes serve the new project at the same URL');
     check(await until(() => ended, 3000) && v.clients() === 0, 'open pages are disconnected so they reconnect and reload');
     await two.edit('second', [{ op: 'set', node: 's', params: { radius: 2 } }]);
-    check(two.listeners.size === 2 && one.listeners.size === 0, 'the viewer (events and outputs) listens to the new workspace only');
+    check(two.listeners.size === 2 && one.listeners.size === 0, 'the viewer (events and outputs) listens to the new project only');
     void stream;
   } finally { ac.abort(); v.close(); }
 }

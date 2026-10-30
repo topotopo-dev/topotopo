@@ -15,7 +15,7 @@
 //                                                         from its newest version (test/kits.ts runs it)
 //   node scripts/gen-kits.ts --publish nature --note "…" [--big]
 //                                                         publish the next version of topotopo/nature: the version
-//                                                         rule and the note as for any package (src/gallery/packages.ts)
+//                                                         rule and the note as for any package (src/packages/registry.ts)
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -24,10 +24,11 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { BUILTIN_LIBRARY, readManifest } from '../src/gallery/library.ts';
-import type { ProjectManifest } from '../src/gallery/library.ts';
-import { openPackages, publishPackage, publishText, publishedVersions, versionHash, workingHash } from '../src/gallery/packages.ts';
-import type { VersionInfo } from '../src/gallery/packages.ts';
+import { BUILTIN_LIBRARY } from '../src/config.ts';
+import { readManifest } from '../src/project.ts';
+import type { ProjectManifest } from '../src/project.ts';
+import { openPackages, publishPackage, publishText, publishedVersions, versionHash, workingHash } from '../src/packages/registry.ts';
+import type { VersionInfo } from '../src/packages/registry.ts';
 import { thumbOptions, thumbnailPNG as renderThumb } from '../src/render/preview.ts';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

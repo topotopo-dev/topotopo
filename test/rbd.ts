@@ -13,7 +13,7 @@ import { expandPacked } from '../src/core/packed.ts';
 import { TriBVH } from '../src/core/spatial.ts';
 import { loadRapier } from '../src/wasm/rapier.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
-import { openPackages } from '../src/gallery/packages.ts';
+import { openPackages } from '../src/packages/registry.ts';
 import { checkGeo, useKits } from './fixtures.ts';
 
 const perfOnly = process.argv.includes('--perf');
