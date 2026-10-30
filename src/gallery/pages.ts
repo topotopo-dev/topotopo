@@ -1,5 +1,5 @@
-// The gallery's pages as plain HTML strings: the grid of projects and TopoTopo's kits, a project's page, a kit's page
-// and the embed page. Pure functions
+// The gallery's pages as plain HTML strings: the registered workspaces (the games), the grid of projects and
+// TopoTopo's kits, a project's page, a kit's page and the embed page. Pure functions
 // of their data and a URL builder, so the local server (src/gallery/server.ts) and a static build can share them.
 // Styles and the small page script are files: app/gallery.css and app/gallery.js here, app/embed.js in the viewer.
 
@@ -73,7 +73,22 @@ export interface ProjectData extends CardData {
   uses: { name: string; version: string; note?: string; published?: string; url?: string; newest?: string }[];
 }
 
-export interface GalleryData { libraries: { name: string; cards: CardData[] }[]; kits?: KitCardData[]; problems: string[] }
+/**
+ * A registered workspace (a game) on the front page: its engine project, the libraries its projects look in, its
+ * projects (linked when a library of the gallery holds them) and the packages it uses, those with a newer version marked.
+ */
+export interface WorkspaceCardData {
+  name: string;
+  dir: string;
+  /** "Godot · game/project.godot · exports to res://assets/topotopo", or null */
+  engine: string | null;
+  libraries: string[];
+  projects: { title: string; rel: string; url?: string; pkg?: string }[];
+  uses: { name: string; version: string; url?: string; newest?: string }[];
+  problems: string[];
+}
+
+export interface GalleryData { libraries: { name: string; cards: CardData[] }[]; kits?: KitCardData[]; workspaces?: WorkspaceCardData[]; problems: string[] }
 
 /** A kit's page: its card, its versions, its outputs (with their thumbnails) and the projects that use it. */
 export interface KitData extends KitCardData { versions: VersionRow[]; rows: (OutputRow & { thumb: string | null })[]; usedBy: UserRow[] }
@@ -152,11 +167,28 @@ function kitCard(k: KitCardData, u: Urls) {
 }
 
 /**
- * The front page: every library's projects grouped by collection, with search and tag filters; packages are marked,
- * and the search finds their outputs by name, kind and tag too.
+ * The front page: the registered workspaces first, then every library's projects grouped by collection, with search
+ * and tag filters; packages are marked, and the search finds their outputs by name, kind and tag too.
  */
 export function galleryPage(d: GalleryData, u: Urls): string {
   const kits = d.kits ?? [];
+  const ws = d.workspaces ?? [];
+  const link = (title: string, url?: string) => (url ? `<a href="${esc(url)}">${esc(title)}</a>` : esc(title));
+  const wsSection = ws.length ? `
+  <section class="hub" id="workspaces">
+    <h2>Workspaces <span class="count">${ws.length}</span></h2>
+    <p class="dim small">The games your projects belong to: the libraries every project inside looks in, one copy of each package for the whole game, and the engine project exports go to.</p>
+    ${ws.map((w) => `<article class="workspace" id="ws-${esc(w.name)}">
+      <h3>${esc(w.name)}${w.engine ? ` <span class="dim small">${esc(w.engine)}</span>` : ''}</h3>
+      <table class="vars ws"><tbody>
+        <tr><th>Libraries</th><td>${w.libraries.length ? w.libraries.map(esc).join(', ') : '<span class="dim">none listed</span>'}</td></tr>
+        <tr><th>Projects</th><td>${w.projects.length ? w.projects.map((p) => `${link(p.title, p.url)}${p.pkg ? ` <code>${esc(p.pkg)}</code>` : ''}`).join(', ') : '<span class="dim">none yet</span>'}</td></tr>
+        <tr><th>Packages</th><td>${w.uses.length ? w.uses.map((x) => `${link(x.name, x.url)} ${esc(x.version)}${x.newest ? ` <span class="newer">${esc(x.newest)} is out</span>` : ''}`).join(', ') : '<span class="dim">none used yet</span>'}</td></tr>
+      </tbody></table>
+      ${w.problems.length ? `<ul class="dim small">${w.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
+      <p class="dim small"><code>${esc(w.dir)}</code></p>
+    </article>`).join('\n')}
+  </section>` : '';
   const tags = [...new Set(d.libraries.flatMap((l) => l.cards.flatMap((c) => c.tags)))].sort();
   const total = d.libraries.reduce((n, l) => n + l.cards.length, 0);
   const outputs = d.libraries.reduce((n, l) => n + l.cards.reduce((k, c) => k + (c.outputs?.length ?? 0), 0), 0) + kits.reduce((n, k) => n + k.outputs.length, 0);
@@ -189,7 +221,7 @@ export function galleryPage(d: GalleryData, u: Urls): string {
 <main class="wrap">
 ${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''} in the libraries</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
 ${tags.length ? `<nav class="chips" aria-label="Tags">${tags.map((t) => `<button class="chip" data-tag="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join('')}</nav>` : ''}
-${none}${libs}${kitSection}
+${wsSection}${none}${libs}${kitSection}
 <p class="empty" id="nomatch" hidden>Nothing matches. <button class="btn" type="button" data-clear>Clear the search</button></p>
 </main>`, { page: 'gallery' });
 }
@@ -222,7 +254,7 @@ function versionList(versions: VersionRow[], big: (v: VersionRow) => string) {
     </details>`).join('')}</div>`;
 }
 
-/** The projects of the libraries that use a package, each linked, with the version it uses. */
+/** The projects of the libraries and the workspaces that use a package, each linked, with the version it uses. */
 function usedBySection(users: UserRow[]) {
   return `<h2>Used by <span class="count">${users.length}</span></h2>${users.length
     ? `<table class="vars uses"><tbody>${users.map((x) => `<tr><th><a href="${esc(x.url)}">${esc(x.title)}</a></th><td>${esc(x.version)}</td><td class="dim">${esc(x.lib)}</td></tr>`).join('')}</tbody></table>`

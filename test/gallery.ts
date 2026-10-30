@@ -1,7 +1,8 @@
 // The gallery web server (src/gallery/server.ts): the grid, a project page, thumbnails (a placeholder before the first
 // bake), preview.glb, the embed page, attachments (inside the project only, scripts never inline), /api/projects
 // (CORS only for listed origins), framing headers, the Host and Origin checks, a bake from a file change, a package's
-// versions and outputs and the packages a project uses, and the pages' templates escaping what they show.
+// versions and outputs and the packages a project uses, the registered workspaces on the front page and among a
+// package's users, and the pages' templates escaping what they show.
 //   node test/gallery.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -188,6 +189,24 @@ try {
     const api = JSON.parse((await req('/api/projects')).body.toString());
     check(JSON.stringify(api.projects.find((x: any) => x.id === 'trees')?.package) === '{"name":"studio/trees","version":"1.1"}' && api.projects.find((x: any) => x.id === 'forest')?.package === undefined,
       '/api/projects names the packages too');
+  }
+
+  section('workspaces: the games on the front page, and among the users of a package');
+  {
+    const ws = path.join(tmp, 'hunt');
+    fs.mkdirSync(path.join(ws, 'scenes', 'hall'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'topotopo-workspace.json'), JSON.stringify({ name: 'hunt', libraries: [], engine: { type: 'godot', project: 'game/project.godot', assets: 'game/assets/topotopo' }, uses: { 'topotopo/props': '1.0' } }));
+    fs.writeFileSync(path.join(ws, 'scenes', 'hall', 'project.json'), JSON.stringify({ id: 'hall', title: 'Pump hall' }));
+    cfg.workspaces.push({ name: 'hunt', path: ws });
+    g.rescan();
+    const home = (await req('/')).body.toString();
+    const block = home.slice(home.indexOf('id="workspaces"'), home.indexOf('id="lib-'));
+    check(home.indexOf('id="ws-hunt"') > 0 && home.indexOf('id="ws-hunt"') < home.indexOf('id="lib-game"') && /Godot · game\/project\.godot · exports to res:\/\/assets\/topotopo/.test(block)
+      && /Pump hall/.test(block) && /<a href="\/k\/props">topotopo\/props<\/a> 1\.0/.test(block),
+      `the front page lists the workspace first: its engine, its projects, the packages it uses (${block.replace(/\s+/g, ' ').slice(0, 900)})`);
+    check(/<a href="\/#ws-hunt">workspace hunt<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/k/props')).body.toString()), 'a kit\'s users include the workspaces that use it');
+    cfg.workspaces.length = 0;
+    g.rescan();
   }
 
   section('templates');
