@@ -31,7 +31,7 @@ import path from 'node:path';
 import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig, removeLibrary } from '../config.ts';
-import { createPackage, isStale, readBakeState, scanAll, workspaceRef } from '../web/library.ts';
+import { createPackage, isStale, placeNamed, readBakeState, scanAll, workspaceRef } from '../web/library.ts';
 import { initPackage, locate, oldManifestAbove, packageDirOf, slugify, workspaceFlag } from '../package.ts';
 import { forgetScans } from '../scan.ts';
 import type { WebConfig } from '../config.ts';
@@ -173,9 +173,9 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
       return 0;
     }
     if (sub === 'list') {
-      if (!cfg.libraries.length) io.out(`no libraries (config ${cfg.file}): ${prog} library add <name> <folder>`);
+      if (!cfg.libraries.length && !cfg.workspaces.length) io.out(`no libraries or workspaces (config ${cfg.file}): ${prog} library add <name> <folder>, or ${prog} workspace add <folder>`);
       for (const s of scanAll(cfg)) {
-        io.out(`${s.name}  ${s.root}  (${s.packages.length} packages)`);
+        io.out(`${s.workspace ? 'workspace ' : ''}${s.name}  ${s.root}  (${s.packages.length} packages)`);
         for (const p of s.packages) {
           const st = readBakeState(p.dir);
           const status = !st ? 'not baked' : !st.ok ? 'bake failed' : isStale(p) ? 'stale' : 'baked';
@@ -183,16 +183,20 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
         }
         for (const pr of s.problems) io.out(`  ! ${pr}`);
       }
+      // a library inside a registered workspace: its packages are listed as the workspace's
+      for (const l of cfg.libraries) {
+        const at = placeNamed(cfg, l.name);
+        if (at?.place.workspace) io.out(`${l.name}  ${l.path}  (shown as the workspace "${at.place.name}"'s, at ${at.prefix ? `${at.prefix}/` : 'its root'})`);
+      }
       return 0;
     }
     if (sub === 'new') {
       if (!x || !y) fail(usage);
-      // a workspace by the name in its file (the name its packages and their pages go by)
-      const workspaces = cfg.workspaces.map(workspaceRef);
-      const lib = cfg.libraries.find((l) => l.name === x) ?? workspaces.find((w) => w.name === x)
-        ?? fail(`no library or workspace "${x}" (${[...cfg.libraries, ...workspaces].map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>, or ${prog} workspace add <folder>`})`);
-      const p = createPackage(lib, y, { title: a.opt('--title'), description: a.opt('--description'), tags: a.opt('--tags')?.split(',').map((t) => t.trim()).filter(Boolean) });
-      io.out(`package ${p.lib}/${p.id} → ${p.dir}`);
+      // a workspace by the name in its file; a library inside a registered workspace is the workspace's
+      const at = placeNamed(cfg, x)
+        ?? fail(`no library or workspace "${x}" (${[...cfg.libraries, ...cfg.workspaces.map(workspaceRef)].map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>, or ${prog} workspace add <folder>`})`);
+      const p = createPackage(at.place, at.prefix ? `${at.prefix}/${y}` : y, { title: a.opt('--title'), description: a.opt('--description'), tags: a.opt('--tags')?.split(',').map((t) => t.trim()).filter(Boolean) });
+      io.out(`package ${p.lib}/${p.id} → ${p.dir}${at.prefix ? ` (library "${x}" lies in the workspace "${at.place.name}": its packages are the workspace's)` : ''}`);
       io.out(`  page: http://127.0.0.1:${cfg.web.port}/p/${p.lib}/${p.id}`);
       return 0;
     }

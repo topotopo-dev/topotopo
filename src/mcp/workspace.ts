@@ -14,7 +14,7 @@ import type { Session } from '../session.ts';
 import type { ToolDef, ToolResult, Content } from './tools.ts';
 import { loadConfig } from '../config.ts';
 import { initPackage, locate, manifestFile, oldManifestAbove, ownPackageName, parseManifest, program, packageDirOf, packageId, readManifest, withPackageLock, within, writeManifest } from '../package.ts';
-import { createPackage, graphNames, isStale, listFiles, readBakeState, readGraph, scanAll, scanLibrary, workspaceRef } from '../web/library.ts';
+import { createPackage, graphNames, isStale, listFiles, placeNamed, readBakeState, readGraph, scanAll, scanLibrary, workspaceRef } from '../web/library.ts';
 import type { PlaceRef } from '../web/library.ts';
 import type { WebConfig } from '../config.ts';
 import type { LibraryScan, Package } from '../web/library.ts';
@@ -187,9 +187,10 @@ export function workspaceTool(host: WorkspaceToolHost): ToolDef {
           const { cfg, places } = libs();
           if (!a.library) throw new Error(`"library" is required: a library's or a workspace's name (${places.map((l) => l.name).join(', ') || 'none registered'})`);
           if (!a.path) throw new Error('"path" is required: the package folder below the library or workspace, e.g. "props/lantern"');
-          const lib = places.find((l) => l.name === a.library);
-          if (!lib) throw new Error(`no library or workspace "${a.library}" (${places.map((l) => l.name).join(', ') || `none: the person registers one with \`${program()} library add <name> <folder>\` or \`${program()} workspace add <folder>\``})`);
-          const p = createPackage(lib, a.path, { title: a.title, description: a.description, tags: a.tags, links: a.links });
+          // a registered library inside a registered workspace is the workspace's: the package is made there
+          const at = placeNamed(cfg, String(a.library)) ?? (() => { const l = places.find((x) => x.name === a.library); return l ? { place: l, prefix: '' } : null; })();
+          if (!at) throw new Error(`no library or workspace "${a.library}" (${places.map((l) => l.name).join(', ') || `none: the person registers one with \`${program()} library add <name> <folder>\` or \`${program()} workspace add <folder>\``})`);
+          const p = createPackage(at.place, at.prefix ? `${at.prefix}/${a.path}` : a.path, { title: a.title, description: a.description, tags: a.tags, links: a.links });
           let opened = '';
           if (a.open !== false) { await host.open(p.dir); opened = ' and opened it: build/edit now work in it (graph "main" is the one its page shows)'; }
           return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Package page: ${urlsOf(cfg, p).page}`);

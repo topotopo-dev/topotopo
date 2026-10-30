@@ -360,6 +360,27 @@ section('the scan: what it skips, what it enters, how deep');
   check(/^workspace "by-hand" \(/.test(mcpList) && /\/p\/by-hand\/bench/.test(mcpList) && /^package by-hand\/bench: /.test(mcpGet), `the MCP workspace tool lists and gets it by the same name (${mcpList.split('\n')[0]}; ${mcpGet.split('\n')[0]})`);
   addWorkspace('by-hand', game);
   check(loadConfig().workspaces.filter((w) => path.resolve(w.path) === path.resolve(game)).map((w) => w.name).join() === 'by-hand', 'registering a folder again under its new name leaves one entry for it');
+  // a registered library inside a registered workspace is the workspace's: listed as such, its new packages made there
+  addLibrary('decor-lib', path.join(game, 'decor'));
+  out.length = 0;
+  const inLib = await commands.library(['new', 'decor-lib', 'lamps/l1'], 'topotopo', io2);
+  const listing: string[] = [];
+  await commands.library(['list'], 'topotopo', { out: (x) => listing.push(x), err: (x) => listing.push(`ERR ${x}`) });
+  const created = await said({ action: 'create', library: 'decor-lib', path: 'lamps/l2', open: false });
+  check(inLib === 0 && fs.existsSync(path.join(game, 'decor', 'lamps', 'l1', 'l1.topo')) && out.some((l) => /page: http:\/\/127\.0\.0\.1:\d+\/p\/by-hand\/l1$/.test(l))
+    && /^created by-hand\/l2 at .*decor[\\/]lamps[\\/]l2\. Package page: http:\/\/127\.0\.0\.1:\d+\/p\/by-hand\/l2$/.test(created),
+    `library new and the MCP create make a package of a library inside a workspace as the workspace's, at the address the web app serves (${out.join(' | ')}; ${created})`);
+  check(listing.some((l) => /^workspace by-hand  .*\(\d+ packages\)$/.test(l)) && listing.some((l) => /^decor-lib  .*decor {2}\(shown as the workspace "by-hand"'s, at decor\/\)$/.test(l)),
+    `library list marks the workspaces and names a library inside one (${listing.filter((l) => !/^ {2}/.test(l)).join(' | ')})`);
+  removeLibrary('decor-lib');
+  const cfgWas = process.env.TOPOTOPO_CONFIG!;
+  process.env.TOPOTOPO_CONFIG = path.join(tmp, 'cfg-ws-only', 'config.json');
+  fs.mkdirSync(path.dirname(process.env.TOPOTOPO_CONFIG), { recursive: true });
+  fs.writeFileSync(process.env.TOPOTOPO_CONFIG, JSON.stringify({ workspaces: [{ name: 'by-hand', path: game }] }));
+  const onlyWs: string[] = [];
+  await commands.library(['list'], 'topotopo', { out: (x) => onlyWs.push(x), err: (x) => onlyWs.push(`ERR ${x}`) });
+  process.env.TOPOTOPO_CONFIG = cfgWas;
+  check(!onlyWs.some((l) => /^no libraries/.test(l)) && /^workspace by-hand/.test(onlyWs[0] ?? ''), `with only workspaces registered, library list does not say there is nothing (${onlyWs[0]})`);
   addWorkspace('other-ws', named);
   fs.writeFileSync(path.join(named, WORKSPACE_FILE), JSON.stringify({ name: 'other-ws' }));
   check(throws(() => initWorkspace(game, { name: 'other-ws' }), /"other-ws" is the name of another registered workspace .*: give the workspace another name/), 'a workspace takes no name another registered workspace has');

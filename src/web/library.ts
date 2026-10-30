@@ -116,6 +116,24 @@ export function createPackage(lib: PlaceRef, rel: string, o: CreateOptions = {})
   return made;
 }
 
+/**
+ * The place a registered library's or workspace's name stands for, as the web app serves it: a library, a workspace by
+ * the name in its file, or for a library inside a registered workspace that workspace (its packages are the
+ * workspace's, at /p/<workspace>/<id>), with the library's folder below it (`prefix`, posix; '' for a place that is
+ * itself). null for a name none has.
+ */
+export function placeNamed(cfg: WebConfig, name: string): { place: PlaceRef; prefix: string } | null {
+  const lib = cfg.libraries.find((l) => l.name === name);
+  if (lib) {
+    const w = cfg.workspaces.find((x) => within(lib.path, x.path));
+    if (!w) return { place: lib, prefix: '' };
+    const prefix = path.relative(path.resolve(w.path), path.resolve(lib.path)).split(path.sep).join('/');
+    return { place: workspaceRef(w), prefix };
+  }
+  const ws = cfg.workspaces.map(workspaceRef).find((w) => w.name === name);
+  return ws ? { place: ws, prefix: '' } : null;
+}
+
 /** A registered workspace's name as a place of the web app (and createPackage), or null when its file cannot be read. */
 export function workspaceRef(w: LibraryRef): PlaceRef {
   let name = w.name;
