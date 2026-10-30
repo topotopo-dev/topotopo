@@ -655,8 +655,11 @@ interface Place { library: string; place: string; dir: string; info: VersionInfo
  */
 interface Found { package: string; library: string; place: string; dir: string; working: boolean; versions: Map<string, Place>; also: string[] }
 
-/** A package's folder in a place: its versions/, and `working` when it is the package's working folder (it holds its manifest). */
-interface PackageFolder { package: string; library: string; place: string; dir: string; working: boolean }
+/**
+ * A package's folder in a place: its versions/, and `working` when it is the package's working folder (it holds its
+ * manifest). `at`: the place itself (the folderKey of its root), which two places of one name do not share.
+ */
+interface PackageFolder { package: string; library: string; place: string; at: string; dir: string; working: boolean }
 
 /** A name as the places give it: the folder of the first place that has it, the later places that have it too, two folders of that place. */
 interface Taken { folder: PackageFolder; also: string[]; clash?: string }
@@ -685,7 +688,7 @@ function builtinPackages(dir: string, problems: Set<string>): PackageFolder[] {
         else problems.add(`${at} in TopoTopo's built-in library holds the versions of ${pkg}, and its manifest names ${m.name ? `the package ${m.name}` : 'no package'}`);
       }
     } catch (e: any) { problems.add(e.message); }
-    return working || fs.existsSync(path.join(at, 'versions')) ? [{ package: pkg, library: BUILTIN_LIBRARY.name, place: BUILTIN_TEXT, dir: at, working }] : [];
+    return working || fs.existsSync(path.join(at, 'versions')) ? [{ package: pkg, library: BUILTIN_LIBRARY.name, place: BUILTIN_TEXT, at: folderKey(dir), dir: at, working }] : [];
   });
 }
 
@@ -707,7 +710,7 @@ function scanPlaces(start: string, builtin: string, store: CopyStore | null): Sc
   const seen = new Set(builtins.map((p) => folderKey(p.dir)));
   const packages: PackageFolder[] = [];
   for (const lib of libs) {
-    const place = placeText(lib), library = lockLabel(lib, store);
+    const place = placeText(lib), library = lockLabel(lib, store), at = folderKey(lib.root);
     let scan: Scan;
     try { scan = lib.workspace ? scanWorkspace(lib.root) : scanTree(lib.name, lib.root); } catch (e: any) { problems.push(e.message); continue; }
     problems.push(...scan.problems.map((p) => `${place}: ${p}`));
@@ -722,7 +725,7 @@ function scanPlaces(start: string, builtin: string, store: CopyStore | null): Sc
         problems.push(`${place}: ${p.rel} publishes as ${name}, and the packages named "${RESERVED_OWNER}/…" are TopoTopo's built-in library's: it is left out (name it after its owner, "studio/${name.split('/')[1]}")`);
         continue;
       }
-      packages.push({ package: name, library, place, dir: p.dir, working: true });
+      packages.push({ package: name, library, place, at, dir: p.dir, working: true });
     }
   }
   packages.push(...builtins);
@@ -731,12 +734,16 @@ function scanPlaces(start: string, builtin: string, store: CopyStore | null): Sc
   for (const f of packages) {
     const t = taken.get(f.package);
     if (!t) { taken.set(f.package, { folder: f, also: [] }); continue; }
-    if (t.folder.place === f.place) {
+    if (t.folder.at === f.at) {
       if (!t.clash) {
         t.clash = `${f.package} is published by two folders of ${f.place}, ${t.folder.dir} and ${f.dir}: TopoTopo never picks one, so the name is not used until one is renamed ("name" in its .topo)`;
         problems.push(t.clash);
       }
-    } else if (!t.also.includes(f.place)) t.also.push(f.place);
+    } else {
+      // a later place of the same name is told apart by its folder
+      const also = f.place === t.folder.place ? `${f.place} (${path.dirname(f.dir)})` : f.place;
+      if (!t.also.includes(also)) t.also.push(also);
+    }
   }
   return { libs, packages, problems, taken, workspace };
 }
@@ -2630,7 +2637,7 @@ export function searchPackages(start: string, q: SearchQuery, opts: { builtin?: 
         seen.add(folderKey(l.path));
         const scan = scanTree(l.name, l.path), place = `library "${l.name}"`;
         for (const p of scan.problems) problems.add(`${place}: ${p}`);
-        unlisted.push({ name: l.name, root: l.path, folders: scan.packages.flatMap((p) => (p.manifest.name && p.manifest.name.split('/')[0] !== RESERVED_OWNER ? [{ package: p.manifest.name, library: l.name, place, dir: p.dir, working: true }] : [])) });
+        unlisted.push({ name: l.name, root: l.path, folders: scan.packages.flatMap((p) => (p.manifest.name && p.manifest.name.split('/')[0] !== RESERVED_OWNER ? [{ package: p.manifest.name, library: l.name, place, at: folderKey(l.path), dir: p.dir, working: true }] : [])) });
         libs.push({ name: l.name, place, root: l.path, standing: 'unlisted' });
       }
     } catch (e: any) { problems.add(e.message); }
@@ -2668,11 +2675,12 @@ export function searchPackages(start: string, q: SearchQuery, opts: { builtin?: 
     }
     return hits.sort((a, b) => (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
   };
-  // the names a lookup takes, by the place they are taken from (a later place's own copy is not used)
+  // the names a lookup takes, by the place they are taken from (a later place's own copy is not used); a place is its
+  // folder (two places may share a name)
   const byPlace = new Map<string, PackageFolder[]>();
-  for (const t of scanned.taken.values()) if (!t.clash) byPlace.set(t.folder.place, [...(byPlace.get(t.folder.place) ?? []), t.folder]);
+  for (const t of scanned.taken.values()) if (!t.clash) byPlace.set(t.folder.at, [...(byPlace.get(t.folder.at) ?? []), t.folder]);
   const libraries: SearchLibrary[] = libs.map((lib) => {
-    const folders = lib.standing === 'unlisted' ? unlisted.find((u) => u.name === lib.name)!.folders : byPlace.get(lib.place) ?? [];
+    const folders = lib.standing === 'unlisted' ? unlisted.find((u) => u.name === lib.name)!.folders : byPlace.get(folderKey(lib.root)) ?? [];
     return { ...lib, hits: hitsOf(folders, (f) => (lib.standing === 'unlisted' ? undefined : scanned.taken.get(f.package)?.also)) };
   });
   const ws = scanned.workspace;

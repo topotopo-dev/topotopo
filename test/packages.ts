@@ -2006,6 +2006,30 @@ section('a folder the workspace\'s scan does not enter is not the workspace\'s: 
   check(locate(BARREL).workspace === null && same(locate(HALL).workspace, WS), 'with "engine": "none", a package in a folder holding project.godot is in no workspace either');
 }
 
+section('two listed libraries of one name are two places: the first has the name, the later one is "also in", not used');
+{
+  // two checkouts of one library, each naming itself "props" (library.json); both hold dup/crate, the second dup/barrel
+  const WT = path.join(tmp, 'props-wt'), MAIN = path.join(tmp, 'props-main'), WS = path.join(tmp, 'twolibs'), USER = path.join(WS, 'user');
+  const crate = (h: number, tag: string): GraphSpec => ({ nodes: { b: { type: 'box', params: { size: [1, h, 1] } } }, output: 'b', outputs: { block: { node: 'b', kind: 'mesh', tags: [tag] } } });
+  for (const lib of [WT, MAIN]) json(path.join(lib, 'library.json'), { name: 'props' });
+  writePackage(path.join(WT, 'crate'), { name: 'dup/crate' }, { main: crate(1, 'dupe') });
+  writePackage(path.join(MAIN, 'crate'), { name: 'dup/crate' }, { main: crate(2, 'dupe') });
+  writePackage(path.join(MAIN, 'barrel'), { name: 'dup/barrel' }, { main: crate(3, 'dupe') });
+  for (const d of [path.join(WT, 'crate'), path.join(MAIN, 'crate'), path.join(MAIN, 'barrel')]) await publish(d, 'first');
+  json(path.join(WS, 'topotopo-workspace.json'), { name: 'twolibs', libraries: ['../props-wt', '../props-main'], engine: 'none' });
+  writePackage(USER, {}, { main: { nodes: { c: { type: 'dup/crate/block' } }, output: 'c' } });
+  const u = await open(USER);
+  let used = '';
+  try { used = u.pk.use('dup/crate').text; } catch (e: any) { used = e.message; }
+  const text = packagesText(u.pk);
+  check(/^added dup\/crate 1\.0 .*from library "props"/.test(used) && size(await u.engine.cook({ nodes: { c: { type: 'dup/crate/block' } }, output: 'c' }), 1) === 1
+    && /\n {2}dup\/crate 1\.0 .*up to date; also in library "props" \(.*props-main.*\), not used/.test(text) && !/published by two folders/.test(text),
+    `the first listed library has the name, the second is also in, not used (${used.split('\n')[0]}; ${text.split('\n').filter((l) => /dup\//.test(l)).join(' | ')})`);
+  const s = searchPackages(USER, { tag: 'dupe' });
+  const where = s.libraries.filter((l) => l.hits.length).map((l) => `${path.basename(l.root)}:${l.hits.map((h) => h.type).join('+')}`).join(' ');
+  check(where === 'props-wt:dup/crate/block props-main:dup/barrel/block', `search shows each package once, under the place that has it (${where})`);
+}
+
 await engines[0]?.host.pool?.close();
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);
