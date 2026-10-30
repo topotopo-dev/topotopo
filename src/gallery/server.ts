@@ -20,17 +20,17 @@ import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { galleryDir, isStale, listFiles, readBakeState, scanLibrary } from './library.ts';
 import { loadConfig } from '../config.ts';
-import { WORKSPACE_FILE, resolveLibraries } from '../project.ts';
+import { WORKSPACE_FILE, resolveLibraries } from '../package.ts';
 import { engineAddress, readWorkspace } from '../workspace.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
 import { graphFiles } from '../session.ts';
-import type { BakeState, LibraryScan, Project } from './library.ts';
+import type { BakeState, LibraryScan, Package } from './library.ts';
 import type { GalleryConfig } from '../config.ts';
 import { builtinVersions, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 import { BakeQueue } from './bake.ts';
-import { embedPage, galleryPage, kitPage, projectPage } from './pages.ts';
-import type { CardData, KitCardData, OutputRow, ProjectData, Urls, UserRow, WorkspaceCardData } from './pages.ts';
+import { embedPage, galleryPage, kitPage, packagePage } from './pages.ts';
+import type { CardData, KitCardData, OutputRow, PackageData, Urls, UserRow, WorkspaceCardData } from './pages.ts';
 import { listKits } from './kits.ts';
 import type { Kit } from './kits.ts';
 
@@ -87,8 +87,8 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
 
   // ---------------------------------------------------------------- libraries
   let scans: LibraryScan[] = [];
-  const projects = new Map<string, Project>();
-  const keyOf = (p: Project) => `${p.lib}/${p.id}`;
+  const projects = new Map<string, Package>();
+  const keyOf = (p: Package) => `${p.lib}/${p.id}`;
   /** the registered workspaces: their files, and the projects inside each (read with the libraries) */
   let games: { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; scan: LibraryScan | null }[] = [];
   const rescan = () => {
@@ -118,9 +118,9 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     },
   });
   /** A project's graphs (graphs/, and graph files beside project.json), and whether it has the one project.json shows. */
-  const graphsOf = (p: Project) => graphFiles(p.dir);
-  const hasDefault = (p: Project) => graphsOf(p).has(p.manifest.bake.graph ?? p.manifest.graph);
-  const bakeIfStale = (p: Project) => {
+  const graphsOf = (p: Package) => graphFiles(p.dir);
+  const hasDefault = (p: Package) => graphsOf(p).has(p.manifest.bake.graph ?? p.manifest.graph);
+  const bakeIfStale = (p: Package) => {
     // nothing to bake before the project has its default graph: its card says so ("no default graph yet")
     if (!bakeOn || queue.pending(p.dir) || !hasDefault(p)) return;
     try { if (isStale(p) && queue.add(p.dir)) broadcast({ project: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
@@ -165,7 +165,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
 
   // ---------------------------------------------------------------- editors
   const editors = new Map<string, { child: ChildProcess; url: Promise<string> }>();
-  const editorFor = (p: Project) => {
+  const editorFor = (p: Package) => {
     const have = editors.get(p.dir);
     if (have && have.child.exitCode === null) return have.url;
     const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -246,8 +246,8 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     thumb: k.outputs.find((o) => o.thumb)?.id ?? null,
     outputs: k.outputs.map((o) => ({ type: o.type, label: o.label, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags })),
   });
-  const status = (p: Project, s: BakeState | null) => (!hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
-  const cardOf = (p: Project): CardData => {
+  const status = (p: Package, s: BakeState | null) => (!hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
+  const cardOf = (p: Package): CardData => {
     const s = readBakeState(p.dir);
     const m = p.manifest;
     // a package: its full name, its newest version and its outputs (its published versions' records)
@@ -264,7 +264,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   };
   /** The projects that are packages, by full name: the first library's when two hold one. */
   const packageHomes = () => {
-    const homes = new Map<string, Project>();
+    const homes = new Map<string, Package>();
     for (const p of projects.values()) if (p.manifest.package && !homes.has(p.manifest.package)) homes.set(p.manifest.package, p);
     return homes;
   };
@@ -280,7 +280,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     if (!Object.values(v.outputs).some(isDefault)) rows.unshift(row(name, v.default, false));
     return rows;
   };
-  const projectData = (p: Project): ProjectData => {
+  const packageData = (p: Package): PackageData => {
     const s = readBakeState(p.dir);
     const graphs = [...graphsOf(p)].map(([name, file]) => {
       let g: any = {};
@@ -344,7 +344,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   };
 
   /** `files/<rest>` of a project: below attachments/ or exports/, never outside them (links included). */
-  const projectFile = (p: Project, rest: string) => {
+  const packageFile = (p: Package, rest: string) => {
     const parts = rest.split('/').map((x) => decodeURIComponent(x));
     // decoded segments: "%2F" and "%5C" must not smuggle separators (and so "..") past the split
     if (!['attachments', 'exports'].includes(parts[0]) || parts.length < 2 || parts.some((x) => !x || x === '.' || x === '..' || /[\\/\0]/.test(x)))
@@ -420,12 +420,12 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
         const s = readBakeState(p.dir);
         const glb = fs.existsSync(path.join(galleryDir(p.dir), 'preview.glb'));
-        return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: String(s?.at ?? 0), projectUrl: urls.project(p.lib, p.id) }, urls), true);
+        return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: String(s?.at ?? 0), packageUrl: urls.project(p.lib, p.id) }, urls), true);
       }
       if (seg[0] === 'p' && seg.length >= 3) {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
         const rest = seg.slice(3);
-        if (!rest.length || (rest.length === 1 && !rest[0])) return html(projectPage(projectData(p), urls));
+        if (!rest.length || (rest.length === 1 && !rest[0])) return html(packagePage(packageData(p), urls));
         if (rest[0] === 'thumb.png' || rest[0] === 'preview.glb') {
           const s = readBakeState(p.dir);
           const file = path.join(galleryDir(p.dir), rest[0]);
@@ -439,7 +439,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
           return send(200, fs.readFileSync(file), rest[0] === 'thumb.png' ? 'image/png' : MIME['.glb'], { etag, 'cache-control': 'no-cache' });
         }
         if (rest[0] === 'files' && rest.length > 1) {
-          const abs = projectFile(p, rest.slice(1).join('/'));
+          const abs = packageFile(p, rest.slice(1).join('/'));
           const ext = path.extname(abs).toLowerCase();
           const disp: Record<string, string> = INLINE.has(ext) ? {} : { 'content-disposition': `attachment; filename="${path.basename(abs).replace(/["\\\r\n]/g, '_')}"` };
           return send(200, fs.readFileSync(abs), FILE_TYPES[ext] ?? 'application/octet-stream', { ...disp, 'content-security-policy': 'sandbox' });

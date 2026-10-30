@@ -8,8 +8,8 @@ import { ID_RE } from '../graph/scope.ts';
 import { graphFiles } from '../session.ts';
 import { loadConfig } from '../config.ts';
 import type { GalleryConfig, LibraryRef } from '../config.ts';
-import type { ProjectLink, ProjectManifest } from '../project.ts';
-import { WORKSPACE_PACKAGES, manifestFile, parseManifest, projectRepoFiles, readManifest, slugify, writeManifest } from '../project.ts';
+import type { PackageLink, PackageManifest } from '../package.ts';
+import { WORKSPACE_PACKAGES, manifestFile, parseManifest, packageRepoFiles, readManifest, slugify, writeManifest } from '../package.ts';
 
 /** Bumped when the baked files change shape (render options, GLB options), so every project bakes again. */
 export const BAKE_VERSION = 1;
@@ -43,7 +43,7 @@ export interface BakeState {
   warnings?: string[];
 }
 
-export interface Project {
+export interface Package {
   lib: string;
   id: string;
   /** absolute folder */
@@ -52,12 +52,12 @@ export interface Project {
   rel: string;
   /** the parent folders' path ("" at the top), how the gallery groups projects */
   collection: string;
-  manifest: ProjectManifest;
+  manifest: PackageManifest;
   /** newest change to project.json, graphs/ or assets/ (ms) */
   updated: number;
 }
 
-export interface LibraryScan { name: string; root: string; projects: Project[]; problems: string[] }
+export interface LibraryScan { name: string; root: string; projects: Package[]; problems: string[] }
 
 // ------------------------------------------------------------------------------------------------------------ scan
 
@@ -105,14 +105,14 @@ export function scanAll(cfg: GalleryConfig = loadConfig()): LibraryScan[] {
 
 // ---------------------------------------------------------------------------------------------------------- create
 
-export interface CreateOptions { title?: string; description?: string; tags?: string[]; links?: ProjectLink[]; graph?: object }
+export interface CreateOptions { title?: string; description?: string; tags?: string[]; links?: PackageLink[]; graph?: object }
 
 /**
  * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the project folders, attachments/, a
  * .gitignore for the derived files and a .gitattributes that keeps its versions and copies byte for byte. `graph` (a
  * graph spec) becomes graphs/main.json. Fails when the folder holds a project already or the id is taken in the library.
  */
-export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {}): Project {
+export function createPackage(lib: LibraryRef, rel: string, o: CreateOptions = {}): Package {
   const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean);
   if (!parts.length || parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || skipped(p) || /[<>:"|?*\u0000-\u001f]/.test(p)))
     throw new Error(`bad project path "${rel}": give folders below the library, e.g. "props/lantern"`);
@@ -126,7 +126,7 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
   if (taken) throw new Error(`id "${id}" is used by ${taken.rel} in library "${lib.name}": pick another folder name`);
   if (scan.projects.some((p) => dir.startsWith(p.dir + path.sep))) throw new Error(`${rel} is inside another project`);
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) fs.mkdirSync(path.join(dir, d), { recursive: true });
-  projectRepoFiles(dir);
+  packageRepoFiles(dir);
   const manifest = parseManifest({
     id, title: o.title ?? parts[parts.length - 1], description: o.description ?? '', tags: o.tags ?? [], links: o.links ?? [],
     graph: 'main', created: new Date().toISOString().slice(0, 10),
@@ -138,12 +138,12 @@ export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {
 
 // ------------------------------------------------------------------------------------------------------ project files
 
-export interface ProjectFile { path: string; size: number; mtime: number; image: boolean }
+export interface PackageFile { path: string; size: number; mtime: number; image: boolean }
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif)$/i;
 
 /** Files under a project subfolder (attachments/, exports/), recursively: posix paths, dot-files skipped. */
-export function listFiles(dir: string): ProjectFile[] {
-  const out: ProjectFile[] = [];
+export function listFiles(dir: string): PackageFile[] {
+  const out: PackageFile[] = [];
   const walk = (d: string, rel: string, depth: number) => {
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
@@ -176,7 +176,7 @@ export const galleryDir = (dir: string) => path.join(dir, '.gallery');
  * What a bake depends on: the bake version, the package version, the manifest's graph and bake choice, every graph
  * and asset file's content, each input file's path, size and time, and the package lock (the versions it uses).
  */
-export function bakeKey(dir: string, m: ProjectManifest): string {
+export function bakeKey(dir: string, m: PackageManifest): string {
   const h = createHash('sha256');
   h.update(`${BAKE_VERSION}|${PKG_VERSION}|${m.graph}|${JSON.stringify(m.bake)}\n`);
   // the graphs (graphs/ and those beside project.json) and the assets
@@ -196,7 +196,7 @@ export function readBakeState(dir: string): BakeState | null {
 }
 
 /** The project needs a bake: never baked, or something it depends on changed since. */
-export function isStale(p: Project): boolean {
+export function isStale(p: Package): boolean {
   const s = readBakeState(p.dir);
   return !s || s.key !== bakeKey(p.dir, p.manifest);
 }

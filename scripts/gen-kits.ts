@@ -25,8 +25,8 @@ import { Engine } from '../src/graph/engine.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { BUILTIN_LIBRARY } from '../src/config.ts';
-import { readManifest } from '../src/project.ts';
-import type { ProjectManifest } from '../src/project.ts';
+import { readManifest } from '../src/package.ts';
+import type { PackageManifest } from '../src/package.ts';
 import { openPackages, publishPackage, publishText, publishedVersions, versionHash, workingHash } from '../src/packages/registry.ts';
 import type { VersionInfo } from '../src/packages/registry.ts';
 import { thumbOptions, thumbnailPNG as renderThumb } from '../src/render/preview.ts';
@@ -43,7 +43,7 @@ export const SHOWN = 'kit';
 export const GAP = 1;
 
 export interface KitOutput { name: string; type: string; file: string; graph: GraphSpec }
-export interface Kit { name: string; package: string; dir: string; manifest: ProjectManifest; outputs: KitOutput[]; versions: VersionInfo[] }
+export interface Kit { name: string; package: string; dir: string; manifest: PackageManifest; outputs: KitOutput[]; versions: VersionInfo[] }
 
 /** Every kit of the built-in library (their working folders, in this repository) with its outputs, by name. */
 export function readKits(): Kit[] {

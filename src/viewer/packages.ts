@@ -29,8 +29,8 @@ import type { Geometry } from '../core/geometry.ts';
 import { diffOverlay } from '../explain.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
 import type { Scope } from '../graph/scope.ts';
-import { copiesFor, readUses } from '../project.ts';
-import { compareVersions, isDefaultOutput, loadProject, ProjectPackages, publishedVersions, publishPackage, searchPackages, startsBigVersion, workingHash } from '../packages/registry.ts';
+import { copiesFor, readUses } from '../package.ts';
+import { compareVersions, isDefaultOutput, loadPackage, PackageUses, publishedVersions, publishPackage, searchPackages, startsBigVersion, workingHash } from '../packages/registry.ts';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import type { GraphSpec } from '../graph/types.ts';
@@ -152,13 +152,13 @@ const TOPOTOPO_REPO = path.dirname(BUILTIN_LIBRARY.path);
 const inside = (dir: string, root: string) => { const r = path.relative(root, dir); return !r.startsWith('..') && !path.isAbsolute(r); };
 
 export function createPackages(ws: Session, broadcast: (ev: object) => void) {
-  const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
+  const pk = ws.packages instanceof PackageUses ? ws.packages : null;
   let closed = false, n = 0, shown = '', lastStamp = '';
   /** what the graphs must change for a big update applied in this viewer, by package */
   const kept = new Map<string, { from: string; to: string; items: string[] }>();
 
   /** The project's packages, or the reason there are none to work with (400). */
-  const need = (): ProjectPackages => {
+  const need = (): PackageUses => {
     if (!pk) err(400, 'this viewer opened no project: its graphs use no packages (topotopo edit <project folder>, or topotopo view <graph.json> on a graph in a project)');
     asked(() => pk.project());
     return pk;
@@ -171,7 +171,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     pk.refresh();
     if (!pk.manifest) return { project: { id: '', title: '', label: pk.label, dir: pk.dir, libraries: [], package: null }, packages: [], problems: [pk.error ?? `${pk.dir}: project.json cannot be read`], ...base };
     const problems: string[] = [];
-    let outdated: ReturnType<ProjectPackages['outdated']> = [];
+    let outdated: ReturnType<PackageUses['outdated']> = [];
     try { outdated = pk.outdated(); } catch (e: any) { problems.push(e.message); }
     const following = new Map(pk.following().map((f) => [f.package, { library: f.library, dir: f.dir }]));
     // where the project's graphs use each package: the nodes, and the output types they name
@@ -301,7 +301,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
   // ---------------------------------------------------------------- the before/after
   interface Run { id: string; signal: { aborted: boolean }; t0: number; progress: CompareProgress; done: Promise<void> }
   interface Done { id: string; result: BeforeAfter; glb: Map<string, Promise<Uint8Array>> }
-  let run: Run | null = null, last: Done | null = null, seq = 0, projectScope: Scope | null = null;
+  let run: Run | null = null, last: Done | null = null, seq = 0, packageScope: Scope | null = null;
   const send = (r: Run) => { r.progress.elapsed = performance.now() - r.t0; broadcast({ compare: r.progress }); };
 
   /**
@@ -309,11 +309,11 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
    * server, topotopo edit), else (topotopo view keeps its session in a scratch folder) a scope of the project folder
    * with its graphs and assets, read again for each before/after.
    */
-  const projectOption = (p: ProjectPackages) => {
+  const packageOption = (p: PackageUses) => {
     if (sameDir(path.resolve(ws.dir), p.dir!)) return {};
-    projectScope ??= ws.engine.createScope(`project ${p.dir}`, { folder: p.dir!, packages: p.resolver });
-    loadProject(ws.engine, p.dir!, projectScope);
-    return { project: { scope: projectScope, folder: p.dir! } };
+    packageScope ??= ws.engine.createScope(`project ${p.dir}`, { folder: p.dir!, packages: p.resolver });
+    loadPackage(ws.engine, p.dir!, packageScope);
+    return { project: { scope: packageScope, folder: p.dir! } };
   };
 
   /**
@@ -342,7 +342,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
       const result = await beforeAfter(p, pkg, {
         to: target.to, signal,
         progress: (done, total, what) => { Object.assign(r.progress, { done, total, what }); send(r); },
-        ...projectOption(p),
+        ...packageOption(p),
       });
       Object.assign(r.progress, { stopped: result.stopped, done: result.compared.length * 2, total: result.total, what: '' });
       if (r.progress.superseded) err(409, 'a newer before/after took the place of this one');

@@ -22,7 +22,7 @@ import { Geometry } from '../src/core/geometry.ts';
 import { expandPacked } from '../src/core/packed.ts';
 import { pieceReport } from '../src/core/analysis.ts';
 import { readMaterials } from '../src/core/materials.ts';
-import { initProject, readManifest } from '../src/project.ts';
+import { initPackage, readManifest } from '../src/package.ts';
 import { openPackages } from '../src/packages/registry.ts';
 import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -204,7 +204,7 @@ for (const k of kits) {
 // ---- the tools: the project's own assets, a fork of an output's graph into them, the catalog and help
 if (!filter || 'stairs house'.includes(filter)) {
   const wsDir = path.join(tmp, 'ws');
-  initProject(wsDir);
+  initPackage(wsDir);
   const e2 = new Engine(createNodeHost({ baseDir: wsDir }));
   await e2.init();
   const ws = new Session(wsDir, e2);

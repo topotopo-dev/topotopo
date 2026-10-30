@@ -11,13 +11,13 @@ import path from 'node:path';
 import type { Session } from '../session.ts';
 import type { ToolDef, ToolResult, Content } from './tools.ts';
 import { loadConfig } from '../config.ts';
-import { initProject, ownPackageName, parseManifest, program, projectDirOf, readManifest, withProjectLock, writeManifest } from '../project.ts';
-import { createProject, graphNames, isStale, listFiles, readBakeState, readGraph, scanAll } from '../gallery/library.ts';
+import { initPackage, ownPackageName, parseManifest, program, packageDirOf, readManifest, withPackageLock, writeManifest } from '../package.ts';
+import { createPackage, graphNames, isStale, listFiles, readBakeState, readGraph, scanAll } from '../gallery/library.ts';
 import type { GalleryConfig } from '../config.ts';
-import type { LibraryScan, Project } from '../gallery/library.ts';
+import type { LibraryScan, Package } from '../gallery/library.ts';
 import { KINDS } from '../graph/outputs.ts';
 import { NothingToUpdate, packageText, packagesText, publishPackage, publishText, searchPackages, searchText } from '../packages/registry.ts';
-import type { ProjectPackages } from '../packages/registry.ts';
+import type { PackageUses } from '../packages/registry.ts';
 import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders, removePackage } from '../packages/update.ts';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) });
@@ -26,33 +26,33 @@ export interface LibraryToolHost {
   /** the session the other tools use now (its folder, graphs, assets and engine) */
   session(): Session;
   /** the packages of the project the session's folder belongs to */
-  packages(): ProjectPackages;
+  packages(): PackageUses;
   /** make a folder the one every tool (and the live viewer) works in */
   open(dir: string): Promise<{ graphs: number; assets: number }>;
 }
 
 export function libraryTool(host: LibraryToolHost): ToolDef {
   const scan = (): { cfg: GalleryConfig; scans: LibraryScan[] } => { const cfg = loadConfig(); return { cfg, scans: scanAll(cfg) }; };
-  const urlsOf = (cfg: GalleryConfig, p: Project) => {
+  const urlsOf = (cfg: GalleryConfig, p: Package) => {
     const b = `http://127.0.0.1:${cfg.gallery.port}`;
     return { page: `${b}/p/${p.lib}/${p.id}`, embed: `${b}/embed/${p.lib}/${p.id}`, thumb: `${b}/p/${p.lib}/${p.id}/thumb.png` };
   };
-  const currentDir = () => projectDirOf(host.session().dir);
-  const statusOf = (p: Project) => { const s = readBakeState(p.dir); return !s ? 'not baked' : !s.ok ? 'bake failed' : isStale(p) ? 'stale' : 'baked'; };
+  const currentDir = () => packageDirOf(host.session().dir);
+  const statusOf = (p: Package) => { const s = readBakeState(p.dir); return !s ? 'not baked' : !s.ok ? 'bake failed' : isStale(p) ? 'stale' : 'baked'; };
   /**
    * {library, id}, {path}, or nothing (the open project). The libraries are scanned for an id; for a folder, only to
    * name the library it is in (a config that cannot be read leaves that out).
    */
-  const pick = (a: any, scans: () => LibraryScan[]): Project => {
+  const pick = (a: any, scans: () => LibraryScan[]): Package => {
     if (a.id) {
       const hits = scans().flatMap((s) => s.projects).filter((p) => p.id === a.id && (!a.library || p.lib === a.library));
       if (hits.length === 1) return hits[0];
       if (hits.length > 1) throw new Error(`id "${a.id}" is in several libraries (${hits.map((p) => p.lib).join(', ')}): give "library"`);
       throw new Error(`no project "${a.id}"${a.library ? ` in library "${a.library}"` : ''}. library {action:"list"} lists them`);
     }
-    const dir = a.path ? projectDirOf(path.resolve(a.path)) : currentDir();
+    const dir = a.path ? packageDirOf(path.resolve(a.path)) : currentDir();
     if (!dir) throw new Error(a.path ? `${a.path}: no project.json there or above` : 'give {library, id}: the server\'s folder is in no project (library {action:"init"} makes it one, when the person says so)');
-    let all: Project[] = [];
+    let all: Package[] = [];
     try { all = scans().flatMap((s) => s.projects); } catch { /* named without its library */ }
     const p = all.find((x) => x.dir === dir);
     if (p) return p;
@@ -173,7 +173,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           if (!a.path) throw new Error('"path" is required: the project folder below the library, e.g. "props/lantern"');
           const lib = cfg.libraries.find((l) => l.name === a.library);
           if (!lib) throw new Error(`no library "${a.library}" (${cfg.libraries.map((l) => l.name).join(', ') || `none: the person registers one with \`${program()} library add <name> <folder>\``})`);
-          const p = createProject(lib, a.path, { title: a.title, description: a.description, tags: a.tags, links: a.links });
+          const p = createPackage(lib, a.path, { title: a.title, description: a.description, tags: a.tags, links: a.links });
           let opened = '';
           if (a.open !== false) { await host.open(p.dir); opened = ' and opened it: build/edit now work in it (graph "main" is the one the gallery shows)'; }
           return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Gallery page: ${urlsOf(cfg, p).page}`);
@@ -189,9 +189,9 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           return text(workspaceText(host.session().dir));
         }
         case 'init': {
-          const dir = host.session().dir, inside = projectDirOf(dir);
+          const dir = host.session().dir, inside = packageDirOf(dir);
           if (inside) throw new Error(`the folder ${dir} is in a project already: ${path.join(inside, 'project.json')}${a.package ? `; library {action:"set", package:"${a.package}"} names the package it is` : ''}`);
-          const { manifest } = initProject(dir, { package: a.package });
+          const { manifest } = initPackage(dir, { package: a.package });
           // the tools take in the project (its packages) as a folder opened afresh
           const r = await host.open(dir);
           return text(`made the folder ${dir} a project, id "${manifest.id}"${manifest.package ? `, package ${manifest.package}` : ''} (project.json, graphs/${manifest.graph}.json; ${r.graphs} graphs, ${r.assets} assets): ` +
@@ -204,7 +204,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           if (a.package !== undefined && a.package !== p.manifest.package) ownPackageName(String(a.package));
           const checked = parseManifest(m, p.id);
           const said: string[] = [];
-          withProjectLock(p.dir, () => {
+          withPackageLock(p.dir, () => {
             // project.json as it is on disk now: the fields set over it, "uses" as the packages left it
             const now = readManifest(p.dir);
             writeManifest(p.dir, { ...checked, uses: now.uses, libraries: now.libraries });
@@ -275,8 +275,8 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         }
         case 'bake': {
           const p = pick(a, () => libs().scans);
-          const { bakeProject } = await import('../gallery/bake.ts');
-          const s = await bakeProject(p.dir);
+          const { bakePackage } = await import('../gallery/bake.ts');
+          const s = await bakePackage(p.dir);
           if (!s.ok) return text(`bake of ${p.id} failed: ${s.error}`, true);
           const content: Content[] = [{ type: 'text', text: `baked ${p.id} in ${s.ms} ms: ${s.points} points, ${s.prims} prims${s.glb ? '' : ' (no preview.glb: too large)'}${s.warnings?.length ? `; warnings: ${s.warnings.slice(0, 5).join('; ')}` : ''}` }];
           content.push({ type: 'image', data: fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png')).toString('base64'), mimeType: 'image/png' });

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { createProject } from '../src/gallery/library.ts';
+import { createPackage } from '../src/gallery/library.ts';
 import type { GalleryConfig } from '../src/config.ts';
 import { startGallery, runningGallery } from '../src/gallery/server.ts';
 import { esc, galleryPage } from '../src/gallery/pages.ts';
@@ -23,7 +23,7 @@ const until = async (pred: () => boolean | Promise<boolean>, ms: number) => { co
 const lib = { name: 'game', path: path.join(tmp, 'lib') };
 fs.mkdirSync(lib.path);
 const BOX = { nodes: { b: { type: 'box' } }, output: 'b' };
-const crate = createProject(lib, 'props/crate', { title: 'Crate <b>&', tags: ['props'], graph: BOX, links: [{ label: 'board', url: 'http://board.local/x' }] });
+const crate = createPackage(lib, 'props/crate', { title: 'Crate <b>&', tags: ['props'], graph: BOX, links: [{ label: 'board', url: 'http://board.local/x' }] });
 fs.writeFileSync(path.join(crate.dir, 'attachments', 'concept.png'), fs.readFileSync(path.resolve('library/props/thumbs/crate.png')));
 fs.writeFileSync(path.join(crate.dir, 'attachments', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 fs.writeFileSync(path.join(tmp, 'secret.txt'), 'secret');
@@ -102,14 +102,14 @@ try {
     fs.writeFileSync(path.join(crate.dir, 'graphs', 'main.json'), JSON.stringify({ nodes: { b: { type: 'sphere' } }, output: 'b' }));
     const rebaked = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(crate.dir, '.gallery', 'bake.json'), 'utf8')).at !== at0; } catch { return false; } }, 30000);
     check(rebaked, 'a graph saved by another process is baked again');
-    createProject(lib, 'props/barrel', { graph: BOX });
+    createPackage(lib, 'props/barrel', { graph: BOX });
     check(await until(async () => JSON.parse((await req('/api/health')).body.toString()).projects === 2, 10000), 'a new project folder appears');
     check((await req('/p/game/barrel')).status === 200, 'and has its page');
   }
 
   section('a bake whose thumbnail renders with shading "pbr" (MikkTSpace loads itself)');
   {
-    const shiny = createProject(lib, 'props/shiny', { title: 'Shiny', graph: { nodes: { b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'] } }, output: 'uv', meta: { thumbnail_render: { shading: 'pbr' } } } as any });
+    const shiny = createPackage(lib, 'props/shiny', { title: 'Shiny', graph: { nodes: { b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'] } }, output: 'uv', meta: { thumbnail_render: { shading: 'pbr' } } } as any });
     const ok = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(shiny.dir, '.gallery', 'bake.json'), 'utf8')).at > 0; } catch { return false; } }, 60000);
     const state = ok ? JSON.parse(fs.readFileSync(path.join(shiny.dir, '.gallery', 'bake.json'), 'utf8')) : null;
     check(state?.ok === true && fs.existsSync(path.join(shiny.dir, '.gallery', 'thumb.png')), `the bake needs no preload script (${state?.error ?? 'ok'})`);
@@ -117,8 +117,8 @@ try {
 
   section('a project without its default graph, and graph files beside project.json');
   {
-    const empty = createProject(lib, 'props/empty', { title: 'Empty' });
-    const beside = createProject(lib, 'props/beside', { title: 'Beside' });
+    const empty = createPackage(lib, 'props/empty', { title: 'Empty' });
+    const beside = createPackage(lib, 'props/beside', { title: 'Beside' });
     fs.writeFileSync(path.join(beside.dir, 'tower.json'), JSON.stringify(BOX));
     const file = path.join(beside.dir, 'project.json'), m = JSON.parse(fs.readFileSync(file, 'utf8'));
     fs.writeFileSync(file, JSON.stringify({ ...m, graph: 'tower' }, null, 2));
@@ -142,8 +142,8 @@ try {
     // write them (versions/<v>/version.json, packages/<owner>/<name>/<v>/version.json)
     const pine = { graph: 'main', node: 'tree', label: 'Pine', kind: 'mesh', tags: ['conifer', 'low-poly'], sliders: { height: { type: 'float', default: 4 } }, inputs: [{ index: 0, label: 'ground' }] };
     const rec = (version: string, note: string, published: string) => ({ package: 'studio/trees', version, note, published, big: false, hash: `h${version}`, outputs: { pine }, default: pine, topotopo: '0' });
-    const trees = createProject(lib, 'nature/trees', { title: 'Trees', graph: BOX });
-    const forest = createProject(lib, 'levels/forest', { title: 'Forest', graph: BOX });
+    const trees = createPackage(lib, 'nature/trees', { title: 'Trees', graph: BOX });
+    const forest = createPackage(lib, 'levels/forest', { title: 'Forest', graph: BOX });
     const edit = (dir: string, f: (m: any) => void) => { const file = path.join(dir, 'project.json'); const m = JSON.parse(fs.readFileSync(file, 'utf8')); f(m); fs.writeFileSync(file, JSON.stringify(m, null, 2)); };
     const write = (file: string, v: unknown) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(v)); };
     edit(trees.dir, (m) => { m.package = 'studio/trees'; });

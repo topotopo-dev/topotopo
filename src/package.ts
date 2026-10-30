@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE, parsePackageName } from './graph/scope.ts';
-import { NAME_RE, PROJECT_FOLDERS, graphFiles } from './session.ts';
+import { NAME_RE, PACKAGE_FOLDERS, graphFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
 import { readWorkspace, writeWorkspace } from './workspace.ts';
 import type { GalleryConfig } from './config.ts';
@@ -50,11 +50,11 @@ const STALE_LOCK_MS = 120_000;
  * none loses another's change. Waits up to about ten seconds for another holder; a lock older than two minutes, or
  * whose process has ended, is taken over. Held again by the same process (a nested call), it just runs `f`.
  */
-export function withProjectLock<T>(dir: string, f: () => T): T {
+export function withPackageLock<T>(dir: string, f: () => T): T {
   return withStoreLock(copiesFor(dir), f);
 }
 
-/** Run `f` holding the lock of a store of copies (withProjectLock). */
+/** Run `f` holding the lock of a store of copies (withPackageLock). */
 export function withStoreLock<T>(store: CopyStore, f: () => T): T {
   return withLockFile(path.join(store.packages, '.lock'), f);
 }
@@ -87,8 +87,8 @@ function withLockFile<T>(file: string, f: () => T): T {
   try { return f(); } finally { heldLocks.delete(file); fs.rmSync(file, { force: true }); }
 }
 
-export interface ProjectLink { label: string; url: string }
-export interface ProjectManifest {
+export interface PackageLink { label: string; url: string }
+export interface PackageManifest {
   id: string;
   title: string;
   description: string;
@@ -98,7 +98,7 @@ export interface ProjectManifest {
   /** what to bake instead of the graph's output: another graph, a node, a frame (simulations settle after frame 1) */
   bake: { graph?: string; node?: string; frame?: number };
   /** links back to the board, concept pages, tickets */
-  links: ProjectLink[];
+  links: PackageLink[];
   /** ISO date */
   created: string;
   /** the package the project is, "owner/name": set by the author before the first publish, never derived */
@@ -139,7 +139,7 @@ export function parseUses(v: unknown, where = ''): Record<string, string> {
 }
 
 /** project.json checked and normalised; throws naming the problem. `fallbackId` is used when it has no id. */
-export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
+export function parseManifest(raw: any, fallbackId: string): PackageManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('project.json must be an object');
   const id = str(raw.id, 'id', fallbackId);
   if (!ID_RE.test(id)) throw new Error(`"id" "${id}" must match ${ID_RE}`);
@@ -151,7 +151,7 @@ export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
   if (!Array.isArray(links) || links.some((l: any) => !l || typeof l.url !== 'string')) throw new Error('"links" must be a list of {"label", "url"}');
   const b = raw.bake ?? {};
   if (typeof b !== 'object' || Array.isArray(b)) throw new Error('"bake" must be {graph?, node?, frame?}');
-  const bake: ProjectManifest['bake'] = {};
+  const bake: PackageManifest['bake'] = {};
   if (b.graph !== undefined) { bake.graph = str(b.graph, 'bake.graph'); if (!NAME_RE.test(bake.graph)) throw new Error(`"bake.graph" must be a graph name`); }
   if (b.node !== undefined) bake.node = str(b.node, 'bake.node');
   if (b.frame !== undefined) { if (!Number.isFinite(b.frame)) throw new Error('"bake.frame" must be a number'); bake.frame = b.frame; }
@@ -177,7 +177,7 @@ export function parseManifest(raw: any, fallbackId: string): ProjectManifest {
 
 export const manifestFile = (dir: string) => path.join(dir, 'project.json');
 
-export function readManifest(dir: string): ProjectManifest {
+export function readManifest(dir: string): PackageManifest {
   const file = manifestFile(dir);
   let raw: any;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
@@ -185,7 +185,7 @@ export function readManifest(dir: string): ProjectManifest {
 }
 
 /** Write a manifest (atomically), keeping keys of the file this version does not know. */
-export function writeManifest(dir: string, m: ProjectManifest) {
+export function writeManifest(dir: string, m: PackageManifest) {
   const file = manifestFile(dir);
   let raw: any = {};
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new or unreadable: replaced */ }
@@ -223,12 +223,12 @@ export function libraryEntry(entry: string): { path: string } | { name: string }
  * to `cwd`) as its path relative to the project, "./x" or "../x"; else a registered library's name. Throws for what is
  * neither, and for a folder that is a package rather than a library.
  */
-export function libraryEntryFor(projectDir: string, given: string, cwd = process.cwd()): string {
+export function libraryEntryFor(packageDir: string, given: string, cwd = process.cwd()): string {
   const abs = path.resolve(cwd, given);
   if (fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory()) {
     if (fs.existsSync(manifestFile(abs)))
       throw new Error(`${abs} is a project (it holds project.json), not a library: list the folder that holds it, ${path.dirname(abs)}`);
-    const rel = path.relative(projectDir, abs).split(path.sep).join('/') || '.';
+    const rel = path.relative(packageDir, abs).split(path.sep).join('/') || '.';
     if (path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) throw new Error(`${abs} is on another drive than the project: register it (topotopo library add <name> ${abs}) and list it by its name`);
     return rel.startsWith('.') ? rel : `./${rel}`;
   }
@@ -242,7 +242,7 @@ export function libraryEntryFor(projectDir: string, given: string, cwd = process
 }
 
 /** The project a folder belongs to (the folder itself, or the nearest parent with a project.json), or null. */
-export function projectDirOf(start: string): string | null {
+export function packageDirOf(start: string): string | null {
   let d = path.resolve(start);
   for (;;) {
     if (fs.existsSync(manifestFile(d))) return d;
@@ -274,7 +274,7 @@ function addLines(file: string, lines: string[]) {
 }
 
 /** A project's .gitignore and .gitattributes, made or completed. */
-export function projectRepoFiles(dir: string) {
+export function packageRepoFiles(dir: string) {
   addLines(path.join(dir, '.gitignore'), IGNORED);
   addLines(path.join(dir, '.gitattributes'), ATTRIBUTES);
 }
@@ -308,7 +308,7 @@ const STARTER = { description: 'A starting point: replace it with the project\'s
  * project already, `package` sets the package it is (when it names none yet); without it, that is an error. Fails for a
  * folder inside another project.
  */
-export function initProject(dir: string, o: { package?: string; name?: string } = {}): { dir: string; manifest: ProjectManifest; said: string } {
+export function initPackage(dir: string, o: { package?: string; name?: string } = {}): { dir: string; manifest: PackageManifest; said: string } {
   const abs = path.resolve(dir);
   if (o.package !== undefined) ownPackageName(o.package);
   if (fs.existsSync(manifestFile(abs))) {
@@ -318,10 +318,10 @@ export function initProject(dir: string, o: { package?: string; name?: string } 
     if (m.package) throw new Error(`project ${m.id} is the package ${m.package} already: a package keeps its name (to make it another package, change "package" in ${manifestFile(abs)} yourself)`);
     m.package = o.package;
     writeManifest(abs, m);
-    projectRepoFiles(abs);
+    packageRepoFiles(abs);
     return { dir: abs, manifest: m, said: `project ${m.id} → ${abs} is the package ${m.package} now` };
   }
-  const outer = projectDirOf(path.dirname(abs));
+  const outer = packageDirOf(path.dirname(abs));
   if (outer) throw new Error(`${abs} is inside the project ${outer}: a project cannot hold another`);
   const named = o.name ?? path.basename(abs);
   const id = slugify(named);
@@ -335,7 +335,7 @@ export function initProject(dir: string, o: { package?: string; name?: string } 
   const raw = { id, title: named, graph, created: new Date().toISOString().slice(0, 10), ...(o.package !== undefined ? { package: o.package } : {}), libraries: [] };
   const manifest = parseManifest(raw, id);
   writeAtomic(manifestFile(abs), JSON.stringify(raw, null, 2) + '\n');
-  projectRepoFiles(abs);
+  packageRepoFiles(abs);
   return { dir: abs, manifest, said: `project ${id} → ${abs}${manifest.package ? ` (package ${manifest.package})` : ''}` };
 }
 
@@ -347,15 +347,15 @@ const SYSTEM_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
  * a folder's with a slash: none for a folder that holds nothing else, nothing at all, or does not exist yet. Files an
  * operating system leaves in folders do not count.
  */
-export function notProjectFiles(dir: string): string[] {
+export function notPackageFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true })
-    .filter((e) => !(e.isDirectory() && PROJECT_FOLDERS.includes(e.name)) && !SYSTEM_FILES.has(e.name))
+    .filter((e) => !(e.isDirectory() && PACKAGE_FOLDERS.includes(e.name)) && !SYSTEM_FILES.has(e.name))
     .map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
 }
 
-/** Where the MCP server works, and what it says about it (startProject). */
-export interface ProjectStart {
+/** Where the MCP server works, and what it says about it (startPackage). */
+export interface PackageStart {
   /** the folder to work in: the one given, or the root of the project it lies in */
   dir: string;
   /** what happened, for the server's log */
@@ -368,19 +368,19 @@ export interface ProjectStart {
  * The MCP server's rule for its folder when it starts, named or not (scripts/preview.ts applies it too). A folder in
  * a project works in that project's root, which holds its graphs, assets and packages. A folder in no project that holds
  * nothing but what TopoTopo makes itself (graphs/, assets/, exports/, inputs/), or nothing at all, becomes a project
- * (initProject; `name`: its id and title, else the folder's name), so that its graphs use packages, TopoTopo's own among
+ * (initPackage; `name`: its id and title, else the folder's name), so that its graphs use packages, TopoTopo's own among
  * them, as they come. A folder with anything else in it (a repository, a folder of the person's) stays as it is:
  * library {action:"init"} makes it a project when the person says so.
  */
-export function startProject(dir: string, o: { name?: string } = {}): ProjectStart {
+export function startPackage(dir: string, o: { name?: string } = {}): PackageStart {
   const abs = path.resolve(dir);
-  const outer = projectDirOf(abs);
+  const outer = packageDirOf(abs);
   if (outer === abs) return { dir: abs, log: `the folder ${abs} is a project`, note: null };
   if (outer) return {
     dir: outer, log: `the folder ${abs} is in the project ${outer}: working in the project's folder`,
     note: `The server works in the project ${outer}, the project that holds the folder it was given (${abs}): a project's graphs, assets, inputs and packages are those of its own folder.`,
   };
-  const other = notProjectFiles(abs);
+  const other = notPackageFiles(abs);
   if (other.length) {
     const held = `${other.slice(0, 3).join(', ')}${other.length > 3 ? ` and ${other.length - 3} more` : ''}`;
     return {
@@ -388,8 +388,8 @@ export function startProject(dir: string, o: { name?: string } = {}): ProjectSta
       note: `The folder ${abs} is in no project, so its graphs cannot use packages, TopoTopo's own kits ("topotopo/nature/rock" …) among them: it holds ${held}, which TopoTopo does not make (it makes graphs/, assets/, exports/, inputs/), so the server left it as it is. Ask the person before making it a project; library {action:"init"} then does it (project.json, graphs/, .gitignore, .gitattributes).`,
     };
   }
-  let made: ReturnType<typeof initProject>;
-  try { made = initProject(abs, { name: o.name }); } catch (e: any) { return { dir: abs, log: `the folder ${abs} could not be made a project: ${e.message}`, note: `The folder ${abs} could not be made a project, so its graphs cannot use packages: ${e.message}` }; }
+  let made: ReturnType<typeof initPackage>;
+  try { made = initPackage(abs, { name: o.name }); } catch (e: any) { return { dir: abs, log: `the folder ${abs} could not be made a project: ${e.message}`, note: `The folder ${abs} could not be made a project, so its graphs cannot use packages: ${e.message}` }; }
   return {
     dir: abs, log: `made the folder ${abs} a project (project.json): it held nothing but what TopoTopo makes itself`,
     note: `The folder ${abs} became a project, "${made.manifest.id}", when the server started (project.json, graphs/${made.manifest.graph}.json): it held nothing but TopoTopo's own folders. Its graphs use packages as they come, TopoTopo's own kits ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish the project as a package, library {action:"set", package:"<owner>/${made.manifest.id}"}; to use packages from another library, library {action:"set", libraries:[...]} when the person names it.`,
@@ -412,7 +412,7 @@ export interface Located {
 
 /** Where a folder sits: the project it belongs to and the workspace (the game) around it. */
 export function locate(start: string): Located {
-  const project = projectDirOf(start);
+  const project = packageDirOf(start);
   for (let d = path.resolve(project ?? start); ; ) {
     if (fs.existsSync(path.join(d, WORKSPACE_FILE))) return { project, workspace: d };
     const up = path.dirname(d);

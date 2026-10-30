@@ -23,7 +23,7 @@ import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
 
 /** The project a path lies in: the nearest folder holding project.json, the path's own or one above it; null for none. */
-export function projectFolderOf(p: string): string | null {
+export function packageFolderOf(p: string): string | null {
   let d = path.resolve(p);
   if (fs.statSync(d, { throwIfNoEntry: false })?.isFile()) d = path.dirname(d);
   for (;;) {
@@ -41,7 +41,7 @@ export function projectFolderOf(p: string): string | null {
  */
 export function exportsFolderFor(graphFile: string): string {
   const file = path.resolve(graphFile);
-  return path.join(projectFolderOf(path.dirname(file)) ?? path.dirname(file), 'exports');
+  return path.join(packageFolderOf(path.dirname(file)) ?? path.dirname(file), 'exports');
 }
 
 /**

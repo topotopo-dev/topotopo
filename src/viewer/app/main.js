@@ -232,7 +232,7 @@ const refreshGraphs = ctx.coalesce(async () => {
 });
 // the project shown: the tab's title, the graph shown first, the welcome while there is no graph
 ctx.project = null;
-const refreshProject = async () => {
+const refreshPackage = async () => {
   const info = await api.project();
   if (!info) return;
   ctx.project = info;
@@ -722,7 +722,7 @@ const es = api.events({
     // after a reconnect the server may have restarted: fetch everything again
     if (es.opened) {
       if (msgEl.textContent === DISCONNECTED_LINE) ctx.message(RECONNECTED_LINE, 'ok');
-      refreshProject().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
+      refreshPackage().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
     }
     es.opened = true;
   },
@@ -744,7 +744,7 @@ syncTop();
 outliner.render();
 props.render();
 ctx.requestRender();
-await refreshProject();
+await refreshPackage();
 await refreshGraphs();
 await ctx.outputs.refresh();
 ctx.packages.refresh();

@@ -6,7 +6,7 @@ import type { Engine } from './graph/engine.ts';
 import { Session } from './session.ts';
 import type { SessionOptions } from './session.ts';
 import { openPackages } from './packages/registry.ts';
-import type { ProjectPackages } from './packages/registry.ts';
+import type { PackageUses } from './packages/registry.ts';
 
 export interface OpenOptions extends SessionOptions {
   /** packages whose working folders to follow this session */
@@ -17,10 +17,10 @@ export interface OpenOptions extends SessionOptions {
   watch?: boolean;
 }
 
-export interface Opened { session: Session; packages: ProjectPackages; loaded: ReturnType<Session['load']> }
+export interface Opened { session: Session; packages: PackageUses; loaded: ReturnType<Session['load']> }
 
 /** A session on `dir`, with the packages of the project it belongs to, its graphs and its assets. */
-export function openProject(engine: Engine, dir: string, o: OpenOptions = {}): Opened {
+export function openPackage(engine: Engine, dir: string, o: OpenOptions = {}): Opened {
   const packages = openPackages(engine, dir, { follow: o.follow, builtin: o.builtin });
   const session = new Session(dir, engine, o);
   session.packages = packages;

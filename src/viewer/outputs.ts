@@ -30,7 +30,7 @@ import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
 import { fittingFormats, kindMismatch, outputKind } from '../io/kinds.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
-import { ProjectPackages } from '../packages/registry.ts';
+import { PackageUses } from '../packages/registry.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
@@ -281,7 +281,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     const sessionRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
     // the packages shown live this session (their working folders): the results that use them show unpublished edits
-    const following = ws.packages instanceof ProjectPackages ? ws.packages.following().map((f) => f.package) : [];
+    const following = ws.packages instanceof PackageUses ? ws.packages.following().map((f) => f.package) : [];
     // the graph the page shows first cooks first: its cards are queued before the others'
     const first = opts.first?.();
     const graphs = [...ws.graphs].sort(([a], [b]) => Number(b === first) - Number(a === first));

@@ -160,7 +160,7 @@ export class EditRejected extends Error {
 }
 
 /** The folders a project makes in its own folder (Session.load): graphs, assets, exports and inputs. */
-export const PROJECT_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
+export const PACKAGE_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
 
 /** A graph file's text holds a graph: an object with "nodes" (project.json and other JSON files do not). */
 const holdsGraph = (j: unknown) => !!j && typeof j === 'object' && !Array.isArray(j) && !!(j as any).nodes && typeof (j as any).nodes === 'object';
@@ -255,7 +255,7 @@ export class Session {
   private recordedSeq = new Map<string, number>();
   private lastYield = 0;
   /** graphs kept in a project's own folder (graphFiles): their file, where they are saved; the others go in graphs/ */
-  private besideProject = new Map<string, string>();
+  private besidePackage = new Map<string, string>();
   /** the inputs folder given to the constructor (SessionOptions.inputs), if any */
   private inputsAt: string | undefined;
   private exportsAt: string | undefined;
@@ -268,7 +268,7 @@ export class Session {
     engine.root.graphs = (n) => this.graphs.get(n);
   }
 
-  // the folders of PROJECT_FOLDERS
+  // the folders of PACKAGE_FOLDERS
   get graphDir() { return path.join(this.dir, 'graphs'); }
   get assetDir() { return path.join(this.dir, 'assets'); }
   get exportDir() { return this.exportsAt ?? path.join(this.dir, 'exports'); }
@@ -288,14 +288,14 @@ export class Session {
     for (const [name, file] of graphFiles(this.dir)) {
       try { this.graphs.set(name, JSON.parse(fs.readFileSync(file, 'utf8'))); }
       catch (e: any) { graphErrors.push(`${path.relative(this.dir, file).split(path.sep).join('/')}: ${e.message}`); continue; }
-      if (path.dirname(file) === this.dir) this.besideProject.set(name, file);
+      if (path.dirname(file) === this.dir) this.besidePackage.set(name, file);
     }
     return { graphs: this.graphs.size, assets: this.engine.assetsIn().length, assetErrors, graphErrors };
   }
 
   /** Where a graph is saved: its file beside project.json, or graphs/<name>.json. */
   graphFile(name: string): string {
-    return this.besideProject.get(name) ?? path.join(this.graphDir, name + '.json');
+    return this.besidePackage.get(name) ?? path.join(this.graphDir, name + '.json');
   }
 
   private persist(name: string) {
@@ -747,7 +747,7 @@ export class Session {
     const graphChanged = (name: string, file: string) => {
       if (!NAME_RE.test(name) || this.graphFile(name) !== file) return;
       if (!fs.existsSync(file)) {
-        this.besideProject.delete(name);
+        this.besidePackage.delete(name);
         if (this.graphs.delete(name)) { this.lastReport.delete(name); this.bump(name); }
         return;
       }
@@ -765,7 +765,7 @@ export class Session {
     // a project's graph files beside project.json, when graphs/ has no graph of that name
     if (fs.existsSync(path.join(this.dir, 'project.json'))) on(this.dir, (name, file) => {
       if (name === 'project' || fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
-      if (!this.graphs.has(name) && fs.existsSync(file)) this.besideProject.set(name, file);
+      if (!this.graphs.has(name) && fs.existsSync(file)) this.besidePackage.set(name, file);
       graphChanged(name, file);
     });
     on(this.assetDir, (name, file) => {

@@ -7,7 +7,7 @@
 // taken when the person says so.
 //
 // Graphs and assets cook in the project's root scope (as a session has them; a command reads them with
-// loadProject, the viewer of a graph file into a scope of their own: BeforeAfterOptions.project), with the version in
+// loadPackage, the viewer of a graph file into a scope of their own: BeforeAfterOptions.project), with the version in
 // use, and in a scope like it whose packages resolve the update's version. A graph file elsewhere in the folder cooks
 // in a scope of its folder, as `topotopo <file>` cooks it. A use inside a nested graph (a foreach or solver body) is
 // compared through the node that holds it. Each cook gets only what its node needs, so another node's error stays out
@@ -30,10 +30,10 @@ import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../session.ts';
-import { copiesFor, program } from '../project.ts';
+import { copiesFor, program } from '../package.ts';
 import { scanLibrary } from '../gallery/library.ts';
-import { compareInterfaces, compareVersions, kindChanges, libraryText, loadProject } from './registry.ts';
-import type { ProjectPackages, UpdateTarget } from './registry.ts';
+import { compareInterfaces, compareVersions, kindChanges, libraryText, loadPackage } from './registry.ts';
+import type { PackageUses, UpdateTarget } from './registry.ts';
 
 /**
  * Folders a search for graph files does not enter: anywhere, those holding data and exports (a graph file has its own
@@ -51,7 +51,7 @@ const MAX_TRIANGLES = 4_000_000;
 type GraphKind = 'graph' | 'asset' | 'file';
 
 /** A graph of the project: one in graphs/, an asset in assets/, or a graph file elsewhere in its folder. */
-interface ProjectGraph {
+interface PackageGraph {
   /** the file, posix and relative to the project (another project's: from the workspace, "scenes/hall/graphs/main.json") */
   file: string;
   kind: GraphKind;
@@ -63,15 +63,15 @@ interface ProjectGraph {
 }
 
 /** A project whose graphs an update changes: the open one (rel ""), or another that shares the workspace's copies. */
-interface ProjectAt { dir: string; rel: string }
+interface PackageAt { dir: string; rel: string }
 
 /**
  * The projects whose graphs use the copies an update or a remove changes: the open project, and in a workspace every
  * other project that shares its copies (one version of each package for the whole game).
  */
-function projectsOf(pk: ProjectPackages): ProjectAt[] {
+function packagesOf(pk: PackageUses): PackageAt[] {
   const { dir } = pk.project();
-  const out: ProjectAt[] = [{ dir, rel: '' }];
+  const out: PackageAt[] = [{ dir, rel: '' }];
   const ws = pk.store?.workspace;
   if (!ws) return out;
   for (const p of scanLibrary({ name: 'workspace', path: ws }).projects) {
@@ -140,7 +140,7 @@ export interface BeforeAfterOptions {
   progress?: (done: number, total: number, what: string) => void;
   /**
    * Where the project's graphs and assets are when the engine's root does not hold them (the viewer of a graph file
-   * keeps its session in a scratch folder): a scope that holds them (loadProject), whose packages are the project's
+   * keeps its session in a scratch folder): a scope that holds them (loadPackage), whose packages are the project's
    * resolver, and the project folder their relative paths read.
    */
   project?: { scope: Scope; folder: string };
@@ -149,8 +149,8 @@ export interface BeforeAfterOptions {
 // ---------------------------------------------------------------------------------------------- the project's uses
 
 /** The graphs of the project that name the package: in graphs/, in assets/, and graph files elsewhere in its folder. */
-function graphsNaming(dir: string, pkg: string, problems: string[]): ProjectGraph[] {
-  const out: ProjectGraph[] = [];
+function graphsNaming(dir: string, pkg: string, problems: string[]): PackageGraph[] {
+  const out: PackageGraph[] = [];
   const read = (abs: string, file: string, kind: GraphKind) => {
     let text: string;
     try {
@@ -208,8 +208,8 @@ function usesIn(g: GraphSpec, pkg: string): { node: string; top: string; spec: N
  * Every place the projects use the package, and the cooks that compare them: a graph's node with the uses it holds.
  * The files of another project are named from the workspace.
  */
-function placesOf(projects: ProjectAt[], pkg: string, problems: string[]): { uses: UsePlace[]; units: { g: ProjectGraph; node: string; uses: UsePlace[] }[] } {
-  const uses: UsePlace[] = [], units: { g: ProjectGraph; node: string; uses: UsePlace[] }[] = [];
+function placesOf(projects: PackageAt[], pkg: string, problems: string[]): { uses: UsePlace[]; units: { g: PackageGraph; node: string; uses: UsePlace[] }[] } {
+  const uses: UsePlace[] = [], units: { g: PackageGraph; node: string; uses: UsePlace[] }[] = [];
   const graphs = projects.flatMap((p) => {
     const said: string[] = [];
     const found = graphsNaming(p.dir, pkg, said);
@@ -307,22 +307,22 @@ const sideOf = (r: CookReport): CookedSide => ({
 /**
  * The before/after of updating a package the project uses (to `o.to`, or the newest version with the same big
  * number): every place it is used, cooked with both versions and compared, the notes of the versions between, and
- * for a big version what the graphs must change. Throws when there is no update (ProjectPackages.updateTarget).
+ * for a big version what the graphs must change. Throws when there is no update (PackageUses.updateTarget).
  */
-export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAfterOptions = {}): Promise<BeforeAfter> {
+export async function beforeAfter(pk: PackageUses, pkg: string, o: BeforeAfterOptions = {}): Promise<BeforeAfter> {
   const t0 = performance.now();
   const t = pk.updateTarget(pkg, o.to);
   const engine = pk.engine, root = o.project?.scope ?? engine.root;
   const { before, after, key, problems: versionProblems } = pk.updateResolvers(t);
   const problems: string[] = [];
-  const { uses, units } = placesOf(projectsOf(pk), pkg, problems);
+  const { uses, units } = placesOf(packagesOf(pk), pkg, problems);
   // another project of the workspace: its graphs and assets in a scope of their own, as its session has them
   const homes = new Map<string, Scope>();
   const homeOf = (dir: string) => {
     let s = homes.get(dir);
     if (!s) {
       s = engine.createScope(`update home ${key} ${dir}`, { folder: dir, packages: pk.resolver });
-      problems.push(...loadProject(engine, dir, s));
+      problems.push(...loadPackage(engine, dir, s));
       homes.set(dir, s);
     }
     return s;
@@ -330,7 +330,7 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
   // graphs and assets: the project's root (or another project's), and a scope like it with the update's packages;
   // graph files: their folder
   const scopes = new Map<string, { before: Scope; after: Scope }>();
-  const scopesOf = (g: ProjectGraph) => {
+  const scopesOf = (g: PackageGraph) => {
     const id = g.folder ?? g.home ?? '';
     let s = scopes.get(id);
     if (!s) {
@@ -383,14 +383,14 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
  * version is applied anyway: the graphs report those errors until they change). The CLI, the library tool and the
  * viewer apply updates through it.
  */
-export function applyUpdate(pk: ProjectPackages, pkg: string, o: { from: string; to: string }): { target: UpdateTarget; text: string; mustChange: string[] } {
+export function applyUpdate(pk: PackageUses, pkg: string, o: { from: string; to: string }): { target: UpdateTarget; text: string; mustChange: string[] } {
   if (typeof o?.from !== 'string' || typeof o?.to !== 'string') throw new Error('applying an update needs "from" and "to": the version in use and the version of the before/after the person saw');
   pk.refresh();
   const now = pk.uses()[pkg];
   if (now !== undefined && now !== o.from) throw new Error(`${pk.usesFileName} uses ${pkg} ${now} now, not ${o.from}: look at the before/after again`);
   const t = pk.updateTarget(pkg, o.to);
   const { before, after } = pk.updateResolvers(t);
-  const m = mustChange(placesOf(projectsOf(pk), pkg, []).uses, before, after, t);
+  const m = mustChange(placesOf(packagesOf(pk), pkg, []).uses, before, after, t);
   const r = pk.applyUpdate(t);
   const lines = [r.text];
   if (m.must.length) lines.push(`${pk.store?.workspace ? 'the graphs of the workspace\'s projects' : 'the project\'s graphs'} must change for ${t.package} ${t.to}; until they do, they report these errors:`, ...m.must.map((x) => `  ${x}`));
@@ -398,12 +398,12 @@ export function applyUpdate(pk: ProjectPackages, pkg: string, o: { from: string;
 }
 
 /**
- * Remove a package the project uses (ProjectPackages.remove): refused while a graph of the project still names it (in
+ * Remove a package the project uses (PackageUses.remove): refused while a graph of the project still names it (in
  * graphs/, assets/ or a graph file in its folder, nested graphs included), which it lists.
  */
-export function removePackage(pk: ProjectPackages, pkg: string): { deleted: string[]; text: string } {
+export function removePackage(pk: PackageUses, pkg: string): { deleted: string[]; text: string } {
   pk.refresh();
-  const places = typeof parsePackageName(pkg) === 'string' ? [] : placesOf(projectsOf(pk), pkg, []).uses.map((u) => `${u.file} ${u.node}`);
+  const places = typeof parsePackageName(pkg) === 'string' ? [] : placesOf(packagesOf(pk), pkg, []).uses.map((u) => `${u.file} ${u.node}`);
   return pk.remove(pkg, places);
 }
 
@@ -473,7 +473,7 @@ export function overlayRenders(r: BeforeAfter, max = 6): { title: string; png: U
  * versions after the one in use (and the outputs of another kind), then one line for those up to date, what could not
  * be checked, and the update to run for each. `folder`: the project folder as the command named it, for those lines.
  */
-export function outdatedText(pk: ProjectPackages, mcp = false, folder?: string): string {
+export function outdatedText(pk: PackageUses, mcp = false, folder?: string): string {
   const problems: string[] = [];
   const list = pk.outdated(problems);
   if (!list.length) return `${pk.holder} uses no packages${problems.length ? `\ncould not check ${problems.length}:\n${problems.map((p) => `  ${p}`).join('\n')}` : ''}`;

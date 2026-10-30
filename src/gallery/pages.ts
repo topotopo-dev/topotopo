@@ -55,7 +55,7 @@ export interface FileRow { path: string; size: number; image: boolean }
 export interface OutputRow { type: string; alias?: string; label: string; kind?: string; tags: string[]; graph: string; node: string; params: string[]; inputs: string[] }
 /** A published version: `big` when it starts a big version, `marked` when its author marked it big; its outputs. */
 export interface VersionRow { version: string; note: string; published: string; big: boolean; marked: boolean; outputs?: OutputRow[] }
-export interface ProjectData extends CardData {
+export interface PackageData extends CardData {
   rel: string;
   links: { label: string; url: string }[];
   graph: string;
@@ -232,7 +232,7 @@ function fileList(rows: FileRow[], lib: string, id: string, base: string, u: Url
 }
 
 /** A package's versions with their notes and dates, and the outputs its newest version publishes with their kinds and tags. */
-function packageSection(pk: NonNullable<ProjectData['package']>): string {
+function packageSection(pk: NonNullable<PackageData['package']>): string {
   if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the project's folder publishes the first, which other projects can then use as <code>${esc(pk.name)}</code>.</p>`;
   const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a project relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
   const outputs = pk.outputs.map((o) => {
@@ -287,7 +287,7 @@ export function kitPage(k: KitData, u: Urls): string {
 }
 
 /** The packages a project uses: the version in use and its note, and when a newer one is out. */
-function usesSection(uses: ProjectData['uses']): string {
+function usesSection(uses: PackageData['uses']): string {
   if (!uses.length) return '';
   return `<h2>Packages it uses</h2>
     <table class="vars uses"><tbody>${uses.map((x) => `<tr><th>${x.url ? `<a href="${esc(x.url)}">${esc(x.name)}</a>` : esc(x.name)}</th><td>${esc(x.version)}</td><td class="dim">${esc([x.note, day(x.published ?? '')].filter(Boolean).join(' · '))}${x.newest ? ` <span class="newer">${esc(x.newest)} is out</span>` : ''}</td></tr>`).join('')}</tbody></table>`;
@@ -297,7 +297,7 @@ function usesSection(uses: ProjectData['uses']): string {
  * A project's page: the 3D view, what it is, links, attachments, a package's versions and outputs, the packages it
  * uses, graphs and their vars, and the snippets for a board.
  */
-export function projectPage(p: ProjectData, u: Urls): string {
+export function packagePage(p: PackageData, u: Urls): string {
   const images = p.attachments.filter((f) => f.image), other = p.attachments.filter((f) => !f.image);
   const edit = u.edit(p.lib, p.id);
   const snippet = (label: string, value: string) => `<label class="copy"><span>${label}</span><input readonly value="${esc(value)}"><button type="button" data-copy>Copy</button></label>`;
@@ -349,7 +349,7 @@ export function projectPage(p: ProjectData, u: Urls): string {
 }
 
 /** The page a board embeds in an iframe: the baked preview.glb under an orbit camera, or the thumbnail. */
-export function embedPage(e: { lib: string; id: string; title: string; glb: boolean; version: string; projectUrl: string }, u: Urls): string {
+export function embedPage(e: { lib: string; id: string; title: string; glb: boolean; version: string; packageUrl: string }, u: Urls): string {
   const thumb = u.thumb(e.lib, e.id, e.version);
   return `<!doctype html>
 <html lang="en">
@@ -372,7 +372,7 @@ ${e.glb ? `<script type="importmap">${JSON.stringify({ imports: { three: `${u.th
 <body>
 <img class="poster" id="poster" src="${esc(thumb)}" alt="${esc(e.title)}">
 ${e.glb ? `<canvas id="gl" data-src="${esc(u.glb(e.lib, e.id, e.version))}"></canvas>` : ''}
-<a class="badge" href="${esc(e.projectUrl)}" target="_blank" rel="noopener">${esc(e.title)} · TopoTopo</a>
+<a class="badge" href="${esc(e.packageUrl)}" target="_blank" rel="noopener">${esc(e.title)} · TopoTopo</a>
 <span class="note" id="note"></span>
 </body>
 </html>

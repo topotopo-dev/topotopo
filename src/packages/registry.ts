@@ -53,18 +53,18 @@ import { imageRef, referenceableImages } from '../core/image.ts';
 import { graphFiles, registerAssets } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { VERSION_RE, WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, readUses, renameInto, withProjectLock, withStoreLock, writeAtomic, writeManifest, writeUses } from '../project.ts';
+import { VERSION_RE, WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestFile, program, packageDirOf, readManifest, readUses, renameInto, withPackageLock, withStoreLock, writeAtomic, writeManifest, writeUses } from '../package.ts';
 import { scanLibrary } from '../gallery/library.ts';
 import { readWorkspace } from '../workspace.ts';
 import type { GalleryConfig } from '../config.ts';
-import type { CopyStore, Libraries, LibraryAt, ProjectManifest } from '../project.ts';
+import type { CopyStore, Libraries, LibraryAt, PackageManifest } from '../package.ts';
 
 /** Publishing warns about a version above this size: every project that uses it keeps a copy. */
 export const MAX_VERSION_BYTES = 50 * 2 ** 20;
 /** The owner of TopoTopo's own packages: nobody else publishes under it. */
 export const RESERVED_OWNER = 'topotopo';
 /** How a folder becomes a project, said where only a project will do. */
-const makeProject = () => `${program()} init <folder> (MCP: library {action:"init"} for the server's folder, when the person says so) makes the folder a project (project.json)`;
+const makePackage = () => `${program()} init <folder> (MCP: library {action:"init"} for the server's folder, when the person says so) makes the folder a project (project.json)`;
 /** A library as messages name it: library "game", and TopoTopo's built-in library by its name and what it is. */
 export const libraryText = (name: string) => `library "${name}"${name === BUILTIN_LIBRARY.name ? ' (TopoTopo\'s built-in library)' : ''}`;
 
@@ -382,7 +382,7 @@ const describedAs = (g: GraphSpec) => (typeof g.description === 'string' ? g.des
  * output it is, if any). Names that are not ids, clashes, a malformed kind, tag or description and a missing default
  * are problems (publishing blocks on them); a clashing name is left out.
  */
-function folderOutputs(m: ProjectManifest, graphs: Map<string, GraphSpec>): { named: FolderOutput[]; default: FolderOutput | null; problems: string[] } {
+function folderOutputs(m: PackageManifest, graphs: Map<string, GraphSpec>): { named: FolderOutput[]; default: FolderOutput | null; problems: string[] } {
   const problems: string[] = [];
   const byName = new Map<string, FolderOutput[]>();
   for (const [graph, spec] of graphs) {
@@ -593,7 +593,7 @@ interface Context {
   library?: Map<string, Place>;
   apart?: boolean;
   /**
-   * The project as a dry run sees it (ProjectPackages.dryRun): the packages a graph names for the first time are in its
+   * The project as a dry run sees it (PackageUses.dryRun): the packages a graph names for the first time are in its
    * uses, read where a library holds them (`library`); this says why the others its first use could not add.
    */
   unavailable?: Map<string, string>;
@@ -714,7 +714,7 @@ export class NothingToUpdate extends Error {
  * copied version (its own assets, graphs, files and uses), adding packages on first use, the session's followed
  * working folders. openPackages attaches one to an engine.
  */
-export class ProjectPackages implements SessionPackages {
+export class PackageUses implements SessionPackages {
   readonly engine: Engine;
   /** the project folder; null when the folder belongs to no project */
   readonly dir: string | null;
@@ -722,7 +722,7 @@ export class ProjectPackages implements SessionPackages {
   readonly store: CopyStore | null;
   /** the folder of TopoTopo's built-in library, which every project looks in */
   readonly builtin: string;
-  manifest: ProjectManifest | null = null;
+  manifest: PackageManifest | null = null;
   /** why project.json or the lock could not be read */
   error: string | null = null;
   /**
@@ -819,7 +819,7 @@ export class ProjectPackages implements SessionPackages {
 
   /** SessionPackages: why the graphs cannot use packages (a folder in no project, a project.json that is not valid). */
   notice(): string | null {
-    if (!this.dir) return `this folder is in no project, so its graphs cannot use packages yet, TopoTopo's own among them: ${makeProject()}`;
+    if (!this.dir) return `this folder is in no project, so its graphs cannot use packages yet, TopoTopo's own among them: ${makePackage()}`;
     return this.error ? `the project's packages cannot be read: ${this.error}` : null;
   }
 
@@ -878,8 +878,8 @@ export class ProjectPackages implements SessionPackages {
   }
 
   /** The project folder and its manifest; throws when the folder is in no project or project.json is not valid. */
-  project(): { dir: string; manifest: ProjectManifest } {
-    if (!this.dir) throw new Error(`this folder is in no project: ${makeProject()}, whose graphs can use packages`);
+  project(): { dir: string; manifest: PackageManifest } {
+    if (!this.dir) throw new Error(`this folder is in no project: ${makePackage()}, whose graphs can use packages`);
     if (!this.manifest) throw new Error(this.error ?? `${manifestFile(this.dir)} cannot be read`);
     return { dir: this.dir, manifest: this.manifest };
   }
@@ -947,7 +947,7 @@ export class ProjectPackages implements SessionPackages {
     const v = ctx.uses[pkg];
     if (v !== undefined) return this.loadCopy(ctx, pkg, v);
     if (ctx !== this.root && !ctx.unavailable) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
-    if (!this.dir) return { error: `package ${pkg}: this graph is in no project, and only projects use packages`, hint: `${makeProject()}; then a graph of it that names ${pkg} adds the package (or ${program()} use ${pkg})` };
+    if (!this.dir) return { error: `package ${pkg}: this graph is in no project, and only projects use packages`, hint: `${makePackage()}; then a graph of it that names ${pkg} adds the package (or ${program()} use ${pkg})` };
     if (this.error) return { error: `package ${pkg}: ${this.error}` };
     const why = (ctx.unavailable ?? this.unavailable).get(pkg);
     return {
@@ -1093,7 +1093,7 @@ export class ProjectPackages implements SessionPackages {
    * as the version's record (`info`) says, or in a working folder as its author pinned and tagged it. Its graphs and
    * assets name its own outputs by full name: they resolve to what this builds (Context.self).
    */
-  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; info?: VersionInfo; warning?: string; manifest: ProjectManifest; ctx: Context; scope: string }): Loaded {
+  private build(o: { pkg: string; version: string | null; dir: string; hash: string; signature: string; info?: VersionInfo; warning?: string; manifest: PackageManifest; ctx: Context; scope: string }): Loaded {
     const problems: string[] = [];
     const graphs = readGraphs(o.dir, problems);
     const scope = this.engine.createScope(o.scope, { folder: o.dir, graphs: (n) => graphs.get(n), packages: this.resolverOf(o.ctx) });
@@ -1356,7 +1356,7 @@ export class ProjectPackages implements SessionPackages {
     const { dir } = this.project();
     if (!Array.isArray(entries) || entries.some((e) => typeof e !== 'string' || !e.trim())) throw new Error('"libraries" is a list of paths relative to the project ("../lib") and registered library names');
     for (const e of entries) { const k = libraryEntry(e); if ('error' in k) throw new Error(`"libraries": ${k.error}`); }
-    return withProjectLock(dir, () => {
+    return withPackageLock(dir, () => {
       const m = readManifest(dir);
       m.libraries = [...new Set(entries.map((e) => e.trim().replace(/\\/g, '/')))];
       writeManifest(dir, m);
@@ -1883,8 +1883,8 @@ function readVersions(dir: string, pkg: string, library: string, problems: Set<s
  * attached to the engine's root scope, and the working folders to follow this session. `builtin`: the folder of
  * TopoTopo's built-in library (default: the one TopoTopo ships).
  */
-export function openPackages(engine: Engine, start: string, opts: { follow?: string[]; builtin?: string } = {}): ProjectPackages {
-  const pk = new ProjectPackages(engine, projectDirOf(start), { builtin: opts.builtin });
+export function openPackages(engine: Engine, start: string, opts: { follow?: string[]; builtin?: string } = {}): PackageUses {
+  const pk = new PackageUses(engine, packageDirOf(start), { builtin: opts.builtin });
   engine.root.packages = pk.resolver;
   for (const f of opts.follow ?? []) pk.follow(f, true);
   // a workspace that follows its own packages ("follow": true): the used packages whose working folder is inside it
@@ -1903,7 +1903,7 @@ export function openPackages(engine: Engine, start: string, opts: { follow?: str
  * anything (a session makes its folders): for a command that cooks the project's graphs and leaves the project as it
  * is, or for the viewer of a graph file, whose session folder is not the project. Says what could not be read.
  */
-export function loadProject(engine: Engine, dir: string, scope: Scope = engine.root): string[] {
+export function loadPackage(engine: Engine, dir: string, scope: Scope = engine.root): string[] {
   const problems: string[] = [];
   const graphs = readGraphs(dir, problems);
   scope.graphs = (n) => graphs.get(n);
@@ -1918,7 +1918,7 @@ export function loadProject(engine: Engine, dir: string, scope: Scope = engine.r
  * folder looks for packages is not part of the package), graphs/, assets/, inputs/, and the copies its uses need with
  * their lock. Files by path, or bytes for the files written anew.
  */
-function versionFiles(dir: string, m: ProjectManifest, lock: Lock): { rel: string; abs?: string; bytes?: Uint8Array }[] {
+function versionFiles(dir: string, m: PackageManifest, lock: Lock): { rel: string; abs?: string; bytes?: Uint8Array }[] {
   const raw = JSON.parse(fs.readFileSync(manifestFile(dir), 'utf8'));
   delete raw.libraries;
   const out: { rel: string; abs?: string; bytes?: Uint8Array }[] = [{ rel: 'project.json', bytes: Buffer.from(JSON.stringify(raw, null, 2) + '\n') }];
@@ -2022,7 +2022,7 @@ export interface PublishOptions {
   /** mark the version big though the rule finds nothing that makes it big */
   big?: boolean;
   /**
-   * publish one of TopoTopo's own packages: a folder <name> of TopoTopo's built-in library (ProjectPackages.builtin),
+   * publish one of TopoTopo's own packages: a folder <name> of TopoTopo's built-in library (PackageUses.builtin),
    * the package topotopo/<name>. TopoTopo's repository publishes its own packages this way; the tools never do, and the
    * owner "topotopo" is refused for every other project.
    */
@@ -2079,7 +2079,7 @@ const outputWhat = (x: FolderOutput) => (x.name === null ? `the default output (
  *   5. versions/<big>.<small>/ written through a .part folder, never over one that is there.
  * A dry run (o.dryRun) goes through every step and writes nothing.
  */
-export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Promise<PublishResult> {
+export async function publishPackage(pk: PackageUses, o: PublishOptions): Promise<PublishResult> {
   const { dir } = pk.project();
   // what its graphs name resolves as its files are now (its own outputs, the copies)
   pk.refresh();
@@ -2306,8 +2306,8 @@ const standing = (o: Outdated) =>
  * outputs, up to date or the newer version that is out), then the others in the libraries it looks in; the libraries;
  * what could not be checked. `packages owner/name` (packageText) shows one with its outputs.
  */
-export function packagesText(pk: ProjectPackages, mcp = false): string {
-  if (!pk.dir) return `this folder is in no project: ${makeProject()}, whose graphs can use packages`;
+export function packagesText(pk: PackageUses, mcp = false): string {
+  if (!pk.dir) return `this folder is in no project: ${makePackage()}, whose graphs can use packages`;
   if (!pk.manifest) return `${manifestFile(pk.dir)}: ${pk.error}`;
   const m = pk.manifest, uses = pk.uses(), lines: string[] = [`${pk.label} (${pk.dir})${m.package ? `, the package ${m.package}` : ''}`];
   if (pk.store?.workspace) lines.push(`in ${pk.holder} (${pk.store.workspace}): its ${WORKSPACE_FILE} names the versions every project in it uses, one copy of each (${WORKSPACE_PACKAGES}/)`);
@@ -2326,7 +2326,7 @@ export function packagesText(pk: ProjectPackages, mcp = false): string {
   const indirect = pk.lockEntries().filter((e) => !e.direct);
   if (indirect.length) lines.push(`  and, used by those: ${indirect.map((e) => `${e.package} ${e.version}`).join(', ')}`);
   // the others in its libraries
-  let cat: ReturnType<ProjectPackages['catalog']> = [];
+  let cat: ReturnType<PackageUses['catalog']> = [];
   try { cat = pk.catalog(problems); } catch (e: any) { problems.push(e.message); }
   const held = new Set(pk.lockEntries().map((e) => e.package));
   const others = cat.filter((c) => !held.has(c.package) && uses[c.package] === undefined && c.package !== m.package);
@@ -2354,7 +2354,7 @@ export function packagesText(pk: ProjectPackages, mcp = false): string {
  * its versions with their notes, and the outputs of the version in use (else of the newest) with their kinds, tags,
  * params and inputs, by the node type a graph names them with.
  */
-export function packageText(pk: ProjectPackages, pkg: string, mcp = false): string {
+export function packageText(pk: PackageUses, pkg: string, mcp = false): string {
   const { manifest: m } = pk.project();
   const n = parsePackageName(pkg);
   if (typeof n === 'string' || n.output !== null) throw new Error(`"${pkg}" is not a package name: write owner/name`);
@@ -2447,7 +2447,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
   if (q.kind !== undefined && !isKind(q.kind)) throw new Error(`"${q.kind}" is not a kind: ${KINDS.join(', ')}`);
   const problems = new Set<string>();
   const builtin = path.resolve(opts.builtin ?? BUILTIN_LIBRARY.path);
-  let manifest: ProjectManifest | null = null, uses: Record<string, string> = {};
+  let manifest: PackageManifest | null = null, uses: Record<string, string> = {};
   if (dir) { try { manifest = readManifest(dir); uses = readUses(copiesFor(dir)); } catch (e: any) { problems.add(e.message); } }
   // each folder once: what the project lists first, then TopoTopo's built-in library, then the other registered libraries
   const key = (p: string) => path.resolve(p).toLowerCase(), seen = new Set([key(builtin)]);
@@ -2481,7 +2481,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
     for (const f of folders) {
       const place = readVersions(f.dir, f.package, lib.name, problems).at(-1);
       if (!place) continue;
-      let pm: ProjectManifest | null = null;
+      let pm: PackageManifest | null = null;
       try { pm = readManifest(place.dir); } catch (e: any) { problems.add(e.message); }
       const v = place.info, about = [pm?.title ?? '', ...(pm?.tags ?? [])];
       const isDefault = (o: OutputInfo) => isDefaultOutput(v, o);
@@ -2522,7 +2522,7 @@ export function searchText(r: SearchResult, mcp = false): string {
   const lines = [hits.length
     ? `search ${asked}: ${hits.length} output${hits.length === 1 ? '' : 's'} in ${r.libraries.filter((l) => l.hits.length).length} of the ${r.libraries.length} libraries looked in${r.project ? `, for ${r.project}` : ''}`
     : `search ${asked}: no output matches in ${r.libraries.map((l) => libraryText(l.name)).join(', ')}`];
-  if (!r.project) lines.push(`this folder is in no project, and only a project's graphs use packages: ${mcp ? "library {action:\"init\"} makes the server's folder one, when the person says so" : makeProject()}`);
+  if (!r.project) lines.push(`this folder is in no project, and only a project's graphs use packages: ${mcp ? "library {action:\"init\"} makes the server's folder one, when the person says so" : makePackage()}`);
   for (const l of r.libraries) {
     if (!l.hits.length) continue;
     const standing = l.standing === 'builtin' ? 'TopoTopo\'s own packages, which every project can use: a graph that names one adds it'

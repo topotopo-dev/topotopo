@@ -18,9 +18,9 @@ import { defineNode } from '../src/graph/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Session } from '../src/session.ts';
-import { readManifest } from '../src/project.ts';
+import { readManifest } from '../src/package.ts';
 import { openPackages, publishPackage } from '../src/packages/registry.ts';
-import type { ProjectPackages } from '../src/packages/registry.ts';
+import type { PackageUses } from '../src/packages/registry.ts';
 import { startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
 
@@ -62,7 +62,7 @@ const project = (dir: string, manifest: Record<string, unknown>, graphs: Record<
 };
 const setGraph = (dir: string, name: string, g: GraphSpec) => json(path.join(dir, 'graphs', `${name}.json`), g);
 const engines: Engine[] = [];
-async function open(dir: string): Promise<{ engine: Engine; pk: ProjectPackages; ws: Session }> {
+async function open(dir: string): Promise<{ engine: Engine; pk: PackageUses; ws: Session }> {
   const engine = new Engine(createNodeHost({ baseDir: dir, workers: 0 }));
   await engine.init();
   engines.push(engine);

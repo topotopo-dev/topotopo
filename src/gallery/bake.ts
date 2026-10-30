@@ -17,9 +17,9 @@ import { previewGLB, thumbOptions } from '../render/preview.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { bakeKey, galleryDir, readBakeState } from './library.ts';
-import { readManifest, writeAtomic } from '../project.ts';
+import { readManifest, writeAtomic } from '../package.ts';
 import type { BakeState } from './library.ts';
-import { openProject } from '../open.ts';
+import { openPackage } from '../open.ts';
 
 export const THUMB_SIZE = 512;
 /** a preview.glb above this is not written (the page shows the thumbnail instead) */
@@ -30,7 +30,7 @@ export const BAKE_TIMEOUT_MS = 300_000;
 export const BAKE_SIM_TIMEOUT_MS = 120_000;
 
 /** Bake one project in this process. Never throws for a graph problem: the result (also in bake.json) says. */
-export async function bakeProject(dir: string): Promise<BakeState> {
+export async function bakePackage(dir: string): Promise<BakeState> {
   const m = readManifest(dir);
   const key = bakeKey(dir, m);
   const out = galleryDir(dir);
@@ -47,7 +47,7 @@ export async function bakeProject(dir: string): Promise<BakeState> {
     if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
     await engine.init();
     // the packages the project uses, from its copies (a bake adds none), its graphs and its assets
-    const ws = openProject(engine, dir).session;
+    const ws = openPackage(engine, dir).session;
     const name = m.bake.graph ?? m.graph;
     const g = ws.graphs.get(name);
     if (!g) return finish({ ok: false, error: `no default graph yet: the project has no graph "${name}" (project.json "graph")` });

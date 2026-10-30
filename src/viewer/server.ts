@@ -36,9 +36,9 @@ import type { NodeProgress } from '../graph/engine.ts';
 import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
-import { ProjectPackages } from '../packages/registry.ts';
+import { PackageUses } from '../packages/registry.ts';
 import { listKits, kitOutputsText } from '../gallery/kits.ts';
-import { projectDirOf, readManifest } from '../project.ts';
+import { packageDirOf, readManifest } from '../package.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';
@@ -214,10 +214,10 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   const graphChanged = (ev: { graph: string; version: number }) => broadcast({ ...ev, ...(ws.held(ev.graph) ? { stopped: true } : {}) });
   ws.listeners.add(graphChanged);
   /** The project the viewer shows: that of the packages attached to the session, else the one its folder is in. */
-  const projectOf = (refresh = false) => {
-    const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
+  const packageOf = (refresh = false) => {
+    const pk = ws.packages instanceof PackageUses ? ws.packages : null;
     if (refresh && pk?.dir) pk.refresh();
-    const dir = pk ? pk.dir : projectDirOf(ws.dir);
+    const dir = pk ? pk.dir : packageDirOf(ws.dir);
     let m = pk?.manifest ?? null;
     if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no project to name */ }
     return m && dir ? { id: m.id, title: m.title, description: m.description, graph: m.graph, package: m.package ?? null, dir } : null;
@@ -228,12 +228,12 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
    * GET /api/project: the project the viewer shows (null for a folder that is in no project), the folder, the graph
    * file of `topotopo view`, and TopoTopo's kits.
    */
-  const projectInfo = () => {
+  const packageInfo = () => {
     kits ??= listKits().map((k) => ({ name: k.name, title: k.title, description: k.description, version: k.version, outputs: kitOutputsText(k) }));
-    return { project: projectOf(true), folder: ws.dir, file: opts.source?.label ?? null, kits };
+    return { project: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, kits };
   };
   // the project's default graph cooks its cards first
-  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => projectOf()?.graph });
+  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => packageOf()?.graph });
   let outputs = makeOutputs();
   const makePackages = () => createPackages(ws, broadcast);
   let packages = makePackages();
@@ -271,7 +271,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   // an export's sidecar (kind "metadata") says what it is: the page shows it with the file it describes
   const listInputs = () => ws.listInputs().filter((f) => !PART_RE.test(f.path))
     .map((f) => (f.sidecar ? { ...f, about: `${SIDECAR_NAMES[f.sidecar.role]}: ${SIDECAR_TEXT[f.sidecar.role]}` } : f));
-  const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? (projectOf() ? 'in the project' : 'in this folder') : `in ${path.dirname(ws.inputDir)}`);
+  const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? (packageOf() ? 'in the project' : 'in this folder') : `in ${path.dirname(ws.inputDir)}`);
   // Files copied into inputs/ by other means (file manager, an agent) show up too, once the folder exists. The viewer
   // does not make it just to watch it (`topotopo view`'s inputs/ beside the graph file appears with the first drop):
   // uploads and listings start the watch when the folder is there by then.
@@ -534,7 +534,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
         req.on('close', () => clients.delete(res));
         return;
       }
-      if (u.pathname === '/api/project') return json(200, projectInfo());
+      if (u.pathname === '/api/project') return json(200, packageInfo());
       if (u.pathname === '/api/graphs') {
         const out = [...ws.graphs].map(([name, g]) => {
           const last = ws.lastReport.get(name);

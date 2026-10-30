@@ -9,9 +9,9 @@ import { Engine } from '../src/graph/engine.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { BUILTIN_LIBRARY } from '../src/config.ts';
-import { initProject } from '../src/project.ts';
+import { initPackage } from '../src/package.ts';
 import { openPackages } from '../src/packages/registry.ts';
-import type { ProjectPackages } from '../src/packages/registry.ts';
+import type { PackageUses } from '../src/packages/registry.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { exportOBJ } from '../src/io/export.ts';
 import { encodeGreyPNG } from '../src/io/heightmap.ts';
@@ -415,8 +415,8 @@ export function graphIsEnvDependent(graph: GraphSpec): boolean {
  * TopoTopo's own packages for an engine: a project in `dir` (default: a new temp folder) that uses every one of them,
  * their newest versions copied from the built-in library, attached to the engine's root, where their outputs resolve.
  */
-export function useKits(engine: Engine, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-kits-'))): ProjectPackages {
-  initProject(dir);
+export function useKits(engine: Engine, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-kits-'))): PackageUses {
+  initPackage(dir);
   const pk = openPackages(engine, dir);
   for (const c of pk.catalog()) if (c.library === BUILTIN_LIBRARY.name && pk.manifest?.uses[c.package] === undefined) pk.use(c.package);
   return pk;

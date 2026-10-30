@@ -10,11 +10,11 @@ import { Engine } from '../graph/engine.ts';
 import { createNodeHost } from '../host/node.ts';
 import { graphFiles } from '../session.ts';
 import { loadConfig } from '../config.ts';
-import { WORKSPACE_FILE, copiesFor, librariesFor, locate, program, resolveLibraries } from '../project.ts';
-import type { LibraryAt } from '../project.ts';
+import { WORKSPACE_FILE, copiesFor, librariesFor, locate, program, resolveLibraries } from '../package.ts';
+import type { LibraryAt } from '../package.ts';
 import { readWorkspace } from '../workspace.ts';
 import { scanLibrary } from '../gallery/library.ts';
-import { libraryText, loadProject, openPackages, publishedVersions } from './registry.ts';
+import { libraryText, loadPackage, openPackages, publishedVersions } from './registry.ts';
 
 /** What a check cooked of one package version or one project, and what failed. */
 export interface CheckItem {
@@ -50,7 +50,7 @@ async function cookIn(dir: string, jobs: Job[]): Promise<{ cooked: number; failu
   const failures: CheckItem['failures'] = [];
   const pk = openPackages(engine, dir);
   if (pk.notice()) failures.push({ where: 'packages', error: pk.notice()! });
-  for (const p of loadProject(engine, dir)) failures.push({ where: 'files', error: p });
+  for (const p of loadPackage(engine, dir)) failures.push({ where: 'files', error: p });
   let cooked = 0;
   const skipped: string[] = [];
   for (const j of jobs) {
@@ -90,7 +90,7 @@ async function checkPackages(libs: { name: string; root: string }[], problems: s
 }
 
 /** A project's graphs (graphs/, and graph files beside project.json), each cooked to its output. */
-async function checkProject(dir: string, name: string): Promise<CheckItem> {
+async function checkPackage(dir: string, name: string): Promise<CheckItem> {
   const jobs = [...graphFiles(dir).keys()].map((g) => ({ graph: g, label: `graph ${g}` }));
   return { what: 'project', name, ...(await cookIn(dir, jobs)) };
 }
@@ -128,7 +128,7 @@ export async function checkAll(start: string, o: { progress?: (what: string) => 
   const items = await checkPackages(libs, problems, o.progress);
   for (const p of projects) {
     o.progress?.(p.name);
-    items.push(await checkProject(p.dir, p.name));
+    items.push(await checkPackage(p.dir, p.name));
   }
   return { scope, items, problems: [...new Set(problems)], ms: performance.now() - t0 };
 }

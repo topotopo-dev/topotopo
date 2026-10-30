@@ -54,7 +54,7 @@ interface Described {
 
 /**
  * The path a file node reads an input with: relative to the folder the host resolves paths against (the project folder,
- * host/node.ts projectBaseDir), "inputs/<path>" when the server's folder is the project, as it mostly is.
+ * host/node.ts packageBaseDir), "inputs/<path>" when the server's folder is the project, as it mostly is.
  */
 export function inputRef(ws: Session, rel: string): string {
   const base = ws.engine.host.resolvePath('.'), dir = path.relative(base, ws.inputDir);

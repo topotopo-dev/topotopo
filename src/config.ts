@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ID_RE } from './graph/scope.ts';
-import { slugify } from './project.ts';
+import { slugify } from './package.ts';
 
 /** The Gallery's port when the config names none. */
 export const DEFAULT_PORT = 7340;

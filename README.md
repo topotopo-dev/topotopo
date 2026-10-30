@@ -88,8 +88,8 @@ The current release is v0.4 ([release notes](docs/release/v0.4-release-notes.md)
 [v0.3](docs/release/v0.3-release-notes.md), [v0.2](docs/release/v0.2-release-notes.md), the first tagged release. To try unreleased changes, build the tarball from a clone: `npm pack`, then
 `npm install -g ./topotopo-<version>.tgz` (or into a project).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations, and
-`import { createNodeHost, openProject } from 'topotopo/node'` the Node host and projects with their packages, for a
-script that cooks package outputs itself (a world generator): `openProject(engine, dir)` puts the project's packages,
+`import { createNodeHost, openPackage } from 'topotopo/node'` the Node host and projects with their packages, for a
+script that cooks package outputs itself (a world generator): `openPackage(engine, dir)` puts the project's packages,
 graphs and assets in the engine's root scope, and `packages.addFor(graph)` adds what a graph names on first use.
 
 **From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for

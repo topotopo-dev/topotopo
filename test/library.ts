@@ -6,12 +6,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { addLibrary, loadConfig } from '../src/config.ts';
-import { startProject, notProjectFiles, parseManifest, projectDirOf, readManifest, slugify, writeManifest } from '../src/project.ts';
-import { bakeKey, createProject, isStale, readBakeState, scanLibrary } from '../src/gallery/library.ts';
-import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/project.ts';
+import { startPackage, notPackageFiles, parseManifest, packageDirOf, readManifest, slugify, writeManifest } from '../src/package.ts';
+import { bakeKey, createPackage, isStale, readBakeState, scanLibrary } from '../src/gallery/library.ts';
+import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/package.ts';
 import { initWorkspace, parseWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
 import { commands } from '../src/packages/commands.ts';
-import { bakeProject, BakeQueue } from '../src/gallery/bake.ts';
+import { bakePackage, BakeQueue } from '../src/gallery/bake.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-library-'));
 process.env.TOPOTOPO_CONFIG = path.join(tmp, 'cfg', 'config.json');
@@ -41,15 +41,15 @@ section('config');
 const lib = { name: 'game', path: path.join(tmp, 'lib') };
 section('create and scan');
 {
-  const lantern = createProject(lib, 'props/lantern', { title: 'Lantern', tags: ['prop', 'hero'], links: [{ label: 'concept', url: 'http://board.local/c/12' }], graph: BOX });
+  const lantern = createPackage(lib, 'props/lantern', { title: 'Lantern', tags: ['prop', 'hero'], links: [{ label: 'concept', url: 'http://board.local/c/12' }], graph: BOX });
   check(lantern.id === 'lantern' && lantern.collection === 'props' && lantern.rel === 'props/lantern', 'a project in a collection');
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) check(fs.existsSync(path.join(lantern.dir, d)), `created ${d}/`);
   check(fs.readFileSync(path.join(lantern.dir, '.gitignore'), 'utf8').includes('.gallery/'), '.gitignore keeps the derived files out');
   check(JSON.parse(fs.readFileSync(path.join(lantern.dir, 'graphs', 'main.json'), 'utf8')).output === 'b', 'the given graph is graphs/main.json');
-  check(throws(() => createProject(lib, 'decor/lantern'), /already|used by/), 'an id is unique in its library');
-  check(throws(() => createProject(lib, 'props/lantern/parts'), /inside another project/), 'no project inside a project');
-  check(throws(() => createProject(lib, '../out'), /bad project path/), 'no path outside the library');
-  createProject(lib, 'Crate Big');
+  check(throws(() => createPackage(lib, 'decor/lantern'), /already|used by/), 'an id is unique in its library');
+  check(throws(() => createPackage(lib, 'props/lantern/parts'), /inside another project/), 'no project inside a project');
+  check(throws(() => createPackage(lib, '../out'), /bad project path/), 'no path outside the library');
+  createPackage(lib, 'Crate Big');
   // things a scan must not enter or take as projects
   fs.mkdirSync(path.join(lib.path, '.hidden', 'p'), { recursive: true });
   fs.writeFileSync(path.join(lib.path, '.hidden', 'p', 'project.json'), '{}');
@@ -68,7 +68,7 @@ section('create and scan');
   check(s.projects.find((p) => p.id === 'lantern')!.manifest.links[0].label === 'concept', 'links are read');
   fs.rmSync(path.join(lib.path, 'props', 'lantern - Copy'), { recursive: true });
   fs.rmSync(path.join(lib.path, 'broken'), { recursive: true });
-  check(projectDirOf(path.join(lantern.dir, 'graphs')) === lantern.dir, 'projectDirOf finds the project above a folder');
+  check(packageDirOf(path.join(lantern.dir, 'graphs')) === lantern.dir, 'packageDirOf finds the project above a folder');
   check(scanLibrary({ name: 'none', path: path.join(tmp, 'missing') }).problems[0].includes('no folder'), 'a missing library folder is a problem');
 }
 
@@ -98,24 +98,24 @@ section('the project of the MCP server: a project when it holds nothing but what
   const fresh = path.join(tmp, 'projects', 'fresh'), empty = ws('empty');
   const own = ws('own', { 'graphs/main.json': JSON.stringify(BOX), 'assets/rock.json': JSON.stringify(BOX), 'exports/renders/main-b.png': 'png', 'inputs/guides.obj': 'v 0 0 0', '.DS_Store': '', 'Thumbs.db': '' });
   const repo = ws('repo', { 'README.md': '# a game', 'graphs/main.json': JSON.stringify(BOX) }), git = ws('git', { '.git/HEAD': 'ref: refs/heads/main' });
-  check([fresh, empty, own].every((d) => !notProjectFiles(d).length), 'a project\'s own folders (and files an operating system leaves) are nothing else, as are no files and no folder');
-  check(notProjectFiles(repo).join() === 'README.md' && notProjectFiles(git).join() === '.git/', `anything else is: ${notProjectFiles(repo)}, ${notProjectFiles(git)}`);
+  check([fresh, empty, own].every((d) => !notPackageFiles(d).length), 'a project\'s own folders (and files an operating system leaves) are nothing else, as are no files and no folder');
+  check(notPackageFiles(repo).join() === 'README.md' && notPackageFiles(git).join() === '.git/', `anything else is: ${notPackageFiles(repo)}, ${notPackageFiles(git)}`);
   for (const d of [fresh, empty, own]) {
-    const s = startProject(d);
+    const s = startPackage(d);
     check(/^made the folder .* a project \(project\.json\)/.test(s.log) && s.dir === d && /became a project, ".*", when the server started .* Next: build into graph "main"/.test(s.note ?? '') && fs.existsSync(path.join(d, 'project.json')),
       `${path.basename(d)}: made a project, and the first reply will say so and what to do next`);
   }
   check(readManifest(own).id === 'own' && fs.existsSync(path.join(own, 'graphs', 'main.json')) && fs.existsSync(path.join(own, 'assets', 'rock.json')), 'its graphs and assets stay where they are');
   check(readManifest(fresh).graph === 'main' && JSON.parse(fs.readFileSync(path.join(fresh, 'graphs', 'main.json'), 'utf8')).output === 'box', 'a new one gets a starter graph, the one project.json shows');
   const named = ws('parent/project');
-  check(readManifest(startProject(named, { name: 'parent' }).dir).id === 'parent' && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
+  check(readManifest(startPackage(named, { name: 'parent' }).dir).id === 'parent' && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
   for (const d of [repo, git]) {
-    const s = startProject(d);
+    const s = startPackage(d);
     check(/is in no project and holds .*, which TopoTopo does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own kits .* Ask the person before making it a project; library \{action:"init"\} then does it/.test(s.note ?? '') && !fs.existsSync(path.join(d, 'project.json')),
       `${path.basename(d)}: left as it is (${s.log.slice(s.log.indexOf(' holds'))})`);
   }
-  check(/^the folder .* is a project$/.test(startProject(own).log) && startProject(own).note === null, 'a project stays as it is, with nothing to tell');
-  const sub = ws('own/levels'), inSub = startProject(sub);
+  check(/^the folder .* is a project$/.test(startPackage(own).log) && startPackage(own).note === null, 'a project stays as it is, with nothing to tell');
+  const sub = ws('own/levels'), inSub = startPackage(sub);
   check(inSub.dir === own && /is in the project .*own: working in the project's folder$/.test(inSub.log) && /The server works in the project .*own, the project that holds the folder it was given/.test(inSub.note ?? '') && !fs.existsSync(path.join(sub, 'project.json')),
     'a folder in a project becomes no project of its own: the server works in the project\'s folder, and says so');
 }
@@ -125,7 +125,7 @@ section('bake');
   const p = scanLibrary(lib).projects.find((x) => x.id === 'lantern')!;
   check(isStale(p), 'never baked: stale');
   const k0 = bakeKey(p.dir, p.manifest);
-  const s = await bakeProject(p.dir);
+  const s = await bakePackage(p.dir);
   const png = fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png'));
   const glb = fs.readFileSync(path.join(p.dir, '.gallery', 'preview.glb'));
   check(s.ok && s.key === k0 && s.points === 8 && s.glb, `baked: ${JSON.stringify(s)}`);
@@ -134,20 +134,20 @@ section('bake');
   check(!isStale(p), 'after a bake: not stale');
   fs.writeFileSync(path.join(p.dir, 'inputs', 'guide.obj'), 'v 0 0 0\n');
   check(isStale(p), 'a new input file makes it stale');
-  await bakeProject(p.dir);
+  await bakePackage(p.dir);
   fs.writeFileSync(path.join(p.dir, 'attachments', 'concept.png'), png);
   check(!isStale(p), 'attachments do not');
   fs.writeFileSync(path.join(p.dir, 'graphs', 'main.json'), JSON.stringify({ nodes: { b: { type: 'nope' } }, output: 'b' }));
   check(isStale(p), 'a graph edit makes it stale');
   const before = fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png'));
-  const bad = await bakeProject(p.dir);
+  const bad = await bakePackage(p.dir);
   check(!bad.ok && /nope/.test(bad.error ?? '') && !isStale(p), `a failed bake records why, under the new key (${bad.error?.split('\n')[0]})`);
   check(fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png')).equals(before) && fs.existsSync(path.join(p.dir, '.gallery', 'preview.glb')), 'a failed bake keeps the previous thumbnail and GLB');
   writeManifest(p.dir, { ...readManifest(p.dir), graph: 'other' });
   fs.writeFileSync(path.join(p.dir, 'graphs', 'other.json'), JSON.stringify(BOX));
   const p2 = scanLibrary(lib).projects.find((x) => x.id === 'lantern')!;
-  check(isStale(p2) && (await bakeProject(p2.dir)).ok, 'the manifest\'s graph choice is part of the key, and is what bakes');
-  const none = await bakeProject(scanLibrary(lib).projects.find((x) => x.id === 'crate-big')!.dir);
+  check(isStale(p2) && (await bakePackage(p2.dir)).ok, 'the manifest\'s graph choice is part of the key, and is what bakes');
+  const none = await bakePackage(scanLibrary(lib).projects.find((x) => x.id === 'crate-big')!.dir);
   check(!none.ok && /no graph "main"/.test(none.error ?? ''), 'a project without its graph says so');
 }
 

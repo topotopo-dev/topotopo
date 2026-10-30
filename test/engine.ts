@@ -10,7 +10,7 @@ import '../src/nodes/index.ts';
 import { Engine, resolveTime, STOPPED } from '../src/graph/engine.ts';
 import type { CookOptions, CookReport } from '../src/graph/engine.ts';
 import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
-import { createNodeHost, projectBaseDir } from '../src/host/node.ts';
+import { createNodeHost, packageBaseDir } from '../src/host/node.ts';
 import { replayArgs } from '../src/io/source.ts';
 import { exportOptionFlags } from '../src/io/targets.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
@@ -947,7 +947,7 @@ section('relative paths read from the project folder');
   const r = cli(g, '--export-all');
   check(init.status === 0 && r.status === 0 && /3 points, 1 prims/.test(r.stdout) && fs.existsSync(path.join(proj, 'exports', 'piece.obj')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
     `a graph in graphs/ reads inputs/ of its project, and --export-all writes the project's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
-  check(projectBaseDir(path.join(proj, 'graphs')) === proj && projectBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'projectBaseDir: the nearest project.json, else the folder itself');
+  check(packageBaseDir(path.join(proj, 'graphs')) === proj && packageBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'packageBaseDir: the nearest project.json, else the folder itself');
   const e = new Engine(createNodeHost({ baseDir: path.join(proj, 'graphs') }));
   check(e.host.resolvePath('inputs/tri.obj') === path.join(proj, 'inputs', 'tri.obj'), 'the node host resolves relative paths against the project folder');
 }

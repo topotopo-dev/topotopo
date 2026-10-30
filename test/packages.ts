@@ -34,7 +34,7 @@ import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Session } from '../src/session.ts';
 import { addLibrary, loadConfig } from '../src/config.ts';
-import { copiesFor, libraryEntry, parseManifest, readManifest } from '../src/project.ts';
+import { copiesFor, libraryEntry, parseManifest, readManifest } from '../src/package.ts';
 import { engineAssetsFor, initWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
 import { resolveTarget, targetError } from '../src/io/targets.ts';
 import { checkAll, checkText } from '../src/packages/check.ts';
@@ -44,7 +44,7 @@ import { makeTools } from '../src/mcp/tools.ts';
 import { libraryTool } from '../src/mcp/library.ts';
 import { catalogText, topicText } from '../src/mcp/docs.ts';
 import { PACKAGE_COMMANDS, commands } from '../src/packages/commands.ts';
-import type { ProjectPackages, PublishResult } from '../src/packages/registry.ts';
+import type { PackageUses, PublishResult } from '../src/packages/registry.ts';
 import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders, removePackage } from '../src/packages/update.ts';
 import { ROOT } from './fixtures.ts';
 
@@ -231,7 +231,7 @@ function project(dir: string, manifest: Record<string, unknown>, graphs: Record<
 const setGraph = (dir: string, name: string, g: GraphSpec) => json(path.join(dir, 'graphs', `${name}.json`), g);
 const editManifest = (dir: string, f: (m: any) => void) => { const m = readJSON(path.join(dir, 'project.json')); f(m); json(path.join(dir, 'project.json'), m); };
 
-interface Opened { engine: Engine; pk: ProjectPackages; ws: Session }
+interface Opened { engine: Engine; pk: PackageUses; ws: Session }
 /** An engine, the packages of the project `dir` belongs to, and a project on it, as the tools open them. */
 async function open(dir: string, follow: string[] = [], builtin?: string): Promise<Opened> {
   const engine = await newEngine(dir);
@@ -1498,9 +1498,9 @@ section('two writers: the project\'s lock around project.json and packages/lock.
   check(/^added nordic\/rocks/.test(a.pk.use('nordic/rocks').text) && !fs.existsSync(lockAt), 'a lock left by a process that ended is taken over, and released after');
   // another process holds it: a write waits for it, and loses nothing
   const held = path.join(tmp, 'two-held');
-  const script = `import { withProjectLock } from ${JSON.stringify(new URL('../src/project.ts', import.meta.url).href)};
+  const script = `import { withPackageLock } from ${JSON.stringify(new URL('../src/package.ts', import.meta.url).href)};
 import fs from 'node:fs';
-withProjectLock(${JSON.stringify(TWO)}, () => { const m = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(TWO, 'project.json'))}, 'utf8')); m.title = 'held'; fs.writeFileSync(${JSON.stringify(path.join(TWO, 'project.json'))}, JSON.stringify(m)); fs.writeFileSync(${JSON.stringify(held)}, 'x'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); });`;
+withPackageLock(${JSON.stringify(TWO)}, () => { const m = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(TWO, 'project.json'))}, 'utf8')); m.title = 'held'; fs.writeFileSync(${JSON.stringify(path.join(TWO, 'project.json'))}, JSON.stringify(m)); fs.writeFileSync(${JSON.stringify(held)}, 'x'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); });`;
   const child = (await import('node:child_process')).spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: 'ignore' });
   const t0 = Date.now();
   while (!fs.existsSync(held) && Date.now() - t0 < 10_000) await new Promise((r) => setTimeout(r, 20));

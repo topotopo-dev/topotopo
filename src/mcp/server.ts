@@ -19,9 +19,9 @@ import { libraryTool } from './library.ts';
 import { INSTRUCTIONS } from './docs.ts';
 import { startViewer } from '../viewer/server.ts';
 import type { Viewer } from '../viewer/server.ts';
-import { startProject, setProgram } from '../project.ts';
-import { openProject } from '../open.ts';
-import type { ProjectPackages } from '../packages/registry.ts';
+import { startPackage, setProgram } from '../package.ts';
+import { openPackage } from '../open.ts';
+import type { PackageUses } from '../packages/registry.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
@@ -37,8 +37,8 @@ setProgram(import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo');
 // itself (graphs/, assets/, exports/, inputs/), or nothing at all, as a new one does: then its graphs use packages,
 // TopoTopo's own among them, as they come. A folder in a project works in that project's folder. A folder with
 // anything else in it (a repository, a folder of the person's) stays as it is: library {action:"init"} makes it a
-// project when the person says so (startProject, src/project.ts). The first tool reply says what happened.
-const start = startProject(path.resolve(named ?? path.join(process.cwd(), 'topotopo')), named ? {} : { name: path.basename(process.cwd()) });
+// project when the person says so (startPackage, src/project.ts). The first tool reply says what happened.
+const start = startPackage(path.resolve(named ?? path.join(process.cwd(), 'topotopo')), named ? {} : { name: path.basename(process.cwd()) });
 log(start.log);
 const wsDir = start.dir;
 let firstNote = start.note;
@@ -49,7 +49,7 @@ let firstNote = start.note;
 // (Session.watch: the gallery's editor, a person editing JSON). The packages a session follows (library
 // {action:"follow"}) resolve to their working folders as they are at each cook; the live viewer cooks its graphs again
 // when one of those folders changes.
-let engine: Engine, ws: Session, packages: ProjectPackages, tools: ToolDef[];
+let engine: Engine, ws: Session, packages: PackageUses, tools: ToolDef[];
 let viewer: Viewer | null = null;
 const ensureViewer = async () => {
   if (!viewer) { viewer = await startViewer(ws); log('preview at', viewer.url); }
@@ -61,7 +61,7 @@ async function openSession(dir: string) {
   if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) e.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
   if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) e.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
   await e.init();
-  const { session: w, packages: pk, loaded } = openProject(e, dir, { watch: true });
+  const { session: w, packages: pk, loaded } = openPackage(e, dir, { watch: true });
   log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.uses()).length} packages used` : '; in no project'}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
   for (const x of loaded.graphErrors) log('graph not read:', x);

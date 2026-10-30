@@ -67,7 +67,7 @@ import type { ExportFormat } from './io/export.ts';
 import { exportSource } from './io/source.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { PACKAGE_COMMANDS } from './packages/commands.ts';
-import { setProgram } from './project.ts';
+import { setProgram } from './package.ts';
 import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
 import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';

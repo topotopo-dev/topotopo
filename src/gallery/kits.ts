@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { BUILTIN_LIBRARY } from '../config.ts';
-import { readManifest } from '../project.ts';
+import { readManifest } from '../package.ts';
 import { builtinVersions, isDefaultOutput } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 
