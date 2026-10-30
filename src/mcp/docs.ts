@@ -1053,18 +1053,43 @@ THE CLI COMMANDS (a folder named must exist; without one, the current folder's p
 ${PACKAGE_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
-  uv_project   planar/box/cylindrical/spherical projection. Fast, no packing; boxes and simple shapes.
+  uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):
+               tiling textures, boxes. box: each polygon along the axis its normal is closest to (X faces u = z, v = y;
+               Y faces u = x, v = z; Z faces u = x, v = y); both sides of an axis share it, so faces looking along +X,
+               +Y and -Z are MIRRORED (text reads backwards; inspect uv counts them) and -X, -Y, +Z read right.
   uv_unwrap    automatic (xatlas): cuts charts by angle/cost, flattens and packs into 0..1. Default for props and
-               hard-surface. Keeps polygons; writes prim chart. use_seams:true keeps existing seams as chart borders.
-               Big smooth meshes chart slowly: max_chart_area -1 (auto) caps chart size above ~1000 triangles.
+               hard-surface. Keeps polygons; writes prim chart. Each connected piece is charted on its own; polygons
+               xatlas cuts across charts become triangles (exact uv); faces with no area collapse onto a neighbour's
+               chart (never to uv 0,0); folded charts are charted again or cut; thin charts (bevel strips) join a
+               neighbour (merge_thin); charts longer than the tile, rings and arcs are cut when that packs denser
+               (cut_long). The result is checked and warnings name the part. use_seams:true keeps existing seams.
+               Big smooth meshes chart slowly: max_chart_area -1 (auto) caps chart size above ~1000 triangles; a higher
+               max_cost makes fewer, larger charts (less space lost to padding).
   uv_flatten   LSCM (conformal) per chart, charts bounded by YOUR seams: uv discontinuities (use_seams), the
                "seams" edge group, point pairs ({"seams": [[a,b],[b,c]]}), a prim chart attribute, the group border.
                Closed charts / handles are cut open automatically (cut_closed). pins: [a,b] fixes orientation.
   uv_autoseam  experimental: proposes charts (xatlas or normal clustering) → prim chart + point seam; then uv_flatten.
-  uv_layout    (re)pack islands: min-area rotation, uniform texel density (scale_mode), padding in texels at
-               resolution, udims N for UDIM tiles 1001.. ; island_attrib "chart" packs by chart. Writes prim island.
+  uv_layout    (re)pack islands without overlaps: island_attrib "chart" packs by chart; writes prim island. Islands that
+               do not fit at any scale leave the uv unchanged, with a warning (never a silent overlap).
   uv_transform translate/scale/rotate existing uv.
+Packing (uv_unwrap and uv_layout): islands on the texel grid of resolution, padding texels apart (half of it to the tile
+  border), uniform texel density (uv area ∝ 3D area), every gap filled (inside rings, between arms).
+  orient: min_rect (densest; 90° turns allowed) | world (world up +Y → +v, horizontal islands +X → +u; no turns) |
+    keep (as it is; no turns). Rotations never mirror.
+  texel_weight: a prim float attribute scaling density per island (2 = twice the texels per metre; <= 0 counts as 1):
+    attrib_create {name:"texel_weight", class:"prim", value:2, group:"@name=sight"} gives the sight more texels.
+  texels_per_unit (0 = largest that fits) with fit: atlas (default: everything in 0..1, the density lowered if needed,
+    with a warning) | udim (keep the density, spill into tiles 1001, 1002 …; uv_layout up to udims) | stack (uv_unwrap:
+    more atlases, all in 0..1, prim atlas).
+Rails, ladders, pipes (long thin parts): orient min_rect lays each strip along the tile and the packer stacks the strips
+  side by side, filling the gaps with small charts; leave cut_long on (a chart longer than the tile is cut into parts)
+  and merge_thin on (bevel strips join the face beside them). Every chart loses a padding border, so fewer, wider charts
+  fill more: unwrap with a higher max_cost, or give a part your own seams (use_seams). inspect uv names the lowest and
+  highest density charts: compare them to spot a part that came out too coarse.
 Typical: geo → uv_unwrap → render {views:"quad_uv", checker:true}.  Manual: delete uv → uv_flatten {seams:[...]} → uv_layout.
+LODs: decimate / lod after uv_unwrap keep the uv free of folds (keep_uv, default on: where a collapse would fold the uv
+  they reduce in steps around it, so a level can stop above its target; the warning names the parts). The full
+  reduction: reduce first, then uv_unwrap each level.
 SEE IT: render views "uv" (or "quad_uv" = persp + uv): the 0..1 square with a 0.1 grid and UDIM labels, polygons filled
 by chart/island colour, island borders yellow, overlapping uv in RED (footer/notes give the overlap %); overlap that is
 expected is amber: charts of a repeating texture (they run across tile borders: the label says TILING) and LODs that
@@ -1077,8 +1102,9 @@ overlap.inTile (between atlas charts, each inside one tile: what a bake suffers)
 tile borders, as uv_project over many tiles does: a repeating texture, flagged tiling:true; expected) and
 overlap.acrossLods (prims named _lod0 / _lod1 … share the uv space on purpose); collapsed / non-finite / out-of-tile
 triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, utilization (exact for a
-clean atlas in 0..1, else a labelled raster ESTIMATE) and per-piece (prim "name") surface, uv area and texel density.
-An analysis that hits its bounds says INCOMPLETE.
+clean atlas in 0..1, else a labelled raster ESTIMATE; tileUtilization per UDIM tile), texel density (density: overall,
+per chart 5 % / median / 95 %, the lowest and highest chart and where; texels/m with a resolution) and per-piece
+(prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
 CLI: --inspect uv --uv-resolution 1024 [--json].
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 

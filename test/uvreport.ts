@@ -1,6 +1,7 @@
 // Structured uv report (core/uvreport.ts, inspect detail "uv"): shared edges are not overlaps, overlapping and
 // mirrored charts, folds inside one chart, collapsed / missing / non-finite uv, out-of-tile triangles, large triangle
-// ids, exact vs estimated utilization, texel density per piece, bounded work that says it is incomplete.
+// ids, exact vs estimated utilization (and per UDIM tile), texel density per chart and per piece, bounded work that says it
+// is incomplete.
 //   node test/uvreport.ts
 import '../src/nodes/index.ts';
 import { GeoBuilder } from '../src/core/geometry.ts';
@@ -139,6 +140,24 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   check(/prim \d of "(lid|base)" at \(\d\.\d{3}, 0\.000, 0\.\d{3}\) × prim \d of "(lid|base)" at \(/.test(w), `overlap examples name the parts and world positions (${w})`);
   const col = uvReport(mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'a'), { P: [[3, 0, 0], [4, 0, 0], [4, 0, 1]], uv: [[0.6, 0.6], [0.7, 0.7], [0.8, 0.8]], name: 'strap' }]));
   check(/^prim 1 of "strap" at \(3\.667, 0\.000, 0\.333\)$/.test(col.firstCollapsed ?? ''), `the first collapsed triangle is named with its position (${col.firstCollapsed})`);
+}
+
+// texel density over the charts (overall, by area: 5 % / median / 95 %, the lowest and highest chart and where) and the
+// covered share of each UDIM tile
+{
+  // 1 m² quads: "fine" at 0.5 uv per metre in tile 1001, "coarse" at 0.3 in tile 1002
+  const g = mesh([quad(0, 0, 0.1, 0.1, 0.6, 0.6, 'fine'), quad(5, 0, 1.1, 0.1, 1.4, 0.4, 'coarse')]);
+  const r = uvReport(g, { resolution: 1000 }), d = r.density!;
+  check(!!d && d.unit === 'texels/m' && d.charts === 2 && near(d.min, 300, 1e-9) && near(d.max, 500, 1e-9) && near(d.overall, Math.sqrt((0.25 + 0.09) / 2) * 1000, 1e-9),
+    `density: overall ${d?.overall.toFixed(1)}, lowest ${d?.min} at ${d?.lowest}, highest ${d?.max}`);
+  check(/of "coarse"/.test(d?.lowest ?? '') && /of "fine"/.test(d?.highest ?? '') && near(d.p05, 300, 1e-9) && near(d.p95, 500, 1e-9), 'density: the lowest and highest charts are named; percentiles by area');
+  check(r.tileUtilization.length === 2 && r.tileUtilization[0].tile === 1001 && near(r.tileUtilization[0].value, 0.25) && r.tileUtilization[1].tile === 1002 && near(r.tileUtilization[1].value, 0.09), `per tile: ${r.tileUtilization.map((t) => `${t.tile} ${t.value}`).join(', ')}`);
+  const plain = uvReport(g);
+  check(plain.density?.unit === 'uv/m' && near(plain.density.max, 0.5, 1e-12), 'density without a resolution is in uv units per metre');
+  const text = inspect(g, { detail: 'uv', uvResolution: 1000 });
+  check(/texel density \(texels\/m at 1000×1000\): 412\.3 over 2 charts/.test(text) && /utilization per tile: 1001 25\.0%, 1002 9\.0%/.test(text), 'inspect uv prints the density and the per-tile lines');
+  const one = uvReport(mesh([quad(0, 0, 0.1, 0.1, 0.6, 0.6, 'a')]));
+  check(one.tileUtilization.length === 0, 'one tile: no per-tile list (utilization says it)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

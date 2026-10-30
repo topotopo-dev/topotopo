@@ -23,6 +23,7 @@ import type { GraphSpec, NodeDef, NodeSpec, ParamDef } from '../src/graph/types.
 import { INPUTS, PARAMS, SKIP, addFixture, checkGeo, createFixtureEngine } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff } from './fingerprint.ts';
 import { spatialProperties } from './spatial-props.ts';
+import { uvPackProperties } from './uvpack-props.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -61,7 +62,7 @@ const LIMITS: Record<string, Record<string, [number, number] | 'keep'>> = {
   slice: { count: [1, 10] },
   bound: { divisions: [1, 3] },
   sdf_modify: { count: [1, 3], octaves: [1, 4] },
-  uv_unwrap: { max_iterations: [1, 2], resolution: 'keep', texels_per_unit: 'keep', padding: [0, 8], bruteforce: 'keep', max_boundary_length: 'keep' },
+  uv_unwrap: { max_iterations: [1, 2], resolution: 'keep', texels_per_unit: 'keep', padding: [0, 8], iterations: [1, 3], max_boundary_length: 'keep' },
   uv_autoseam: { max_cost: [0.5, 4] },
   uv_layout: { iterations: [1, 4], udims: [1, 4] },
   heightfield_from_mesh: { resolution: [0.02, 0.5] },
@@ -322,6 +323,10 @@ if (ONLY === undefined) {
   const ts = performance.now();
   spatialProperties(SEED, 90, (cond, msg) => { if (!cond) failures++; console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); });
   console.log(`(spatial checks ${((performance.now() - ts) / 1000).toFixed(1)}s)\n`);
+  // uv packing: skyline rects and raster-packed islands never overlap and keep their padding
+  const tu = performance.now();
+  uvPackProperties(SEED, 30, (cond, msg) => { if (!cond) failures++; console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); });
+  console.log(`(uv packing checks ${((performance.now() - tu) / 1000).toFixed(1)}s)\n`);
 }
 
 const indices = ONLY !== undefined ? [ONLY] : Array.from({ length: COUNT }, (_, i) => i);

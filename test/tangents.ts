@@ -236,7 +236,8 @@ await loadMikkTSpace();
   const img = [...referenceableImages(await cook(nodes, 'tn')).values()][0];
   const c = img.layer('C')!, mask = img.layer('mask')!;
   let grey = 0, n = 0;
-  for (let px = 0; px < R * R; px++) if (mask[px] >= 1) { n++; if (c[px * 4 + 2] < 0.6) grey++; }
+  // grey: a zero normal encodes as (0.5, 0.5, 0.5); a texel on a corner of a face may tilt far (the bevel) but keeps a direction
+  for (let px = 0; px < R * R; px++) if (mask[px] >= 1) { n++; if (Math.hypot(c[px * 4] - 0.5, c[px * 4 + 1] - 0.5, c[px * 4 + 2] - 0.5) < 0.2) grey++; }
   check(n > 0 && grey === 0, `bake_normal: a merged high mesh whose N is partly zero bakes no grey texels (${grey} of ${n})`);
 }
 
