@@ -1,0 +1,68 @@
+{
+  "description": "Worn painted metal from the texture nodes, every distance in metres on a 1 m texture: bolted plates from SDF shapes (tex_sdf_shape boxes with round corners, rivets kept to a band along the plate edges by tex_sdf_op and tex_sdf_boolean, bevelled by tex_sdf_to_mask), a slightly different paint per plate from tex_flood_fill and tex_histogram_range, edge wear where tex_curvature finds convex edges, broken up by tex_grunge and made ragged by tex_slope_blur, brushed steel under the paint from tex_directional_blur (its grain blended into the normal map only where the metal shows), rust running down from every rivet (a one-sided directional blur times grunge leaks), tex_ao in the seams, and an ORM map. The cabinet is box-projected at 1 m per uv tile, so the texture's size of 1 m is true on the model; the render shows it next to the material's maps.",
+  "meta": { "render": { "views": ["persp", "texture"], "textures": true, "azimuth": 35, "elevation": 15 } },
+  "nodes": {
+    "cabinet": { "type": "box", "params": { "size": [1.2, 1.6, 0.6], "center": [0, 0.8, 0] } },
+    "cabinet_uv": { "type": "uv_project", "in": ["cabinet"], "params": { "method": "box", "scale": [1, 1] } },
+
+    "plates": { "type": "tex_sdf_shape", "params": { "resolution": 512, "shape": "box", "extent": [0.46, 0.46], "corner": 0.025, "tile": [2, 2], "name": "plates" } },
+    "rivet_grid": { "type": "tex_sdf_shape", "params": { "resolution": 512, "shape": "disc", "radius": 0.011, "tile": [8, 8], "name": "rivet_grid" } },
+    "edge_band": { "type": "tex_sdf_op", "in": ["plates"], "params": { "mode": "offset", "amount": -0.035 } },
+    "rivet_band": { "type": "tex_sdf_op", "in": ["edge_band"], "params": { "mode": "stroke", "amount": 0.07 } },
+    "rivets": { "type": "tex_sdf_boolean", "in": ["rivet_grid", "rivet_band"], "params": { "mode": "intersect" } },
+    "plate_relief": { "type": "tex_sdf_to_mask", "in": ["plates"], "params": { "mode": "bevel", "width": 0.012, "profile": "round" } },
+    "plate_low": { "type": "tex_levels", "in": ["plate_relief"], "params": { "out_high": 0.7 } },
+    "rivet_relief": { "type": "tex_sdf_to_mask", "in": ["rivets"], "params": { "mode": "bevel", "width": 0.009, "profile": "round" } },
+    "dents": { "type": "tex_noise", "params": { "resolution": 512, "scale": 10, "octaves": 4, "seed": 5, "name": "dents" } },
+    "relief": { "type": "tex_blend", "in": ["plate_low", "rivet_relief"], "params": { "mode": "add", "opacity": 0.3 } },
+    "height": { "type": "tex_blend", "in": ["relief", "dents"], "params": { "mode": "add", "opacity": 0.04, "clamp": false } },
+    "base_normal": { "type": "tex_normal_from_height", "in": ["height"], "params": { "depth": 0.006, "size": 1 } },
+    "ao": { "type": "tex_ao", "in": ["height"], "params": { "radius": 0.03, "depth": 0.006, "directions": 8, "steps": 8 } },
+
+    "curvature": { "type": "tex_curvature", "in": ["base_normal"], "params": { "radius": 0.004 } },
+    "edges": { "type": "tex_output", "in": ["curvature"], "params": { "layer": "convex", "keep_only": true } },
+    "chips": { "type": "tex_grunge", "params": { "resolution": 512, "style": "dirt", "scale": 12, "coverage": 0.5, "contrast": 0.7, "seed": 3, "name": "chips" } },
+    "flow": { "type": "tex_noise", "params": { "resolution": 512, "scale": 14, "octaves": 3, "seed": 8, "name": "flow" } },
+    "edge_chips": { "type": "tex_blend", "in": ["edges", "chips"], "params": { "mode": "multiply" } },
+    "ragged": { "type": "tex_slope_blur", "in": ["edge_chips", "flow"], "params": { "distance": 0.008, "samples": 12, "mode": "max" } },
+    "scratches": { "type": "tex_scratches", "params": { "resolution": 512, "count": 40, "length": [0.03, 0.1], "width": 0.002, "angle": 15, "spread": 40, "intensity": [0.2, 0.6], "seed": 4, "name": "scratches" } },
+    "wear_raw": { "type": "tex_blend", "in": ["ragged", "scratches"], "params": { "mode": "max" } },
+    "wear": { "type": "tex_histogram_scan", "in": ["wear_raw"], "params": { "coverage": 0.07, "contrast": 0.95 } },
+    "paint_mask": { "type": "tex_invert", "in": ["wear"] },
+
+    "grain": { "type": "tex_noise", "params": { "resolution": 512, "scale": 90, "octaves": 3, "seed": 6, "name": "grain" } },
+    "brushed": { "type": "tex_directional_blur", "in": ["grain"], "params": { "length": 0.15, "angle": 0 } },
+    "brushed_normal": { "type": "tex_normal_from_height", "in": ["brushed"], "params": { "depth": 0.0004, "size": 1 } },
+    "normal": { "type": "tex_normal_blend", "in": ["base_normal", "brushed_normal", "wear"], "params": { "mode": "rnm" } },
+
+    "plate_mask": { "type": "tex_sdf_to_mask", "in": ["plates"] },
+    "plate_ids": { "type": "tex_flood_fill", "in": ["plate_mask"], "params": { "output": "random", "seed": 2 } },
+    "plate_tint": { "type": "tex_histogram_range", "in": ["plate_ids"], "params": { "range": 0.6, "position": 0.5 } },
+    "paint": { "type": "tex_colorize", "in": ["plate_tint"], "params": { "ramp": [[0, "#24504f"], [0.5, "#2e6462"], [1, "#3b7570"]] } },
+    "steel": { "type": "tex_colorize", "in": ["brushed"], "params": { "ramp": [[0, "#5f5f5c"], [1, "#a6a5a0"]] } },
+    "painted": { "type": "tex_blend", "in": ["steel", "paint", "paint_mask"], "params": { "mode": "normal" } },
+
+    "rivet_mask": { "type": "tex_sdf_to_mask", "in": ["rivets"], "params": { "softness": 0.004 } },
+    "runs": { "type": "tex_directional_blur", "in": ["rivet_mask"], "params": { "length": 0.16, "angle": -90, "symmetric": false } },
+    "leaks": { "type": "tex_grunge", "params": { "resolution": 512, "style": "leaks", "scale": 10, "coverage": 0.45, "contrast": 0.5, "seed": 9, "name": "leaks" } },
+    "rust_runs": { "type": "tex_blend", "in": ["runs", "leaks"], "params": { "mode": "multiply" } },
+    "rust_mask": { "type": "tex_levels", "in": ["rust_runs"], "params": { "in_high": 0.15 } },
+    "rust": { "type": "tex_colorize", "in": ["leaks"], "params": { "ramp": [[0, "#4a2414"], [1, "#8a4a22"]] } },
+    "rusty": { "type": "tex_blend", "in": ["painted", "rust", "rust_mask"], "params": { "mode": "normal", "opacity": 0.85 } },
+    "metal_color": { "type": "tex_blend", "in": ["rusty", "ao"], "params": { "mode": "multiply", "opacity": 0.9, "name": "metal_color" } },
+
+    "paint_rough": { "type": "tex_histogram_range", "in": ["chips"], "params": { "range": 0.2, "position": 0.55 } },
+    "steel_rough": { "type": "tex_histogram_range", "in": ["brushed"], "params": { "range": 0.25, "position": 0.3 } },
+    "rough_worn": { "type": "tex_blend", "in": ["paint_rough", "steel_rough", "wear"], "params": { "mode": "normal" } },
+    "rust_rough": { "type": "tex_constant", "in": ["rough_worn"], "params": { "value": 0.9 } },
+    "rough": { "type": "tex_blend", "in": ["rough_worn", "rust_rough", "rust_mask"], "params": { "mode": "normal" } },
+    "no_metal": { "type": "tex_constant", "in": ["wear"], "params": { "value": 0 } },
+    "metallic": { "type": "tex_blend", "in": ["wear", "no_metal", "rust_mask"], "params": { "mode": "normal" } },
+    "metal_orm": { "type": "tex_channel", "in": ["ao", "rough", "metallic"], "params": { "name": "metal_orm" } },
+    "metal_normal": { "type": "tex_output", "in": ["normal"], "params": { "name": "metal_normal", "keep_only": true } },
+
+    "maps": { "type": "merge", "in": ["metal_color", "metal_normal", "metal_orm"] },
+    "out": { "type": "texture_to_material", "in": ["cabinet_uv", "maps"], "params": { "material": "worn_paint", "base_color": "metal_color", "normal": "metal_normal", "orm": "metal_orm" } }
+  },
+  "output": "out"
+}

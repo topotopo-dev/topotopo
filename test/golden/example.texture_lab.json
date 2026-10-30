@@ -1,0 +1,87 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["material:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.6, 1.6, 0.3],
+      "min": [-0.6, 0, -0.3]
+    },
+    "counts": {
+      "points": 8,
+      "prims": 6,
+      "vertices": 24,
+      "volumes": 3
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "c0eb94a5ee1949bf",
+      "attributes": {
+        "detail.materials": "421f759b8b5730ed",
+        "prim.material": "df730df53f92183f",
+        "vertex.uv": "95a19fdd873475b7"
+      },
+      "topology": "508d91e0a87c69fa"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "2cbc6f9acbaf1860"
+        },
+        "name": "metal_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "73f23e78e1ed4a52"
+        },
+        "name": "metal_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "48af55de2d40898c"
+        },
+        "name": "metal_orm"
+      }
+    ]
+  },
+  "name": "example.texture_lab",
+  "ok": true,
+  "source": "examples/texture_lab.json",
+  "warnings": []
+}

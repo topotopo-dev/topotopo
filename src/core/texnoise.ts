@@ -47,8 +47,11 @@ export function value2(seed: number, px = 0, py = 0): Noise2 {
   };
 }
 
-/** Result of a cellular query: distances to the nearest and second nearest feature point and the nearest cell's hash. */
-export interface CellHit { f1: number; f2: number; id: number; cx: number; cy: number }
+/**
+ * Result of a cellular query: distances to the nearest and second nearest feature point, the nearest cell's hash and
+ * (wrapped) lattice cell, and the offset (ex, ey) from the sample to the nearest feature point.
+ */
+export interface CellHit { f1: number; f2: number; id: number; cx: number; cy: number; ex: number; ey: number }
 
 /**
  * Cellular (Worley) noise: one feature point per lattice cell, jittered by `jitter` (0 = regular grid, 1 = anywhere in
@@ -60,7 +63,7 @@ export function cellular2(seed: number, px = 0, py = 0, jitter = 1, metric = 0):
   const j = Math.max(0, Math.min(1, jitter));
   return (x, y, out) => {
     const xf = Math.floor(x), yf = Math.floor(y);
-    let f1 = Infinity, f2 = Infinity, id = 0, bx = 0, by = 0;
+    let f1 = Infinity, f2 = Infinity, id = 0, bx = 0, by = 0, oex = 0, oey = 0;
     for (let dy = -1; dy <= 1; dy++)
       for (let dx = -1; dx <= 1; dx++) {
         const cx = xf + dx, cy = yf + dy;
@@ -69,9 +72,9 @@ export function cellular2(seed: number, px = 0, py = 0, jitter = 1, metric = 0):
         const fx = cx + 0.5 + (((h & 0xffff) / 65536) - 0.5) * j, fy = cy + 0.5 + (((h2 & 0xffff) / 65536) - 0.5) * j;
         const ex = fx - x, ey = fy - y;
         const d = metric === 1 ? Math.abs(ex) + Math.abs(ey) : metric === 2 ? Math.max(Math.abs(ex), Math.abs(ey)) : Math.sqrt(ex * ex + ey * ey);
-        if (d < f1) { f2 = f1; f1 = d; id = h; bx = wrap(cx, px); by = wrap(cy, py); } else if (d < f2) f2 = d;
+        if (d < f1) { f2 = f1; f1 = d; id = h; bx = wrap(cx, px); by = wrap(cy, py); oex = ex; oey = ey; } else if (d < f2) f2 = d;
       }
-    out.f1 = f1; out.f2 = f2; out.id = id; out.cx = bx; out.cy = by;
+    out.f1 = f1; out.f2 = f2; out.id = id; out.cx = bx; out.cy = by; out.ex = oex; out.ey = oey;
     return out;
   };
 }
@@ -213,7 +216,7 @@ export function texNoise(o: TexNoiseOptions): (u: number, v: number) => number {
       fns.push((u, v) => n2(u * fx + ox, v * fy + oy));
     } else if (o.noise === 'worley') {
       const c = cellular2(seed, px, py, o.jitter ?? 1);
-      const hit: CellHit = { f1: 0, f2: 0, id: 0, cx: 0, cy: 0 };
+      const hit: CellHit = { f1: 0, f2: 0, id: 0, cx: 0, cy: 0, ex: 0, ey: 0 };
       fns.push((u, v) => Math.min(1, c(u * fx + ox, v * fy + oy, hit).f1 / 0.85) * 2 - 1);
     } else {
       const n = o.noise === 'value' ? value2(seed, px, py) : perlin2(seed, px, py);

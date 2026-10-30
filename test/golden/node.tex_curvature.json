@@ -1,0 +1,53 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 32,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "02d55b8d35fbbcb7",
+          "concave": "77af4f0d431f4437",
+          "convex": "8d74a58d752188b7",
+          "id": "dfe46a8d68df27b7"
+        },
+        "name": "target"
+      }
+    ]
+  },
+  "name": "node.tex_curvature",
+  "ok": true,
+  "source": "fixture for node type \"tex_curvature\" (test/fixtures.ts)",
+  "warnings": []
+}
