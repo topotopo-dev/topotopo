@@ -313,7 +313,7 @@ section('the manifest: name, uses, no libraries');
   check(throws(() => parseManifest({ uses: { 'studio/trees': '1' } }, 'x'), /needs a version such as "1\.3"/), 'uses need big.small versions');
   check(throws(() => parseManifest({ uses: { 'studio/trees': '01.0' } }, 'x'), /needs a version/) && throws(() => parseManifest({ uses: { trees: '1.0' } }, 'x'), /not a package name/), 'no leading zeros; keys are package names');
   const gone = errorText(() => parseManifest({ libraries: ['game', '../shared lib'] }, 'x'));
-  check(/^"libraries" is gone from the package manifest: the workspace lists the libraries its packages use \(topotopo workspace library add game; topotopo workspace library add "\.\.\/shared lib"\); outside a workspace every registered library counts\. Remove "libraries"$/.test(gone),
+  check(/^"libraries" is gone from the package manifest: a workspace lists the shared libraries its packages use \(topotopo workspace library add <name or folder>\); outside a workspace every registered library counts; remove "libraries"$/.test(gone),
     `a manifest that still lists libraries is refused, naming where each entry goes now: ${gone}`);
   check(throws(() => parseManifest({ libraries: 'game' }, 'x'), /"libraries" is gone/) && !throws(() => parseManifest({ libraries: [] }, 'x'), /./), 'an empty "libraries" is dropped silently');
   const emptied = path.join(tmp, 'emptied');
@@ -844,9 +844,20 @@ section('errors: unknown outputs, packages no place has, a library the workspace
   editManifest(lonely, (m) => { m.libraries = ['nowhere', '../lib']; });
   const lo = await open(lonely);
   const listedLibs = errorText(() => lo.pk.use('studio/trees'));
-  check(/lonely\.topo: "libraries" is gone from the package manifest: the workspace lists the libraries its packages use \(topotopo workspace library add nowhere; topotopo workspace library add \.\.\/lib\); outside a workspace every registered library counts/.test(listedLibs),
-    `a manifest with "libraries" is refused, naming where each entry goes: ${listedLibs}`);
+  check(/lonely\.topo: "libraries" is gone from the package manifest: outside a workspace every registered library counts \(topotopo library add nowhere <its folder>; "\.\.\/lib" is the registered library "lib", which counts already\); remove "libraries"$/.test(listedLibs),
+    `a manifest with "libraries" outside a workspace is refused: an entry registered counts already, another is registered (${listedLibs})`);
   editManifest(lonely, (m) => { delete m.libraries; });
+  // in a workspace: each entry, its paths read from the package, is listed by the workspace (from outside it, with
+  // --workspace); one inside the workspace needs nothing
+  const OLD = path.join(dirs.valley, 'levels', 'oldlibs');
+  writePackage(OLD, { libraries: ['../../../lib', '../../assets', '../../../vendor-props'] }, {});
+  const inWs = errorText(() => readManifest(OLD));
+  const vendor = path.join(tmp, 'vendor-props');
+  check(inWs.includes(`the workspace lists the shared libraries its packages use (topotopo workspace library add lib --workspace `) && /"\.\.\/\.\.\/assets" \(.*assets\) is inside the workspace, whose packages are found by themselves: nothing to list; /.test(inWs)
+    && inWs.includes(`topotopo workspace library add ${vendor} --workspace `) && /; remove "libraries"$/.test(inWs),
+    `a manifest with "libraries" in a workspace says the command that lists each entry, its folder read from the package (${inWs})`);
+  fs.rmSync(OLD, { recursive: true });
+  forgetScans();
   // no registered library: said
   const cfg = process.env.TOPOTOPO_CONFIG!;
   process.env.TOPOTOPO_CONFIG = path.join(tmp, 'no-config.json');

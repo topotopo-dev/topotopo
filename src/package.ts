@@ -139,8 +139,12 @@ export function parseUses(v: unknown, where = ''): Record<string, string> {
   return Object.fromEntries(Object.entries(v as Record<string, string>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-/** A manifest checked and normalised; throws naming the problem. `id`: the package id, its file's name (the default title). */
-export function parseManifest(raw: any, id: string): PackageManifest {
+/**
+ * A manifest checked and normalised; throws naming the problem. `id`: the package id, its file's name (the default
+ * title); `dir`: the package's folder, when the manifest is read from one (what a manifest that still lists
+ * "libraries" is told depends on where it is).
+ */
+export function parseManifest(raw: any, id: string, dir?: string): PackageManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('a package manifest must be an object');
   if (Object.hasOwn(raw, 'id')) throw new Error('"id": the file\'s name is the package id; remove "id"');
   if (Object.hasOwn(raw, 'package')) throw new Error('"package" is "name" now: rename it');
@@ -160,7 +164,7 @@ export function parseManifest(raw: any, id: string): PackageManifest {
   if (name !== undefined && !isPackageName(name)) throw new Error(`"name" "${name}" must be "owner/name": each part lower-case letters, digits, - and _, starting with a letter or digit`);
   const uses = parseUses(raw.uses);
   // a package lists no libraries: its workspace does (an empty list is dropped)
-  if (raw.libraries !== undefined && !(Array.isArray(raw.libraries) && !raw.libraries.length)) throw new Error(librariesGone(raw.libraries));
+  if (raw.libraries !== undefined && !(Array.isArray(raw.libraries) && !raw.libraries.length)) throw new Error(librariesGone(raw.libraries, dir));
   return {
     graph, bake,
     title: str(raw.title, 'title', id),
@@ -174,13 +178,32 @@ export function parseManifest(raw: any, id: string): PackageManifest {
 }
 
 /**
- * What a manifest that still lists "libraries" is told: where each entry goes now. A workspace lists the libraries its
- * packages find packages in; outside a workspace every registered library counts.
+ * What a manifest that still lists "libraries" is told: where each entry goes now, for the package in `dir` (its
+ * entries' paths were written from it). In a workspace, the workspace lists the shared libraries its packages use:
+ * the command that lists each (a path entry by its folder; one inside the workspace needs nothing, its packages are
+ * found by themselves). Outside a workspace every registered library counts: the command that registers one.
  */
-function librariesGone(v: unknown): string {
+function librariesGone(v: unknown, dir?: string): string {
+  if (!dir) return `"libraries" is gone from the package manifest: a workspace lists the shared libraries its packages use (${program()} workspace library add <name or folder>); outside a workspace every registered library counts; remove "libraries"`;
   const entries = Array.isArray(v) ? v.filter((e): e is string => typeof e === 'string' && !!e.trim()) : [];
-  const how = entries.length ? entries.map((e) => `${program()} workspace library add ${/\s/.test(e) ? JSON.stringify(e) : e}`).join('; ') : `${program()} workspace library add <library>`;
-  return `"libraries" is gone from the package manifest: the workspace lists the libraries its packages use (${how}); outside a workspace every registered library counts. Remove "libraries"`;
+  const q = (s: string) => (/[\s"]/.test(s) ? JSON.stringify(s) : s);
+  const ws = locate(dir).workspace;
+  let registered: { name: string; path: string }[] = [];
+  try { registered = loadConfig().libraries; } catch { /* none to name */ }
+  const said = entries.map((e) => {
+    const k = libraryEntry(e);
+    if ('error' in k) return `"${e}" is no library: ${k.error}`;
+    const abs = 'path' in k ? path.resolve(dir, k.path) : null;
+    const reg = abs ? registered.find((l) => folderKey(l.path) === folderKey(abs)) : registered.find((l) => l.name === e);
+    if (ws) {
+      if (abs && within(abs, ws)) return `"${e}" (${abs}) is inside the workspace, whose packages are found by themselves: nothing to list`;
+      return `${program()} workspace library add ${reg ? reg.name : q(abs ?? e)}${workspaceFlag(ws)}`;
+    }
+    if (reg) return `"${e}" is the registered library "${reg.name}", which counts already`;
+    return abs ? `${program()} library add ${libraryName(abs) ?? (slugify(path.basename(abs)) || 'library')} ${q(abs)}` : `${program()} library add ${e} <its folder>`;
+  });
+  const how = said.length ? said.join('; ') : ws ? `${program()} workspace library add <name or folder>${workspaceFlag(ws)}` : `${program()} library add <name> <folder>`;
+  return `"libraries" is gone from the package manifest: ${ws ? `the workspace lists the shared libraries its packages use (${how})` : `outside a workspace every registered library counts (${how})`}; remove "libraries"`;
 }
 
 /**
@@ -243,7 +266,7 @@ export function readManifest(dir: string): PackageManifest {
 export function readManifestFile(file: string, id: string): PackageManifest {
   let raw: any;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
-  try { return parseManifest(raw, id); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
+  try { return parseManifest(raw, id, path.dirname(file)); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
 }
 
 /**
