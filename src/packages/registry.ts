@@ -740,8 +740,8 @@ function scanPlaces(start: string, builtin: string, store: CopyStore | null): Sc
         problems.push(t.clash);
       }
     } else {
-      // a later place of the same name is told apart by its folder
-      const also = f.place === t.folder.place ? `${f.place} (${path.dirname(f.dir)})` : f.place;
+      // a later place of the same name is told apart by the package's folder in it
+      const also = f.place === t.folder.place ? `${f.place} (${f.dir})` : f.place;
       if (!t.also.includes(also)) t.also.push(also);
     }
   }
