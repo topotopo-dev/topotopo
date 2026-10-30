@@ -226,26 +226,26 @@ section('bake queue (child processes)');
   const m = readWorkspace(game);
   check(m.name === 'ws-game' && m.libraries.join() === './art/lib' && m.engine?.type === 'godot' && m.engine.project === 'godot/project.godot' && m.engine.assets === 'godot/assets/topotopo' && !m.follow,
     `workspace init: the name from the folder, the libraries given, the Godot project found, the assets folder (${made.text.split('\n').join(' | ')})`);
-  const again = initWorkspace(game, { name: 'raven', engine: 'none' });
-  check(again.manifest.name === 'raven' && again.manifest.engine === null && again.manifest.libraries.join() === './art/lib', 'workspace init again changes only what an option says');
+  const again = initWorkspace(game, { name: 'mygame', engine: 'none' });
+  check(again.manifest.name === 'mygame' && again.manifest.engine === null && again.manifest.libraries.join() === './art/lib', 'workspace init again changes only what an option says');
   check(throws(() => initWorkspace(game, { engine: 'godot:nope/project.godot' }), /no file/) && throws(() => initWorkspace(game, { engine: 'blender:x' }), /godot:<path to project.godot>/), 'a wrong --engine says what to write');
-  check(throws(() => parseWorkspace({ name: 'Raven Hunt' }, 'x'), /"name" must be lower-case/) && throws(() => parseWorkspace({ engine: { type: 'godot' } }, 'x'), /"engine" must be/)
+  check(throws(() => parseWorkspace({ name: 'My Game' }, 'x'), /"name" must be lower-case/) && throws(() => parseWorkspace({ engine: { type: 'godot' } }, 'x'), /"engine" must be/)
     && throws(() => parseWorkspace({ follow: 'yes' }, 'x'), /"follow" must be true or false/), 'a malformed workspace file says what is wrong');
   const shown = workspaceText(path.join(game, 'art', 'props', 'crate'));
-  check(/^workspace "raven"/.test(shown) && /engine: none/.test(shown) && /libraries: \.\/art\/lib/.test(shown) && /packages: 1\n  art\/props\/crate  package game\/crate/.test(shown), `workspace: what it is, from a package inside it (${shown.split('\n').slice(0, 3).join(' | ')})`);
+  check(/^workspace "mygame"/.test(shown) && /engine: none/.test(shown) && /libraries: \.\/art\/lib/.test(shown) && /packages: 1\n  art\/props\/crate  package game\/crate/.test(shown), `workspace: what it is, from a package inside it (${shown.split('\n').slice(0, 3).join(' | ')})`);
   check(throws(() => workspaceText(tmp), /is in no workspace: .* workspace init/), 'outside a workspace: how to make one');
   const lines: string[] = [], io = { out: (x: string) => lines.push(x), err: (x: string) => lines.push(`ERR ${x}`) };
   const code = await commands.workspace(['add', game], 'topotopo', io);
   const listed = await commands.workspace(['list'], 'topotopo', io);
-  check(code === 0 && listed === 0 && loadConfig().workspaces.some((w) => w.name === 'raven' && path.resolve(w.path) === path.resolve(game)) && lines.some((l) => /^raven  /.test(l)),
+  check(code === 0 && listed === 0 && loadConfig().workspaces.some((w) => w.name === 'mygame' && path.resolve(w.path) === path.resolve(game)) && lines.some((l) => /^mygame  /.test(l)),
     `workspace add registers it by its name, list shows it (${lines.join(' | ')})`);
   const lib = librariesFor(path.join(game, 'art', 'props', 'crate'));
   check(lib.libs.some((l) => l.from === 'workspace' && path.resolve(l.root) === path.resolve(game, 'art', 'lib')), 'its packages look in the workspace\'s libraries');
   // a new workspace is named after its engine project (a checkout's folder may be called otherwise)
   const co = path.join(tmp, 'checkout-4062d1');
   fs.mkdirSync(path.join(co, 'game'), { recursive: true });
-  fs.writeFileSync(path.join(co, 'game', 'project.godot'), '[application]\n\nconfig/name="Raven Hunt"\nrun/main_scene="res://main.tscn"\n');
-  check(initWorkspace(co).manifest.name === 'raven-hunt', 'a new workspace takes its engine project\'s name');
+  fs.writeFileSync(path.join(co, 'game', 'project.godot'), '[application]\n\nconfig/name="My Game"\nrun/main_scene="res://main.tscn"\n');
+  check(initWorkspace(co).manifest.name === 'my-game', 'a new workspace takes its engine project\'s name');
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);

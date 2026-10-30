@@ -108,7 +108,7 @@ board or concept pages, so the package page and the board link both ways. To fin
 ("a conifer", every terrain): workspace {action:"search", query?, kind?, tag?}.
 
 WORKSPACES: topotopo-workspace.json at the game's root:
-  {"name": "raven-hunt", "libraries": ["./art/topotopo"],
+  {"name": "my-game", "libraries": ["./art/topotopo"],
    "engine": {"type": "godot", "project": "game/project.godot", "assets": "game/assets/topotopo"},
    "follow": false, "uses": {"topotopo/props": "1.1"}}
 Paths are written from the workspace's folder. The person makes one: CLI topotopo workspace init <the game's folder>

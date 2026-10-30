@@ -28,7 +28,7 @@ export interface CheckItem {
 }
 
 export interface CheckResult {
-  /** what was checked: 'workspace "raven-hunt"', "package forest", "the registered libraries" */
+  /** what was checked: 'workspace "my-game"', "package forest", "the registered libraries" */
   scope: string;
   items: CheckItem[];
   /** what could not be read (a library, a workspace file) */

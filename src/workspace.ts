@@ -3,7 +3,7 @@
 // whether the game's own packages are followed live for looking, and the one version of each package the whole game
 // uses: its packages share one copy of it, in topotopo-packages/ beside the file (a package that publishes versions keeps
 // its own copies: its uses are published with it).
-//   {"name": "raven-hunt", "libraries": ["./art/topotopo"],
+//   {"name": "my-game", "libraries": ["./art/topotopo"],
 //    "engine": {"type": "godot", "project": "game/project.godot", "assets": "game/assets/topotopo"}, "follow": false,
 //    "uses": {"topotopo/props": "1.1"}}
 // Paths are written from the workspace's folder. package.ts finds the workspace around a package (locate), the
@@ -45,7 +45,7 @@ const SKIP = new Set(['node_modules', '.git', '.godot', '.import', 'Binaries', '
 export function parseWorkspace(raw: any, fallbackName: string): WorkspaceManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${WORKSPACE_FILE} must be an object`);
   const name = raw.name === undefined ? fallbackName : raw.name;
-  if (typeof name !== 'string' || !ID_RE.test(name)) throw new Error(`${WORKSPACE_FILE}: "name" must be lower-case letters, digits, - and _ ("raven-hunt"), got ${JSON.stringify(name)}`);
+  if (typeof name !== 'string' || !ID_RE.test(name)) throw new Error(`${WORKSPACE_FILE}: "name" must be lower-case letters, digits, - and _ ("my-game"), got ${JSON.stringify(name)}`);
   const libraries = raw.libraries ?? [];
   if (!Array.isArray(libraries) || libraries.some((l: unknown) => typeof l !== 'string')) throw new Error(`${WORKSPACE_FILE}: "libraries" must be a list of paths from the workspace ("./art/topotopo") and registered library names`);
   let engine: EngineLink | null = null;
@@ -153,7 +153,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   const had = fs.existsSync(path.join(abs, WORKSPACE_FILE));
   const m: WorkspaceManifest = had ? readWorkspace(abs) : { name: slugify(path.basename(abs)) || 'workspace', libraries: [], engine: null, follow: false, uses: {} };
   if (o.name !== undefined) {
-    if (!ID_RE.test(o.name)) throw new Error(`--name "${o.name}": lower-case letters, digits, - and _ ("raven-hunt")`);
+    if (!ID_RE.test(o.name)) throw new Error(`--name "${o.name}": lower-case letters, digits, - and _ ("my-game")`);
     m.name = o.name;
   }
   for (const l of o.libraries ?? []) {
