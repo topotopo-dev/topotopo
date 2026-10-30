@@ -17,7 +17,7 @@ const PostImport := preload("instances_post_import.gd")
 const ExportFilter := preload("export_filter.gd")
 const ContextMenu := preload("context_menu.gd")
 const Inspector := preload("inspector.gd")
-const Dock := preload("dock.gd")
+const Dock := preload("dock.tscn")
 const Watcher := preload("watcher.gd")
 
 const SETTING := "filesystem/import/topotopo/"
@@ -51,10 +51,11 @@ var _batch_depth := 0
 var _batch := PackedStringArray()
 ## Files a cook wrote, to import (res:// -> true when the import waits for the focus rule).
 var _pending := {}
-## .topo files to import again so their status resource matches the record (res:// -> true).
+## .topo files whose status resource may be behind their record: res:// -> {gated (waits for the focus rule),
+## written (a cook rewrote the record)}.
 var _refresh := {}
-## The record's md5 each .topo's last import saw (res:// -> md5).
-var _imported_record := {}
+## What each .topo's last import saw (res:// -> {record: the record's md5, state: its freshness state}).
+var _imported := {}
 var _said_missing := false
 var _said_skipped := {}
 var _viewers := {}
@@ -90,24 +91,36 @@ func _enter_tree() -> void:
 	_watcher.host = self
 	add_child(_watcher)
 	if not headless:
-		_context_menu = ContextMenu.new()
-		_context_menu.host = self
-		add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _context_menu)
-		_inspector = Inspector.new()
-		_inspector.host = self
-		add_inspector_plugin(_inspector)
-		_dock = Dock.new()
-		_dock.host = self
-		add_dock(_dock)
-		_menu = PopupMenu.new()
-		_menu.add_item("Cook Stale Packages", 0)
-		_menu.add_item("Recook All", 1)
-		_menu.add_separator()
-		_menu.add_item("Show TopoTopo Panel", 2)
-		_menu.id_pressed.connect(_on_menu)
-		add_tool_submenu_item(MENU, _menu)
-		EditorInterface.get_editor_settings().settings_changed.connect(_on_settings_changed)
+		add_window_parts()
 	_startup()
+
+
+## The parts of the editor's window: the context menu, the inspector header, the panel, Project > Tools > TopoTopo, and
+## the reaction to settings. A headless editor (--import, --export-*) has none, and cooks before its first scan
+## instead of in the background; the tests add them to a headless editor to drive the window's flow.
+func add_window_parts() -> void:
+	if _dock:
+		return
+	headless = false
+	_context_menu = ContextMenu.new()
+	_context_menu.host = self
+	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _context_menu)
+	_inspector = Inspector.new()
+	_inspector.host = self
+	add_inspector_plugin(_inspector)
+	_dock = Dock.instantiate()
+	_dock.host = self
+	add_dock(_dock)
+	_menu = PopupMenu.new()
+	_menu.add_item("Cook Stale Packages", 0)
+	_menu.add_item("Recook All", 1)
+	_menu.add_separator()
+	_menu.add_item("Show TopoTopo Panel", 2)
+	_menu.id_pressed.connect(_on_menu)
+	add_tool_submenu_item(MENU, _menu)
+	EditorInterface.get_editor_settings().settings_changed.connect(_on_settings_changed)
+	if _watcher:
+		_watcher.rebaseline()
 
 
 func _exit_tree() -> void:
@@ -116,7 +129,7 @@ func _exit_tree() -> void:
 		efs.resources_reimporting.disconnect(_on_reimporting)
 		efs.resources_reimported.disconnect(_on_reimported)
 		efs.filesystem_changed.disconnect(_on_filesystem_changed)
-	if not headless and EditorInterface.get_editor_settings().settings_changed.is_connected(_on_settings_changed):
+	if EditorInterface.get_editor_settings().settings_changed.is_connected(_on_settings_changed):
 		EditorInterface.get_editor_settings().settings_changed.disconnect(_on_settings_changed)
 	runner.kill_all()
 	for v in _viewers.values():
@@ -183,12 +196,25 @@ func _on_settings_changed() -> void:
 		var where_changed: bool = s.topotopo_path != runner.settings.topotopo_path or s.node_path != runner.settings.node_path
 		runner.settings = s
 		if where_changed:
-			runner.reset()
-			_said_missing = false
-			check_all()
+			_look_again()
 		packages_changed.emit()
 	elif es.check_changed_settings_in_group(UNFOCUSED):
 		packages_changed.emit()
+		queue_flush()
+
+
+## Look for TopoTopo again (where it is was set): check every package, and cook the stale ones once it is found.
+func _look_again() -> void:
+	runner.reset()
+	_said_missing = false
+	check_all()
+	if runner.found() and bool(runner.settings.get("live_cook", true)) and _watcher:
+		var stale := []
+		for t in packages:
+			if is_stale(packages[t].fresh) and not packages[t].copy and not packages[t].root:
+				stale.append(t)
+		if stale.size():
+			_watcher.cook_background(stale, false)
 
 
 ## Godot's own "Import Resources When Unfocused".
@@ -205,9 +231,7 @@ func set_import_when_unfocused(on: bool) -> void:
 func locate(path: String) -> void:
 	EditorInterface.get_editor_settings().set_setting(SETTING + "topotopo_path", path)
 	runner.settings = editor_settings()
-	runner.reset()
-	_said_missing = false
-	check_all()
+	_look_again()
 	packages_changed.emit()
 
 
@@ -322,6 +346,8 @@ func cook(topos: Array, force := false, blocking := false, gated := true, opts :
 			packages[t].cooking = true
 			packages[t].progress = "waiting"
 			packages[t].error = ""
+			# the package's files as this cook reads them: a cook that ends stale with the same files is not retried
+			packages[t].cook_stamp = _watcher.source_stamp(t) if _watcher and not headless else ""
 	packages_changed.emit()
 	if blocking:
 		runner.wait(run)
@@ -370,15 +396,20 @@ func _package_done(run: Dictionary, pk: Dictionary) -> void:
 		return
 	st.cooking = false
 	st.progress = ""
+	var gated := bool(run.get("gated", true))
+	var stamp: String = st.get("cook_stamp", "")
 	if pk.crash != "":
 		if run.killed == "restart":
 			return
 		st.error = pk.crash
-		st.crashed = _watcher.source_stamp(topo) if _watcher else "crashed"
+		# not tried again until the package's files change (they may have changed while it cooked)
+		st.crashed = stamp if stamp != "" else "crashed"
 		_error("TopoTopo: %s: %s" % [st.id, pk.crash])
 		toast("TopoTopo: %s did not cook: %s" % [st.id, pk.crash.get_slice("\n", 0)], EditorToaster.SEVERITY_ERROR)
 		check(topo)
+		_refresh[topo] = {"gated": gated, "written": false}
 		packages_changed.emit()
+		queue_flush()
 		return
 	var rep: Dictionary = pk.result
 	st.report = rep
@@ -389,14 +420,18 @@ func _package_done(run: Dictionary, pk: Dictionary) -> void:
 	var written := []
 	for o in rep.get("outputs", []):
 		for f in o.get("written", []):
-			_pending[f] = bool(run.get("gated", true))
+			_pending[f] = gated
 		if not o.get("written", []).is_empty():
 			written.append(o.id)
 	for e in rep.get("errors", []):
 		_error("TopoTopo: %s: %s" % [st.id, e])
-	if rep.get("record") == "written" or written.size():
-		_refresh[topo] = bool(run.get("gated", true))
 	check(topo)
+	if is_stale(st.fresh):
+		# the package did not open (or its files changed while it cooked): say why; the same files are not cooked again
+		st.error = String(rep.errors[0]) if rep.get("errors", []).size() else st.fresh.text
+		if stamp != "" and _watcher and _watcher.source_stamp(topo) == stamp:
+			st.crashed = stamp
+	_refresh[topo] = {"gated": gated, "written": rep.get("record") == "written" or written.size() > 0}
 	if rep.get("ok", false) and written.size():
 		toast("TopoTopo: %s updated: %s" % [st.id, ", ".join(written)], EditorToaster.SEVERITY_INFO)
 	elif not rep.get("ok", false) and rep.get("errors", []).size():
@@ -446,7 +481,29 @@ func batch() -> PackedStringArray:
 func imported(topo: String) -> void:
 	var st = packages.get(topo)
 	if st:
-		_imported_record[topo] = FileAccess.get_md5(st.dir.path_join(Record.RECORD))
+		_imported[topo] = {"record": FileAccess.get_md5(st.dir.path_join(Record.RECORD)), "state": st.fresh.state}
+		_refresh.erase(topo)
+
+
+## Whether a .topo's import is behind its package: valid while the package is not ok (or the other way round), or made
+## from another record or state than now. When this session has not imported it, a record a cook rewrote (`written`)
+## counts as behind.
+func topo_behind(topo: String, written: bool) -> bool:
+	var st = packages.get(topo)
+	if st == null or not FileAccess.file_exists(st.abs):
+		return false
+	if topo_import_valid(topo) != (st.fresh.state == "ok"):
+		return true
+	var seen = _imported.get(topo)
+	if seen != null:
+		return seen.record != FileAccess.get_md5(st.dir.path_join(Record.RECORD)) or seen.state != st.fresh.state
+	return written
+
+
+## Import a .topo again once nothing else imports (and the focus rule allows it), if its import is behind.
+func refresh_later(topo: String, written := false) -> void:
+	_refresh[topo] = {"gated": not headless, "written": written}
+	queue_flush()
 
 
 func queue_flush() -> void:
@@ -514,14 +571,14 @@ func flush() -> void:
 			changed.append(f)
 	var topos := PackedStringArray()
 	for t in _refresh.keys():
-		if _refresh[t] and not allowed:
+		var r: Dictionary = _refresh[t]
+		if r.gated and not allowed:
 			continue
 		_refresh.erase(t)
-		var st = packages.get(t)
-		if st == null or not FileAccess.file_exists(st.abs):
-			continue
-		if _imported_record.get(t, "") != FileAccess.get_md5(st.dir.path_join(Record.RECORD)) or not topo_import_valid(t):
-			topos.append(t)
+		if packages.has(t) and not packages[t].cooking:
+			check(t)
+			if topo_behind(t, r.written):
+				topos.append(t)
 	if fresh_files.size():
 		efs.reimport_files(fresh_files)
 	if changed.size():
@@ -542,7 +599,7 @@ func flush() -> void:
 	if topos.size():
 		if efs.is_scanning() or efs.is_importing():
 			for t in topos:
-				_refresh[t] = false
+				_refresh[t] = {"gated": false, "written": true}
 		else:
 			efs.reimport_files(topos)
 
@@ -590,10 +647,11 @@ func _after_first_scan() -> void:
 	scan_packages()
 	for topo in packages:
 		var st = packages[topo]
-		if st.copy or st.root:
+		if st.copy or st.root or st.cooking:
 			continue
-		if not topo_import_valid(topo) and not is_stale(check(topo)):
-			_refresh[topo] = false
+		check(topo)
+		if topo_behind(topo, false):
+			_refresh[topo] = {"gated": false, "written": false}
 	packages_changed.emit()
 	queue_flush()
 
@@ -618,7 +676,8 @@ func _startup() -> void:
 	if stale.size() and not runner.found():
 		for topo in stale:
 			_warning("TopoTopo: %s: %s; TopoTopo is not set up here (%s), so the committed outputs are used" % [topo, packages[topo].fresh.text, runner.problem])
-		_said_missing = true
+		# after the first scan, their .topo imports say it too (Godot's red ImportFail icon)
+		say_missing_once()
 	elif stale.size():
 		if headless:
 			print("TopoTopo: cooking %d stale package%s before the first scan: %s" % [stale.size(), "" if stale.size() == 1 else "s", ", ".join(stale)])

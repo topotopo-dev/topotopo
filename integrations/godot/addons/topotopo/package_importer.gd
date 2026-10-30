@@ -110,7 +110,11 @@ func _import(source_file: String, save_path: String, options: Dictionary, _platf
 
 
 func _manifest(res: Package, abs_topo: String) -> void:
-	var raw = JSON.parse_string(FileAccess.get_file_as_string(abs_topo).trim_prefix("﻿"))
+	# a manifest that does not parse is said by the cook, with where and why
+	var json := JSON.new()
+	if json.parse(FileAccess.get_file_as_string(abs_topo).trim_prefix("﻿")) != OK:
+		return
+	var raw = json.data
 	if typeof(raw) == TYPE_DICTIONARY:
 		res.title = String(raw.get("title", ""))
 		res.package_name = String(raw.get("name", "")) if raw.get("name") != null else ""
@@ -138,12 +142,13 @@ func _cook_if_stale(topo: String, abs_topo: String, options: Dictionary, res: Pa
 		if not host.runner.found():
 			host.say_missing_once()
 			return _fail(res, "stale_no_topotopo", host.not_set_up_text(topo, fr), ERR_UNAVAILABLE)
-		# a running cook that has this package (the batch's, or the watcher's): wait for it
+		# a running cook that has this package (the batch's, or the watcher's): wait for it; else cook it now
 		var run: Dictionary = host.runner.run_with(abs_topo)
 		if not run.is_empty():
 			host.wait_for(run, abs_topo)
 			fr = host.check(topo, opts)
-		if host.is_stale(fr):
+		# (a running cook had other import options than this import: cook with these)
+		if run.is_empty() or (host.is_stale(fr) and fr.why == "options"):
 			host.cook([topo], false, true, false, {topo: opts})
 			fr = host.check(topo, opts)
 		if host.is_stale(fr):
@@ -170,7 +175,7 @@ func _cook_if_stale(topo: String, abs_topo: String, options: Dictionary, res: Pa
 				failed += 1
 		res.message = "\n".join(lines) if lines.size() else fr.text
 		host.toast("TopoTopo: %s: %d of %d outputs did not cook; the last good result is kept" % [pkg, failed, outputs.size()], EditorToaster.SEVERITY_ERROR)
-		return FAILED
+		return ERR_TIMEOUT if res.message.contains("timed out") else FAILED
 	res.status = "ok"
 	if not host.runner.found():
 		res.message = "cooked elsewhere, current (TopoTopo is not set up here)"

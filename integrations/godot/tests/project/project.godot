@@ -1,0 +1,13 @@
+; The project of the Godot addon's headless tests (npm run test:godot copies it, the addon and the fixtures into a
+; temporary folder).
+
+config_version=5
+
+[application]
+
+config/name="TopoTopo addon tests"
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/topotopo/plugin.cfg")

@@ -124,7 +124,10 @@ func _settle() -> void:
 	if stale.is_empty() or not bool(host.runner.settings.get("live_cook", true)):
 		return
 	if not host.runner.found():
+		# the committed outputs stay; the .topo imports say what changed and how to set TopoTopo up
 		host.say_missing_once()
+		for topo in stale:
+			host.refresh_later(topo)
 		return
 	cook_background(stale, false)
 

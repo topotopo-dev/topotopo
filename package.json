@@ -61,6 +61,7 @@
     "test:builtin": "node test/builtin.ts",
     "test:packages": "node test/packages.ts",
     "test:cook": "node test/cook.ts",
+    "test:godot": "node scripts/test-godot.mjs",
     "test:textures": "node test/textures.ts && node test/texnodes.ts",
     "test:texnodes": "node test/texnodes.ts",
     "test:imageops": "node test/imageops.ts",

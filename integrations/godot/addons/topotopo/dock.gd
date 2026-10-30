@@ -1,29 +1,28 @@
 @tool
 extends EditorDock
-## The "TopoTopo" panel (bottom panel by default): which TopoTopo cooks and where it was found, one row per package
-## (its state, last cook, outputs with thumbnails, errors, skipped outputs, orphans) and the actions on a package.
-## Drag an output from here into a scene or the 3D view like a file from the FileSystem dock.
+## The "TopoTopo" panel (bottom panel by default; dock.tscn): which TopoTopo cooks and where it was found, one row per
+## package (its state, last cook, outputs with thumbnails, errors, skipped outputs, orphans) and the actions on a
+## package. Drag an output from here into a scene or the 3D view like a file from the FileSystem dock.
 
 const Record := preload("record.gd")
 
 ## plugin.gd
 var host: Object
 
-var _status: Label
-var _locate: Button
-var _unfocused: CheckButton
-var _tree: Tree
-var _open: Button
-var _recook: Button
-var _show: Button
-var _report: Button
-var _orphans: Button
+@onready var _status: Label = $Box/Top/Status
+@onready var _locate: Button = $Box/Top/Locate
+@onready var _unfocused: CheckButton = $Box/Top/Unfocused
+@onready var _tree: Tree = $Box/Tree
+@onready var _open: Button = $Box/Actions/Open
+@onready var _recook: Button = $Box/Actions/Recook
+@onready var _show: Button = $Box/Actions/ShowOutputs
+@onready var _report: Button = $Box/Actions/ShowReport
+@onready var _orphans: Button = $Box/Actions/RemoveOrphans
 var _dialog: EditorFileDialog
 var _dirty := true
 
 
 func _init() -> void:
-	name = "TopoTopo"
 	title = "TopoTopo"
 	default_slot = DOCK_SLOT_BOTTOM
 	available_layouts = DOCK_LAYOUT_HORIZONTAL | DOCK_LAYOUT_FLOATING
@@ -35,38 +34,9 @@ func _ready() -> void:
 		var img := Image.new()
 		if img.load_svg_from_string(svg, EditorInterface.get_editor_scale()) == OK:
 			dock_icon = ImageTexture.create_from_image(img)
-	var box := VBoxContainer.new()
-	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(box)
-	var top := HBoxContainer.new()
-	box.add_child(top)
-	_status = Label.new()
-	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_status.mouse_filter = Control.MOUSE_FILTER_PASS
-	top.add_child(_status)
-	_locate = Button.new()
-	_locate.text = "Locate TopoTopo..."
-	_locate.tooltip_text = "Set where TopoTopo is (Editor Settings > FileSystem > Import > TopoTopo > Topotopo Path): its src/cli.ts, dist/cli.js, or its folder."
 	_locate.pressed.connect(_on_locate)
-	top.add_child(_locate)
-	_unfocused = CheckButton.new()
-	_unfocused.text = "Import When Unfocused"
-	_unfocused.tooltip_text = "Godot's own Editor Settings > Interface > Editor > Import Resources When Unfocused: cooked outputs update while you work in TopoTopo beside Godot."
 	_unfocused.toggled.connect(func(on: bool): if host: host.set_import_when_unfocused(on))
-	top.add_child(_unfocused)
-	var cook_stale := Button.new()
-	cook_stale.text = "Cook Stale"
-	cook_stale.tooltip_text = "Cook every package whose outputs are behind its files."
-	cook_stale.pressed.connect(_on_cook_stale)
-	top.add_child(cook_stale)
-
-	_tree = Tree.new()
-	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_tree.custom_minimum_size = Vector2(0, 120)
-	_tree.columns = 3
-	_tree.hide_root = true
-	_tree.column_titles_visible = true
+	$Box/Top/CookStale.pressed.connect(_on_cook_stale)
 	_tree.set_column_title(0, "Package / output")
 	_tree.set_column_title(1, "State")
 	_tree.set_column_title(2, "")
@@ -76,19 +46,14 @@ func _ready() -> void:
 	_tree.set_column_custom_minimum_width(1, 140)
 	_tree.set_column_expand(2, true)
 	_tree.set_column_expand_ratio(2, 3)
-	_tree.select_mode = Tree.SELECT_ROW
 	_tree.item_selected.connect(_update_buttons)
 	_tree.item_activated.connect(_on_activated)
 	_tree.set_drag_forwarding(_drag, Callable(), Callable())
-	box.add_child(_tree)
-
-	var actions := HBoxContainer.new()
-	box.add_child(actions)
-	_open = _action(actions, "Open in TopoTopo", "Open TopoTopo's live viewer on the package in the browser.", func(t): host.open_in_topotopo(t))
-	_recook = _action(actions, "Recook", "Cook every output of the package again, ignoring the record and the cache.", func(t): host.cook_now([t], true))
-	_show = _action(actions, "Show Outputs", "Show the package's outputs in the FileSystem dock.", _show_outputs)
-	_report = _action(actions, "Show Report", "Print the package's last cook report to Output.", func(t): host.show_report(t))
-	_orphans = _action(actions, "Remove Orphans", "Delete the files outputs had and have no more (a level may still use them).", func(t): host.remove_orphans(t))
+	_action(_open, func(t): host.open_in_topotopo(t))
+	_action(_recook, func(t): host.cook_now([t], true))
+	_action(_show, _show_outputs)
+	_action(_report, func(t): host.show_report(t))
+	_action(_orphans, func(t): host.remove_orphans(t))
 
 	_dialog = EditorFileDialog.new()
 	_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
@@ -104,22 +69,17 @@ func _ready() -> void:
 	_update_buttons()
 
 
-func _action(parent: Control, text: String, tip: String, fn: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.tooltip_text = tip
+func _action(b: Button, fn: Callable) -> void:
 	b.pressed.connect(func():
 		var t := _selected_topo()
 		if host and t != "":
 			fn.call(t))
-	parent.add_child(b)
-	return b
 
 
 func _process(_delta: float) -> void:
 	if _dirty and is_visible_in_tree() and host:
 		_dirty = false
-		_refresh()
+		refresh()
 
 
 func _selected_topo() -> String:
@@ -210,7 +170,7 @@ func _state_color(st: Dictionary) -> Color:
 	return get_theme_color("warning_color", "Editor")
 
 
-func _refresh() -> void:
+func refresh() -> void:
 	_status.text = host.runner.describe()
 	_status.tooltip_text = _status.text
 	_locate.visible = true
