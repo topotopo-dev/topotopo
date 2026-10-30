@@ -706,7 +706,7 @@ page({ out: '404.html', title: 'Page not found', nav: '', abs: true, description
 
 // where the mailing list's confirmation link lands (Kit form settings → Confirmation email → redirect URL); not in the sitemap
 page({ out: 'subscribed.html', title: 'Subscribed', nav: '', abs: true, description: 'You are on the TopoTopo mailing list.' }, () => `<div class="notfound">
-<h1>You're subscribed! 😊😲🥰</h1>
+<h1>You're subscribed! 😲😊🥰</h1>
 <p>Thanks for confirming. TopoTopo news comes about once a month: releases, new packs and free stuff. Every email has an unsubscribe link.</p>
 <p class="cta"><a class="button primary" href="${u('index.html')}">Home</a><a class="button" href="${u('examples/index.html')}">Examples</a></p>
 </div>`);
