@@ -103,31 +103,6 @@ Put reference images the person gives you in attachments/, guide files in inputs
 board or concept pages, so the gallery page and the board link both ways.
 A project can be a package that other projects use, and use packages itself: help topic "packages". To find a
 ready-made output in any library ("a conifer", every terrain): library {action:"search", query?, kind?, tag?}.`,
-  workspace: `WORKSPACES (a game made of several TopoTopo projects)
-A workspace is a game's folder (or any 3D project's) with topotopo-workspace.json at its root:
-  {"name": "raven-hunt", "libraries": ["./art/topotopo"],
-   "engine": {"type": "godot", "project": "game/project.godot", "assets": "game/assets/topotopo"},
-   "follow": false, "uses": {"topotopo/props": "1.1"}}
-Paths are written from the workspace's folder. The person makes one: CLI topotopo workspace init <the game's folder>
-[--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow]; MCP library
-{action:"workspace", init:true, path, ...} when the person says so. library {action:"workspace"} (CLI: topotopo
-workspace) says what the open project's workspace holds.
-- LIBRARIES: every project inside looks for packages in its own project.json "libraries", then in the workspace's, then
-  in TopoTopo's built-in library.
-- ONE COPY PER GAME: the projects inside share one copy of each package version, in topotopo-packages/ beside the
-  file, whose "uses" names one version of each package for the whole game. A first use in any project adds it there;
-  Update compares every place any project of the workspace uses the package, and applying changes them all. A project
-  that is a package keeps its own uses and copies (they are published with it). workspace init moves the copies of the
-  projects inside that kept their own.
-- FOLLOWING: "follow": true shows the workspace's own packages live from their working folders, for looking (the
-  viewer, renders, inspect); exports and publishing always use the published versions, and an export made while
-  following says which it used.
-- THE ENGINE: "engine" names the engine project and "assets" a folder inside it that exports may go to: an export
-  target whose path is "engine:props/crate.glb" is written there (Godot imports it as res://assets/topotopo/props/...).
-- CHECK: library {action:"check"} (CLI: topotopo check) cooks the newest version of every package in the workspace's
-  libraries and every graph of its projects, and lists what broke and why; it changes nothing. Run it after a
-  TopoTopo update.
-- THE GALLERY lists the registered workspaces first (CLI: topotopo workspace add <folder>).`,
   graph: `GRAPH FORMAT
 {
   "nodes": {
@@ -1087,6 +1062,31 @@ EXPORTS record the package versions their graph used in the source block: "packa
 
 THE CLI COMMANDS (a folder named must exist; without one, the current folder's project):
 ${PACKAGE_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
+  workspace: `WORKSPACES (a game made of several TopoTopo projects)
+A workspace is a game's folder (or any 3D project's) with topotopo-workspace.json at its root:
+  {"name": "raven-hunt", "libraries": ["./art/topotopo"],
+   "engine": {"type": "godot", "project": "game/project.godot", "assets": "game/assets/topotopo"},
+   "follow": false, "uses": {"topotopo/props": "1.1"}}
+Paths are written from the workspace's folder. The person makes one: CLI topotopo workspace init <the game's folder>
+[--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow]; MCP library
+{action:"workspace", init:true, path, ...} when the person says so. library {action:"workspace"} (CLI: topotopo
+workspace) says what the open project's workspace holds.
+- LIBRARIES: every project inside looks for packages in its own project.json "libraries", then in the workspace's, then
+  in TopoTopo's built-in library.
+- ONE COPY PER GAME: the projects inside share one copy of each package version, in topotopo-packages/ beside the
+  file, whose "uses" names one version of each package for the whole game. A first use in any project adds it there;
+  Update compares every place any project of the workspace uses the package, and applying changes them all. A project
+  that is a package keeps its own uses and copies (they are published with it). workspace init moves the copies of the
+  projects inside that kept their own.
+- FOLLOWING: "follow": true shows the workspace's own packages live from their working folders, for looking (the
+  viewer, renders, inspect); exports and publishing always use the published versions, and an export made while
+  following says which it used.
+- THE ENGINE: "engine" names the engine project and "assets" a folder inside it that exports may go to: an export
+  target whose path is "engine:props/crate.glb" is written there (Godot imports it as res://assets/topotopo/props/...).
+- CHECK: library {action:"check"} (CLI: topotopo check) cooks the newest version of every package in the workspace's
+  libraries and every graph of its projects, and lists what broke and why; it changes nothing. Run it after a
+  TopoTopo update.
+- THE GALLERY lists the registered workspaces first (CLI: topotopo workspace add <folder>).`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):

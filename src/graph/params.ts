@@ -342,9 +342,10 @@ export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined
   for (const [k, v] of Object.entries(raw ?? {})) {
     const name = resolveParamName(def, k);
     if (!name) {
-      const sugg = didYouMean(k, Object.keys(def.params));
+      const now = def.renamed?.[k];
+      const sugg = now ? [] : didYouMean(k, Object.keys(def.params));
       errors.push(
-        `unknown param "${k}"` + (sugg.length ? ` — did you mean ${sugg.map((s) => `"${s}"`).join(' or ')}?` : '') +
+        `unknown param "${k}"` + (now ? `: ${now}.` : sugg.length ? ` — did you mean ${sugg.map((s) => `"${s}"`).join(' or ')}?` : '') +
         ` Valid params: ${Object.keys(def.params).join(', ') || '(none)'}`,
       );
       continue;

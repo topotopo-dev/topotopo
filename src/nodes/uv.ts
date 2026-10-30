@@ -186,6 +186,12 @@ function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandO
 defineNode({
   type: 'uv_unwrap',
   category: 'uv',
+  renamed: {
+    udim: 'it is gone: fit "udim" fills UDIM tiles at the texel density (what udim: true did), fit "atlas" (the default) keeps everything in the 0..1 tile',
+    rotate_charts: 'it is now orient: "min_rect" (rotate_charts: true) or "keep" (false); "world" turns world up to +v',
+    bruteforce: 'it is gone: the packer tries `iterations` orders and keeps the tightest',
+    block_align: 'it is gone: charts are packed at the texel, with `padding` between them',
+  },
   summary: 'Automatic UV unwrap: xatlas cuts and flattens charts per connected piece; they are packed without overlaps into the 0..1 square. Polygons are kept.',
   description:
     'Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is ' +
@@ -373,6 +379,7 @@ defineNode({
 defineNode({
   type: 'uv_layout',
   category: 'uv',
+  renamed: { rotate: 'it is now orient: "min_rect" (rotate: true) or "keep" (false); "world" turns world up to +v' },
   summary: 'Pack UV islands into the 0..1 square (or UDIM tiles) without overlaps: rotate to minimal bounds (or keep, or align to the world), equalise texel density, fill every gap.',
   description:
     'Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is oriented ' +
