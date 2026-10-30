@@ -26,7 +26,7 @@ const crate = createProject(lib, 'props/crate', { title: 'Crate <b>&', tags: ['p
 fs.writeFileSync(path.join(crate.dir, 'attachments', 'concept.png'), fs.readFileSync(path.resolve('library/props/thumbs/crate.png')));
 fs.writeFileSync(path.join(crate.dir, 'attachments', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 fs.writeFileSync(path.join(tmp, 'secret.txt'), 'secret');
-const cfg: GalleryConfig = { file: path.join(tmp, 'config.json'), libraries: [lib], gallery: { port: 0, cors: ['http://board.local:3000'] } };
+const cfg: GalleryConfig = { file: path.join(tmp, 'config.json'), libraries: [lib], workspaces: [], gallery: { port: 0, cors: ['http://board.local:3000'] } };
 
 const g = await startGallery({ config: cfg, port: 0 });
 const req = (p: string, o: { method?: string; headers?: Record<string, string> } = {}) => new Promise<{ status: number; headers: http.IncomingHttpHeaders; body: Buffer }>((resolve, reject) => {

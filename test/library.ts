@@ -9,6 +9,8 @@ import { addLibrary, loadConfig } from '../src/config.ts';
 import { startProject, notProjectFiles, parseManifest, projectDirOf, readManifest, slugify, writeManifest } from '../src/project.ts';
 import { bakeKey, createProject, isStale, readBakeState, scanLibrary } from '../src/gallery/library.ts';
 import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/project.ts';
+import { initWorkspace, parseWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
+import { commands } from '../src/packages/commands.ts';
 import { bakeProject, BakeQueue } from '../src/gallery/bake.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-library-'));
@@ -187,6 +189,35 @@ section('bake queue (child processes)');
   w(path.join(game, WORKSPACE_FILE), { libraries: ['./art/nope'] });
   check(librariesFor(crate).problems.some((p) => p.includes(WORKSPACE_FILE) && /"\.\/art\/nope" is no folder/.test(p)), 'a workspace entry that does not work says so, naming the workspace file');
   check(libraryName(path.join(game, 'art', 'shared')) === null && libraryName(path.join(game, 'art', 'materials')) === 'game-materials', 'libraryName: library.json, or none');
+}
+
+// a workspace: the game's file (name, libraries, engine, follow), made by init (the engine found below), shown, registered
+{
+  const game = path.join(tmp, 'ws-game');
+  fs.mkdirSync(path.join(game, 'godot'), { recursive: true });
+  fs.writeFileSync(path.join(game, 'godot', 'project.godot'), '[application]\n');
+  fs.mkdirSync(path.join(game, 'art', 'lib'), { recursive: true });
+  fs.mkdirSync(path.join(game, 'art', 'props', 'crate'), { recursive: true });
+  fs.writeFileSync(path.join(game, 'art', 'props', 'crate', 'project.json'), JSON.stringify({ id: 'crate', package: 'game/crate' }));
+  const made = initWorkspace(game, { libraries: ['./art/lib'], assets: 'godot/assets/topotopo' });
+  const m = readWorkspace(game);
+  check(m.name === 'ws-game' && m.libraries.join() === './art/lib' && m.engine?.type === 'godot' && m.engine.project === 'godot/project.godot' && m.engine.assets === 'godot/assets/topotopo' && !m.follow,
+    `workspace init: the name from the folder, the libraries given, the Godot project found, the assets folder (${made.text.split('\n').join(' | ')})`);
+  const again = initWorkspace(game, { name: 'raven', engine: 'none' });
+  check(again.manifest.name === 'raven' && again.manifest.engine === null && again.manifest.libraries.join() === './art/lib', 'workspace init again changes only what an option says');
+  check(throws(() => initWorkspace(game, { engine: 'godot:nope/project.godot' }), /no file/) && throws(() => initWorkspace(game, { engine: 'blender:x' }), /godot:<path to project.godot>/), 'a wrong --engine says what to write');
+  check(throws(() => parseWorkspace({ name: 'Raven Hunt' }, 'x'), /"name" must be lower-case/) && throws(() => parseWorkspace({ engine: { type: 'godot' } }, 'x'), /"engine" must be/)
+    && throws(() => parseWorkspace({ follow: 'yes' }, 'x'), /"follow" must be true or false/), 'a malformed workspace file says what is wrong');
+  const shown = workspaceText(path.join(game, 'art', 'props', 'crate'));
+  check(/^workspace "raven"/.test(shown) && /engine: none/.test(shown) && /libraries: \.\/art\/lib/.test(shown) && /projects: 1\n  art\/props\/crate  package game\/crate/.test(shown), `workspace: what it is, from a project inside it (${shown.split('\n').slice(0, 3).join(' | ')})`);
+  check(throws(() => workspaceText(tmp), /is in no workspace: .* workspace init/), 'outside a workspace: how to make one');
+  const lines: string[] = [], io = { out: (x: string) => lines.push(x), err: (x: string) => lines.push(`ERR ${x}`) };
+  const code = await commands.workspace(['add', game], 'topotopo', io);
+  const listed = await commands.workspace(['list'], 'topotopo', io);
+  check(code === 0 && listed === 0 && loadConfig().workspaces.some((w) => w.name === 'raven' && path.resolve(w.path) === path.resolve(game)) && lines.some((l) => /^raven  /.test(l)),
+    `workspace add registers it by its name, list shows it (${lines.join(' | ')})`);
+  const lib = librariesFor(path.join(game, 'art', 'props', 'crate'));
+  check(lib.libs.some((l) => l.from === 'workspace' && path.resolve(l.root) === path.resolve(game, 'art', 'lib')), 'its projects look in the workspace\'s libraries');
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);

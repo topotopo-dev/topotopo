@@ -7,6 +7,7 @@ import path from 'node:path';
 import { ID_RE, parsePackageName } from './graph/scope.ts';
 import { NAME_RE, PROJECT_FOLDERS, graphFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
+import { readWorkspace } from './workspace.ts';
 import type { GalleryConfig } from './config.ts';
 
 /** a package version: big.small, from 1.0 */
@@ -427,20 +428,28 @@ export interface Libraries { libs: LibraryAt[]; problems: string[] }
  * work. TopoTopo's built-in library is none of them (listing it by its name changes nothing).
  */
 export function librariesFor(dir: string): Libraries {
-  const out: Libraries = { libs: [], problems: [] };
-  let cfg: GalleryConfig | null | undefined;
-  const lists: { file: string; base: string; entries: string[]; from: LibraryAt['from'] }[] = [
-    { file: 'project.json', base: dir, entries: readManifest(dir).libraries, from: 'project' },
-  ];
+  const lists: LibraryList[] = [{ file: 'project.json', base: dir, entries: readManifest(dir).libraries, from: 'project' }];
+  const problems: string[] = [];
   const ws = locate(dir).workspace;
   if (ws) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(path.join(ws, WORKSPACE_FILE), 'utf8'));
-      const entries = raw?.libraries ?? [];
-      if (!Array.isArray(entries) || entries.some((e: unknown) => typeof e !== 'string')) throw new Error('"libraries" must be a list of paths and registered names');
-      lists.push({ file: path.join(ws, WORKSPACE_FILE), base: ws, entries, from: 'workspace' });
-    } catch (e: any) { out.problems.push(`${path.join(ws, WORKSPACE_FILE)}: ${e.message}`); }
+    try { lists.push({ file: path.join(ws, WORKSPACE_FILE), base: ws, entries: readWorkspace(ws).libraries, from: 'workspace' }); }
+    catch (e: any) { problems.push(e.message); }
   }
+  const out = resolveLibraries(lists);
+  out.problems.unshift(...problems);
+  return out;
+}
+
+/** A file's "libraries": the file (for messages), the folder its paths are written from, its entries, who lists them. */
+export interface LibraryList { file: string; base: string; entries: string[]; from: LibraryAt['from'] }
+
+/**
+ * The libraries some lists name, in order, a library named twice counted once; what is wrong with an entry is a
+ * problem and the others still count (see librariesFor).
+ */
+export function resolveLibraries(lists: LibraryList[]): Libraries {
+  const out: Libraries = { libs: [], problems: [] };
+  let cfg: GalleryConfig | null | undefined;
   for (const { file, base, entries, from } of lists) {
     const said = (entry: string, why: string) => out.problems.push(`${file} "libraries": "${entry}" ${why}; the other libraries still count`);
     const add = (entry: string, root: string) => {
