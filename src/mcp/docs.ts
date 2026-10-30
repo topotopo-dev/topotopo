@@ -953,7 +953,8 @@ packages/.lock (held while a command, the viewer or an MCP server writes project
 LIBRARIES: a project finds packages only in the libraries its project.json lists, "libraries": ["../shared/library",
 "game"]: a path written from the project ("./lib", "../lib") for a library in the same repository (every checkout and
 worktree uses its own), else a registered library's name. An entry that does not work (no such folder, a name not
-registered, a package's folder instead of its library's) is reported, and the others still count. The tools never list
+registered, a package's folder instead of its library's) is reported, and the others still count. A library with a
+library.json ({"name": "game-materials"}) goes by that name in the lock and the listings. The tools never list
 a library by themselves: library {action:"set", libraries:[...]} (CLI: topotopo libraries add|remove) does it when the
 person names one. Besides those, every project looks in TopoTopo's built-in library, "topotopo" (no other library takes
 that name): it holds TopoTopo's own packages (owner "topotopo"), which a project uses, copies and locks like any other;
