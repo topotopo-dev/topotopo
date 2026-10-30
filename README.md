@@ -694,6 +694,8 @@ TopoTopo is free and stays free. If it saves you time, you can sponsor its maint
 [GitHub Sponsors](https://github.com/sponsors/faxlab). Sponsorship funds maintainer time and comes with no
 obligations either way.
 
+For releases and new packs, about once a month, join the [mailing list](https://topotopo.kit.com/54b6b32c3f).
+
 ## Licence
 
 Apache-2.0 (see [LICENSE](LICENSE)). Third-party components and their licence texts are listed in [NOTICE](NOTICE).

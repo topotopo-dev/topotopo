@@ -163,6 +163,9 @@ main { padding-bottom: 3rem; }
 .site-footer { border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; padding: 1.5rem 0 2.5rem; }
 .site-footer p { margin: 0.25rem 0; }
 .site-footer a { color: inherit; }
+.news { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-bottom: 1rem; }
+.news span { display: flex; gap: 0.5rem; flex: 1 1 18rem; max-width: 26rem; }
+.news input { flex: 1; min-width: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--fg); font: inherit; }
 
 /* home */
 .hero { padding: 2.5rem 0 1rem; max-width: 52rem; }

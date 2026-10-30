@@ -53,6 +53,8 @@ const CONTACT = /<([^<>\s]+@[^<>\s]+)>/.exec(String(pkg.author ?? ''))?.[1] ?? n
 // Cloudflare Web Analytics (cookieless page views): the site token from the Cloudflare dashboard (the account
 // that holds the topotopo.dev zone), Observability → Analytics → Web analytics → topotopo.dev → Manage site. It is public (it ships in every page); empty leaves the beacon out.
 const CF_BEACON_TOKEN = 'e166f98611114840beed8a8e61ea96bd';
+// The mailing list (Kit, double opt-in): a plain form posting to the list's subscribe endpoint, no third-party script.
+const NEWS_FORM = 'https://app.kit.com/forms/10119525/subscriptions';
 const COMMIT = (() => {
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
   try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; }
@@ -348,6 +350,10 @@ ${CF_BEACON_TOKEN ? `<script type="module" src="https://static.cloudflareinsight
 ${body.trim()}
 </main>
 <footer class="site-footer"><div class="wrap">
+<form class="news" action="${NEWS_FORM}" method="post">
+<label for="news-email">TopoTopo news: releases and new packs, about once a month.</label>
+<span><input id="news-email" name="email_address" type="email" required placeholder="you@example.com" autocomplete="email"><button class="button primary" type="submit">Subscribe</button></span>
+</form>
 <p>TopoTopo is open source under the ${esc(pkg.license ?? 'Apache-2.0')} licence. <a href="${esc(REPO)}">Source on GitHub</a> · <a href="https://github.com/sponsors/faxlab">Sponsor</a>${CONTACT ? ` · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>` : ''}</p>
 <p>Generated from ${sha} by <code>scripts/gen-site.ts</code>: every page is built from the files in the repository.</p>
 </div></footer>

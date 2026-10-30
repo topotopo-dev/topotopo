@@ -217,6 +217,7 @@ export function galleryPage(d: GalleryData, u: Urls): string {
   <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>
   <input id="search" type="search" placeholder="Search ${total} project${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search projects${outputs ? ', the outputs of packages and TopoTopo\'s kits' : ''}">
   <button id="clear" class="btn" type="button" hidden title="clear the search and the tags">Clear</button>
+  <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
 </header>
 <main class="wrap">
 ${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''} in the libraries</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
