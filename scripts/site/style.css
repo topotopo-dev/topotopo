@@ -156,6 +156,7 @@ td.default { max-width: 16rem; }
 .site-nav a:hover { color: var(--fg); background: var(--bg-soft); }
 .site-nav a[aria-current] { color: var(--fg); background: var(--bg-soft); font-weight: 600; }
 .site-nav .ext { margin-left: auto; }
+.site-nav .ext ~ .ext { margin-left: 0; }
 
 main { padding-bottom: 3rem; }
 

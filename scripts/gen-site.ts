@@ -56,6 +56,12 @@ const CF_BEACON_TOKEN = 'e166f98611114840beed8a8e61ea96bd';
 // The mailing list (Kit, double opt-in): a plain form posting to the list's subscribe endpoint, no third-party script.
 const NEWS_FORM = 'https://app.kit.com/forms/10119525/subscriptions';
 const YOUTUBE = 'https://www.youtube.com/@topotopodev';
+// TopoTopo's own accounts, in the footer's Follow line (personal accounts stay off the site)
+const SOCIAL = [
+  { label: 'GitHub', href: REPO },
+  { label: 'YouTube', href: YOUTUBE },
+  { label: 'Bluesky', href: 'https://bsky.app/profile/topotopo.dev' },
+];
 const COMMIT = (() => {
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
   try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; }
@@ -345,7 +351,7 @@ ${CF_BEACON_TOKEN ? `<script type="module" src="https://static.cloudflareinsight
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header"><div class="wrap">
 <a class="brand" href="${u('index.html')}"><img src="${u('favicon.svg')}" alt="" width="26" height="26">TopoTopo</a>
-<nav class="site-nav" aria-label="Main"><ul>${nav}<li class="ext"><a href="${esc(REPO)}">GitHub</a></li></ul></nav>
+<nav class="site-nav" aria-label="Main"><ul>${nav}<li class="ext"><a href="${esc(REPO)}">GitHub</a></li><li class="ext"><a href="${YOUTUBE}">YouTube</a></li></ul></nav>
 </div></header>
 <main id="main" class="wrap">
 ${body.trim()}
@@ -355,6 +361,7 @@ ${body.trim()}
 <label for="news-email">TopoTopo news: releases and new packs, about once a month.</label>
 <span><input id="news-email" name="email_address" type="email" required placeholder="you@example.com" autocomplete="email"><button class="button primary" type="submit">Subscribe</button></span>
 </form>
+<p class="follow">Follow TopoTopo: ${SOCIAL.map((s) => `<a href="${esc(s.href)}">${s.label}</a>`).join(' · ')}</p>
 <p>TopoTopo is open source under the ${esc(pkg.license ?? 'Apache-2.0')} licence. <a href="${esc(REPO)}">Source on GitHub</a> · <a href="https://github.com/sponsors/faxlab">Sponsor</a>${CONTACT ? ` · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>` : ''}</p>
 <p>Generated from ${sha} by <code>scripts/gen-site.ts</code>: every page is built from the files in the repository.</p>
 </div></footer>
