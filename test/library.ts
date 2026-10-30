@@ -426,6 +426,15 @@ section('the engine project: at or above the workspace first, then below; what U
   fs.rmSync(path.join(repo, 'topotopo-workspace.json'));
   const inside = initWorkspace(path.join(godot, 'assets'), { name: 'valley-assets' });
   check(inside.manifest.engine !== 'none' && inside.manifest.engine?.project === '../project.godot', `a workspace inside the project: the project above it, its path leading upward (${inside.manifest.engine && inside.manifest.engine !== 'none' ? inside.manifest.engine.project : ''})`);
+  // --engine names the project over the one detection finds, its path written from the workspace (leading upward too)
+  const two = path.join(tmp, 'two-projects');
+  for (const p of ['one', 'two']) { fs.mkdirSync(path.join(two, p, 'assets'), { recursive: true }); fs.writeFileSync(path.join(two, p, 'project.godot'), '[application]\n'); }
+  const picked = initWorkspace(two, { name: 'two-picked', engine: 'godot:two/project.godot' });
+  const upward = initWorkspace(path.join(two, 'two', 'assets'), { name: 'two-upward', engine: 'godot:../../one/project.godot' });
+  const pickedEngine = picked.manifest.engine, upwardEngine = upward.manifest.engine;
+  check(pickedEngine !== null && pickedEngine !== 'none' && pickedEngine.type === 'godot' && pickedEngine.project === 'two/project.godot'
+    && upwardEngine !== null && upwardEngine !== 'none' && upwardEngine.project === '../../one/project.godot' && readWorkspace(path.join(two, 'two', 'assets')).engine !== 'none',
+    `--engine godot:<path> wins over the project detection finds (below: one/; above: two/), written from the workspace (${JSON.stringify(pickedEngine)}; ${JSON.stringify(upwardEngine)})`);
   // Unreal: a workspace outside Content/ is not seen
   const ue = path.join(tmp, 'ue');
   fs.mkdirSync(path.join(ue, 'Content', 'TopoTopo'), { recursive: true });
