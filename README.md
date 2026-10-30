@@ -511,6 +511,7 @@ topotopo packages [owner/name] [folder]
 topotopo publish [folder] --note "..." [--big] [--dry-run]
 topotopo search [words] [folder] [--kind k] [--tag t]
 topotopo outdated [folder]
+topotopo check [folder]
 topotopo update owner/name [folder] [--to 1.4] [--render <folder>]
 topotopo update owner/name [folder] --from 1.3 --to 1.4 --apply
 ```

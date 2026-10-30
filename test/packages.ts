@@ -37,6 +37,7 @@ import { addLibrary, loadConfig } from '../src/config.ts';
 import { copiesFor, libraryEntry, parseManifest, readManifest } from '../src/project.ts';
 import { engineAssetsFor, initWorkspace, readWorkspace } from '../src/workspace.ts';
 import { resolveTarget, targetError } from '../src/io/targets.ts';
+import { checkAll, checkText } from '../src/packages/check.ts';
 import { scanLibrary } from '../src/gallery/library.ts';
 import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/packages/registry.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -1713,6 +1714,23 @@ section('a workspace: one shared copy of each package for every project in the g
   check(all.code === 0 && exists(GAME, 'godot', 'assets', 'topotopo', 'props', 'stones.glb') && !exists(A, 'exports', 'props'),
     `--export-all writes an engine target into the engine project (${all.out.split('\n').filter((l) => /exported/.test(l)).join(' | ') || all.out.slice(-300)})`);
   check(throws(() => engineAssetsFor(dirs.forest), /is in no workspace: .*workspace init/), 'outside a workspace an engine target says how to name the engine project');
+
+  // check: the newest version of every package in the workspace's libraries and every graph of its projects
+  initWorkspace(GAME, { libraries: ['./art/lib'] });
+  const fine = await checkAll(A);
+  const names = fine.items.map((i) => i.name).sort().join(', ');
+  check(names === 'scenes/a, scenes/b, scenes/c, ws/sticks 1.0, ws/stones 1.2' && fine.items.every((i) => !i.failures.length && i.cooked > 0) && /nothing broke; nothing was changed$/.test(checkText(fine)),
+    `check cooks the newest version of each package and every project of the workspace (${names}; ${fine.items.filter((i) => i.failures.length).map((i) => `${i.name}: ${i.failures.map((f) => f.error).join('; ')}`).join(' | ')})`);
+  // a published version an engine change broke (here: a param its graph sets that the node does not have)
+  const vgraph = path.join(STICKS, 'versions', '1.0', 'graphs', 'main.json'), kept = fs.readFileSync(vgraph);
+  json(vgraph, { nodes: { b: { type: 'box', params: { size: [1, 3, 1], strength: 2 } } }, output: 'b' });
+  const before = shown(GAME).join();
+  const broken = await checkAll(GAME), report = checkText(broken);
+  const cli = spawnCli(['check', GAME]);
+  fs.writeFileSync(vgraph, kept);
+  check(/BROKEN {2}ws\/sticks 1\.0: 1 failure\n {2}ws\/sticks: \[b\] unknown param "strength" for box/.test(report) && /1 of 5 broke; nothing was changed/.test(report) && !/BROKEN {2}project/.test(report)
+    && shown(GAME).join() === before && cli.code === 1 && /BROKEN {2}ws\/sticks 1\.0/.test(cli.out),
+    `check names the broken version and why; the game's own copy still cooks; it changes nothing, and the CLI exits 1 (${report.split('\n').slice(0, 4).join(' | ')})`);
 }
 
 await engines[0]?.host.pool?.close();
