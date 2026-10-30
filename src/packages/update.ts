@@ -1,7 +1,7 @@
 // Out of date and Update (the registry is src/packages/registry.ts): the newer versions of the packages a project uses,
 // and the before/after of an update. The before/after finds every place the project uses the package (each node of
 // its type in the project's graphs, assets and graph files, nested graphs included, with its params and inputs as they
-// are), cooks each with the version in use and with the version the update goes to, says what changed (diffGeometry)
+// are; in a workspace, in every project that shares the workspace's copies, as an update changes them all), cooks each with the version in use and with the version the update goes to, says what changed (diffGeometry)
 // and draws an overlay; with it come the notes of the versions between them and, for a big version, what the graphs
 // must change. Nothing is written: the new version is read where its library holds it. Applying is a step of its own,
 // taken when the person says so.
@@ -30,8 +30,9 @@ import type { GraphSpec, NodeSpec } from '../graph/types.ts';
 import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../session.ts';
-import { program } from '../project.ts';
-import { compareInterfaces, compareVersions, kindChanges, libraryText } from './registry.ts';
+import { copiesFor, program } from '../project.ts';
+import { scanLibrary } from '../gallery/library.ts';
+import { compareInterfaces, compareVersions, kindChanges, libraryText, loadProject } from './registry.ts';
 import type { ProjectPackages, UpdateTarget } from './registry.ts';
 
 /**
@@ -51,12 +52,33 @@ type GraphKind = 'graph' | 'asset' | 'file';
 
 /** A graph of the project: one in graphs/, an asset in assets/, or a graph file elsewhere in its folder. */
 interface ProjectGraph {
-  /** the file, posix and relative to the project */
+  /** the file, posix and relative to the project (another project's: from the workspace, "scenes/hall/graphs/main.json") */
   file: string;
   kind: GraphKind;
   spec: GraphSpec;
   /** a graph file's folder, where its relative paths read */
   folder?: string;
+  /** the folder of another project of the workspace that holds it (its graphs and assets cook in a scope of their own) */
+  home?: string;
+}
+
+/** A project whose graphs an update changes: the open one (rel ""), or another that shares the workspace's copies. */
+interface ProjectAt { dir: string; rel: string }
+
+/**
+ * The projects whose graphs use the copies an update or a remove changes: the open project, and in a workspace every
+ * other project that shares its copies (one version of each package for the whole game).
+ */
+function projectsOf(pk: ProjectPackages): ProjectAt[] {
+  const { dir } = pk.project();
+  const out: ProjectAt[] = [{ dir, rel: '' }];
+  const ws = pk.store?.workspace;
+  if (!ws) return out;
+  for (const p of scanLibrary({ name: 'workspace', path: ws }).projects) {
+    if (path.resolve(p.dir).toLowerCase() === path.resolve(dir).toLowerCase() || copiesFor(p.dir).workspace !== ws) continue;
+    out.push({ dir: p.dir, rel: p.rel });
+  }
+  return out;
 }
 
 /** A node of the package's type in a graph of the project. */
@@ -182,10 +204,19 @@ function usesIn(g: GraphSpec, pkg: string): { node: string; top: string; spec: N
   return out;
 }
 
-/** Every place the project uses the package, and the cooks that compare them: a graph's node with the uses it holds. */
-function placesOf(dir: string, pkg: string, problems: string[]): { uses: UsePlace[]; units: { g: ProjectGraph; node: string; uses: UsePlace[] }[] } {
+/**
+ * Every place the projects use the package, and the cooks that compare them: a graph's node with the uses it holds.
+ * The files of another project are named from the workspace.
+ */
+function placesOf(projects: ProjectAt[], pkg: string, problems: string[]): { uses: UsePlace[]; units: { g: ProjectGraph; node: string; uses: UsePlace[] }[] } {
   const uses: UsePlace[] = [], units: { g: ProjectGraph; node: string; uses: UsePlace[] }[] = [];
-  for (const g of graphsNaming(dir, pkg, problems)) {
+  const graphs = projects.flatMap((p) => {
+    const said: string[] = [];
+    const found = graphsNaming(p.dir, pkg, said);
+    problems.push(...said.map((x) => (p.rel ? `${p.rel}/${x}` : x)));
+    return p.rel ? found.map((g) => ({ ...g, file: `${p.rel}/${g.file}`, home: p.dir })) : found;
+  });
+  for (const g of graphs) {
     const byTop = new Map<string, UsePlace[]>();
     for (const u of usesIn(g.spec, pkg)) {
       const place: UsePlace = { file: g.file, kind: g.kind, node: u.node, type: u.spec.type, spec: u.spec };
@@ -281,21 +312,33 @@ const sideOf = (r: CookReport): CookedSide => ({
 export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAfterOptions = {}): Promise<BeforeAfter> {
   const t0 = performance.now();
   const t = pk.updateTarget(pkg, o.to);
-  const { dir } = pk.project();
   const engine = pk.engine, root = o.project?.scope ?? engine.root;
   const { before, after, key, problems: versionProblems } = pk.updateResolvers(t);
   const problems: string[] = [];
-  const { uses, units } = placesOf(dir, pkg, problems);
-  // graphs and assets: the project's root, and a scope like it with the update's packages; graph files: their folder
+  const { uses, units } = placesOf(projectsOf(pk), pkg, problems);
+  // another project of the workspace: its graphs and assets in a scope of their own, as its session has them
+  const homes = new Map<string, Scope>();
+  const homeOf = (dir: string) => {
+    let s = homes.get(dir);
+    if (!s) {
+      s = engine.createScope(`update home ${key} ${dir}`, { folder: dir, packages: pk.resolver });
+      problems.push(...loadProject(engine, dir, s));
+      homes.set(dir, s);
+    }
+    return s;
+  };
+  // graphs and assets: the project's root (or another project's), and a scope like it with the update's packages;
+  // graph files: their folder
   const scopes = new Map<string, { before: Scope; after: Scope }>();
   const scopesOf = (g: ProjectGraph) => {
-    const id = g.folder ?? '';
+    const id = g.folder ?? g.home ?? '';
     let s = scopes.get(id);
     if (!s) {
+      const base = g.home ? homeOf(g.home) : root, folder = g.home ?? o.project?.folder;
       const like = (name: string, packages: PackageResolver) => (g.folder
         ? engine.createScope(`update ${name} ${key} ${g.folder}`, { folder: g.folder, packages })
-        : engine.createScope(`update ${name} ${key}${o.project ? ` ${o.project.folder}` : ''}`, { assets: root.assets, graphs: (n) => root.graphs?.(n), packages, ...(o.project ? { folder: o.project.folder } : {}) }));
-      s = { before: !g.folder && before === pk.resolver ? root : like('before', before), after: like('after', after) };
+        : engine.createScope(`update ${name} ${key}${folder ? ` ${folder}` : ''}`, { assets: base.assets, graphs: (n) => base.graphs?.(n), packages, ...(folder ? { folder } : {}) }));
+      s = { before: !g.folder && before === pk.resolver ? base : like('before', before), after: like('after', after) };
       scopes.set(id, s);
     }
     return s;
@@ -328,7 +371,7 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
   const m = mustChange(uses, before, after, t);
   const ic = t.fromInfo ? compareInterfaces(t.fromInfo, t.toInfo) : { big: [], small: [] };
   return {
-    target: t, project: pk.label, uses, compared, total, interfaceBig: ic.big, interfaceSmall: ic.small, mustChange: m.must, stopped,
+    target: t, project: pk.holder, uses, compared, total, interfaceBig: ic.big, interfaceSmall: ic.small, mustChange: m.must, stopped,
     problems: [...new Set([...problems, ...m.problems, ...versionProblems()])], ms: performance.now() - t0,
   };
 }
@@ -342,16 +385,15 @@ export async function beforeAfter(pk: ProjectPackages, pkg: string, o: BeforeAft
  */
 export function applyUpdate(pk: ProjectPackages, pkg: string, o: { from: string; to: string }): { target: UpdateTarget; text: string; mustChange: string[] } {
   if (typeof o?.from !== 'string' || typeof o?.to !== 'string') throw new Error('applying an update needs "from" and "to": the version in use and the version of the before/after the person saw');
-  const { dir } = pk.project();
   pk.refresh();
-  const now = pk.manifest?.uses[pkg];
-  if (now !== undefined && now !== o.from) throw new Error(`project.json uses ${pkg} ${now} now, not ${o.from}: look at the before/after again`);
+  const now = pk.uses()[pkg];
+  if (now !== undefined && now !== o.from) throw new Error(`${pk.usesFileName} uses ${pkg} ${now} now, not ${o.from}: look at the before/after again`);
   const t = pk.updateTarget(pkg, o.to);
   const { before, after } = pk.updateResolvers(t);
-  const m = mustChange(placesOf(dir, pkg, []).uses, before, after, t);
+  const m = mustChange(placesOf(projectsOf(pk), pkg, []).uses, before, after, t);
   const r = pk.applyUpdate(t);
   const lines = [r.text];
-  if (m.must.length) lines.push(`the project's graphs must change for ${t.package} ${t.to}; until they do, they report these errors:`, ...m.must.map((x) => `  ${x}`));
+  if (m.must.length) lines.push(`${pk.store?.workspace ? 'the graphs of the workspace\'s projects' : 'the project\'s graphs'} must change for ${t.package} ${t.to}; until they do, they report these errors:`, ...m.must.map((x) => `  ${x}`));
   return { target: t, text: lines.join('\n'), mustChange: m.must };
 }
 
@@ -360,9 +402,8 @@ export function applyUpdate(pk: ProjectPackages, pkg: string, o: { from: string;
  * graphs/, assets/ or a graph file in its folder, nested graphs included), which it lists.
  */
 export function removePackage(pk: ProjectPackages, pkg: string): { deleted: string[]; text: string } {
-  const { dir } = pk.project();
   pk.refresh();
-  const places = typeof parsePackageName(pkg) === 'string' ? [] : placesOf(dir, pkg, []).uses.map((u) => `${u.file} ${u.node}`);
+  const places = typeof parsePackageName(pkg) === 'string' ? [] : placesOf(projectsOf(pk), pkg, []).uses.map((u) => `${u.file} ${u.node}`);
   return pk.remove(pkg, places);
 }
 
@@ -388,8 +429,8 @@ export function beforeAfterText(r: BeforeAfter, closing: string): string {
     lines.push(r.interfaceBig.length ? `${step}; what goes away or means something else:` : `${step}: nothing goes away between the two, and a version between was marked big by its author, its meaning changed in a way the tools cannot see (its note says how)`);
     lines.push(...r.interfaceBig.map((x) => `  ${x}`));
   }
-  if (r.mustChange.length) lines.push(`what the project's graphs must change (updating is allowed; until they change, they report these errors):`, ...r.mustChange.map((x) => `  ${x}`));
-  if (!r.uses.length) lines.push(`no graph of the project uses ${t.package}: the update changes no geometry`);
+  if (r.mustChange.length) lines.push(`what ${r.project.startsWith('workspace ') ? 'the graphs of its projects' : 'the project\'s graphs'} must change (updating is allowed; until they change, they report these errors):`, ...r.mustChange.map((x) => `  ${x}`));
+  if (!r.uses.length) lines.push(`no graph of ${r.project} uses ${t.package}: the update changes no geometry`);
   else {
     lines.push(`${r.uses.length === 1 ? '1 place uses' : `${r.uses.length} places use`} ${t.package}; each cooked with ${t.from} (a) and with ${t.to} (b):`);
     for (const c of r.compared) {
@@ -435,10 +476,10 @@ export function overlayRenders(r: BeforeAfter, max = 6): { title: string; png: U
 export function outdatedText(pk: ProjectPackages, mcp = false, folder?: string): string {
   const problems: string[] = [];
   const list = pk.outdated(problems);
-  if (!list.length) return `${pk.label} uses no packages${problems.length ? `\ncould not check ${problems.length}:\n${problems.map((p) => `  ${p}`).join('\n')}` : ''}`;
+  if (!list.length) return `${pk.holder} uses no packages${problems.length ? `\ncould not check ${problems.length}:\n${problems.map((p) => `  ${p}`).join('\n')}` : ''}`;
   const late = list.filter((o) => o.small || o.big), fine = list.filter((o) => !o.error && !o.small && !o.big), failed = list.filter((o) => o.error);
   const counts = [late.length ? `${late.length} out of date` : '', fine.length ? `${fine.length} up to date` : '', failed.length || problems.length ? `could not check ${failed.length + problems.length}` : ''].filter(Boolean);
-  const lines = [`${pk.label} uses ${list.length} package${list.length === 1 ? '' : 's'}: ${counts.join(', ')}`];
+  const lines = [`${pk.holder} uses ${list.length} package${list.length === 1 ? '' : 's'}: ${counts.join(', ')}`];
   for (const o of late) {
     lines.push(`  ${o.package} ${o.version}: ${[o.small ? `${o.small} is out` : '', o.big ? `${o.big} is out (big)` : ''].filter(Boolean).join(', ')}  [${o.libraries.map(libraryText).join(', ')}]`);
     // each newer version's note, and its outputs of another kind

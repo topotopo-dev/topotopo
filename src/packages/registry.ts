@@ -53,10 +53,11 @@ import { imageRef, referenceableImages } from '../core/image.ts';
 import { graphFiles, registerAssets } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { VERSION_RE, copiesFor, isPackageName, parseUses, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, renameInto, withProjectLock, writeAtomic, writeManifest } from '../project.ts';
+import { VERSION_RE, WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestFile, program, projectDirOf, readManifest, readUses, renameInto, withProjectLock, withStoreLock, writeAtomic, writeManifest, writeUses } from '../project.ts';
 import { scanLibrary } from '../gallery/library.ts';
+import { readWorkspace } from '../workspace.ts';
 import type { GalleryConfig } from '../config.ts';
-import type { Libraries, LibraryAt, ProjectManifest } from '../project.ts';
+import type { CopyStore, Libraries, LibraryAt, ProjectManifest } from '../project.ts';
 
 /** Publishing warns about a version above this size: every project that uses it keeps a copy. */
 export const MAX_VERSION_BYTES = 50 * 2 ** 20;
@@ -214,17 +215,21 @@ function fileSha(abs: string, cached: boolean): string {
   return h;
 }
 
-/** The file that keeps a project's file hashes between runs, and the shape it is written in. */
-const shaCacheFile = (dir: string) => path.join(dir, 'packages', '.cache.json');
+/**
+ * The file that keeps the hashes of a store's files between runs (.cache.json beside its copies; its paths are from
+ * the store's folder, the project's or the workspace's), and the shape it is written in.
+ */
+const shaCacheFile = (store: CopyStore) => path.join(store.packages, '.cache.json');
 const SHA_CACHE_FORMAT = 1;
 const shaCacheRead = new Set<string>();
 
-/** Take in the hashes a project kept (packages/.cache.json), once per process. */
-function readShaCache(dir: string) {
+/** Take in the hashes a store kept (.cache.json), once per process. */
+function readShaCache(store: CopyStore) {
+  const dir = store.root;
   if (shaCacheRead.has(dir)) return;
   shaCacheRead.add(dir);
   let raw: any;
-  try { raw = JSON.parse(fs.readFileSync(shaCacheFile(dir), 'utf8')); } catch { return; }
+  try { raw = JSON.parse(fs.readFileSync(shaCacheFile(store), 'utf8')); } catch { return; }
   if (raw?.format !== SHA_CACHE_FORMAT || !raw.files || typeof raw.files !== 'object') return;
   for (const [rel, s] of Object.entries(raw.files)) {
     const [stamp, h] = String(s).split(' ');
@@ -233,9 +238,10 @@ function readShaCache(dir: string) {
   }
 }
 
-/** Keep the hashes of the project's files that are still there (packages/.cache.json), when new ones were taken. */
-function writeShaCache(dir: string) {
-  if (!shaFresh || !fs.existsSync(path.join(dir, 'packages'))) return;
+/** Keep the hashes of the store's files that are still there (.cache.json), when new ones were taken. */
+function writeShaCache(store: CopyStore) {
+  const dir = store.root;
+  if (!shaFresh || !fs.existsSync(store.packages)) return;
   shaFresh = false;
   const files: Record<string, string> = {};
   for (const [abs, c] of shaCache) {
@@ -243,7 +249,7 @@ function writeShaCache(dir: string) {
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || !fs.existsSync(abs)) continue;
     files[rel.split(path.sep).join('/')] = `${c.stamp} ${c.sha}`;
   }
-  try { writeAtomic(shaCacheFile(dir), JSON.stringify({ format: SHA_CACHE_FORMAT, files: sortKeys(files) }) + '\n'); } catch { /* a cache: kept next time */ }
+  try { writeAtomic(shaCacheFile(store), JSON.stringify({ format: SHA_CACHE_FORMAT, files: sortKeys(files) }) + '\n'); } catch { /* a cache: kept next time */ }
 }
 
 /** The hash of a set of files: their sorted posix paths, each with the SHA-256 of its content (contentSha). */
@@ -299,7 +305,12 @@ export const lockFile = (dir: string) => path.join(dir, 'packages', 'lock.json')
 
 /** A folder's packages/lock.json (empty when there is none); throws naming the file when it is not valid. */
 export function readLock(dir: string): Lock {
-  const file = lockFile(dir);
+  return readLockAt(path.join(dir, 'packages'));
+}
+
+/** The lock.json of a folder of copies (packages/, a workspace's topotopo-packages/). */
+export function readLockAt(packages: string): Lock {
+  const file = path.join(packages, 'lock.json');
   if (!fs.existsSync(file)) return { packages: {} };
   let raw: any;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
@@ -323,9 +334,9 @@ function lockText(lock: Lock): string {
   return JSON.stringify({ packages }, null, 2) + '\n';
 }
 
-function writeLock(dir: string, lock: Lock) {
-  fs.mkdirSync(path.join(dir, 'packages'), { recursive: true });
-  writeAtomic(lockFile(dir), lockText(lock));
+function writeLockAt(packages: string, lock: Lock) {
+  fs.mkdirSync(packages, { recursive: true });
+  writeAtomic(path.join(packages, 'lock.json'), lockText(lock));
 }
 
 /** Every version `uses` needs through the lock (its uses, theirs …), sorted; throws for one the lock does not list. */
@@ -469,6 +480,88 @@ function materialMaps(g: Geometry): OutputInfo['maps'] {
     out[name] = slots;
   }
   return out;
+}
+
+/** A workspace's name for messages (its folder's when its file cannot be read). */
+const workspaceName = (ws: string) => { try { return readWorkspace(ws).name; } catch { return path.basename(ws); } };
+
+/** A workspace's copies are never imported by Godot (a .gdignore in their folder), should the game's root be its project. */
+function gdignore(packages: string) {
+  const f = path.join(packages, '.gdignore');
+  if (!fs.existsSync(f)) try { fs.writeFileSync(f, ''); } catch { /* Godot imports them: harmless */ }
+}
+
+/**
+ * Move the copies of the projects inside a workspace that keep their own (their project.json "uses", their packages/)
+ * into the workspace's one shared copy, as topotopo workspace init does: each package at one version for the whole
+ * game (two projects that used different versions get the newer, said), the lock entries merged, the projects' uses
+ * and copies removed. A project that is a package keeps its own (its uses are published with it). A project whose
+ * copies differ from the workspace's for the same version (edited by hand) is left as it is, said. Returns what it did,
+ * a line each.
+ */
+export function gatherCopies(ws: string): string[] {
+  const store = copiesFor(ws);
+  if (store.workspace !== path.resolve(ws)) return [];
+  const projects = scanLibrary({ name: 'workspace', path: ws }).projects
+    .filter((p) => copiesFor(p.dir).workspace === store.workspace && Object.keys(p.manifest.uses).length);
+  if (!projects.length) return [];
+  return withStoreLock(store, () => {
+    const out: string[] = [];
+    const uses = readUses(store), lock = readLockAt(store.packages);
+    let before: [string, string][] = [];
+    try { before = usesClosure(uses, lock); } catch { /* the lock misses a version: nothing is deleted */ }
+    for (const p of projects) {
+      const own = readLock(p.dir), ownUses = readManifest(p.dir).uses, from = path.join(p.dir, 'packages');
+      // a version the project's lock does not list may be one the workspace holds already
+      const both: Lock = { packages: {} };
+      for (const l of [lock, own]) for (const [pkg, vs] of Object.entries(l.packages)) Object.assign(both.packages[pkg] ??= {}, vs);
+      let closure: [string, string][];
+      try { closure = usesClosure(ownUses, both); } catch (e: any) { out.push(`left ${p.rel} as it is: ${e.message}`); continue; }
+      const clash = closure.find(([pkg, v]) => lock.packages[pkg]?.[v] && own.packages[pkg]?.[v] && lock.packages[pkg][v].hash !== own.packages[pkg][v].hash);
+      if (clash) { out.push(`left ${p.rel} as it is: its copy of ${clash[0]} ${clash[1]} differs from the workspace's (edited by hand?)`); continue; }
+      const missing = closure.find(([pkg, v]) => ![from, store.packages].some((d) => fs.existsSync(path.join(copyAt(d, pkg, v), 'version.json'))));
+      if (missing) { out.push(`left ${p.rel} as it is: its copy of ${missing[0]} ${missing[1]} is missing (${program()} use ${missing[0]} in it copies it again)`); continue; }
+      for (const [pkg, v] of closure) {
+        const to = copyAt(store.packages, pkg, v);
+        if (!fs.existsSync(path.join(to, 'version.json'))) {
+          fs.rmSync(to, { recursive: true, force: true });
+          copyTree(copyAt(from, pkg, v), to);
+        }
+        (lock.packages[pkg] ??= {})[v] = both.packages[pkg][v];
+      }
+      const moved: string[] = [];
+      for (const [pkg, v] of Object.entries(ownUses)) {
+        const was = uses[pkg];
+        if (was === undefined || compareVersions(v, was) > 0) {
+          if (was !== undefined) out.push(`${pkg}: ${p.rel} used ${v}, another project ${was}; the workspace uses ${v} now (${program()} update shows the before/after of a version)`);
+          uses[pkg] = v;
+        } else if (was !== v) out.push(`${pkg}: ${p.rel} used ${v}, another project ${was}; the workspace uses ${was}`);
+        moved.push(`${pkg} ${v}`);
+      }
+      writeManifest(p.dir, { ...readManifest(p.dir), uses: {} });
+      fs.rmSync(from, { recursive: true, force: true });
+      out.push(`moved the copies of ${p.rel} into the workspace's: ${moved.join(', ')}`);
+    }
+    writeLockAt(store.packages, lock);
+    gdignore(store.packages);
+    writeUses(store, uses);
+    // the copies an older version needed that the game uses no more
+    let keep: Set<string>;
+    try { keep = new Set(usesClosure(uses, lock).map(([pkg, v]) => `${pkg}@${v}`)); } catch { return out; }
+    const all = Object.entries(lock.packages).flatMap(([pkg, vs]) => Object.keys(vs).map((v) => [pkg, v] as [string, string]));
+    const gone: string[] = [];
+    for (const [pkg, v] of [...before, ...all]) {
+      if (keep.has(`${pkg}@${v}`) || !lock.packages[pkg]?.[v]) continue;
+      delete lock.packages[pkg][v];
+      if (!Object.keys(lock.packages[pkg]).length) delete lock.packages[pkg];
+      const at = copyAt(store.packages, pkg, v);
+      fs.rmSync(at, { recursive: true, force: true });
+      for (let d = path.dirname(at); d.length > store.packages.length; d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
+      gone.push(`${pkg} ${v}`);
+    }
+    if (gone.length) { writeLockAt(store.packages, lock); out.push(`deleted the copies no project uses any more: ${gone.join(', ')}`); }
+    return out;
+  });
 }
 
 // ------------------------------------------------------------------------------------------------------- registry
@@ -616,8 +709,8 @@ export class ProjectPackages implements SessionPackages {
   readonly engine: Engine;
   /** the project folder; null when the folder belongs to no project */
   readonly dir: string | null;
-  /** the folder whose packages/ holds the project's copies and their lock (copiesFor) */
-  readonly store: string | null;
+  /** where the project's copies, their lock and its uses are (copiesFor): its own, or its workspace's shared copy */
+  readonly store: CopyStore | null;
   /** the folder of TopoTopo's built-in library, which every project looks in */
   readonly builtin: string;
   manifest: ProjectManifest | null = null;
@@ -656,7 +749,7 @@ export class ProjectPackages implements SessionPackages {
     this.dir = dir === null ? null : path.resolve(dir);
     this.store = this.dir === null ? null : copiesFor(this.dir);
     this.builtin = path.resolve(opts.builtin ?? BUILTIN_LIBRARY.path);
-    this.root = { label: 'this project', uses: {}, packages: this.store ? path.join(this.store, 'packages') : '', lock: { packages: {} }, follows: true };
+    this.root = { label: 'this project', uses: {}, packages: this.store ? this.store.packages : '', lock: { packages: {} }, follows: true };
     this.resolver = { resolve: (name) => this.resolveIn(this.root, name), names: () => this.namesIn(this.root), offered: () => this.offered() };
     if (this.store) readShaCache(this.store);
     this.reload();
@@ -664,6 +757,17 @@ export class ProjectPackages implements SessionPackages {
 
   /** "project lantern (D:/lib/props/lantern)" */
   get label(): string { return this.manifest ? `project ${this.manifest.id}` : 'this folder'; }
+
+  /** Who holds the uses and copies, for messages: the project, or its workspace (one copy for every project in it). */
+  get holder(): string {
+    return this.store?.workspace ? `workspace "${workspaceName(this.store.workspace)}"` : this.label;
+  }
+
+  /** The file whose "uses" name the versions in use, for messages: "project.json", or the workspace's file. */
+  get usesFileName(): string { return this.store?.workspace ? WORKSPACE_FILE : 'project.json'; }
+
+  /** The versions the project uses (its own, or its workspace's), as last read. */
+  uses(): Record<string, string> { return this.root.uses; }
 
   /** SessionPackages: why the graphs cannot use packages (a folder in no project, a project.json that is not valid). */
   notice(): string | null {
@@ -687,9 +791,11 @@ export class ProjectPackages implements SessionPackages {
     if (!this.dir) return;
     try {
       this.manifest = readManifest(this.dir);
-      const pkg = this.manifest.package;
+      const pkg = this.manifest.package, store = this.store!;
+      if (store.workspace && Object.keys(this.manifest.uses).length)
+        throw new Error(`${manifestFile(this.dir)} lists "uses" (${Object.entries(this.manifest.uses).map(([k, v]) => `${k} ${v}`).join(', ')}), but the project is in the workspace ${store.workspace}, whose ${WORKSPACE_FILE} names the versions every project in it uses, with one copy of each: ${program()} workspace init ${store.workspace} moves them there`);
       // the project that is a package: its graphs name their own outputs, which cook from its graphs as they are now
-      this.root = { ...this.root, uses: this.manifest.uses, lock: readLock(this.store!), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
+      this.root = { ...this.root, uses: readUses(store), lock: readLockAt(store.packages), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
       this.error = null;
     } catch (e: any) { this.error = e.message; this.root = { ...this.root, uses: {}, lock: { packages: {} }, self: undefined }; }
     if (this.policy) this.applyPolicy();
@@ -698,25 +804,29 @@ export class ProjectPackages implements SessionPackages {
   private diskStamp(): string {
     if (!this.dir) return '';
     const st = (f: string) => { const s = fs.statSync(f, { throwIfNoEntry: false }); return s ? `${s.size}:${s.mtimeMs}` : '-'; };
-    return `${st(manifestFile(this.dir))}|${st(lockFile(this.store!))}`;
+    return `${st(manifestFile(this.dir))}|${st(this.store!.usesFile)}|${st(path.join(this.store!.packages, 'lock.json'))}`;
   }
 
   /**
    * PackageOutput.rootPath: a file as the root names it. Relative to the root's folder (where its relative paths read:
-   * the project's, or the folder of a graph file in it) when it lies in the project, as copies do, so exports name no
-   * folder of this machine; absolute when it lies elsewhere (a followed working folder in another library).
+   * the project's, or the folder of a graph file in it) when it lies in the folder of the project's copies (the
+   * project's, or its workspace's), as copies do, so exports name no folder of this machine; absolute when it lies
+   * elsewhere (a followed working folder in another library).
    */
   private rootPath = (abs: string): string => {
-    const inProject = this.dir ? path.relative(this.dir, abs) : '..';
-    if (!inProject || inProject.startsWith('..') || path.isAbsolute(inProject)) return abs;
+    const inStore = this.store ? path.relative(this.store.root, abs) : '..';
+    if (!inStore || inStore.startsWith('..') || path.isAbsolute(inStore)) return abs;
     return path.relative(this.engine.root.files.resolvePath('.'), abs).split(path.sep).join('/');
   };
 
-  /** A path for messages: relative to the project when inside it. */
+  /** A path for messages: relative to the project when inside it, else to the workspace that holds its copies. */
   private shown(p: string): string {
-    if (!this.dir) return p;
-    const r = path.relative(this.dir, p);
-    return r && !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : p;
+    for (const base of [this.dir, this.store?.workspace]) {
+      if (!base) continue;
+      const r = path.relative(base, p);
+      if (r && !r.startsWith('..') && !path.isAbsolute(r)) return r.split(path.sep).join('/');
+    }
+    return p;
   }
 
   /** The project folder and its manifest; throws when the folder is in no project or project.json is not valid. */
@@ -829,13 +939,13 @@ export class ProjectPackages implements SessionPackages {
     // the package the project uses that needs it, whose `use` copies and records it again
     const direct = ctx.packages === this.root.packages ? this.directUser(pkg, v) : undefined;
     if (!fs.existsSync(path.join(dir, 'version.json')))
-      return { error: missingCopy(pkg, v, this.shown(dir)), hint: `${ctx.label} uses it, and the copies are kept with the project (commit packages/): restore it, or run ${program()} use ${direct ?? pkg}, which copies what is missing` };
+      return { error: missingCopy(pkg, v, this.shown(dir)), hint: `${ctx.label} uses it, and the copies are kept with the ${ctx.packages === this.root.packages && this.store?.workspace ? 'workspace' : 'project'} (commit ${this.shown(ctx.packages)}/): restore it, or run ${program()} use ${direct ?? pkg}, which copies what is missing` };
     const info = readVersionInfo(dir);
     const m = readManifest(dir);
     const hash = copyHash(dir, ctx.packages);
     const expected = ctx.lock.packages[pkg]?.[v]?.hash;
     let warning: string | undefined;
-    if (expected === undefined) warning = `${this.shown(path.dirname(ctx.packages))}/packages/lock.json does not list ${pkg} ${v}: ${program()} use ${direct ?? pkg} records it`;
+    if (expected === undefined) warning = `${this.shown(ctx.packages)}/lock.json does not list ${pkg} ${v}: ${program()} use ${direct ?? pkg} records it`;
     else if (expected !== hash) warning = editedCopy(pkg, v, this.shown(dir), direct);
     const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: ctx.packages, lock: ctx.lock, follows: false };
     // the scope is the files' too: a copy restored after an edit is another scope, with results of its own
@@ -998,10 +1108,10 @@ export class ProjectPackages implements SessionPackages {
 
   /** The copies the project's uses need, checked now: one the lock does not list, one missing, one edited by hand. */
   verifyCopies(): string[] {
-    const { dir } = this.project(), store = this.store!;
-    const packages = path.join(store, 'packages');
+    this.project();
+    const store = this.store!, packages = store.packages;
     let lock: Lock, closure: [string, string][];
-    try { lock = readLock(store); closure = usesClosure(readManifest(dir).uses, lock); } catch (e: any) { return [e.message]; }
+    try { lock = readLockAt(packages); closure = usesClosure(readUses(store), lock); } catch (e: any) { return [e.message]; }
     const out: string[] = [];
     for (const [pkg, v] of closure) {
       const at = copyAt(packages, pkg, v);
@@ -1059,31 +1169,28 @@ export class ProjectPackages implements SessionPackages {
     if (at && isPackageName(at[1])) throw new Error(`"${pkg}" is not a package name: name the version apart, ${program()} use ${at[1]} --version ${at[2] || '<version>'} (MCP: library {action:"use", package:"${at[1]}", version:"${at[2]}"})`);
     if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name (lower-case letters, digits, - and _)`);
     if (o.version !== undefined && !VERSION_RE.test(o.version)) throw new Error(`"${o.version}" is not a version: write big.small, such as ${/^\d+$/.test(o.version) ? `${o.version}.0` : '1.1'}`);
-    return withProjectLock(this.store!, () => {
-      const m = readManifest(dir);
+    const store = this.store!;
+    return withStoreLock(store, () => {
+      const m = readManifest(dir), uses = readUses(store);
       if (pkg === m.package) throw new Error(`this project is the package ${pkg}: its graphs name its own outputs by full name, with no entry in "uses"`);
-      const inUse = m.uses[pkg];
+      const inUse = uses[pkg];
       if (inUse !== undefined && o.version !== undefined && o.version !== inUse)
-        throw new Error(`this project uses ${pkg} ${inUse}: ${program()} update ${pkg} --to ${o.version} shows the before/after of going to ${o.version}, and applies it when asked`);
+        throw new Error(`${store.workspace ? `the ${this.holder} (every project in it)` : 'this project'} uses ${pkg} ${inUse}: ${program()} update ${pkg} --to ${o.version} shows the before/after of going to ${o.version}, and applies it when asked`);
       if (inUse !== undefined) {
-        const packages = path.join(this.store!, 'packages');
         let complete = false;
-        try { complete = usesClosure({ [pkg]: inUse }, readLock(this.store!)).every(([p, w]) => fs.existsSync(path.join(copyAt(packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
-        if (complete) return { version: inUse, copied: [], text: `${this.label} already uses ${pkg} ${inUse}` };
+        try { complete = usesClosure({ [pkg]: inUse }, readLockAt(store.packages)).every(([p, w]) => fs.existsSync(path.join(copyAt(store.packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
+        if (complete) return { version: inUse, copied: [], text: `${this.holder} already uses ${pkg} ${inUse}` };
       }
       const { version: v, place } = this.versionToAdd(pkg, inUse ?? o.version);
       const copied = this.copyIn(pkg, v, place);
-      if (inUse === undefined) {
-        m.uses = sortKeys({ ...m.uses, [pkg]: v });
-        writeManifest(dir, m);
-      }
+      if (inUse === undefined) writeUses(store, { ...uses, [pkg]: v });
       this.reload();
-      writeShaCache(this.store!);
+      writeShaCache(store);
       const deps = copied.filter((c) => c !== `${pkg} ${v}`);
       return {
         version: v, copied,
         text: inUse === undefined
-          ? `added ${pkg} ${v} to ${this.label} from ${libraryText(place.library)}${deps.length ? `, with ${deps.join(', ')}` : ''}: packages/${pkg}/${v}`
+          ? `added ${pkg} ${v} to ${this.holder}${store.workspace ? ' (one copy for every project in it)' : ''} from ${libraryText(place.library)}${deps.length ? `, with ${deps.join(', ')}` : ''}: ${this.shown(copyAt(store.packages, pkg, v))}`
           : `copied what was missing of ${pkg} ${v} again from ${libraryText(place.library)}: ${copied.join(', ')}`,
       };
     });
@@ -1136,7 +1243,7 @@ export class ProjectPackages implements SessionPackages {
 
   /** Copy a version as published, and the versions it holds copies of, into the project; record them in the lock. */
   private copyIn(pkg: string, v: string, place: Place): string[] {
-    const store = this.store!;
+    const packages = this.store!.packages;
     if (versionHash(place.dir) !== place.info.hash)
       throw new Error(`${pkg} ${v} in ${place.dir} (${libraryText(place.library)}) was changed after publishing: its files do not match the hash in its version.json, so it is not copied`);
     type Wanted = { pkg: string; v: string; from: string; hash: string; uses: Record<string, string>; keep?: (rel: string) => boolean };
@@ -1154,7 +1261,7 @@ export class ProjectPackages implements SessionPackages {
       wanted.push(w);
     };
     for (const key of byKey.keys()) visit(key);
-    const lock = readLock(store), packages = path.join(store, 'packages');
+    const lock = readLockAt(packages);
     const copied: string[] = [];
     for (const w of wanted) {
       if (!fs.existsSync(path.join(w.from, 'version.json'))) throw new Error(`${pkg} ${v} in library "${place.library}" lists ${w.pkg} ${w.v} in its packages/lock.json but holds no copy of it (${w.from})`);
@@ -1172,7 +1279,8 @@ export class ProjectPackages implements SessionPackages {
       // the lock keeps the library a copy came from
       if (!have || copied.includes(`${w.pkg} ${w.v}`)) (lock.packages[w.pkg] ??= {})[w.v] = { hash: w.hash, library: place.library, uses: w.uses };
     }
-    writeLock(store, lock);
+    writeLockAt(packages, lock);
+    if (this.store!.workspace) gdignore(packages);
     return copied;
   }
 
@@ -1447,8 +1555,8 @@ export class ProjectPackages implements SessionPackages {
    * looked up says why (error).
    */
   outdated(problems: string[] = []): Outdated[] {
-    const { dir } = this.project();
-    const uses = readManifest(dir).uses;
+    this.project();
+    const uses = readUses(this.store!);
     let scanned: Scanned | null = null, why = '';
     if (Object.keys(uses).length) try { scanned = this.scanLibraries(); problems.push(...scanned.problems); } catch (e: any) { why = e.message; }
     return Object.entries(uses).map(([pkg, version]) => {
@@ -1474,12 +1582,12 @@ export class ProjectPackages implements SessionPackages {
    * big version is a step of its own: it is named. Throws saying why there is none.
    */
   updateTarget(pkg: string, to?: string): UpdateTarget {
-    const { dir } = this.project();
+    this.project();
     if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name`);
     this.refresh();
-    const uses = readManifest(dir).uses, from = uses[pkg];
+    const uses = readUses(this.store!), from = uses[pkg];
     if (from === undefined) {
-      const users = Object.entries(readLock(dir).packages).flatMap(([p, vs]) => Object.entries(vs).filter(([, e]) => e.uses[pkg]).map(([w, e]) => `${p} ${w} uses ${pkg} ${e.uses[pkg]}`));
+      const users = Object.entries(readLockAt(this.store!.packages).packages).flatMap(([p, vs]) => Object.entries(vs).filter(([, e]) => e.uses[pkg]).map(([w, e]) => `${p} ${w} uses ${pkg} ${e.uses[pkg]}`));
       throw new Error(users.length
         ? `this project does not use ${pkg} itself (${users.join('; ')}): a version keeps what it uses, so updating the package that uses it can bring another`
         : `this project does not use ${pkg}: its uses are ${Object.keys(uses).join(', ') || 'none'}`);
@@ -1528,23 +1636,25 @@ export class ProjectPackages implements SessionPackages {
    * copies nothing uses any more (those the project's uses needed before and need no more).
    */
   applyUpdate(t: UpdateTarget): UpdateResult {
-    const { dir } = this.project();
-    const { copied, deleted } = withProjectLock(dir, () => {
-      const m = readManifest(dir);
-      if (m.uses[t.package] !== t.from) throw new Error(`project.json uses ${t.package} ${m.uses[t.package] ?? 'no more'} now, not ${t.from}: look at the before/after again`);
+    this.project();
+    const store = this.store!;
+    const { copied, deleted } = withStoreLock(store, () => {
+      const uses = readUses(store);
+      if (uses[t.package] !== t.from) throw new Error(`${this.usesFileName} uses ${t.package} ${uses[t.package] ?? 'no more'} now, not ${t.from}: look at the before/after again`);
       let before: [string, string][] = [];
-      try { before = usesClosure(m.uses, readLock(dir)); } catch { /* the lock misses a version: nothing is deleted */ }
+      try { before = usesClosure(uses, readLockAt(store.packages)); } catch { /* the lock misses a version: nothing is deleted */ }
       const copied = this.copyIn(t.package, t.to, { library: t.library, dir: t.dir, info: t.toInfo });
-      m.uses = sortKeys({ ...m.uses, [t.package]: t.to });
-      writeManifest(dir, m);
-      return { copied, deleted: this.dropUnused(before, m.uses) };
+      const now = sortKeys({ ...uses, [t.package]: t.to });
+      writeUses(store, now);
+      return { copied, deleted: this.dropUnused(before, now) };
     });
     this.reload();
+    const folder = `${this.shown(store.packages)}/`;
     return {
       copied, deleted,
       text: [
-        `updated ${t.package} ${t.from} → ${t.to} in ${this.label}: project.json uses ${t.package} ${t.to}, from ${libraryText(t.library)}`,
-        `  copied into packages/: ${copied.length ? copied.join(', ') : 'nothing (the project held it already)'}; packages/lock.json records them`,
+        `updated ${t.package} ${t.from} → ${t.to} in ${this.holder}${store.workspace ? ', for every project in it' : ''}: ${this.usesFileName} uses ${t.package} ${t.to}, from ${libraryText(t.library)}`,
+        `  copied into ${folder}: ${copied.length ? copied.join(', ') : `nothing (the ${store.workspace ? 'workspace' : 'project'} held it already)`}; ${folder}lock.json records them`,
         `  deleted the copies nothing uses any more: ${deleted.length ? deleted.join(', ') : 'none (every other copy is still used)'}`,
       ].join('\n'),
     };
@@ -1556,7 +1666,7 @@ export class ProjectPackages implements SessionPackages {
    * When the lock misses a version, every copy stays.
    */
   private dropUnused(before: [string, string][], uses: Record<string, string>): string[] {
-    const store = this.store!, packages = path.join(store, 'packages'), lock = readLock(store);
+    const packages = this.store!.packages, lock = readLockAt(packages);
     let keep: Set<string>;
     try { keep = new Set(usesClosure(uses, lock).map(([p, v]) => `${p}@${v}`)); } catch { return []; }
     const deleted: string[] = [];
@@ -1569,7 +1679,7 @@ export class ProjectPackages implements SessionPackages {
       this.loaded.delete(`${p}@${v}`);
       deleted.push(`${p} ${v}`);
     }
-    writeLock(store, lock);
+    writeLockAt(packages, lock);
     return deleted;
   }
 
@@ -1579,28 +1689,30 @@ export class ProjectPackages implements SessionPackages {
    * one does, it is refused, listing them.
    */
   remove(pkg: string, places: string[]): { deleted: string[]; text: string } {
-    const { dir } = this.project();
+    this.project();
     if (!isPackageName(pkg)) throw new Error(`"${pkg}" is not a package name: write owner/name`);
-    const { v, deleted } = withProjectLock(dir, () => {
-      const m = readManifest(dir), v = m.uses[pkg];
+    const store = this.store!, who = store.workspace ? `the ${this.holder}` : 'this project';
+    const { v, deleted } = withStoreLock(store, () => {
+      const uses = readUses(store), v = uses[pkg];
       if (v === undefined) {
-        const users = Object.entries(readLock(dir).packages).flatMap(([p, vs]) => Object.entries(vs).filter(([, e]) => e.uses[pkg]).map(([w]) => `${p} ${w}`));
+        const users = Object.entries(readLockAt(store.packages).packages).flatMap(([p, vs]) => Object.entries(vs).filter(([, e]) => e.uses[pkg]).map(([w]) => `${p} ${w}`));
         throw new Error(users.length
-          ? `this project does not use ${pkg} itself: ${users.join(', ')} ${users.length === 1 ? 'uses' : 'use'} it, and keeps it until ${users.length === 1 ? 'that package goes' : 'those packages go'}`
-          : `this project does not use ${pkg}: its uses are ${Object.keys(m.uses).join(', ') || 'none'}`);
+          ? `${who} does not use ${pkg} itself: ${users.join(', ')} ${users.length === 1 ? 'uses' : 'use'} it, and keeps it until ${users.length === 1 ? 'that package goes' : 'those packages go'}`
+          : `${who} does not use ${pkg}: its uses are ${Object.keys(uses).join(', ') || 'none'}`);
       }
+      const where = store.workspace ? `the workspace's projects` : 'the project';
       if (places.length)
-        throw new Error(`${places.length === 1 ? 'a graph of the project still names' : `${places.length} places in the project's graphs still name`} ${pkg}: ${places.join(', ')}; change or remove ${places.length === 1 ? 'that node' : 'those nodes'} first, then remove the package`);
+        throw new Error(`${places.length === 1 ? `a graph of ${where} still names` : `${places.length} places in the graphs of ${where} still name`} ${pkg}: ${places.join(', ')}; change or remove ${places.length === 1 ? 'that node' : 'those nodes'} first, then remove the package`);
       let before: [string, string][] = [];
-      try { before = usesClosure(m.uses, readLock(dir)); } catch { /* the lock misses a version: only the package goes from the uses */ }
-      delete m.uses[pkg];
-      writeManifest(dir, m);
-      return { v, deleted: this.dropUnused(before, m.uses) };
+      try { before = usesClosure(uses, readLockAt(store.packages)); } catch { /* the lock misses a version: only the package goes from the uses */ }
+      delete uses[pkg];
+      writeUses(store, uses);
+      return { v, deleted: this.dropUnused(before, uses) };
     });
     this.reload();
     return {
       deleted,
-      text: `removed ${pkg} ${v} from ${this.label}: project.json no longer uses it; deleted the copies nothing uses any more: ${deleted.length ? deleted.join(', ') : 'none'}`,
+      text: `removed ${pkg} ${v} from ${this.holder}: ${this.usesFileName} no longer uses it; deleted the copies nothing uses any more: ${deleted.length ? deleted.join(', ') : 'none'}`,
     };
   }
 
@@ -2124,9 +2236,10 @@ const standing = (o: Outdated) =>
 export function packagesText(pk: ProjectPackages, mcp = false): string {
   if (!pk.dir) return `this folder is in no project: ${makeProject()}, whose graphs can use packages`;
   if (!pk.manifest) return `${manifestFile(pk.dir)}: ${pk.error}`;
-  const m = pk.manifest, lines: string[] = [`${pk.label} (${pk.dir})${m.package ? `, the package ${m.package}` : ''}`];
+  const m = pk.manifest, uses = pk.uses(), lines: string[] = [`${pk.label} (${pk.dir})${m.package ? `, the package ${m.package}` : ''}`];
+  if (pk.store?.workspace) lines.push(`in ${pk.holder} (${pk.store.workspace}): its ${WORKSPACE_FILE} names the versions every project in it uses, one copy of each (${WORKSPACE_PACKAGES}/)`);
   const problems: string[] = [...pk.verifyCopies(), ...pk.check()];
-  const outdated = Object.keys(m.uses).length ? pk.outdated(problems) : [];
+  const outdated = Object.keys(uses).length ? pk.outdated(problems) : [];
   for (const o of outdated) if (o.error) problems.push(`${o.package}: ${o.error}`);
   const late = outdated.filter((o) => o.small || o.big).length, unchecked = outdated.filter((o) => o.error).length;
   lines.push(outdated.length
@@ -2143,7 +2256,7 @@ export function packagesText(pk: ProjectPackages, mcp = false): string {
   let cat: ReturnType<ProjectPackages['catalog']> = [];
   try { cat = pk.catalog(problems); } catch (e: any) { problems.push(e.message); }
   const held = new Set(pk.lockEntries().map((e) => e.package));
-  const others = cat.filter((c) => !held.has(c.package) && m.uses[c.package] === undefined && c.package !== m.package);
+  const others = cat.filter((c) => !held.has(c.package) && uses[c.package] === undefined && c.package !== m.package);
   if (others.length) {
     lines.push(`in its libraries, not used yet (${others.length}):`);
     const w2 = Math.max(0, ...others.map((c) => `${c.package} ${c.versions.at(-1)?.version ?? ''}`.length));
@@ -2174,7 +2287,7 @@ export function packageText(pk: ProjectPackages, pkg: string, mcp = false): stri
   if (typeof n === 'string' || n.output !== null) throw new Error(`"${pkg}" is not a package name: write owner/name`);
   const problems: string[] = [];
   const c = pk.catalog(problems).find((x) => x.package === pkg);
-  const used = m.uses[pkg], inUse = used ? pk.copyInfo(pkg, used) : null;
+  const used = pk.uses()[pkg], inUse = used ? pk.copyInfo(pkg, used) : null;
   if (!c && !inUse) {
     const s = didYouMean(pkg, pk.catalog().map((x) => x.package));
     throw new Error(`no library this project looks in has a package ${pkg}${s.length ? ` — did you mean ${s.join(', ')}?` : ''}${problems.length ? `; could not check ${problems.length}: ${problems.join('; ')}` : ''}`);
@@ -2261,8 +2374,8 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
   if (q.kind !== undefined && !isKind(q.kind)) throw new Error(`"${q.kind}" is not a kind: ${KINDS.join(', ')}`);
   const problems = new Set<string>();
   const builtin = path.resolve(opts.builtin ?? BUILTIN_LIBRARY.path);
-  let manifest: ProjectManifest | null = null;
-  if (dir) { try { manifest = readManifest(dir); } catch (e: any) { problems.add(e.message); } }
+  let manifest: ProjectManifest | null = null, uses: Record<string, string> = {};
+  if (dir) { try { manifest = readManifest(dir); uses = readUses(copiesFor(dir)); } catch (e: any) { problems.add(e.message); } }
   // each folder once: what the project lists first, then TopoTopo's built-in library, then the other registered libraries
   const key = (p: string) => path.resolve(p).toLowerCase(), seen = new Set([key(builtin)]);
   const libs: Omit<SearchLibrary, 'hits'>[] = [];
@@ -2307,7 +2420,7 @@ export function searchPackages(dir: string | null, q: SearchQuery, opts: { built
         if (q.tag !== undefined && !tags.includes(q.tag)) continue;
         const hay = wordsOf([type, alias ?? '', o.label ?? '', o.description ?? '', ...tags, ...about].join(' '));
         if (!words.every((w) => hay.some((h) => h.startsWith(w)))) continue;
-        const used = manifest?.uses[f.package];
+        const used = uses[f.package];
         hits.push({
           type, ...(alias ? { alias } : {}), package: f.package, version: v.version, ...(o.label ? { label: o.label } : {}), kind: o.kind, tags,
           ...(o.description ? { description: o.description } : {}), ...(used ? { used } : {}), ...(manifest?.package === f.package ? { self: true } : {}),

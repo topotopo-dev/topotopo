@@ -29,7 +29,7 @@ import type { Geometry } from '../core/geometry.ts';
 import { diffOverlay } from '../explain.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
 import type { Scope } from '../graph/scope.ts';
-import { readManifest } from '../project.ts';
+import { copiesFor, readUses } from '../project.ts';
 import { compareVersions, isDefaultOutput, loadProject, ProjectPackages, publishedVersions, publishPackage, searchPackages, startsBigVersion, workingHash } from '../packages/registry.ts';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { parsePackageName } from '../graph/scope.ts';
@@ -420,8 +420,8 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     const p = need();
     if (typeof from !== 'string' || typeof to !== 'string') err(400, '"from" and "to" are required: the versions of the before/after the person saw');
     if (run?.progress.package === pkg) { run.signal.aborted = true; await run.done; }
-    const now = asked(() => readManifest(p.dir!).uses[pkg]);
-    if (now !== from) err(409, now === undefined ? `this project does not use ${pkg} now: look at its packages again` : `project.json uses ${pkg} ${now} now, not ${from}: look at the before/after again`);
+    const now = asked(() => readUses(copiesFor(p.dir!))[pkg]);
+    if (now !== from) err(409, now === undefined ? `${p.holder} does not use ${pkg} now: look at its packages again` : `${p.usesFileName} uses ${pkg} ${now} now, not ${from}: look at the before/after again`);
     const r = asked(() => applyUpdate(p, pkg, { from: from as string, to: to as string }));
     if (r.mustChange.length) kept.set(pkg, { from, to: r.target.to, items: r.mustChange });
     else kept.delete(pkg);
