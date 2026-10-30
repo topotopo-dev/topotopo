@@ -2,8 +2,9 @@
 // bake), preview.glb, the embed page, attachments (inside the package only, scripts never inline), /api/packages
 // (CORS only for listed origins), framing headers, the Host and Origin checks, a bake from a file change, a package's
 // versions and outputs and the packages it uses, TopoTopo's built-in library as a library with the same package pages,
-// the registered workspaces on the front page and among a package's users, and the pages' templates escaping what
-// they show.
+// the registered workspaces on the front page (their packages, found by scanning them, with pages of their own; a
+// registered library inside one shown once, as the workspace's) and among a package's users, and the pages' templates
+// escaping what they show.
 //   node test/web.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -16,6 +17,10 @@ import { builtinLibrary } from '../src/packages/registry.ts';
 import { esc, frontPage } from '../src/web/pages.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-web-'));
+// a config of its own: the libraries registered on this machine play no part
+process.env.TOPOTOPO_CONFIG = path.join(tmp, 'config.json');
+delete process.env.TOPOTOPO_LIBRARIES;
+fs.writeFileSync(process.env.TOPOTOPO_CONFIG, JSON.stringify({ libraries: [{ name: 'game', path: path.join(tmp, 'lib') }] }));
 let failures = 0, passes = 0;
 const check = (cond: any, msg: string) => { if (cond) passes++; else failures++; console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); };
 const section = (s: string) => console.log(`\n== ${s}`);
@@ -198,21 +203,30 @@ try {
       '/api/packages names the packages too');
   }
 
-  section('workspaces: the games on the front page, and among the users of a package');
+  section('workspaces: on the front page with their packages, which have pages of their own, and among the users of a package');
   {
     const ws = path.join(tmp, 'hunt');
     fs.mkdirSync(path.join(ws, 'scenes', 'hall'), { recursive: true });
-    fs.writeFileSync(path.join(ws, 'topotopo-workspace.json'), JSON.stringify({ name: 'hunt', libraries: [], engine: { type: 'godot', project: 'game/project.godot', assets: 'game/assets/topotopo' }, uses: { 'topotopo/props': '1.0' } }));
+    fs.writeFileSync(path.join(ws, 'topotopo-workspace.json'), JSON.stringify({ name: 'hunt', libraries: ['game'], engine: { type: 'godot', project: 'game/project.godot' }, uses: { 'topotopo/props': '1.0' } }));
     fs.writeFileSync(path.join(ws, 'scenes', 'hall', 'hall.topo'), JSON.stringify({ title: 'Pump hall' }));
+    // a library registered inside the workspace: shown once, as the workspace's
+    const art = { name: 'hunt-art', path: path.join(ws, 'art') };
+    createPackage(art, 'rugs/rug', { title: 'Rug', graph: BOX });
+    cfg.libraries.push(art);
     cfg.workspaces.push({ name: 'hunt', path: ws });
     g.rescan();
     const home = (await req('/')).body.toString();
     const block = home.slice(home.indexOf('id="workspaces"'), home.indexOf('id="lib-'));
-    check(home.indexOf('id="ws-hunt"') > 0 && home.indexOf('id="ws-hunt"') < home.indexOf('id="lib-game"') && /Godot · game\/project\.godot · exports to res:\/\/assets\/topotopo/.test(block)
-      && /Pump hall/.test(block) && /<a href="\/p\/topotopo\/props">topotopo\/props<\/a> 1\.0/.test(block),
-      `the front page lists the workspace first: its engine, its packages, the packages it uses (${block.replace(/\s+/g, ' ').slice(0, 900)})`);
+    check(home.indexOf('id="ws-hunt"') > 0 && home.indexOf('id="ws-hunt"') < home.indexOf('id="lib-game"') && /Godot · game\/project\.godot<\/span>/.test(block) && !/exports to/.test(block)
+      && /<a href="\/p\/hunt\/hall">Pump hall<\/a>/.test(block) && /<a href="\/p\/hunt\/rug">Rug<\/a>/.test(block) && /<th>Shared libraries<\/th><td>game<\/td>/.test(block) && /<a href="\/p\/topotopo\/props">topotopo\/props<\/a> 1\.0/.test(block),
+      `the front page lists the workspace first: its engine (no word on where exports go), its shared libraries, its packages linked to their pages, the packages it uses (${block.replace(/\s+/g, ' ').slice(0, 900)})`);
+    check(!/id="lib-hunt-art"/.test(home), 'a registered library inside a registered workspace shows once, as the workspace\'s');
+    const page = await req('/p/hunt/hall');
+    check(page.status === 200 && /Pump hall/.test(page.body.toString()) && /in the workspace &quot;hunt&quot;/.test(page.body.toString()), 'a workspace\'s package has a page of its own at /p/<workspace>/<id>');
+    check((await req('/p/hunt/rug')).status === 200, 'and so does the package of the library inside it, as the workspace\'s');
     check(/<a href="\/#ws-hunt">workspace hunt<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/p/topotopo/props')).body.toString()), 'a built-in package\'s users include the workspaces that use it');
     cfg.workspaces.length = 0;
+    cfg.libraries.pop();
     g.rescan();
   }
 

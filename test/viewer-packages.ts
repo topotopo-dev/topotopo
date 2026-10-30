@@ -53,8 +53,9 @@ defineNode({
 //   lib/trees  studio/trees 1.0, 1.1 (rounder crowns: a small update)
 //   lib/rocks  studio/rocks 1.0, 2.0 (the slider "size" is now "radius": a big update)
 //   lib/slow   studio/slow 1.0, 1.1 (its cooks wait: for the stop)
-//   forest     uses each at 1.0 (libraries: ["../lib"]); graphs main, waits, yard (a graph_ref to a graph of the
+//   forest     uses each at 1.0 (lib is registered: outside a workspace every registered library counts); graphs main, waits, yard (a graph_ref to a graph of the
 //              package, and an asset of it), and a graph file scene.json beside graphs/
+json(process.env.TOPOTOPO_CONFIG!, { libraries: [{ name: 'lib', path: path.join(tmp, 'lib') }] });
 const LIB = path.join(tmp, 'lib'), TREES = path.join(LIB, 'trees'), ROCKS = path.join(LIB, 'rocks'), SLOW = path.join(LIB, 'slow'), FOREST = path.join(tmp, 'forest');
 const writePackage = (dir: string, manifest: Record<string, unknown>, graphs: Record<string, GraphSpec>) => {
   json(path.join(dir, `${path.basename(dir)}.topo`), { title: path.basename(dir), graph: 'main', ...manifest });
@@ -104,7 +105,7 @@ const forestMain: GraphSpec = {
   },
   output: 'out',
 };
-writePackage(FOREST, { libraries: ['../lib'] }, {
+writePackage(FOREST, {}, {
   main: forestMain,
   waits: { nodes: { a: { type: 'studio/slow/wait', params: { ms: 300 } }, b: { type: 'studio/slow/wait', params: { ms: 301 } }, c: { type: 'studio/slow/wait', params: { ms: 302 } }, out: { type: 'merge', in: ['a', 'b', 'c'] } }, output: 'out' },
   // a place whose cook needs the package's own graphs and assets (graph_ref, an asset)
@@ -151,8 +152,8 @@ try {
   section('GET /api/packages: what the package uses, the updates and their notes');
   {
     const s = await packages();
-    check(s.package?.id === 'forest' && s.package.dir === FOREST && JSON.stringify(s.package.libraries) === '["../lib"]' && !s.problems.length && s.running === null,
-      `the package, the libraries it lists (${JSON.stringify(s.package)})`);
+    check(s.package?.id === 'forest' && s.package.dir === FOREST && JSON.stringify(s.package.places) === '["library \\"lib\\""]' && !s.problems.length && s.running === null,
+      `the package, the places it looks in (${JSON.stringify(s.package)})`);
     check(s.packages.map((p: any) => p.package).join() === 'studio/rocks,studio/slow,studio/trees', `every package it uses, by name (${s.packages.map((p: any) => p.package)})`);
     const t = s.packages.find((p: any) => p.package === 'studio/trees'), r = s.packages.find((p: any) => p.package === 'studio/rocks');
     check(t.version === '1.0' && t.note === 'first' && /^\d{4}-\d\d-\d\dT/.test(t.published) && t.small === '1.1' && !t.big && t.newer.map((x: any) => `${x.version} ${x.note} ${x.big}`).join() === '1.1 rounder crowns false',
@@ -165,11 +166,11 @@ try {
     check(!t.builtin && t.canFollow && s.package.title === 'forest' && s.package.name === null, 'a package with one working folder can show it live; the package by its title');
     const found = (await get('/api/packages/search?q=tree')).j;
     const hits = found.libraries.flatMap((l: any) => l.hits.map((h: any) => `${l.standing}:${h.type}${h.used ? `@${h.used}` : ''}`));
-    check(hits.includes('listed:studio/trees/pine@1.0') && hits.some((h: string) => h.startsWith('builtin:topotopo/nature/')),
-      `Find packages: the package's libraries and TopoTopo's built-in packages, and what the package uses (${hits.join(', ')})`);
+    check(hits.includes('registered:studio/trees/pine@1.0') && hits.some((h: string) => h.startsWith('builtin:topotopo/nature/')) && found.libraries[0].place === 'library "lib"',
+      `Find packages: the places the package looks in and TopoTopo's built-in packages, and what the package uses (${hits.join(', ')})`);
     check((await get('/api/packages/author')).status === 400, 'a package that is no package has no author panel');
-    check(t.working.length === 1 && t.working[0].dir === TREES && t.working[0].library === '../lib' && t.followed === null && JSON.stringify(t.libraries) === '["../lib"]',
-      'its working folder in the libraries the package lists; not followed');
+    check(t.working.length === 1 && t.working[0].dir === TREES && t.working[0].place === 'library "lib"' && t.followed === null && JSON.stringify(t.places) === '["library \\"lib\\""]',
+      'its working folder in the place the package finds it; not followed');
     const g = (await get('/api/graphs')).j.find((x: any) => x.name === 'main');
     const named = Object.fromEntries(g.nodes.map((n: any) => [n.name, n.packages ?? null]));
     check(JSON.stringify(named.pine) === '["studio/trees"]' && JSON.stringify(named.boulder) === '["studio/rocks"]' && named.ground === null,
@@ -182,7 +183,7 @@ try {
     events.length = 0;
     const r = await post('/api/packages/compare', { package: 'studio/trees' });
     const j = r.j;
-    check(r.status === 200 && j.ok && j.target.from === '1.0' && j.target.to === '1.1' && !j.target.big && j.target.up && j.target.library === '../lib' && j.target.between.map((x: any) => x.version).join() === '1.1',
+    check(r.status === 200 && j.ok && j.target.from === '1.0' && j.target.to === '1.1' && !j.target.big && j.target.up && j.target.library === 'lib' && j.target.place === 'library "lib"' && j.target.between.map((x: any) => x.version).join() === '1.1',
       `without "to": the newest with the same big number (${r.status} ${j.error ?? `${j.target?.from} → ${j.target?.to}`})`);
     check(j.uses.map((u: any) => `${u.file} ${u.node}`).join(' | ') === 'graphs/main.json pine | graphs/main.json small_pine | graphs/yard.json t | scene.json t',
       `every place the package uses it, a graph file beside graphs/ too (${j.uses.map((u: any) => `${u.file} ${u.node}`).join(' | ')})`);
@@ -227,7 +228,7 @@ try {
     const noPkg = await post('/api/packages/compare', {});
     check(none.status === 400 && /this package does not use studio\/oaks: its uses are studio\/rocks, studio\/slow, studio\/trees/.test(none.j.error), `a package it does not use: ${none.j.error}`);
     check(latest.status === 400 && /studio\/rocks 1\.0 is the newest 1\.x .* and 2\.0 is a big version, a step of its own: name it/.test(latest.j.error), `a big update is named: ${latest.j.error}`);
-    check(far.status === 400 && /no library this package lists has studio\/trees 1\.9: they have 1\.0, 1\.1/.test(far.j.error) && noPkg.status === 400 && /"package" is required/.test(noPkg.j.error), 'a version no library has; no package');
+    check(far.status === 400 && /library "lib" has no studio\/trees 1\.9: it has 1\.0, 1\.1/.test(far.j.error) && noPkg.status === 400 && /"package" is required/.test(noPkg.j.error), 'a version its place does not have; no package');
     const methods = await Promise.all([fetch(`${url}/api/packages/stop`), fetch(`${url}/api/packages`, { method: 'POST' }), fetch(`${url}/api/packages/nope`)]);
     check(methods.map((m) => m.status).join() === '405,405,404', `GET of a POST route, POST of a GET route, an unknown route (${methods.map((m) => m.status)})`);
     const cross = await fetch(`${url}/api/packages/follow`, { method: 'POST', headers: { origin: 'http://evil.example' }, body: '{"package":"studio/trees"}' });
@@ -309,7 +310,7 @@ try {
     check(off.j.ok && !off.j.followed && /stopped following studio\/trees: it resolves to its copy \(1\.1\) again/.test(off.j.text) && height(await info()) === h1 && !(await row('studio/trees')).followed,
       `off: the copy again (${off.j.text})`);
     const bad = await post('/api/packages/follow', { package: 'studio/oaks' });
-    check(bad.status === 400 && /no library this package lists has a package studio\/oaks/.test(bad.j.error), `a package no library has: ${bad.j.error}`);
+    check(bad.status === 400 && /no place this package looks in has a package studio\/oaks/.test(bad.j.error), `a package no place has: ${bad.j.error}`);
   }
 
   section('the offer: a save in the working folder of a package the session does not follow');

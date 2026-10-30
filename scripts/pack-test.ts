@@ -30,6 +30,9 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
+// an empty config of its own, which every command below inherits: the libraries registered on this machine play no part
+process.env.TOPOTOPO_CONFIG = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-config-')), 'config.json');
+delete process.env.TOPOTOPO_LIBRARIES;
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const NAME: string = pkg.name;
 const BIN = Object.keys(pkg.bin)[0];

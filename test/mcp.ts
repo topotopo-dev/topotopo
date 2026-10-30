@@ -257,7 +257,7 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
     'help topic inputs: group pattern, role wrangle and the example graph');
   // it names topotopo/nature/tree_lowpoly: a dry run checks it against the package's version a build adds, and copies nothing
   const dry = await call('build', { name: 'land', graph: example, dry_run: true });
-  check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV} to package .* on first use, from library "topotopo" \\(TopoTopo's built-in library\\): this dry run read it there and copied nothing`).test(dry.txt),
+  check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV} to package .* on first use, from TopoTopo's built-in library: this dry run read it there and copied nothing`).test(dry.txt),
     `a dry run of the help inputs example validates the package's output where it lies: ${dry.txt.split('\n').slice(0, 2).join(' | ')}`);
   check(!fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature')) && !JSON.parse(fs.readFileSync(manifestAt(wsDir)!.file, 'utf8')).uses?.['topotopo/nature'] && !fs.existsSync(path.join(wsDir, 'graphs', 'land.json')),
     'and writes nothing: no copy, no entry in uses, no graph');
@@ -274,7 +274,7 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const xg = await call('export', { graph: 'guides_src', path: 'inputs/guides.glb' });
   const land = await call('build', { name: 'land', graph: example });
   check(!xg.isError && !land.isError && /packed: \d+ instances of 1 source/.test(land.txt) && /point: .*\bpath f1/.test(land.txt), `help inputs example cooks on inputs/guides.glb: ${land.txt.split('\n')[0]}`);
-  check(new RegExp(`note: added topotopo/nature ${NV} to package .* from library "topotopo" \\(TopoTopo's built-in library\\): packages/topotopo/nature/${NV}`).test(land.txt) && fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature', NATURE, 'version.json')),
+  check(new RegExp(`note: added topotopo/nature ${NV} to package .* from TopoTopo's built-in library: packages/topotopo/nature/${NV}`).test(land.txt) && fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature', NATURE, 'version.json')),
     `its first use copies the nature package's newest version (${NATURE}) in from TopoTopo's built-in library`);
   const dry2 = await call('build', { name: 'land', graph: example, dry_run: true });
   check(!dry2.isError && /✓ valid: 15 nodes/.test(dry2.txt), `then the help inputs example validates: ${dry2.txt.split('\n')[0]}`);
@@ -365,6 +365,16 @@ if (url) {
   await call('workspace', { action: 'open', path: path.join(game, 'art', 'crate') });
   const inside = await call('workspace', { action: 'show' });
   check(!inside.isError && /^workspace "mcp-game"/.test(inside.txt) && /art\/crate/.test(inside.txt), `workspace show from a package inside it: ${inside.txt.split('\n').slice(0, 2).join(' | ')}`);
+  // the shared libraries of the open package's workspace: shown, listed and unlisted when the person says so
+  const libs = await call('workspace', { action: 'libraries' });
+  check(!libs.isError && /^the workspace "mcp-game" lists no libraries in .*topotopo-workspace\.json "libraries"\nits packages find packages in the workspace itself, then in no shared library, then in TopoTopo's built-in library/.test(libs.txt), `libraries alone says what the workspace lists: ${libs.txt}`);
+  const addLib = await call('workspace', { action: 'libraries', add: 'game' });
+  const wsLibs = () => JSON.parse(fs.readFileSync(path.join(game, 'topotopo-workspace.json'), 'utf8')).libraries.join();
+  check(!addLib.isError && wsLibs() === 'game' && !(await call('workspace', { action: 'libraries', remove: 'game' })).isError && wsLibs() === '', `libraries {add} and {remove} change the workspace's list: ${addLib.txt.split('\n')[0]}`);
+  const setLibs = await call('workspace', { action: 'set', libraries: ['game'] });
+  check(setLibs.isError && /"libraries" is no longer set on a package/.test(setLibs.txt), 'set {libraries} is refused, saying where it went');
+  const assets = await call('workspace', { action: 'init_workspace', path: game, assets: 'godot/assets' });
+  check(assets.isError && /is gone: an export stays in its package's exports\/ folder/.test(assets.txt), `init_workspace refuses an assets folder, naming the change: ${assets.txt}`);
 }
 
 // packages: a package publishes a version; another lists the library, uses it and cooks its output
@@ -390,13 +400,11 @@ if (url) {
 
   const yard = path.join(libDir, 'lib', 'levels', 'yard');
   await call('workspace', { action: 'create', library: 'game', path: 'levels/yard', title: 'Yard' });
-  // the person lists the library the package finds packages in
-  const pj = JSON.parse(fs.readFileSync(path.join(yard, 'yard.topo'), 'utf8'));
-  fs.writeFileSync(path.join(yard, 'yard.topo'), JSON.stringify({ ...pj, libraries: ['game'] }, null, 2));
+  // a package inside a library finds its siblings there
   const listed = await call('workspace', { action: 'packages' });
-  check(!listed.isError && /\n {2}studio\/crates 1\.0 +1 output {2}\[library "game"\]/.test(listed.txt), `library packages lists the packages in the libraries the package lists: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
+  check(!listed.isError && /\n {2}studio\/crates 1\.0 +1 output {2}\[library "game"\]/.test(listed.txt), `library packages lists the packages of the places the package looks in: ${listed.txt.split('\n').find((l) => l.includes('studio/crates'))}`);
   const found = await call('workspace', { action: 'search', query: 'crate' });
-  check(!found.isError && /^search "crate": \d+ outputs/.test(found.txt) && /\nlibrary "game" \(.*\): package yard lists it: a graph that names one of these adds its package\n {2}studio\/crates\/crate {2}mesh {2}"Crate" {2}1\.0/.test(found.txt)
+  check(!found.isError && /^search "crate": \d+ outputs/.test(found.txt) && /\nlibrary "game" \(.*\): package yard is in it: a graph that names one of these adds its package\n {2}studio\/crates\/crate {2}mesh {2}"Crate" {2}1\.0/.test(found.txt)
     && /\n {2}topotopo\/props\/crate {2}/.test(found.txt), `library search finds outputs in the package's library and TopoTopo's built-in one: ${found.txt.split('\n').filter((l) => /^ {2}\S/.test(l)).join(' | ')}`);
   const meshes = await call('workspace', { action: 'search', kind: 'mesh', tag: 'nothing-has-this' });
   check(!meshes.isError && /^search kind mesh, tag nothing-has-this: no output matches in /.test(meshes.txt), `kind and tag filters: ${meshes.txt.split('\n')[0]}`);

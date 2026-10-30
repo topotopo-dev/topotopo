@@ -2,6 +2,8 @@
 // node test/remeshquad.ts
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
@@ -337,7 +339,10 @@ try {
   hash(parity.source_triangle, 4); hash(parity.barycentric, 8); hash(parity.src_prim, 4);
   console.log(`quad_parity_digest=${digest.toString(16).padStart(16, '0')}; ${parity.positions.length / 3} points, ${parity.prim_start.length - 1} faces`);
   const example = JSON.parse(fs.readFileSync(new URL('../examples/quad_remesh.json', import.meta.url), 'utf8')) as GraphSpec;
-  // the example's rock is topotopo/nature/rock: it cooks as a graph of the examples' package, from its copy
+  // the example's rock is topotopo/nature/rock: it cooks as a graph of the examples' package, from its copy; an empty
+  // config of its own, so the libraries registered on this machine play no part
+  process.env.TOPOTOPO_CONFIG = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-config-')), 'config.json');
+  delete process.env.TOPOTOPO_LIBRARIES;
   openPackages(off, fileURLToPath(new URL('../examples/', import.meta.url)));
   for (const output of ['sphere_quad', 'box_quad', 'rock_quad', 'tube_quad']) {
     const geo = await cook(example.nodes, output);
