@@ -1209,7 +1209,11 @@ the one that cooked it. Only outputs whose own deps changed cook again; results 
 
 EXIT CODES: 0 every output ok; 1 an output or package failed or timed out (records and reports still written);
 2 usage, setup or protocol error, a published copy, a package outside a Godot project (nothing written).
-CI: godot --headless --path game --import, then topotopo godot status game --strict.
+CI: godot --headless --path game --import, then topotopo godot status game --strict (where TopoTopo is not installed:
+godot --headless --path game --script res://addons/topotopo/tools/check.gd, which exits 1 the same way).
+IN THE EDITOR: the TopoTopo panel (bottom) shows each package's state, outputs, errors and orphans; right-click a .topo
+or an output: Open in TopoTopo (the live viewer), Recook, Show Cook Report. A failed output keeps its last good GLB and
+marks the .topo with Godot's ImportFail icon. integrations/godot/demo is a project to try it on.
 The plugin's contract (jobs file, progress lines, record schema, freshness): integrations/godot/PROTOCOL.md.
 
 THE CLI COMMANDS:

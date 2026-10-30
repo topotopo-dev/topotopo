@@ -431,6 +431,15 @@ writes (options from `<id>.topo.import`, flags override them). Exit codes: 0 ok,
 usage or setup error. `--help-topic godot` has the details; the plugin's contract is
 [integrations/godot/PROTOCOL.md](integrations/godot/PROTOCOL.md).
 
+In the editor, the plugin ([integrations/godot/addons/topotopo](integrations/godot/addons/topotopo/README.md)) cooks
+in the background while you work: save a graph in TopoTopo's viewer (right-click a `.topo` or one of its outputs:
+**Open in TopoTopo**) or let an agent change it over MCP, and the changed GLBs reimport and open levels update. A
+failed output shows Godot's ImportFail icon on the `.topo`, an Output line naming the node, a toast and a row in the
+**TopoTopo** panel, while levels keep the last good GLB. Without TopoTopo on a machine, the committed outputs are used
+and `godot --headless --path <project> --script res://addons/topotopo/tools/check.gd` checks them in CI. To try it,
+set up the demo project with `topotopo godot setup integrations/godot/demo` and follow its
+[README](integrations/godot/demo/README.md).
+
 ## Web app
 
 Keep packages in workspaces and libraries on your PC and browse them as a website: `topotopo web` serves the registered
@@ -712,6 +721,14 @@ and nowhere else), and `npm test` fails while a built-in package's working folde
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.
+
+**The Godot addon** has its own tests, outside `npm test` because they need Godot:
+`GODOT=<the Godot 4.7 editor, on Windows its _console.exe> npm run test:godot` runs the addon in that editor, headless,
+with its settings and cache in a temp folder: the GDScript port of the record and freshness against the golden values
+of `test/cook.ts`, first and incremental imports, sockets, extracted textures and MultiMesh buffers as the cook wrote
+them, an output's own Godot settings surviving recooks, failures, a machine without TopoTopo, published copies, an
+export pack, a C# project, the window's flow (background cooks, reimports, the panel) and the demo project. Without
+`GODOT` it is skipped.
 
 **Golden fingerprints.** A fingerprint holds counts, the bbox (rounded to 1e-4), the attribute schema and group names
 per class, and hashes of positions (quantised to 1e-5), topology and every attribute (1e-4). They are stable across runs
