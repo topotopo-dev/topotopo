@@ -127,8 +127,9 @@ export const GODOT_EXCLUDES = ['*/attachments/*', '*/graphs/*', '*/inputs/*', '*
 
 /**
  * The export presets of a Godot project (export_presets.cfg in `projectDir`) that would ship TopoTopo's files: one that
- * exports every resource (export_filter="all_resources") or includes *.json or *.txt files, with the exclude_filter
- * entries it lacks. Nothing is edited. One line each; none when the file is missing or every preset excludes them.
+ * exports every resource (export_filter="all_resources", or "exclude": all but the files checked) or includes *.json or
+ * *.txt files, with the exclude_filter entries it lacks. Nothing is edited. One line each; none when the file is missing
+ * or every preset excludes them.
  */
 export function godotPresetReport(projectDir: string): string[] {
   let text: string;
@@ -140,12 +141,15 @@ export function godotPresetReport(projectDir: string): string[] {
     const key = (k: string) => new RegExp(`^${k}\\s*=\\s*"((?:[^"\\\\]|\\\\.)*)"`, 'm').exec(body)?.[1] ?? '';
     const name = key('name') || '(unnamed)', filter = key('export_filter'), include = key('include_filter'), exclude = key('exclude_filter');
     const includes = include.split(',').map((s) => s.trim()).filter(Boolean);
-    const ships = filter === 'all_resources' || includes.some((p) => /\*\.(json|txt)$/i.test(p) || p === '*' || p === '*.*');
+    // "all_resources": every resource; "exclude": every resource but the files checked in the dialog
+    const every = filter === 'all_resources' || filter === 'exclude';
+    const ships = every || includes.some((p) => /\*\.(json|txt)$/i.test(p) || p === '*' || p === '*.*');
     if (!ships) continue;
     const have = new Set(exclude.split(',').map((s) => s.trim()).filter(Boolean));
     const missing = GODOT_EXCLUDES.filter((e) => !have.has(e));
     if (!missing.length) continue;
-    const why = filter === 'all_resources' ? 'exports every resource' : `includes ${includes.filter((p) => /\*\.(json|txt)$/i.test(p) || p === '*' || p === '*.*').join(', ')}`;
+    const why = filter === 'all_resources' ? 'exports every resource' : filter === 'exclude' ? 'exports every resource but the files it leaves out'
+      : `includes ${includes.filter((p) => /\*\.(json|txt)$/i.test(p) || p === '*' || p === '*.*').join(', ')}`;
     out.push(`export preset "${name}" ${why}, so it would ship TopoTopo's files: add to its exclude_filter (Project > Export > Resources > Filters to exclude) ${missing.join(', ')}`);
   }
   return out;

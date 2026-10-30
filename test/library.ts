@@ -399,11 +399,13 @@ section('the engine project: at or above the workspace first, then below; what U
     '[preset.0.options]', 'binary_format/embed_pck=false', '',
     '[preset.1]', 'name="Web"', 'export_filter="resources"', 'include_filter="*.json"', 'exclude_filter=""', '',
     '[preset.2]', 'name="Clean"', 'export_filter="resources"', 'include_filter=""', 'exclude_filter=""', '',
+    '[preset.3]', 'name="All But"', 'export_filter="exclude"', 'export_files=PackedStringArray()', 'include_filter=""', 'exclude_filter=""', '',
   ].join('\n'));
   const atRoot = initWorkspace(godot);
   check(atRoot.manifest.name === 'valley' && atRoot.manifest.engine !== 'none' && atRoot.manifest.engine?.project === 'project.godot' && /\(found at or above the workspace\)/.test(atRoot.text) && /^packages: 1/m.test(atRoot.text),
     `a workspace at the Godot project's root: the project is the one at its root, and the packages under assets/ are found (${atRoot.text.split('\n').slice(0, 2).join(' | ')})`);
   check(/export preset "Windows Desktop" exports every resource, so it would ship TopoTopo's files: add to its exclude_filter .* \*\/attachments\/\*, \*\/inputs\/\*, \*\.topo, \*\/exports\/\*\.source\.json, \*\/exports\/exports\.json$/m.test(atRoot.text)
+    && /export preset "All But" exports every resource but the files it leaves out, so it would ship TopoTopo's files/.test(atRoot.text)
     && /export preset "Web" includes \*\.json, so it would ship TopoTopo's files/.test(atRoot.text) && !/"Clean"/.test(atRoot.text),
     'it reports the presets that would ship TopoTopo\'s files, with the exclude_filter entries each lacks, and edits nothing');
   check(fs.readFileSync(path.join(godot, 'export_presets.cfg'), 'utf8').includes('exclude_filter="*/graphs/*"'), 'the presets stay as they were');
