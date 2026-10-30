@@ -1858,6 +1858,8 @@ section('Godot: a .gdignore in the working folders of the packages inside a Godo
   fs.rmSync(path.join(BARREL, 'inputs', '.gdignore'));
   const ck = await checkAll(BARREL);
   check(ck.fixed.length === 1 && exists(BARREL, 'inputs', '.gdignore') && /added 1 missing \.gdignore file, which keep Godot's importer out of TopoTopo's working folders/.test(checkText(ck)), `check adds a missing .gdignore and says so (${ck.fixed.join(', ')})`);
+  const checkHelp = spawnCli(['--help']).out.split('\n').find((l) => / check \[folder\] /.test(l)) ?? '';
+  check(/changing nothing but missing \.gdignore files inside a Godot project\)$/.test(checkHelp), `--help says the one thing check writes (${checkHelp.trim()})`);
   // the exports a viewer lists leave the engine's files out
   write(path.join(BARREL, 'exports', 'barrel.glb'), 'glb');
   write(path.join(BARREL, 'exports', 'barrel.glb.import'), '[remap]\n');

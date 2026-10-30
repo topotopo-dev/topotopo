@@ -52,7 +52,7 @@ export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'publish [folder] --note "..." [--big] [--dry-run]', what: 'publish the next version of the package into versions/; --dry-run checks everything and writes nothing' },
   { usage: 'search [words] [folder] [--kind k] [--tag t]', what: 'the outputs of every place the package looks in, and in a workspace the registered libraries it does not list' },
   { usage: 'outdated [folder]', what: 'the packages it uses that have newer versions, with their notes' },
-  { usage: 'check [folder]', what: 'cook what the workspace relies on (the newest version of its packages that publish, every graph of the others, the newest versions in the libraries it lists; outside a workspace the package and its library); list what broke and why, changing nothing' },
+  { usage: 'check [folder]', what: 'cook what the workspace relies on (the newest version of its packages that publish, every graph of the others, the newest versions in the libraries it lists; outside a workspace the package and its library); list what broke and why, changing nothing but missing .gdignore files inside a Godot project' },
   { usage: 'update owner/name [folder] [--to 1.4] [--render <folder>]', what: 'the before/after of an update: every place the package uses it, cooked with both versions; nothing is written' },
   { usage: 'update owner/name [folder] --from 1.3 --to 1.4 --apply', what: 'apply the update you looked at: copy it in, set "uses" and the lock, delete the copies nothing uses' },
 ];
@@ -355,8 +355,9 @@ export async function outdatedCommand(argv: string[], prog: string, io: Io = con
 
 /**
  * `check [folder]`: cook the newest version of every package in the libraries of the workspace around the folder (or
- * of its package), and every graph of its packages; say what broke and why. Writes nothing; exit code 1 when something
- * broke (a build machine runs it after updating TopoTopo).
+ * of its package), and every graph of its packages; say what broke and why. Writes nothing but the .gdignore files a
+ * package inside a Godot project lacks; exit code 1 when something broke (a build machine runs it after updating
+ * TopoTopo).
  */
 export async function checkCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
