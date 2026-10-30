@@ -48,7 +48,7 @@ export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'packages [owner/name] [folder]', what: 'what the package uses and can use, one line each; with a package, its versions and its outputs' },
   { usage: 'publish [folder] --note "..." [--big] [--dry-run]', what: 'publish the next version of the package into versions/; --dry-run checks everything and writes nothing' },
   { usage: 'search [words] [folder] [--kind k] [--tag t]', what: 'the outputs of every library, and whether the package can use them' },
-  { usage: 'outdated [folder]', what: 'the packages the package uses that have newer versions, with their notes' },
+  { usage: 'outdated [folder]', what: 'the packages it uses that have newer versions, with their notes' },
   { usage: 'check [folder]', what: 'cook the newest version of every package in the workspace\'s (or the package\'s) libraries, and every graph of its packages; list what broke and why, changing nothing' },
   { usage: 'update owner/name [folder] [--to 1.4] [--render <folder>]', what: 'the before/after of an update: every place the package uses it, cooked with both versions; nothing is written' },
   { usage: 'update owner/name [folder] --from 1.3 --to 1.4 --apply', what: 'apply the update you looked at: copy it in, set "uses" and the lock, delete the copies nothing uses' },
@@ -343,7 +343,7 @@ export async function searchCommand(argv: string[], prog: string, io: Io = conso
   })) ?? 0;
 }
 
-/** `outdated [folder]`: the packages the package uses that have newer versions, with their notes. */
+/** `outdated [folder]`: the packages it uses that have newer versions, with their notes. */
 export async function outdatedCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const folder = args(argv, [], [], `usage: ${prog} outdated [folder]`).rest[0];

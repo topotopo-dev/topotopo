@@ -179,7 +179,7 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   if (argv.includes('--catalog')) console.log(catalogText(defs, { cli: true }));
   else {
     const name = opt('--help-node')!;
-    // an output of a package that the package does not use yet is read where its library holds it (nothing is copied)
+    // an output of a package this one does not use yet is read where its library holds it (nothing is copied)
     const d = defs.find((x) => x.type === name) ?? (name.includes('/') ? engine.resolveDef(name) ?? pk.describe(name) ?? undefined : undefined);
     // a package output this folder cannot cook as it is (one of TopoTopo's own it does not use, a folder in no package)
     const why = name.includes('/') && !engine.resolveDef(name) ? engine.packageIssue(name) : null;
@@ -273,10 +273,10 @@ async function cook() {
   }
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
   await engine.init();
-  // the packages of the package the file belongs to: one the graph names for the first time is added (said), and
+  // the packages the file's package uses: one the graph names for the first time is added (said), and
   // --follow uses a package's working folder for this run. A graph that does not validate as a dry run sees it adds
   // nothing: its errors are said and the run ends. --locked (a build machine) adds nothing and changes no file: a
-  // package the package does not use, or a copy missing or edited by hand, fails the run instead.
+  // package it does not use, or a copy missing or edited by hand, fails the run instead.
   let pk: ReturnType<typeof openPackages>;
   try { pk = openPackages(engine, path.dirname(path.resolve(file)), { follow: followArgs }); } catch (e) { fail(`--follow: ${(e as Error).message}`); }
   const dry = pk!.dryRun(graph);

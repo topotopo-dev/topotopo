@@ -75,7 +75,7 @@ export const TOPICS: Record<string, string> = {
 - A PACKAGE is a folder of graphs and the models they make, marked by one <id>.topo file, its manifest (the file's
   name is the package id). Every tool works in one package, the open package; only a package's graphs use other
   packages. A package that publishes versions is used by other packages by name (help topic "packages").
-- A WORKSPACE is a game's folder (or any 3D project's) with topotopo-workspace.json at its root: the packages inside
+- A WORKSPACE is a game's folder (or any 3D production's) with topotopo-workspace.json at its root: the packages inside
   share the libraries it lists and one copy of each package version, and exports can go into its engine project.
 - A LIBRARY is a folder of packages registered on this machine by name (\`topotopo library add <name> <folder>\`, kept
   in ~/.topotopo/config.json), shared across workspaces. TopoTopo ships one built in, "topotopo", with its own packages.
@@ -1092,9 +1092,10 @@ outputs are listed by the catalog (category "package") and help even where the p
   Y up, metres; walls start at x = 0, roofs at the wall top); every piece has prim name and material. Outputs that
   follow a curve (railing, fence, pipe_run, road_strip) take the curve as input 0, those that dress a surface
   (scatter_rocks, forest_patch, grass_clumps) the surface; unconnected they build a default one. Those three output
-  packed instances. A built-in package's pieces build on each other (house is the package's wall_segment and roof_skeleton). The first
-  use copies the built-in package into the package like any package, and a newer version a TopoTopo release brings shows as an
-  update. In an installed TopoTopo they have no working folder to follow; TopoTopo's repository publishes them.
+  packed instances. A built-in package's pieces build on each other (house is its own wall_segment and roof_skeleton).
+  A first use copies the built-in package into the package that uses it, as for any other, and a newer version a
+  TopoTopo release brings shows as an update. In an installed TopoTopo they have no working folder to follow;
+  TopoTopo's repository publishes them.
 
 FOLLOWING, for one session: workspace {action:"follow", package:"studio/trees", on:true} (CLI: --follow studio/trees on a
 graph cook or topotopo view) shows that package's working folder (found in the libraries this package lists) instead of its copy, until

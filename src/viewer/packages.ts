@@ -1,9 +1,9 @@
 // The packages a package uses, in the live viewer (the registry is src/packages/registry.ts, Update's before/after
-// src/packages/update.ts): what the page's Packages tab shows, each package the package uses with the version in use and
+// src/packages/update.ts): what the page's Packages tab shows, each package it uses with the version in use and
 // its outputs' kinds and tags, the updates its libraries have and their notes, its working folder and whether this
 // session follows it; the before/after of an update, with progress events and a stop of its own (its cooks are not the
 // session's, so the session's stop does not reach them); applying it; and the follow switch. Following lasts as
-// long as the viewer and is never saved. The working folders of the packages the package uses are watched: a save in
+// long as the viewer and is never saved. The working folders of the packages it uses are watched: a save in
 // one the session follows cooks the graphs that use it again, a save in another is told to the pages (they offer to
 // follow it), and a version published there is a new update.
 //
@@ -524,7 +524,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
           return true;
         }
         const pkg = body.package;
-        if (typeof pkg !== 'string' || !pkg) err(400, '"package" is required: "owner/name", a package the package uses (GET /api/packages lists them)');
+        if (typeof pkg !== 'string' || !pkg) err(400, '"package" is required: "owner/name", a package the open package uses (GET /api/packages lists them)');
         if (u.pathname === '/api/packages/compare') {
           if (body.to !== undefined && typeof body.to !== 'string') err(400, '"to" is a version, such as "2.0"');
           json(200, await compare(pkg, body.to));

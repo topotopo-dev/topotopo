@@ -232,7 +232,7 @@ const setGraph = (dir: string, name: string, g: GraphSpec) => json(path.join(dir
 const editManifest = (dir: string, f: (m: any) => void) => { const m = readJSON(manifestFile(dir)); f(m); json(manifestFile(dir), m); };
 
 interface Opened { engine: Engine; pk: PackageUses; ws: Session }
-/** An engine, the packages of the package `dir` belongs to, and a package on it, as the tools open them. */
+/** An engine, the packages used by the package `dir` belongs to, and a package on it, as the tools open them. */
 async function open(dir: string, follow: string[] = [], builtin?: string): Promise<Opened> {
   const engine = await newEngine(dir);
   const pk = openPackages(engine, dir, { follow, builtin });
@@ -1251,7 +1251,7 @@ section('the CLI as a person runs it: a graph-file cook (first use, --follow, --
   const was = fs.readFileSync(manifestFile(dirs.forest), 'utf8');
   const locked = f.pk.locked(sceneGraph);
   check(locked.length === 1 && /^the graph names studio\/rules, which forest\.topo does not use: topotopo use studio\/rules adds it/.test(locked[0]) && fs.readFileSync(manifestFile(dirs.forest), 'utf8') === was,
-    `--locked fails for a package the package does not use, and writes nothing: ${locked.join(' | ')}`);
+    `--locked fails for a package it does not use, and writes nothing: ${locked.join(' | ')}`);
   check(!f.pk.locked({ nodes: { t: { type: 'studio/trees/pine' } } }).length, 'and lets one that uses what the package holds cook');
   // a graph-file cook adds on first use, follows a working folder and records the packages it used
   setGraph(TREES, 'crown', crown(2));
@@ -1328,7 +1328,7 @@ section('Update: the before/after of a small update; nothing is written until it
   // not a place: a graph in an exports/ folder, here beside a graph file in a subfolder
   write(path.join(dirs.forest, 'levels', 'exports', 'scene.json'), fs.readFileSync(path.join(dirs.forest, 'scene.json')));
   const o = await open(dirs.forest);
-  check(/this package does not use studio\/oaks: its uses are nordic\/rocks, studio\/grove, studio\/rules, studio\/trees/.test(await rejection(beforeAfter(o.pk, 'studio/oaks'))), 'a package the package does not use');
+  check(/this package does not use studio\/oaks: its uses are nordic\/rocks, studio\/grove, studio\/rules, studio\/trees/.test(await rejection(beforeAfter(o.pk, 'studio/oaks'))), 'a package it does not use');
   check(/studio\/grove 1\.0 is the newest version in the package's libraries: there is nothing to update/.test(await rejection(beforeAfter(o.pk, 'studio/grove'))), 'a package that is up to date');
   check(/no library this package lists has studio\/trees 1\.9: they have 1\.0, 1\.1, 1\.2, 1\.3/.test(await rejection(beforeAfter(o.pk, 'studio/trees', { to: '1.9' }))) && /this package uses studio\/trees 1\.1 already/.test(await rejection(beforeAfter(o.pk, 'studio/trees', { to: '1.1' }))),
     'a version no library has, and the version in use');
@@ -1426,7 +1426,7 @@ section('Update: a big version is named, and says what the graphs must change');
   const back = await beforeAfter(o.pk, 'studio/trees', { to: '1.3' }), backText = beforeAfterText(back, '');
   check(/\(back to an older big version\)/.test(backText) && /\ngoing back to 1\.3 crosses a big version; what goes away or means something else:\n {2}output "pine": param "trunk_height" removed\n/.test(backText) && !back.mustChange.length,
     'going back across a big version says what goes away, and the graphs, which set "height", need no change for it');
-  // a package the package uses only through another
+  // a package it uses only through another
   const user = path.join(dirs.repo, 'grove-user');
   writePackage(user, { libraries: ['../../game'] }, {});
   const u = await open(user);

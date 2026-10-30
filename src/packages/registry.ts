@@ -631,7 +631,7 @@ export type FollowPolicy = (working: { package: string; dir: string; library: st
 /** A published version found in one of the package's libraries. */
 interface Place { library: string; dir: string; info: VersionInfo }
 
-/** A package in the package's libraries: the libraries that hold it, its working folders and its versions. */
+/** A package in the libraries this one looks in: the libraries that hold it, its working folders and its versions. */
 interface Found { package: string; libraries: string[]; working: { library: string; dir: string }[]; versions: Map<string, Place[]> }
 
 /** A package's folder in a library: its versions/, and `working` when it is the package's working folder (it holds its manifest). */
@@ -1788,7 +1788,7 @@ export class PackageUses implements SessionPackages {
   }
 
   /**
-   * PackageResolver.offered: the outputs of TopoTopo's own packages the package does not use, at the newest version its
+   * PackageResolver.offered: the outputs of TopoTopo's own packages it does not use, at the newest version its
    * built-in library holds, read there (nothing is copied): the catalog and help list them, and a graph's first use adds
    * the package. Outside a package as well, where naming one is an error that says how to make the folder a package.
    */
@@ -1912,7 +1912,7 @@ function readVersions(dir: string, pkg: string, library: string, problems: Set<s
 }
 
 /**
- * The packages of the package a folder belongs to (the folder itself or the nearest one above with a .topo file),
+ * The packages used by the package a folder belongs to (the folder itself or the nearest one above with a .topo file),
  * attached to the engine's root scope, and the working folders to follow this session. `builtin`: the folder of
  * TopoTopo's built-in library (default: the one TopoTopo ships).
  */

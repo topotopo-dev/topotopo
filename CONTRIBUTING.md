@@ -2,7 +2,7 @@
 
 Thanks for your interest. A few things to know before you start.
 
-## How this project is run
+## How TopoTopo is run
 
 - **One maintainer.** Reviews are slow, sometimes weeks. Small pull requests get reviewed first.
 - **Open an issue before large changes.** New node families, engine changes, new dependencies or file formats
@@ -46,7 +46,7 @@ mirrors it.
 npm run typecheck
 npm test
 npm run notice       # NOTICE for the current npm and Rust dependencies (Rust needs cargo), then commit it
-npm run pack:test    # builds and packs the tarball, installs it in a temp project, runs the CLI, library and MCP server
+npm run pack:test    # builds and packs the tarball, installs it in a temp folder, runs the CLI, library and MCP server
 npm pack --dry-run   # the file list that will be published
 npm run site         # the documentation site (https://topotopo.dev) into site/, from the README, registry, TopoTopo's own packages, examples and docs
 npm run site:check   # fails on broken internal links or anchors, missing images, unused files or a site over 25 MB
@@ -76,4 +76,4 @@ make) and the output of `inspect` or the error text. Reports without a graph are
 
 ## Code of conduct
 
-This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
+TopoTopo follows the [Contributor Covenant](CODE_OF_CONDUCT.md).

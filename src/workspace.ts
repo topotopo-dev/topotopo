@@ -1,4 +1,4 @@
-// A workspace: a game (or any 3D project) that holds TopoTopo packages. topotopo-workspace.json at its root names the
+// A workspace: a game (or any 3D production) that holds TopoTopo packages. topotopo-workspace.json at its root names the
 // libraries every package inside looks in (after the package's own), the engine project the game is built with,
 // whether the game's own packages are followed live for looking, and the one version of each package the whole game
 // uses: its packages share one copy of it, in topotopo-packages/ beside the file (a package that publishes versions keeps

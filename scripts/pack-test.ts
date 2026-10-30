@@ -1,4 +1,4 @@
-// Pack test: build the npm tarball, install it into an empty project in a temp directory and use it the way a user
+// Pack test: build the npm tarball, install it into an empty folder in a temp directory and use it the way a user
 // would. Not part of npm test (it builds, packs and installs: about a minute); run it before a release.
 //   node scripts/pack-test.ts [--keep]      (npm run pack:test; --keep leaves the temp directory for inspection)
 //
@@ -7,7 +7,7 @@
 //   versions of its own packages, library/<name>/versions/), and nothing from src/, test/, examples/, out/, the built-in packages'
 //   working folders and thumbnails, or the Rust sources is.
 // - The bin from the installed package: `npm exec --no -- topotopo --help`, and cooking an example graph copied into the
-//   temp project with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
+//   temp folder with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
 //   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
 //   makes the folder a package, and the cook's first use copies the built-in package in from the installed built-in library).
 // - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the built-in library, the
@@ -90,7 +90,7 @@ try {
   check(!unshipped.length && versionFiles.length > 30, `tarball has every file of the built-in library's versions (${versionFiles.length})${unshipped.length ? `; missing: ${unshipped.slice(0, 5).join(', ')}` : ''}`);
 
   // ------------------------------------------------------------------------------------------------ install
-  step('npm install <tarball> into an empty project');
+  step('npm install <tarball> into an empty folder');
   fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ name: `${NAME}-pack-test`, private: true, type: 'module' }, null, 2));
   sh(`npm install --no-audit --no-fund --prefer-offline "${tarball}"`, app);
   const installed = path.join(app, 'node_modules', NAME);

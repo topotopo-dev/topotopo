@@ -225,7 +225,7 @@ try {
     const latest = await post('/api/packages/compare', { package: 'studio/rocks' });
     const far = await post('/api/packages/compare', { package: 'studio/trees', to: '1.9' });
     const noPkg = await post('/api/packages/compare', {});
-    check(none.status === 400 && /this package does not use studio\/oaks: its uses are studio\/rocks, studio\/slow, studio\/trees/.test(none.j.error), `a package the package does not use: ${none.j.error}`);
+    check(none.status === 400 && /this package does not use studio\/oaks: its uses are studio\/rocks, studio\/slow, studio\/trees/.test(none.j.error), `a package it does not use: ${none.j.error}`);
     check(latest.status === 400 && /studio\/rocks 1\.0 is the newest 1\.x .* and 2\.0 is a big version, a step of its own: name it/.test(latest.j.error), `a big update is named: ${latest.j.error}`);
     check(far.status === 400 && /no library this package lists has studio\/trees 1\.9: they have 1\.0, 1\.1/.test(far.j.error) && noPkg.status === 400 && /"package" is required/.test(noPkg.j.error), 'a version no library has; no package');
     const methods = await Promise.all([fetch(`${url}/api/packages/stop`), fetch(`${url}/api/packages`, { method: 'POST' }), fetch(`${url}/api/packages/nope`)]);
@@ -360,7 +360,7 @@ section('topotopo view: a graph file in the package; the before/after cooks the 
   const view = await viewGraphFile(path.join(FOREST, 'scene.json'), { name: 'scene', port: 0, log: (l) => lines.push(l) });
   try {
     const s = await (await fetch(`${view.url}api/packages`)).json() as any;
-    check(s.package?.dir === FOREST && s.packages.some((p: any) => p.package === 'studio/trees' && p.small === '1.2'), 'the packages of the package the file belongs to');
+    check(s.package?.dir === FOREST && s.packages.some((p: any) => p.package === 'studio/trees' && p.small === '1.2'), 'the packages the file\'s package uses');
     const r = await (await fetch(`${view.url}api/packages/compare`, { method: 'POST', body: '{"package":"studio/trees"}' })).json() as any;
     const yard = r.places?.find((c: any) => c.file === 'graphs/yard.json'), scene = r.places?.find((c: any) => c.file === 'scene.json');
     // the yard sets the crown itself (from the stand asset), so only the scene, which takes the default, changes

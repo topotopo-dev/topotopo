@@ -3,7 +3,7 @@
 // changes back into it as minimal edits (json-edit.ts): an export target, the values "Save values to graph" keeps.
 // The rest of the file stays as it was written. The values a person tunes are session values over the graph
 // (Session.sessionVars): they survive every reload of the file, the viewer's own writes included. The graph uses the
-// packages of the package the file belongs to; one it names for the first time is added to the package, and a package
+// packages the file's package uses; one it names for the first time is added to the package, and a package
 // followed with --follow (or the viewer's switch) re-cooks the graph whenever its working folder changes.
 import fs from 'node:fs';
 import os from 'node:os';

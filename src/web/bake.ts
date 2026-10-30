@@ -46,7 +46,7 @@ export async function bakePackage(dir: string): Promise<BakeState> {
     if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) engine.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
     if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
     await engine.init();
-    // the packages the package uses, from its copies (a bake adds none), its graphs and its assets
+    // the packages it uses, from its copies (a bake adds none), its graphs and its assets
     const ws = openPackage(engine, dir).session;
     const name = m.bake.graph ?? m.graph;
     const g = ws.graphs.get(name);

@@ -26,7 +26,7 @@ const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 't
 export interface WorkspaceToolHost {
   /** the session the other tools use now (its folder, graphs, assets and engine) */
   session(): Session;
-  /** the packages of the package the session's folder belongs to */
+  /** the packages used by the package that holds the session's folder */
   packages(): PackageUses;
   /** make a folder the one every tool (and the live viewer) works in */
   open(dir: string): Promise<{ graphs: number; assets: number }>;

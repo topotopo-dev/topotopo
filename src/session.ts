@@ -197,8 +197,8 @@ export function graphFiles(dir: string): Map<string, string> {
 }
 
 /**
- * The packages the package a session's folder belongs to uses (src/packages/registry.ts), attached by whoever opens it: a graph
- * set or edited through the session that names a package the package does not use yet adds it (first use).
+ * The packages used by the package that holds a session's folder (src/packages/registry.ts), attached by whoever opens
+ * it: a graph set or edited through the session that names a package it does not use yet adds it (first use).
  */
 export interface SessionPackages {
   /**
@@ -213,7 +213,7 @@ export interface SessionPackages {
    */
   dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[]; id: string };
   /**
-   * the node type of an output of a package the package does not use yet, read where a library it looks in holds the
+   * the node type of an output of a package it does not use yet, read where a library it looks in holds the
    * newest version (nothing copied): what help says about an output search found; null when none has it
    */
   describe(name: string): NodeDef | null;
@@ -246,11 +246,11 @@ export class Session {
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
   /** told when the cooks of a graph start, move to another node (with that node's event), are asked to stop and end (see activity) */
   activityListeners = new Set<(graph: string, ev?: NodeProgress) => void>();
-  /** the packages of the package the session's folder belongs to, when whoever opened it attached them (src/packages/registry.ts) */
+  /** the packages used by the package that holds the session's folder, when whoever opened it attached them (src/packages/registry.ts) */
   packages: SessionPackages | null = null;
   /**
    * Session values: var values a person set in the live viewer over a graph file (`topotopo view`). They shadow the
-   * graph's vars in this package's cooks without changing the graph, and stay when the graph is replaced (a reload
+   * graph's vars in this session's cooks without changing the graph, and stay when the graph is replaced (a reload
    * of the file) unless the var's declaration changed (varDeclaration), the var is gone, or the graph now holds the
    * same value itself. graph → var → value and the declaration it was set under.
    */

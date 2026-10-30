@@ -9,7 +9,7 @@
 // the next node boundary. A new value supersedes the cook of the one before: the latest value wins.
 // Over a graph file (`topotopo view`, ViewerOptions.source) the controls set session values over the graph, which
 // survive reloads of the file; POST /api/vars/save writes them into its vars.
-// The packages the package uses (/api/packages*, src/viewer/packages.ts): their updates, the before/after of one and
+// The packages the open package uses (/api/packages*, src/viewer/packages.ts): their updates, the before/after of one and
 // Update, and following a package's working folder for the viewer's session. /api/package says which package the
 // viewer shows (the page's title, its default graph, and what an empty package or a folder that is no package says),
 // with TopoTopo's built-in packages for the welcome.

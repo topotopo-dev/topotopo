@@ -19,7 +19,7 @@ export interface OpenOptions extends SessionOptions {
 
 export interface Opened { session: Session; packages: PackageUses; loaded: ReturnType<Session['load']> }
 
-/** A session on `dir`, with the packages of the package it belongs to, its graphs and its assets. */
+/** A session on `dir`, with the packages its package uses, its graphs and its assets. */
 export function openPackage(engine: Engine, dir: string, o: OpenOptions = {}): Opened {
   const packages = openPackages(engine, dir, { follow: o.follow, builtin: o.builtin });
   const session = new Session(dir, engine, o);

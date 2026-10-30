@@ -86,7 +86,7 @@ npx topotopo mcp --package /absolute/path/to/package    # the MCP server over st
 
 The current release is v0.4 ([release notes](docs/release/v0.4-release-notes.md)); earlier ones:
 [v0.3](docs/release/v0.3-release-notes.md), [v0.2](docs/release/v0.2-release-notes.md), the first tagged release. To try unreleased changes, build the tarball from a clone: `npm pack`, then
-`npm install -g ./topotopo-<version>.tgz` (or into a project).
+`npm install -g ./topotopo-<version>.tgz` (or, without `-g`, into a folder of your own).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations, and
 `import { createNodeHost, openPackage } from 'topotopo/node'` the Node host and packages with the packages they use, for a
 script that cooks package outputs itself (a world generator): `openPackage(engine, dir)` puts the packages a package uses, its
@@ -218,7 +218,7 @@ works in that package's folder. The first reply the agent gets says which of the
 
 | tool | purpose |
 |---|---|
-| `catalog` | node types by category (filter/search), with the outputs of the packages the package uses and of TopoTopo's own packages |
+| `catalog` | node types by category (filter/search), with the outputs of the packages the open package uses and of TopoTopo's own packages |
 | `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, packages, uv, render, export, verify, cloth, workspace, recipes; a package output's params, inputs, version and note, also one search found that the package does not use yet |
 | `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
@@ -674,7 +674,7 @@ CI (`.github/workflows/ci.yml`) runs `npm run typecheck`, `npm test`, `npm run b
 `main`. `test/portability.ts` (part of `npm test`) covers what one platform cannot see: generated files that must not
 depend on the locale, exact file-name case, a symlinked checkout and LF line endings.
 
-**Package.** `npm run pack:test` builds and packs the npm tarball, installs it into an empty project in a temp
+**Package.** `npm run pack:test` builds and packs the npm tarball, installs it into an empty folder in a temp
 directory and uses it from there: the `topotopo` bin (help, cooking an example with a render), the library import and
 its types, the built-in library of TopoTopo's own packages (a package's first use copies a built-in package from it), the bundled font,
 the worker pool, the WASM kernels and the MCP server over stdio. It takes about a minute and is not part of
