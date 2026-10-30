@@ -519,6 +519,17 @@ export const within = (inner: string, outer: string) => { const r = path.relativ
 const isDir = (p: string) => !!fs.statSync(p, { throwIfNoEntry: false })?.isDirectory();
 
 /**
+ * What a `workspace library` command a hint names needs to act on the workspace `ws`: " --workspace <folder>" (its path
+ * from `cwd`) when `cwd` is outside it, for the command acts on the workspace around the current folder; else ''.
+ */
+export function workspaceFlag(ws: string, cwd = process.cwd()): string {
+  if (within(cwd, ws)) return '';
+  const r = path.relative(path.resolve(cwd), path.resolve(ws));
+  const p = !r || path.isAbsolute(r) ? path.resolve(ws) : r;
+  return ` --workspace ${/[\s"]/.test(p) ? JSON.stringify(p) : p}`;
+}
+
+/**
  * What an entry of a workspace's "libraries" names: a registered library's name ("props"), or a path written from the
  * workspace, "../shared/props" (a library in the same repository, so every checkout and worktree reads its own).
  * Anything else says how to write it.

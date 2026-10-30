@@ -32,7 +32,7 @@ import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig, removeLibrary } from '../config.ts';
 import { createPackage, isStale, readBakeState, scanAll } from '../web/library.ts';
-import { initPackage, locate, oldManifestAbove, packageDirOf, slugify } from '../package.ts';
+import { initPackage, locate, oldManifestAbove, packageDirOf, slugify, workspaceFlag } from '../package.ts';
 import { forgetScans } from '../scan.ts';
 import type { WebConfig } from '../config.ts';
 
@@ -247,8 +247,9 @@ export async function initCommand(argv: string[], prog: string, io: Io = console
     const a = args(argv, ['--name'], [], `usage: ${prog} init [folder] [--name owner/name]`);
     const r = initPackage(a.rest[0] ?? '.', { name: a.opt('--name') });
     io.out(r.said);
+    const ws = locate(r.dir).workspace;
     if (!/ publishes as \S+ (already|now)$/.test(r.said))
-      io.out(`  graphs go in graphs/ (it shows "${r.manifest.graph}"); ${locate(r.dir).workspace ? `it finds packages in its workspace and the libraries the workspace lists (${prog} workspace library add <name or folder> lists one)` : 'outside a workspace it finds packages in every registered library'}; TopoTopo's own packages need none`);
+      io.out(`  graphs go in graphs/ (it shows "${r.manifest.graph}"); ${ws ? `it finds packages in its workspace and the libraries the workspace lists (${prog} workspace library add <name or folder>${workspaceFlag(ws)} lists one)` : 'outside a workspace it finds packages in every registered library'}; TopoTopo's own packages need none`);
     return 0;
   })) ?? 0;
 }

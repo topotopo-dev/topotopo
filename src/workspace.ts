@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE } from './graph/scope.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
-import { WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, libraryEntry, locate, manifestAt, parseUses, program, resolveListed, slugify, within, workspaceRepoFiles, writeAtomic } from './package.ts';
+import { WORKSPACE_FILE, WORKSPACE_PACKAGES, workspaceFlag, copiesFor, libraryEntry, locate, manifestAt, parseUses, program, resolveListed, slugify, within, workspaceRepoFiles, writeAtomic } from './package.ts';
 import { gatherCopies } from './packages/registry.ts';
 import { forgetScans, scanTree } from './scan.ts';
 import type { Scan } from './scan.ts';
@@ -245,7 +245,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   if (!fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`${abs} is no folder`);
   const had = fs.existsSync(path.join(abs, WORKSPACE_FILE));
   const m: WorkspaceManifest = had ? readWorkspace(abs) : { name: slugify(path.basename(abs)) || 'workspace', libraries: [], engine: null, follow: false, uses: {} };
-  if (had && o.libraries?.length) throw new Error(`--library is for making a workspace, and ${abs} is the workspace "${m.name}" already: ${program()} workspace library add <name or folder> lists a library for it`);
+  if (had && o.libraries?.length) throw new Error(`--library is for making a workspace, and ${abs} is the workspace "${m.name}" already: ${program()} workspace library add <name or folder>${workspaceFlag(abs, o.cwd)} lists a library for it`);
   if (o.name !== undefined) {
     if (!ID_RE.test(o.name)) throw new Error(`--name "${o.name}": lower-case letters, digits, - and _ ("my-game")`);
     m.name = o.name;
@@ -292,7 +292,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
     `${had ? 'updated' : 'made'} the workspace "${m.name}" (${path.join(abs, WORKSPACE_FILE)})`,
     `engine: ${m.engine === 'none' ? 'none (kept: --engine godot:<path> or unreal:<path> names one)' : m.engine ? `${m.engine.type} ${m.engine.project}${found}` : `none found (--engine godot:<path>|unreal:<path>|none)`}`,
     ...engineLines,
-    `shared libraries: ${libs.libs.length ? libs.libs.map((l) => l.entry).join(', ') : `none yet (${program()} workspace library add <name or folder> lists one)`}; its packages find each other by themselves, then look in these, then in TopoTopo's built-in library`,
+    `shared libraries: ${libs.libs.length ? libs.libs.map((l) => l.entry).join(', ') : `none yet (${program()} workspace library add <name or folder>${workspaceFlag(abs, o.cwd)} lists one)`}; its packages find each other by themselves, then look in these, then in TopoTopo's built-in library`,
     ...libs.problems.map((p) => `  problem: ${p}`),
     `packages: ${scan.packages.length}${scan.workspaces.length ? `; other workspaces inside, not scanned: ${scan.workspaces.map((w) => rel(abs, w)).join(', ')}` : ''}`,
     `follow its own packages live: ${m.follow ? 'on (their working folders inside the workspace show in the viewer and renders, for looking; exports use the published versions)' : 'off'}`,

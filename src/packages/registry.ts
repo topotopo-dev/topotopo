@@ -58,7 +58,7 @@ import { imageRef, referenceableImages } from '../core/image.ts';
 import { graphFiles, registerAssets } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { BUILTIN_TEXT, VERSION_RE, WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestAt, manifestFile, oldManifestAbove, placeText, program, packageDirOf, packageId, readManifest, readUses, renameInto, withStoreLock, within, writeAtomic, writeManifest, writeUses } from '../package.ts';
+import { BUILTIN_TEXT, VERSION_RE, WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestAt, manifestFile, oldManifestAbove, placeText, program, packageDirOf, packageId, readManifest, readUses, renameInto, withStoreLock, within, workspaceFlag, writeAtomic, writeManifest, writeUses } from '../package.ts';
 import { folderKey, forgetScans, scanTree } from '../scan.ts';
 import type { Scan } from '../scan.ts';
 import { readWorkspace, scanWorkspace } from '../workspace.ts';
@@ -1533,10 +1533,10 @@ export class PackageUses implements SessionPackages {
       for (const lib of cfg?.libraries ?? []) {
         if (listed.has(folderKey(lib.path)) || within(lib.path, s.workspace) || within(s.workspace, lib.path)) continue;
         if (scanTree(lib.name, lib.path).packages.some((p) => p.manifest.name === pkg))
-          throw new Error(`${pkg} is in library "${lib.name}" (${lib.path}), which the workspace "${workspaceName(s.workspace)}" does not list: ${program()} workspace library add ${lib.name} lists it (MCP: workspace {action:"libraries", add:"${lib.name}"}, when the person says so)${scanProblems}`);
+          throw new Error(`${pkg} is in library "${lib.name}" (${lib.path}), which the workspace "${workspaceName(s.workspace)}" does not list: ${program()} workspace library add ${lib.name}${workspaceFlag(s.workspace)} lists it (MCP: workspace {action:"libraries", add:"${lib.name}"}, when the person says so)${scanProblems}`);
       }
       const shared = s.libs.some((l) => l.from === 'listed');
-      throw new Error(`no place ${this.looker} looks in has a package ${pkg}${dym(pkg, s)}: it looks in ${placesLine(s.libs)}${shared ? '' : `; the workspace lists no shared library (${program()} workspace library add <name or folder> lists one; MCP: workspace {action:"libraries", add}, when the person says so)`}${scanProblems}`);
+      throw new Error(`no place ${this.looker} looks in has a package ${pkg}${dym(pkg, s)}: it looks in ${placesLine(s.libs)}${shared ? '' : `; the workspace lists no shared library (${program()} workspace library add <name or folder>${workspaceFlag(s.workspace)} lists one; MCP: workspace {action:"libraries", add}, when the person says so)`}${scanProblems}`);
     }
     if (!s.libs.length)
       throw new Error(`no library has a package ${pkg}${dym(pkg, s)}: ${this.looker === 'this package' ? 'this package is' : `${this.looker} is`} in no workspace, so it looks in every registered library, and none is registered (${program()} library add <name> <folder> registers one); ${BUILTIN_TEXT} holds TopoTopo's own packages alone${scanProblems}`);
@@ -2445,7 +2445,7 @@ const alsoText = (also: string[] | undefined) => (also?.length ? `; also in ${al
 
 /** The places a lookup looks in, as the packages view ends with them, and how to list a shared library. */
 function placesText(libs: Libraries, mcp: boolean): string {
-  const how = mcp ? 'workspace {action:"libraries", add}, when the person says so' : `${program()} workspace library add <name or folder>`;
+  const how = mcp ? 'workspace {action:"libraries", add}, when the person says so' : `${program()} workspace library add <name or folder>${libs.workspace ? workspaceFlag(libs.workspace) : ''}`;
   const hint = libs.workspace
     ? (libs.libs.some((l) => l.from === 'listed') ? '' : `; the workspace lists no shared library (${how} lists one)`)
     : `; outside a workspace every registered library counts${libs.libs.some((l) => l.from === 'registered') ? '' : ` (none is registered: ${program()} library add <name> <folder>)`}`;
@@ -2599,6 +2599,8 @@ export interface SearchResult {
   package: string | null;
   /** the workspace around the folder, by name, or null */
   workspace: string | null;
+  /** its folder, or null */
+  workspaceDir: string | null;
   /** the places looked in, in the order a lookup takes them, TopoTopo's built-in library after them; then, in a workspace, the registered libraries it does not list */
   libraries: SearchLibrary[];
   problems: string[];
@@ -2690,7 +2692,7 @@ export function searchPackages(start: string, q: SearchQuery, opts: { builtin?: 
     return { ...lib, hits: hitsOf(folders, (f) => (lib.standing === 'unlisted' ? undefined : scanned.taken.get(f.package)?.also)) };
   });
   const ws = scanned.workspace;
-  return { query: q, package: dir && manifest ? `package ${packageId(dir)}` : null, workspace: ws ? workspaceName(ws) : null, libraries, problems: [...problems] };
+  return { query: q, package: dir && manifest ? `package ${packageId(dir)}` : null, workspace: ws ? workspaceName(ws) : null, workspaceDir: ws, libraries, problems: [...problems] };
 }
 
 /** A search as the CLI (or, `mcp`, the workspace tool) says it: the hits by place, and whether the package can use them. */
@@ -2708,7 +2710,7 @@ export function searchText(r: SearchResult, mcp = false): string {
       : l.standing === 'self' ? `${who ? `${who} is in it` : 'the folder is in it'}: a graph that names one of these adds its package`
       : l.standing === 'listed' ? `the workspace lists it: a graph that names one of these adds its package`
       : l.standing === 'registered' ? `a registered library: outside a workspace every registered library counts, and a graph that names one of these adds its package`
-      : `the workspace "${r.workspace}" does not list it: to use these, ${mcp ? `workspace {action:"libraries", add:"${l.name}"} lists it, when the person says so (the tools never add a library by themselves)` : `${program()} workspace library add ${l.name} lists it`}`;
+      : `the workspace "${r.workspace}" does not list it: to use these, ${mcp ? `workspace {action:"libraries", add:"${l.name}"} lists it, when the person says so (the tools never add a library by themselves)` : `${program()} workspace library add ${l.name}${r.workspaceDir ? workspaceFlag(r.workspaceDir) : ''} lists it`}`;
     lines.push(`${l.standing === 'builtin' ? `TopoTopo's built-in library "${l.name}"` : `${l.place} (${l.root})`}: ${standing}`);
     for (const h of l.hits) {
       const also = [h.alias ? `also ${h.alias}, its default output` : '', h.self ? 'this package\'s own output' : h.used ? `${r.package ? 'this package' : 'the workspace'} uses ${h.used}` : '', h.also?.length ? `also in ${h.also.join(', ')}, not used` : ''].filter(Boolean).join('; ');

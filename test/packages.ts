@@ -830,8 +830,13 @@ section('errors: unknown outputs, packages no place has, a library the workspace
   // in the workspace: a package only in a registered library the workspace does not list names the command that lists it
   const y = await open(YARD);
   const notListed = errorText(() => y.pk.use('studio/trees'));
-  check(/^studio\/trees is in library "game" \(.*\), which the workspace "valley" does not list: topotopo workspace library add game lists it \(MCP: workspace \{action:"libraries", add:"game"\}, when the person says so\)/.test(notListed),
-    `a package only in a library the workspace does not list: the command that lists it (${notListed})`);
+  const was = process.cwd();
+  process.chdir(dirs.valley);
+  const fromInside = errorText(() => y.pk.use('studio/trees'));
+  process.chdir(was);
+  check(/^studio\/trees is in library "game" \(.*\), which the workspace "valley" does not list: topotopo workspace library add game --workspace \S*valley lists it \(MCP: workspace \{action:"libraries", add:"game"\}, when the person says so\)/.test(notListed)
+    && /which the workspace "valley" does not list: topotopo workspace library add game lists it \(MCP:/.test(fromInside),
+    `a package only in a library the workspace does not list: the command that lists it, with --workspace when the current folder is outside the workspace (${notListed}; ${fromInside})`);
   check(/no place this package looks in has a package studio\/oaks .*: it looks in the workspace "valley" \(.*\), library "lib" \(.*\), TopoTopo's built-in library/.test(errorText(() => y.pk.use('studio/oaks'))), 'and one no place has names the places, in order');
   // a manifest that still lists libraries: the package's uses cannot be read, and the error says where each entry goes
   const lonely = path.join(tmp, 'lonely');
@@ -1272,7 +1277,14 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   // search, from a folder or for one named
   const found = await run('search', ['conifer', '--kind', 'mesh'], path.join(dirs.valley, 'levels', 'finder'));
   check(found.code === 0 && /^search "conifer", kind mesh: \d+ outputs? in \d+ of the 5 places looked in, for package finder/.test(found.out) && /\n {2}studio\/trees\/pine {2}mesh \[conifer, tree\]/.test(found.out)
-    && /the workspace "valley" does not list it: to use these, topotopo workspace library add game lists it/.test(found.out) && /\ntopotopo --help-node \S+ gives an output's params and inputs/.test(found.out), `search: ${found.out.split('\n')[0]}`);
+    && /the workspace "valley" does not list it: to use these, topotopo workspace library add game lists it/.test(found.out) && !/--workspace/.test(found.out) && /\ntopotopo --help-node \S+ gives an output's params and inputs/.test(found.out), `search: ${found.out.split('\n')[0]}`);
+  // the command a hint names works where the person ran the command that printed it, outside the workspace too
+  const outside = await run('use', ['studio/trees', path.join(dirs.valley, 'levels', 'finder')]);
+  const said = /topotopo workspace library add game --workspace ("[^"]*"|\S+) lists it/.exec(outside.err);
+  const listedNow = said ? await run('workspace', ['library', 'add', 'game', '--workspace', said[1].startsWith('"') ? JSON.parse(said[1]) : said[1]]) : null;
+  check(outside.code === 1 && listedNow?.code === 0 && readWorkspace(dirs.valley).libraries.join() === 'lib,game', `the hint run outside the workspace names it with --workspace, and works as printed (${outside.err.slice(0, 200)})`);
+  const unlisted = await run('workspace', ['library', 'remove', 'game', '--workspace', dirs.valley]);
+  check(unlisted.code === 0 && readWorkspace(dirs.valley).libraries.join() === 'lib', 'and is undone');
   // packages at a workspace's root, in no package: the workspace's
   const root = await run('packages', [dirs.valley]);
   check(root.code === 0 && /^the workspace "valley" \(.*\), at its root, in no package: its topotopo-workspace\.json names the versions every package in it uses/.test(root.out) && /\nuses 1 package: 1 up to date\n {2}nordic\/rocks 1\.0 /.test(root.out)
@@ -1927,7 +1939,9 @@ section('a workspace: one shared copy of each package for every package in it');
   const again = initWorkspace(GAME, {});
   const c2 = await open(C);
   check(!c2.pk.notice() && !Object.keys(readManifest(C).uses).length && size(await c2.engine.cook(scene('ws/stones')), 1) === 4, `init again moves them (${again.text.split('\n').slice(3).join(' | ')})`);
-  check(throws(() => initWorkspace(GAME, { libraries: ['lib'] }), /--library is for making a workspace, and .* is the workspace "wsgame" already: topotopo workspace library add <name or folder> lists a library for it/), '--library is for making a workspace only');
+  check(throws(() => initWorkspace(GAME, { libraries: ['lib'] }), /--library is for making a workspace, and .* is the workspace "wsgame" already: topotopo workspace library add <name or folder> --workspace \S*wsgame lists a library for it/)
+    && throws(() => initWorkspace(GAME, { libraries: ['lib'], cwd: path.join(GAME, 'scenes') }), /already: topotopo workspace library add <name or folder> lists a library for it/), '--library is for making a workspace only (the command that lists one names the workspace when run outside it)');
+  check(/shared libraries: none yet \(topotopo workspace library add <name or folder> --workspace \S*wsgame lists one\)/.test(initWorkspace(GAME, {}).text), 'init says how to list a shared library, naming the workspace from outside it');
 
   // a workspace that follows its own packages: the viewer and renders show their working folders, exports use the
   // published versions
