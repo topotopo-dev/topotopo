@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [50.808, 5.35, 7.9194],
+      "min": [0, -0.05, -7.9194]
+    },
+    "counts": {
+      "points": 4492,
+      "prims": 5665,
+      "vertices": 19566,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "547a04eb15b58f11",
+      "attributes": {
+        "detail.materials": "52d42fbdb4e79d3f",
+        "prim.Cd": "9100b883f6449d1d",
+        "prim.material": "042e6538ece7ca8a",
+        "prim.name": "7e8fb6eb7a482849",
+        "vertex.N": "fb7ae1a90fb12e4b",
+        "vertex.uv": "28114ed14aa3aafb"
+      },
+      "topology": "36246a55fff8ca5f"
+    }
+  },
+  "name": "package.topotopo.street.lineup",
+  "ok": true,
+  "source": "topotopo/street/lineup at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

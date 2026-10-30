@@ -1,16 +1,16 @@
 // Packages, the engine side: the node type of a package output, and the packages a graph names and uses. The host's
 // package registry (src/packages/registry.ts) reads the versions from disk and gives each scope its PackageResolver
-// (src/graph/scope.ts): the project's root resolves names by the project's uses, a version by its own.
+// (src/graph/scope.ts): the package's root resolves names by the package's uses, a version by its own.
 //
-// A package is a project with a full name ("owner/name") and published versions: frozen copies of its graphs, assets
+// A published package has a full name ("owner/name") and versions: frozen copies of its graphs, assets
 // and inputs. A graph uses an output of one as a node type, "owner/name/output", or "owner/name" for the package's
 // default output. A package output cooks its graph in the version's own scope (its assets, graphs, files and
-// packages), so nothing leaks between the project and the package and two versions of one package cook side by side.
-// Its signature is the version's hash and the node it cooks: a frozen version cooks once for the project and once for
+// packages), so nothing leaks between a package and the packages it uses, and two versions of one package cook side by side.
+// Its signature is the version's hash and the node it cooks: a frozen version cooks once for the package and once for
 // the packages that use it (which name its texture files differently).
 //
-// A package's graphs name its own outputs by full name too (a kit whose pieces build on each other: a house of the
-// kit's walls): they resolve to the same version, or the same working folder, with no entry in its uses. Outputs that
+// A package's graphs name its own outputs by full name too (a built-in package whose pieces build on each other: a house of the
+// package's walls): they resolve to the same version, or the same working folder, with no entry in its uses. Outputs that
 // name each other in a loop do not resolve (ownOutputsNamed finds what each output names).
 import { isGraph } from './types.ts';
 import { Geometry } from '../core/geometry.ts';
@@ -58,7 +58,7 @@ export interface PackageOutput {
   warning?: string;
   /**
    * How the root names a file of the version, given its absolute path: relative to the root's folder when the version
-   * lies inside the root's project, so exports stay portable, else the absolute path. The registry gives it (the core
+   * lies inside the root's package, so exports stay portable, else the absolute path. The registry gives it (the core
    * has no paths); absent, texture paths are absolute.
    */
   rootPath?: (absolute: string) => string;
@@ -103,7 +103,7 @@ export function packageOutputDef(o: PackageOutput): NodeDef {
       });
       for (const w of r.warnings) ctx.warn(`[${w.node}] ${w.message}`);
       if (!r.ok || !r.geo) throw new NodeError(`${type} (${at}) failed: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
-      // texture paths relative to the version's folder would be read from the project's: they name the version's files.
+      // texture paths relative to the version's folder would be read from the package's: they name the version's files.
       // Inside another package's scope they are absolute (that package names them for the root in turn, its own and
       // those of the packages it uses alike); for the root, as the root names them.
       const forRoot = !ctx.scope.id ? o.rootPath : undefined;

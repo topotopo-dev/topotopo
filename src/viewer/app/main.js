@@ -219,7 +219,7 @@ const refreshGraphs = ctx.coalesce(async () => {
   const sel = $('graph');
   // the options are rebuilt only when the graphs change, so an open list stays open
   if (names.join('\n') !== [...sel.options].map((o) => o.value).join('\n')) sel.replaceChildren(...names.map((n) => new Option(n, n)));
-  if (!names.includes(G.name)) { G.name = local.get('graph', null); if (!names.includes(G.name)) G.name = defaultGraph(ctx.project, names); G.node = null; }
+  if (!names.includes(G.name)) { G.name = local.get('graph', null); if (!names.includes(G.name)) G.name = defaultGraph(ctx.package, names); G.node = null; }
   sel.value = G.name ?? '';
   const g = G.current();
   if (G.node && !g?.nodes.some((n) => n.name === G.node)) G.node = null;
@@ -227,15 +227,15 @@ const refreshGraphs = ctx.coalesce(async () => {
   for (const x of list) if (x.cook && !((cooks.get(x.name)?.at ?? -1) > issued)) cooks.set(x.name, { state: x.cook, at: performance.now() });
   renderCook();
   props.controls.render(g, issued);
-  renderWelcome($('welcome'), ctx.project, !list.length);
+  renderWelcome($('welcome'), ctx.package, !list.length);
   ctx.emit('graphs');
 });
-// the project shown: the tab's title, the graph shown first, the welcome while there is no graph
-ctx.project = null;
-const refreshProject = async () => {
-  const info = await api.project();
+// the package shown: the tab's title, the graph shown first, the welcome while there is no graph
+ctx.package = null;
+const refreshPackage = async () => {
+  const info = await api.package();
   if (!info) return;
-  ctx.project = info;
+  ctx.package = info;
   document.title = pageTitle(info);
   renderWelcome($('welcome'), info, !ctx.graph.list.length);
 };
@@ -722,7 +722,7 @@ const es = api.events({
     // after a reconnect the server may have restarted: fetch everything again
     if (es.opened) {
       if (msgEl.textContent === DISCONNECTED_LINE) ctx.message(RECONNECTED_LINE, 'ok');
-      refreshProject().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
+      refreshPackage().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
     }
     es.opened = true;
   },
@@ -744,7 +744,7 @@ syncTop();
 outliner.render();
 props.render();
 ctx.requestRender();
-await refreshProject();
+await refreshPackage();
 await refreshGraphs();
 await ctx.outputs.refresh();
 ctx.packages.refresh();

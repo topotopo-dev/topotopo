@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { ExprSandbox, Host, WorkerPool } from './types.ts';
 import { createNodePool, poolOptionsFromEnv } from './pool.ts';
-import { projectFolderOf } from './export-targets.ts';
+import { packageFolderOf } from './export-targets.ts';
 import type { NodePoolOptions } from './pool.ts';
 import { REALM_CONTROL, SCRIPT_REALM_SETUP } from '../core/snippet-lib.ts';
 import { makeCurl, makeNoise } from '../core/noise.ts';
@@ -77,19 +77,19 @@ function blenderScript(): string {
 let envPool: WorkerPool | undefined | null = null;
 
 /**
- * The folder relative file paths resolve against, for a graph (or a session's folder) in `dir`: its project folder, the nearest
- * folder at or above `dir` with a project.json, else `dir` itself. One rule for the CLI (the graph file's folder), the
- * MCP server (its folder) and the viewer (the graph file's folder): a graph in a project's graphs/ reads
- * "inputs/ref.png" from the project's inputs/, wherever it is cooked from, and exports into the project's exports/
+ * The folder relative file paths resolve against, for a graph (or a session's folder) in `dir`: its package folder, the nearest
+ * folder at or above `dir` with a .topo file, else `dir` itself. One rule for the CLI (the graph file's folder), the
+ * MCP server (its folder) and the viewer (the graph file's folder): a graph in a package's graphs/ reads
+ * "inputs/ref.png" from the package's inputs/, wherever it is cooked from, and exports into the package's exports/
  * (export-targets.ts exportsFolderFor).
  */
-export function projectBaseDir(dir: string): string {
-  // the project lookup is the one export targets use (exports/ of the same folder): one function for both rules
-  return projectFolderOf(dir) ?? path.resolve(dir);
+export function packageBaseDir(dir: string): string {
+  // the package lookup is the one export targets use (exports/ of the same folder): one function for both rules
+  return packageFolderOf(dir) ?? path.resolve(dir);
 }
 
 export interface NodeHostOptions {
-  /** the graph's (or the session's) folder: relative paths resolve against its project folder (projectBaseDir) */
+  /** the graph's (or the session's) folder: relative paths resolve against its package folder (packageBaseDir) */
   baseDir?: string;
   /**
    * Worker threads for Host.pool. Default: TOPOTOPO_WORKERS (availableParallelism() - 1 when unset), shared by every
@@ -103,7 +103,7 @@ export interface NodeHostOptions {
 }
 
 export function createNodeHost(opts: NodeHostOptions = {}): Host {
-  const baseDir = projectBaseDir(opts.baseDir ?? process.cwd());
+  const baseDir = packageBaseDir(opts.baseDir ?? process.cwd());
   const conversions = new Map<string, Promise<Uint8Array>>();
   let pool: WorkerPool | undefined;
   if (opts.workers === undefined && !opts.pool) {
@@ -388,10 +388,10 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   };
 }
 
-// Projects and their packages for scripts that cook outside the CLI and the MCP server (a world generator): open a
-// project (its packages, graphs and assets in the engine's root scope), add what a graph names on first use, cook.
+// Packages and the packages they use, for scripts that cook outside the CLI and the MCP server (a world generator): open a
+// package (its packages, graphs and assets in the engine's root scope), add what a graph names on first use, cook.
 //   const engine = new Engine(createNodeHost({ baseDir: dir })); await engine.init();
-//   const { packages } = openProject(engine, dir); packages.addFor(graph); await engine.cook(graph);
-export { openProject } from '../open.ts';
+//   const { packages } = openPackage(engine, dir); packages.addFor(graph); await engine.cook(graph);
+export { openPackage } from '../open.ts';
 export type { OpenOptions, Opened } from '../open.ts';
-export { openPackages, ProjectPackages } from '../packages/registry.ts';
+export { openPackages, PackageUses } from '../packages/registry.ts';

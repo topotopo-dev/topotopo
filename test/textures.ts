@@ -30,7 +30,7 @@ import { renderArgs } from '../src/render/options.ts';
 import { inspect, summarize } from '../src/inspect.ts';
 import { explainGeometry } from '../src/explain.ts';
 import { fingerprint } from './fingerprint.ts';
-import { useKits } from './fixtures.ts';
+import { useBuiltin } from './fixtures.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
 const require = createRequire(import.meta.url);
@@ -40,7 +40,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-tex-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
 // the crate is TopoTopo's own (topotopo/props/crate)
-useKits(engine, path.join(tmp, 'kits'));
+useBuiltin(engine, path.join(tmp, 'builtin'));
 
 let fail = 0, pass = 0;
 const check = (ok: boolean, msg: string) => {
@@ -406,13 +406,13 @@ const UVBOX = { b: { type: 'box', params: { divisions: [2, 2, 2] } }, uv: { type
   check(matched.stats.missed === unmatched.stats.missed && maxDiff(findImage(matched.geo)!.layer('C')!, findImage(unmatched.geo)!.layer('C')!) < 1e-6 && !matched.warnings.some((w) => /no high prims named/.test(w)),
     `match_name: each piece finds its own high piece (the same map as without it here; ${matched.stats.missed} corner misses)`);
   // kitbashed parts that cut into each other share no edge: the crease where they cross is concave all the same
-  const kit = { b: { type: 'box' }, stud: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.5, 0] } }, m: { type: 'merge', in: ['b', 'stud'] }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 128 } } };
-  const crossed = await cookOn(engine, { ...kit, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05 } } }, 'c');
-  const uncrossed = await image({ ...kit, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05, intersections: false } } }, 'c');
+  const parts = { b: { type: 'box' }, stud: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.5, 0] } }, m: { type: 'merge', in: ['b', 'stud'] }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 128 } } };
+  const crossed = await cookOn(engine, { ...parts, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05 } } }, 'c');
+  const uncrossed = await image({ ...parts, c: { type: 'bake_curvature', in: ['uv'], params: { resolution: 128, radius: 0.05, intersections: false } } }, 'c');
   check(Math.max(...findImage(crossed.geo)!.layer('concave')!) > 0.5 && crossed.stats.crossing_edges > 0 && Math.max(...uncrossed.layer('concave')!) === 0,
     `a stud sunk into a box: concave where they cross (${crossed.stats.crossing_edges} crossing edges), none with intersections off`);
-  const hiKit = await image({ low: { type: 'box' }, uvl: { type: 'uv_unwrap', in: ['low'], params: { resolution: 128 } }, stud: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.5, 0] } }, high: { type: 'merge', in: ['low', 'stud'] }, c: { type: 'bake_curvature', in: ['uvl', 'high'], params: { resolution: 128, radius: 0.05, cage: 0.2 } } }, 'c');
-  check(Math.max(...hiKit.layer('concave')!) > 0.5, 'from a high mesh of crossing parts too');
+  const hiParts = await image({ low: { type: 'box' }, uvl: { type: 'uv_unwrap', in: ['low'], params: { resolution: 128 } }, stud: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.5, 0] } }, high: { type: 'merge', in: ['low', 'stud'] }, c: { type: 'bake_curvature', in: ['uvl', 'high'], params: { resolution: 128, radius: 0.05, cage: 0.2 } } }, 'c');
+  check(Math.max(...hiParts.layer('concave')!) > 0.5, 'from a high mesh of crossing parts too');
 
   // padding dilates the islands; texels beyond it get the background
   const p0 = await image({ ...UVBOX, p: { type: 'bake_position', in: ['uv'], params: { resolution: 128, padding: 0 } } }, 'p');
@@ -668,10 +668,10 @@ section('image_file and the file node: PNG files as images');
   check(viaFile.name === 'rgba8' && maxDiff(viaFile.layer('C')!, rgbaImg.layer('C')!) === 0, 'file on a .png gives the pixels image_file gives with its defaults, named after the file');
   put('inputs/scan.dat', pngOf(W, H, 1, 8, g8));
   check(findImage(await geo({ f: { type: 'file', params: { path: 'inputs/scan.dat', format: 'png' } } }, 'f'))?.name === 'scan', 'format "png" reads a PNG with another extension');
-  put('kit/a.obj', 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n'); put('kit/b.png', pngOf(W, H, 1, 8, g8)); put('kit/c.png', 'not a png');
-  const kit = await cookOn(engine, { f: { type: 'file', params: { path: 'kit' } } }, 'f');
-  check(kit.geo.numPrims === 1 && kit.geo.prims.get('name')?.get(0) === 'a' && imagesOf(kit.geo).map((x) => x.name).join() === 'b' && kit.warnings.some((w) => w.includes('skipped c.png') && w.includes('bad signature')),
-    `folder mode: models and PNG images; an unreadable PNG is skipped with a warning (${kit.warnings.join('; ')})`);
+  put('parts/a.obj', 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n'); put('parts/b.png', pngOf(W, H, 1, 8, g8)); put('parts/c.png', 'not a png');
+  const folder = await cookOn(engine, { f: { type: 'file', params: { path: 'parts' } } }, 'f');
+  check(folder.geo.numPrims === 1 && folder.geo.prims.get('name')?.get(0) === 'a' && imagesOf(folder.geo).map((x) => x.name).join() === 'b' && folder.warnings.some((w) => w.includes('skipped c.png') && w.includes('bad signature')),
+    `folder mode: models and PNG images; an unreadable PNG is skipped with a warning (${folder.warnings.join('; ')})`);
   const imported = importGeometry(new Uint8Array(fs.readFileSync(path.join(tmp, 'inputs/grey16.png'))), 'png', { path: 'maps/height.png' });
   check(findImage(imported)?.name === 'height' && dev(findImage(imported)!.layer('C'), 1, (i) => g16[i] / 65535) < EPS, 'importGeometry(bytes, "png") gives the image too');
 

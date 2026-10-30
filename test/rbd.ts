@@ -14,7 +14,7 @@ import { TriBVH } from '../src/core/spatial.ts';
 import { loadRapier } from '../src/wasm/rapier.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { openPackages } from '../src/packages/registry.ts';
-import { checkGeo, useKits } from './fixtures.ts';
+import { checkGeo, useBuiltin } from './fixtures.ts';
 
 const perfOnly = process.argv.includes('--perf');
 let fail = 0, pass = 0;
@@ -24,8 +24,8 @@ const check = (ok: any, msg: string) => {
 };
 const engine = new Engine(createNodeHost({ baseDir: '.', workers: 0 }));
 await engine.init();
-// the rocks are TopoTopo's own (topotopo/nature/rock): one project that uses its kits, for every engine here
-const kits = useKits(engine).dir!;
+// the rocks are TopoTopo's own (topotopo/nature/rock): one package that uses them, for every engine here
+const builtin = useBuiltin(engine).dir!;
 const R = await loadRapier();
 
 async function cook(nodes: Record<string, NodeSpec>, output: string, e = engine, frame?: number) {
@@ -213,13 +213,13 @@ if (!perfOnly) {
     const a = (await cook(nodes, 'settle')).geo;
     const e2 = new Engine(createNodeHost({ baseDir: '.', workers: 0 }));
     await e2.init();
-    openPackages(e2, kits);
+    openPackages(e2, builtin);
     await cook({ x: { type: 'rbd_stack', in: ['y'] }, y: { type: 'copy_xform', in: ['z'], params: { count: 4, translate: [0, 0, 0] } }, z: { type: 'box' } }, 'x', e2);
     const b = (await cook(nodes, 'settle', e2)).geo;
     check(same(a.P, b.P) && same(a.packedXform, b.packedXform), 'two cooks in two engines (another simulation in between) are bit-identical');
     const pooled = new Engine(createNodeHost({ baseDir: '.', workers: 3, pool: { minElements: 1 } }));
     await pooled.init();
-    openPackages(pooled, kits);
+    openPackages(pooled, builtin);
     const c = (await cook(nodes, 'settle', pooled)).geo;
     check(same(a.P, c.P) && same(a.packedXform, c.packedXform), 'pool on (3 workers, every kernel forced onto it) gives the same bits as pool off');
     await pooled.host.pool?.close();
@@ -419,7 +419,7 @@ if (!perfOnly) {
     const f30 = (await cook(nodes, 'settle', engine, 30)).geo; // resumes the world of frame 12
     const fresh = new Engine(createNodeHost({ baseDir: '.', workers: 0 }));
     await fresh.init();
-    openPackages(fresh, kits);
+    openPackages(fresh, builtin);
     const f30b = (await cook(nodes, 'settle', fresh, 30)).geo;
     check(same(f30.P, f30b.P) && same(f30.packedXform, f30b.packedXform), 'frame 30 after frame 12 (resumed) equals frame 30 cooked fresh');
     check(f12a.P[1] < input.P[1], 'pieces fall between frames');

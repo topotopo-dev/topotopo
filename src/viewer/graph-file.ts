@@ -3,7 +3,7 @@
 // changes back into it as minimal edits (json-edit.ts): an export target, the values "Save values to graph" keeps.
 // The rest of the file stays as it was written. The values a person tunes are session values over the graph
 // (Session.sessionVars): they survive every reload of the file, the viewer's own writes included. The graph uses the
-// packages of the project the file belongs to; one it names for the first time is added to the project, and a package
+// packages the file's package uses; one it names for the first time is added to the package, and a package
 // followed with --follow (or the viewer's switch) re-cooks the graph whenever its working folder changes.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,9 +19,9 @@ import type { Viewer } from './server.ts';
 import { applyJSONEdits, editJSONText } from './json-edit.ts';
 import type { JSONEdit } from './json-edit.ts';
 
-/** Where a graph's source lives when it is not the project's graphs/ folder (ViewerOptions.source). */
+/** Where a graph's source lives when it is not the package's graphs/ folder (ViewerOptions.source). */
 export interface GraphSource {
-  /** the project graph it holds */
+  /** the package graph it holds */
   graph: string;
   /** its file name, for the page ("boxes.json") */
   label: string;
@@ -56,7 +56,7 @@ export class GraphFile implements GraphSource {
   }
 
   /**
-   * Read the file into the project graph and cook it, unless it holds what the graph already is. A file that is not
+   * Read the file into the package graph and cook it, unless it holds what the graph already is. A file that is not
    * valid JSON (half saved, a typo) keeps the last good version. Loads never overlap: a change during one loads again.
    */
   load(): Promise<void> {
@@ -135,7 +135,7 @@ export class GraphFile implements GraphSource {
 }
 
 export interface ViewGraphFileOptions {
-  /** the graph's name in the project and on the page (the file name, made a valid graph name) */
+  /** the graph's name in the package and on the page (the file name, made a valid graph name) */
   name: string;
   port?: number;
   /** where status lines go (default: stdout) */
@@ -154,7 +154,7 @@ export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): P
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
   const packages = openPackages(engine, dir, { follow: opts.follow });
-  // exports go into the project's exports/ (a graph file in no project: beside it), as the CLI's do
+  // exports go into the package's exports/ (a graph file in no package: beside it), as the CLI's do
   const ws = new Session(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: exportsFolderFor(file) });
   ws.packages = packages;
   ws.load();

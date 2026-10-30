@@ -30,7 +30,7 @@ import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
 import { fittingFormats, kindMismatch, outputKind } from '../io/kinds.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
-import { ProjectPackages } from '../packages/registry.ts';
+import { PackageUses } from '../packages/registry.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
@@ -128,7 +128,7 @@ function heightmapAbout(sidecar: string): string | undefined {
 export interface OutputsOptions {
   /** the graph file a graph comes from (topotopo view): a target set on the page goes into it as a minimal edit */
   source?: GraphSource;
-  /** the graph whose results cook first (the project's default graph, which the page shows first) */
+  /** the graph whose results cook first (the package's default graph, which the page shows first) */
   first?: () => string | null | undefined;
 }
 
@@ -157,7 +157,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
   };
   /**
    * What a cooked result is, on its card: kind, words, size, heightfield; a published one's fitting formats, and a
-   * warning when it is not the kind its graph pins (publishing the project's package would block on it).
+   * warning when it is not the kind its graph pins (publishing the package would block on it).
    */
   const describe = (e: OutputEntry, g: Geometry) => {
     const info = outputKind(g);
@@ -281,7 +281,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     const sessionRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
     // the packages shown live this session (their working folders): the results that use them show unpublished edits
-    const following = ws.packages instanceof ProjectPackages ? ws.packages.following().map((f) => f.package) : [];
+    const following = ws.packages instanceof PackageUses ? ws.packages.following().map((f) => f.package) : [];
     // the graph the page shows first cooks first: its cards are queued before the others'
     const first = opts.first?.();
     const graphs = [...ws.graphs].sort(([a], [b]) => Number(b === first) - Number(a === first));

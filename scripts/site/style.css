@@ -322,10 +322,10 @@ h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:
 /* galleries */
 .example h2 { font-size: 1.1rem; }
 .example .types { margin: 0.6rem 0 0; }
-.kit-card img { aspect-ratio: 1 / 1; }
-.kit-card .body { padding: 0.6rem 0.75rem 0.75rem; }
-.kit-card h3 { font-family: var(--mono); font-size: 0.92rem; }
-.kit-card p { color: var(--muted); font-size: 0.85rem; }
+.output-card img { aspect-ratio: 1 / 1; }
+.output-card .body { padding: 0.6rem 0.75rem 0.75rem; }
+.output-card h3 { font-family: var(--mono); font-size: 0.92rem; }
+.output-card p { color: var(--muted); font-size: 0.85rem; }
 
 .notfound { text-align: center; padding: 4rem 0; }
 .notfound h1 { font-size: 3rem; }

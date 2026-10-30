@@ -7,8 +7,8 @@
 //                        from examples/renders
 //   nodes/               one page per category from the registered NodeDefs and the outputs of TopoTopo's own packages
 //                        (the data of docs/nodes.md)
-//   packages/            TopoTopo's own packages: the kits of library/, their outputs with the thumbnails in
-//                        library/<kit>/thumbs
+//   packages/            TopoTopo's own packages: the built-in packages of library/, their outputs with the thumbnails in
+//                        library/<name>/thumbs
 //   examples/            every examples/*.json with its render, its description and the graph JSON itself
 //   releases/            docs/release/v*-release-notes.md converted from Markdown
 //   404.html, subscribed.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg (docs/brand/mark.svg)
@@ -23,8 +23,8 @@ import type { Token, Tokens } from 'marked';
 import '../src/nodes/index.ts';
 import { CATEGORY_ORDER, allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
 import type { NodeDef, ParamDef } from '../src/graph/types.ts';
-import { anchorOf, kitDefs, thumbOf } from './gen-docs.ts';
-import { kitText, readKits, typesUsed } from './gen-kits.ts';
+import { anchorOf, builtinDefs, thumbOf } from './gen-docs.ts';
+import { builtinText, readBuiltin, typesUsed } from './gen-builtin.ts';
 import { ROOT, SITE_DIR, SIZE_LIMIT, listFiles } from './check-site.ts';
 
 /** The renders on the home page, in order (the first is also the social preview image). */
@@ -32,11 +32,11 @@ const HERO: { name: string; caption: string }[] = [
   { name: 'street_block', caption: 'A street block assembled only from TopoTopo\'s own packages: houses, road, lamp posts, trees, fences.' },
   { name: 'unreal_demo', caption: 'The Unreal 5.8 demo scene: an eroded heightfield that fits a Landscape exactly, a road, packed trees and rocks.' },
   { name: 'terrain_erosion', caption: 'Hydraulic and thermal erosion on a ridged massif, a road cut along a curve, rocks on the steep slopes.' },
-  { name: 'rbd_settle', caption: 'Rigid bodies: rocks of the nature kit dropped onto a terrain until they rest, crates piled one at a time.' },
+  { name: 'rbd_settle', caption: 'Rigid bodies: rocks of the nature package dropped onto a terrain until they rest, crates piled one at a time.' },
   { name: 'particles', caption: 'Particles running down an eroded massif with curl noise and sliding contacts, next to a fountain.' },
   { name: 'textures', caption: 'A brick material from texture nodes, and a crate whose baked AO and curvature become worn paint.' },
   { name: 'quad_remesh', caption: 'Field-aligned quad remeshing (Rust/WASM): each input on the left, its quads on the right.' },
-  { name: 'house_city', caption: 'Nested generators: the architecture kit\'s house spawned on a grid of lots, varied per lot.' },
+  { name: 'house_city', caption: 'Nested generators: the architecture package\'s house spawned on a grid of lots, varied per lot.' },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -68,7 +68,7 @@ const COMMIT = (() => {
 })();
 
 const nodeDefs = allNodeDefs();
-const packageOutputs = await kitDefs();
+const packageOutputs = await builtinDefs();
 const defs = [...nodeDefs, ...packageOutputs];
 const categories = [...CATEGORY_ORDER, ...[...new Set(defs.map((d) => d.category))].filter((c) => !CATEGORY_ORDER.includes(c)).sort()]
   .filter((c) => defs.some((d) => d.category === c));
@@ -79,14 +79,14 @@ const nodeCategories = categories.filter((c) => c !== 'package');
 /** Canonical node type of a name or alias used in a graph (null for saved assets and unknown names). */
 const resolveType = (t: string) => (catOf.has(t) ? t : getNodeDef(t)?.type ?? null);
 
-const kits = readKits();
-/** The outputs of TopoTopo's own packages, each kit's default output aside (it lines the others up). */
-const kitOutputs = kits.flatMap((k) => k.outputs);
+const builtin = readBuiltin();
+/** The outputs of TopoTopo's own packages, each package's default output aside (it lines the others up). */
+const builtinOutputs = builtin.flatMap((k) => k.outputs);
 /** docs/nodes.md anchors of the node types (a full name loses its slashes there) */
 const byAnchor = new Map(defs.map((d) => [anchorOf(d.type), d.type]));
 
 interface Example { name: string; graph: any; description: string; types: string[]; nodes: number; render: string | null }
-const examples: Example[] = fs.readdirSync(path.join(ROOT, 'examples')).filter((f) => f.endsWith('.json') && f !== 'project.json').sort().map((f) => {
+const examples: Example[] = fs.readdirSync(path.join(ROOT, 'examples')).filter((f) => f.endsWith('.json')).sort().map((f) => {
   const name = f.slice(0, -'.json'.length);
   const graph = JSON.parse(read(`examples/${f}`));
   const render = exists(`examples/renders/${name}.png`) ? `examples/renders/${name}.png` : null;
@@ -170,7 +170,7 @@ function siteTarget(repoPath: string, frag: string): string | null {
   if (m && examples.some((e) => e.name === m![1])) return `examples/index.html#${m[1]}`;
   if (repoPath === 'library') return 'packages/index.html';
   m = /^library\/([\w-]+)(?:\/graphs\/([\w-]+)\.json)?$/.exec(repoPath);
-  if (m && kits.some((k) => k.name === m![1])) return m[2] && m[2] !== 'kit' ? `packages/index.html#topotopo/${m[1]}/${m[2]}` : `packages/index.html#${m[1]}`;
+  if (m && builtin.some((k) => k.name === m![1])) return m[2] && m[2] !== 'lineup' ? `packages/index.html#topotopo/${m[1]}/${m[2]}` : `packages/index.html#${m[1]}`;
   if (/^(examples\/renders|library\/[\w-]+\/thumbs)\/[\w.-]+\.png$/.test(repoPath) && exists(repoPath)) return useFile(repoPath);
   return null;
 }
@@ -416,9 +416,9 @@ const claudeCode = need(findCode(section(readme, 'Connect to Claude Code'), /cla
 const mcpJson = need(findCode(section(readme, /^Other MCP clients/), /mcpServers/, 'json'), 'json config under "### Other MCP clients"');
 const toolTable = section(readme, 'MCP tools').find((t) => t.type === 'table') as Tokens.Table | undefined;
 const mcpTools = (toolTable?.rows ?? []).map((r) => r[0].text.replace(/`/g, '').trim()).filter(Boolean);
-const kitJson = findCode(section(readme, "TopoTopo's own packages"), /"type"/, 'json');
+const builtinJson = findCode(section(readme, "TopoTopo's own packages"), /"type"/, 'json');
 
-const counts = `<strong>${nodeDefs.length}</strong> node types · <strong>${kitOutputs.length}</strong> ready-made outputs in ${kits.length} kits · ` +
+const counts = `<strong>${nodeDefs.length}</strong> node types · <strong>${builtinOutputs.length}</strong> ready-made outputs in ${builtin.length} packages · ` +
   `<strong>${examples.length}</strong> example graphs · ${esc(pkg.license ?? 'Apache-2.0')}`;
 
 page({
@@ -434,7 +434,7 @@ page({
 </figure>`).join('\n');
   const links = [
     ['nodes/index.html', 'Node reference', `${nodeDefs.length} node types in ${nodeCategories.length} categories: params, inputs, examples`],
-    ['packages/index.html', 'TopoTopo\'s own packages', `${kits.length} kits, ${kitOutputs.length} ready-made outputs used like nodes`],
+    ['packages/index.html', 'TopoTopo\'s own packages', `${builtin.length} packages, ${builtinOutputs.length} ready-made outputs used like nodes`],
     ['examples/index.html', 'Examples', `${examples.length} example graphs with their renders`],
     ...(releases.length ? [[releases[0].out, 'Release notes', `what is in ${releases[0].version}, known limits`]] : []),
     [REPO, 'Source on GitHub', 'issues, contributing, licence'],
@@ -594,7 +594,7 @@ ${nodesSidebar(c)}
 <div class="content">
 <h1 id="${esc(c)}-nodes">${esc(c)} nodes</h1>
 <p class="intro">${isPackage
-  ? `${list.length} outputs of TopoTopo's own packages, the kits in its built-in library (see <a href="${u('packages/index.html')}">TopoTopo's own packages</a>), by full name; a kit's name alone is its default output, which lines its outputs up. A project's graph names one like any node, and its first use copies the kit's version into the project. Their parameters are the outputs' typed vars and their inputs the graphs' <code>input</code> nodes; <code>assets {action: "fork"}</code> copies one's graph into the project's assets to edit.`
+  ? `${list.length} outputs of TopoTopo's own packages, the packages of its built-in library (see <a href="${u('packages/index.html')}">TopoTopo's own packages</a>), by full name; a built-in package's name alone is its default output, which lines its outputs up. A package's graph names one like any node, and its first use copies the package's version into the package. Their parameters are the outputs' typed vars and their inputs the graphs' <code>input</code> nodes; <code>assets {action: "fork"}</code> copies one's graph into the package's assets to edit.`
   : `${list.length} node type${list.length > 1 ? 's' : ''} in the <code>${esc(c)}</code> category.`}</p>
 <ul class="chips">${list.map((d) => `<li><a href="#${esc(d.type)}">${esc(d.type)}</a></li>`).join('')}</ul>
 ${list.map(nodeSection).join('\n')}
@@ -603,20 +603,20 @@ ${list.map(nodeSection).join('\n')}
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// TopoTopo's own packages and the examples gallery
+// TopoTopo's own packages and the examples
 
 page({
   out: 'packages/index.html',
   title: 'TopoTopo\'s own packages',
   nav: 'packages',
-  description: `TopoTopo's own packages: ${kits.length} kits of ${kitOutputs.length} ready-made generators (walls, houses, roofs, stairs, rocks, trees, props, roads) used like nodes.`,
+  description: `TopoTopo's own packages: ${builtin.length} packages of ${builtinOutputs.length} ready-made generators (walls, houses, roofs, stairs, rocks, trees, props, roads) used like nodes.`,
 }, () => {
-  const card = (type: string, name: string, kit: string) => {
+  const card = (type: string, name: string, pkg: string) => {
     const d = packageOutputs.find((x) => x.type === type);
     const params = d ? Object.keys(d.params).length : 0;
     const inputs = d?.inputs.map((i) => i.name) ?? [];
-    const thumb = `library/${kit}/thumbs/${name}.png`;
-    return `<article class="card kit-card" id="${esc(type)}">
+    const thumb = `library/${pkg}/thumbs/${name}.png`;
+    return `<article class="card output-card" id="${esc(type)}">
 <a href="${u(`nodes/package.html#${type}`)}">${exists(thumb) ? img(thumb, `${type} thumbnail`) : ''}</a>
 <div class="body"><h3><a href="${u(`nodes/package.html#${type}`)}">${esc(type)}</a></h3>
 ${d ? `<p>${inline(d.summary)}</p>` : ''}
@@ -625,20 +625,20 @@ ${d?.package?.tags?.length ? `<p class="meta">tags: ${d.package.tags.map(esc).jo
 </article>`;
   };
   return `<h1>TopoTopo's own packages</h1>
-<p class="intro">${kitOutputs.length} ready-made generators in ${kits.length} kits, TopoTopo's own packages: walls, windows and doors, whole
+<p class="intro">${builtinOutputs.length} ready-made generators in ${builtin.length} packages, TopoTopo's own packages: walls, windows and doors, whole
 houses, roofs, stairs, railings and floors, props, trees and rocks, roads and street furniture, and generators that dress
 a road or a terrain. TopoTopo carries them built in (<a href="${esc(repoUrl('library'))}">library/</a>), so they work
-offline and every project finds them without listing a library. A project's graph names an output by its full name; the
-first use copies the kit's version into the project and locks it, as for any package, and a newer version a TopoTopo
+offline and every package finds them without listing a library. A package's graph names an output by its full name; the
+first use copies the package's version into the package and locks it, as for any package, and a newer version a TopoTopo
 release brings shows as an update. Each output documents its typed parameters, puts its pivot at the base and tags every
 piece with <code>name</code> and <code>material</code>; it says what it is (its kind) and carries tags a search finds it by
 (<code>topotopo search --tag street-furniture</code>, or the MCP <code>library</code> tool's <code>search</code>, across
 every library). Parameters, inputs and examples are in the
 <a href="${u('nodes/package.html')}">node reference</a>.</p>
-${kitJson ? codeBlock(kitJson.text, kitJson.lang) : ''}
-<ul class="chips">${kits.map((k) => `<li><a href="#${esc(k.name)}">${esc(k.package)}</a></li>`).join('')}</ul>
-${kits.map((k) => `<h2 id="${esc(k.name)}">${esc(k.package)}${k.versions.length ? `<span class="badge">${esc(k.versions.at(-1)!.version)}</span>` : ''}</h2>
-<p>${esc(kitText(k))} Its default output, <a href="${u(`nodes/package.html#${k.package}`)}"><code>${esc(k.package)}</code></a> alone, lines them up.</p>
+${builtinJson ? codeBlock(builtinJson.text, builtinJson.lang) : ''}
+<ul class="chips">${builtin.map((k) => `<li><a href="#${esc(k.name)}">${esc(k.package)}</a></li>`).join('')}</ul>
+${builtin.map((k) => `<h2 id="${esc(k.name)}">${esc(k.package)}${k.versions.length ? `<span class="badge">${esc(k.versions.at(-1)!.version)}</span>` : ''}</h2>
+<p>${esc(builtinText(k))} Its default output, <a href="${u(`nodes/package.html#${k.package}`)}"><code>${esc(k.package)}</code></a> alone, lines them up.</p>
 <div class="grid small">
 ${k.outputs.map((o) => card(o.type, o.name, k.name)).join('\n')}
 </div>`).join('\n')}`;
@@ -748,5 +748,5 @@ const pageBytes = pages.reduce((s, p) => s + size(p.out), 0);
 for (const p of pages) console.log(`  ${p.out.padEnd(28)} ${kb(size(p.out)).padStart(10)}`);
 const imgs = files.filter((f) => /\.(png|svg)$/.test(f));
 console.log(`site/: ${pages.length} pages (${kb(pageBytes)}), ${imgs.length} images (${(imgs.reduce((s, f) => s + size(f), 0) / 1048576).toFixed(2)} MB), ` +
-  `${files.length} files, ${(total / 1048576).toFixed(2)} MB total; ${nodeDefs.length} node types, ${kitOutputs.length} outputs of TopoTopo's own packages, ${examples.length} examples`);
+  `${files.length} files, ${(total / 1048576).toFixed(2)} MB total; ${nodeDefs.length} node types, ${builtinOutputs.length} outputs of TopoTopo's own packages, ${examples.length} examples`);
 if (total > SIZE_LIMIT) { console.log(`FAIL the site is over the ${SIZE_LIMIT / 1048576} MB budget`); process.exit(1); }

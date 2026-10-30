@@ -26,8 +26,8 @@ export const api = {
    * or null. vars: what the controls show; graphVars: the graph's own; mode "file": session values over a graph file.
    */
   async graphs() { const { status, j } = await json('/api/graphs'); return status === 200 && Array.isArray(j) ? j : null; },
-  /** {project: {id, title, description, graph, package, dir} | null, folder, file, kits} or null */
-  async project() { const { status, j } = await json('/api/project'); return status === 200 ? j : null; },
+  /** {package: {id, title, description, graph, name, dir} | null, folder, file, builtin} or null */
+  async package() { const { status, j } = await json('/api/package'); return status === 200 ? j : null; },
   /** the last cook of a graph: {ok, ms, target, errors, warnings} */
   async report(graph) { const { status, j } = await json('/api/report?' + q({ graph })); return status === 200 ? j : null; },
   /** the output (or a node) as a GLB; heightfields with `layer` in red (default the mask) */
@@ -63,11 +63,11 @@ export const api = {
     const { status, j } = await json('/api/markers', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
     return status === 200 && j.ok ? j : fail(j.error ?? `${status}`);
   },
-  /** The project's packages: {project, packages, problems, running, compare} (project null: no project), or null */
+  /** The packages in use: {package, packages, problems, running, compare} (package null: no package), or null */
   async packages() { const { status, j } = await json('/api/packages'); return status === 200 ? j : null; },
   /** Find packages: {libraries: [{name, standing, hits}], problems} or {ok: false, error} */
   async searchPackages(q) { const { status, j } = await json('/api/packages/search?' + new URLSearchParams({ q })); return status === 200 ? { ok: true, ...j } : fail(j.error ?? `${status}`); },
-  /** In a package's own project: {ok, package, last, published, note, changed} */
+  /** In a package that publishes versions: {ok, package, last, published, note, changed} */
   async authorState() { const { status, j } = await json('/api/packages/author'); return status === 200 ? j : fail(j.error ?? `${status}`); },
   /** The publish dry run: {ok, check: {ok, version, previous, blocks, warnings, changes, bigBecause}} */
   async checkPublish() { const { status, j } = await json('/api/packages/check', post({})); return status === 200 ? j : fail(j.error ?? `${status}`); },

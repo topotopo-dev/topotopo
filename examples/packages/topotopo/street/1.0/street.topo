@@ -1,0 +1,12 @@
+{
+  "graph": "lineup",
+  "bake": {},
+  "title": "Street",
+  "description": "TopoTopo's street package: roads with kerbs and sidewalks, lamp posts, bollards, benches, street signs, fences and hanging cables.",
+  "tags": [
+    "built-in"
+  ],
+  "links": [],
+  "created": "2026-10-28",
+  "name": "topotopo/street"
+}

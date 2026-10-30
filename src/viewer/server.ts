@@ -1,7 +1,7 @@
 // Live preview web server: serves the viewer page (index.html, a shell loading the ES modules of app/ and three.js
-// from /vendor/three/) that shows any graph/node of the project and refreshes over
+// from /vendor/three/) that shows any graph/node of the package and refreshes over
 // Server-Sent Events whenever a graph is rebuilt/edited.
-// It is also the human's control surface: files dropped on the page are stored in the project's inputs/ (under
+// It is also the human's control surface: files dropped on the page are stored in the package's inputs/ (under
 // `topotopo view`, the inputs/ beside the graph file) and shown as reference layers, the graph's exposed vars are set
 // from generated controls (POST /api/vars), and markers clicked into the view (sites, paths, zones, volumes) become
 // inputs/markers.json (POST /api/markers).
@@ -9,10 +9,10 @@
 // the next node boundary. A new value supersedes the cook of the one before: the latest value wins.
 // Over a graph file (`topotopo view`, ViewerOptions.source) the controls set session values over the graph, which
 // survive reloads of the file; POST /api/vars/save writes them into its vars.
-// The packages the project uses (/api/packages*, src/viewer/packages.ts): their updates, the before/after of one and
-// Update, and following a package's working folder for the viewer's session. /api/project says which project the
-// viewer shows (the page's title, its default graph, and what an empty project or a folder that is no project says),
-// with TopoTopo's kits for the welcome.
+// The packages the open package uses (/api/packages*, src/viewer/packages.ts): their updates, the before/after of one and
+// Update, and following a package's working folder for the viewer's session. /api/package says which package the
+// viewer shows (the page's title, its default graph, and what an empty package or a folder that is no package says),
+// with TopoTopo's built-in packages for the welcome.
 // Bound to 127.0.0.1 only; requests must name this server as their Host, and writes must come from its own page.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -36,9 +36,9 @@ import type { NodeProgress } from '../graph/engine.ts';
 import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
-import { ProjectPackages } from '../packages/registry.ts';
-import { listKits, kitOutputsText } from '../gallery/kits.ts';
-import { projectDirOf, readManifest } from '../project.ts';
+import { PackageUses, builtinLibrary, isDefaultOutput } from '../packages/registry.ts';
+import type { VersionInfo } from '../packages/registry.ts';
+import { packageDirOf, packageId, readManifest } from '../package.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';
@@ -66,6 +66,12 @@ const PART_RE = /(^|\/)\.[^/]*\.part$/;
 class HttpError extends Error {
   status: number;
   constructor(status: number, msg: string) { super(msg); this.status = status; }
+}
+
+/** A built-in package's outputs in a line, its line-up left out: "7 outputs: bench, bollard, cable …". */
+function outputsLine(v: VersionInfo, most = 6): string {
+  const names = Object.entries(v.outputs).filter(([, o]) => !isDefaultOutput(v, o)).map(([k]) => k);
+  return `${names.length} output${names.length === 1 ? '' : 's'}${names.length ? `: ${names.slice(0, most).join(', ')}${names.length > most ? ' …' : ''}` : ''}`;
 }
 
 /** The shape every geometry route serves: the same GLB options as /api/geo; images alone show as textured quads. */
@@ -177,11 +183,11 @@ interface VarsBatch { vars: Record<string, any>; waiters: ((r: VarsReply) => voi
 export interface ViewerOptions {
   /**
    * Where the inputs folder is, in words that follow "inputs/" on the page: `topotopo view` passes "beside house.json".
-   * Default: "in the project" (or the folder that holds it, when the project was given another inputs folder).
+   * Default: "in the package" (or the folder that holds it, when the package was given another inputs folder).
    */
   inputsWhere?: string;
   /**
-   * The graph file a graph comes from when it is not the project's own (`topotopo view`: viewGraphFile). The
+   * The graph file a graph comes from when it is not the package's own (`topotopo view`: viewGraphFile). The
    * controls then set session values over that graph (Session.sessionVars) instead of editing it: they survive
    * reloads of the file, show where they differ from it, and POST /api/vars/save writes them into its vars. Export
    * targets set on the page go into the file. Both are minimal edits of its text.
@@ -195,7 +201,7 @@ export interface Viewer {
   /** pages open now (event-stream connections) */
   clients: () => number;
   /**
-   * Show another project (the MCP library tool's open): the routes serve it from now on and every open page
+   * Show another package (the MCP workspace tool's open): the routes serve it from now on and every open page
    * reconnects and reloads, so the URL stays the same.
    */
   setSession: (ws: Session) => void;
@@ -213,27 +219,30 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   // a graph changed: after a stop the page keeps the geometry it has instead of fetching (and cooking) it again
   const graphChanged = (ev: { graph: string; version: number }) => broadcast({ ...ev, ...(ws.held(ev.graph) ? { stopped: true } : {}) });
   ws.listeners.add(graphChanged);
-  /** The project the viewer shows: that of the packages attached to the session, else the one its folder is in. */
-  const projectOf = (refresh = false) => {
-    const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
+  /** The package the viewer shows: that of the packages attached to the session, else the one its folder is in. */
+  const packageOf = (refresh = false) => {
+    const pk = ws.packages instanceof PackageUses ? ws.packages : null;
     if (refresh && pk?.dir) pk.refresh();
-    const dir = pk ? pk.dir : projectDirOf(ws.dir);
+    const dir = pk ? pk.dir : packageDirOf(ws.dir);
     let m = pk?.manifest ?? null;
-    if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no project to name */ }
-    return m && dir ? { id: m.id, title: m.title, description: m.description, graph: m.graph, package: m.package ?? null, dir } : null;
+    if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no package to name */ }
+    return m && dir ? { id: packageId(dir), title: m.title, description: m.description, graph: m.graph, name: m.name ?? null, dir } : null;
   };
-  // TopoTopo's kits, read once: they change only with TopoTopo itself
-  let kits: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
+  // TopoTopo's built-in packages, read once: they change only with TopoTopo itself
+  let builtin: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
   /**
-   * GET /api/project: the project the viewer shows (null for a folder that is in no project), the folder, the graph
-   * file of `topotopo view`, and TopoTopo's kits.
+   * GET /api/package: the package the viewer shows (null for a folder that is in no package), the folder, the graph
+   * file of `topotopo view`, and TopoTopo's built-in packages.
    */
-  const projectInfo = () => {
-    kits ??= listKits().map((k) => ({ name: k.name, title: k.title, description: k.description, version: k.version, outputs: kitOutputsText(k) }));
-    return { project: projectOf(true), folder: ws.dir, file: opts.source?.label ?? null, kits };
+  const packageInfo = () => {
+    builtin ??= builtinLibrary().map((b) => {
+      const v = b.versions.at(-1);
+      return { name: b.name, title: b.manifest.title, description: b.manifest.description, version: v?.version ?? null, outputs: v ? outputsLine(v) : '0 outputs' };
+    });
+    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin };
   };
-  // the project's default graph cooks its cards first
-  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => projectOf()?.graph });
+  // the package's default graph cooks its cards first
+  const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => packageOf()?.graph });
   let outputs = makeOutputs();
   const makePackages = () => createPackages(ws, broadcast);
   let packages = makePackages();
@@ -271,7 +280,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   // an export's sidecar (kind "metadata") says what it is: the page shows it with the file it describes
   const listInputs = () => ws.listInputs().filter((f) => !PART_RE.test(f.path))
     .map((f) => (f.sidecar ? { ...f, about: `${SIDECAR_NAMES[f.sidecar.role]}: ${SIDECAR_TEXT[f.sidecar.role]}` } : f));
-  const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? (projectOf() ? 'in the project' : 'in this folder') : `in ${path.dirname(ws.inputDir)}`);
+  const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? (packageOf() ? 'in the package' : 'in this folder') : `in ${path.dirname(ws.inputDir)}`);
   // Files copied into inputs/ by other means (file manager, an agent) show up too, once the folder exists. The viewer
   // does not make it just to watch it (`topotopo view`'s inputs/ beside the graph file appears with the first drop):
   // uploads and listings start the watch when the folder is there by then.
@@ -392,7 +401,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   // latest value wins; values in between may never cook); the waiting requests are merged (the latest value of each
   // var wins) and applied by a single further cook. Every request is answered once its values are applied, or when a
   // stop (POST /api/cook/stop) ends the cook. Over a graph file the values are session values, set at once; in a
-  // project they edit the stored graph (an agent reads them there).
+  // package they edit the stored graph (an agent reads them there).
   const varQueues = new Map<string, { busy: boolean; next: VarsBatch | null }>();
   const varsState = (name: string) => {
     const g = ws.graphs.get(name);
@@ -475,7 +484,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     const src = opts.source;
     if (!src || src.graph !== name) throw new HttpError(400, sessionMode(name)
       ? 'this viewer cannot write the graph file: start it with `topotopo view <graph.json>` to save values'
-      : `graph ${name} is the project's own: its values are saved as they change`);
+      : `graph ${name} is the package's own: its values are saved as they change`);
     const values = ws.sessionVars(name), names = Object.keys(values);
     if (names.length) {
       try { src.save(names.map((k) => ({ path: ['vars', k], value: values[k] }))); }
@@ -534,7 +543,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
         req.on('close', () => clients.delete(res));
         return;
       }
-      if (u.pathname === '/api/project') return json(200, projectInfo());
+      if (u.pathname === '/api/package') return json(200, packageInfo());
       if (u.pathname === '/api/graphs') {
         const out = [...ws.graphs].map(([name, g]) => {
           const last = ws.lastReport.get(name);
@@ -543,9 +552,9 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
             name, output: last?.target || g.output || null, version: ws.versions.get(name) ?? 0,
             // vars: what the controls show; graphVars: the graph's own; overrides: the session values among them
             ...varsState(name), params: g.params ?? {},
-            // "file": the controls set session values over a graph file (saveable when it names the file); "project":
+            // "file": the controls set session values over a graph file (saveable when it names the file); "package":
             // they edit the stored graph
-            mode: sessionMode(name) ? 'file' : 'project', file: opts.source?.graph === name ? opts.source.label : null,
+            mode: sessionMode(name) ? 'file' : 'package', file: opts.source?.graph === name ? opts.source.label : null,
             cook: cookState(name),
             nodes: Object.entries(g.nodes).map(([n, spec]) => {
               const def = ws.engine.resolveDef(spec.type);
@@ -707,7 +716,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
       outputs = makeOutputs();
       packages = makePackages();
       watchInputs();
-      // the pages reconnect (EventSource retries) and reload graphs, layers and guides from the new project
+      // the pages reconnect (EventSource retries) and reload graphs, layers and guides from the new package
       for (const c of clients) c.end();
       clients.clear();
     },

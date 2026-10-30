@@ -48,7 +48,7 @@ export function createOutputPanel(ctx) {
   const live = document.createElement('div'), saved = document.createElement('details'), savedRows = document.createElement('div');
   saved.className = 'saved-outputs'; saved.open = ctx.store.get('outputs.savedOpen', false);
   saved.append(text('summary', 'Saved files'), savedRows); saved.ontoggle = () => ctx.store.set('outputs.savedOpen', saved.open);
-  const empty = text('div', 'No outputs yet: the results of the project\'s graphs show here once your agent has built one.', 'empty');
+  const empty = text('div', 'No outputs yet: the results of the package\'s graphs show here once your agent has built one.', 'empty');
   const cards = new Map(), groups = new Map(); let input = null;
   host.append(bar, empty, live, saved);
   Object.defineProperty(P, 'count', { get: () => list.filter((v) => v.exportable).length });
@@ -144,8 +144,8 @@ export function createOutputPanel(ctx) {
 
   function render() {
     const used = new Set(), usedGroups = new Set(), grouped = new Map();
-    // the project's default graph first
-    const first = ctx.project?.project?.graph;
+    // the package's default graph first
+    const first = ctx.package?.package?.graph;
     if (first && list.some((v) => v.origin === 'published' && v.graph === first)) grouped.set(first, []);
     for (const item of list) {
       const name = item.origin === 'published' ? item.graph ?? 'Outputs' : '__saved';
@@ -233,7 +233,7 @@ export function createOutputPanel(ctx) {
         tags.replaceChildren(...(item.tags ?? []).map((t) => text('span', t, 'tag')));
         tags.title = item.tags?.length ? kindTagsLine(item) : '';
         tags.hidden = !item.tags?.length;
-        // an output that is not the kind its graph pins says so (publishing the project's package would block on it); one
+        // an output that is not the kind its graph pins says so (publishing the package would block on it); one
         // whose cook was stopped shows the last finished result
         const warned = !item.error && item.warning;
         info.textContent = item.error ?? (item.stale ? `out of date: its cook was stopped · ${detail}` : warned ? `not a "${item.pinned}" · ${detail}` : detail || (item.status === 'loading' ? 'cooking…' : ''));
@@ -323,7 +323,7 @@ export function createOutputPanel(ctx) {
         else if (after) { P.active = after; showDetails(after); }
         else if (selected && !after) P.scene();
         else if (initial && list.length) {
-          // first the graph the page shows (the project's default graph), its default output
+          // first the graph the page shows (the package's default graph), its default output
           initial = false;
           const top = list.filter((v) => v.generated && !v.parent), main = top.find((v) => v.graph === ctx.graph.name && v.output === null) ?? top.find((v) => v.graph === ctx.graph.name) ?? top[0];
           if (main) await P.select(main.id);

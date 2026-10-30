@@ -1,13 +1,13 @@
-// The Packages tab (src/viewer/packages.ts serves it), in every project: the project's name, Find packages (a search of
-// TopoTopo's kits and every library's packages, which says whether the project can use each), and a box per package
-// the project uses. A box says the package's name, the version in use and its state as a badge (up to date, update
+// The Packages tab (src/viewer/packages.ts serves it), in every package: the package's name, Find packages (a search of
+// TopoTopo's built-in packages and every library's packages, which says whether the package can use each), and a box per package
+// the package uses. A box says the package's name, the version in use and its state as a badge (up to date, update
 // available, live); its source, as a two-way switch naming both states, "Published 1.1 | Live folder", where the
-// package has a working folder of its own (TopoTopo's kits only inside TopoTopo's own repository): Published is the
+// package has a working folder of its own (TopoTopo's built-in packages only inside TopoTopo's own repository): Published is the
 // frozen copy, Live shows the folder's edits as they are saved, for this session; the nodes that use it (a click shows
-// that node); its outputs, folded, as aligned rows of name, kind and tags, marked where the project uses them; and,
+// that node); its outputs, folded, as aligned rows of name, kind and tags, marked where the package uses them; and,
 // only when a newer version exists, Update. A save in a working folder the session does not follow is offered in that
 // package's box, in words that do not assume the person is its author; using the switch, Not now or Update clears it.
-// Update first runs the before/after: every place the project uses the package cooks with the version in use (a) and
+// Update first runs the before/after: every place the package uses the updated package cooks with the version in use (a) and
 // the new one (b); a place shows alone in the view as an output card does, as a, as b or both overlaid (the switch
 // over the view), and says in one line what changed, its details folded. Nothing changes until the person confirms in
 // the box; a big version whose graphs must change asks once more and gives a line to copy for the agent. A node of a
@@ -48,7 +48,7 @@ export function packageState(p) {
     };
   }
   if (p.error) return { kind: 'error', text: 'not found', title: p.error };
-  if (!ups.length) return { kind: 'current', text: 'up to date', title: `${p.version} is the newest version in ${librariesText(p.libraries) || 'the project\'s libraries'}` };
+  if (!ups.length) return { kind: 'current', text: 'up to date', title: `${p.version} is the newest version in ${librariesText(p.libraries) || 'the package\'s libraries'}` };
   return { kind: 'update', text: 'update available', title: updates };
 }
 
@@ -106,14 +106,14 @@ export function placeVerdict(c, t) {
 export function shortText(r) {
   const n = r.places.length, failed = r.places.filter((c) => !c.after.ok).length;
   const changed = r.places.filter((c) => c.after.ok && (!c.before.ok || (c.diff && !c.diff.identical))).length, same = n - failed - changed;
-  if (!n) return `no graph of the project uses ${r.target.package}: nothing changes`;
-  if (!changed && !failed) return `nothing changes in the ${n === 1 ? 'place' : `${n} places`} the project uses it`;
+  if (!n) return `no graph of the package uses ${r.target.package}: nothing changes`;
+  if (!changed && !failed) return `nothing changes in the ${n === 1 ? 'place' : `${n} places`} the package uses it`;
   const parts = [failed ? `${failed} ${failed === 1 ? 'does' : 'do'} not cook with ${r.target.to}` : '', changed ? `${changed} change${changed === 1 ? 's' : ''}` : '', same ? `${same} ${same === 1 ? 'stays' : 'stay'} the same` : ''];
   return `${n} place${n === 1 ? '' : 's'}: ${parts.filter(Boolean).join(', ')}`;
 }
 
 /** The line a person gives their agent for a big update whose graphs must change. */
-export const agentLine = (r, project) => `update ${r.target.package} to ${r.target.to}${project ? ` in ${project}` : ''} and fix: ${r.mustChange.join('; ')}`;
+export const agentLine = (r, id) => `update ${r.target.package} to ${r.target.to}${id ? ` in ${id}` : ''} and fix: ${r.mustChange.join('; ')}`;
 
 /** What a place shows first: the overlay where it changed, else b, else a; null when it cooked with neither. */
 export const firstView = (c) => (c.views.overlay && c.diff && !c.diff.identical ? 'overlay' : c.views.b ? 'b' : c.views.a ? 'a' : null);
@@ -122,7 +122,7 @@ export const firstView = (c) => (c.views.overlay && c.diff && !c.diff.identical 
 export const usedByText = (uses, oneGraph) => uses.map((u) => (oneGraph ? u.node : `${u.graph} › ${u.node}`)).join(', ');
 
 export function createPackagesPanel(ctx, host) {
-  const P = { rows: new Map(), project: null, problems: [], running: null, result: null, ended: null, loaded: false };
+  const P = { rows: new Map(), package: null, problems: [], running: null, result: null, ended: null, loaded: false };
   const tab = document.getElementById('tab-packages');
   /** the view each place was last shown as (a, b, overlay), by the id it has in the view */
   const views = new Map();
@@ -171,7 +171,7 @@ export function createPackagesPanel(ctx, host) {
     for (const v of rows) {
       const r = el('div', 'pkg-v');
       r.append(el('span', 'pkg-vn', v.version), el('span', 'pkg-vd', day(v.published)), el('span', 'pkg-vt', v.note));
-      if (v.big || v.marked) { const tag = el('span', 'pkg-tag', 'big'); tag.title = v.big ? `${v.version} is a big version: something a project relies on goes away or means something else` : 'its author marked it big'; r.append(tag); }
+      if (v.big || v.marked) { const tag = el('span', 'pkg-tag', 'big'); tag.title = v.big ? `${v.version} is a big version: something a package relies on goes away or means something else` : 'its author marked it big'; r.append(tag); }
       box.append(r);
     }
     return box;
@@ -189,9 +189,9 @@ export function createPackagesPanel(ctx, host) {
   };
 
   // ---------------------------------------------------------------- the tab
-  const bar = el('div', 'packages-bar'), head = el('div', 'pkg-project'), search = el('input', 'pkg-search'), results = el('div', 'pkg-found');
+  const bar = el('div', 'packages-bar'), head = el('div', 'pkg-package'), search = el('input', 'pkg-search'), results = el('div', 'pkg-found');
   search.type = 'search'; search.placeholder = 'Find packages: tree, lamp, crate…'; search.setAttribute('aria-label', 'Find packages');
-  search.title = 'search TopoTopo\'s kits and every library\'s packages by name, kind and tag';
+  search.title = 'search TopoTopo\'s built-in packages and every library\'s packages by name, kind and tag';
   let searchTimer = 0;
   search.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(search.value), 200); };
   search.onkeydown = (e) => { if (e.key === 'Escape') { search.value = ''; runSearch(''); search.blur(); } };
@@ -209,21 +209,21 @@ export function createPackagesPanel(ctx, host) {
     found = j;
     renderFound();
   }
-  /** Find packages' result: each output found, its kind and tags, whether the project uses it or can. */
+  /** Find packages' result: each output found, its kind and tags, whether the package uses it or can. */
   function renderFound() {
     results.hidden = !found;
     if (!found) { results.replaceChildren(); return; }
     if (!found.ok && found.error) { results.replaceChildren(el('div', 'err', found.error)); return; }
     const parts = [];
     const libs = (found.libraries ?? []).filter((l) => l.hits.length);
-    if (!libs.length) parts.push(el('div', 'pkg-sub', `Nothing found for "${query}". TopoTopo's kits hold walls, houses, roofs, stairs, rocks, trees, props and roads.`));
+    if (!libs.length) parts.push(el('div', 'pkg-sub', `Nothing found for "${query}". TopoTopo's built-in packages hold walls, houses, roofs, stairs, rocks, trees, props and roads.`));
     for (const l of libs) {
-      parts.push(el('div', 'pkg-libhead', l.standing === 'builtin' ? 'TopoTopo\'s kits' : `library "${l.name}"${l.standing === 'unlisted' ? ' · not listed in this project' : ''}`));
+      parts.push(el('div', 'pkg-libhead', l.standing === 'builtin' ? 'TopoTopo\'s built-in packages' : `library "${l.name}"${l.standing === 'unlisted' ? ' · not listed in this package' : ''}`));
       for (const h of l.hits.slice(0, 40)) {
         const row = el('div', 'pkg-hit');
         const name = el('code', '', h.type), kind = h.kind ? el('span', 'badge kind', h.kind) : null, tags = el('span', 'pkg-tags line');
         for (const t of h.tags) tags.append(el('span', 'tag', t));
-        const state = h.used ? `in use (${h.used})` : h.self ? 'this project' : l.standing === 'unlisted' ? `its project.json would list library "${l.name}"` : 'ready to use';
+        const state = h.used ? `in use (${h.used})` : h.self ? 'this package' : l.standing === 'unlisted' ? `its manifest would list library "${l.name}"` : 'ready to use';
         row.append(name, ...(kind ? [kind] : []), el('span', 'pkg-hitstate dim', state), tags);
         row.title = `${h.type}${h.label ? ` (${h.label})` : ''} · ${kindTagsLine(h)}${h.description ? `\n${h.description}` : ''}\nTo use it, ask your agent: use ${h.type}`;
         row.append(button('Copy name', 'pkg-hitcopy', `copy ${h.type}: your agent uses it as a node type`, async () => {
@@ -240,23 +240,23 @@ export function createPackagesPanel(ctx, host) {
   function render() {
     const rows = [...P.rows.values()];
     const late = rows.filter((p) => p.small || p.big).length, live = rows.filter((p) => p.followed).length;
-    // in every project: Find packages works without packages too
-    ctx.setTabShown?.('packages', !!P.project);
+    // in every package: Find packages works without packages too
+    ctx.setTabShown?.('packages', !!P.package);
     const count = tab.querySelector('.count');
     count.textContent = rows.length ? String(rows.length) : '';
     count.classList.toggle('late', late > 0);
     count.classList.toggle('live', live > 0 && !late);
-    count.title = [late ? `${late} of the ${rows.length} packages the project uses ${late === 1 ? 'has' : 'have'} an update` : `the project uses ${rows.length === 1 ? '1 package' : `${rows.length} packages`}`, live ? `${live} live this session` : ''].filter(Boolean).join('; ');
-    if (P.project) {
-      head.replaceChildren(el('strong', '', P.project.title || P.project.id), el('span', 'dim', ` · ${rows.length ? `${rows.length} package${rows.length === 1 ? '' : 's'} in use` : 'no packages yet'}`));
-      head.title = `${P.project.dir}\nThe project finds packages in TopoTopo's built-in library${P.project.libraries.length ? ` and in ${P.project.libraries.map((l) => `"${l}"`).join(', ')} (project.json "libraries")` : ''}; the copies of the versions it uses are in packages/.`;
+    count.title = [late ? `${late} of the ${rows.length} packages it uses ${late === 1 ? 'has' : 'have'} an update` : `it uses ${rows.length === 1 ? '1 package' : `${rows.length} packages`}`, live ? `${live} live this session` : ''].filter(Boolean).join('; ');
+    if (P.package) {
+      head.replaceChildren(el('strong', '', P.package.title || P.package.id), el('span', 'dim', ` · ${rows.length ? `${rows.length} package${rows.length === 1 ? '' : 's'} in use` : 'no packages yet'}`));
+      head.title = `${P.package.dir}\nThe package finds packages in TopoTopo's built-in library${P.package.libraries.length ? ` and in ${P.package.libraries.map((l) => `"${l}"`).join(', ')}` : ''}; the copies of the versions it uses are in packages/.`;
     }
     const parts = [];
     if (P.problems.length) parts.push(list(P.problems, 'err'));
-    if (P.project?.package) parts.push(authorBox());
-    if (!rows.length && P.project) {
+    if (P.package?.name) parts.push(authorBox());
+    if (!rows.length && P.package) {
       const e = el('div', 'pkg-empty');
-      e.append(el('p', '', 'This project uses no packages yet.'), el('p', 'dim', 'Packages are ready-made parts: TopoTopo\'s kits (houses, walls, trees, rocks, props, roads) and your team\'s libraries. Find one above, then ask your agent to use it, for example: "add topotopo/street/lamp_post along the road".'));
+      e.append(el('p', '', 'This package uses no packages yet.'), el('p', 'dim', 'Packages are ready-made parts: TopoTopo\'s built-in packages (houses, walls, trees, rocks, props, roads) and your team\'s libraries. Find one above, then ask your agent to use it, for example: "add topotopo/street/lamp_post along the road".'));
       parts.push(e);
     }
     for (const p of rows) parts.push(card(p));
@@ -277,7 +277,7 @@ export function createPackagesPanel(ctx, host) {
     if (p.error) box.append(el('div', 'pkg-sub err', p.error));
     // where it comes from: the published copy, or the live folder (the switch names both)
     if (p.canFollow) box.append(sourceSwitch(p));
-    else box.append(el('div', 'pkg-note', p.kit ? `${p.version ? `version ${p.version}` : 'not published'} from TopoTopo's kits` : sourceText(p)));
+    else box.append(el('div', 'pkg-note', p.builtin ? `${p.version ? `version ${p.version}` : 'not published'} from TopoTopo's built-in library` : sourceText(p)));
     // a save in its working folder, offered here (cleared by the switch, Not now or Update)
     if (offers.has(p.package) && !p.followed) {
       const o = el('div', 'pkg-offer');
@@ -288,7 +288,7 @@ export function createPackagesPanel(ctx, host) {
       o.append(acts);
       box.append(o);
     }
-    // where the project uses it: a click shows that node
+    // where the package uses it: a click shows that node
     if (p.usedBy?.length) {
       const graphs = new Set(p.usedBy.map((u) => u.graph)), u = el('div', 'pkg-used');
       u.append(el('span', 'dim', 'Used by '));
@@ -297,8 +297,8 @@ export function createPackagesPanel(ctx, host) {
         u.append(b);
       }
       box.append(u);
-    } else if (p.version) box.append(el('div', 'pkg-note', 'No graph of the project uses it now.'));
-    // its outputs, folded: aligned rows of name, kind and tags, marked where the project uses them
+    } else if (p.version) box.append(el('div', 'pkg-note', 'No graph of the package uses it now.'));
+    // its outputs, folded: aligned rows of name, kind and tags, marked where the package uses them
     if (p.outputs?.length) {
       const used = p.outputs.filter((o) => o.used).length;
       const grid = el('div', 'pkg-outs');
@@ -307,7 +307,7 @@ export function createPackagesPanel(ctx, host) {
         for (const t of l.tags) tags.append(el('span', 'tag', t));
         tags.title = kindTagsLine(l);
         const name = el('span', `pkg-on${l.used ? ' used' : ''}`, l.name);
-        name.title = `${o.type}${o.label ? ` (${o.label})` : ''} · ${kindTagsLine(l)}${l.used ? ' · used by the project' : ''}`;
+        name.title = `${o.type}${o.label ? ` (${o.label})` : ''} · ${kindTagsLine(l)}${l.used ? ' · used by the package' : ''}`;
         grid.append(el('span', `pkg-in${l.used ? ' on' : ''}`, l.used ? '●' : ''), name, l.kind ? el('span', 'badge kind', l.kind) : el('span'), tags);
       }
       box.append(fold(`${p.outputs.length} output${p.outputs.length === 1 ? '' : 's'}${used ? ` · ${used} in use` : ''}`, grid, open.has(p.package), (on) => { if (on) open.add(p.package); else open.delete(p.package); }));
@@ -323,7 +323,7 @@ export function createPackagesPanel(ctx, host) {
     if ((p.small || p.big) && !r && !running) {
       if (p.newer.length) box.append(fold(`What is new since ${p.version}`, versions([...p.newer].reverse())));
       const acts = el('div', 'pkg-actions');
-      const at = (v, big) => `see what changes where the project uses ${p.package} with ${v}, then confirm${big ? `; ${v} is a big version: it also says what the graphs must change` : ''}. Nothing changes before you confirm`;
+      const at = (v, big) => `see what changes where the package uses ${p.package} with ${v}, then confirm${big ? `; ${v} is a big version: it also says what the graphs must change` : ''}. Nothing changes before you confirm`;
       if (p.small) acts.append(button(`Update to ${p.small}…`, 'primary', at(p.small, false), () => P.compare(p.package, p.small)));
       if (p.big) acts.append(button(`Update to ${p.big} (big)…`, p.small ? '' : 'primary', at(p.big, true), () => P.compare(p.package, p.big)));
       for (const b of acts.children) b.disabled = comparing || applying;
@@ -331,8 +331,8 @@ export function createPackagesPanel(ctx, host) {
     }
     if (p.mustChange) {
       const m = el('div', 'pkg-must');
-      m.append(el('div', 'pkg-sub', `Updated to ${p.mustChange.to}: the project's graphs must change; until they do, they report these errors:`), list(p.mustChange.items, 'err'));
-      m.append(el('div', 'pkg-sub', 'Give your agent this line:'), copyBox(agentLine({ target: { package: p.package, to: p.mustChange.to }, mustChange: p.mustChange.items }, P.project?.id)));
+      m.append(el('div', 'pkg-sub', `Updated to ${p.mustChange.to}: the package's graphs must change; until they do, they report these errors:`), list(p.mustChange.items, 'err'));
+      m.append(el('div', 'pkg-sub', 'Give your agent this line:'), copyBox(agentLine({ target: { package: p.package, to: p.mustChange.to }, mustChange: p.mustChange.items }, P.package?.id)));
       m.append(button('Dismiss', '', 'hide this list (the nodes report their errors until the graphs change)', () => P.dismiss(p.package)));
       box.append(m);
     }
@@ -357,12 +357,12 @@ export function createPackagesPanel(ctx, host) {
     return wrap;
   }
 
-  /** In the package's own project: its last version, unpublished changes, and Check publish (the publish dry run). */
+  /** In a package that publishes versions: its last version, unpublished changes, and Check publish (the publish dry run). */
   let author = null, checking = false;
   function authorBox() {
-    const box = el('div', 'pkg-card pkg-author'), name = P.project.package;
+    const box = el('div', 'pkg-card pkg-author'), name = P.package.name;
     const h = el('div', 'pkg-head');
-    h.append(el('span', 'pkg-name', name), el('span', 'pkg-ver', author?.last ?? '—'), el('span', 'pkg-state author', 'this project'));
+    h.append(el('span', 'pkg-name', name), el('span', 'pkg-ver', author?.last ?? '—'), el('span', 'pkg-state author', 'this package'));
     box.append(h);
     if (!author) { box.append(el('div', 'pkg-note', '…')); return box; }
     box.append(el('div', 'pkg-note', author.last ? `Last published: ${author.last} · ${day(author.published)}${author.note ? ` · ${author.note}` : ''}` : 'Not published yet.'));
@@ -380,7 +380,7 @@ export function createPackagesPanel(ctx, host) {
       if (c.bigBecause?.length) lines.push(fold('Why it is big', list(c.bigBecause)));
       if (c.changes?.length) lines.push(fold(`${c.changes.length} change${c.changes.length === 1 ? '' : 's'}`, list(c.changes)));
       if (c.warnings?.length) lines.push(fold(`${c.warnings.length} warning${c.warnings.length === 1 ? '' : 's'}`, list(c.warnings)));
-      lines.push(el('div', 'pkg-note', 'Publishing itself is your agent\'s step (or topotopo publish --note "…" in the project folder).'));
+      lines.push(el('div', 'pkg-note', 'Publishing itself is your agent\'s step (or topotopo publish --note "…" in the package folder).'));
       box.append(...lines);
     }
     return box;
@@ -403,21 +403,21 @@ export function createPackagesPanel(ctx, host) {
       more.append(el('div', 'pkg-sub', r.interfaceBig.length ? `${step}; what goes away or means something else:` : `${step}: nothing goes away between the two; a version between was marked big by its author (its note says why)`));
       if (r.interfaceBig.length) more.append(list(r.interfaceBig));
     }
-    if (r.uses.length) more.append(el('div', 'pkg-sub', 'Where the project uses it:'), list(r.uses.map((u) => `${u.file} · ${u.node}: ${u.type}${u.set ? ` ${u.set}` : ''}`)));
+    if (r.uses.length) more.append(el('div', 'pkg-sub', 'Where the package uses it:'), list(r.uses.map((u) => `${u.file} · ${u.node}: ${u.type}${u.set ? ` ${u.set}` : ''}`)));
     if (r.problems.length) more.append(list(r.problems, 'err'));
     b.append(fold('Details', more));
     if (r.mustChange.length) {
-      b.append(el('div', 'pkg-sub err', `With ${t.to} the project's graphs must change; until they do, they report these errors:`), list(r.mustChange, 'err'));
-      b.append(el('div', 'pkg-sub', 'Your agent can make these changes. Give it this line:'), copyBox(agentLine(r, P.project?.id)));
+      b.append(el('div', 'pkg-sub err', `With ${t.to} the package's graphs must change; until they do, they report these errors:`), list(r.mustChange, 'err'));
+      b.append(el('div', 'pkg-sub', 'Your agent can make these changes. Give it this line:'), copyBox(agentLine(r, P.package?.id)));
     }
     const acts = el('div', 'pkg-actions');
     if (confirming.has(t.package)) {
       b.append(el('div', 'pkg-sub warn', `Update anyway? The graphs keep reporting these errors until they change.`));
-      const yes = button(`Yes, update to ${t.to}`, 'primary danger', `copy ${t.package} ${t.to} into the project and name it in project.json; the graphs report errors until they change`, () => P.update(r));
+      const yes = button(`Yes, update to ${t.to}`, 'primary danger', `copy ${t.package} ${t.to} into the package and name it in its manifest; the graphs report errors until they change`, () => P.update(r));
       yes.disabled = applying || !!P.running;
       acts.append(yes, button('Cancel', '', 'keep the version in use', () => { confirming.delete(t.package); render(); }));
     } else {
-      const update = button(`Update to ${t.to}${t.big ? ' (big)' : ''}`, 'primary', `copy ${t.package} ${t.to} into the project, name it in project.json and the lock, then cook the scene again`, () => {
+      const update = button(`Update to ${t.to}${t.big ? ' (big)' : ''}`, 'primary', `copy ${t.package} ${t.to} into the package, name it in its manifest and the lock, then cook the scene again`, () => {
         if (r.mustChange.length) { confirming.add(t.package); render(); } else P.update(r);
       });
       update.disabled = applying || !!P.running;
@@ -425,9 +425,9 @@ export function createPackagesPanel(ctx, host) {
       if (r.stopped) acts.append(button('Compare again', '', 'compare every place again; what was cooked is reused', () => P.compare(t.package, t.to)));
       acts.append(button('Close', '', 'close it; nothing changes', () => P.close()));
     }
-    // values tuned over a graph file and not saved (topotopo view) are the viewer's, not the project's
+    // values tuned over a graph file and not saved (topotopo view) are the viewer's, not the package's
     const tuned = ctx.graph.list.some((g) => g.overrides?.length);
-    b.append(acts, el('div', 'hint', `Nothing has changed yet: the project uses ${t.package} ${t.from} until you update.${tuned ? ' Values tuned in this viewer and not saved play no part.' : ''}`));
+    b.append(acts, el('div', 'hint', `Nothing has changed yet: the package uses ${t.package} ${t.from} until you update.${tuned ? ' Values tuned in this viewer and not saved play no part.' : ''}`));
     return b;
   }
 
@@ -566,13 +566,13 @@ export function createPackagesPanel(ctx, host) {
     const s = await api.packages();
     if (!s) return;
     P.loaded = true;
-    P.project = s.project;
+    P.package = s.package;
     P.problems = s.problems ?? [];
     P.rows = new Map((s.packages ?? []).map((p) => [p.package, p]));
     for (const p of P.rows.values()) if (p.followed) offers.delete(p.package);
     // a before/after another page started (or one running before a reload) shows its progress here too
     if (s.running && !P.running) P.running = { ...s.running, at: performance.now() };
-    if (s.project?.package) {
+    if (s.package?.package) {
       const a = await api.authorState();
       if (a.ok) author = { ...a, check: author?.check ?? null };
     } else author = null;

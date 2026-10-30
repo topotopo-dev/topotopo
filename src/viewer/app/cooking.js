@@ -73,6 +73,6 @@ export function compareLine(state, since = 0) {
   const step = state.total ? `${Math.min(state.done + 1, state.total)}/${state.total} ` : '';
   return {
     kind: 'running', text: `before/after ${head} · ${step}${state.what} · ${total}`,
-    title: 'Every place the project uses the package cooks with the version in use and with the new one. Stop ends it at the next node; the places compared stay.',
+    title: 'Every place this package uses the updated package cooks with the version in use and with the new one. Stop ends it at the next node; the places compared stay.',
   };
 }

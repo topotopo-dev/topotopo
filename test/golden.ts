@@ -13,7 +13,7 @@ import { allNodeDefs } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { openPackages } from '../src/packages/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, kitFixtureGraph } from './fixtures.ts';
+import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, builtinFixtureGraph } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff, sortedJSON } from './fingerprint.ts';
 
 const args = process.argv.slice(2);
@@ -23,7 +23,7 @@ const goldenDir = path.join(ROOT, 'test', 'golden');
 const examplesDir = path.join(ROOT, 'examples');
 
 const { engine } = await createFixtureEngine();
-// the examples are a project: they cook TopoTopo's own packages from its copies
+// the examples are a package: they cook TopoTopo's own packages from its copies
 const exampleEngine = new Engine(createNodeHost({ baseDir: examplesDir }));
 await exampleEngine.init();
 openPackages(exampleEngine, examplesDir);
@@ -34,14 +34,14 @@ for (const def of allNodeDefs()) {
   if (SKIP.has(def.type)) continue;
   cases.push({ name: `node.${def.type}`, graph: fixtureGraphFor(def.type), engine, source: `fixture for node type "${def.type}" (test/fixtures.ts)` });
 }
-for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json') && x !== 'project.json').sort()) {
+for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json')).sort()) {
   const graph = JSON.parse(fs.readFileSync(path.join(examplesDir, f), 'utf8'));
   cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}` });
 }
 // the outputs of TopoTopo's own packages at their defaults (curve/surface outputs on their fixture inputs), and each
-// kit's default output, its line-up
+// each built-in package's default output, its line-up
 for (const type of engine.packageDefs().map((d) => d.type).sort()) {
-  cases.push({ name: `package.${type.replace(/\//g, '.')}`, graph: kitFixtureGraph(type), engine, source: `${type} at its defaults (test/fixtures.ts)` });
+  cases.push({ name: `package.${type.replace(/\//g, '.')}`, graph: builtinFixtureGraph(type), engine, source: `${type} at its defaults (test/fixtures.ts)` });
 }
 
 /** The machine-dependent inputs a graph's output depends on (currently: the default system font). */

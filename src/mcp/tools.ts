@@ -114,7 +114,7 @@ function exportReport(all: { path: string; bytes: Uint8Array }[], outDir: string
 }
 function renderOpts(a: any, g: Geometry, label: string | undefined, dir: string): RenderOptions {
   const ro = renderArgs(a); // views (presets, persp@az, section), overlays, shading, labels … (src/render/options.ts)
-  // a reference image is a path relative to the project, as save_to is
+  // a reference image is a path relative to the package, as save_to is
   if (ro.underlay) ro.underlay = path.resolve(dir, ro.underlay);
   let highlight: RenderOptions['highlight'] = null;
   if (a.highlight) {
@@ -134,7 +134,7 @@ const RENDER_PROPS = {
   size: { description: 'pixels per view: n (square; default 512 for several views, 800 for one) or "WxH" / [w, h] (e.g. "1600x600" for a long prop: the views fit the bounds to that aspect); scale 2 doubles it', anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'array', items: { type: 'number' } }] },
   transparent: { type: 'boolean', description: 'transparent background: pixels without surface, line or point get alpha 0 (PNG with alpha); no ground grid or axis gizmo; the footer stays opaque' },
   grid: { type: 'boolean', description: 'the persp ground grid on y = 0 (default true, false with transparent)' },
-  underlay: { type: 'string', description: 'a reference image (PNG, path relative to the project) drawn behind the 3D views, e.g. a side photo behind views:"front"' },
+  underlay: { type: 'string', description: 'a reference image (PNG, path relative to the package) drawn behind the 3D views, e.g. a side photo behind views:"front"' },
   underlay_opacity: { type: 'number', description: 'underlay opacity 0..1 (default 0.5)' },
   underlay_fit: { type: 'string', enum: ['bounds', 'width', 'height', 'view'], description: 'where the underlay goes: "bounds" (default: fitted into the rectangle the bounds cover in each view, keeping its aspect, so a reference cropped to the object lines up with it), "width" (its width spans the width of the bounds), "height" (its height spans their height), "view" (the whole view)' },
   sockets: { type: 'boolean', description: 'draw scene empties (scene_null sockets) as dots with their name and orient axes (X red, Y green, Z blue), through surfaces; without it pbr renders hide them' },
@@ -190,7 +190,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
 
   /**
    * The named outputs of a cooked graph that cook to another kind than their author pinned ("kind" in its outputs, help
-   * topic "packages"), each said as a warning: publishing the project's package would block on them.
+   * topic "packages"), each said as a warning: publishing the package would block on them.
    */
   const kindWarnings = async (name: string, r: CookReport, frame?: number): Promise<string[]> => {
     const out: string[] = [];
@@ -269,7 +269,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
   const tools: ToolDef[] = [
     {
       name: 'catalog',
-      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, asset = project assets, package = package outputs, "owner/name/output": those the project uses, and TopoTopo\'s own, ready-made walls, houses, roofs, stairs, rocks, trees, props and roads such as "topotopo/architecture/house" or "topotopo/nature/rock", which a graph\'s first use adds to the project). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the project.',
+      description: 'List available node types grouped by category (generate, curve, transform, deform, attribute, measure, group, topology, copy, solid, sdf, heightfield, uv, code, flow, io, pcg, asset = package assets, package = package outputs, "owner/name/output": those the package uses, and TopoTopo\'s own, ready-made walls, houses, roofs, stairs, rocks, trees, props and roads such as "topotopo/architecture/house" or "topotopo/nature/rock", which a graph\'s first use adds to the package). Optional filter by category or search text. Building a landscape or scene for a person? Call inputs {action:"list"} first: the meshes, guide curves and masks they dropped into the package.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -281,14 +281,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
       run: async (a) => {
         const cat = catalogText([...allNodeDefs(), ...engine.assetsIn().map((x) => x.def), ...engine.packageDefs()], { category: a.category, search: a.search, deprecated: a.include_deprecated });
         const nIn = ws.listInputs().length;
-        // the package outputs listed cannot be used where the server's folder is in no project: say why, and how that changes
+        // the package outputs listed cannot be used where the server's folder is in no package: say why, and how that changes
         const notice = (!a.category || a.category === 'package') ? ws.packages?.notice() : null;
-        return text(`${cat}${notice ? `\nPACKAGES: ${notice}` : ''}\nHUMAN INPUT: ${nIn ? `${nIn} file${nIn === 1 ? '' : 's'} in` : 'nothing yet in'} the project inputs/ folder (meshes, guide curves and points, blockouts, PNG masks people drop in). Building a landscape or scene: inputs {action:"list"} first, then read them with file nodes (help topic "inputs").`);
+        return text(`${cat}${notice ? `\nPACKAGES: ${notice}` : ''}\nHUMAN INPUT: ${nIn ? `${nIn} file${nIn === 1 ? '' : 's'} in` : 'nothing yet in'} the package inputs/ folder (meshes, guide curves and points, blockouts, PNG masks people drop in). Building a landscape or scene: inputs {action:"list"} first, then read them with file nodes (help topic "inputs").`);
       },
     },
     {
       name: 'help',
-      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its params, inputs, version and note, also one search found that the project does not use yet) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
+      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its params, inputs, version and note, also one search found that the package does not use yet) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
       inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` } } },
       run: async (a) => {
         const out: string[] = [];
@@ -297,10 +297,10 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           const d = engine.resolveDef(n);
           if (!d && String(n).includes('/')) {
             const p = engine.packageIssue(String(n));
-            // a package the project does not use yet (TopoTopo's own, or one search found in a library it lists): its
+            // a package this package does not use yet (TopoTopo's own, or one search found in a library it lists): its
             // docs, read where its library holds it, and what naming it does here
             const offered = engine.packageDefs().find((x) => x.type === n) ?? ws.packages?.describe(String(n)) ?? undefined;
-            out.push(offered ? `${nodeDoc(offered)}\nin this project: ${p.error}${p.hint ? ` (hint: ${p.hint})` : ''}` : `${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`);
+            out.push(offered ? `${nodeDoc(offered)}\nin this package: ${p.error}${p.hint ? ` (hint: ${p.hint})` : ''}` : `${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`);
             continue;
           }
           if (!d) { const s = didYouMean(n, engine.allTypeNames()); out.push(`unknown node "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); continue; }
@@ -317,7 +317,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not part of the project\'s package), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not published), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
           name: { type: 'string', description: 'graph name (default "main")' },
           mode: { type: 'string', enum: ['replace', 'merge'] },
           dry_run: { type: 'boolean' },
@@ -343,7 +343,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         // validated as a dry run sees it: a graph that is not saved adds no package and writes nothing
         const v = engine.validate(spec, '', ws.dryScope(spec).scope);
         if (v.errors.length) return text(`✗ graph not saved — ${v.errors.length} error(s):\n` + v.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n'), true);
-        // packages the graph names for the first time join the project
+        // packages the graph names for the first time join the package
         const added = ws.packages?.addFor(spec) ?? [];
         ws.setGraph(name, spec);
         return cookAndReport(name, a, added);
@@ -415,7 +415,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         properties: {
           graph: { type: 'string', description: 'graph name (default "main")' }, node: { type: 'string', description: 'node to look at (default: the graph output)' },
           ...RENDER_PROPS,
-          save_to: { type: 'string', description: 'also write the PNG to this path (relative to the project)' },
+          save_to: { type: 'string', description: 'also write the PNG to this path (relative to the package)' },
           ...FRAME_PROP,
         },
       },
@@ -438,7 +438,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the project. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]). Every export records how it was made (graph, vars, seeds, frame, version) in its sidecar or in <file>.source.json next to it (help topic "export").',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the package. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]). Every export records how it was made (graph, vars, seeds, frame, version) in its sidecar or in <file>.source.json next to it (help topic "export").',
       inputSchema: {
         type: 'object',
         properties: {
@@ -489,7 +489,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'graphs',
-      description: 'Manage project graphs: list (with node counts), get (full JSON), delete, rename, duplicate. Graphs persist as JSON files in the project graphs/ folder.',
+      description: 'Manage package graphs: list (with node counts), get (full JSON), delete, rename, duplicate. Graphs persist as JSON files in the package graphs/ folder.',
       inputSchema: {
         type: 'object',
         required: ['action'],
@@ -498,7 +498,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
       run: async (a) => {
         switch (a.action) {
           case 'list': {
-            if (!ws.graphs.size) return text(`no graphs yet (project ${ws.dir}). Use build.`);
+            if (!ws.graphs.size) return text(`no graphs yet (package ${ws.dir}). Use build.`);
             return text([...ws.graphs].map(([k, g]) => {
               const r = ws.lastReport.get(k);
               return `${k}: ${Object.keys(g.nodes).length} nodes, output ${g.output ?? '(auto)'}${r ? `, last cook ${r.ok ? 'ok' : 'FAILED'}${r.geo ? ` (${r.geo.numPoints} pts, ${r.geo.numPrims} prims)` : ''}` : ''}`;
@@ -519,7 +519,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'assets',
-      description: 'Reusable custom node types built from graphs (like HDAs), the project\'s own (assets/). save {name, from_graph | graph, description, params:{var:{desc,min,max}}}: the graph\'s vars become parameters and its "input" nodes become inputs. list, get, delete. fork {name: "owner/name/output", to?} copies the graph of a package output, TopoTopo\'s own included ("topotopo/architecture/stairs" …), into the project\'s assets as "to" (default: the output\'s name), an asset to edit and use like any other; get shows its graph, save writes it back.',
+      description: 'Reusable custom node types built from graphs (like HDAs), the package\'s own (assets/). save {name, from_graph | graph, description, params:{var:{desc,min,max}}}: the graph\'s vars become parameters and its "input" nodes become inputs. list, get, delete. fork {name: "owner/name/output", to?} copies the graph of a package output, TopoTopo\'s own included ("topotopo/architecture/stairs" …), into the package\'s assets as "to" (default: the output\'s name), an asset to edit and use like any other; get shows its graph, save writes it back.',
       inputSchema: {
         type: 'object',
         required: ['action'],
@@ -551,7 +551,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
             const all = engine.assetsIn();
             if (!all.length) return text('no assets yet (assets {action:"save"} makes one of a graph; fork copies a package output\'s graph, catalog {category:"package"} lists them)');
             const line = (x: { name: string; def: any }) => `  ${x.name} — ${x.def.summary}; params: ${Object.keys(x.def.params).join(', ') || 'none'}; inputs: ${x.def.inputs.length}`;
-            return text([`[asset] project assets (${all.length})`, ...all.map(line)].join('\n'));
+            return text([`[asset] package assets (${all.length})`, ...all.map(line)].join('\n'));
           }
           case 'get': {
             const x = assetOf(a.name);
@@ -566,8 +566,8 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           }
           case 'fork': {
             const name = String(a.name ?? '');
-            if (!name.includes('/')) throw new Error(`fork copies a package output's graph into the project's assets: name one, "owner/name/output" (catalog {category:"package"} lists them, TopoTopo's own as "topotopo/architecture/stairs" …)${engine.asset(name) ? `; "${name}" is an asset of the project already: get shows its graph` : ''}`);
-            // an output the project uses, or one of TopoTopo's own it does not use yet
+            if (!name.includes('/')) throw new Error(`fork copies a package output's graph into the package's assets: name one, "owner/name/output" (catalog {category:"package"} lists them, TopoTopo's own as "topotopo/architecture/stairs" …)${engine.asset(name) ? `; "${name}" is an asset of the package already: get shows its graph` : ''}`);
+            // an output the package uses, or one of TopoTopo's own it does not use yet
             const all = engine.packageDefs(), o = (engine.resolveDef(name) ?? all.find((x) => x.type === name))?.package;
             if (!o) {
               const s = didYouMean(name, all.map((x) => x.type)), p = engine.packageIssue(name);
@@ -578,13 +578,13 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
             const g: GraphSpec = { ...structuredClone(o.spec), output: o.node };
             delete g.outputs;
             delete g.export;
-            // the package's other outputs its graph names join the project (first use), once it validates
+            // the package's other outputs its graph names join the package (first use), once it validates
             validAsset(to, g);
             const added = ws.packages?.addFor(g) ?? [];
             const def = engine.registerAsset(to, g);
             fs.writeFileSync(path.join(ws.assetDir, to + '.json'), JSON.stringify(g, null, 2));
-            return text(`forked ${name} (${packageAt(o)}) into asset "${to}" of the project (assets/${to}.json; use {"type": "${to}"}): its vars are the params, its "input" nodes the inputs. ` +
-              `assets {action:"get", name:"${to}"} shows its graph; change it and write it back with assets {action:"save", name:"${to}", graph}. Relative paths in it now read the project's files.` +
+            return text(`forked ${name} (${packageAt(o)}) into asset "${to}" of the package (assets/${to}.json; use {"type": "${to}"}): its vars are the params, its "input" nodes the inputs. ` +
+              `assets {action:"get", name:"${to}"} shows its graph; change it and write it back with assets {action:"save", name:"${to}", graph}. Relative paths in it now read the package's files.` +
               `${added.map((n) => `\nnote: ${n}`).join('')}\n\n${nodeDoc(def)}`);
           }
           case 'save': {
@@ -607,7 +607,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
   if (opts.onPreview) {
     tools.push({
       name: 'preview',
-      description: 'Start (or get the URL of) the live viewer for humans: an editor viewport of the project (graph menu, an outliner with the graph\'s nodes, single and quad views, the graph\'s params as Controls, input layers and guides) that updates after every build/edit. Returns the URL to open in a browser.',
+      description: 'Start (or get the URL of) the live viewer for humans: an editor viewport of the package (graph menu, an outliner with the graph\'s nodes, single and quad views, the graph\'s params as Controls, input layers and guides) that updates after every build/edit. Returns the URL to open in a browser.',
       inputSchema: { type: 'object', properties: {} },
       run: async () => text(`live preview: ${await opts.onPreview!()}  (updates automatically on every build/edit; click a node in the outliner to see its result)`),
     });
@@ -626,7 +626,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
   for (const t of tools) {
     const run = t.run;
     t.run = async (args) => {
-      // what changed on disk since the last call (a followed working folder, project.json): every tool sees it
+      // what changed on disk since the last call (a followed working folder, the manifest): every tool sees it
       ws.packages?.refresh();
       const result = await run(args);
       const note = inputsNote(t.name);

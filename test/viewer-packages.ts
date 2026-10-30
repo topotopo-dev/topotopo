@@ -1,12 +1,12 @@
-// The project's packages in the live viewer (src/viewer/packages.ts): GET /api/packages (each package the project
+// The packages a package uses, in the live viewer (src/viewer/packages.ts): GET /api/packages (each package the package
 // uses, the version in use and its note, the updates and the notes of the newer versions, its working folder, whether
 // the session follows it), the package names on the node list (the Scene tree's mark), the before/after of an update
 // (the places and what changed, progress events, a place's GLB with each version and both overlaid, nothing written),
-// its stop (its own: its cooks are not the project's) and a newer one taking its place, Update (the copies, the graphs
+// its stop (its own: its cooks are not the package's) and a newer one taking its place, Update (the copies, the graphs
 // cooked again, a node's error after a big one, the must-change list kept until dismissed), the follow switch (a save
 // in the followed working folder cooks the scene again; off: the copy), the offer after a save in a working folder the
-// session does not follow, a version published while the viewer runs, the errors, a viewer outside a project, and the
-// viewer of a graph file in a project (topotopo view), whose before/after cooks the project's graphs in its folder.
+// session does not follow, a version published while the viewer runs, the errors, a viewer outside a package, and the
+// viewer of a graph file in a package (topotopo view), whose before/after cooks the package's graphs in its folder.
 //   node test/viewer-packages.ts
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,9 +18,9 @@ import { defineNode } from '../src/graph/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Session } from '../src/session.ts';
-import { readManifest } from '../src/project.ts';
+import { readManifest } from '../src/package.ts';
 import { openPackages, publishPackage } from '../src/packages/registry.ts';
-import type { ProjectPackages } from '../src/packages/registry.ts';
+import type { PackageUses } from '../src/packages/registry.ts';
 import { startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
 
@@ -49,20 +49,20 @@ defineNode({
   },
 });
 
-// ------------------------------------------------------------------ the libraries and the project
+// ------------------------------------------------------------------ the libraries and the package
 //   lib/trees  studio/trees 1.0, 1.1 (rounder crowns: a small update)
 //   lib/rocks  studio/rocks 1.0, 2.0 (the slider "size" is now "radius": a big update)
 //   lib/slow   studio/slow 1.0, 1.1 (its cooks wait: for the stop)
 //   forest     uses each at 1.0 (libraries: ["../lib"]); graphs main, waits, yard (a graph_ref to a graph of the
-//              project, and an asset of it), and a graph file scene.json beside graphs/
+//              package, and an asset of it), and a graph file scene.json beside graphs/
 const LIB = path.join(tmp, 'lib'), TREES = path.join(LIB, 'trees'), ROCKS = path.join(LIB, 'rocks'), SLOW = path.join(LIB, 'slow'), FOREST = path.join(tmp, 'forest');
-const project = (dir: string, manifest: Record<string, unknown>, graphs: Record<string, GraphSpec>) => {
-  json(path.join(dir, 'project.json'), { id: path.basename(dir), title: path.basename(dir), graph: 'main', ...manifest });
+const writePackage = (dir: string, manifest: Record<string, unknown>, graphs: Record<string, GraphSpec>) => {
+  json(path.join(dir, `${path.basename(dir)}.topo`), { title: path.basename(dir), graph: 'main', ...manifest });
   for (const [n, g] of Object.entries(graphs)) json(path.join(dir, 'graphs', `${n}.json`), g);
 };
 const setGraph = (dir: string, name: string, g: GraphSpec) => json(path.join(dir, 'graphs', `${name}.json`), g);
 const engines: Engine[] = [];
-async function open(dir: string): Promise<{ engine: Engine; pk: ProjectPackages; ws: Session }> {
+async function open(dir: string): Promise<{ engine: Engine; pk: PackageUses; ws: Session }> {
   const engine = new Engine(createNodeHost({ baseDir: dir, workers: 0 }));
   await engine.init();
   engines.push(engine);
@@ -90,9 +90,9 @@ const rocks = (slider: string): GraphSpec => ({
 });
 const slow = (ms: number): GraphSpec => ({ nodes: { w: { type: 'test_pkg_wait', params: { ms: '=ms' } } }, output: 'w', vars: { ms }, params: { ms: { type: 'int', min: 0, max: 5000 } }, outputs: { wait: { node: 'w' } } });
 
-project(TREES, { package: 'studio/trees' }, { main: trees(1) });
-project(ROCKS, { package: 'studio/rocks' }, { main: rocks('size') });
-project(SLOW, { package: 'studio/slow' }, { main: slow(20) });
+writePackage(TREES, { name: 'studio/trees' }, { main: trees(1) });
+writePackage(ROCKS, { name: 'studio/rocks' }, { main: rocks('size') });
+writePackage(SLOW, { name: 'studio/slow' }, { main: slow(20) });
 for (const d of [TREES, ROCKS, SLOW]) await publish(d, 'first');
 const forestMain: GraphSpec = {
   nodes: {
@@ -104,10 +104,10 @@ const forestMain: GraphSpec = {
   },
   output: 'out',
 };
-project(FOREST, { libraries: ['../lib'] }, {
+writePackage(FOREST, { libraries: ['../lib'] }, {
   main: forestMain,
   waits: { nodes: { a: { type: 'studio/slow/wait', params: { ms: 300 } }, b: { type: 'studio/slow/wait', params: { ms: 301 } }, c: { type: 'studio/slow/wait', params: { ms: 302 } }, out: { type: 'merge', in: ['a', 'b', 'c'] } }, output: 'out' },
-  // a place whose cook needs the project's own graphs and assets (graph_ref, an asset)
+  // a place whose cook needs the package's own graphs and assets (graph_ref, an asset)
   plate: { nodes: { p: { type: 'grid', params: { size: [6, 6] } } }, output: 'p' },
   yard: { nodes: { g: { type: 'graph_ref', params: { graph: 'plate' } }, s: { type: 'stand' }, t: { type: 'studio/trees/pine', params: { height: "=bbox('g').size.x", crown: "=bbox('s').size.x" } }, out: { type: 'merge', in: ['t', 'g', 's'] } }, output: 'out' },
 });
@@ -123,7 +123,7 @@ setGraph(SLOW, 'main', slow(25));
 check(await publish(TREES, 'rounder crowns') === '1.1' && await publish(ROCKS, 'the size slider is now radius') === '2.0' && await publish(SLOW, 'waits longer') === '1.1',
   'the fixture: studio/trees 1.1 (small), studio/rocks 2.0 (big), studio/slow 1.1');
 
-// ------------------------------------------------------------------ the viewer on the project (topotopo edit, the MCP server)
+// ------------------------------------------------------------------ the viewer on the package (topotopo edit, the MCP server)
 const o = await open(FOREST);
 const v = await startViewer(o.ws, 0);
 const url = v.url.replace(/\/$/, '');
@@ -143,33 +143,33 @@ const get = async (p: string) => { const r = await fetch(url + p); return { stat
 const post = async (p: string, body: unknown) => { const r = await fetch(url + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, j: await r.json() as any }; };
 const packages = async () => (await get('/api/packages')).j;
 const row = async (pkg: string) => (await packages()).packages.find((p: any) => p.package === pkg);
-const files = (dir: string) => JSON.stringify([fs.readFileSync(path.join(dir, 'project.json'), 'utf8'), fs.readFileSync(path.join(dir, 'packages', 'lock.json'), 'utf8'), fs.readdirSync(path.join(dir, 'packages', 'studio')).sort()]);
+const files = (dir: string) => JSON.stringify([fs.readFileSync(path.join(dir, `${path.basename(dir)}.topo`), 'utf8'), fs.readFileSync(path.join(dir, 'packages', 'lock.json'), 'utf8'), fs.readdirSync(path.join(dir, 'packages', 'studio')).sort()]);
 const info = async (graph = 'main') => (await get(`/api/info?graph=${graph}`)).j.summary as string;
 
 try {
   await until(() => v.clients() > 0, 3000);
-  section('GET /api/packages: what the project uses, the updates and their notes');
+  section('GET /api/packages: what the package uses, the updates and their notes');
   {
     const s = await packages();
-    check(s.project?.id === 'forest' && s.project.dir === FOREST && JSON.stringify(s.project.libraries) === '["../lib"]' && !s.problems.length && s.running === null,
-      `the project, the libraries it lists (${JSON.stringify(s.project)})`);
+    check(s.package?.id === 'forest' && s.package.dir === FOREST && JSON.stringify(s.package.libraries) === '["../lib"]' && !s.problems.length && s.running === null,
+      `the package, the libraries it lists (${JSON.stringify(s.package)})`);
     check(s.packages.map((p: any) => p.package).join() === 'studio/rocks,studio/slow,studio/trees', `every package it uses, by name (${s.packages.map((p: any) => p.package)})`);
     const t = s.packages.find((p: any) => p.package === 'studio/trees'), r = s.packages.find((p: any) => p.package === 'studio/rocks');
     check(t.version === '1.0' && t.note === 'first' && /^\d{4}-\d\d-\d\dT/.test(t.published) && t.small === '1.1' && !t.big && t.newer.map((x: any) => `${x.version} ${x.note} ${x.big}`).join() === '1.1 rounder crowns false',
       `studio/trees: 1.0 in use, its note and date; a small update 1.1 and its note (${JSON.stringify(t).slice(0, 200)})`);
     check(r.version === '1.0' && !r.small && r.big === '2.0' && r.newer[0].big === true && r.newer[0].note === 'the size slider is now radius', 'studio/rocks: a big update 2.0, marked big');
     check(JSON.stringify(t.outputs) === JSON.stringify([{ type: 'studio/trees/pine', label: 'Pine', kind: 'mesh', tags: [], used: true }]) && JSON.stringify(r.outputs) === JSON.stringify([{ type: 'studio/rocks/boulder', kind: 'mesh', tags: [], used: true }]),
-      `the outputs of the version in use, with their kinds and tags, marked where the project uses them (${JSON.stringify(t.outputs)})`);
+      `the outputs of the version in use, with their kinds and tags, marked where the package uses them (${JSON.stringify(t.outputs)})`);
     check(JSON.stringify(t.usedBy.map((u: any) => `${u.graph} › ${u.node}`).sort()) === JSON.stringify(['main › pine', 'main › small_pine', 'scene › t', 'yard › t']) && t.usedBy.every((u: any) => u.type === 'studio/trees/pine'),
-      `the nodes of the project's graphs that use a package (${t.usedBy.map((u: any) => `${u.graph} › ${u.node}`)})`);
-    check(!t.kit && t.canFollow && s.project.title === 'forest' && s.project.package === null, 'a package with one working folder can show it live; the project by its title');
+      `the nodes of the package's graphs that use a package (${t.usedBy.map((u: any) => `${u.graph} › ${u.node}`)})`);
+    check(!t.builtin && t.canFollow && s.package.title === 'forest' && s.package.name === null, 'a package with one working folder can show it live; the package by its title');
     const found = (await get('/api/packages/search?q=tree')).j;
     const hits = found.libraries.flatMap((l: any) => l.hits.map((h: any) => `${l.standing}:${h.type}${h.used ? `@${h.used}` : ''}`));
     check(hits.includes('listed:studio/trees/pine@1.0') && hits.some((h: string) => h.startsWith('builtin:topotopo/nature/')),
-      `Find packages: the project's libraries and TopoTopo's kits, and what the project uses (${hits.join(', ')})`);
-    check((await get('/api/packages/author')).status === 400, 'a project that is no package has no author panel');
+      `Find packages: the package's libraries and TopoTopo's built-in packages, and what the package uses (${hits.join(', ')})`);
+    check((await get('/api/packages/author')).status === 400, 'a package that is no package has no author panel');
     check(t.working.length === 1 && t.working[0].dir === TREES && t.working[0].library === '../lib' && t.followed === null && JSON.stringify(t.libraries) === '["../lib"]',
-      'its working folder in the libraries the project lists; not followed');
+      'its working folder in the libraries the package lists; not followed');
     const g = (await get('/api/graphs')).j.find((x: any) => x.name === 'main');
     const named = Object.fromEntries(g.nodes.map((n: any) => [n.name, n.packages ?? null]));
     check(JSON.stringify(named.pine) === '["studio/trees"]' && JSON.stringify(named.boulder) === '["studio/rocks"]' && named.ground === null,
@@ -185,18 +185,18 @@ try {
     check(r.status === 200 && j.ok && j.target.from === '1.0' && j.target.to === '1.1' && !j.target.big && j.target.up && j.target.library === '../lib' && j.target.between.map((x: any) => x.version).join() === '1.1',
       `without "to": the newest with the same big number (${r.status} ${j.error ?? `${j.target?.from} → ${j.target?.to}`})`);
     check(j.uses.map((u: any) => `${u.file} ${u.node}`).join(' | ') === 'graphs/main.json pine | graphs/main.json small_pine | graphs/yard.json t | scene.json t',
-      `every place the project uses it, a graph file beside graphs/ too (${j.uses.map((u: any) => `${u.file} ${u.node}`).join(' | ')})`);
+      `every place the package uses it, a graph file beside graphs/ too (${j.uses.map((u: any) => `${u.file} ${u.node}`).join(' | ')})`);
     const pine = j.places.find((c: any) => c.node === 'pine'), small = j.places.find((c: any) => c.node === 'small_pine'), yard = j.places.find((c: any) => c.file === 'graphs/yard.json');
     check(pine.before.ok && pine.after.ok && !pine.diff.identical && /^shape changed by up to/.test(pine.diff.verdict) && /^counts:/m.test(pine.diff.text) && pine.views.a && pine.views.b && pine.views.overlay,
       `a place that changed: both cooked, what changed, a, b and the overlay to look at (${pine.diff?.verdict})`);
     check(small.diff.identical && small.uses[0].set === '{"height":3,"crown":0.8}', 'a place that sets the slider whose default changed does not change');
-    check(yard.before.ok && yard.after.ok, `a graph that reads a graph and an asset of the project cooks (${yard.before.errors.join('; ')})`);
+    check(yard.before.ok && yard.after.ok, `a graph that reads a graph and an asset of the package cooks (${yard.before.errors.join('; ')})`);
     // the events come on their own connection: the last may arrive after the answer
     await until(() => events.some((e) => e.compare && !e.compare.running && e.compare.id === j.id), 3000);
     const progress = events.filter((e) => e.compare);
     check(progress.some((e) => e.compare.running && e.compare.total === 8 && /^graphs\/main\.json pine with studio\/trees 1\.(0|1)$/.test(e.compare.what)) && progress.at(-1).compare.running === false && progress.at(-1).compare.id === j.id,
       `{compare} events say how far it is, and when it ended (${progress.length} events)`);
-    check(files(FOREST) === was, 'nothing is written: project.json, the lock and the copies are as they were');
+    check(files(FOREST) === was, 'nothing is written: the manifest, the lock and the copies are as they were');
     const geo = async (side: string, id = j.id, place = pine.index) => { const res = await fetch(`${url}/api/packages/compare/geo?id=${id}&place=${place}&side=${side}`); return { status: res.status, magic: res.status === 200 ? Buffer.from(await res.arrayBuffer()).toString('latin1', 0, 4) : (await res.json() as any).error }; };
     const [a, b, ov] = await Promise.all(['a', 'b', 'overlay'].map((s) => geo(s)));
     check(a.magic === 'glTF' && b.magic === 'glTF' && ov.magic === 'glTF', 'GET /api/packages/compare/geo: the place with each version, and both overlaid, as GLBs');
@@ -225,9 +225,9 @@ try {
     const latest = await post('/api/packages/compare', { package: 'studio/rocks' });
     const far = await post('/api/packages/compare', { package: 'studio/trees', to: '1.9' });
     const noPkg = await post('/api/packages/compare', {});
-    check(none.status === 400 && /this project does not use studio\/oaks: its uses are studio\/rocks, studio\/slow, studio\/trees/.test(none.j.error), `a package the project does not use: ${none.j.error}`);
+    check(none.status === 400 && /this package does not use studio\/oaks: its uses are studio\/rocks, studio\/slow, studio\/trees/.test(none.j.error), `a package it does not use: ${none.j.error}`);
     check(latest.status === 400 && /studio\/rocks 1\.0 is the newest 1\.x .* and 2\.0 is a big version, a step of its own: name it/.test(latest.j.error), `a big update is named: ${latest.j.error}`);
-    check(far.status === 400 && /no library this project lists has studio\/trees 1\.9: they have 1\.0, 1\.1/.test(far.j.error) && noPkg.status === 400 && /"package" is required/.test(noPkg.j.error), 'a version no library has; no package');
+    check(far.status === 400 && /no library this package lists has studio\/trees 1\.9: they have 1\.0, 1\.1/.test(far.j.error) && noPkg.status === 400 && /"package" is required/.test(noPkg.j.error), 'a version no library has; no package');
     const methods = await Promise.all([fetch(`${url}/api/packages/stop`), fetch(`${url}/api/packages`, { method: 'POST' }), fetch(`${url}/api/packages/nope`)]);
     check(methods.map((m) => m.status).join() === '405,405,404', `GET of a POST route, POST of a GET route, an unknown route (${methods.map((m) => m.status)})`);
     const cross = await fetch(`${url}/api/packages/follow`, { method: 'POST', headers: { origin: 'http://evil.example' }, body: '{"package":"studio/trees"}' });
@@ -263,20 +263,20 @@ try {
   {
     const stale = await post('/api/packages/update', { package: 'studio/trees', from: '1.1', to: '1.1' });
     const noTo = await post('/api/packages/update', { package: 'studio/trees' });
-    check(stale.status === 409 && /project\.json uses studio\/trees 1\.0 now, not 1\.1: look at the before\/after again/.test(stale.j.error) && noTo.status === 400 && /"from" and "to" are required/.test(noTo.j.error),
+    check(stale.status === 409 && /forest\.topo uses studio\/trees 1\.0 now, not 1\.1: look at the before\/after again/.test(stale.j.error) && noTo.status === 400 && /"from" and "to" are required/.test(noTo.j.error),
       `an update of what the person did not look at is refused (${stale.j.error})`);
     const h0 = height(await info()), version0 = (await get('/api/report?graph=main')).j.version;
     events.length = 0;
     const r = await post('/api/packages/update', { package: 'studio/trees', from: '1.0', to: '1.1' });
-    check(r.status === 200 && r.j.ok && /^updated studio\/trees 1\.0 → 1\.1 in project forest/.test(r.j.text) && !r.j.mustChange.length && readManifest(FOREST).uses['studio/trees'] === '1.1'
-      && exists(FOREST, 'packages', 'studio', 'trees', '1.1', 'version.json') && !exists(FOREST, 'packages', 'studio', 'trees', '1.0'), `applied: the copy of 1.1 in, 1.0 out, project.json (${r.j.text})`);
+    check(r.status === 200 && r.j.ok && /^updated studio\/trees 1\.0 → 1\.1 in package forest/.test(r.j.text) && !r.j.mustChange.length && readManifest(FOREST).uses['studio/trees'] === '1.1'
+      && exists(FOREST, 'packages', 'studio', 'trees', '1.1', 'version.json') && !exists(FOREST, 'packages', 'studio', 'trees', '1.0'), `applied: the copy of 1.1 in, 1.0 out, the manifest (${r.j.text})`);
     check(await until(() => events.some((e) => e.graph === 'main') && events.some((e) => e.packages !== undefined), 8000), 'the pages hear it: the packages, and the graphs that use it');
     const rep = (await get('/api/report?graph=main')).j;
     check(rep.version > version0 && rep.ok && height(await info()) > h0, `the graph cooked again with 1.1: its crown is rounder (height ${h0} → ${height(await info())})`);
     const t = await row('studio/trees');
     check(t.version === '1.1' && !t.small && !t.newer.length && t.note === 'rounder crowns' && (await packages()).compare === null, 'the package is up to date (the mark goes); the before/after is done with');
     const big = await post('/api/packages/update', { package: 'studio/rocks', from: '1.0', to: '2.0' });
-    check(big.j.ok && /sets param "size"/.test(big.j.mustChange.join()) && /the project's graphs must change for studio\/rocks 2\.0/.test(big.j.text), 'a big update is applied, and says what the graphs must change');
+    check(big.j.ok && /sets param "size"/.test(big.j.mustChange.join()) && /the package's graphs must change for studio\/rocks 2\.0/.test(big.j.text), 'a big update is applied, and says what the graphs must change');
     const kept = (await row('studio/rocks')).mustChange;
     check(kept?.from === '1.0' && kept.to === '2.0' && /^graphs\/main\.json boulder: sets param "size"/.test(kept.items[0]), 'that list stays in view (GET /api/packages)');
     await until(() => !!(o.ws.lastReport.get('main') && !o.ws.lastReport.get('main')!.ok), 5000);
@@ -290,10 +290,10 @@ try {
 
   section('follow: the working folder for this session; a save there cooks the scene again; off: the copy');
   {
-    const was = fs.readFileSync(path.join(FOREST, 'project.json'), 'utf8');
+    const was = fs.readFileSync(path.join(FOREST, 'forest.topo'), 'utf8');
     const on = await post('/api/packages/follow', { package: 'studio/trees', on: true });
     const t = await row('studio/trees');
-    check(on.j.ok && on.j.followed && /^following studio\/trees for this session: its working folder/.test(on.j.text) && t.followed?.dir === TREES && fs.readFileSync(path.join(FOREST, 'project.json'), 'utf8') === was,
+    check(on.j.ok && on.j.followed && /^following studio\/trees for this session: its working folder/.test(on.j.text) && t.followed?.dir === TREES && fs.readFileSync(path.join(FOREST, 'forest.topo'), 'utf8') === was,
       `on: it shows as followed, nothing is saved (${on.j.text?.slice(0, 60)}…)`);
     await until(() => !o.ws.activity('main'), 5000);
     const h1 = height(await info());
@@ -309,7 +309,7 @@ try {
     check(off.j.ok && !off.j.followed && /stopped following studio\/trees: it resolves to its copy \(1\.1\) again/.test(off.j.text) && height(await info()) === h1 && !(await row('studio/trees')).followed,
       `off: the copy again (${off.j.text})`);
     const bad = await post('/api/packages/follow', { package: 'studio/oaks' });
-    check(bad.status === 400 && /no library this project lists has a package studio\/oaks/.test(bad.j.error), `a package no library has: ${bad.j.error}`);
+    check(bad.status === 400 && /no library this package lists has a package studio\/oaks/.test(bad.j.error), `a package no library has: ${bad.j.error}`);
   }
 
   section('the offer: a save in the working folder of a package the session does not follow');
@@ -336,7 +336,7 @@ try {
   v.close();
 }
 
-section('a viewer whose graphs are in no project: nothing to show');
+section('a viewer whose graphs are in no package: nothing to show');
 {
   const loose = path.join(tmp, 'loose');
   fs.mkdirSync(loose);
@@ -349,23 +349,23 @@ section('a viewer whose graphs are in no project: nothing to show');
   try {
     const s = await (await fetch(`${lv.url}api/packages`)).json() as any;
     const c = await fetch(`${lv.url}api/packages/compare`, { method: 'POST', body: '{"package":"studio/trees"}' });
-    check(s.project === null && !s.packages.length && c.status === 400 && /in no project: topotopo init <folder> \(MCP: library \{action:"init"\} for the server's folder, when the person says so\) makes the folder a project/.test((await c.json() as any).error),
-      'no project: no packages, and a before/after says how to make one');
+    check(s.package === null && !s.packages.length && c.status === 400 && /in no package: topotopo init <folder> \(MCP: workspace \{action:"init"\} for the server's folder, when the person says so\) makes the folder a package/.test((await c.json() as any).error),
+      'no package: no packages, and a before/after says how to make one');
   } finally { lv.close(); }
 }
 
-section('topotopo view: a graph file in the project; the before/after cooks the project\'s graphs in its folder');
+section('topotopo view: a graph file in the package; the before/after cooks the package\'s graphs in its folder');
 {
   const lines: string[] = [];
   const view = await viewGraphFile(path.join(FOREST, 'scene.json'), { name: 'scene', port: 0, log: (l) => lines.push(l) });
   try {
     const s = await (await fetch(`${view.url}api/packages`)).json() as any;
-    check(s.project?.dir === FOREST && s.packages.some((p: any) => p.package === 'studio/trees' && p.small === '1.2'), 'the packages of the project the file belongs to');
+    check(s.package?.dir === FOREST && s.packages.some((p: any) => p.package === 'studio/trees' && p.small === '1.2'), 'the packages the file\'s package uses');
     const r = await (await fetch(`${view.url}api/packages/compare`, { method: 'POST', body: '{"package":"studio/trees"}' })).json() as any;
     const yard = r.places?.find((c: any) => c.file === 'graphs/yard.json'), scene = r.places?.find((c: any) => c.file === 'scene.json');
     // the yard sets the crown itself (from the stand asset), so only the scene, which takes the default, changes
     check(r.ok && yard?.before.ok && yard.after.ok && yard.diff.identical && scene?.before.ok && scene.after.ok && !scene.diff.identical,
-      `its project is a scratch folder: a graph of the project still reads the project's graphs and assets (${yard?.before.errors.join('; ') || 'ok'})`);
+      `its package is a scratch folder: a graph of the package still reads the package's graphs and assets (${yard?.before.errors.join('; ') || 'ok'})`);
   } finally { view.close(); }
 }
 

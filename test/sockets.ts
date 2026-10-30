@@ -164,7 +164,7 @@ const BODY: Record<string, NodeSpec> = {
   check(semc.includes('_WEAR') && !semc.some((x) => /^_(SCENE_EMPTY|PARENT|ORIENT|SCALE|FORWARD)$/.test(x)), `custom attributes: the mesh's own _WEAR, none of the empties' (${semc.join(', ')})`);
   const wick = nodeNamed(dc, 'wick')[0];
   check(wick && close((wick.getExtras() as any)?.forward ?? [], [0, 0, -1]), 'the empty keeps its extra as node extras');
-  // the gallery's preview GLB merges every mesh into one node: a mesh-parented empty goes on the root, in place
+  // the web app's preview GLB merges every mesh into one node: a mesh-parented empty goes on the root, in place
   const pv = await doc(await previewGLB(g));
   const m = nodeNamed(pv, 'wick')[0];
   check(m && !m.getParentNode() && close(m.getTranslation(), [0, 0, -0.2], 1e-6), 'preview GLB: an empty parented to a mesh lands on the scene root at its position');

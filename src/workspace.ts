@@ -1,19 +1,19 @@
-// A workspace: a game (or any 3D project) that holds TopoTopo projects. topotopo-workspace.json at its root names the
-// libraries every project inside looks in (after the project's own), the engine project the game is built with,
+// A workspace: a game (or any 3D production) that holds TopoTopo packages. topotopo-workspace.json at its root names the
+// libraries every package inside looks in (after the package's own), the engine project the game is built with,
 // whether the game's own packages are followed live for looking, and the one version of each package the whole game
-// uses: its projects share one copy of it, in topotopo-packages/ beside the file (a project that is a package keeps
+// uses: its packages share one copy of it, in topotopo-packages/ beside the file (a package that publishes versions keeps
 // its own copies: its uses are published with it).
 //   {"name": "raven-hunt", "libraries": ["./art/topotopo"],
 //    "engine": {"type": "godot", "project": "game/project.godot", "assets": "game/assets/topotopo"}, "follow": false,
 //    "uses": {"topotopo/props": "1.1"}}
-// Paths are written from the workspace's folder. project.ts finds the workspace around a project (locate), the
+// Paths are written from the workspace's folder. package.ts finds the workspace around a package (locate), the
 // libraries it lists (librariesFor) and where its copies are (copiesFor).
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE } from './graph/scope.ts';
-import { WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, libraryEntry, locate, parseUses, program, resolveLibraries, slugify, workspaceRepoFiles, writeAtomic } from './project.ts';
+import { WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, libraryEntry, locate, parseUses, program, resolveLibraries, slugify, workspaceRepoFiles, writeAtomic } from './package.ts';
 import { gatherCopies } from './packages/registry.ts';
-import { scanLibrary } from './gallery/library.ts';
+import { scanLibrary } from './web/library.ts';
 
 export { WORKSPACE_FILE };
 
@@ -28,12 +28,12 @@ export interface EngineLink {
 
 export interface WorkspaceManifest {
   name: string;
-  /** where its projects look for packages after their own libraries: paths from the workspace, or registered names */
+  /** where its packages look for packages after their own libraries: paths from the workspace, or registered names */
   libraries: string[];
   engine: EngineLink | null;
   /** follow the workspace's own packages live (their working folders inside the workspace), for looking */
   follow: boolean;
-  /** the version of each package its projects use: one shared copy for the whole game (topotopo-packages/) */
+  /** the version of each package its packages use: one shared copy for the whole game (topotopo-packages/) */
   uses: Record<string, string>;
 }
 
@@ -144,7 +144,7 @@ export interface InitWorkspaceOptions { name?: string; engine?: string | 'none';
 
 /**
  * Make `dir` (a game's root) a workspace: topotopo-workspace.json with its name, the libraries given and the engine
- * project (given, or the one found below the folder; "none" for none). A folder that is a workspace already is changed
+ * package (given, or the one found below the folder; "none" for none). A folder that is a workspace already is changed
  * only where an option says so. Returns what it wrote and says it.
  */
 export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir: string; manifest: WorkspaceManifest; text: string } {
@@ -181,12 +181,12 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   if (o.follow !== undefined) m.follow = o.follow;
   writeWorkspace(abs, m);
   workspaceRepoFiles(abs);
-  // the projects inside that kept their own copies share the workspace's now
+  // the packages inside that kept their own copies share the workspace's now
   const gathered = gatherCopies(abs);
   const text = [
     `${had ? 'updated' : 'made'} the workspace "${m.name}" (${path.join(abs, WORKSPACE_FILE)})`,
     `engine: ${m.engine ? `${m.engine.type} ${m.engine.project}${found}${m.engine.assets ? `, "engine:" exports go to ${m.engine.assets} (${engineAddress(m.engine, m.engine.assets)})` : ''}` : 'none'}`,
-    `libraries: ${m.libraries.length ? m.libraries.join(', ') : 'none yet (topotopo workspace init --library <folder or name>)'}; every project inside looks in them after its own`,
+    `libraries: ${m.libraries.length ? m.libraries.join(', ') : 'none yet (topotopo workspace init --library <folder or name>)'}; every package inside looks in them after its own`,
     `follow its own packages live: ${m.follow ? 'on (their working folders inside the workspace show in the viewer and renders, for looking; exports use the published versions)' : 'off'}`,
     ...gathered,
   ].join('\n');
@@ -195,29 +195,29 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
 
 /**
  * The workspace around a folder in a few lines: its name and file, its engine project, the libraries it lists (and what
- * is wrong with an entry), whether it follows its own packages, and the projects inside it with the packages they are
+ * is wrong with an entry), whether it follows its own packages, and the packages inside it with the packages they are
  * and use. Throws when the folder is in no workspace, saying how one is made.
  */
 export function workspaceText(start: string): string {
   const ws = locate(start).workspace;
-  if (!ws) throw new Error(`${path.resolve(start)} is in no workspace: ${program()} workspace init <the game's folder> makes one (${WORKSPACE_FILE} at the game's root, naming the libraries every project inside looks in)`);
+  if (!ws) throw new Error(`${path.resolve(start)} is in no workspace: ${program()} workspace init <the game's folder> makes one (${WORKSPACE_FILE} at the game's root, naming the libraries every package inside looks in)`);
   const m = readWorkspace(ws);
   const libs = resolveLibraries([{ file: path.join(ws, WORKSPACE_FILE), base: ws, entries: m.libraries, from: 'workspace' }]);
   const scan = scanLibrary({ name: m.name, path: ws });
   const lines = [
     `workspace "${m.name}" (${path.join(ws, WORKSPACE_FILE)})`,
     `engine: ${m.engine ? `${m.engine.type} ${m.engine.project}${m.engine.assets ? `, exports to ${m.engine.assets}` : ' (no assets folder for exports set)'}` : 'none'}`,
-    `libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root}${l.name !== l.entry ? `, named "${l.name}"` : ''})`).join(', ') : 'none'}; every project inside looks in them after its own, and in TopoTopo's built-in library`,
+    `libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root}${l.name !== l.entry ? `, named "${l.name}"` : ''})`).join(', ') : 'none'}; every package inside looks in them after its own, and in TopoTopo's built-in library`,
     `follow its own packages live: ${m.follow ? 'on (the working folders of its own packages, for looking; exports use the published versions)' : 'off'}`,
-    `uses: ${Object.keys(m.uses).length ? Object.entries(m.uses).map(([k, v]) => `${k} ${v}`).join(', ') : 'nothing yet'}; one copy for every project inside (${WORKSPACE_PACKAGES}/), the packages among them keep their own`,
-    `projects: ${scan.projects.length}`,
-    ...scan.projects.slice(0, 40).map((p) => {
+    `uses: ${Object.keys(m.uses).length ? Object.entries(m.uses).map(([k, v]) => `${k} ${v}`).join(', ') : 'nothing yet'}; one copy for every package inside (${WORKSPACE_PACKAGES}/), the packages among them keep their own`,
+    `packages: ${scan.packages.length}`,
+    ...scan.packages.slice(0, 40).map((p) => {
       const own = copiesFor(path.join(ws, p.rel)).workspace === null;
       const uses = Object.entries(p.manifest.uses);
       const listed = uses.map(([k, v]) => `${k} ${v}`).join(', ');
-      return `  ${p.rel}${p.manifest.package ? `  package ${p.manifest.package}` : ''}${!uses.length ? '' : own ? `  uses ${listed} (its own copies)` : `  its project.json still uses ${listed}: ${program()} workspace init ${ws} moves them into the workspace's`}`;
+      return `  ${p.rel}${p.manifest.name ? `  package ${p.manifest.name}` : ''}${!uses.length ? '' : own ? `  uses ${listed} (its own copies)` : `  its manifest still uses ${listed}: ${program()} workspace init ${ws} moves them into the workspace's`}`;
     }),
-    ...(scan.projects.length > 40 ? [`  … ${scan.projects.length - 40} more`] : []),
+    ...(scan.packages.length > 40 ? [`  … ${scan.packages.length - 40} more`] : []),
   ];
   const problems = [...libs.problems, ...scan.problems];
   if (problems.length) lines.push(`problems: ${problems.length}`, ...problems.map((x) => `  ${x}`));

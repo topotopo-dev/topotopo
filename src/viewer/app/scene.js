@@ -530,7 +530,7 @@ export class MeshObject {
 }
 
 // --------------------------------------------------------------------------------------------- loading GLBs
-// meshopt for the gallery's baked preview.glb (the live routes send plain GLB)
+// meshopt for the web app's baked preview.glb (the live routes send plain GLB)
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 /** Parse a GLB buffer into a three.js scene, or throw. */
 export const parseGLB = (buf) => new Promise((resolve, reject) => loader.parse(buf, '', (g) => resolve(g.scene), reject));

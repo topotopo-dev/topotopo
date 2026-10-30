@@ -2,9 +2,9 @@
   "package": "topotopo/props",
   "version": "1.0",
   "note": "first version",
-  "published": "2026-10-29T16:36:50.812Z",
+  "published": "2026-10-30T12:01:49.872Z",
   "big": false,
-  "hash": "3d535352af055a4531f206484e1748748e33b9b14911c3b71eef9036b377586f",
+  "hash": "8bab4b0396af3dcad5d9cdca1d48a4dfc479e513b14ff2c2438013afb39bdd91",
   "outputs": {
     "barrel": {
       "graph": "barrel",
@@ -129,17 +129,16 @@
       },
       "inputs": []
     },
-    "kit": {
-      "graph": "kit",
-      "node": "kit",
-      "label": "Props kit",
+    "lineup": {
+      "graph": "lineup",
+      "node": "lineup",
+      "label": "Props line-up",
       "kind": "mesh",
       "tags": [
-        "kit",
         "lineup",
         "props"
       ],
-      "description": "TopoTopo's props kit, its 5 outputs side by side at their defaults. The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.",
+      "description": "TopoTopo's props package, its 5 outputs side by side at their defaults. The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.",
       "sliders": {},
       "inputs": []
     },
@@ -322,15 +321,14 @@
     }
   },
   "default": {
-    "graph": "kit",
-    "node": "kit",
+    "graph": "lineup",
+    "node": "lineup",
     "kind": "mesh",
     "tags": [
-      "kit",
       "lineup",
       "props"
     ],
-    "description": "TopoTopo's props kit, its 5 outputs side by side at their defaults. The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.",
+    "description": "TopoTopo's props package, its 5 outputs side by side at their defaults. The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.",
     "sliders": {},
     "inputs": []
   },

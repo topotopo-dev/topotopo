@@ -1,6 +1,6 @@
 // Cook and render every graph in examples/ to examples/renders/<name>.png.
 // A graph's meta.render (any render tool option: views, checker, color_by, azimuth, wireframe, section_axis, glyphs, …) overrides the default quad view.
-// examples/ is a project: the graphs that name TopoTopo's own packages cook them from its copies in examples/packages/.
+// examples/ is a package: the graphs that name TopoTopo's own packages cook them from its copies in examples/packages/.
 //   node test/showcase.ts [filter]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,7 +24,7 @@ const packages = openPackages(engine, dir);
 for (const p of packages.check()) console.log(`warning: ${p}`);
 const filter = process.argv[2];
 let failed = 0;
-for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && x !== 'project.json' && (!filter || x.includes(filter)))) {
+for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && (!filter || x.includes(filter)))) {
   const name = path.basename(f, '.json');
   const graph = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
   const r = await engine.cook(graph, { frame: graph.meta?.frame }); // animated examples name their display frame

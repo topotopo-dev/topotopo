@@ -9,7 +9,7 @@ import '../src/nodes/index.ts';
 import { CATEGORY_ORDER, allNodeDefs } from '../src/graph/registry.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { ProjectPackages } from '../src/packages/registry.ts';
+import { PackageUses } from '../src/packages/registry.ts';
 import type { NodeDef, ParamDef } from '../src/graph/types.ts';
 
 export const NODES_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'nodes.md');
@@ -49,7 +49,7 @@ function categoriesOf(defs: NodeDef[]): string[] {
 /** The anchor GitHub gives a heading: lower case, punctuation but - and _ dropped ("topotopo/nature/rock" → "topotoponaturerock"). */
 export const anchorOf = (heading: string) => heading.toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '').replace(/ /g, '-');
 
-/** The thumbnail of an output of one of TopoTopo's own packages, library/<kit>/thumbs/<output>.png (repository path), or null. */
+/** The thumbnail of an output of one of TopoTopo's own packages, library/<name>/thumbs/<output>.png (repository path), or null. */
 export function thumbOf(type: string): string | null {
   const m = /^topotopo\/([a-z0-9_-]+)\/([a-z0-9_-]+)$/.exec(type);
   return m ? `library/${m[1]}/thumbs/${m[2]}.png` : null;
@@ -95,13 +95,13 @@ function nodeSection(def: NodeDef): string[] {
 }
 
 /**
- * The outputs of TopoTopo's own packages as node definitions (category "package"): every output and each kit's default
- * output, at the newest version TopoTopo's built-in library holds, as the catalog offers them outside a project.
+ * The outputs of TopoTopo's own packages as node definitions (category "package"): every output and each package's default
+ * output, at the newest version TopoTopo's built-in library holds, as the catalog offers them outside a package.
  */
-export async function kitDefs(): Promise<NodeDef[]> {
+export async function builtinDefs(): Promise<NodeDef[]> {
   const engine = new Engine(createNodeHost({ workers: 0 }));
   await engine.init();
-  const pk = new ProjectPackages(engine, null);
+  const pk = new PackageUses(engine, null);
   engine.root.packages = pk.resolver;
   const defs = engine.packageDefs();
   if (pk.libraryProblems.length) throw new Error(`TopoTopo's own packages: ${pk.libraryProblems.join('; ')}`);
@@ -110,7 +110,7 @@ export async function kitDefs(): Promise<NodeDef[]> {
 
 /** docs/nodes.md as it should be: every node type and every output of TopoTopo's own packages. */
 export async function referenceMarkdown(): Promise<string> {
-  return renderNodeReference(allNodeDefs(), await kitDefs());
+  return renderNodeReference(allNodeDefs(), await builtinDefs());
 }
 
 /**
@@ -139,11 +139,11 @@ export function renderNodeReference(nodes: NodeDef[] = allNodeDefs(), packages: 
   for (const c of cats) {
     out.push(`## ${c} nodes`, '');
     if (c === 'package') {
-      out.push('The outputs of TopoTopo\'s own packages, the kits in its built-in library ([library/](../library); see the README',
-        'section "TopoTopo\'s own packages"), by full name; a kit\'s name alone is its default output, which lines its outputs up.',
-        'A project\'s graph names one like any node, and its first use copies the kit\'s version into the project. Their',
+      out.push('The outputs of TopoTopo\'s own packages, the packages of its built-in library ([library/](../library); see the README',
+        'section "TopoTopo\'s own packages"), by full name; a built-in package\'s name alone is its default output, which lines its outputs up.',
+        'A package\'s graph names one like any node, and its first use copies the built-in package\'s version into the package. Their',
         'parameters are the outputs\' typed vars; their inputs are the graphs\' `input` nodes. `assets {action: "fork"}`',
-        'copies one\'s graph into the project\'s assets to edit.', '');
+        'copies one\'s graph into the package\'s assets to edit.', '');
     }
     for (const def of byCat.get(c)!) out.push(...nodeSection(def));
   }

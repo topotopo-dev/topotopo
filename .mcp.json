@@ -2,7 +2,7 @@
   "mcpServers": {
     "topotopo": {
       "command": "node",
-      "args": ["src/mcp/server.ts", "--project", "project"]
+      "args": ["src/mcp/server.ts", "--package", "package"]
     }
   }
 }

@@ -358,11 +358,11 @@ defineNode({
   type: 'graph_ref',
   category: 'flow',
   packed: 'keep',
-  summary: 'Use the output (or any node) of another graph in the project — compose scenes from separate graphs.',
+  summary: 'Use the output (or any node) of another graph in the package — compose scenes from separate graphs.',
   aliases: ['object_merge', 'reference', 'ref'],
   inputs: [],
   params: {
-    graph: { type: 'string', default: '', desc: 'project graph name' },
+    graph: { type: 'string', default: '', desc: 'package graph name' },
     node: { type: 'string', default: '', desc: 'node in that graph ("" = its output)' },
     vars: { type: 'json', default: {}, desc: 'override that graph\'s vars' },
   },
@@ -374,9 +374,9 @@ defineNode({
   example: { type: 'graph_ref', params: { graph: 'island', node: 'ground', vars: { seed: 7 } } },
   async cook(ctx) {
     const { p, scope } = ctx;
-    if (!scope.graphs && !scope.id) throw new NodeError('graph_ref needs a project (not available in this host)');
+    if (!scope.graphs && !scope.id) throw new NodeError('graph_ref needs a package (not available in this host)');
     const g = scope.graphs?.(p.graph);
-    if (!g) throw new NodeError(`no graph named "${p.graph}" in ${scope.id ? `"${scope.id}"` : 'the project'}`);
+    if (!g) throw new NodeError(`no graph named "${p.graph}" in ${scope.id ? `"${scope.id}"` : 'the package'}`);
     const r = await ctx.subcook(g, { target: p.node || undefined, vars: p.vars });
     if (!r.ok || !r.geo) throw new NodeError(`graph "${p.graph}" failed: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
     return r.geo;
@@ -429,7 +429,7 @@ defineNode({
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {
-    path: { type: 'path', default: '', desc: 'file or folder path or file URL; a relative path reads from the project folder (the nearest folder with a project.json at or above the graph), else from the graph\'s folder (MCP: the project); folder mode needs directory support in the host', aliases: ['file', 'filename'] },
+    path: { type: 'path', default: '', desc: 'file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a .topo file at or above the graph), else from the graph\'s folder (MCP: the package); folder mode needs directory support in the host', aliases: ['file', 'filename'] },
     format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },

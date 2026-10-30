@@ -1,0 +1,59 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "copynum:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [67.3765, 8.9335, 17.4841],
+      "min": [0.0002, -0.1924, -17.5273]
+    },
+    "counts": {
+      "points": 1856,
+      "prims": 2346,
+      "vertices": 7566,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "99f9f5a1f20577f3",
+      "attributes": {
+        "detail.materials": "60bdca48964ac35e",
+        "prim.Cd": "af9a7e52ce20b2a0",
+        "prim.copynum": "f38bc9441963cb1e",
+        "prim.material": "f468aca9e84c66f3",
+        "prim.name": "2a97bc0cf6c9eada",
+        "vertex.N": "3d2a3abbaddc4105",
+        "vertex.uv": "acdcc8b7d4cc092d"
+      },
+      "topology": "a4684f6b3c717131"
+    },
+    "packed": {
+      "hash": "99133fd0bb36f232",
+      "instances": 226,
+      "sources": [
+        "f84ffc8892dc3d16",
+        "14c091b670fade94",
+        "2ab39a8d27df8bbb",
+        "4feb679b5139431d",
+        "c68b61d4e1fa321e",
+        "1ed0a3bce4b8447e",
+        "704bf2dc06eb4e32",
+        "ebfa9ee108c5c0df",
+        "e0e5dcf94876deff"
+      ]
+    }
+  },
+  "name": "package.topotopo.nature.lineup",
+  "ok": true,
+  "source": "topotopo/nature/lineup at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

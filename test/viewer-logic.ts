@@ -249,10 +249,10 @@ section('Controls rules (section 8)');
   check(vars.kindOf({ type: 'enum', options: [4, 8, 16] }, 8) === 'select' && nums.valueOf('16') === 16 && nums.textOf(8) === '8' && !nums.byIndex && nums.valueOf('5') === undefined
     && texts.valueOf('high') === 'high' && idx.byIndex && idx.valueOf('high') === 1 && idx.textOf(0) === 'low' && vars.blank({ type: 'enum', options: [4, 8] }) === 4,
     'menus: numeric options give numbers (16, not "16"), text options their text, a number var with text options the index');
-  // over a graph file ↺ goes back to the file's value; in a project to the declared default
+  // over a graph file ↺ goes back to the file's value; in a package to the declared default
   check(vars.baseValue('file', { default: 1 }, { s: 3 }, 's') === 3 && vars.baseValue('file', { default: 1 }, {}, 's') === 1 && vars.baseValue('file', { type: 'bool' }, {}, 'b') === false
-    && vars.baseValue('project', { default: 1 }, { s: 3 }, 's') === 1 && vars.baseValue('project', null, { s: 3 }, 's') === undefined,
-    'what ↺ goes back to: the graph file\'s value (else the default, else a blank), in a project the declared default');
+    && vars.baseValue('package', { default: 1 }, { s: 3 }, 's') === 1 && vars.baseValue('package', null, { s: 3 }, 's') === undefined,
+    'what ↺ goes back to: the graph file\'s value (else the default, else a blank), in a package the declared default');
   check(vars.rowShape({ type: 'float', min: 0, max: 10 }, 2) === vars.rowShape({ type: 'float', min: 0, max: 10 }, 7) && vars.rowShape({ type: 'float', min: 0, max: 10 }, 2) !== vars.rowShape({ type: 'float', min: 0, max: 20 }, 2)
     && vars.rowShape(null, [1, 2]) !== vars.rowShape(null, [1, 2, 3]) && vars.rowShape(null, 'a') !== vars.rowShape(null, '#ff0000'),
     'a row keeps its element while its shape stays: a new value keeps it, a new range, vector length or widget builds it again');
@@ -304,14 +304,14 @@ section('the Packages tab: a package\'s state and source, the Scene tree\'s mark
   const fol = pkgs.packageState(p({ small: '1.3', followed: { library: '../lib', dir: '/lib/trees' } }));
   check(fol.kind === 'live' && fol.text === 'live' && /shows the edits of \/lib\/trees \(library "\.\.\/lib"\) instead of the published copy of 1\.1/.test(fol.title) && /1\.3 is the newest/.test(fol.title),
     `live: said even when an update exists (${fol.text})`);
-  check(pkgs.packageState(p({ error: 'no library this project lists has a package studio/trees' })).kind === 'error', 'a package its libraries do not have: the error');
+  check(pkgs.packageState(p({ error: 'no library this package lists has a package studio/trees' })).kind === 'error', 'a package its libraries do not have: the error');
   check(pkgs.librariesText(['topotopo', '../lib']) === 'TopoTopo\'s built-in library, library "../lib"' && pkgs.packageState(p({ package: 'topotopo/nature', libraries: ['topotopo'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
-    && cur.title === '1.1 is the newest version in the project\'s libraries', 'the badge names the libraries that hold its package, TopoTopo\'s built-in library by what it is');
+    && cur.title === '1.1 is the newest version in the package\'s libraries', 'the badge names the libraries that hold its package, TopoTopo\'s built-in library by what it is');
   check(/published copy of 1\.1: it changes only when you update/.test(pkgs.sourceText(p({}))) && /showing edits from lib\/trees as they are saved · exports use the published version · this session only/.test(pkgs.sourceText(p({ followed: { library: '../lib', dir: '/lib/trees' } }))),
     'the source switch says what each state means');
   check(!/you are editing|I'm editing/.test(pkgs.savedOffer('studio/trees')) && /new edits in its working folder that are not published yet/.test(pkgs.savedOffer('studio/trees')), 'the offer after a save does not assume the reader is its author');
   const named = pkgs.outputLine('studio/trees', { type: 'studio/trees/pine', kind: 'mesh', tags: ['conifer'], used: true }), dflt = pkgs.outputLine('studio/trees', { type: 'studio/trees', tags: [] });
-  check(JSON.stringify(named) === '{"name":"pine","kind":"mesh","tags":["conifer"],"used":true}' && JSON.stringify(dflt) === '{"name":"(default)","kind":"","tags":[],"used":false}', 'an output in a box: its name in the package, its kind, tags and whether the project uses it');
+  check(JSON.stringify(named) === '{"name":"pine","kind":"mesh","tags":["conifer"],"used":true}' && JSON.stringify(dflt) === '{"name":"(default)","kind":"","tags":[],"used":false}', 'an output in a box: its name in the package, its kind, tags and whether the package uses it');
   const rows = new Map([['studio/trees', p({ small: '1.3' })], ['studio/rocks', p({ package: 'studio/rocks', small: '1.2', followed: { library: '../lib', dir: '/lib/rocks' } })], ['nordic/moss', p({ package: 'nordic/moss' })]]);
   const late = pkgs.nodeMark(['studio/trees'], rows), fm = pkgs.nodeMark(['studio/rocks'], rows);
   check(late?.kind === 'update' && late.text === '↑ 1.3' && late.package === 'studio/trees' && /studio\/trees 1\.1 is in use: 1\.3 is a small update \(click: its box in the Packages tab\)/.test(late.title) && fm?.text === 'live' && fm.kind === 'live' && fm.package === 'studio/rocks' && /1\.2 is out/.test(fm.title),
@@ -328,7 +328,7 @@ section('the Packages tab: a package\'s state and source, the Scene tree\'s mark
   check(pkgs.firstView(place({})) === 'overlay' && pkgs.firstView(place({ diff: { identical: true } })) === 'b' && pkgs.firstView(place({ views: { a: true, b: false, overlay: false } })) === 'a'
     && pkgs.firstView(place({ views: { a: false, b: false, overlay: false } })) === null, 'a place shows the overlay where it changed, else b, else a');
   check(pkgs.shortText({ target: t, places: [place({}), place({ diff: { identical: true } }), place({ after: { ok: false }, diff: null })] }) === '3 places: 1 does not cook with 1.3, 1 changes, 1 stays the same'
-    && pkgs.shortText({ target: t, places: [place({ diff: { identical: true } })] }) === 'nothing changes in the place the project uses it' && /no graph of the project uses studio\/trees/.test(pkgs.shortText({ target: t, places: [] }))
+    && pkgs.shortText({ target: t, places: [place({ diff: { identical: true } })] }) === 'nothing changes in the place the package uses it' && /no graph of the package uses studio\/trees/.test(pkgs.shortText({ target: t, places: [] }))
     && pkgs.stepText({ big: true, up: true }) === 'a big update' && pkgs.stepText({ big: false, up: false }) === 'back to an older version' && pkgs.day('2026-10-28T03:12:50.931Z') === '2026-10-28',
     'an update in a line; the kind of step; a version\'s day');
   check(pkgs.agentLine({ target: { package: 'ux/crates', to: '2.0' }, mustChange: ['graphs/main.json row: sets slider "count"'] }, 'game') === 'update ux/crates to 2.0 in game and fix: graphs/main.json row: sets slider "count"',
@@ -363,16 +363,16 @@ section('graph file edits (json-edit.ts): only what changes');
 section('the tab\'s title, the welcome, and messages that clear themselves (section 4)');
 {
   const welcome = await import('../src/viewer/app/welcome.js');
-  const kits = [{ name: 'topotopo/street', title: 'Street kit', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
-  const proj = { project: { id: 'lantern', title: 'Lantern', graph: 'main', package: null }, folder: 'C:\\work\\lantern', file: null, kits };
-  const loose = { project: null, folder: '/home/me/stuff', file: null, kits };
-  check(welcome.pageTitle(proj) === 'Lantern · TopoTopo' && welcome.pageTitle(loose) === 'stuff · TopoTopo' && welcome.pageTitle({ project: null, folder: '/tmp/x', file: 'house.json' }) === 'house.json · TopoTopo',
-    'the tab is titled after the project (a graph file, a folder)');
-  check(welcome.defaultGraph(proj, ['a', 'main']) === 'main' && welcome.defaultGraph(proj, ['a', 'b']) === 'a' && welcome.defaultGraph(loose, []) === null, 'the project\'s default graph is shown first');
+  const builtin = [{ name: 'topotopo/street', title: 'Street', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
+  const proj = { package: { id: 'lantern', title: 'Lantern', graph: 'main', name: null }, folder: 'C:\\work\\lantern', file: null, builtin };
+  const loose = { package: null, folder: '/home/me/stuff', file: null, builtin };
+  check(welcome.pageTitle(proj) === 'Lantern · TopoTopo' && welcome.pageTitle(loose) === 'stuff · TopoTopo' && welcome.pageTitle({ package: null, folder: '/tmp/x', file: 'house.json' }) === 'house.json · TopoTopo',
+    'the tab is titled after the package (a graph file, a folder)');
+  check(welcome.defaultGraph(proj, ['a', 'main']) === 'main' && welcome.defaultGraph(proj, ['a', 'b']) === 'a' && welcome.defaultGraph(loose, []) === null, 'the package\'s default graph is shown first');
   const wp = welcome.welcomeOf(proj), wf = welcome.welcomeOf(loose);
-  check(wp.kind === 'project' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.kits.length === 1,
-    'a project without graphs: its name, ask your agent, TopoTopo\'s kits');
-  check(wf.kind === 'folder' && /not a TopoTopo project/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no project says so and how to make it one');
+  check(wp.kind === 'package' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.builtin.length === 1,
+    'a package without graphs: its name, ask your agent, TopoTopo\'s built-in packages');
+  check(wf.kind === 'folder' && /not a TopoTopo package/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no package says so and how to make it one');
   check(status.messageLife('saved 2 values', 'ok') === 6000 && status.messageLife('no such node', 'err') === 12000 && status.messageLife('undid move', '', 2000) === 6000 && status.messageLife('x', '', 9000) === 9000,
     'a message clears itself: 6 s, an error 12 s, longer when held');
   check(status.messageLife('exporting crate…', 'busy') === Infinity && status.messageLife(status.DISCONNECTED_LINE, 'err') === Infinity && status.messageLife('', 'err') === 0,
@@ -425,7 +425,7 @@ section('the page\'s modules');
       else if (spec.startsWith('three/addons/') && !fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.resolve('three'))), '..', 'examples', 'jsm', spec.slice('three/addons/'.length))))
         problems.push(`${f} imports ${spec}, which three does not ship`);
     }
-    // embed.js is the gallery's embed page, not the editor: the one module allowed a model viewer's orbit camera
+    // embed.js is the web app's embed page, not the editor: the one module allowed a model viewer's orbit camera
     if (f !== 'embed.js' && /OrbitControls\.js|new\s+OrbitControls/.test(src)) problems.push(`${f} uses OrbitControls (section 3: our own camera controller)`);
     if (f !== 'embed.js' && /from\s+['"]\.\/embed\.js['"]/.test(src)) problems.push(`${f} imports the embed page's module`);
   }

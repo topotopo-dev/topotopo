@@ -7,8 +7,8 @@
 // Either way the cook must succeed without errors or warnings and the result must pass the geometry invariants (an
 // example is what `help` shows: it must not teach a graph that warns). Files the examples
 // name (images, meshes) are written to the engine's temp dir from the test fixtures, and graph_ref resolves every
-// project graph name to a small terrain graph; the engine's project uses TopoTopo's own packages (useKits), which
-// some examples name. The kits themselves are covered by test/kits.ts.
+// package graph name to a small terrain graph; the engine's package uses TopoTopo's own packages (useBuiltin), which
+// some examples name. The built-in packages themselves are covered by test/builtin.ts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { allNodeDefs, getNodeDef } from '../src/graph/registry.ts';
@@ -25,7 +25,7 @@ const FIXTURE_FILES: Record<string, string> = {
   attribute_from_map: path.join(tmp, 'colormap.png'),
   image_file: path.join(tmp, 'colormap.png'),
 };
-// graph_ref: any project graph name resolves to this graph (node "ground" is its output)
+// graph_ref: any package graph name resolves to this graph (node "ground" is its output)
 const REF_GRAPH: GraphSpec = {
   vars: { seed: 1 },
   nodes: { ground: { type: 'terrain', params: { size: [10, 10], divisions: [20, 20], seed: '=seed' } } },

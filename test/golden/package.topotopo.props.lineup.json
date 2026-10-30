@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["Cd:float:3", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [16.3509, 1.924, 2.6209],
+      "min": [0.0001, 0, -0.4]
+    },
+    "counts": {
+      "points": 5202,
+      "prims": 4918,
+      "vertices": 19868,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "01b2d71c6bb56b0e",
+      "attributes": {
+        "detail.materials": "337a925dadf234cf",
+        "prim.Cd": "6d39d50dfb73c2d7",
+        "prim.material": "ab5ee6416fdb33eb",
+        "prim.name": "91f2a77d725c0257",
+        "vertex.uv": "cd95fc2cd62e9ff2"
+      },
+      "topology": "9f0c80fe9a7d5824"
+    }
+  },
+  "name": "package.topotopo.props.lineup",
+  "ok": true,
+  "source": "topotopo/props/lineup at its defaults (test/fixtures.ts)",
+  "warnings": []
+}

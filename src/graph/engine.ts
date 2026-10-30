@@ -438,7 +438,7 @@ const PSUF = '\u0000params';
 export class Engine {
   host: Host;
   cache = new GeoCache();
-  /** the project's scope: the assets, graphs and files of every cook that is not given another (CookOptions.scope) */
+  /** the package's scope: the assets, graphs and files of every cook that is not given another (CookOptions.scope) */
   readonly root: Scope;
   /** base signatures of nodes found to depend on time while cooking */
   timeDeps = new Set<string>();
@@ -497,7 +497,7 @@ export class Engine {
     if (r && 'error' in r) return r;
     const n = parsePackageName(type);
     if (typeof n === 'string') return { error: n };
-    return { error: `"${type}" is an output of package ${n.package}, and this cook has no packages`, hint: 'packages are used by projects (project.json "uses"), cooked by the TopoTopo CLI, viewer or MCP server' };
+    return { error: `"${type}" is an output of package ${n.package}, and this cook has no packages`, hint: 'a package uses packages (its manifest\'s "uses"); they are cooked by the TopoTopo CLI, viewer or MCP server' };
   }
 
   /**
@@ -620,7 +620,7 @@ export class Engine {
         else if (out.export !== undefined && targetError(out.export))
           errors.push({ node: path || '(graph)', message: `named output "${id}": ${targetError(out.export)}` });
         else if (out.publish !== undefined && typeof out.publish !== 'boolean')
-          errors.push({ node: path || '(graph)', message: `named output "${id}": "publish" must be true or false (false keeps it out of the project's package), got ${JSON.stringify(out.publish)}` });
+          errors.push({ node: path || '(graph)', message: `named output "${id}": "publish" must be true or false (false keeps it out of the published version), got ${JSON.stringify(out.publish)}` });
         else for (const i of outputFieldIssues(out)) errors.push({ node: path || '(graph)', message: `named output "${id}": ${i.message}`, hint: i.hint });
       }
     }

@@ -1,7 +1,7 @@
 // The left panel's tabs. Scene is the outliner tree: the output (the node being shown), the graph's nodes (click one to
 // show its result; the square is its display flag; a node of a package with an update carries the mark packages.js
 // gives it) and the guides. Outputs is the published results (outputs.js). Inputs is the files in inputs/ (reference
-// layers) with Add input. Packages (packages.js) shows while the project uses packages.
+// layers) with Add input. Packages (packages.js) shows while the package uses packages.
 // Rows carry a visibility eye, a display mode and the name; selecting a row selects in the viewport and back.
 // Rows are kept and updated in place, so an open menu survives a refresh.
 import { opOf } from './selection.js';
@@ -16,7 +16,7 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 
 export function createOutliner(ctx, panes) {
   // the tabs: one pane shown, remembered per browser; arrow keys move between tabs. A hidden tab (Packages, while the
-  // project uses none) stays the one wanted: it shows again when its tab does.
+  // package uses none) stays the one wanted: it shows again when its tab does.
   const tabs = [...document.querySelectorAll('#outliner [data-tab]')], paneEls = [...document.querySelectorAll('#outliner [data-pane]')];
   let tab = ctx.store.get('outliner.tab', 'outputs'), wanted = tab;
   const visibleTabs = () => tabs.filter((t) => !t.hidden);

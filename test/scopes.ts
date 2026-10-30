@@ -186,7 +186,7 @@ section('graph_ref: the scope\'s own graphs');
 {
   const ref = (graph: string): GraphSpec => ({ nodes: { r: { type: 'graph_ref', params: { graph } } } });
   const none = await cook(ref('g'));
-  check(!none.ok && errorOf(none) === 'graph_ref needs a project (not available in this host)', `without a project: ${errorOf(none)}`);
+  check(!none.ok && errorOf(none) === 'graph_ref needs a package (not available in this host)', `without a package: ${errorOf(none)}`);
   engine.root.graphs = graphsOf(rootGraphs);
   const rr = await cook(ref('g')), ra = await cook(ref('g'), { scope: a }), rb = await cook(ref('g'), { scope: b });
   check(width(rr) === 1 && width(ra) === 2 && width(rb) === 3, `graph_ref "g" reads root, a and b's own graph (widths ${width(rr)}, ${width(ra)}, ${width(rb)})`);
@@ -194,7 +194,7 @@ section('graph_ref: the scope\'s own graphs');
   const pa = await cook(ref('uses_part'), { scope: a }), pb = await cook(ref('uses_part'), { scope: b });
   check(width(pa) === 2 && width(pb) === 3, 'the same referenced graph resolves its node types in each scope');
   const missRoot = await cook(ref('nope')), missA = await cook(ref('nope'), { scope: a });
-  check(errorOf(missRoot) === 'no graph named "nope" in the project', `the root names the project: ${errorOf(missRoot)}`);
+  check(errorOf(missRoot) === 'no graph named "nope" in the package', `the root names the package: ${errorOf(missRoot)}`);
   check(errorOf(missA) === 'no graph named "nope" in "test/a@1"', `a scope names itself: ${errorOf(missA)}`);
   const c = engine.createScope('test/c@1');
   const missC = await cook(ref('g'), { scope: c });
