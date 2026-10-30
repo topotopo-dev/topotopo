@@ -499,7 +499,7 @@ The commands (a folder named must exist; without one, the current folder's proje
 
 ```text
 topotopo workspace [folder]
-topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]
+topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 topotopo workspace add|list [folder]
 topotopo init [folder] [--package owner/name]
 topotopo libraries add|remove <folder or name> [folder]

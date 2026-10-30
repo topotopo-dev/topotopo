@@ -1016,10 +1016,11 @@ outputs are listed by the catalog (category "package") and help even where the p
   update. In an installed TopoTopo they have no working folder to follow; TopoTopo's repository publishes them.
 
 FOLLOWING, for one session: library {action:"follow", package:"studio/trees", on:true} (CLI: --follow studio/trees on a
-graph cook or topotopo view) uses the package's working folder in the project's libraries instead of its copy, until
-on:false or the end of the session; nothing about it is saved. Every edit there re-cooks, exports record it
-("studio/trees@working" and the hash of its files), and publishing the project is refused while it lasts. Other
-packages' versions keep the copies they hold.
+graph cook or topotopo view) shows the package's working folder in the project's libraries instead of its copy, until
+on:false or the end of the session; nothing about it is saved. Every edit there re-cooks. Following is for looking
+(the viewer, renders, inspect): exports and publishing use the published copy, and an export made while following
+says which published version it used. A workspace with "follow": true (topotopo workspace init --follow) follows its
+own packages this way, those whose working folder is inside it. Other packages' versions keep the copies they hold.
 
 OUT OF DATE AND UPDATE: what a project uses changes only by an update, after a before/after.
 - library {action:"outdated"} (CLI: topotopo outdated) lists the packages the project uses that have newer versions:
@@ -1050,7 +1051,8 @@ version in use (a) and the new one (b), its progress in the cook line and Stop; 
 as b or both overlaid, with what changed in a line; it applies only when the person confirms, and a big version whose
 graphs must change asks once more and gives the person a line to copy for you. "Source: Published | Live folder" shows
 a package's working folder for the viewer's session (never saved; not offered for TopoTopo's kits outside TopoTopo's
-repository); results and exports that use it are marked as holding unpublished edits, and a save in a working folder
+repository); results that use it are marked as showing unpublished edits, their exports and downloads write the
+published version, and a save in a working folder
 the session does not follow is offered in that package's box.
 
 EXPORTS record the package versions their graph used in the source block: "packages": {"studio/trees@1.3": "<hash>"}.

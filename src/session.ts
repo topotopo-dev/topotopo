@@ -217,6 +217,13 @@ export interface SessionPackages {
    * a package is kept only while it stays the same (the viewer's previews, a person's stop)
    */
   revision(): string;
+  /**
+   * while this session follows working folders (for looking): the scope exports cook in, resolving packages to their
+   * published copies; null while nothing is followed
+   */
+  published?(): Scope | null;
+  /** what an export of the graph made while following says: the published versions it used (null: nothing to say) */
+  publishedNote?(graph: GraphSpec): string | null;
 }
 
 export class Session {
@@ -660,6 +667,7 @@ export class Session {
    * Cook a graph (its output, or `target`) with its session values, as a cook of `kind`. Session.stop and `signal`
    * stop it at a node boundary; activity() reports it while it runs. A cook of the whole graph records its outcome
    * (lastCook) and, unless it was stopped, its report (lastReport), when no cook started after it has done so first.
+   * An export cooks with the published copies of the packages the session shows live, and records nothing.
    */
   async cook(name: string, target?: string, frame?: number, opts: { kind?: CookKind; signal?: StopSignal } = {}) {
     const g = this.getGraph(name);
@@ -680,8 +688,10 @@ export class Session {
     this.notifyActivity(name);
     try {
       const s = this.sessions.get(name);
-      const r = await this.engine.cook(g, { target, frame, signal, onNode: (ev) => this.onNode(name, run, ev), ...(s?.size ? { vars: this.sessionVars(name) } : {}) });
-      if (seq && !(r.stopped && run.superseded) && seq > (this.recordedSeq.get(name) ?? 0)) {
+      // an export uses the published copies of the packages this session shows live (SessionPackages.published)
+      const scope = run.kind === 'export' ? this.packages?.published?.() ?? null : null;
+      const r = await this.engine.cook(g, { target, frame, signal, onNode: (ev) => this.onNode(name, run, ev), ...(s?.size ? { vars: this.sessionVars(name) } : {}), ...(scope ? { scope } : {}) });
+      if (seq && !scope && !(r.stopped && run.superseded) && seq > (this.recordedSeq.get(name) ?? 0)) {
         this.recordedSeq.set(name, seq);
         if (!r.stopped) this.lastReport.set(name, r);
         // a cook that found every result cached (a target set, a reload without change) keeps the outcome of the

@@ -31,7 +31,7 @@
 // The workspace (the game) around projects (src/workspace.ts), a project and its packages (src/packages/commands.ts,
 // src/packages/registry.ts, src/packages/update.ts):
 //   node src/cli.ts workspace [folder]
-//   node src/cli.ts workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]
+//   node src/cli.ts workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 //   node src/cli.ts workspace add|list [folder]
 //   node src/cli.ts init [folder] [--package owner/name]
 //   node src/cli.ts libraries add|remove <folder or name> [folder]
@@ -44,7 +44,8 @@
 //   node src/cli.ts update owner/name [folder] [--to 1.4] [--render <folder>]
 //   node src/cli.ts update owner/name [folder] --from 1.3 --to 1.4 --apply
 //   A graph-file cook adds a package its graph names for the first time (and says so); --locked fails instead, for a
-//   build machine. --follow owner/name on a cook or view uses a package's working folder instead of its copy.
+//   build machine. --follow owner/name on a cook or view uses a package's working folder instead of its copy, for
+//   looking: exports use the published copy.
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -108,7 +109,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--export-all] (every output with an export target in the graph, into exports/ of its project folder)',
     '         relative paths in the graph (file nodes, maps) read from its project folder: the nearest folder with a project.json at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
-    '         [--follow owner/name] (use that package\'s working folder in the project\'s libraries instead of its copy, for this run; repeat it)',
+    '         [--follow owner/name] (show that package\'s working folder in the project\'s libraries instead of its copy, for this run: renders and inspect use it, exports the published copy; repeat it)',
     '         [--locked] (a build machine: a package the graph names that the project does not use, or a copy missing or edited by hand, fails the run instead of being added)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
@@ -285,7 +286,17 @@ async function cook() {
     if (unlocked.length) fail(unlocked.map((x) => `--locked: ${x}`).join('\n'));
   } else for (const n of pk!.addFor(graph)) console.log(n);
   for (const p of pk!.check()) console.error(`warning: ${p}`);
-  for (const f of pk!.following()) console.log(`following ${f.package}: its working folder ${f.dir} instead of its copy`);
+  for (const f of pk!.following()) console.log(`following ${f.package}: its working folder ${f.dir} instead of its copy, for renders and inspect (exports use the published copy)`);
+  // the packages shown live (--follow, a workspace that follows its own) are for looking: an export cooks with their
+  // published copies (a cook of its own when the graph names one) and says so
+  const exportNote = pk!.publishedNote(graph);
+  const exportScope = exportNote ? pk!.published() : null;
+  const forExport = async (r: CookReport, node = r.target): Promise<CookReport> => {
+    if (!exportScope) return r;
+    const e = await engine.cook(graph, { target: node, frame: r.frame, fps: r.fps, scope: exportScope });
+    if (!e.ok || !e.geo) fail(`export: with the published copies, ${node} does not cook (${e.errors.map((x) => `${x.node}: ${x.message}`).join('; ') || 'no geometry'}); nothing was written`);
+    return e;
+  };
   const fps = opt('--fps') !== undefined ? Number(opt('--fps')) : undefined;
   const framesArg = opt('--frames');
   const frameArg = opt('--frame');
@@ -396,13 +407,15 @@ async function cook() {
       if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
       // the export tool's options (the MCP export tool and export targets use the same names and code)
       const a = exportArgs();
-      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph), version: TOPOTOPO_VERSION });
-      const res = await serializeExport(geo, fmt, p, a, engine.host, source);
+      const x = await forExport(r);
+      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), version: TOPOTOPO_VERSION });
+      const res = await serializeExport(x.geo!, fmt, p, a, engine.host, source);
       for (const w of res.warnings) console.warn(`warning: ${w}`);
       writeExportFiles(res.files);
       if (res.files.length) record(res.files.map((f) => f.path), fmt);
       const files = res.files.filter((f) => f.path !== res.sourceManifest);
       console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${res.summary}` : ''}${res.sourceFile ? `; source: ${res.sourceFile}` : ''}`);
+      if (exportNote) console.log(exportNote);
     }
   }
 
@@ -444,10 +457,10 @@ async function cook() {
     const prepared: PreparedTarget[] = [];
     for (const p of published) {
       if (!p.target) continue;
-      const r = await engine.cook(graph, { target: p.node, frame: single, fps });
+      const r = await engine.cook(graph, { target: p.node, frame: single, fps, ...(exportScope ? { scope: exportScope } : {}) });
       report(r);
-      if (!r.ok || !r.geo) fail(`--export-all: "${p.label}" did not cook; nothing was written`);
-      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, graph) }));
+      if (!r.ok || !r.geo) fail(`--export-all: "${p.label}" did not cook${exportScope ? ' with the published copies' : ''}; nothing was written`);
+      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, graph, exportScope ?? engine.root) }));
     }
     writeTargets(prepared, exportsDir);
     // paths as the person finds them from where they ran the command
@@ -455,6 +468,7 @@ async function cook() {
     for (const p of prepared) console.log(`exported ${p.label} → ${rel(path.join(exportsDir, ...p.target.path.split('/')))} — ${p.summary}${p.sourceFile ? `; source: ${rel(p.sourceFile)}` : ''}`);
     const skipped = published.filter((p) => !p.target).map((p) => p.label);
     if (skipped.length) console.log(`no export target (skipped): ${skipped.join(', ')}`);
+    if (exportNote) console.log(exportNote);
   }
   // stop the kernel worker threads (idle ones would not hold the process, but a clean exit should not wait on them)
   await engine.host.pool?.close();

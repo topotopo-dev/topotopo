@@ -71,7 +71,7 @@ export interface OutputEntry {
   tags?: string[];
   /** it shows the last finished result, not the values now: its cook was stopped */
   stale?: boolean;
-  /** the packages it uses whose working folder this session shows live: it holds their unpublished edits, and so do its exports */
+  /** the packages it uses whose working folder this session shows live: it shows their unpublished edits (its exports use the published versions) */
   live?: string[];
   /** a named output: the kind its graph pins ("kind" in its outputs), and what it says when it cooks to another */
   pinned?: string; warning?: string;
@@ -279,7 +279,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     // the packages: an update, or a save in a working folder the session follows, changes what they resolve to
     const sessionRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
-    // the packages shown live this session (their working folders): the results that use them hold unpublished edits
+    // the packages shown live this session (their working folders): the results that use them show unpublished edits
     const following = ws.packages instanceof ProjectPackages ? ws.packages.following().map((f) => f.package) : [];
     // the graph the page shows first cooks first: its cards are queued before the others'
     const first = opts.first?.();
@@ -357,7 +357,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     const r = await ws.cook(graph, p.node, undefined, { kind: 'export' });
     if (r.stopped) err(409, `${p.label} (${graph}): the export was stopped at ${r.stopped}; nothing was written`);
     if (!r.ok || !r.geo) err(422, `${p.label} (${graph}): ` + (r.errors.map((e) => `${e.node}: ${e.message}`).join('; ') || 'no geometry'));
-    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(ws.engine, p.spec) });
+    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(ws.engine, p.spec, ws.packages?.published?.() ?? ws.engine.root) });
   };
   /** One export at a time, so two clicks never interleave their writes. */
   const exclusive = async <T>(work: () => Promise<T>): Promise<T> => {

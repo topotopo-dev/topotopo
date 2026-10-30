@@ -106,7 +106,7 @@ export function parseEngineArg(arg: string, dir: string): EngineLink {
   return { type, project: rel(dir, abs), assets: '' };
 }
 
-export interface InitWorkspaceOptions { name?: string; engine?: string | 'none'; libraries?: string[]; assets?: string }
+export interface InitWorkspaceOptions { name?: string; engine?: string | 'none'; libraries?: string[]; assets?: string; follow?: boolean }
 
 /**
  * Make `dir` (a game's root) a workspace: topotopo-workspace.json with its name, the libraries given and the engine
@@ -138,6 +138,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
     if (!m.engine) throw new Error('--assets needs an engine project: --engine godot:<path to project.godot>');
     m.engine.assets = o.assets.trim().replace(/\\/g, '/');
   }
+  if (o.follow !== undefined) m.follow = o.follow;
   writeWorkspace(abs, m);
   workspaceRepoFiles(abs);
   // the projects inside that kept their own copies share the workspace's now
@@ -146,6 +147,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
     `${had ? 'updated' : 'made'} the workspace "${m.name}" (${path.join(abs, WORKSPACE_FILE)})`,
     `engine: ${m.engine ? `${m.engine.type} ${m.engine.project}${found}${m.engine.assets ? `, exports to ${m.engine.assets}` : ''}` : 'none'}`,
     `libraries: ${m.libraries.length ? m.libraries.join(', ') : 'none yet (topotopo workspace init --library <folder or name>)'}; every project inside looks in them after its own`,
+    `follow its own packages live: ${m.follow ? 'on (their working folders inside the workspace show in the viewer and renders, for looking; exports use the published versions)' : 'off'}`,
     ...gathered,
   ].join('\n');
   return { dir: abs, manifest: m, text };

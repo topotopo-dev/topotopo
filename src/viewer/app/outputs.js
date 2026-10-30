@@ -226,7 +226,7 @@ export function createOutputPanel(ctx) {
         if (item.default && entries.filter((v) => !v.parent && v.exportable).length > 1) { const b = text('span', 'default', 'badge default'); b.title = 'the graph\'s default output: what the graph shows and exports when no output is named'; marks.push(b); }
         const kind = kindBadge(item);
         if (kind) { const b = text('span', kind, 'badge kind'); b.title = 'what it is'; marks.push(b); }
-        // it uses a package shown live: unpublished edits, in its exports too
+        // it uses a package shown live: unpublished edits on show (its exports use the published version)
         if (item.live?.length) { const b = text('span', 'unpublished edits', 'badge live'); b.title = liveText(item); marks.push(b); }
         badges.replaceChildren(...marks);
         tags.replaceChildren(...(item.tags ?? []).map((t) => text('span', t, 'tag')));

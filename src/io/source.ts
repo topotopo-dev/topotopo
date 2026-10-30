@@ -9,8 +9,8 @@
 //   vars           every var of the graph after overrides (CLI --var), keys sorted
 //   seeds          the seed params the graph sets, by node ("loop/pts" inside a nested graph), as written
 //   packages       only when the graph uses packages (src/graph/packages.ts packagesUsed): "owner/name@version" → the
-//                  version's hash for every package version it uses, directly or through other packages, and
-//                  "owner/name@working" → the hash of the files of a working folder followed this session
+//                  version's hash for every package version it uses, directly or through other packages (an export
+//                  made while following a working folder cooks with the published copies, so it names those)
 //   export         {format, options}: the export options given (the export tool's names)
 //   topotopo       the version that wrote it
 // Formats that write a sidecar or manifest carry the block there (png16 / r16: <name>.json; csv / points.json instance

@@ -935,20 +935,26 @@ section('following a working folder for one session');
   check(o.pk.refresh(), 'an edit in the working folder: refresh sees it');
   const b = await o.engine.cook(pine);
   check(size(b, 0) === 5 && o.engine.resolveDef('studio/trees/pine')!.package!.scope.id !== scope1 && !b.results.get('t')!.cached, `under a new scope id it cooks again (width ${size(b, 0)})`);
-  // exports record it
+  // what the live cook used names the working folder; an export cooks with the published copies, and says so
   const graph: GraphSpec = { nodes: { t: { type: 'studio/trees/pine' }, g: { type: 'studio/grove' }, out: { type: 'merge', in: ['t', 'g'] } }, output: 'out' };
   const used = packagesUsed(o.engine, graph);
   const lock = readLock(dirs.forest);
   check(Object.keys(used).join() === 'nordic/rocks@1.0,studio/grove@1.0,studio/trees@1.0,studio/trees@working' && used['studio/trees@working'] === o.engine.resolveDef('studio/trees/pine')!.package!.hash
-    && used['studio/grove@1.0'] === lock.packages['studio/grove']['1.0'].hash, `the export's source record names every version it used and the working folder's hash (${Object.keys(used)})`);
+    && used['studio/grove@1.0'] === lock.packages['studio/grove']['1.0'].hash, `what the live cook used: every version and the working folder's hash (${Object.keys(used)})`);
+  const pub = o.pk.published()!, inUse = readManifest(dirs.forest).uses['studio/trees'];
+  const usedPub = packagesUsed(o.engine, graph, pub), cookedPub = await o.engine.cook(pine, { scope: pub });
+  check(!!pub && !Object.keys(usedPub).some((k) => k.endsWith('@working')) && !!usedPub[`studio/trees@${inUse}`] && size(cookedPub, 0) === 3
+    && new RegExp(`shows studio/trees live from its working folder, for looking; the export used the published studio/trees ${inUse}`).test(o.pk.publishedNote(graph) ?? ''),
+    `an export cooks with the published copies while following (width ${size(cookedPub, 0)}; ${Object.keys(usedPub)}; ${o.pk.publishedNote(graph)})`);
   const src = exportSource({ graph: 'main', spec: graph, node: 'out', format: 'glb', packages: used, version: '0' });
   check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'packages', 'export', 'topotopo']) && src.packages!['studio/trees@working'] === used['studio/trees@working'],
     'exportSource writes them as "packages"');
   const plain = exportSource({ graph: 'main', spec: { nodes: { b: { type: 'box' } } }, node: 'b', format: 'glb', packages: {}, version: '0' });
   check(!('packages' in plain), 'a graph without packages has no "packages" (records stay as they were)');
-  // publishing while following
-  const p = await publishPackage(o.pk, { note: 'while following' });
-  check(!p.ok && p.blocks.some((x) => /this session follows studio\/trees from its working folder/.test(x)), `publishing a project that follows a package is refused: ${p.blocks.join(' | ')}`);
+  // publishing while following: checked with the published copies, said
+  const p = await publishPackage(o.pk, { note: 'while following', dryRun: true });
+  check(!p.blocks.some((x) => /follow/.test(x)) && p.warnings.some((x) => /shows studio\/trees live from its working folder: the version was checked with the published copies/.test(x)),
+    `publishing while following is not refused: it uses the published copies (${p.warnings.filter((x) => /live/.test(x)).join(' | ')})`);
   check(/stopped following studio\/trees: it resolves to its copy \(1\.1\) again/.test(o.pk.follow('studio/trees', false)), 'stop following');
   const c = await o.engine.cook(pine);
   check(size(c, 0) === 3, `the copy again (width ${size(c, 0)})`);
@@ -1249,7 +1255,9 @@ section('the CLI as a person runs it: a graph-file cook (first use, --follow, --
   const followed = spawnCli([FILE, '--follow', 'studio/trees', '--export', fexp]);
   const frec = fs.existsSync(fexp + '.source.json') ? readJSON(fexp + '.source.json').source : {};
   check(followed.code === 0 && /added studio\/rules 7\.1 to project forest/.test(followed.out) && /following studio\/trees: its working folder/.test(followed.out)
-    && typeof frec.packages?.['studio/trees@working'] === 'string' && frec.packages?.['studio/rules@7.1'], `a cook adds on first use and follows a working folder: ${followed.out.split('\n').slice(0, 3).join(' | ')} ${JSON.stringify(frec.packages)}`);
+    && !Object.keys(frec.packages ?? {}).some((k: string) => k.endsWith('@working')) && Object.keys(frec.packages ?? {}).some((k: string) => k.startsWith('studio/trees@')) && frec.packages?.['studio/rules@7.1']
+    && /the export used the published studio\/trees \d+\.\d+/.test(followed.out),
+    `a cook adds on first use and shows a working folder; its export uses the published copy: ${followed.out.split('\n').slice(0, 3).join(' | ')} ${JSON.stringify(frec.packages)}`);
   const hn = spawnCli(['--help-node', 'studio/trees/pine'], dirs.forest);
   check(hn.code === 0 && /## studio\/trees\/pine \(package\)/.test(hn.out) && /studio\/trees 1\.1: bigger crown/.test(hn.out) && /height float = 4 \[1\.\.20\]/.test(hn.out), '--help-node gives a package output\'s params, version and note');
   // the catalog of the current folder's project; an output of a package it does not use yet, read from its library
@@ -1676,6 +1684,20 @@ section('a workspace: one shared copy of each package for every project in the g
   const again = initWorkspace(GAME, {});
   const c2 = await open(C);
   check(!c2.pk.notice() && !Object.keys(readManifest(C).uses).length && size(await c2.engine.cook(scene('ws/stones')), 1) === 4, `init again moves them (${again.text.split('\n').slice(3).join(' | ')})`);
+
+  // a workspace that follows its own packages: the viewer and renders show their working folders, exports use the
+  // published versions
+  const on = initWorkspace(GAME, { follow: true });
+  setGraph(STONES, 'main', box(5));
+  const f = await open(A);
+  const shownLive = await f.engine.cook(scene('ws/stones'));
+  const preview = await f.ws.cook('main'), exported = await f.ws.cook('main', undefined, undefined, { kind: 'export' });
+  check(readWorkspace(GAME).follow && /follow its own packages live: on/.test(on.text) && f.pk.following().some((x) => x.package === 'ws/stones' && same(x.dir, STONES))
+    && size(shownLive, 1) === 5 && size(preview, 1) === 5 && size(exported, 1) === 4,
+    `a workspace that follows its own packages shows their working folders, and exports the published versions (shown ${size(preview, 1)}, exported ${size(exported, 1)})`);
+  initWorkspace(GAME, { follow: false });
+  setGraph(STONES, 'main', box(4));
+  check(!(await open(A)).pk.following().length, 'follow off: the copies again');
 }
 
 await engines[0]?.host.pool?.close();

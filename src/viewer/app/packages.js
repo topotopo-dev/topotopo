@@ -57,7 +57,7 @@ export const shortDir = (dir) => String(dir ?? '').replace(/[\\/]+$/, '').split(
 
 /** What the source switch says under it: the published copy, or the live folder. */
 export function sourceText(p) {
-  if (p.followed) return `showing edits from ${shortDir(p.followed.dir)} as they are saved · exports use these edits too, marked unpublished · this session only`;
+  if (p.followed) return `showing edits from ${shortDir(p.followed.dir)} as they are saved · exports use the published version · this session only`;
   return p.version ? `the published copy of ${p.version}: it changes only when you update` : 'not published yet: only its folder exists';
 }
 
@@ -283,7 +283,7 @@ export function createPackagesPanel(ctx, host) {
       const o = el('div', 'pkg-offer');
       o.append(el('div', '', savedOffer(p.package)));
       const acts = el('div', 'pkg-actions');
-      acts.append(button('Show live edits', 'primary', `show the edits of ${p.working[0]?.dir ?? 'its working folder'} for this session; exports use them too, marked unpublished`, () => P.follow(p.package, true)),
+      acts.append(button('Show live edits', 'primary', `show the edits of ${p.working[0]?.dir ?? 'its working folder'} for this session; exports use the published version`, () => P.follow(p.package, true)),
         button('Not now', '', 'keep the published copy; the switch above does it later', () => { offers.delete(p.package); render(); }));
       o.append(acts);
       box.append(o);
@@ -346,7 +346,7 @@ export function createPackagesPanel(ctx, host) {
     seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', `Source of ${p.package}`);
     const one = p.followed ?? p.working[0];
     const pub = button(p.version ? `Published ${p.version}` : 'Published', p.followed ? '' : 'on', p.version ? `the published copy of ${p.version}: frozen, it changes only when you update` : `${p.package} has no published version yet`, () => { if (p.followed) P.follow(p.package, false); });
-    const live = button('Live folder', p.followed ? 'on live' : '', `show the edits of ${one?.dir ?? 'its working folder'} as they are saved, for this session; exports use them too, marked unpublished`, () => { if (!p.followed) P.follow(p.package, true); });
+    const live = button('Live folder', p.followed ? 'on live' : '', `show the edits of ${one?.dir ?? 'its working folder'} as they are saved, for this session; exports use the published version`, () => { if (!p.followed) P.follow(p.package, true); });
     pub.disabled = !p.version && !p.followed;
     pub.setAttribute('aria-pressed', String(!p.followed)); live.setAttribute('aria-pressed', String(!!p.followed));
     seg.append(pub, live);

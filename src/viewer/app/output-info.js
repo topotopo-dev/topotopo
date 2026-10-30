@@ -18,8 +18,8 @@ export function detailLine(item) {
 /** An output's kind and tags in words, as the CLI says them: "mesh [crate, wood]" (the badges read in the same order). */
 export const kindTagsLine = (o) => `${o.kind || 'kind not pinned'}${o.tags?.length ? ` [${o.tags.join(', ')}]` : ''}`;
 
-/** What a result that uses packages shown live says: its exports and downloads hold their unpublished edits. */
-export const liveText = (item) => (item.live?.length ? `uses the unpublished edits of ${item.live.join(', ')} (shown live this session): Export and Download write them too, and say so in how the file was made` : '');
+/** What a result that uses packages shown live says: it shows their unpublished edits; its exports and downloads use the published versions. */
+export const liveText = (item) => (item.live?.length ? `shows the unpublished edits of ${item.live.join(', ')} (live this session, for looking): Export and Download write the published version` : '');
 
 /** What it is in a line, its kind first: "terrain · 2049 × 2049 samples, 2 m apart · 4096 × 312 × 4096 m" (its view before it has cooked). */
 export function kindLine(item) {
