@@ -578,5 +578,13 @@ for (const node of ['uv_layout', 'uv_unwrap']) {
   check(uvReport(lp.geo).overlap.pairs > 0 && uvReport(lk.geo).overlap.pairs === 0 && lk.warnings.some((w) => w.includes('folds the uv') && w.includes('"ring"')), `lod keep_uv: a level of the unwrapped torus keeps the uv clean (plain: ${uvReport(lp.geo).overlap.pairs} overlapping pairs) and says where it held back`);
 }
 
+// a renamed or removed param is refused, and the error says what to write now (NodeDef.renamed)
+{
+  const v = engine.validate({ nodes: { b: { type: 'box' }, u: { type: 'uv_unwrap', in: ['b'], params: { udim: true, rotate_charts: false } }, l: { type: 'uv_layout', in: ['u'], params: { rotate: false } } }, output: 'l' });
+  const said = v.errors.map((e) => e.message).join('\n');
+  check(v.errors.length === 3 && /unknown param "udim" for uv_unwrap: it is gone: fit "udim"/.test(said) && /"rotate_charts" for uv_unwrap: it is now orient: "min_rect" \(rotate_charts: true\) or "keep"/.test(said)
+    && /"rotate" for uv_layout: it is now orient/.test(said), `the old names are errors that name the new ones:\n${said}`);
+}
+
 console.log(fail ? `\n${fail} uv check(s) failed` : '\nuv: all checks passed');
 process.exit(fail ? 1 : 0);

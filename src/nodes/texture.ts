@@ -856,6 +856,7 @@ defineNode({
   type: 'tex_normal_from_height',
   usesNodeName: NAMED_BY_NODE,
   category: 'texture',
+  renamed: { strength: 'it is now depth, the relief in metres for a height of 1, with size, the texture\'s width in metres (strength k matches depth k/64 with size 1)' },
   summary: 'Normal map from a height image (Sobel) in physical units (relief depth and texture size in metres): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).',
   description:
     'Substance: Normal (from height); Houdini COP: Bump to Normal. The slope is real: a value of 1 stands `depth` metres ' +

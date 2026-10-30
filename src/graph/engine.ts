@@ -699,10 +699,12 @@ export class Engine {
       }
       for (const k of Object.keys(spec.params ?? {})) {
         if (!resolveParamName(def, k)) {
-          const s = didYouMean(k, Object.keys(def.params));
+          // a renamed or removed param says what to write now (NodeDef.renamed)
+          const now = def.renamed?.[k];
+          const s = now ? [] : didYouMean(k, Object.keys(def.params));
           errors.push({
             node: nm,
-            message: `unknown param "${k}" for ${def.type}${s.length ? ` — did you mean ${s.map((x) => `"${x}"`).join(' or ')}?` : ''}`,
+            message: `unknown param "${k}" for ${def.type}${now ? `: ${now}` : s.length ? ` — did you mean ${s.map((x) => `"${x}"`).join(' or ')}?` : ''}`,
             hint: `valid params: ${Object.keys(def.params).join(', ') || '(none)'}`,
           });
         }

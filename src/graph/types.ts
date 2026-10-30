@@ -74,6 +74,11 @@ export interface NodeDef {
   /** deprecation notice naming the replacement; hidden from the catalog, warned about on cook */
   deprecated?: string;
   /**
+   * params that were renamed or removed: the old name → what to write now. The old name is not accepted (no
+   * compatibility layer); the unknown-param error says this instead of guessing at near names.
+   */
+  renamed?: Record<string, string>;
+  /**
    * Packed primitives: 'keep' = the node handles packed prims (instances) in its inputs; 'unpack' (default) = the
    * engine expands them before cooking the node, with a warning. A function decides per cook from the resolved params.
    */
