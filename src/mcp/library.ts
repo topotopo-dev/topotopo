@@ -66,6 +66,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
     description: 'The person\'s libraries of projects (the TopoTopo Gallery website shows them; a board links to them). A library is a folder; a project is a folder in it with project.json (title, description, tags, links to concept art/board pages) and is a project of its own (graphs/, assets/, inputs/, exports/, attachments/ for concept art and references). ' +
       'list {query?, tag?, library?}: every project with status and gallery URL. get {library, id} (or the open project): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
       'open {library, id} | {path}: make that project the folder every tool and the live viewer work in, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new project, opened. ' +
+      'workspace: the workspace (the game) around the open project: its engine project, the libraries every project inside looks in, its projects. workspace {init:true, path?, name?, engine?, assets?, libraries?} makes a game\'s folder (path, default: the folder above the open project that the person names) a workspace (topotopo-workspace.json; the engine project found when not given), when the person says so. ' +
       'init {package?}: make the server\'s folder a project (project.json, graphs/main.json, .gitignore, .gitattributes), when it is none and the person says so: only a project\'s graphs use packages (TopoTopo\'s own included), and a build that names one in a project outside any project fails saying so. ' +
       'set {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?, libraries?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the package the project is, set once by its author; libraries = the libraries the project finds packages in, ["../lib", "game"]: a path from the project for a library in the same repository, else a registered name; set it only when the person names the library). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). ' +
       `Packages of the open project: packages (what it uses and can use, one line each: version, outputs, up to date or the newer version that is out), packages {package} (one package: its versions and notes, its outputs with their kinds, tags, params and inputs); search {query?, kind?, tag?}: the outputs of every library (TopoTopo\'s built-in one, those the project lists, every registered one) by words, kind (${KINDS.join(', ')}) and tag, each with its full name, kind, tags, label, version and description, and whether the project can use it, else the "libraries" entry that would list its library; use {package:"owner/name", version?} adds one (a graph that names "owner/name/output" adds it too); remove {package} removes one no graph of the project names; follow {package, on} uses a package\'s working folder instead of its copy for this session. ` +
@@ -75,7 +76,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'init', 'set', 'bake', 'packages', 'search', 'use', 'remove', 'follow', 'publish', 'outdated', 'update'] },
+        action: { type: 'string', enum: ['list', 'get', 'open', 'create', 'init', 'workspace', 'set', 'bake', 'packages', 'search', 'use', 'remove', 'follow', 'publish', 'outdated', 'update'] },
         library: { type: 'string', description: 'library name (list shows them)' },
         id: { type: 'string', description: 'project id' },
         path: { type: 'string', description: 'create: folder below the library ("props/lantern"); open/get: a project folder on disk instead of {library, id}' },
@@ -93,6 +94,10 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         graph: { type: 'string', description: 'set: the graph the gallery shows and bakes (default "main")' },
         bake: { type: 'object', properties: { graph: { type: 'string' }, node: { type: 'string' }, frame: { type: 'number' } }, description: 'set: what the preview shows instead of the graph output' },
         thumbnail: { type: 'boolean', description: 'get: include the baked thumbnail image' },
+        init: { type: 'boolean', description: 'workspace: make the folder (path) a workspace, or change it' },
+        name: { type: 'string', description: 'workspace init: its name (default: the folder\'s)' },
+        engine: { type: 'string', description: 'workspace init: the engine project, "godot:game/project.godot" or "unreal:Game.uproject" from the workspace folder, or "none" (default: the one found below it)' },
+        assets: { type: 'string', description: 'workspace init: the folder in the engine project exports may go to, from the workspace folder' },
         open: { type: 'boolean', description: 'create: open the new project (default true)' },
         package: { type: 'string', description: 'use / remove / follow / update / packages: a package, "owner/name"; set and init: the package the project is' },
         on: { type: 'boolean', description: 'follow: true to follow the package\'s working folder (default), false to go back to its copy' },
@@ -171,6 +176,16 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           let opened = '';
           if (a.open !== false) { await host.open(p.dir); opened = ' and opened it: build/edit now work in it (graph "main" is the one the gallery shows)'; }
           return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Gallery page: ${urlsOf(cfg, p).page}`);
+        }
+        case 'workspace': {
+          const { initWorkspace, workspaceText } = await import('../workspace.ts');
+          if (a.init) {
+            if (!a.path) throw new Error('workspace {init:true} needs path: the game\'s folder (its root), as the person names it');
+            const r = initWorkspace(path.resolve(host.session().dir, String(a.path)), { name: a.name, engine: a.engine, assets: a.assets, libraries: Array.isArray(a.libraries) ? a.libraries : undefined });
+            host.packages().refresh();
+            return text(`${r.text}\n${workspaceText(r.dir)}`);
+          }
+          return text(workspaceText(host.session().dir));
         }
         case 'init': {
           const dir = host.session().dir, inside = projectDirOf(dir);

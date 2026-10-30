@@ -491,6 +491,9 @@ package's own project the tab shows its last version, whether it changed since, 
 The commands (a folder named must exist; without one, the current folder's project):
 
 ```text
+topotopo workspace [folder]
+topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]
+topotopo workspace add|list [folder]
 topotopo init [folder] [--package owner/name]
 topotopo libraries add|remove <folder or name> [folder]
 topotopo use owner/name [folder] [--version 1.1]

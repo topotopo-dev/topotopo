@@ -6,6 +6,10 @@
 //   topotopo library bake <project folder> | --stale | --all          bake previews in this process
 //   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a project (the gallery's editor)
 // and a project's packages (src/packages/registry.ts, src/packages/update.ts), as PACKAGE_COMMANDS says them:
+//   topotopo workspace [folder]                                       the workspace (game) around a folder
+//   topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]
+//                                                                     make a game's folder a workspace, or change one
+//   topotopo workspace add|list [folder]                              register a workspace for the Gallery's hub; list them
 //   topotopo init [folder] [--package owner/name]                     make a folder a project, or set the package it is
 //   topotopo libraries add|remove <folder or name> [folder]           the libraries the project finds packages in
 //   topotopo use owner/name [folder] [--version 1.1]                  add a package from the libraries the project lists
@@ -33,6 +37,9 @@ import type { GalleryConfig } from '../config.ts';
  * help topic "packages" and README.md, each of which holds every usage as it is here (test/docs.ts checks).
  */
 export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
+  { usage: 'workspace [folder]', what: 'the workspace (the game) around a folder: its engine project, the libraries every project inside looks in, its projects' },
+  { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]', what: 'make a game\'s folder a workspace (topotopo-workspace.json; the engine project is found when not given), or change one' },
+  { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the Gallery\'s hub, or list the registered ones' },
   { usage: 'init [folder] [--package owner/name]', what: 'make a folder a project (project.json, graphs/main.json), or set the package an existing project is' },
   { usage: 'libraries add|remove <folder or name> [folder]', what: 'list or unlist a library the project finds packages in: a folder by its path from the project, else a registered library\'s name' },
   { usage: 'use owner/name [folder] [--version 1.1]', what: 'add a package: its newest version (or --version) in the libraries the project lists, copied into packages/' },
@@ -66,7 +73,7 @@ async function run(io: Io, f: () => Promise<number | void>): Promise<number | vo
  * order. An unknown option, or a valued one without its value, fails with the usage.
  */
 function args(argv: string[], valued: string[], flags: string[], usage: string) {
-  const opts = new Map<string, string>(), rest: string[] = [];
+  const opts = new Map<string, string>(), many = new Map<string, string[]>(), rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) { rest.push(a); continue; }
@@ -75,9 +82,11 @@ function args(argv: string[], valued: string[], flags: string[], usage: string) 
     const v = argv[i + 1];
     if (v === undefined || v.startsWith('--')) fail(`${a} needs a value\n${usage}`);
     opts.set(a, v);
+    many.set(a, [...(many.get(a) ?? []), v]);
     i++;
   }
-  return { opt: (f: string) => opts.get(f), has: (f: string) => opts.has(f), rest };
+  // opt: the option's (last) value; all: every value of an option given more than once
+  return { opt: (f: string) => opts.get(f), all: (f: string) => many.get(f) ?? [], has: (f: string) => opts.has(f), rest };
 }
 
 /**
@@ -395,7 +404,40 @@ export async function updateCommand(argv: string[], prog: string, io: Io = conso
 }
 
 /** The commands src/cli.ts dispatches here, by name. */
+/** `workspace [folder]`, `workspace init …`, `workspace add|list`: the game a project sits in (src/workspace.ts). */
+const workspaceCommand: Command = (argv, prog, io = consoleIo) => run(io, async () => {
+  const { initWorkspace, workspaceText, readWorkspace } = await import('../workspace.ts');
+  const { addWorkspace } = await import('../config.ts');
+  const { locate } = await import('../project.ts');
+  const sub = ['init', 'add', 'list'].includes(argv[0]) ? argv[0] : 'show';
+  const a = args(sub === 'show' ? argv : argv.slice(1), ['--name', '--engine', '--assets', '--library'], [], `usage: ${prog} workspace [folder] | workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] | workspace add|list [folder]`);
+  const folder = path.resolve(a.rest[0] ?? '.');
+  if (a.rest[0] !== undefined && !fs.existsSync(folder)) fail(`${folder} does not exist`);
+  if (sub === 'init') {
+    const r = initWorkspace(folder, { name: a.opt('--name'), engine: a.opt('--engine'), assets: a.opt('--assets'), libraries: a.all('--library') });
+    io.out(r.text);
+    io.out(`next: ${prog} workspace add ${a.rest[0] ?? '.'} lists it in the Gallery's hub`);
+    return 0;
+  }
+  if (sub === 'add') {
+    const ws = locate(folder).workspace;
+    if (!ws) fail(`${folder} is in no workspace: ${prog} workspace init <folder> makes one`);
+    const m = readWorkspace(ws!);
+    const cfg = addWorkspace(m.name, ws!);
+    io.out(`registered the workspace "${m.name}" (${ws}) in ${cfg.file}`);
+    return 0;
+  }
+  if (sub === 'list') {
+    const { loadConfig } = await import('../config.ts');
+    const cfg = loadConfig();
+    io.out(cfg.workspaces.length ? cfg.workspaces.map((w) => `${w.name}  ${w.path}`).join('\n') : `no workspaces registered (${cfg.file}): ${prog} workspace add <folder>`);
+    return 0;
+  }
+  io.out(workspaceText(folder));
+  return 0;
+});
+
 export const commands: Record<string, Command> = {
-  gallery: galleryCommand, library: libraryCommand, edit: editCommand, init: initCommand, libraries: librariesCommand, use: useCommand,
+  gallery: galleryCommand, library: libraryCommand, edit: editCommand, workspace: workspaceCommand, init: initCommand, libraries: librariesCommand, use: useCommand,
   remove: removeCommand, packages: packagesCommand, publish: publishCommand, search: searchCommand, outdated: outdatedCommand, update: updateCommand,
 };

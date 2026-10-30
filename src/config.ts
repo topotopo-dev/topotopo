@@ -1,5 +1,5 @@
 // The user's config: the libraries registered by name and the Gallery's settings, and TopoTopo's built-in library.
-//   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], gallery: {port, cors: [origins]}}
+//   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], workspaces: [{name, path}], gallery: {port, cors: [origins]}}
 //   $TOPOTOPO_LIBRARIES                              more libraries: name=path entries separated by path.delimiter
 // TopoTopo carries a library of its own, its built-in library (BUILTIN_LIBRARY), which every project looks in without
 // listing it.
@@ -27,6 +27,8 @@ export interface GalleryConfig {
   /** the config file read (or the one `library add` writes) */
   file: string;
   libraries: LibraryRef[];
+  /** the workspaces (games) registered, by name: the Gallery's hub lists them */
+  workspaces: LibraryRef[];
   gallery: { port: number; cors: string[] };
 }
 
@@ -60,9 +62,14 @@ export function loadConfig(): GalleryConfig {
     if (i > 0) add(entry.slice(0, i), entry.slice(i + 1), 'TOPOTOPO_LIBRARIES');
     else add(slugify(path.basename(path.resolve(entry))) || 'library', entry, 'TOPOTOPO_LIBRARIES');
   }
+  const workspaces: LibraryRef[] = [];
+  for (const w of Array.isArray(raw.workspaces) ? raw.workspaces : []) {
+    if (!w || typeof w.name !== 'string' || typeof w.path !== 'string' || !ID_RE.test(w.name)) throw new Error(`${file}: each workspace is {"name": "...", "path": "..."} (a name of lower-case letters, digits, - and _)`);
+    if (!workspaces.some((x) => x.name === w.name)) workspaces.push({ name: w.name, path: path.resolve(path.dirname(file), w.path) });
+  }
   const g = raw.gallery ?? {};
   return {
-    file, libraries,
+    file, libraries, workspaces,
     gallery: {
       port: Number.isInteger(g.port) ? g.port : DEFAULT_PORT,
       cors: Array.isArray(g.cors) ? g.cors.filter((o: unknown) => typeof o === 'string') : [],
@@ -86,3 +93,16 @@ export function addLibrary(name: string, dir: string): GalleryConfig {
   return loadConfig();
 }
 
+/** Register (or re-point) a workspace in the config file by its name, keeping the file's other keys. */
+export function addWorkspace(name: string, dir: string): GalleryConfig {
+  if (!ID_RE.test(name)) throw new Error(`workspace name "${name}" must match ${ID_RE}`);
+  const file = configFile();
+  let raw: any = {};
+  if (fs.existsSync(file)) raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const list: LibraryRef[] = (Array.isArray(raw.workspaces) ? raw.workspaces : []).filter((w: LibraryRef) => w?.name !== name);
+  list.push({ name, path: path.resolve(dir) });
+  raw.workspaces = list;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
+  return loadConfig();
+}

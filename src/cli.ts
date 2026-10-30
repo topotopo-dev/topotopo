@@ -28,7 +28,11 @@
 //   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/packages/commands.ts)
 //   node src/cli.ts library add|list|new|bake …           registered libraries and projects; edit [folder] opens the
 //                                                         live viewer on a project
-// A project and its packages (src/packages/commands.ts, src/packages/registry.ts, src/packages/update.ts):
+// The workspace (the game) around projects (src/workspace.ts), a project and its packages (src/packages/commands.ts,
+// src/packages/registry.ts, src/packages/update.ts):
+//   node src/cli.ts workspace [folder]
+//   node src/cli.ts workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]
+//   node src/cli.ts workspace add|list [folder]
 //   node src/cli.ts init [folder] [--package owner/name]
 //   node src/cli.ts libraries add|remove <folder or name> [folder]
 //   node src/cli.ts use owner/name [folder] [--version 1.1]
@@ -196,7 +200,7 @@ if (argv[0] === 'view') {
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
-} else if (['gallery', 'library', 'edit', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'update'].includes(argv[0])) {
+} else if (['gallery', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'update'].includes(argv[0])) {
   // the gallery website, its libraries and its editor; a project's packages (src/packages/commands.ts). A command that ends
   // gives its exit code; the gallery and the editor keep running
   const { commands } = await import('./packages/commands.ts');
