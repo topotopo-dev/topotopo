@@ -1239,6 +1239,16 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   const unregistered = await run('workspace', ['library', 'add', 'nowhere', '--workspace', dirs.valley]);
   check(unregistered.code === 1 && /^"nowhere" is no folder here and no registered library \(game, lib, other\): .*"libraries" lists a registered library by its name; register it first \(topotopo library add nowhere <folder>\)/.test(unregistered.err), `an unregistered name is refused: ${unregistered.err}`);
   check(/topotopo-workspace\.json does not list "nope": it lists "lib"/.test((await run('workspace', ['library', 'remove', 'nope', '--workspace', dirs.valley])).err), 'and remove says what it lists for one it does not');
+  // a registered name and a path to its folder are one library
+  const twice = await run('workspace', ['library', 'add', path.relative(dirs.valley, dirs.lib)], dirs.valley);
+  check(twice.code === 0 && readJSON(wsFile).libraries.join() === 'lib' && /lists "\.\.\/lib" already \(as "lib", the same folder\)/.test(twice.out), `add of a folder listed by its registered name lists it once (${twice.out.split('\n')[0]})`);
+  json(wsFile, { ...readJSON(wsFile), libraries: ['lib', '../game'] });
+  const byName = await run('workspace', ['library', 'remove', 'game', '--workspace', dirs.valley]);
+  json(wsFile, { ...readJSON(wsFile), libraries: ['lib', '../lib'] });
+  const both = await run('workspace', ['library', 'remove', 'lib', '--workspace', dirs.valley]);
+  const after = readJSON(wsFile).libraries.join();
+  json(wsFile, { ...readJSON(wsFile), libraries: ['lib'] });
+  check(byName.code === 0 && /lists "lib" in /.test(byName.out) && both.code === 0 && after === '', `remove by a registered name takes a path entry to its folder too, every entry of that folder (${byName.err || byName.out.split('\n')[0]}; left "${after}")`);
   check(/is in no workspace: topotopo workspace init <folder> makes one; outside a workspace every registered library counts/.test((await run('workspace', ['library', 'add', 'game'], CLI)).err), 'outside a workspace it says so');
 
   // a folder named must exist; a version is named apart

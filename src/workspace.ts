@@ -181,15 +181,22 @@ export function workspaceLibrary(op: 'add' | 'remove', given: string, o: { at?: 
   const cwd = o.cwd ?? process.cwd();
   const ws = workspaceOf(o.at ?? cwd);
   const m = readWorkspace(ws), file = path.join(ws, WORKSPACE_FILE);
+  // entries are one library when they name one folder: a registered name and a path to its folder alike
+  const folderOf = (e: string): string | null => {
+    const k = libraryEntry(e);
+    return 'path' in k ? folderKey(path.resolve(ws, k.path)) : 'name' in k && registeredLibrary(e) ? folderKey(registeredLibrary(e)!.path) : null;
+  };
   if (op === 'add') {
-    const entry = workspaceLibraryEntry(ws, given, cwd);
-    if (m.libraries.includes(entry)) return `${file} lists "${entry}" already\n${librariesLine(ws, m)}`;
+    const entry = workspaceLibraryEntry(ws, given, cwd), at = folderOf(entry);
+    const have = m.libraries.find((e) => e === entry || (at !== null && folderOf(e) === at));
+    if (have) return `${file} lists "${entry}" already${have !== entry ? ` (as "${have}", the same folder)` : ''}\n${librariesLine(ws, m)}`;
     m.libraries.push(entry);
   } else {
-    const abs = path.resolve(cwd, given.trim());
-    const entry = m.libraries.find((e) => e === given.trim() || e === given.trim().replace(/\\/g, '/') || ('path' in libraryEntry(e) && path.resolve(ws, e) === abs));
-    if (!entry) throw new Error(`${file} does not list "${given}": it lists ${m.libraries.map((e) => `"${e}"`).join(', ') || 'no libraries'}`);
-    m.libraries = m.libraries.filter((e) => e !== entry);
+    const g = given.trim(), reg = ID_RE.test(g) ? registeredLibrary(g) : null;
+    const at = folderKey(reg ? reg.path : path.resolve(cwd, g));
+    const gone = m.libraries.filter((e) => e === g || e === g.replace(/\\/g, '/') || folderOf(e) === at);
+    if (!gone.length) throw new Error(`${file} does not list "${given}": it lists ${m.libraries.map((e) => `"${e}"`).join(', ') || 'no libraries'}`);
+    m.libraries = m.libraries.filter((e) => !gone.includes(e));
   }
   writeWorkspace(ws, m);
   return `the workspace "${m.name}" lists ${m.libraries.length ? m.libraries.map((e) => `"${e}"`).join(', ') : 'no libraries'} in ${file} "libraries" now\n${librariesLine(ws, m)}`;
