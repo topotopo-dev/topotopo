@@ -93,7 +93,7 @@ try {
   ]);
   check(site.code === 1 && /does not exist/.test(site.out), `check-site through a symlinked path reports a missing site (exit ${site.code}: ${site.out.trim().split('\n')[0] || 'no output'})`);
   check(docs.code === 0 && /docs\/nodes\.md is up to date/.test(docs.out), `gen-docs --check through a symlinked path runs its check (${docs.out.trim() || 'no output'})`);
-  check(kits.code === 0 && /^kits: /m.test(kits.out), `gen-kits --check through a symlinked path runs its check (${kits.out.trim().split('\n').pop() || 'no output'})`);
+  check(kits.code === 0 && /^built-in packages: /m.test(kits.out), `gen-kits --check through a symlinked path runs its check (${kits.out.trim().split('\n').pop() || 'no output'})`);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

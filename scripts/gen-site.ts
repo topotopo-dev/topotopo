@@ -7,8 +7,8 @@
 //                        from examples/renders
 //   nodes/               one page per category from the registered NodeDefs and the outputs of TopoTopo's own packages
 //                        (the data of docs/nodes.md)
-//   packages/            TopoTopo's own packages: the kits of library/, their outputs with the thumbnails in
-//                        library/<kit>/thumbs
+//   packages/            TopoTopo's own packages: the built-in packages of library/, their outputs with the thumbnails in
+//                        library/<name>/thumbs
 //   examples/            every examples/*.json with its render, its description and the graph JSON itself
 //   releases/            docs/release/v*-release-notes.md converted from Markdown
 //   404.html, subscribed.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg (docs/brand/mark.svg)
@@ -32,11 +32,11 @@ const HERO: { name: string; caption: string }[] = [
   { name: 'street_block', caption: 'A street block assembled only from TopoTopo\'s own packages: houses, road, lamp posts, trees, fences.' },
   { name: 'unreal_demo', caption: 'The Unreal 5.8 demo scene: an eroded heightfield that fits a Landscape exactly, a road, packed trees and rocks.' },
   { name: 'terrain_erosion', caption: 'Hydraulic and thermal erosion on a ridged massif, a road cut along a curve, rocks on the steep slopes.' },
-  { name: 'rbd_settle', caption: 'Rigid bodies: rocks of the nature kit dropped onto a terrain until they rest, crates piled one at a time.' },
+  { name: 'rbd_settle', caption: 'Rigid bodies: rocks of the nature package dropped onto a terrain until they rest, crates piled one at a time.' },
   { name: 'particles', caption: 'Particles running down an eroded massif with curl noise and sliding contacts, next to a fountain.' },
   { name: 'textures', caption: 'A brick material from texture nodes, and a crate whose baked AO and curvature become worn paint.' },
   { name: 'quad_remesh', caption: 'Field-aligned quad remeshing (Rust/WASM): each input on the left, its quads on the right.' },
-  { name: 'house_city', caption: 'Nested generators: the architecture kit\'s house spawned on a grid of lots, varied per lot.' },
+  { name: 'house_city', caption: 'Nested generators: the architecture package\'s house spawned on a grid of lots, varied per lot.' },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -73,7 +73,7 @@ const nodeCategories = categories.filter((c) => c !== 'package');
 const resolveType = (t: string) => (catOf.has(t) ? t : getNodeDef(t)?.type ?? null);
 
 const kits = readKits();
-/** The outputs of TopoTopo's own packages, each kit's default output aside (it lines the others up). */
+/** The outputs of TopoTopo's own packages, each package's default output aside (it lines the others up). */
 const kitOutputs = kits.flatMap((k) => k.outputs);
 /** docs/nodes.md anchors of the node types (a full name loses its slashes there) */
 const byAnchor = new Map(defs.map((d) => [anchorOf(d.type), d.type]));
@@ -410,7 +410,7 @@ const toolTable = section(readme, 'MCP tools').find((t) => t.type === 'table') a
 const mcpTools = (toolTable?.rows ?? []).map((r) => r[0].text.replace(/`/g, '').trim()).filter(Boolean);
 const kitJson = findCode(section(readme, "TopoTopo's own packages"), /"type"/, 'json');
 
-const counts = `<strong>${nodeDefs.length}</strong> node types · <strong>${kitOutputs.length}</strong> ready-made outputs in ${kits.length} kits · ` +
+const counts = `<strong>${nodeDefs.length}</strong> node types · <strong>${kitOutputs.length}</strong> ready-made outputs in ${kits.length} packages · ` +
   `<strong>${examples.length}</strong> example graphs · ${esc(pkg.license ?? 'Apache-2.0')}`;
 
 page({
@@ -426,7 +426,7 @@ page({
 </figure>`).join('\n');
   const links = [
     ['nodes/index.html', 'Node reference', `${nodeDefs.length} node types in ${nodeCategories.length} categories: params, inputs, examples`],
-    ['packages/index.html', 'TopoTopo\'s own packages', `${kits.length} kits, ${kitOutputs.length} ready-made outputs used like nodes`],
+    ['packages/index.html', 'TopoTopo\'s own packages', `${kits.length} packages, ${kitOutputs.length} ready-made outputs used like nodes`],
     ['examples/index.html', 'Examples', `${examples.length} example graphs with their renders`],
     ...(releases.length ? [[releases[0].out, 'Release notes', `what is in ${releases[0].version}, known limits`]] : []),
     [REPO, 'Source on GitHub', 'issues, contributing, licence'],
@@ -586,7 +586,7 @@ ${nodesSidebar(c)}
 <div class="content">
 <h1 id="${esc(c)}-nodes">${esc(c)} nodes</h1>
 <p class="intro">${isPackage
-  ? `${list.length} outputs of TopoTopo's own packages, the kits in its built-in library (see <a href="${u('packages/index.html')}">TopoTopo's own packages</a>), by full name; a kit's name alone is its default output, which lines its outputs up. A package's graph names one like any node, and its first use copies the kit's version into the package. Their parameters are the outputs' typed vars and their inputs the graphs' <code>input</code> nodes; <code>assets {action: "fork"}</code> copies one's graph into the package's assets to edit.`
+  ? `${list.length} outputs of TopoTopo's own packages, the packages of its built-in library (see <a href="${u('packages/index.html')}">TopoTopo's own packages</a>), by full name; a built-in package's name alone is its default output, which lines its outputs up. A package's graph names one like any node, and its first use copies the package's version into the package. Their parameters are the outputs' typed vars and their inputs the graphs' <code>input</code> nodes; <code>assets {action: "fork"}</code> copies one's graph into the package's assets to edit.`
   : `${list.length} node type${list.length > 1 ? 's' : ''} in the <code>${esc(c)}</code> category.`}</p>
 <ul class="chips">${list.map((d) => `<li><a href="#${esc(d.type)}">${esc(d.type)}</a></li>`).join('')}</ul>
 ${list.map(nodeSection).join('\n')}
@@ -601,7 +601,7 @@ page({
   out: 'packages/index.html',
   title: 'TopoTopo\'s own packages',
   nav: 'packages',
-  description: `TopoTopo's own packages: ${kits.length} kits of ${kitOutputs.length} ready-made generators (walls, houses, roofs, stairs, rocks, trees, props, roads) used like nodes.`,
+  description: `TopoTopo's own packages: ${kits.length} packages of ${kitOutputs.length} ready-made generators (walls, houses, roofs, stairs, rocks, trees, props, roads) used like nodes.`,
 }, () => {
   const card = (type: string, name: string, kit: string) => {
     const d = packageOutputs.find((x) => x.type === type);
@@ -617,11 +617,11 @@ ${d?.package?.tags?.length ? `<p class="meta">tags: ${d.package.tags.map(esc).jo
 </article>`;
   };
   return `<h1>TopoTopo's own packages</h1>
-<p class="intro">${kitOutputs.length} ready-made generators in ${kits.length} kits, TopoTopo's own packages: walls, windows and doors, whole
+<p class="intro">${kitOutputs.length} ready-made generators in ${kits.length} packages, TopoTopo's own packages: walls, windows and doors, whole
 houses, roofs, stairs, railings and floors, props, trees and rocks, roads and street furniture, and generators that dress
 a road or a terrain. TopoTopo carries them built in (<a href="${esc(repoUrl('library'))}">library/</a>), so they work
 offline and every package finds them without listing a library. A package's graph names an output by its full name; the
-first use copies the kit's version into the package and locks it, as for any package, and a newer version a TopoTopo
+first use copies the package's version into the package and locks it, as for any package, and a newer version a TopoTopo
 release brings shows as an update. Each output documents its typed parameters, puts its pivot at the base and tags every
 piece with <code>name</code> and <code>material</code>; it says what it is (its kind) and carries tags a search finds it by
 (<code>topotopo search --tag street-furniture</code>, or the MCP <code>library</code> tool's <code>search</code>, across

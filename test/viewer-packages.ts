@@ -166,7 +166,7 @@ try {
     const found = (await get('/api/packages/search?q=tree')).j;
     const hits = found.libraries.flatMap((l: any) => l.hits.map((h: any) => `${l.standing}:${h.type}${h.used ? `@${h.used}` : ''}`));
     check(hits.includes('listed:studio/trees/pine@1.0') && hits.some((h: string) => h.startsWith('builtin:topotopo/nature/')),
-      `Find packages: the package's libraries and TopoTopo's kits, and what the package uses (${hits.join(', ')})`);
+      `Find packages: the package's libraries and TopoTopo's built-in packages, and what the package uses (${hits.join(', ')})`);
     check((await get('/api/packages/author')).status === 400, 'a package that is no package has no author panel');
     check(t.working.length === 1 && t.working[0].dir === TREES && t.working[0].library === '../lib' && t.followed === null && JSON.stringify(t.libraries) === '["../lib"]',
       'its working folder in the libraries the package lists; not followed');

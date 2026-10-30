@@ -10,7 +10,7 @@ graph and its seeds, and the core is browser-ready.
   scattering and instancing, robust booleans, Voronoi fracture, an SDF/implicit toolkit and sampled SDF grids,
   heightfield terrain (masks, hydraulic and thermal erosion, roads, scattering), procedural textures and bakes,
   cloth draping and inflation (XPBD), L-systems, text, loops, a frame solver, in-graph checks, and code nodes. TopoTopo's
-  own packages, kits of ready-made generators (walls, houses, roofs, stairs, props, trees, rocks, roads, PCG helpers), are
+  own packages, ready-made generators (walls, houses, roofs, stairs, props, trees, rocks, roads, PCG helpers), are
   used like nodes. Every node documents its params and carries an example that is cooked in the tests.
 - **Familiar to Houdini users**: SOP-style nodes, attributes, groups and `.geo` export; Houdini node names work as
   aliases. Blender Geometry Nodes and Unreal PCG users will recognise the rest.
@@ -89,7 +89,7 @@ The current release is v0.4 ([release notes](docs/release/v0.4-release-notes.md)
 `npm install -g ./topotopo-<version>.tgz` (or into a project).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations, and
 `import { createNodeHost, openPackage } from 'topotopo/node'` the Node host and packages with the packages they use, for a
-script that cooks package outputs itself (a world generator): `openPackage(engine, dir)` puts the package's packages,
+script that cooks package outputs itself (a world generator): `openPackage(engine, dir)` puts the packages a package uses, its
 graphs and assets in the engine's root scope, and `packages.addFor(graph)` adds what a graph names on first use.
 
 **From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for
@@ -121,7 +121,7 @@ npm run preview
 The viewer opens a package (`topotopo edit <package>`, the MCP server's package, or `topotopo view graph.json`) with
 the package's default graph in view; the browser tab is named after the package. A package's graphs are the files in
 `graphs/` and the graph files beside its `project.json`. A package without graphs shows its name, a pointer to
-TopoTopo's kits and what to ask your agent; a folder that is no package says so and how to make it one. The left panel
+TopoTopo's built-in packages and what to ask your agent; a folder that is no package says so and how to make it one. The left panel
 has four tabs: **Scene** (the graph's nodes and guides), **Outputs**, **Inputs** and, in a package, **Packages** (see
 [Packages](#packages)). **Outputs**, the default, shows each graph's results, one card per result, and their textures;
 click one to inspect it alone, and **Scene** in the top bar returns to the whole scene. Publish extra results in graph
@@ -224,14 +224,14 @@ works in that package's folder. The first reply the agent gets says which of the
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inputs` | `list` the files in the package `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
 | `inspect` | one-screen summary (counts, triangles, bbox to the millimetre, parts, materials, images, uv state, open edges), `detail: "budget"` (triangles per part, per LOD and per node), `detail: "scene"` (the glb export read back: nodes, sockets, parents, meshes, materials, images), attribute stats, topology health (a closed solid or why not: open edges counted after welding uv/normal seam splits, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part and world position of the first one and the fix; pieces, volume, genus, render/export triangle slivers), element listings, images (size and per-layer ranges), `detail: "uv"` (exact uv overlaps split into in-tile, tiling and across-LOD overlap with parts and positions, collapsed and out-of-tile triangles, charts, utilization, per-piece texel density; `json: true`) |
-| `render` | PNG with persp/front/right/top views (every 3D view fits the bounds; `zoom` is relative to that fit), three-quarter views (`front_left`, `back_right`, …), `size: "1600x600"` for wide views, `transparent` background, `grid: false`, a reference image behind the views (`underlay`, `underlay_opacity`, `underlay_fit`), scene empties as labelled dots (`sockets`), `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `shading: "pbr"` (the exported metallic-roughness material with its base colour, normal, orm and roughness maps under a fixed studio rig; deterministic, `exposure` in stops), `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the kits' thumbnails), `heightfield_res` (heightfield quads drawn per side, default 256, or `"full"`), `heightfield_layer` (the heightfield layer drawn in red, default the mask, or `"none"`); a footer line names what is shown (help topic `render`) |
+| `render` | PNG with persp/front/right/top views (every 3D view fits the bounds; `zoom` is relative to that fit), three-quarter views (`front_left`, `back_right`, …), `size: "1600x600"` for wide views, `transparent` background, `grid: false`, a reference image behind the views (`underlay`, `underlay_opacity`, `underlay_fit`), scene empties as labelled dots (`sockets`), `turntable`, a `uv` view (`quad_uv`), uv checker, a `texture` view of images and `textures: true` for base colour maps on meshes, colour by attribute (+ `legend`), group highlight, flipped normals in blue; opt-in overlays: `section` view and `clip` plane with filled caps, edge overlays (`wireframe` all / hard / boundary / groups), `glyphs` (N, up, orient, v), group / piece / attribute labels and point / prim numbers, `shading` flat / matcap / ao, `shading: "pbr"` (the exported metallic-roughness material with its base colour, normal, orm and roughness maps under a fixed studio rig; deterministic, `exposure` in stops), `scale: 2`, `view_labels: false` (no view labels or axis gizmo, as in the built-in packages' thumbnails), `heightfield_res` (heightfield quads drawn per side, default 256, or `"full"`), `heightfield_layer` (the heightfield layer drawn in red, default the mask, or `"none"`); a footer line names what is shown (help topic `render`) |
 | `export` | glb / gltf / obj / usda / ply / stl / json / geo / csv / points.json (packed instances: instance rows + meshes sidecar + one GLB per source); heightfields: png16 / r16 (+ JSON sidecar with the Unreal import numbers) / mask_png / unreal_landscape (a directory bundle); images: textures (one PNG per image; glb/gltf embed and usda writes the textures materials use); every export records its source (graph, vars, seeds, frame, version) to be made again |
 | `graphs` | list / get / delete / rename / duplicate package graphs (stored as JSON in the package's `graphs/`) |
 | `assets` | save a graph with vars as a reusable node type (like an HDA); list / get / delete; `fork` copies a package output's graph (TopoTopo's own included) into the package's assets to edit |
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, heightfields, images and SDF grids, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `workspace` | the workspace (the game) around the open package: `show` it, or make a game's folder one with `init_workspace`; the person's libraries of packages (the web app): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a package the folder every tool and the viewer work in, or `init`, which makes the server's folder a package (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the open package's packages: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the package can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
+| `workspace` | the workspace (the game) around the open package: `show` it, or make a game's folder one with `init_workspace`; the person's libraries of packages (the web app): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a package the folder every tool and the viewer work in, or `init`, which makes the server's folder a package (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the packages the open package uses: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the package can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
 
 ## Graph format
 
@@ -336,11 +336,11 @@ Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with
 `splines` shows the curve toolkit: a NURBS road projected onto bumpy ground, a boardwalk with filleted corners and
 offset handrails, and a Bezier letter extruded. `street_block` is a street block built only from TopoTopo's own packages
 (see [TopoTopo's own packages](#topotopos-own-packages)). `textures` is a brick wall material made only from texture
-nodes and the props kit's crate with baked AO and curvature turned into worn paint on its edges and an ORM map,
+nodes and the props package's crate with baked AO and curvature turned into worn paint on its edges and an ORM map,
 rendered with `textures: true` next to the texture view. `texture_lab` is worn painted metal from texture nodes only:
 SDF plates and rivets, edge wear from curvature, chipped by grunge and slope blur, brushed steel under the paint, a paint
 tint per plate from flood fill, rust running from the rivets, AO and an ORM map.
-`house_city` spawns the architecture kit's `house` on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
+`house_city` spawns the architecture package's `house` on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
 straight-skeleton roofs (an L-shaped house, a courtyard roof around a hole, nested offsets). `deformers` (lattice,
 path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert) and `remesh_lod` (isotropic remesh,
 repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
@@ -349,8 +349,8 @@ sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a b
 power), and `terrain_tiles` bends escarpments and a river with domain-warped noise, with one tile of the map cooked on
 its own (`heightfield_crop`) floating above the area it matches. `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
 collision surface, curl noise, sliding contacts; trails coloured by age) next to a fountain bouncing on a plane.
-`rbd_settle` drops the nature kit's rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
-crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of the props kit's crates, a
+`rbd_settle` drops the nature package's rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
+crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of the props package's crates, a
 banner pinned between two poles in the wind, and a box inflated into a cushion.
 
 To cook a graph from the command line:
@@ -422,11 +422,11 @@ topotopo web
 ```
 
 Each package has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
-`/embed/<library>/<id>`. TopoTopo's kits have cards and pages of their own (`/k/<kit>`), with each output's thumbnail.
-A package's or kit's page lists its versions (each opens to the outputs it published), the outputs of the newest with
-their kinds and tags, and the packages that use it; a package's page links the packages it uses. The grid marks
+`/embed/<library>/<id>`. TopoTopo's built-in packages have cards and pages of their own (`/k/<id>`), with each output's thumbnail.
+A package's page lists its versions (each opens to the outputs it published), the outputs of the newest with
+their kinds and tags, the packages that use it and the packages it uses. The grid marks
 packages with their full name and packages that have an update; its search finds packages by the packages they use and
-the outputs of packages and kits by name, kind and tag. A package without the graph its `project.json` shows says "no
+the outputs of packages and built-in packages by name, kind and tag. A package without the graph its `project.json` shows says "no
 default graph yet" instead of a failed bake.
 
 ## Packages
@@ -463,7 +463,7 @@ instead, for a build machine. `topotopo remove` drops a package no graph names a
 uses. Only a package uses packages: `topotopo init` (MCP: `workspace {action: "init"}`) makes a folder one, and the MCP
 server makes its folder one when it starts if the folder is in no package and holds nothing but `graphs/`,
 `assets/`, `exports/` and `inputs/`, or nothing at all. A package's own graphs name its other outputs the same way, a
-kit's house of the kit's walls: they resolve to the same version, with no entry in `uses`, and outputs that name each
+house of the package's walls: they resolve to the same version, with no entry in `uses`, and outputs that name each
 other in a loop are refused. To tune a package while looking at one that uses it, `--follow studio/trees` (or
 the MCP `workspace` tool's `follow`) uses the package's working folder for one session. Exports record the package
 versions they used.
@@ -492,7 +492,7 @@ has, values its narrower range clamps, options it dropped). It ends with the com
 `--from` the version in use `--to` the new one with `--apply`.
 
 In the live viewer (`topotopo edit levels/forest`, or `topotopo view` on a graph in a package) the **Packages** tab
-has **Find packages**, a search of TopoTopo's kits and every library, and a box per package in use: its
+has **Find packages**, a search of TopoTopo's built-in packages and every library, and a box per package in use: its
 version and a badge (up to date, update available, live), the nodes that use it (a click shows one), and its outputs,
 folded, with the ones in use marked. Where a package has a working folder of its own, **Source: Published 1.1 | Live
 folder** shows that folder's unpublished edits for the viewer session, and every save there cooks the scene
@@ -538,7 +538,7 @@ topotopo update studio/trees levels/forest --from 1.0 --to 1.1 --apply
 
 ## TopoTopo's own packages
 
-TopoTopo comes with packages of its own, four kits of ready-made generators in its built-in library
+TopoTopo comes with packages of its own, four packages of ready-made generators in its built-in library
 ([library/](library)), used by full name like any package's outputs. `topotopo/architecture` has walls with windows
 and doors, whole houses, roofs (gable, hip, and straight-skeleton roofs for any footprint), stairs, railings, pillars,
 arches, floors, trusses and scaffolds; `topotopo/nature` rocks, cliffs, trees, bushes and logs, and forests, grass and
@@ -550,7 +550,7 @@ rock fields that dress a surface; `topotopo/props` barrels, crates, pallets, san
 ```
 
 TopoTopo carries them built in, so they work offline and every package finds them without listing a library: the first
-graph that names an output copies its kit's version into the package's `packages/` and locks it, as for any package,
+graph that names an output copies its package's version into the package's `packages/` and locks it, as for any package,
 and a newer version in a TopoTopo release shows as an update (`topotopo outdated`) instead of changing a scene by
 itself. A graph outside a package cannot use them: `topotopo init` makes its folder one (the MCP server makes a
 folder one that holds nothing but TopoTopo's own folders). Each output documents its typed parameters (`help {nodes: ["topotopo/architecture/stairs"]}`, or
@@ -558,19 +558,19 @@ folder one that holds nothing but TopoTopo's own folders). Each output documents
 `name` and `material` attributes, so exports split and shade cleanly. Outputs that follow a curve (`railing`, `fence`,
 `pipe_run`, `road_strip`) take it as input 0 and those that dress a surface (`scatter_rocks`, `forest_patch`,
 `grass_clumps`) take the surface as input 0; without an input they build a default one, which is what the thumbnails
-show. A kit's pieces build on each other (the house is the kit's walls and roof), and a kit's default output
+show. A built-in package's pieces build on each other (the house is the package's walls and roof), and its default output
 (`topotopo/nature` alone, or `topotopo/nature/kit`) lines its outputs up. Every output has its kind pinned and tags
 a game developer searches by (`conifer`, `modular`, `masonry`, `street-furniture`): `topotopo search --tag
 street-furniture`. `assets {action: "fork", name: "topotopo/architecture/stairs"}` copies
 an output's graph into the package's assets to edit. [examples/street_block.json](examples/street_block.json) builds a
-street block from the kits alone (transform, merge and copy nodes just place them):
+street block from the built-in packages alone (transform, merge and copy nodes just place them):
 
 ![street block](examples/renders/street_block.png)
 
-`npm run kits` rewrites the kits' line-ups, their thumbnails and the tables below. `npm run kits -- --publish nature
---note "..."` publishes a kit's next version, numbered as for any package (TopoTopo's own packages are published there
-and nowhere else), and `npm test` fails while a kit's working folder differs from its newest version.
-`node test/kits.ts` cooks every output at its defaults and at the ends of every numeric range.
+`npm run kits` rewrites the built-in packages' line-ups, their thumbnails and the tables below. `npm run kits -- --publish nature
+--note "..."` publishes a built-in package's next version, numbered as for any package (TopoTopo's own packages are published there
+and nowhere else), and `npm test` fails while a built-in package's working folder differs from its newest version.
+`node test/builtin.ts` cooks every output at its defaults and at the ends of every numeric range.
 
 <!-- kits:start (generated by npm run kits) -->
 
@@ -630,7 +630,7 @@ and nowhere else), and `npm test` fails while a kit's working folder differs fro
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, crops and tiles that match the whole map, erosion determinism and mass conservation, the same erosion settings at three spacings, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
-| kits | `npm run test:kits [-- filter]` | every output of TopoTopo's own packages, cooked as a package that uses its kit: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; each kit's line-up, thumbnails and README table current, and its working folder its newest version; `assets` fork / list / get / delete; the catalog and help |
+| builtin | `npm run test:builtin [-- filter]` | every output of TopoTopo's own packages, cooked as a package that uses it: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; each package's line-up, thumbnails and README table current, and its working folder its newest version; `assets` fork / list / get / delete; the catalog and help |
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
 | particles | `npm run test:particles` | the particles node: emission counts and lifetimes, attribute and group carry, determinism, pool on/off bit-identical (noise, fields, mesh and floor collisions, trails), particles never below the floor or a mesh and never inside a closed one, spheres kept pscale off a mesh, trail lengths/curveu/ages, max_particles, max_births (step cap, batched runs = one run), frames = one long run (resume, jump back, substeps, moving emitter), point/heightfield/SDF fields, wind, attraction, analytic Perlin gradients and divergence-free curl noise, 100k particles × 200 steps |
 | rbd | `npm run test:rbd` | rbd_settle / rbd_stack: rocks rest on the ground plane, a terrain mesh and a heightfield (exact hulls checked independently: no vertex below the surface or inside another piece beyond 5 mm / 1 cm; reduced hulls within 5 % of a radius), every piece settled and touching something, bit-identical across cooks, engines and pool on/off, input order independent (also coincident pieces of different shapes), packed = unpacked, static `active` = 0 pieces, initial `v`, fallen pieces and `delete_fallen`, the overlap warning, `ground_plane` auto, `max_pieces`, a 12-crate pile that keeps every crate, animate (frame 1, resumed frames, last frame = settled), every collision shape, and the 1,000-piece timing |
@@ -675,7 +675,7 @@ depend on the locale, exact file-name case, a symlinked checkout and LF line end
 
 **Package.** `npm run pack:test` builds and packs the npm tarball, installs it into an empty project in a temp
 directory and uses it from there: the `topotopo` bin (help, cooking an example with a render), the library import and
-its types, the built-in library of TopoTopo's own packages (a package's first use copies a kit from it), the bundled font,
+its types, the built-in library of TopoTopo's own packages (a package's first use copies a built-in package from it), the bundled font,
 the worker pool, the WASM kernels and the MCP server over stdio. It takes about a minute and is not part of
 `npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 

@@ -171,21 +171,21 @@ try {
       && /placeholder="Search \d+ packages and \d+ outputs"/.test(grid), 'the grid\'s search finds a package\'s outputs by name, kind and tag: each card carries them, shown when the search finds them');
     check(/data-hay="[^"]*studio\/trees/.test(cardOf('game/forest')) && /<span class="upd" title="studio\/trees 1\.0 is in use; 1\.1 is out">update: studio\/trees 1\.1<\/span>/.test(cardOf('game/forest')),
       'a package\'s card: the search finds it by the packages it uses, and it says that an update exists');
-    // TopoTopo's kits: on the grid, searchable, with a page and thumbnails, and the packages that use them
+    // TopoTopo's built-in packages: on the grid, searchable, with a page and thumbnails, and the packages that use them
     const kit = cardOf('kit/props');
     check(/<section class="library kits" id="kits">/.test(grid) && /href="\/k\/props" data-key="kit\/props"/.test(grid) && /<span class="out" hidden data-hay="topotopo\/props\/barrel [^"]*"><code>topotopo\/props\/barrel<\/code>/.test(kit) && /src="\/k\/props\/thumbs\/[a-z_]+\.png"/.test(kit),
-      'TopoTopo\'s kits have cards on the grid, whose search finds their outputs');
+      'TopoTopo\'s built-in packages have cards on the grid, whose search finds their outputs');
     const kp = (await req('/k/props')).body.toString();
     check(/<h1>Props kit<\/h1>/.test(kp) && /<code>topotopo\/props\/barrel<\/code>/.test(kp) && /<img src="\/k\/props\/thumbs\/barrel\.png"/.test(kp) && /<h2>Used by <span class="count">0<\/span>/.test(kp),
-      'a kit\'s page: its outputs with their thumbnails, its versions, the packages that use it');
+      'a built-in package\'s page: its outputs with their thumbnails, its versions, the packages that use it');
     const th = await req('/k/props/thumbs/barrel.png');
     check(th.status === 200 && th.headers['content-type'] === 'image/png' && (await req('/k/props/thumbs/..%2Fproject.json')).status === 404 && (await req('/k/nope')).status === 404,
-      'a kit\'s thumbnails are served, nothing else of its folder');
+      'a built-in package\'s thumbnails are served, nothing else of its folder');
     edit(forest.dir, (m) => { m.uses = { ...m.uses, 'topotopo/props': '1.0' }; });
     g.rescan();
     const user2 = (await req('/p/game/forest')).body.toString();
     check(/<th><a href="\/k\/props">topotopo\/props<\/a><\/th><td>1\.0<\/td>/.test(user2) && /<a href="\/p\/game\/forest">Forest<\/a>/.test((await req('/k/props')).body.toString()),
-      'a package\'s page links the kits it uses, and the kit\'s page lists the package');
+      'a package\'s page links the built-in packages it uses, and the built-in package\'s page lists the package');
     const api = JSON.parse((await req('/api/packages')).body.toString());
     check(JSON.stringify(api.packages.find((x: any) => x.id === 'trees')?.package) === '{"name":"studio/trees","version":"1.1"}' && api.packages.find((x: any) => x.id === 'forest')?.package === undefined,
       '/api/packages names the packages too');
@@ -204,7 +204,7 @@ try {
     check(home.indexOf('id="ws-hunt"') > 0 && home.indexOf('id="ws-hunt"') < home.indexOf('id="lib-game"') && /Godot · game\/project\.godot · exports to res:\/\/assets\/topotopo/.test(block)
       && /Pump hall/.test(block) && /<a href="\/k\/props">topotopo\/props<\/a> 1\.0/.test(block),
       `the front page lists the workspace first: its engine, its packages, the packages it uses (${block.replace(/\s+/g, ' ').slice(0, 900)})`);
-    check(/<a href="\/#ws-hunt">workspace hunt<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/k/props')).body.toString()), 'a kit\'s users include the workspaces that use it');
+    check(/<a href="\/#ws-hunt">workspace hunt<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/k/props')).body.toString()), 'a built-in package\'s users include the workspaces that use it');
     cfg.workspaces.length = 0;
     g.rescan();
   }

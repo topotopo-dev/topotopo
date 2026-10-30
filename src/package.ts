@@ -385,14 +385,14 @@ export function startPackage(dir: string, o: { name?: string } = {}): PackageSta
     const held = `${other.slice(0, 3).join(', ')}${other.length > 3 ? ` and ${other.length - 3} more` : ''}`;
     return {
       dir: abs, log: `the folder ${abs} is in no package and holds ${held}, which TopoTopo does not make: left as it is`,
-      note: `The folder ${abs} is in no package, so its graphs cannot use packages, TopoTopo's own kits ("topotopo/nature/rock" …) among them: it holds ${held}, which TopoTopo does not make (it makes graphs/, assets/, exports/, inputs/), so the server left it as it is. Ask the person before making it a package; workspace {action:"init"} then does it (project.json, graphs/, .gitignore, .gitattributes).`,
+      note: `The folder ${abs} is in no package, so its graphs cannot use packages, TopoTopo's own packages ("topotopo/nature/rock" …) among them: it holds ${held}, which TopoTopo does not make (it makes graphs/, assets/, exports/, inputs/), so the server left it as it is. Ask the person before making it a package; workspace {action:"init"} then does it (project.json, graphs/, .gitignore, .gitattributes).`,
     };
   }
   let made: ReturnType<typeof initPackage>;
   try { made = initPackage(abs, { name: o.name }); } catch (e: any) { return { dir: abs, log: `the folder ${abs} could not be made a package: ${e.message}`, note: `The folder ${abs} could not be made a package, so its graphs cannot use packages: ${e.message}` }; }
   return {
     dir: abs, log: `made the folder ${abs} a package (project.json): it held nothing but what TopoTopo makes itself`,
-    note: `The folder ${abs} became a package, "${made.manifest.id}", when the server started (project.json, graphs/${made.manifest.graph}.json): it held nothing but TopoTopo's own folders. Its graphs use packages as they come, TopoTopo's own kits ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish versions of it, workspace {action:"set", package:"<owner>/${made.manifest.id}"} names it; to use packages from another library, workspace {action:"set", libraries:[...]} when the person names it.`,
+    note: `The folder ${abs} became a package, "${made.manifest.id}", when the server started (project.json, graphs/${made.manifest.graph}.json): it held nothing but TopoTopo's own folders. Its graphs use packages as they come, TopoTopo's own packages ("topotopo/nature/rock" …) among them. Next: build into graph "${made.manifest.graph}"; to publish versions of it, workspace {action:"set", package:"<owner>/${made.manifest.id}"} names it; to use packages from another library, workspace {action:"set", libraries:[...]} when the person names it.`,
   };
 }
 

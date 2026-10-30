@@ -49,7 +49,7 @@ function categoriesOf(defs: NodeDef[]): string[] {
 /** The anchor GitHub gives a heading: lower case, punctuation but - and _ dropped ("topotopo/nature/rock" → "topotoponaturerock"). */
 export const anchorOf = (heading: string) => heading.toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '').replace(/ /g, '-');
 
-/** The thumbnail of an output of one of TopoTopo's own packages, library/<kit>/thumbs/<output>.png (repository path), or null. */
+/** The thumbnail of an output of one of TopoTopo's own packages, library/<name>/thumbs/<output>.png (repository path), or null. */
 export function thumbOf(type: string): string | null {
   const m = /^topotopo\/([a-z0-9_-]+)\/([a-z0-9_-]+)$/.exec(type);
   return m ? `library/${m[1]}/thumbs/${m[2]}.png` : null;
@@ -95,7 +95,7 @@ function nodeSection(def: NodeDef): string[] {
 }
 
 /**
- * The outputs of TopoTopo's own packages as node definitions (category "package"): every output and each kit's default
+ * The outputs of TopoTopo's own packages as node definitions (category "package"): every output and each package's default
  * output, at the newest version TopoTopo's built-in library holds, as the catalog offers them outside a package.
  */
 export async function kitDefs(): Promise<NodeDef[]> {
@@ -139,9 +139,9 @@ export function renderNodeReference(nodes: NodeDef[] = allNodeDefs(), packages: 
   for (const c of cats) {
     out.push(`## ${c} nodes`, '');
     if (c === 'package') {
-      out.push('The outputs of TopoTopo\'s own packages, the kits in its built-in library ([library/](../library); see the README',
-        'section "TopoTopo\'s own packages"), by full name; a kit\'s name alone is its default output, which lines its outputs up.',
-        'A package\'s graph names one like any node, and its first use copies the kit\'s version into the package. Their',
+      out.push('The outputs of TopoTopo\'s own packages, the packages of its built-in library ([library/](../library); see the README',
+        'section "TopoTopo\'s own packages"), by full name; a built-in package\'s name alone is its default output, which lines its outputs up.',
+        'A package\'s graph names one like any node, and its first use copies the built-in package\'s version into the package. Their',
         'parameters are the outputs\' typed vars; their inputs are the graphs\' `input` nodes. `assets {action: "fork"}`',
         'copies one\'s graph into the package\'s assets to edit.', '');
     }

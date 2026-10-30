@@ -3,7 +3,7 @@
 // preview, and stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their
 // notes and the outputs it publishes with their kinds and tags (from its versions' records), which the grid's search
 // finds as well, and the packages that use it; any package's page the packages it uses, linked, and the grid marks a
-// package with an update. TopoTopo's kits (its built-in library) have cards and pages of their own (/k/<id>), with
+// package with an update. TopoTopo's built-in packages (its built-in library) have cards and pages of their own (/k/<id>), with
 // each output's thumbnail, and the search finds their outputs too. It reads
 // files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in editor"
 // starts a `topotopo edit` child.
@@ -208,10 +208,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     app: (name) => `/app/${name}`,
     three: '/vendor/three/',
   };
-  // TopoTopo's kits: read again on each page (a few small files), so a kit published while the web app runs shows
+  // TopoTopo's built-in packages: read again on each page (a few small files), so a built-in package published while the web app runs shows
   const kits = () => listKits();
   const kitOf = (name: string, all = kits()) => all.find((k) => k.name === name);
-  /** The newest version of a package the web app knows of: its package's in a library, or TopoTopo's kits'. */
+  /** The newest version of a package the web app knows of: its package's in a library, or TopoTopo's built-in packages'. */
   const newestOf = (name: string, homes = packageHomes(), all = kits()) =>
     [...(homes.get(name) ? publishedVersions(homes.get(name)!.dir, name) : []), ...(kitOf(name, all)?.versions ?? [])].map((x) => x.version).sort(compareVersions).at(-1);
   /** The packages of the libraries and the workspaces that use a package, with the version each uses. */
@@ -317,7 +317,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       uses,
     };
   };
-  /** A kit's page: its versions, its outputs with their thumbnails, the packages that use it. */
+  /** A built-in package's page: its versions, its outputs with their thumbnails, the packages that use it. */
   const kitData = (k: Kit) => ({
     ...kitCard(k),
     versions: [...k.versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(k.name, v) })),
@@ -405,9 +405,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         return json(200, { libraries: scans.map((s) => ({ name: s.name, packages: s.packages.length, problems: s.problems })), packages: listJSON() }, cors);
       }
       if (seg[0] === 'k' && seg.length >= 2) {
-        const k = kits().find((x) => x.id === decodeURIComponent(seg[1])) ?? (() => { throw new HttpError(404, `no kit "${decodeURIComponent(seg[1])}" in TopoTopo's built-in library`); })();
+        const k = kits().find((x) => x.id === decodeURIComponent(seg[1])) ?? (() => { throw new HttpError(404, `no package "${decodeURIComponent(seg[1])}" in TopoTopo's built-in library`); })();
         if (seg.length === 2 || (seg.length === 3 && !seg[2])) return html(kitPage(kitData(k), urls));
-        // a kit's thumbnail of one of its outputs (thumbs/<output>.png), nothing else of its folder
+        // a built-in package's thumbnail of one of its outputs (thumbs/<output>.png), nothing else of its folder
         if (seg[2] === 'thumbs' && seg.length === 4) {
           const name = decodeURIComponent(seg[3]);
           const o = /^([a-z0-9][a-z0-9_-]*)\.png$/.exec(name) && k.outputs.find((x) => `${x.id}.png` === name && x.thumb);

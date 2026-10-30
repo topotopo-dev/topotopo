@@ -30,7 +30,7 @@ TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / hei
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
 LIBRARIES: the person's packages live in libraries the web app (topotopo web) shows (their board links to them). workspace {action:"list"} finds one, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one. See help topic "library".
 WORKSPACES: a game with topotopo-workspace.json at its root: its packages share the libraries it lists and one copy of each package version, and an export target "engine:<path>" writes into its engine project (Godot, Unreal). workspace {action:"show"} says what the open package's workspace holds; {action:"check"} cooks what it relies on and lists what broke (after a TopoTopo update). See help topic "workspace".
-PACKAGES: a package uses the published outputs of other packages as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the package once the graph validates. TopoTopo's own packages are four kits built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a package's graphs use packages: the server makes its package one when it starts if the folder holds nothing but a package's own folders (its first reply says so), and workspace {action:"init"} makes any other open package one when the person says so. workspace {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the package can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
+PACKAGES: a package uses the published outputs of other packages as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the package once the graph validates. TopoTopo's own packages are four packages built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a package's graphs use packages: the server makes its package one when it starts if the folder holds nothing but a package's own folders (its first reply says so), and workspace {action:"init"} makes any other open package one when the person says so. workspace {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the package can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -922,7 +922,7 @@ Assets are stored as JSON in the package's assets/ folder and load on startup; l
 Ready-made generators are TopoTopo's own packages, used by full name (help topic "packages"): walls, houses, roofs,
 stairs, rocks, trees, props and roads such as {"type": "topotopo/architecture/stairs", "params": {"steps": 12}}. To
 change one: assets {action:"fork", name:"topotopo/architecture/stairs", to:"my_stairs"} copies the output's graph into
-the package's assets as my_stairs (an output whose graph names the kit's other outputs adds the kit to the package);
+the package's assets as my_stairs (an output whose graph names the package's other outputs adds the built-in package to the package);
 assets {action:"get", name:"my_stairs"} shows it, assets {action:"save", name:"my_stairs", graph} writes it back, and
 {"type": "my_stairs"} uses it.`,
 
@@ -956,12 +956,12 @@ WHAT AN OUTPUT IS: its kind, its tags and its description, which search, the cat
 - tags: free words search finds the output by: lower-case letters, digits and -, starting with a letter or digit, at
   most 64 characters, at most 16 per output, each once ("low-poly", "street-furniture"); a malformed one is an error. A
   package's own "tags" in project.json stay the web app's; search matches both.
-- description: the output's "description", else its graph's "description" (a kit's outputs, one graph each, need no
+- description: the output's "description", else its graph's "description" (a built-in package's outputs, one graph each, need no
   more). The default output carries the tags and description of the named output it is, if any.
 Every listing says an output's kind and tags the same way: mesh [conifer, low-poly].
 
-OUTPUTS OF THE SAME PACKAGE: a package's graphs and assets name its own outputs by full name, as they name another package's: a kit
-whose pieces build on each other, a house of the kit's walls ({"type": "studio/kit/wall"} in the house's graph). They
+OUTPUTS OF THE SAME PACKAGE: a package's graphs and assets name its own outputs by full name, as they name another package's: a built-in package
+whose pieces build on each other, a house of the package's walls ({"type": "studio/house/wall"} in the house's graph). They
 resolve to the same version, with no entry in "uses"; in the package that publishes versions, to its graphs as they are now
 (its working folder), and in a followed working folder to that folder. Outputs that name each other in a loop (a names
 b and b names a, or a names itself) do not resolve, and publishing refuses them.
@@ -1042,7 +1042,7 @@ built-in library), each with its full name, kind, tags, label, version and descr
 use it: TopoTopo's own packages and those of a library it lists, yes (a graph that names one adds it); another
 library's only once its project.json lists it, and the result says the entry that lists it.
 
-TOPOTOPO'S OWN PACKAGES: four kits in TopoTopo's built-in library, every one a package of the owner "topotopo"; their
+TOPOTOPO'S OWN PACKAGES: four built-in packages in TopoTopo's built-in library, every one a package of the owner "topotopo"; their
 outputs are listed by the catalog (category "package") and help even where the package does not use them yet:
   topotopo/architecture  wall_segment window_frame door_frame house stairs spiral_stairs railing pillar arch roof_gable
                          roof_hip roof_skeleton brick_wall tile_floor hex_grid_floor scaffold beam_truss
@@ -1050,14 +1050,14 @@ outputs are listed by the catalog (category "package") and help even where the p
   topotopo/props         crate barrel pallet sandbag_wall pipe_run
   topotopo/street        road_strip lamp_post bollard bench sign_post fence cable
   {"type": "topotopo/architecture/stairs", "params": {"steps": 12, "style": "open"}}   {"type": "topotopo/nature/rock"}
-  A kit's name alone ("topotopo/nature"), or its output "kit", is its default output: its outputs side by side. Every
-  output has a pinned kind (mesh; instances for scatter_rocks, forest_patch and grass_clumps; the nature kit's line-up a
+  A built-in package's name alone ("topotopo/nature"), or its output "kit", is its default output: its outputs side by side. Every
+  output has a pinned kind (mesh; instances for scatter_rocks, forest_patch and grass_clumps; the nature package's line-up a
   scene) and tags (search {tag:"street-furniture"}, {query:"conifer"}, {tag:"low-poly"}). Pivots sit at the base (y = 0,
   Y up, metres; walls start at x = 0, roofs at the wall top); every piece has prim name and material. Outputs that
   follow a curve (railing, fence, pipe_run, road_strip) take the curve as input 0, those that dress a surface
   (scatter_rocks, forest_patch, grass_clumps) the surface; unconnected they build a default one. Those three output
-  packed instances. A kit's pieces build on each other (house is the kit's wall_segment and roof_skeleton). The first
-  use copies the kit into the package like any package, and a newer version a TopoTopo release brings shows as an
+  packed instances. A built-in package's pieces build on each other (house is the package's wall_segment and roof_skeleton). The first
+  use copies the built-in package into the package like any package, and a newer version a TopoTopo release brings shows as an
   update. In an installed TopoTopo they have no working folder to follow; TopoTopo's repository publishes them.
 
 FOLLOWING, for one session: workspace {action:"follow", package:"studio/trees", on:true} (CLI: --follow studio/trees on a
@@ -1088,14 +1088,14 @@ OUT OF DATE AND UPDATE: what a package uses changes only by an update, after a b
   report what they must change until they do.
 
 IN THE VIEWER (preview, topotopo edit, topotopo view on a graph in a package): the Packages tab, in every package, has
-Find packages (TopoTopo's kits and every library) and a box per package used: the version in use with a badge (up to
+Find packages (TopoTopo's built-in packages and every library) and a box per package used: the version in use with a badge (up to
 date, update available, live), the nodes that use it, its outputs with their kinds and tags (those in use marked), and
 Update only when a newer version exists. The Scene tree marks the nodes of a package with an update or a live folder.
 The card of an output that cooks to another kind than its "kind" says so. Update first compares every place with the
 version in use (a) and the new one (b), its progress in the cook line and Stop; a place shows alone in the view as a,
 as b or both overlaid, with what changed in a line; it applies only when the person confirms, and a big version whose
 graphs must change asks once more and gives the person a line to copy for you. "Source: Published | Live folder" shows
-a package's working folder for the viewer's session (never saved; not offered for TopoTopo's kits outside TopoTopo's
+a package's working folder for the viewer's session (never saved; not offered for TopoTopo's built-in packages outside TopoTopo's
 repository); results that use it are marked as showing unpublished edits, their exports and downloads write the
 published version, and a save in a working folder
 the session does not follow is offered in that package's box.

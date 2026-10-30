@@ -56,11 +56,11 @@ export interface PackageRow {
    * "owner/name" for a default output that is no named output; `used` when a graph of the package names it
    */
   outputs?: { type: string; label?: string; kind?: string; tags: string[]; used?: boolean }[];
-  /** one of TopoTopo's own packages (its kits) */
+  /** one of TopoTopo's own packages (a built-in package) */
   kit: boolean;
   /**
-   * it can show the edits of its working folder live: it has exactly one, and it is no kit of TopoTopo's unless the
-   * package is inside TopoTopo's own repository (whose library folder holds the kits' working folders)
+   * it can show the edits of its working folder live: it has exactly one, and it is not one of TopoTopo's own unless the
+   * package is inside TopoTopo's own repository (whose library folder holds the built-in packages' working folders)
    */
   canFollow: boolean;
   /** the nodes of the package's graphs that use it: a node of its type, or one whose nested graph names it */
@@ -147,7 +147,7 @@ function typesNamedBy(node: unknown, depth = 0): string[] {
   return out;
 }
 const packageOf = (type: string) => type.split('/').slice(0, 2).join('/');
-/** The folder of TopoTopo's own repository, whose library/ holds the kits' working folders. */
+/** The folder of TopoTopo's own repository, whose library/ holds the built-in packages' working folders. */
 const TOPOTOPO_REPO = path.dirname(BUILTIN_LIBRARY.path);
 const inside = (dir: string, root: string) => { const r = path.relative(root, dir); return !r.startsWith('..') && !path.isAbsolute(r); };
 
@@ -496,7 +496,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
           if (u.pathname === '/api/packages') { json(200, state()); return true; }
           if (u.pathname === '/api/packages/author') { json(200, authorState()); return true; }
           if (u.pathname === '/api/packages/search') {
-            // Find packages: TopoTopo's kits and every library's packages, and whether this package can use each
+            // Find packages: TopoTopo's built-in packages and every library's packages, and whether this package can use each
             const q = { query: u.searchParams.get('q') ?? '', ...(u.searchParams.get('kind') ? { kind: u.searchParams.get('kind')! } : {}), ...(u.searchParams.get('tag') ? { tag: u.searchParams.get('tag')! } : {}) };
             const r = asked(() => searchPackages(pk?.dir ?? null, q));
             json(200, { ...r, libraries: r.libraries.map((l) => ({ name: l.name, standing: l.standing, hits: l.hits })) });

@@ -13,7 +13,7 @@ import { allNodeDefs } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { openPackages } from '../src/packages/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, kitFixtureGraph } from './fixtures.ts';
+import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, builtinFixtureGraph } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff, sortedJSON } from './fingerprint.ts';
 
 const args = process.argv.slice(2);
@@ -39,9 +39,9 @@ for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json') &&
   cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}` });
 }
 // the outputs of TopoTopo's own packages at their defaults (curve/surface outputs on their fixture inputs), and each
-// kit's default output, its line-up
+// each built-in package's default output, its line-up
 for (const type of engine.packageDefs().map((d) => d.type).sort()) {
-  cases.push({ name: `package.${type.replace(/\//g, '.')}`, graph: kitFixtureGraph(type), engine, source: `${type} at its defaults (test/fixtures.ts)` });
+  cases.push({ name: `package.${type.replace(/\//g, '.')}`, graph: builtinFixtureGraph(type), engine, source: `${type} at its defaults (test/fixtures.ts)` });
 }
 
 /** The machine-dependent inputs a graph's output depends on (currently: the default system font). */

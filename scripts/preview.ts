@@ -2,7 +2,7 @@
 //   node scripts/preview.ts [--package dir] [--examples]
 // The folder (default: package/ in the repository) becomes a package by the MCP server's rule (startPackage: in no
 // package, and holding nothing but TopoTopo's own folders), so the examples that use TopoTopo's own packages cook
-// there: their first use copies the kits into it.
+// there: their first use copies the built-in packages into it.
 import fs from 'node:fs';
 import path from 'node:path';
 import '../src/nodes/index.ts';

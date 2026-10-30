@@ -1,5 +1,5 @@
 // The web app's pages as plain HTML strings: the registered workspaces (the games), the grid of packages and
-// TopoTopo's kits, a package's page, a kit's page and the embed page. Pure functions
+// TopoTopo's built-in packages, a package's page, a built-in package's page and the embed page. Pure functions
 // of their data and a URL builder, so the local server (src/web/server.ts) and a static build can share them.
 // Styles and the small page script are files: app/web.css and app/web.js here, app/embed.js in the viewer.
 
@@ -18,7 +18,7 @@ export interface Urls {
   app(name: string): string;
   /** three.js: the import map's base for build/ and examples/jsm/ */
   three: string;
-  /** a kit's page and its thumbnail of an output (absent where there are none: a static build) */
+  /** a built-in package's page and its thumbnail of an output (absent where there are none: a static build) */
   kit?(id: string): string;
   kitThumb?(id: string, output: string): string;
 }
@@ -36,10 +36,10 @@ export interface CardData {
   updates?: { name: string; version: string; newest: string }[];
 }
 
-/** One of TopoTopo's kits on the grid: its newest version's outputs, which the search finds like a package's. */
+/** One of TopoTopo's built-in packages on the grid: its newest version's outputs, which the search finds like a package's. */
 export interface KitCardData {
   id: string; name: string; title: string; description: string; tags: string[]; version: string | null;
-  /** the output whose thumbnail stands for the kit */
+  /** the output whose thumbnail stands for the built-in package */
   thumb: string | null;
   outputs: { type: string; label: string; kind?: string; tags: string[] }[];
 }
@@ -90,7 +90,7 @@ export interface WorkspaceCardData {
 
 export interface WebData { libraries: { name: string; cards: CardData[] }[]; kits?: KitCardData[]; workspaces?: WorkspaceCardData[]; problems: string[] }
 
-/** A kit's page: its card, its versions, its outputs (with their thumbnails) and the packages that use it. */
+/** A built-in package's page: its card, its versions, its outputs (with their thumbnails) and the packages that use it. */
 export interface KitData extends KitCardData { versions: VersionRow[]; rows: (OutputRow & { thumb: string | null })[]; usedBy: UserRow[] }
 
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -149,7 +149,7 @@ function card(c: CardData, u: Urls) {
 </a>`;
 }
 
-/** A kit of TopoTopo's on the grid: its first output's thumbnail, its name and version; the search finds its outputs. */
+/** One of TopoTopo's built-in packages on the grid: its first output's thumbnail, its name and version; the search finds its outputs. */
 function kitCard(k: KitCardData, u: Urls) {
   const hay = [k.title, k.id, k.name, ...k.tags].join(' ').toLowerCase();
   const outs = k.outputs.map((o) => `<span class="out" hidden data-hay="${esc([o.type, o.label, o.kind ?? '', ...o.tags].join(' ').toLowerCase())}"><code>${esc(o.type)}</code>${kindTagMarks(o)}</span>`).join('');
@@ -205,17 +205,17 @@ export function frontPage(d: WebData, u: Urls): string {
     <h2>${esc(l.name)} <span class="count" data-total="${l.cards.length}">${l.cards.length}</span></h2>${sections || '<p class="empty">No packages yet. Make one with <code>topotopo library new ' + esc(l.name) + ' &lt;folder/name&gt;</code> or ask your agent to make one.</p>'}
   </section>`;
   }).join('');
-  // TopoTopo's kits: ready-made parts every package can use
+  // TopoTopo's built-in packages: ready-made parts every package can use
   const kitSection = kits.length ? `
   <section class="library kits" id="kits">
-    <h2>TopoTopo's kits <span class="count" data-total="${kits.length}">${kits.length}</span></h2>
+    <h2>TopoTopo's built-in packages <span class="count" data-total="${kits.length}">${kits.length}</span></h2>
     <p class="dim small">Ready-made parts every package can use: ask your agent to use one by its name, such as <code>${esc(kits[0].outputs.find((o) => !/\/kit$/.test(o.type))?.type ?? kits[0].name)}</code>.</p>
     <section class="collection" data-collection=""><div class="grid">${kits.map((k) => kitCard(k, u)).join('\n')}</div></section>
   </section>` : '';
   const none = d.libraries.length ? '' : `<p class="empty">No libraries yet. Add a folder with <code>topotopo library add &lt;name&gt; &lt;folder&gt;</code>.</p>`;
   return shell('TopoTopo', u, `<header class="bar">
   <a class="brand" href="${esc(u.home)}">TopoTopo</a>
-  <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ', the outputs of packages and TopoTopo\'s kits' : ''}">
+  <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ', the outputs of packages and TopoTopo\'s built-in packages' : ''}">
   <button id="clear" class="btn" type="button" hidden title="clear the search and the tags">Clear</button>
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
 </header>
@@ -262,7 +262,7 @@ function usedBySection(users: UserRow[]) {
     : '<p class="dim">No package in the libraries uses it yet.</p>'}`;
 }
 
-/** One of TopoTopo's kits: what it holds, each output with its thumbnail, kind and tags, its versions and users. */
+/** One of TopoTopo's built-in packages: what it holds, each output with its thumbnail, kind and tags, its versions and users. */
 export function kitPage(k: KitData, u: Urls): string {
   const big = (v: VersionRow) => (v.big || v.marked ? ' <span class="tag">big</span>' : '');
   const rows = k.rows.filter((o) => !/\/kit$/.test(o.type)).map((o) => `<div class="kit-out">
@@ -271,7 +271,7 @@ export function kitPage(k: KitData, u: Urls): string {
     </div>`).join('');
   return shell(`${k.title} · TopoTopo`, u, `<header class="bar">
   <a class="brand" href="${esc(u.home)}">TopoTopo</a>
-  <nav class="crumbs"><a href="${esc(u.home)}#kits">TopoTopo's kits</a> / <span>${esc(k.id)}</span></nav>
+  <nav class="crumbs"><a href="${esc(u.home)}#kits">TopoTopo's built-in packages</a> / <span>${esc(k.id)}</span></nav>
 </header>
 <main class="wrap kit">
   <h1>${esc(k.title)}</h1>

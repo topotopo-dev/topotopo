@@ -65,7 +65,7 @@ td .tags { margin-top: 4px; }
 /* a package that uses a package with a newer version */
 .upd { align-self: flex-start; font-size: 11px; color: var(--accent); }
 #clear { padding: 4px 10px; }
-/* TopoTopo's kits: cards, and a kit's page with each output's thumbnail */
+/* TopoTopo's built-in packages: cards, and a built-in package's page with each output's thumbnail */
 .kits > p { margin: -4px 0 12px; }
 .kit-outs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .kit-out { display: flex; gap: 10px; align-items: flex-start; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }

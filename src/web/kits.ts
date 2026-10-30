@@ -1,7 +1,7 @@
-// TopoTopo's kits: the packages of TopoTopo's built-in library (library/ in the checkout), which every package can use.
-// The viewer's welcome and its "Find packages", and the web app's search and kit pages list them from here: each kit's
+// TopoTopo's own packages, as the web app and the viewer list them: the packages of TopoTopo's built-in library (library/ in the checkout), which every package can use.
+// The viewer's welcome and its "Find packages", and the web app's search and kit pages list them from here: each package's
 // title and description (its project.json), its newest version and the outputs that version publishes, with their
-// kinds, tags and the thumbnail the kit keeps of each (thumbs/<output>.png).
+// kinds, tags and the thumbnail the built-in package keeps of each (thumbs/<output>.png).
 import fs from 'node:fs';
 import path from 'node:path';
 import { BUILTIN_LIBRARY } from '../config.ts';
@@ -9,18 +9,18 @@ import { readManifest } from '../package.ts';
 import { builtinVersions, isDefaultOutput } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 
-/** An output of a kit's newest version, by the node type a graph names it with ("topotopo/street/bench"). */
+/** An output of a built-in package's newest version, by the node type a graph names it with ("topotopo/street/bench"). */
 export interface KitOutput {
   type: string;
-  /** its id in the kit ("bench") */
+  /** its id in the built-in package ("bench") */
   id: string;
   label: string;
   kind?: string;
   tags: string[];
   description?: string;
-  /** the kit's thumbnail of it (absolute path), when it has one */
+  /** the package's thumbnail of it (absolute path), when it has one */
   thumb?: string;
-  /** the kit's default output (the kit line-up) */
+  /** the package's default output (the built-in package line-up) */
   default: boolean;
 }
 
@@ -39,7 +39,7 @@ export interface Kit {
   outputs: KitOutput[];
 }
 
-/** The kits of TopoTopo's built-in library, by name; unreadable ones are left out. */
+/** The packages of TopoTopo's built-in library, by name; unreadable ones are left out. */
 export function listKits(builtin = BUILTIN_LIBRARY.path): Kit[] {
   let dirs: string[] = [];
   try { dirs = fs.readdirSync(builtin).filter((d) => fs.existsSync(path.join(builtin, d, 'project.json'))).sort(); } catch { return []; }
@@ -59,12 +59,12 @@ export function listKits(builtin = BUILTIN_LIBRARY.path): Kit[] {
         };
       }) : [];
       kits.push({ name: m.package, id, title: m.title, description: m.description, tags: m.tags, dir, version: newest?.version ?? null, versions, outputs });
-    } catch { /* an unreadable kit is left out */ }
+    } catch { /* an unreadable package is left out */ }
   }
   return kits;
 }
 
-/** A kit's outputs in a line: "7 outputs: bench, bollard, cable …". */
+/** A built-in package's outputs in a line: "7 outputs: bench, bollard, cable …". */
 export const kitOutputsText = (k: Kit, most = 6) => {
   const names = k.outputs.filter((o) => !o.default).map((o) => o.id);
   return `${names.length} output${names.length === 1 ? '' : 's'}${names.length ? `: ${names.slice(0, most).join(', ')}${names.length > most ? ' …' : ''}` : ''}`;

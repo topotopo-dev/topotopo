@@ -28,7 +28,7 @@ import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-/** The graphs TopoTopo ships: examples/*.json and the graphs of its own packages (library/<kit>/graphs/), by path. */
+/** The graphs TopoTopo ships: examples/*.json and the graphs of its own packages (library/<name>/graphs/), by path. */
 const shippedGraphs = (): [string, any][] => [
   ...fs.readdirSync(path.join(root, 'examples')).filter((f) => f.endsWith('.json') && f !== 'project.json').map((f) => `examples/${f}`),
   ...fs.readdirSync(path.join(root, 'library')).flatMap((k) => fs.readdirSync(path.join(root, 'library', k, 'graphs')).filter((f) => f.endsWith('.json')).map((f) => `library/${k}/graphs/${f}`)),

@@ -9,8 +9,8 @@
 // Its signature is the version's hash and the node it cooks: a frozen version cooks once for the package and once for
 // the packages that use it (which name its texture files differently).
 //
-// A package's graphs name its own outputs by full name too (a kit whose pieces build on each other: a house of the
-// kit's walls): they resolve to the same version, or the same working folder, with no entry in its uses. Outputs that
+// A package's graphs name its own outputs by full name too (a built-in package whose pieces build on each other: a house of the
+// package's walls): they resolve to the same version, or the same working folder, with no entry in its uses. Outputs that
 // name each other in a loop do not resolve (ownOutputsNamed finds what each output names).
 import { isGraph } from './types.ts';
 import { Geometry } from '../core/geometry.ts';

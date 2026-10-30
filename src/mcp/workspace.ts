@@ -110,7 +110,7 @@ export function workspaceTool(host: WorkspaceToolHost): ToolDef {
     },
     run: async (a, call) => {
       // the registered libraries are read and scanned only by the actions on them: a broken config or a slow library
-      // does not stand in the way of the open package's packages
+      // does not stand in the way of the packages the open package uses
       let scanned: { cfg: WebConfig; scans: LibraryScan[] } | null = null;
       const libs = () => (scanned ??= scan());
       // the packages of the open package as its files are now (a person may have edited project.json)

@@ -9701,9 +9701,9 @@ Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated poi
 
 ## package nodes
 
-The outputs of TopoTopo's own packages, the kits in its built-in library ([library/](../library); see the README
-section "TopoTopo's own packages"), by full name; a kit's name alone is its default output, which lines its outputs up.
-A package's graph names one like any node, and its first use copies the kit's version into the package. Their
+The outputs of TopoTopo's own packages, the packages of its built-in library ([library/](../library); see the README
+section "TopoTopo's own packages"), by full name; a built-in package's name alone is its default output, which lines its outputs up.
+A package's graph names one like any node, and its first use copies the built-in package's version into the package. Their
 parameters are the outputs' typed vars; their inputs are the graphs' `input` nodes. `assets {action: "fork"}`
 copies one's graph into the package's assets to edit.
 

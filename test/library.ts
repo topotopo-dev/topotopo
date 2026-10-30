@@ -111,7 +111,7 @@ section('the package of the MCP server: a package when it holds nothing but what
   check(readManifest(startPackage(named, { name: 'parent' }).dir).id === 'parent' && readManifest(named).title === 'parent', 'the default folder takes the name of the folder it is in');
   for (const d of [repo, git]) {
     const s = startPackage(d);
-    check(/is in no package and holds .*, which TopoTopo does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own kits .* Ask the person before making it a package; workspace \{action:"init"\} then does it/.test(s.note ?? '') && !fs.existsSync(path.join(d, 'project.json')),
+    check(/is in no package and holds .*, which TopoTopo does not make: left as it is$/.test(s.log) && /cannot use packages, TopoTopo's own packages .* Ask the person before making it a package; workspace \{action:"init"\} then does it/.test(s.note ?? '') && !fs.existsSync(path.join(d, 'project.json')),
       `${path.basename(d)}: left as it is (${s.log.slice(s.log.indexOf(' holds'))})`);
   }
   check(/^the folder .* is a package$/.test(startPackage(own).log) && startPackage(own).note === null, 'a package stays as it is, with nothing to tell');

@@ -2092,10 +2092,10 @@ export async function publishPackage(pk: PackageUses, o: PublishOptions): Promis
 
   // 1. what the package declares
   // TopoTopo's own packages: a folder of its built-in library, named as the package
-  const inBuiltin = path.relative(pk.builtin, dir), kit = !!inBuiltin && !inBuiltin.startsWith('..') && !path.isAbsolute(inBuiltin) && !/[\\/]/.test(inBuiltin);
+  const inBuiltin = path.relative(pk.builtin, dir), isBuiltin = !!inBuiltin && !inBuiltin.startsWith('..') && !path.isAbsolute(inBuiltin) && !/[\\/]/.test(inBuiltin);
   if (!m.package) r.blocks.push(`project.json has no "package": the author names the package once, "package": "<owner>/${m.id}" (${program()} init --package <owner>/${m.id}; owner and name: lower-case letters, digits, - and _)`);
   else if (o.builtin) {
-    if (!kit) r.blocks.push(`only a folder of TopoTopo's built-in library (${pk.builtin}) publishes one of TopoTopo's own packages, and ${dir} is none`);
+    if (!isBuiltin) r.blocks.push(`only a folder of TopoTopo's built-in library (${pk.builtin}) publishes one of TopoTopo's own packages, and ${dir} is none`);
     else if (m.package !== `${RESERVED_OWNER}/${inBuiltin}`) r.blocks.push(`the folder ${inBuiltin} of TopoTopo's built-in library holds the package ${RESERVED_OWNER}/${inBuiltin}, and its project.json names ${m.package}`);
   } else if (m.package.split('/')[0] === RESERVED_OWNER) r.blocks.push(`the owner "${RESERVED_OWNER}" is reserved for TopoTopo's own packages, which TopoTopo's repository publishes into its built-in library: publish under your own owner`);
   if (!note && !dryRun) r.blocks.push('a version needs a note, one line on what changed: --note "..." (workspace {action:"publish", note})');
@@ -2134,7 +2134,7 @@ export async function publishPackage(pk: PackageUses, o: PublishOptions): Promis
   const maps = new Map<FolderOutput, OutputInfo['maps']>();
   const published = pk.publishedResolver();
   const scope = pk.engine.root.packages === published ? pk.engine.root : { ...pk.engine.root, id: `publish ${m.package}${published === pk.resolver ? '' : ' published copies'}`, packages: published };
-  // an output that builds on others of the package (a kit's line-up, a house of the kit's walls) cooks after them, and
+  // an output that builds on others of the package (a built-in package's line-up, a house of the package's walls) cooks after them, and
   // a warning of theirs is said once, under the output it belongs to, not again under each output that builds on it
   const byName = new Map(all.map((x) => [x.name ?? '', x]));
   const uses = new Map(all.map((x) => [x, ownOutputsNamed(m.package!, x.spec, x.node, self.scope).map((n) => byName.get(n)).filter((y): y is FolderOutput => !!y && y !== x)]));

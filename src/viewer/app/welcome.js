@@ -1,5 +1,5 @@
 // What the viewer says about the package it shows (GET /api/package): the page's title, the graph shown first, and the
-// welcome in the viewport while there is no graph: a package's name with a pointer to TopoTopo's kits and to the agent
+// welcome in the viewport while there is no graph: a package's name with a pointer to TopoTopo's built-in packages and to the agent
 // that builds the graphs, or, for a folder that is no package, that it is none and how to make it one. The plain
 // functions are tested in Node (test/viewer-logic.ts).
 
@@ -27,7 +27,7 @@ export function welcomeOf(info) {
       kind: 'package', title: p.title || p.id, sub: `package ${p.id}${p.package ? ` · publishes as ${p.package}` : ''}`, kits,
       lead: 'This package has no graphs yet.',
       steps: [
-        'Ask your agent to build one here, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s kits."',
+        'Ask your agent to build one here, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s built-in packages."',
         'It shows here as soon as your agent builds it, and so does every change after that.',
       ],
     };
@@ -57,7 +57,7 @@ export function renderWelcome(host, info, show) {
     box.append(p);
   }
   if (w.kits.length) {
-    box.append(el('h2', '', 'TopoTopo\'s kits: ready-made parts your agent can use'));
+    box.append(el('h2', '', 'TopoTopo\'s built-in packages: ready-made parts your agent can use'));
     const list = el('ul', 'welcome-kits');
     for (const k of w.kits) {
       const li = el('li');

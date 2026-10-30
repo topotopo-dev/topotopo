@@ -254,10 +254,10 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const example = exText ? JSON.parse(exText) : null;
   check(!!example && JSON.stringify(example) === JSON.stringify(INPUTS_EXAMPLE) && help.txt.includes('@name=path.*') && help.txt.includes("s@role = s@role || @name.split('.')[0].toLowerCase();"),
     'help topic inputs: group pattern, role wrangle and the example graph');
-  // it names topotopo/nature/tree_lowpoly: a dry run checks it against the kit's version a build adds, and copies nothing
+  // it names topotopo/nature/tree_lowpoly: a dry run checks it against the package's version a build adds, and copies nothing
   const dry = await call('build', { name: 'land', graph: example, dry_run: true });
   check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV} to package .* on first use, from library "topotopo" \\(TopoTopo's built-in library\\): this dry run read it there and copied nothing`).test(dry.txt),
-    `a dry run of the help inputs example validates the kit's output where it lies: ${dry.txt.split('\n').slice(0, 2).join(' | ')}`);
+    `a dry run of the help inputs example validates the package's output where it lies: ${dry.txt.split('\n').slice(0, 2).join(' | ')}`);
   check(!fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature')) && !JSON.parse(fs.readFileSync(path.join(wsDir, 'project.json'), 'utf8')).uses?.['topotopo/nature'] && !fs.existsSync(path.join(wsDir, 'graphs', 'land.json')),
     'and writes nothing: no copy, no entry in uses, no graph');
   const dryTypo = await call('build', { name: 'land', graph: { nodes: { t: { type: 'topotopo/nature/tree_lowpoly', params: { heigth: 7 } } } }, dry_run: true });
@@ -274,7 +274,7 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const land = await call('build', { name: 'land', graph: example });
   check(!xg.isError && !land.isError && /packed: \d+ instances of 1 source/.test(land.txt) && /point: .*\bpath f1/.test(land.txt), `help inputs example cooks on inputs/guides.glb: ${land.txt.split('\n')[0]}`);
   check(new RegExp(`note: added topotopo/nature ${NV} to package .* from library "topotopo" \\(TopoTopo's built-in library\\): packages/topotopo/nature/${NV}`).test(land.txt) && fs.existsSync(path.join(wsDir, 'packages', 'topotopo', 'nature', NATURE, 'version.json')),
-    `its first use copies the nature kit's newest version (${NATURE}) in from TopoTopo's built-in library`);
+    `its first use copies the nature package's newest version (${NATURE}) in from TopoTopo's built-in library`);
   const dry2 = await call('build', { name: 'land', graph: example, dry_run: true });
   check(!dry2.isError && /✓ valid: 15 nodes/.test(dry2.txt), `then the help inputs example validates: ${dry2.txt.split('\n')[0]}`);
   const lsg = await call('inputs', { action: 'list' });
@@ -368,10 +368,10 @@ if (url) {
 
 // packages: a package publishes a version; another lists the library, uses it and cooks its output
 {
-  const kit = path.join(libDir, 'lib', 'kits', 'crates');
-  await call('workspace', { action: 'create', library: 'game', path: 'kits/crates', title: 'Crates' });
+  const crates = path.join(libDir, 'lib', 'shared', 'crates');
+  await call('workspace', { action: 'create', library: 'game', path: 'shared/crates', title: 'Crates' });
   const named = await call('workspace', { action: 'set', package: 'studio/crates' });
-  check(!named.isError && JSON.parse(fs.readFileSync(path.join(kit, 'project.json'), 'utf8')).package === 'studio/crates', 'library set names the package');
+  check(!named.isError && JSON.parse(fs.readFileSync(path.join(crates, 'project.json'), 'utf8')).package === 'studio/crates', 'library set names the package');
   await call('build', { graph: {
     nodes: { c: { type: 'box', params: { size: '=s' } }, peek: { type: 'sphere' } }, output: 'c',
     vars: { s: 1 }, params: { s: { type: 'float', min: 0.1, max: 5, label: 'Size' } },
@@ -380,10 +380,10 @@ if (url) {
   const noNote = await call('workspace', { action: 'publish' });
   check(noNote.isError && /a version needs a note/.test(noNote.txt), 'library publish needs a note');
   const dry = await call('workspace', { action: 'publish', dry_run: true });
-  check(!dry.isError && /^✓ would publish studio\/crates 1\.0 \(the first version\); publishing it needs a note/.test(dry.txt) && /\n {2}crate {2}mesh {2}"Crate"\n/.test(dry.txt) && !fs.existsSync(path.join(kit, 'versions')),
+  check(!dry.isError && /^✓ would publish studio\/crates 1\.0 \(the first version\); publishing it needs a note/.test(dry.txt) && /\n {2}crate {2}mesh {2}"Crate"\n/.test(dry.txt) && !fs.existsSync(path.join(crates, 'versions')),
     `library publish dry_run:true is a dry run: the number, each output's kind, nothing written (${dry.txt.split('\n')[0]})`);
   const pub = await call('workspace', { action: 'publish', note: 'first crates' });
-  check(!pub.isError && /✓ published studio\/crates 1\.0 \(the first version\): "first crates"/.test(pub.txt) && fs.existsSync(path.join(kit, 'versions', '1.0', 'version.json')), `library publish: ${pub.txt.split('\n')[0]}`);
+  check(!pub.isError && /✓ published studio\/crates 1\.0 \(the first version\): "first crates"/.test(pub.txt) && fs.existsSync(path.join(crates, 'versions', '1.0', 'version.json')), `library publish: ${pub.txt.split('\n')[0]}`);
   const again = await call('workspace', { action: 'publish', note: 'again' });
   check(again.isError && /nothing changed since 1\.0/.test(again.txt), 'publishing again without a change is refused');
 
@@ -413,17 +413,17 @@ if (url) {
   const rec = JSON.parse(fs.readFileSync(path.join(yard, 'exports', 'yard.glb.source.json'), 'utf8')).source;
   const lock = JSON.parse(fs.readFileSync(path.join(yard, 'packages', 'lock.json'), 'utf8'));
   check(!x.isError && JSON.stringify(rec.packages) === JSON.stringify({ 'studio/crates@1.0': lock.packages['studio/crates']['1.0'].hash }), `the export records the package version it used: ${JSON.stringify(rec.packages)}`);
-  // following the kit's working folder for the session: an edit there re-cooks here; publishing is refused meanwhile
-  const kitGraph = JSON.parse(fs.readFileSync(path.join(kit, 'graphs', 'main.json'), 'utf8'));
-  kitGraph.nodes.c.params.size = '=s * 3';
-  fs.writeFileSync(path.join(kit, 'graphs', 'main.json'), JSON.stringify(kitGraph, null, 2));
+  // following the package's working folder for the session: an edit there re-cooks here; publishing is refused meanwhile
+  const crateGraph = JSON.parse(fs.readFileSync(path.join(crates, 'graphs', 'main.json'), 'utf8'));
+  crateGraph.nodes.c.params.size = '=s * 3';
+  fs.writeFileSync(path.join(crates, 'graphs', 'main.json'), JSON.stringify(crateGraph, null, 2));
   const before = await call('inspect', { node: 'a' });
   const fol = await call('workspace', { action: 'follow', package: 'studio/crates', on: true });
   check(!fol.isError && /following studio\/crates for this session: its working folder/.test(fol.txt), `library follow: ${fol.txt.slice(0, 100)}`);
   const ins = await call('inspect', { node: 'a' });
   check(/size 2\.000 × 2\.000 × 2\.000 m/.test(before.txt) && /size 6\.000 × 6\.000 × 6\.000 m/.test(ins.txt), 'the followed package cooks from its working folder (an edit there shows here)');
-  kitGraph.nodes.c.params.size = '=s * 4';
-  fs.writeFileSync(path.join(kit, 'graphs', 'main.json'), JSON.stringify(kitGraph, null, 2));
+  crateGraph.nodes.c.params.size = '=s * 4';
+  fs.writeFileSync(path.join(crates, 'graphs', 'main.json'), JSON.stringify(crateGraph, null, 2));
   const ins2 = await call('inspect', { node: 'a' });
   check(/size 8\.000 × 8\.000 × 8\.000 m/.test(ins2.txt), 'a later edit there re-cooks it');
   const xf = await call('export', { path: 'exports/yard_followed.glb' });
@@ -436,11 +436,11 @@ if (url) {
   const off = await call('workspace', { action: 'follow', package: 'studio/crates', on: false });
   check(!off.isError && /it resolves to its copy \(1\.0\) again/.test(off.txt), 'library follow on:false goes back to the copy');
 
-  // out of date and Update: the kit publishes 1.1 (its crate four times the size since the edits above); the yard sees
+  // out of date and Update: the built-in package publishes 1.1 (its crate four times the size since the edits above); the yard sees
   // it, looks at the before/after while it cooks, and updates once told to
-  await call('workspace', { action: 'open', path: kit });
+  await call('workspace', { action: 'open', path: crates });
   const p11 = await call('workspace', { action: 'publish', note: 'four times the size' });
-  check(!p11.isError && /✓ published studio\/crates 1\.1 \(small, after 1\.0\)/.test(p11.txt), `the kit publishes 1.1: ${p11.txt.split('\n')[0]}`);
+  check(!p11.isError && /✓ published studio\/crates 1\.1 \(small, after 1\.0\)/.test(p11.txt), `the built-in package publishes 1.1: ${p11.txt.split('\n')[0]}`);
   await call('workspace', { action: 'open', path: yard });
   const od = await call('workspace', { action: 'outdated' });
   check(!od.isError && /studio\/crates 1\.0: 1\.1 is out {2}\[library "game"\]\n {4}1\.1 {2}"four times the size"/.test(od.txt) && /\nworkspace \{action:"update", package:"studio\/crates"\} shows the before\/after of 1\.0 → 1\.1/.test(od.txt),

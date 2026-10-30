@@ -85,7 +85,7 @@ section('names');
 section('the engine: a scope resolves package outputs through its packages');
 {
   // a version's folder, scope, asset and graphs, by hand: what the registry (src/packages/registry.ts) builds from disk
-  const base = path.join(tmp, 'engine'), vdir = path.join(base, 'kit');
+  const base = path.join(tmp, 'engine'), vdir = path.join(base, 'parts');
   write(path.join(base, 'inputs', 'mark.obj'), triangle(1));
   write(path.join(vdir, 'inputs', 'mark.obj'), triangle(3));
   write(path.join(vdir, 'inputs', 'bark.png'), grey(50));
@@ -106,46 +106,46 @@ section('the engine: a scope resolves package outputs through its packages');
     },
     piece: { nodes: { p: { type: 'part' } }, output: 'p' },
   };
-  const scope = e.createScope('test/kit@1.0', { folder: vdir, graphs: (n) => graphs[n] });
+  const scope = e.createScope('test/parts@1.0', { folder: vdir, graphs: (n) => graphs[n] });
   e.registerAsset('part', { nodes: { b: { type: 'box', params: { size: [0.5, 0.5, 0.5] } } }, output: 'b' }, { scope });
   const out = (o: { output: string; node: string; hash?: string; version?: string | null }) => packageOutputDef({
-    package: 'test/kit', version: o.version === undefined ? '1.0' : o.version, hash: o.hash ?? 'h1', signature: o.hash ?? 'h1', output: o.output, graph: 'main', spec: graphs.main, node: o.node, scope, note: 'first kit',
+    package: 'test/parts', version: o.version === undefined ? '1.0' : o.version, hash: o.hash ?? 'h1', signature: o.hash ?? 'h1', output: o.output, graph: 'main', spec: graphs.main, node: o.node, scope, note: 'first version',
   });
   const mark = out({ output: 'mark', node: 'out' }), packed = out({ output: 'packed', node: 'packed' });
-  const defs: Record<string, NodeDef> = { 'test/kit/mark': mark, 'test/kit/packed': packed };
-  const resolver: PackageResolver = { resolve: (n) => defs[n] ?? { error: `no "${n}" here`, hint: 'only test/kit/mark and test/kit/packed' }, names: () => Object.keys(defs) };
+  const defs: Record<string, NodeDef> = { 'test/parts/mark': mark, 'test/parts/packed': packed };
+  const resolver: PackageResolver = { resolve: (n) => defs[n] ?? { error: `no "${n}" here`, hint: 'only test/parts/mark and test/parts/packed' }, names: () => Object.keys(defs) };
   e.root.packages = resolver;
-  check(e.resolveDef('test/kit/mark') === mark && !e.resolveDef('test/kit/x') && e.allTypeNames().includes('test/kit/packed') && e.packageDefs().length === 2,
+  check(e.resolveDef('test/parts/mark') === mark && !e.resolveDef('test/parts/x') && e.allTypeNames().includes('test/parts/packed') && e.packageDefs().length === 2,
     'resolveDef, allTypeNames and packageDefs ask the scope\'s packages');
-  const v = e.validate({ nodes: { a: { type: 'test/kit/x' } } });
-  check(v.errors[0]?.message === 'no "test/kit/x" here' && v.errors[0].hint === 'only test/kit/mark and test/kit/packed', 'validate gives the resolver\'s error and hint');
-  check(!e.resolveDef('test/kit/mark', e.createScope('test/none')) && !e.resolveDef('part'), 'another scope has none of it, and the root not the version\'s asset');
-  check(mark.category === 'package' && mark.params.k?.max === 5 && mark.inputs.length === 1 && mark.inputs[0].desc === 'base' && /test\/kit 1\.0: first kit/.test(mark.description ?? '') && !mark.usesScope,
+  const v = e.validate({ nodes: { a: { type: 'test/parts/x' } } });
+  check(v.errors[0]?.message === 'no "test/parts/x" here' && v.errors[0].hint === 'only test/parts/mark and test/parts/packed', 'validate gives the resolver\'s error and hint');
+  check(!e.resolveDef('test/parts/mark', e.createScope('test/none')) && !e.resolveDef('part'), 'another scope has none of it, and the root not the version\'s asset');
+  check(mark.category === 'package' && mark.params.k?.max === 5 && mark.inputs.length === 1 && mark.inputs[0].desc === 'base' && /test\/parts 1\.0: first version/.test(mark.description ?? '') && !mark.usesScope,
     'its node type: the graph\'s vars are its params, its input nodes its inputs; version and note in its description');
-  const a = await e.cook({ nodes: { k: { type: 'test/kit/mark', params: { k: 2 } } } });
+  const a = await e.cook({ nodes: { k: { type: 'test/parts/mark', params: { k: 2 } } } });
   const bb = a.geo?.bbox();
   check(a.ok && bb!.max[0] === 6 && bb!.min[0] === -0.25, `it cooks in the version's scope: its file (3 wide, scaled 2) and its asset through its graph_ref (${errorOf(a)} ${bb?.min[0]}..${bb?.max[0]})`);
   const tex = a.geo ? readMaterials(a.geo).bark?.textures?.baseColor : '';
   check(tex === path.join(vdir, 'inputs', 'bark.png'), `a texture path relative to the version is made absolute: ${tex}`);
-  const p = await e.cook({ nodes: { k: { type: 'test/kit/packed' } } });
+  const p = await e.cook({ nodes: { k: { type: 'test/parts/packed' } } });
   const src = p.geo?.hasPacked() ? readMaterials(p.geo.packedSources[0]).bark?.textures?.baseColor : '';
   check(src === path.join(vdir, 'inputs', 'bark.png'), `in packed sources too: ${src}`);
-  const g = await e.cook({ nodes: { grid: { type: 'grid', params: { size: [20, 20] } }, k: { type: 'test/kit/mark', in: ['grid'] } }, output: 'k' });
+  const g = await e.cook({ nodes: { grid: { type: 'grid', params: { size: [20, 20] } }, k: { type: 'test/parts/mark', in: ['grid'] } }, output: 'k' });
   check(size(g, 0) === 20, 'an input goes to its input node');
   // the signature: the version's hash and the node, shared by every scope that resolves the same output
-  const again = await e.cook({ nodes: { k: { type: 'test/kit/mark', params: { k: 2 } } } });
-  const elsewhere = await e.cook({ nodes: { k: { type: 'test/kit/mark', params: { k: 2 } } } }, { scope: e.createScope('test/user', { packages: resolver }) });
+  const again = await e.cook({ nodes: { k: { type: 'test/parts/mark', params: { k: 2 } } } });
+  const elsewhere = await e.cook({ nodes: { k: { type: 'test/parts/mark', params: { k: 2 } } } }, { scope: e.createScope('test/user', { packages: resolver }) });
   check(again.results.get('k')!.cached && elsewhere.results.get('k')!.cached && elsewhere.results.get('k')!.sig === a.results.get('k')!.sig, 'one version cooks once for every scope that uses it');
-  defs['test/kit/mark'] = out({ output: 'mark', node: 'out', hash: 'h2' });
-  const other = await e.cook({ nodes: { k: { type: 'test/kit/mark', params: { k: 2 } } } });
+  defs['test/parts/mark'] = out({ output: 'mark', node: 'out', hash: 'h2' });
+  const other = await e.cook({ nodes: { k: { type: 'test/parts/mark', params: { k: 2 } } } });
   check(!other.results.get('k')!.cached && other.results.get('k')!.sig !== a.results.get('k')!.sig, 'another hash is another result');
   // the packages a graph uses: directly, through an asset and a graph_ref graph
-  e.registerAsset('uses_kit', { nodes: { k: { type: 'test/kit/packed' } }, output: 'k' });
-  e.root.graphs = (n) => (n === 'refd' ? { nodes: { k: { type: 'test/kit/mark' } }, output: 'k' } : undefined);
-  const used = packagesUsed(e, { nodes: { a: { type: 'uses_kit' }, r: { type: 'graph_ref', params: { graph: 'refd' } } } });
-  check(JSON.stringify(used) === '{"test/kit@1.0":"h2"}', `packagesUsed finds them through assets and graph_ref graphs: ${JSON.stringify(used)}`);
-  defs['test/kit/working'] = out({ output: 'working', node: 'out', version: null, hash: 'w1' });
-  check(JSON.stringify(packagesUsed(e, { nodes: { w: { type: 'test/kit/working' }, a: { type: 'uses_kit' } } })) === '{"test/kit@1.0":"h1","test/kit@working":"w1"}', 'a working folder is "@working", keys sorted');
+  e.registerAsset('uses_part', { nodes: { k: { type: 'test/parts/packed' } }, output: 'k' });
+  e.root.graphs = (n) => (n === 'refd' ? { nodes: { k: { type: 'test/parts/mark' } }, output: 'k' } : undefined);
+  const used = packagesUsed(e, { nodes: { a: { type: 'uses_part' }, r: { type: 'graph_ref', params: { graph: 'refd' } } } });
+  check(JSON.stringify(used) === '{"test/parts@1.0":"h2"}', `packagesUsed finds them through assets and graph_ref graphs: ${JSON.stringify(used)}`);
+  defs['test/parts/working'] = out({ output: 'working', node: 'out', version: null, hash: 'w1' });
+  check(JSON.stringify(packagesUsed(e, { nodes: { w: { type: 'test/parts/working' }, a: { type: 'uses_part' } } })) === '{"test/parts@1.0":"h1","test/parts@working":"w1"}', 'a working folder is "@working", keys sorted');
   // which texture paths are rebased: file paths, relative and absolute, not images or URLs
   const geo = new Geometry();
   writeMaterials(geo, { t: { baseColor: [1, 1, 1], metallic: 0, roughness: 1, emissive: [0, 0, 0], alpha: 1, doubleSided: false, unlit: false, textures: { baseColor: 'image:noise', normal: 'https://example.com/n.png', roughness: '/abs/r.png', orm: 'maps/orm.png' } } });
@@ -155,12 +155,12 @@ section('the engine: a scope resolves package outputs through its packages');
   check(rebaseTexturePaths(geo, (x) => x) === geo, 'nothing rewritten: the same geometry');
   // given rootPath (as the registry gives it), the root's result names its textures by it, another scope's absolutely
   const named = packageOutputDef({
-    package: 'test/kit', version: '1.0', hash: 'h1', signature: 'h1', output: 'mark', graph: 'main', spec: graphs.main, node: 'out', scope,
+    package: 'test/parts', version: '1.0', hash: 'h1', signature: 'h1', output: 'mark', graph: 'main', spec: graphs.main, node: 'out', scope,
     rootPath: (abs) => `root:${path.basename(abs)}`,
   });
-  defs['test/kit/named'] = named;
-  const forRoot = await e.cook({ nodes: { k: { type: 'test/kit/named' } } });
-  const inside = await e.cook({ nodes: { k: { type: 'test/kit/named' } } }, { scope: e.createScope('test/user', { packages: resolver }) });
+  defs['test/parts/named'] = named;
+  const forRoot = await e.cook({ nodes: { k: { type: 'test/parts/named' } } });
+  const inside = await e.cook({ nodes: { k: { type: 'test/parts/named' } } }, { scope: e.createScope('test/user', { packages: resolver }) });
   const texOf = (r: CookReport) => (r.geo ? readMaterials(r.geo).bark?.textures?.baseColor : '');
   check(texOf(forRoot) === 'root:bark.png' && texOf(inside) === path.join(vdir, 'inputs', 'bark.png'), `with rootPath: the root's result names its textures by it, another scope's absolutely (${texOf(forRoot)}, ${texOf(inside)})`);
   check(forRoot.results.get('k')!.sig !== inside.results.get('k')!.sig, 'so the two are cached apart');
@@ -593,9 +593,9 @@ section('a dry run: what publishing would do, and nothing written');
 
 section('outputs of the same package: by full name, the same version, no entry in uses; a loop does not resolve');
 {
-  // studio/blocks: a brick; a wall of the kit's own bricks; the shown graph builds on the wall directly, in a foreach
+  // studio/blocks: a brick; a wall of the package's own bricks; the shown graph builds on the wall directly, in a foreach
   // body and through an asset of the package (a pier of one brick)
-  const KITLIB = path.join(tmp, 'kitlib'), BLOCKS = path.join(KITLIB, 'blocks');
+  const PARTLIB = path.join(tmp, 'partlib'), BLOCKS = path.join(PARTLIB, 'blocks');
   const brick = (h: number): GraphSpec => ({ nodes: { b: { type: 'box', params: { size: ['=w', h, 0.5] } } }, output: 'b', vars: { w: 1 }, params: { w: { type: 'float', min: 0.1, max: 4 } }, outputs: { brick: { node: 'b', label: 'Brick' } } });
   writePackage(BLOCKS, { package: 'studio/blocks' }, {
     brick: brick(0.5),
@@ -626,7 +626,7 @@ section('outputs of the same package: by full name, the same version, no entry i
     'the version publishes both, and names no package of its own in its uses');
   // a package that uses it: the version's outputs name each other within that version
   const USER = path.join(tmp, 'blocks-user');
-  writePackage(USER, { libraries: ['../kitlib'] }, {});
+  writePackage(USER, { libraries: ['../partlib'] }, {});
   const u = await open(USER);
   const scene: GraphSpec = { nodes: { k: { type: 'studio/blocks', params: {} } }, output: 'k' };
   check(u.pk.addFor(scene).length === 1 && JSON.stringify(readManifest(USER).uses) === '{"studio/blocks":"1.0"}' && Object.keys(readLock(USER).packages).join() === 'studio/blocks',
@@ -643,7 +643,7 @@ section('outputs of the same package: by full name, the same version, no entry i
   setGraph(BLOCKS, 'brick', brick(0.8));
 
   // studio/loops: a and b name each other, c names itself; ok names itself only in a node its output does not cook
-  const LOOPS = path.join(KITLIB, 'loops');
+  const LOOPS = path.join(PARTLIB, 'loops');
   writePackage(LOOPS, { package: 'studio/loops' }, {
     main: { nodes: { a: { type: 'studio/loops/a' } }, output: 'a' },
     a: { nodes: { b: { type: 'studio/loops/b' } }, output: 'b', outputs: { a: { node: 'b' } } },
@@ -662,17 +662,17 @@ section('outputs of the same package: by full name, the same version, no entry i
   check(!lp.ok && lp.blocks.some((b) => /^studio\/loops\/a → studio\/loops\/b → studio\/loops\/a name each other in a loop$/.test(b)) && lp.blocks.some((b) => /^studio\/loops\/c names itself$/.test(b)) && !exists(LOOPS, 'versions'),
     `publishing refuses a loop: ${lp.blocks.join(' | ')}`);
 
-  // studio/warnkit: a piece that warns, and a line-up of two pieces: the warning is said once, under the piece
+  // studio/warnlib: a piece that warns, and a line-up of two pieces: the warning is said once, under the piece
   defineNode({
     type: 'test_pkg_warn', category: 'generate', summary: 'test only: a box that warns', inputs: [], params: {},
     cook: async (ctx) => { ctx.warn('mind the gap'); const b = new GeoBuilder(); b.addPoint(0, 0, 0); b.addPoint(1, 1, 1); return b.build(); },
   });
-  const WARNKIT = path.join(KITLIB, 'warnkit');
-  writePackage(WARNKIT, { package: 'studio/warnkit' }, {
+  const WARNLIB = path.join(PARTLIB, 'warnlib');
+  writePackage(WARNLIB, { package: 'studio/warnlib' }, {
     piece: { description: 'A piece.', nodes: { w: { type: 'test_pkg_warn' } }, output: 'w', outputs: { piece: { node: 'w', kind: 'points', tags: ['piece'] } } },
-    main: { description: 'Two pieces.', nodes: { a: { type: 'studio/warnkit/piece' }, b: { type: 'studio/warnkit/piece' }, m: { type: 'merge', in: ['a', 'b'] } }, output: 'm', outputs: { lineup: { node: 'm', kind: 'points', tags: ['kit'] } } },
+    main: { description: 'Two pieces.', nodes: { a: { type: 'studio/warnlib/piece' }, b: { type: 'studio/warnlib/piece' }, m: { type: 'merge', in: ['a', 'b'] } }, output: 'm', outputs: { lineup: { node: 'm', kind: 'points', tags: ['kit'] } } },
   });
-  const wk = await publishPackage(openPackages(await newEngine(WARNKIT), WARNKIT), { dryRun: true });
+  const wk = await publishPackage(openPackages(await newEngine(WARNLIB), WARNLIB), { dryRun: true });
   const gap = wk.warnings.filter((w) => /mind the gap/.test(w));
   check(wk.ok && gap.length === 1 && /^output "piece" \(graph "piece"\): \[w\] mind the gap$/.test(gap[0]), `a piece's warning is said once, under the piece, not again under the line-up that cooks it (${gap.join(' | ')})`);
 }
@@ -979,67 +979,67 @@ section('following a working folder for one session');
 // ------------------------------------------------------------------ TopoTopo's built-in library
 section('TopoTopo\'s built-in library: looked in without listing it; copies and locks; a new version is an update');
 {
-  // a built-in library as TopoTopo's repository has it: topotopo/kit's working folder, which publishes its versions
-  const BUILTIN = path.join(tmp, 'builtin'), KIT = path.join(BUILTIN, 'kit');
+  // a built-in library as TopoTopo's repository has it: topotopo/shapes's working folder, which publishes its versions
+  const BUILTIN = path.join(tmp, 'builtin'), SHAPES = path.join(BUILTIN, 'shapes');
   const cube = (s: number): GraphSpec => ({ description: 'A test cube. Its size is s.', nodes: { b: { type: 'box', params: { size: ['=s', '=s', '=s'] } } }, output: 'b', vars: { s }, params: { s: { type: 'float', min: 0.1, max: 9 } }, outputs: { cube: { node: 'b', label: 'Cube' } } });
-  writePackage(KIT, { package: 'topotopo/kit' }, { main: cube(1) });
+  writePackage(SHAPES, { package: 'topotopo/shapes' }, { main: cube(1) });
   const asTopoTopo = async (dir: string, note: string, builtin?: string, flag = true) => { const o = await open(dir, [], builtin); return publishPackage(o.pk, { note, builtin: flag }); };
-  const refused = await asTopoTopo(KIT, 'mine', BUILTIN, false), outside = await asTopoTopo(KIT, 'mine');
+  const refused = await asTopoTopo(SHAPES, 'mine', BUILTIN, false), outside = await asTopoTopo(SHAPES, 'mine');
   check(!refused.ok && refused.blocks.some((b) => /the owner "topotopo" is reserved for TopoTopo's own packages, which TopoTopo's repository publishes into its built-in library/.test(b)), `a package does not publish under "topotopo": ${refused.blocks.join(' | ')}`);
   check(!outside.ok && outside.blocks.some((b) => /only a folder of TopoTopo's built-in library .* publishes one of TopoTopo's own packages/.test(b)), `nor does a folder outside the built-in library: ${outside.blocks.join(' | ')}`);
   const WRONG = path.join(BUILTIN, 'other');
-  writePackage(WRONG, { package: 'topotopo/kit2' }, { main: cube(1) });
-  check((await asTopoTopo(WRONG, 'x', BUILTIN)).blocks.some((b) => /the folder other of TopoTopo's built-in library holds the package topotopo\/other, and its project\.json names topotopo\/kit2/.test(b)), 'a folder of the built-in library holds the package of its name');
+  writePackage(WRONG, { package: 'topotopo/shapes2' }, { main: cube(1) });
+  check((await asTopoTopo(WRONG, 'x', BUILTIN)).blocks.some((b) => /the folder other of TopoTopo's built-in library holds the package topotopo\/other, and its project\.json names topotopo\/shapes2/.test(b)), 'a folder of the built-in library holds the package of its name');
   fs.rmSync(WRONG, { recursive: true });
-  const v1 = await asTopoTopo(KIT, 'first kit', BUILTIN);
-  check(v1.ok && v1.version === '1.0', `the built-in library's folder publishes topotopo/kit 1.0: ${v1.blocks.join('; ')}`);
-  // a package that lists no library: first use copies the kit in and locks it, from library "topotopo"
+  const v1 = await asTopoTopo(SHAPES, 'first version', BUILTIN);
+  check(v1.ok && v1.version === '1.0', `the built-in library's folder publishes topotopo/shapes 1.0: ${v1.blocks.join('; ')}`);
+  // a package that lists no library: first use copies the built-in package in and locks it, from library "topotopo"
   const APP = path.join(tmp, 'app');
   writePackage(APP, {}, {});
   const a = await open(APP, [], BUILTIN);
-  const scene: GraphSpec = { nodes: { c: { type: 'topotopo/kit/cube', params: { s: 3 } } }, output: 'c' };
+  const scene: GraphSpec = { nodes: { c: { type: 'topotopo/shapes/cube', params: { s: 3 } } }, output: 'c' };
   const added = a.pk.addFor(scene);
-  check(added.length === 1 && added[0] === 'added topotopo/kit 1.0 to package app from library "topotopo" (TopoTopo\'s built-in library): packages/topotopo/kit/1.0',
+  check(added.length === 1 && added[0] === 'added topotopo/shapes 1.0 to package app from library "topotopo" (TopoTopo\'s built-in library): packages/topotopo/shapes/1.0',
     `found without listing a library: ${added.join(' | ')}`);
-  check(JSON.stringify(readManifest(APP).uses) === '{"topotopo/kit":"1.0"}' && readLock(APP).packages['topotopo/kit']['1.0'].library === 'topotopo' && readLock(APP).packages['topotopo/kit']['1.0'].hash === v1.hash
-    && exists(APP, 'packages', 'topotopo', 'kit', '1.0', 'version.json'), 'copied and locked like any package: the lock names library "topotopo" and the version\'s hash');
+  check(JSON.stringify(readManifest(APP).uses) === '{"topotopo/shapes":"1.0"}' && readLock(APP).packages['topotopo/shapes']['1.0'].library === 'topotopo' && readLock(APP).packages['topotopo/shapes']['1.0'].hash === v1.hash
+    && exists(APP, 'packages', 'topotopo', 'shapes', '1.0', 'version.json'), 'copied and locked like any package: the lock names library "topotopo" and the version\'s hash');
   check(size(await a.engine.cook(scene), 0) === 3, 'it cooks from the copy');
   const listed = packagesText(a.pk);
-  check(/\nuses 1 package: 1 up to date\n {2}topotopo\/kit 1\.0 {2}1 output {2}up to date\n/.test(listed) && /\nlibraries: none listed \(topotopo libraries add <folder or registered name> lists one\); TopoTopo's built-in library is looked in as well/.test(listed),
+  check(/\nuses 1 package: 1 up to date\n {2}topotopo\/shapes 1\.0 {2}1 output {2}up to date\n/.test(listed) && /\nlibraries: none listed \(topotopo libraries add <folder or registered name> lists one\); TopoTopo's built-in library is looked in as well/.test(listed),
     `packages: one line for the package, and the libraries:\n${listed}`);
   // the catalog and help: offered where it is not used yet, with its description as the summary
   const B = path.join(tmp, 'app-b');
   writePackage(B, { libraries: ['topotopo'] }, {});
   const b = await open(B, [], BUILTIN);
-  const offered = b.engine.packageDefs().find((d) => d.type === 'topotopo/kit/cube');
-  check(!!offered && offered.summary === 'A test cube.' && /^Its size is s\.\ntopotopo\/kit 1\.0: first kit\nOutput "cube" of package topotopo\/kit 1\.0 \(Cube\): it cooks node "b"/.test(offered.description ?? '') && !b.engine.resolveDef('topotopo/kit/cube'),
+  const offered = b.engine.packageDefs().find((d) => d.type === 'topotopo/shapes/cube');
+  check(!!offered && offered.summary === 'A test cube.' && /^Its size is s\.\ntopotopo\/shapes 1\.0: first version\nOutput "cube" of package topotopo\/shapes 1\.0 \(Cube\): it cooks node "b"/.test(offered.description ?? '') && !b.engine.resolveDef('topotopo/shapes/cube'),
     `a package that does not use it gets it offered: the catalog lists it (${offered?.summary}), and only a graph's first use makes it resolve`);
-  check(b.pk.libraries().libs.length === 0 && !b.pk.libraries().problems.length && /^added topotopo\/kit 1\.0/.test(b.pk.use('topotopo/kit').text), 'a package that lists "topotopo" lists nothing more: the built-in library is looked in anyway');
+  check(b.pk.libraries().libs.length === 0 && !b.pk.libraries().problems.length && /^added topotopo\/shapes 1\.0/.test(b.pk.use('topotopo/shapes').text), 'a package that lists "topotopo" lists nothing more: the built-in library is looked in anyway');
   const loose = path.join(tmp, 'loose-builtin');
   fs.mkdirSync(loose);
   const lo = await open(loose, [], BUILTIN);
   const notHere = await lo.engine.cook(scene);
-  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/kit/cube') && /this graph is in no package, and only packages use packages \(hint: topotopo init <folder> \(MCP: workspace \{action:"init"\} for the server's folder, when the person says so\) makes the folder a package/.test(errorOf(notHere)),
+  check(lo.engine.packageDefs().some((d) => d.type === 'topotopo/shapes/cube') && /this graph is in no package, and only packages use packages \(hint: topotopo init <folder> \(MCP: workspace \{action:"init"\} for the server's folder, when the person says so\) makes the folder a package/.test(errorOf(notHere)),
     `outside a package it is offered too, and naming it says how to make the folder a package: ${errorOf(notHere)}`);
   // a TopoTopo release with a new version: an update, never a silent change
-  setGraph(KIT, 'main', cube(2));
-  const v11 = await asTopoTopo(KIT, 'a bigger cube', BUILTIN);
-  check(v11.ok && v11.version === '1.1', `topotopo/kit 1.1: ${v11.blocks.join('; ')}`);
+  setGraph(SHAPES, 'main', cube(2));
+  const v11 = await asTopoTopo(SHAPES, 'a bigger cube', BUILTIN);
+  check(v11.ok && v11.version === '1.1', `topotopo/shapes 1.1: ${v11.blocks.join('; ')}`);
   const a2 = await open(APP, [], BUILTIN);
   const late = a2.pk.outdated()[0];
-  check(late.package === 'topotopo/kit' && late.small === '1.1' && late.libraries.join() === 'topotopo' && /topotopo\/kit 1\.0: 1\.1 is out {2}\[library "topotopo" \(TopoTopo's built-in library\)\]\n {4}1\.1 {2}"a bigger cube"/.test(outdatedText(a2.pk)),
+  check(late.package === 'topotopo/shapes' && late.small === '1.1' && late.libraries.join() === 'topotopo' && /topotopo\/shapes 1\.0: 1\.1 is out {2}\[library "topotopo" \(TopoTopo's built-in library\)\]\n {4}1\.1 {2}"a bigger cube"/.test(outdatedText(a2.pk)),
     `the new built-in version shows as an update (${outdatedText(a2.pk).split('\n')[1]})`);
   check(size(await a2.engine.cook(scene), 0) === 3, 'and the package keeps cooking the copy of 1.0 until it updates');
-  check(builtinVersions('topotopo/kit', BUILTIN).map((v) => v.version).join() === '1.0,1.1' && !builtinVersions('studio/trees', BUILTIN).length, 'the versions the built-in library holds (the web app names the newest)');
-  const up = applyUpdate(a2.pk, 'topotopo/kit', { from: '1.0', to: '1.1' });
-  check(/from library "topotopo" \(TopoTopo's built-in library\)/.test(up.text) && size(await a2.engine.cook({ nodes: { c: { type: 'topotopo/kit/cube' } } }), 0) === 2 && readLock(APP).packages['topotopo/kit']['1.1'].library === 'topotopo',
+  check(builtinVersions('topotopo/shapes', BUILTIN).map((v) => v.version).join() === '1.0,1.1' && !builtinVersions('studio/trees', BUILTIN).length, 'the versions the built-in library holds (the web app names the newest)');
+  const up = applyUpdate(a2.pk, 'topotopo/shapes', { from: '1.0', to: '1.1' });
+  check(/from library "topotopo" \(TopoTopo's built-in library\)/.test(up.text) && size(await a2.engine.cook({ nodes: { c: { type: 'topotopo/shapes/cube' } } }), 0) === 2 && readLock(APP).packages['topotopo/shapes']['1.1'].library === 'topotopo',
     `Update copies 1.1 in from the built-in library: ${up.text.split('\n')[0]}`);
   // following: the working folder in TopoTopo's repository; an installed TopoTopo ships the versions alone
-  check(/^following topotopo\/kit for this session: its working folder .*kit \(library "topotopo" \(TopoTopo's built-in library\)\)/.test(a2.pk.follow('topotopo/kit')) && a2.pk.outdated()[0].working.length === 1, 'the built-in library\'s working folder is followed like any');
+  check(/^following topotopo\/shapes for this session: its working folder .*shapes \(library "topotopo" \(TopoTopo's built-in library\)\)/.test(a2.pk.follow('topotopo/shapes')) && a2.pk.outdated()[0].working.length === 1, 'the built-in library\'s working folder is followed like any');
   const SHIPPED = path.join(tmp, 'shipped');
-  fs.cpSync(path.join(KIT, 'versions'), path.join(SHIPPED, 'kit', 'versions'), { recursive: true });
+  fs.cpSync(path.join(SHAPES, 'versions'), path.join(SHIPPED, 'shapes', 'versions'), { recursive: true });
   const a3 = await open(APP, [], SHIPPED);
-  check(/topotopo\/kit has no working folder in the libraries this package looks in: "topotopo" holds its versions alone \(an installed TopoTopo ships its own packages without their working folders\), and follow needs one/.test(errorText(() => a3.pk.follow('topotopo/kit')))
+  check(/topotopo\/shapes has no working folder in the libraries this package looks in: "topotopo" holds its versions alone \(an installed TopoTopo ships its own packages without their working folders\), and follow needs one/.test(errorText(() => a3.pk.follow('topotopo/shapes')))
     && a3.pk.outdated()[0].working.length === 0 && a3.pk.outdated()[0].libraries.join() === 'topotopo', 'without a working folder there is nothing to follow (the viewer offers no switch)');
   check((await a3.engine.cook(scene)).ok && a3.engine.packageDefs().length > 0, 'and the versions alone serve the package');
   // no registered library takes the built-in library's name
@@ -1052,7 +1052,7 @@ section('TopoTopo\'s built-in library: looked in without listing it; copies and 
 // ------------------------------------------------------------------ search
 section('search: every library, by words, kind and tag; what the package can use, and the "libraries" entry it needs');
 {
-  // a built-in library of its own: topotopo/woods, published as TopoTopo's repository publishes its kits
+  // a built-in library of its own: topotopo/woods, published as TopoTopo's repository publishes its packages
   const SB = path.join(tmp, 'search-builtin'), WOODS = path.join(SB, 'woods');
   writePackage(WOODS, { package: 'topotopo/woods' }, {
     main: {
@@ -1562,8 +1562,8 @@ section('the workspace tool: the libraries a package lists, set when the person 
 
 section('textures of two packages under the same image names stay apart when their outputs are merged');
 {
-  // two kits each call their base colour map "basecolor": a red locker, a blue compressor
-  const kit = (pkg: string, material: string, color: string): GraphSpec => ({
+  // two packages each call their base colour map "basecolor": a red locker, a blue compressor
+  const piece = (pkg: string, material: string, color: string): GraphSpec => ({
     nodes: {
       b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
       basecolor: { type: 'tex_constant', params: { resolution: 8, channels: 'rgba', color } },
@@ -1572,9 +1572,9 @@ section('textures of two packages under the same image names stay apart when the
     output: 'm', outputs: { piece: { node: 'm', label: pkg, kind: 'mesh', tags: ['prop'], description: `a ${material}` } },
   });
   const LOCKERS = path.join(dirs.game, 'lockers'), COMPRESSOR = path.join(dirs.game, 'compressor');
-  writePackage(LOCKERS, { package: 'studio/lockers' }, { main: kit('lockers', 'locker', '#ff0000') });
-  writePackage(COMPRESSOR, { package: 'studio/compressor' }, { main: kit('compressor', 'compressor', '#0000ff') });
-  check((await publish(LOCKERS, 'lockers')).ok && (await publish(COMPRESSOR, 'compressor')).ok, 'two kits published, both with an image "basecolor"');
+  writePackage(LOCKERS, { package: 'studio/lockers' }, { main: piece('lockers', 'locker', '#ff0000') });
+  writePackage(COMPRESSOR, { package: 'studio/compressor' }, { main: piece('compressor', 'compressor', '#0000ff') });
+  check((await publish(LOCKERS, 'lockers')).ok && (await publish(COMPRESSOR, 'compressor')).ok, 'two packages published, both with an image "basecolor"');
   const HALL = path.join(dirs.repo, 'hall');
   writePackage(HALL, { libraries: ['game'] }, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
   const o = await open(HALL);

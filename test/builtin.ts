@@ -1,13 +1,13 @@
-// TopoTopo's own packages, the kits of its built-in library (library/<kit>/, scripts/gen-kits.ts): every output, cooked
-// as a package that uses the kit cooks it, documents its params, follows the kits' conventions and cooks at its defaults
+// TopoTopo's own packages, the built-in packages of its built-in library (library/<name>/, scripts/gen-kits.ts): every output, cooked
+// as a package that uses the built-in package cooks it, documents its params, follows the built-in packages' conventions and cooks at its defaults
 // and at both ends of every numeric range.
-//   node test/kits.ts [filter]
+//   node test/builtin.ts [filter]
 // Per output: description, 3–10 params each with type, default (= the var), desc and a range or options; every prim
 // carries name and material (packed outputs are unpacked first); the pivot follows meta.pivot ("base" = on y = 0 with
 // the origin inside the footprint); meta.watertight promises closed pieces; the default cook (cold cache) takes under
 // 1 s. Then every numeric param at its min and max, every enum option and every bool flipped must cook without errors
 // (and stay watertight when promised), and curve/surface outputs must also cook on their fixture input.
-// Per kit: topotopo/<folder>, one output per graph named as its file with a pinned kind and tags (which its newest
+// Per built-in package: topotopo/<folder>, one output per graph named as its file with a pinned kind and tags (which its newest
 // version records, the line-up "kit" among them), the graph it shows lines its outputs up (its default output cooks),
 // and its working folder is its newest version; the thumbnails and the README table are current
 // (gen-kits --check). Also: the assets tool forks an output's graph into the package's assets, which keeps list, get,
@@ -28,22 +28,22 @@ import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { SHOWN, checkKits, lineupGraph, lineupText, readKits } from '../scripts/gen-kits.ts';
-import { KIT_INPUTS, checkGeo, kitFixtureGraph, useKits } from './fixtures.ts';
+import { BUILTIN_INPUTS, checkGeo, builtinFixtureGraph, useBuiltin } from './fixtures.ts';
 
 const filter = process.argv.slice(2).find((a) => !a.startsWith('--'));
 let fails = 0, checks = 0;
 const fail = (msg: string) => { fails++; console.log('FAIL ' + msg); };
 const check = (ok: boolean, msg: string) => { checks++; if (!ok) fail(msg); };
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-kits-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-builtin-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
-const pk = useKits(engine, path.join(tmp, 'package'));
-check(!pk.check().length, `the kits load without problems: ${pk.check().join('; ')}`);
+const pk = useBuiltin(engine, path.join(tmp, 'package'));
+check(!pk.check().length, `the built-in packages load without problems: ${pk.check().join('; ')}`);
 
 const kits = readKits();
 const outputs = kits.flatMap((k) => k.outputs);
-check(kits.length >= 4 && outputs.length >= 30, `at least 4 kits and 30 outputs (${kits.length}, ${outputs.length})`);
+check(kits.length >= 4 && outputs.length >= 30, `at least 4 built-in packages and 30 outputs (${kits.length}, ${outputs.length})`);
 if (!filter) for (const p of checkKits(kits)) fail(p);
 
 const NUMERIC = new Set(['float', 'int']);
@@ -100,7 +100,7 @@ const rows: Row[] = [];
 
 for (const k of kits) {
   if (filter && !k.outputs.some((o) => o.type.includes(filter))) continue;
-  // ---- the kit: its package, one output per graph, the graph it shows, its default output
+  // ---- the built-in package: its package, one output per graph, the graph it shows, its default output
   check(k.manifest.package === k.package && k.manifest.graph === SHOWN, `library/${k.name}/project.json: package ${k.package}, graph "${SHOWN}"`);
   for (const o of k.outputs) {
     const outs = Object.keys(o.graph.outputs ?? {});
@@ -154,11 +154,11 @@ for (const k of kits) {
     }
     const nIn = def.inputs.length;
     check(nIn === (graph.meta?.inputs?.length ?? 0), `${where}: meta.inputs lists ${graph.meta?.inputs?.length ?? 0} input(s), the graph has ${nIn}`);
-    if (nIn) check(!!KIT_INPUTS[name], `${where}: takes ${nIn} input(s) but has no fixture in KIT_INPUTS (test/fixtures.ts)`);
+    if (nIn) check(!!BUILTIN_INPUTS[name], `${where}: takes ${nIn} input(s) but has no fixture in BUILTIN_INPUTS (test/fixtures.ts)`);
 
     // ---- defaults, cold cache, standalone (inputs fall back to their built-in default)
     const cookOf = async (p: Record<string, any>, fixture = false) => {
-      const g: GraphSpec = fixture ? kitFixtureGraph(name, p) : { nodes: { target: { type: name, params: p } }, output: 'target' };
+      const g: GraphSpec = fixture ? builtinFixtureGraph(name, p) : { nodes: { target: { type: name, params: p } }, output: 'target' };
       engine.cache.clear();
       const t0 = performance.now();
       const r = await engine.cook(g);
@@ -189,7 +189,7 @@ for (const k of kits) {
       conventions(`${where} ${label}`, v.r.geo, graph, false);
     }
     // ---- on the fixture input (curve / surface)
-    if (nIn && KIT_INPUTS[name]) {
+    if (nIn && BUILTIN_INPUTS[name]) {
       const v = await cookOf({}, true);
       if (!v.r.ok || !v.r.geo) fail(`${where} on its fixture input: ${v.r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
       else {
@@ -221,8 +221,8 @@ if (!filter || 'stairs house'.includes(filter)) {
   check(rf.ok && !!rf.geo && rf.geo.numPrims > 0, `the forked asset cooks: ${rf.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
   const house = await txt('assets', { action: 'fork', name: 'topotopo/architecture/house' });
   check(!house.err && !!e2.asset('house') && readManifest(wsDir).uses['topotopo/architecture'] === kits.find((x) => x.name === 'architecture')!.versions.at(-1)!.version && /added topotopo\/architecture/.test(house.text),
-    `a fork whose graph names the kit's other outputs adds the kit to the package (first use): ${house.text.split('\n').slice(0, 2).join(' | ')}`);
-  check((await e2.cook({ nodes: { h: { type: 'house', params: { floors: 1 } } } })).ok, 'and it cooks with the kit\'s walls and roof');
+    `a fork whose graph names the package's other outputs adds the built-in package to the package (first use): ${house.text.split('\n').slice(0, 2).join(' | ')}`);
+  check((await e2.cook({ nodes: { h: { type: 'house', params: { floors: 1 } } } })).ok, 'and it cooks with the built-in package\'s walls and roof');
   const list = await txt('assets', { action: 'list' });
   check(/my_stairs — Straight stairs/.test(list.text) && /house — House built from a footprint polygon/.test(list.text), `assets list shows the package's assets: ${list.text.split('\n').slice(0, 3).join(' | ')}`);
   const get = await txt('assets', { action: 'get', name: 'my_stairs' });
@@ -232,13 +232,13 @@ if (!filter || 'stairs house'.includes(filter)) {
   const bare = await txt('assets', { action: 'fork', name: 'stairs' });
   check(bare.err && /fork copies a package output's graph/.test(bare.text), `fork names a package output: ${bare.text}`);
   const unknown = await txt('assets', { action: 'fork', name: 'topotopo/architecture/stair' });
-  check(unknown.err && /did you mean .*topotopo\/architecture\/stairs/.test(unknown.text), `fork of an output the kit does not have: ${unknown.text}`);
+  check(unknown.err && /did you mean .*topotopo\/architecture\/stairs/.test(unknown.text), `fork of an output the built-in package does not have: ${unknown.text}`);
   const cat = await txt('catalog', { category: 'package' });
   check(/\[package\]/.test(cat.text) && /topotopo\/architecture\/wall_segment ◦ — Straight wall from x = 0 to x = wall_length/.test(cat.text) && /topotopo\/nature\/rock ◦ — Low-poly rock/.test(cat.text),
-    'catalog lists the kits\' outputs with their descriptions');
+    'catalog lists the built-in packages\' outputs with their descriptions');
   const help = await txt('help', { nodes: ['topotopo/architecture/stairs', 'topotopo/nature/rock'] });
   check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this package: package topotopo\/nature is not in this package's uses/.test(help.text),
-    'help documents an output, and says when the package does not use its kit yet');
+    'help documents an output, and says when the package does not use it yet');
   check(/\ntopotopo\/nature\/rock ◦ — Low-poly rock[^\n]* {2}\(mesh \[rock, stone, boulder, low-poly\]\)\n/.test(`\n${cat.text.split('\n').map((l) => l.trim()).join('\n')}\n`) && /\nwhat it is: instances \[forest, trees, conifer/.test((await txt('help', { nodes: ['topotopo/nature/forest_patch'] })).text)
     && /topotopo\/nature\/forest_patch/.test((await txt('catalog', { search: 'conifer' })).text), 'the catalog and help give an output\'s kind and tags, and the catalog\'s search finds a tag');
   // a bare name is no node type, and nothing makes it one: the error names the output of that name, used or not
@@ -259,5 +259,5 @@ fs.rmSync(tmp, { recursive: true, force: true });
 rows.sort((a, b) => b.ms - a.ms);
 console.log('\noutput                                default ms  prims   variants  slowest variant');
 for (const r of rows) console.log(`${r.name.padEnd(38)}${r.ms.toFixed(0).padStart(9)}  ${String(r.prims).padStart(6)}  ${String(r.variants).padStart(8)}  ${r.worst.toFixed(0).padStart(5)} ms (${r.worstAt})`);
-console.log(`\nkits: ${kits.length} kits, ${rows.length} outputs, ${rows.reduce((s, r) => s + r.variants, 0)} variant cooks, ${checks} checks, ${fails} failed`);
+console.log(`\nbuilt-in packages: ${kits.length} packages, ${rows.length} outputs, ${rows.reduce((s, r) => s + r.variants, 0)} variant cooks, ${checks} checks, ${fails} failed`);
 process.exit(fails ? 1 : 0);

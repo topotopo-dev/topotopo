@@ -371,7 +371,7 @@ section('the tab\'s title, the welcome, and messages that clear themselves (sect
   check(welcome.defaultGraph(proj, ['a', 'main']) === 'main' && welcome.defaultGraph(proj, ['a', 'b']) === 'a' && welcome.defaultGraph(loose, []) === null, 'the package\'s default graph is shown first');
   const wp = welcome.welcomeOf(proj), wf = welcome.welcomeOf(loose);
   check(wp.kind === 'package' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.kits.length === 1,
-    'a package without graphs: its name, ask your agent, TopoTopo\'s kits');
+    'a package without graphs: its name, ask your agent, TopoTopo\'s built-in packages');
   check(wf.kind === 'folder' && /not a TopoTopo package/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no package says so and how to make it one');
   check(status.messageLife('saved 2 values', 'ok') === 6000 && status.messageLife('no such node', 'err') === 12000 && status.messageLife('undid move', '', 2000) === 6000 && status.messageLife('x', '', 9000) === 9000,
     'a message clears itself: 6 s, an error 12 s, longer when held');

@@ -1,8 +1,8 @@
 // The Packages tab (src/viewer/packages.ts serves it), in every package: the package's name, Find packages (a search of
-// TopoTopo's kits and every library's packages, which says whether the package can use each), and a box per package
+// TopoTopo's built-in packages and every library's packages, which says whether the package can use each), and a box per package
 // the package uses. A box says the package's name, the version in use and its state as a badge (up to date, update
 // available, live); its source, as a two-way switch naming both states, "Published 1.1 | Live folder", where the
-// package has a working folder of its own (TopoTopo's kits only inside TopoTopo's own repository): Published is the
+// package has a working folder of its own (TopoTopo's built-in packages only inside TopoTopo's own repository): Published is the
 // frozen copy, Live shows the folder's edits as they are saved, for this session; the nodes that use it (a click shows
 // that node); its outputs, folded, as aligned rows of name, kind and tags, marked where the package uses them; and,
 // only when a newer version exists, Update. A save in a working folder the session does not follow is offered in that
@@ -191,7 +191,7 @@ export function createPackagesPanel(ctx, host) {
   // ---------------------------------------------------------------- the tab
   const bar = el('div', 'packages-bar'), head = el('div', 'pkg-package'), search = el('input', 'pkg-search'), results = el('div', 'pkg-found');
   search.type = 'search'; search.placeholder = 'Find packages: tree, lamp, crate…'; search.setAttribute('aria-label', 'Find packages');
-  search.title = 'search TopoTopo\'s kits and every library\'s packages by name, kind and tag';
+  search.title = 'search TopoTopo\'s built-in packages and every library\'s packages by name, kind and tag';
   let searchTimer = 0;
   search.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => runSearch(search.value), 200); };
   search.onkeydown = (e) => { if (e.key === 'Escape') { search.value = ''; runSearch(''); search.blur(); } };
@@ -216,9 +216,9 @@ export function createPackagesPanel(ctx, host) {
     if (!found.ok && found.error) { results.replaceChildren(el('div', 'err', found.error)); return; }
     const parts = [];
     const libs = (found.libraries ?? []).filter((l) => l.hits.length);
-    if (!libs.length) parts.push(el('div', 'pkg-sub', `Nothing found for "${query}". TopoTopo's kits hold walls, houses, roofs, stairs, rocks, trees, props and roads.`));
+    if (!libs.length) parts.push(el('div', 'pkg-sub', `Nothing found for "${query}". TopoTopo's built-in packages hold walls, houses, roofs, stairs, rocks, trees, props and roads.`));
     for (const l of libs) {
-      parts.push(el('div', 'pkg-libhead', l.standing === 'builtin' ? 'TopoTopo\'s kits' : `library "${l.name}"${l.standing === 'unlisted' ? ' · not listed in this package' : ''}`));
+      parts.push(el('div', 'pkg-libhead', l.standing === 'builtin' ? 'TopoTopo\'s built-in packages' : `library "${l.name}"${l.standing === 'unlisted' ? ' · not listed in this package' : ''}`));
       for (const h of l.hits.slice(0, 40)) {
         const row = el('div', 'pkg-hit');
         const name = el('code', '', h.type), kind = h.kind ? el('span', 'badge kind', h.kind) : null, tags = el('span', 'pkg-tags line');
@@ -256,7 +256,7 @@ export function createPackagesPanel(ctx, host) {
     if (P.package?.package) parts.push(authorBox());
     if (!rows.length && P.package) {
       const e = el('div', 'pkg-empty');
-      e.append(el('p', '', 'This package uses no packages yet.'), el('p', 'dim', 'Packages are ready-made parts: TopoTopo\'s kits (houses, walls, trees, rocks, props, roads) and your team\'s libraries. Find one above, then ask your agent to use it, for example: "add topotopo/street/lamp_post along the road".'));
+      e.append(el('p', '', 'This package uses no packages yet.'), el('p', 'dim', 'Packages are ready-made parts: TopoTopo\'s built-in packages (houses, walls, trees, rocks, props, roads) and your team\'s libraries. Find one above, then ask your agent to use it, for example: "add topotopo/street/lamp_post along the road".'));
       parts.push(e);
     }
     for (const p of rows) parts.push(card(p));
@@ -277,7 +277,7 @@ export function createPackagesPanel(ctx, host) {
     if (p.error) box.append(el('div', 'pkg-sub err', p.error));
     // where it comes from: the published copy, or the live folder (the switch names both)
     if (p.canFollow) box.append(sourceSwitch(p));
-    else box.append(el('div', 'pkg-note', p.kit ? `${p.version ? `version ${p.version}` : 'not published'} from TopoTopo's kits` : sourceText(p)));
+    else box.append(el('div', 'pkg-note', p.kit ? `${p.version ? `version ${p.version}` : 'not published'} from TopoTopo's built-in packages` : sourceText(p)));
     // a save in its working folder, offered here (cleared by the switch, Not now or Update)
     if (offers.has(p.package) && !p.followed) {
       const o = el('div', 'pkg-offer');

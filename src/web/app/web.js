@@ -1,5 +1,5 @@
 // The script of the web app's pages (src/web/pages.ts): search and tag filters on the grid (the search finds a package's
-// outputs and TopoTopo's kits' too, by name, kind and tag, and shows those it found on the card; each library says how
+// outputs and TopoTopo's built-in packages' too, by name, kind and tag, and shows those it found on the card; each library says how
 // many cards it shows, and Clear ends the filter, which a new visit starts without), copy buttons and actions on a
 // package page, and live updates from the server's event stream (a bake finished, packages added or removed).
 const page = document.body.dataset.page;

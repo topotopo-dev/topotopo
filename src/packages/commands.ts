@@ -5,7 +5,7 @@
 //   topotopo library new <library> <folder/name> [--title t] [--tags a,b] [--description d]
 //   topotopo library bake <package folder> | --stale | --all          bake previews in this process
 //   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a package (the web app's editor)
-// and a package's packages (src/packages/registry.ts, src/packages/update.ts), as PACKAGE_COMMANDS says them:
+// and the packages a package uses (src/packages/registry.ts, src/packages/update.ts), as PACKAGE_COMMANDS says them:
 //   topotopo workspace [folder]                                       the workspace (game) around a folder
 //   topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 //                                                                     make a game's folder a workspace, or change one

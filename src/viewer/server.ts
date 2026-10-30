@@ -12,7 +12,7 @@
 // The packages the package uses (/api/packages*, src/viewer/packages.ts): their updates, the before/after of one and
 // Update, and following a package's working folder for the viewer's session. /api/package says which package the
 // viewer shows (the page's title, its default graph, and what an empty package or a folder that is no package says),
-// with TopoTopo's kits for the welcome.
+// with TopoTopo's built-in packages for the welcome.
 // Bound to 127.0.0.1 only; requests must name this server as their Host, and writes must come from its own page.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -222,11 +222,11 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     if (!pk && dir) try { m = readManifest(dir); } catch { /* unreadable: no package to name */ }
     return m && dir ? { id: m.id, title: m.title, description: m.description, graph: m.graph, package: m.package ?? null, dir } : null;
   };
-  // TopoTopo's kits, read once: they change only with TopoTopo itself
+  // TopoTopo's built-in packages, read once: they change only with TopoTopo itself
   let kits: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
   /**
    * GET /api/package: the package the viewer shows (null for a folder that is in no package), the folder, the graph
-   * file of `topotopo view`, and TopoTopo's kits.
+   * file of `topotopo view`, and TopoTopo's built-in packages.
    */
   const packageInfo = () => {
     kits ??= listKits().map((k) => ({ name: k.name, title: k.title, description: k.description, version: k.version, outputs: kitOutputsText(k) }));

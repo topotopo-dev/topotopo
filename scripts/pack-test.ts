@@ -4,18 +4,18 @@
 //
 // Checks
 // - npm pack (prepack builds dist/): required files are in the tarball, TopoTopo's built-in library among them (the
-//   versions of its own packages, library/<kit>/versions/), and nothing from src/, test/, examples/, out/, the kits'
+//   versions of its own packages, library/<name>/versions/), and nothing from src/, test/, examples/, out/, the built-in packages'
 //   working folders and thumbnails, or the Rust sources is.
 // - The bin from the installed package: `npm exec --no -- topotopo --help`, and cooking an example graph copied into the
 //   temp project with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
 //   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
-//   makes the folder a package, and the cook's first use copies the kit in from the installed built-in library).
+//   makes the folder a package, and the cook's first use copies the built-in package in from the installed built-in library).
 // - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the built-in library, the
 //   bundled font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location,
 //   and rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
 // - The MCP server over stdio as a client starts it (`npm exec --no -- topotopo mcp --package …`, which is what
 //   `npx -y topotopo mcp` runs once the package is installed) on a new folder, which it makes a package:
-//   catalog (TopoTopo's own packages too), a build that names a kit's output and copies the kit in from the installed
+//   catalog (TopoTopo's own packages too), a build that names a built-in package's output and copies the built-in package in from the installed
 //   built-in library, a build that uses sdf_grid, and the preview page with three.js served from the installed
 //   dependencies.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
@@ -34,7 +34,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 const NAME: string = pkg.name;
 const BIN = Object.keys(pkg.bin)[0];
 
-/** The newest version TopoTopo's built-in library holds of a kit, which a first use copies in. */
+/** The newest version TopoTopo's built-in library holds of a built-in package, which a first use copies in. */
 const newestOf = (kit: string) => fs.readdirSync(path.join(ROOT, 'library', kit, 'versions')).filter((v) => /^\d+\.\d+$/.test(v))
   .sort((a, b) => { const [x, y] = a.split('.').map(Number), [u, w] = b.split('.').map(Number); return x - u || y - w; }).at(-1)!;
 /** A version as a regular expression matches it. */
@@ -236,7 +236,7 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     const cat = await call('catalog', {});
     check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('topotopo/nature/rock'), 'catalog lists the nodes and the installed packages of TopoTopo\'s own');
     // the documented setup: a new folder, which the server made a package, so the first build that names a
-    // kit's output copies the kit in
+    // an output of one of TopoTopo's own packages copies it in
     const rock = await call('build', { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' });
     const nature = newestOf('nature');
     check(fs.existsSync(path.join(ws, 'project.json')) && !rock.isError && new RegExp(`note: added topotopo/nature ${re(nature)}`).test(rock.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', nature, 'version.json')),
