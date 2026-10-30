@@ -1978,6 +1978,34 @@ section('a workspace: one shared copy of each package for every package in it');
   removeLibrary('wsart');
 }
 
+section('a folder the workspace\'s scan does not enter is not the workspace\'s: its packages keep their own copies');
+{
+  // the workspace builds with game/project.godot; lookdev/ is another Godot project inside it, which the scan skips
+  const WS = path.join(tmp, 'twoproj'), HALL = path.join(WS, 'hall'), ROCK = path.join(WS, 'lookdev', 'rock'), BARREL = path.join(WS, 'game', 'assets', 'barrel');
+  const same = (x: string | null | undefined, y: string) => !!x && path.resolve(x).toLowerCase() === path.resolve(y).toLowerCase();
+  const rocks: GraphSpec = { nodes: { r: { type: 'nordic/rocks' } }, output: 'r' };
+  write(path.join(WS, 'game', 'project.godot'), '[application]\n');
+  write(path.join(WS, 'lookdev', 'project.godot'), '[application]\n');
+  writePackage(ROCK, {}, { main: rocks });
+  for (const d of [HALL, BARREL]) writePackage(d, {}, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  initWorkspace(WS, { name: 'twoproj', engine: 'godot:game/project.godot', libraries: ['lib'] });
+  const { locate } = await import('../src/package.ts');
+  check(same(locate(HALL).workspace, WS) && same(locate(BARREL).workspace, WS) && locate(ROCK).workspace === null && copiesFor(ROCK).workspace === null && librariesFor(ROCK).workspace === null,
+    `the packages the scan finds are the workspace's (the workspace's own engine project among them); one in another engine project is in no workspace (${locate(ROCK).workspace})`);
+  check(/lookdev: another engine project \(it holds project\.godot\)/.test(errorText(() => workspaceText(ROCK))), `a folder of it says why it is in no workspace (${errorText(() => workspaceText(ROCK))})`);
+  const rock = await open(ROCK);
+  rock.pk.use('nordic/rocks', { version: '1.0' });
+  const hall = await open(HALL);
+  hall.pk.use('nordic/rocks');
+  const removed = removePackage(hall.pk, 'nordic/rocks');
+  rock.pk.refresh();
+  check(exists(ROCK, 'packages', 'nordic', 'rocks', '1.0', 'version.json') && readManifest(ROCK).uses['nordic/rocks'] === '1.0' && !readWorkspace(WS).uses['nordic/rocks'] && rock.pk.uses()['nordic/rocks'] === '1.0',
+    `the package in another engine project keeps its own copy at the version it uses, which removing the package from the workspace leaves alone (${removed.text.split('\n')[0]})`);
+  // with no engine project of its own, every folder holding one is another
+  initWorkspace(WS, { engine: 'none' });
+  check(locate(BARREL).workspace === null && same(locate(HALL).workspace, WS), 'with "engine": "none", a package in a folder holding project.godot is in no workspace either');
+}
+
 await engines[0]?.host.pool?.close();
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);

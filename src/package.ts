@@ -9,8 +9,8 @@ import path from 'node:path';
 import { ID_RE, parsePackageName } from './graph/scope.ts';
 import { MANIFEST_EXT, NAME_RE, PACKAGE_FOLDERS, graphFiles, topoFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
-import { readWorkspace, writeWorkspace } from './workspace.ts';
-import { folderKey, forgetScans } from './scan.ts';
+import { engineFile, readWorkspace, writeWorkspace } from './workspace.ts';
+import { folderKey, forgetScans, unscanned } from './scan.ts';
 import type { WebConfig } from './config.ts';
 
 /** a package version: big.small, from 1.0 */
@@ -441,15 +441,30 @@ export const LIBRARY_FILE = 'library.json';
 export interface Located {
   /** the package the folder belongs to (itself or the nearest folder above with a .topo file) */
   package: string | null;
-  /** the workspace around it: the nearest folder at or above the package (or the folder) with topotopo-workspace.json */
+  /**
+   * the workspace around it: the nearest folder at or above the package (or the folder) with topotopo-workspace.json,
+   * when the workspace's scan reaches the package (src/scan.ts); else null
+   */
   workspace: string | null;
+  /** the workspace above whose scan does not reach the package (another engine project on the way, say), and why */
+  outside?: { workspace: string; why: string };
 }
 
-/** Where a folder sits: the package it belongs to and the workspace (the game) around it. */
+/**
+ * Where a folder sits: the package it belongs to and the workspace (the game) around it. A package is the workspace's
+ * when the workspace's scan finds it: one the scan never reaches (in another engine project inside the workspace, a dot
+ * folder, deeper than the scan looks) is in no workspace, and keeps its own copies.
+ */
 export function locate(start: string): Located {
   const inside = packageDirOf(start);
   for (let d = path.resolve(inside ?? start); ; ) {
-    if (fs.existsSync(path.join(d, WORKSPACE_FILE))) return { package: inside, workspace: d };
+    if (fs.existsSync(path.join(d, WORKSPACE_FILE))) {
+      let engine: string | null;
+      // a workspace file that cannot be read: said where the packages are looked up
+      try { engine = engineFile(d, readWorkspace(d)); } catch { return { package: inside, workspace: d }; }
+      const why = unscanned(d, inside ?? start, { engine });
+      return why ? { package: inside, workspace: null, outside: { workspace: d, why } } : { package: inside, workspace: d };
+    }
     const up = path.dirname(d);
     if (up === d) return { package: inside, workspace: null };
     d = up;

@@ -164,9 +164,10 @@ const registeredLibrary = (name: string) => { try { return loadConfig().librarie
 
 /** The workspace around a folder, or an error saying there is none and how one is made. */
 function workspaceOf(start: string): string {
-  const ws = locate(start).workspace;
-  if (!ws) throw new Error(`${path.resolve(start)} is in no workspace: ${program()} workspace init <folder> makes one; outside a workspace every registered library counts`);
-  return ws;
+  const at = locate(start);
+  if (at.outside) throw new Error(`${path.resolve(start)} is in no workspace: the workspace ${at.outside.workspace} does not look in it (${at.outside.why}); outside a workspace every registered library counts`);
+  if (!at.workspace) throw new Error(`${path.resolve(start)} is in no workspace: ${program()} workspace init <folder> makes one; outside a workspace every registered library counts`);
+  return at.workspace;
 }
 
 /**
