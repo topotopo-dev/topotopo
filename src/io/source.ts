@@ -12,6 +12,9 @@
 //                  version's hash for every package version it uses, directly or through other packages (an export
 //                  made while following a working folder cooks with the published copies, so it names those)
 //   export         {format, options}: the export options given (the export tool's names)
+//   package        only on a package's outputs cooked for an engine (topotopo cook --for godot, src/host/cook.ts): the
+//                  package's publish name, else its id; the cook replaces a file at an output path only when it names
+//                  this package (or the cook record lists the file)
 //   topotopo       the version that wrote it
 // Formats that write a sidecar or manifest carry the block there (png16 / r16: <name>.json; csv / points.json instance
 // rows: <name>.meshes.json; unreal_landscape: its landscape.json); every other export gets <file>.source.json next to
@@ -35,6 +38,8 @@ export interface ExportSource {
   /** the package versions the graph uses (absent when it uses none) */
   packages?: Record<string, string>;
   export: { format: string; options: Record<string, unknown> };
+  /** the package an engine cook made it for: its publish name, else its id (absent elsewhere) */
+  package?: string;
   topotopo: string;
 }
 
@@ -55,6 +60,8 @@ export interface SourceInput {
   options?: Record<string, unknown>;
   /** the package versions the cooked graph uses (packagesUsed) */
   packages?: Record<string, string>;
+  /** an engine cook: the package it cooks for (ExportSource.package) */
+  package?: string;
   /** the TopoTopo version */
   version: string;
 }
@@ -112,6 +119,7 @@ export function exportSource(i: SourceInput): ExportSource {
     seeds: graphSeeds(spec),
     ...(i.packages && Object.keys(i.packages).length ? { packages: sorted(i.packages) } : {}),
     export: { format: i.format, options: sorted(i.options ?? {}) },
+    ...(i.package ? { package: i.package } : {}),
     topotopo: i.version,
   };
 }

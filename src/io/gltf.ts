@@ -39,7 +39,8 @@
 //   accessors with the extension's "_" prefix: Cd (+ Alpha) → _COLOR (VEC3/VEC4 float), every other numeric attribute
 //   of size 1–4 → _NAME, single strings → _NAME indices into a table in the node's extras; all as 32-bit floats (exact
 //   for integers below 2^24; 1- and 2-byte components break EXT_meshopt_compression's 4-byte instance strides); the
-//   transform inputs (N, up, orient, rot, scale, trans, pivot) are folded into TRS and skipped.
+//   transform inputs (N, up, orient, rot, scale, trans, pivot) are folded into TRS and skipped. Option instanceColors
+//   writes _COLOR alone, without custom (Godot's MultiMesh reads instance colours and nothing else).
 //   Node extras (topotopo.instanceAttributes) keep names, classes, types and string tables for re-import.
 //   Node and mesh names are packedSourceNames() (the source's prim "name", else source_<i>), as in the instance stream.
 //   Textures: the material table's texture paths (base colour, normal, roughness) are read with options.readFile and
@@ -725,7 +726,8 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
   for (const { s } of bySrc.values()) perSource.set(s, (perSource.get(s) ?? 0) + 1);
   const ext = doc.createExtension(EXTMeshGPUInstancing).setRequired(true);
   const names = packedSourceNames(g);
-  const iattrs = o.custom === true ? instanceAttribSpecs(g) : [];
+  // custom: every per-instance attribute; instanceColors: Cd (+ Alpha) alone, as _COLOR
+  const iattrs = o.custom === true ? instanceAttribSpecs(g) : o.instanceColors === true ? instanceAttribSpecs(g).filter((ia) => ia.sem === '_COLOR') : [];
   const info: Record<string, InstanceAttribInfo> = {};
   for (const ia of iattrs) info[ia.sem] = { name: ia.a.name, cls: ia.a.cls, type: ia.type, size: ia.size, ...(ia.strings ? { strings: ia.strings } : {}) };
   let sheared = 0;
