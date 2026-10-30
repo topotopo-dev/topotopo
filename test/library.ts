@@ -204,7 +204,7 @@ section('the scan: what it skips, what it enters, how deep');
   const pkg = (rel: string, m: object = {}) => { fs.mkdirSync(path.join(root, rel), { recursive: true }); fs.writeFileSync(path.join(root, rel, `${path.basename(rel)}.topo`), JSON.stringify(m)); };
   const file = (rel: string, text = '') => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
   pkg('assets/props/crate');
-  pkg('weapons/shotgun');
+  pkg('props/lantern');
   pkg('graphs/g'); pkg('exports/e'); pkg('attachments/a'); pkg('inputs/i');
   for (const d of ['Binaries', 'Intermediate', 'Saved', 'DerivedDataCache', '__ExternalActors__', '__ExternalObjects__', 'node_modules', 'topotopo-packages', '.git', 'saved']) pkg(`${d}/x`);
   file('tool/Tool.csproj'); pkg('tool/bin/b'); pkg('tool/obj/o');
@@ -215,10 +215,10 @@ section('the scan: what it skips, what it enters, how deep');
   file('notours/package.json', '{"name": "something"}'); pkg('notours/p');
   pkg('deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o');       // 16 folders below the root: found
   pkg('too-deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p');  // 17: cut off, said
-  pkg('weapons/shotgun/parts/barrel');                 // inside a package: never entered
+  pkg('props/lantern/parts/glass');                 // inside a package: never entered
   const s = scanTree('scan', root);
   const rels = s.packages.map((p) => p.rel);
-  check(rels.join() === 'assets/props/crate,attachments/a,deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o,exports/e,graphs/g,inputs/i,notours/p,plain/bin/kept,weapons/shotgun',
+  check(rels.join() === 'assets/props/crate,attachments/a,deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o,exports/e,graphs/g,inputs/i,notours/p,plain/bin/kept,props/lantern',
     `a package is a folder with one .topo file; plain folders of any name are scanned, a package is never entered (${rels})`);
   check(s.workspaces.length === 1 && /nested-ws$/.test(s.workspaces[0]) && !rels.some((r) => r.startsWith('nested-ws')), 'another workspace inside is listed, not scanned');
   check(!rels.some((r) => /^(Binaries|Intermediate|Saved|saved|DerivedDataCache|__External|node_modules|topotopo-packages|\.git|tool|other-game|checkout)/.test(r)),
@@ -313,7 +313,7 @@ section('the engine project: at or above the workspace first, then below; what U
   // game/assets/… found in both
   const repo = path.join(tmp, 'engine-repo'), godot = path.join(repo, 'game');
   fs.mkdirSync(path.join(godot, 'assets', 'trees', 'pine'), { recursive: true });
-  fs.writeFileSync(path.join(godot, 'project.godot'), 'config/name="Hunt"\n');
+  fs.writeFileSync(path.join(godot, 'project.godot'), 'config/name="Valley"\n');
   fs.writeFileSync(path.join(godot, 'assets', 'trees', 'pine', 'pine.topo'), '{}');
   fs.writeFileSync(path.join(godot, 'export_presets.cfg'), [
     '[preset.0]', 'name="Windows Desktop"', 'platform="Windows Desktop"', 'export_filter="all_resources"', 'include_filter=""', 'exclude_filter="*/graphs/*"', '',
@@ -322,28 +322,28 @@ section('the engine project: at or above the workspace first, then below; what U
     '[preset.2]', 'name="Clean"', 'export_filter="resources"', 'include_filter=""', 'exclude_filter=""', '',
   ].join('\n'));
   const atRoot = initWorkspace(godot);
-  check(atRoot.manifest.name === 'hunt' && atRoot.manifest.engine !== 'none' && atRoot.manifest.engine?.project === 'project.godot' && /\(found at or above the workspace\)/.test(atRoot.text) && /^packages: 1/m.test(atRoot.text),
+  check(atRoot.manifest.name === 'valley' && atRoot.manifest.engine !== 'none' && atRoot.manifest.engine?.project === 'project.godot' && /\(found at or above the workspace\)/.test(atRoot.text) && /^packages: 1/m.test(atRoot.text),
     `a workspace at the Godot project's root: the project is the one at its root, and the packages under assets/ are found (${atRoot.text.split('\n').slice(0, 2).join(' | ')})`);
   check(/export preset "Windows Desktop" exports every resource, so it would ship TopoTopo's files: add to its exclude_filter .* \*\/attachments\/\*, \*\/inputs\/\*, \*\.topo, \*\/exports\/\*\.source\.json, \*\/exports\/exports\.json$/m.test(atRoot.text)
     && /export preset "Web" includes \*\.json, so it would ship TopoTopo's files/.test(atRoot.text) && !/"Clean"/.test(atRoot.text),
     'it reports the presets that would ship TopoTopo\'s files, with the exclude_filter entries each lacks, and edits nothing');
   check(fs.readFileSync(path.join(godot, 'export_presets.cfg'), 'utf8').includes('exclude_filter="*/graphs/*"'), 'the presets stay as they were');
   fs.rmSync(path.join(godot, 'topotopo-workspace.json'));
-  const fromRepo = initWorkspace(repo, { name: 'hunt-repo' });
+  const fromRepo = initWorkspace(repo, { name: 'valley-repo' });
   check(fromRepo.manifest.engine !== 'none' && fromRepo.manifest.engine?.project === 'game/project.godot' && /\(found below the workspace\)/.test(fromRepo.text) && /^packages: 1/m.test(fromRepo.text) && !/packages outside the engine project/.test(fromRepo.text),
     `a workspace at the repository's root: the project found below, game/assets/… found too (${fromRepo.text.split('\n').slice(0, 2).join(' | ')})`);
   // a workspace inside the Godot project: the project above it, written upward
   fs.rmSync(path.join(repo, 'topotopo-workspace.json'));
-  const inside = initWorkspace(path.join(godot, 'assets'), { name: 'hunt-assets' });
+  const inside = initWorkspace(path.join(godot, 'assets'), { name: 'valley-assets' });
   check(inside.manifest.engine !== 'none' && inside.manifest.engine?.project === '../project.godot', `a workspace inside the project: the project above it, its path leading upward (${inside.manifest.engine && inside.manifest.engine !== 'none' ? inside.manifest.engine.project : ''})`);
   // Unreal: a workspace outside Content/ is not seen
   const ue = path.join(tmp, 'ue');
   fs.mkdirSync(path.join(ue, 'Content', 'TopoTopo'), { recursive: true });
   fs.mkdirSync(path.join(ue, 'Art'), { recursive: true });
-  fs.writeFileSync(path.join(ue, 'Shooter.uproject'), '{}');
+  fs.writeFileSync(path.join(ue, 'Garden.uproject'), '{}');
   const seen = initWorkspace(path.join(ue, 'Content', 'TopoTopo'));
-  const unseen = initWorkspace(path.join(ue, 'Art'), { name: 'shooter-art' });
-  check(seen.manifest.engine !== 'none' && seen.manifest.engine?.type === 'unreal' && seen.manifest.engine.project === '../../Shooter.uproject' && !/Unreal will not see/.test(seen.text) && /Unreal will not see this workspace: it imports only what lies under the project's Content\/ folder/.test(unseen.text),
+  const unseen = initWorkspace(path.join(ue, 'Art'), { name: 'garden-art' });
+  check(seen.manifest.engine !== 'none' && seen.manifest.engine?.type === 'unreal' && seen.manifest.engine.project === '../../Garden.uproject' && !/Unreal will not see/.test(seen.text) && /Unreal will not see this workspace: it imports only what lies under the project's Content\/ folder/.test(unseen.text),
     'Unreal: inside Content/ is seen; outside it init says Unreal will not see the workspace');
 }
 

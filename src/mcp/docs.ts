@@ -85,13 +85,13 @@ export const TOPICS: Record<string, string> = {
 The workspace tool works on all three; its actions that use or publish packages are in help topic "packages".
 
 A PACKAGE'S FOLDER
-  weapons/shotgun/shotgun.topo  {title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}],
+  props/lantern/lantern.topo   {title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}],
                                 name?:"owner/name", uses}
-  weapons/shotgun/graphs/ assets/ inputs/ exports/  graphs, saved assets, the person's input files, exports
-  weapons/shotgun/attachments/  concept art, references, source files (shown on the package's page)
-  weapons/shotgun/.web/         thumb.png, preview.glb, bake.json: derived, never edit
+  props/lantern/graphs/ assets/ inputs/ exports/  graphs, saved assets, the person's input files, exports
+  props/lantern/attachments/    concept art, references, source files (shown on the package's page)
+  props/lantern/.web/           thumb.png, preview.glb, bake.json: derived, never edit
 A folder holds one package at most (two .topo files in a folder are an error), and a package holds no other package.
-Plain folders group packages: weapons/, props/, a Godot project's assets/.
+Plain folders group packages: props/, levels/, a Godot project's assets/.
 
 WORKING IN A PACKAGE
 - workspace {action:"list", query?, tag?} → find one in the registered libraries and workspaces (and the open

@@ -205,26 +205,26 @@ try {
 
   section('workspaces: on the front page with their packages, which have pages of their own, and among the users of a package');
   {
-    const ws = path.join(tmp, 'hunt');
+    const ws = path.join(tmp, 'valley');
     fs.mkdirSync(path.join(ws, 'scenes', 'hall'), { recursive: true });
-    fs.writeFileSync(path.join(ws, 'topotopo-workspace.json'), JSON.stringify({ name: 'hunt', libraries: ['game'], engine: { type: 'godot', project: 'game/project.godot' }, uses: { 'topotopo/props': '1.0' } }));
+    fs.writeFileSync(path.join(ws, 'topotopo-workspace.json'), JSON.stringify({ name: 'valley', libraries: ['game'], engine: { type: 'godot', project: 'game/project.godot' }, uses: { 'topotopo/props': '1.0' } }));
     fs.writeFileSync(path.join(ws, 'scenes', 'hall', 'hall.topo'), JSON.stringify({ title: 'Pump hall' }));
     // a library registered inside the workspace: shown once, as the workspace's
-    const art = { name: 'hunt-art', path: path.join(ws, 'art') };
+    const art = { name: 'valley-art', path: path.join(ws, 'art') };
     createPackage(art, 'rugs/rug', { title: 'Rug', graph: BOX });
     cfg.libraries.push(art);
-    cfg.workspaces.push({ name: 'hunt', path: ws });
+    cfg.workspaces.push({ name: 'valley', path: ws });
     g.rescan();
     const home = (await req('/')).body.toString();
     const block = home.slice(home.indexOf('id="workspaces"'), home.indexOf('id="lib-'));
-    check(home.indexOf('id="ws-hunt"') > 0 && home.indexOf('id="ws-hunt"') < home.indexOf('id="lib-game"') && /Godot · game\/project\.godot<\/span>/.test(block) && !/exports to/.test(block)
-      && /<a href="\/p\/hunt\/hall">Pump hall<\/a>/.test(block) && /<a href="\/p\/hunt\/rug">Rug<\/a>/.test(block) && /<th>Shared libraries<\/th><td>game<\/td>/.test(block) && /<a href="\/p\/topotopo\/props">topotopo\/props<\/a> 1\.0/.test(block),
+    check(home.indexOf('id="ws-valley"') > 0 && home.indexOf('id="ws-valley"') < home.indexOf('id="lib-game"') && /Godot · game\/project\.godot<\/span>/.test(block) && !/exports to/.test(block)
+      && /<a href="\/p\/valley\/hall">Pump hall<\/a>/.test(block) && /<a href="\/p\/valley\/rug">Rug<\/a>/.test(block) && /<th>Shared libraries<\/th><td>game<\/td>/.test(block) && /<a href="\/p\/topotopo\/props">topotopo\/props<\/a> 1\.0/.test(block),
       `the front page lists the workspace first: its engine (no word on where exports go), its shared libraries, its packages linked to their pages, the packages it uses (${block.replace(/\s+/g, ' ').slice(0, 900)})`);
-    check(!/id="lib-hunt-art"/.test(home), 'a registered library inside a registered workspace shows once, as the workspace\'s');
-    const page = await req('/p/hunt/hall');
-    check(page.status === 200 && /Pump hall/.test(page.body.toString()) && /in the workspace &quot;hunt&quot;/.test(page.body.toString()), 'a workspace\'s package has a page of its own at /p/<workspace>/<id>');
-    check((await req('/p/hunt/rug')).status === 200, 'and so does the package of the library inside it, as the workspace\'s');
-    check(/<a href="\/#ws-hunt">workspace hunt<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/p/topotopo/props')).body.toString()), 'a built-in package\'s users include the workspaces that use it');
+    check(!/id="lib-valley-art"/.test(home), 'a registered library inside a registered workspace shows once, as the workspace\'s');
+    const page = await req('/p/valley/hall');
+    check(page.status === 200 && /Pump hall/.test(page.body.toString()) && /in the workspace &quot;valley&quot;/.test(page.body.toString()), 'a workspace\'s package has a page of its own at /p/<workspace>/<id>');
+    check((await req('/p/valley/rug')).status === 200, 'and so does the package of the library inside it, as the workspace\'s');
+    check(/<a href="\/#ws-valley">workspace valley<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/p/topotopo/props')).body.toString()), 'a built-in package\'s users include the workspaces that use it');
     cfg.workspaces.length = 0;
     cfg.libraries.pop();
     g.rescan();

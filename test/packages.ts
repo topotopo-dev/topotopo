@@ -14,7 +14,7 @@
 //   lib/           a registered library ("lib"): rocks, kinds, rules …
 //   other/         a registered library ("other"), which the workspace does not list
 //   repo/forest/   a package outside any workspace and library: it looks in every registered library
-//   hunt/          a workspace "hunt" listing "lib": packages in plain folders (assets/props/crate, weapons/shotgun,
+//   valley/          a workspace "valley" listing "lib": packages in plain folders (assets/props/crate, furniture/chair,
 //                  levels/…), which find each other by themselves
 //   node test/packages.ts
 import fs from 'node:fs';
@@ -223,7 +223,7 @@ const shown = (dir: string) => listing(dir).filter((f) => !f.split('/').some((p)
 
 const dirs = {
   repo: path.join(tmp, 'repo'), lib: path.join(tmp, 'lib'), forest: path.join(tmp, 'repo', 'forest'),
-  game: path.join(tmp, 'game'), other: path.join(tmp, 'other'), hunt: path.join(tmp, 'hunt'),
+  game: path.join(tmp, 'game'), other: path.join(tmp, 'other'), valley: path.join(tmp, 'valley'),
 };
 json(process.env.TOPOTOPO_CONFIG, { libraries: [{ name: 'game', path: dirs.game }, { name: 'lib', path: dirs.lib }, { name: 'other', path: dirs.other }] });
 
@@ -297,11 +297,11 @@ writePackage(GROVE, { name: 'studio/grove' }, { main: { nodes: { t: { type: 'stu
 // other/thing: in a registered library the workspace does not list
 writePackage(path.join(dirs.other, 'thing'), { name: 'other/thing' }, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
 
-// hunt: a workspace listing the library "lib"; its packages in plain folders, one under assets/, one nested by kind
-json(path.join(dirs.hunt, 'topotopo-workspace.json'), { name: 'hunt', libraries: ['lib'] });
-const CRATE = path.join(dirs.hunt, 'assets', 'props', 'crate'), SHOTGUN = path.join(dirs.hunt, 'weapons', 'shotgun'), YARD = path.join(dirs.hunt, 'levels', 'yard');
-writePackage(CRATE, { name: 'hunt/crate' }, { main: { nodes: { b: { type: 'box', params: { size: [1, 0.5, 1] } } }, output: 'b', outputs: { crate: { node: 'b', kind: 'mesh', tags: ['crate'], description: 'A crate.' } } } });
-writePackage(SHOTGUN, { name: 'hunt/shotgun' }, { main: { nodes: { t: { type: 'tube' } }, output: 't' } });
+// valley: a workspace listing the library "lib"; its packages in plain folders, one under assets/, one nested by kind
+json(path.join(dirs.valley, 'topotopo-workspace.json'), { name: 'valley', libraries: ['lib'] });
+const CRATE = path.join(dirs.valley, 'assets', 'props', 'crate'), CHAIR = path.join(dirs.valley, 'furniture', 'chair'), YARD = path.join(dirs.valley, 'levels', 'yard');
+writePackage(CRATE, { name: 'valley/crate' }, { main: { nodes: { b: { type: 'box', params: { size: [1, 0.5, 1] } } }, output: 'b', outputs: { crate: { node: 'b', kind: 'mesh', tags: ['crate'], description: 'A crate.' } } } });
+writePackage(CHAIR, { name: 'valley/chair' }, { main: { nodes: { t: { type: 'tube' } }, output: 't' } });
 writePackage(YARD, {}, {});
 
 section('the manifest: name, uses, no libraries');
@@ -830,9 +830,9 @@ section('errors: unknown outputs, packages no place has, a library the workspace
   // in the workspace: a package only in a registered library the workspace does not list names the command that lists it
   const y = await open(YARD);
   const notListed = errorText(() => y.pk.use('studio/trees'));
-  check(/^studio\/trees is in library "game" \(.*\), which the workspace "hunt" does not list: topotopo workspace library add game lists it \(MCP: workspace \{action:"libraries", add:"game"\}, when the person says so\)/.test(notListed),
+  check(/^studio\/trees is in library "game" \(.*\), which the workspace "valley" does not list: topotopo workspace library add game lists it \(MCP: workspace \{action:"libraries", add:"game"\}, when the person says so\)/.test(notListed),
     `a package only in a library the workspace does not list: the command that lists it (${notListed})`);
-  check(/no place this package looks in has a package studio\/oaks .*: it looks in the workspace "hunt" \(.*\), library "lib" \(.*\), TopoTopo's built-in library/.test(errorText(() => y.pk.use('studio/oaks'))), 'and one no place has names the places, in order');
+  check(/no place this package looks in has a package studio\/oaks .*: it looks in the workspace "valley" \(.*\), library "lib" \(.*\), TopoTopo's built-in library/.test(errorText(() => y.pk.use('studio/oaks'))), 'and one no place has names the places, in order');
   // a manifest that still lists libraries: the package's uses cannot be read, and the error says where each entry goes
   const lonely = path.join(tmp, 'lonely');
   writePackage(lonely, {}, {});
@@ -851,19 +851,19 @@ section('errors: unknown outputs, packages no place has, a library the workspace
       'outside a workspace with no library registered, it says how to register one');
   } finally { process.env.TOPOTOPO_CONFIG = cfg; }
   // the workspace's "libraries": an entry that does not work leaves the others working, and the listings say why
-  json(path.join(dirs.hunt, 'topotopo-workspace.json'), { name: 'hunt', libraries: ['../hunt-typo', 'nowhere', '../lib/rocks', './assets', 'topotopo', 'lib'] });
+  json(path.join(dirs.valley, 'topotopo-workspace.json'), { name: 'valley', libraries: ['../valley-typo', 'nowhere', '../lib/rocks', './assets', 'topotopo', 'lib'] });
   const both = librariesFor(YARD);
-  check(both.libs.map((l) => `${l.name}:${l.from}`).join() === 'hunt:self,lib:listed' && both.problems.length === 4 && /"\.\.\/hunt-typo" is no folder/.test(both.problems[0])
+  check(both.libs.map((l) => `${l.name}:${l.from}`).join() === 'valley:self,lib:listed' && both.problems.length === 4 && /"\.\.\/valley-typo" is no folder/.test(both.problems[0])
     && /"nowhere" is not registered on this machine \(.*has game, lib, other\): topotopo library add nowhere <folder> registers it/.test(both.problems[1])
     && /"\.\.\/lib\/rocks" is a package's folder \(rocks\.topo\), not a library/.test(both.problems[2])
     && /"\.\/assets" is inside the workspace \(.*\): its packages are found by themselves; remove it from "libraries"/.test(both.problems[3]),
     `each entry that does not work says why (a typo, a name not registered, a package's folder, a folder inside the workspace; "topotopo" changes nothing), and the others still count (${both.problems.join(' | ')})`);
   const y2 = await open(YARD);
-  check(/^added nordic\/rocks 1\.0 to workspace "hunt"/.test(y2.pk.use('nordic/rocks').text) && /\ncould not check 4:\n {2}.*topotopo-workspace\.json "libraries": /.test(packagesText(y2.pk)),
+  check(/^added nordic\/rocks 1\.0 to workspace "valley"/.test(y2.pk.use('nordic/rocks').text) && /\ncould not check 4:\n {2}.*topotopo-workspace\.json "libraries": /.test(packagesText(y2.pk)),
     'use and packages work with the others, and say "could not check" for the rest');
-  json(path.join(dirs.hunt, 'topotopo-workspace.json'), { ...readJSON(path.join(dirs.hunt, 'topotopo-workspace.json')), libraries: ['lib'] });
+  json(path.join(dirs.valley, 'topotopo-workspace.json'), { ...readJSON(path.join(dirs.valley, 'topotopo-workspace.json')), libraries: ['lib'] });
   // an unreadable workspace file: a problem naming it, and only the built-in library is looked in
-  const wsFile = path.join(dirs.hunt, 'topotopo-workspace.json'), kept = fs.readFileSync(wsFile);
+  const wsFile = path.join(dirs.valley, 'topotopo-workspace.json'), kept = fs.readFileSync(wsFile);
   fs.writeFileSync(wsFile, '{ not json');
   const bad = librariesFor(YARD);
   check(!bad.libs.length && /topotopo-workspace\.json: .*; until it is fixed, packages are found in TopoTopo's built-in library only$/.test(bad.problems[0] ?? ''), `an unreadable workspace file: only the built-in library (${bad.problems[0]})`);
@@ -1066,7 +1066,7 @@ section('TopoTopo\'s built-in library: looked in without listing it; copies and 
   const offered = b.engine.packageDefs().find((d) => d.type === 'topotopo/shapes/cube');
   check(!!offered && offered.summary === 'A test cube.' && /^Its size is s\.\ntopotopo\/shapes 1\.0: first version\nOutput "cube" of package topotopo\/shapes 1\.0 \(Cube\): it cooks node "b"/.test(offered.description ?? '') && !b.engine.resolveDef('topotopo/shapes/cube'),
     `a package that does not use it gets it offered: the catalog lists it (${offered?.summary}), and only a graph's first use makes it resolve`);
-  const listsBuiltin = resolveListed(dirs.hunt, ['topotopo']);
+  const listsBuiltin = resolveListed(dirs.valley, ['topotopo']);
   check(!listsBuiltin.libs.length && !listsBuiltin.problems.length && /^added topotopo\/shapes 1\.0/.test(b.pk.use('topotopo/shapes').text), 'a workspace that lists "topotopo" lists nothing more: the built-in library is looked in anyway');
   const loose = path.join(tmp, 'loose-builtin');
   fs.mkdirSync(loose);
@@ -1116,28 +1116,28 @@ section('search: the places a package looks in, by words, kind and tag; in a wor
   });
   const w = await open(WOODS, [], SB);
   check((await publishPackage(w.pk, { note: 'woods', builtin: true })).ok, 'the built-in library of the search: topotopo/woods 1.0');
-  // finder is a package of the workspace "hunt", which lists "lib"; game and other are registered and not listed
-  const FINDER = path.join(dirs.hunt, 'levels', 'finder');
+  // finder is a package of the workspace "valley", which lists "lib"; game and other are registered and not listed
+  const FINDER = path.join(dirs.valley, 'levels', 'finder');
   writePackage(FINDER, {}, {});
   const find = (dir: string, q: Parameters<typeof searchPackages>[1]) => searchPackages(dir, q, { builtin: SB });
   const s = find(FINDER, { query: 'conifer' });
   const where = (r: ReturnType<typeof searchPackages>) => r.libraries.map((l) => `${l.name}:${l.standing}:${l.hits.map((h) => h.type).join('+')}`).join(' ');
-  check(s.package === 'package finder' && s.workspace === 'hunt' && s.libraries.map((l) => `${l.name}:${l.standing}`).join() === 'hunt:self,lib:listed,topotopo:builtin,game:unlisted,other:unlisted',
+  check(s.package === 'package finder' && s.workspace === 'valley' && s.libraries.map((l) => `${l.name}:${l.standing}`).join() === 'valley:self,lib:listed,topotopo:builtin,game:unlisted,other:unlisted',
     `the places in the order a lookup takes them (the workspace, the library it lists, the built-in library), then the registered ones it does not list, by name (${where(s)})`);
-  check(where(s) === 'hunt:self: lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:',
+  check(where(s) === 'valley:self: lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:',
     `words match the outputs' names, descriptions and tags, across the built-in library and a registered one (${where(s)})`);
   const pine = s.libraries[3].hits[0];
   check(pine.kind === 'mesh' && pine.tags.join() === 'conifer,tree' && pine.label === 'Pine' && pine.version === '1.1' && pine.alias === 'studio/trees' && pine.package === 'studio/trees',
     `each result: full name, kind, tags, label, version (${JSON.stringify(pine)})`);
   const text = searchText(s, true);
   check(/^search "conifer": 3 outputs in 2 of the 5 places looked in, for package finder\n/.test(text) && /\nTopoTopo's built-in library "topotopo": TopoTopo's own packages, which every package can use/.test(text)
-    && /\nlibrary "game" \(.*game\): the workspace "hunt" does not list it: to use these, workspace \{action:"libraries", add:"game"\} lists it, when the person says so \(the tools never add a library by themselves\)/.test(text)
+    && /\nlibrary "game" \(.*game\): the workspace "valley" does not list it: to use these, workspace \{action:"libraries", add:"game"\} lists it, when the person says so \(the tools never add a library by themselves\)/.test(text)
     && /\nhelp \{nodes:\["topotopo\/woods\/fir"\]\} gives an output's params and inputs/.test(text)
-    && /\n {2}studio\/trees\/pine {2}mesh \[conifer, tree\] {2}"Pine" {2}1\.1 {2}\(also studio\/trees, its default output\)\n/.test(text) && /\nnothing matches in the workspace "hunt", library "lib", library "other"/.test(text),
+    && /\n {2}studio\/trees\/pine {2}mesh \[conifer, tree\] {2}"Pine" {2}1\.1 {2}\(also studio\/trees, its default output\)\n/.test(text) && /\nnothing matches in the workspace "valley", library "lib", library "other"/.test(text),
     `it says which the package can use, and the command that lists a library for the others:\n${text}`);
-  check(where(find(FINDER, { query: 'conifer', kind: 'instances' })) === 'hunt:self: lib:listed: topotopo:builtin:topotopo/woods/grove game:unlisted: other:unlisted:', 'kind matches exactly');
-  check(where(find(FINDER, { tag: 'conifer' })) === 'hunt:self: lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:'
-    && !find(FINDER, { tag: 'conif' }).libraries.some((l) => l.hits.length) && where(find(FINDER, { tag: 'rock' })) === 'hunt:self: lib:listed: topotopo:builtin:topotopo/woods/stone game:unlisted: other:unlisted:', 'tag matches exactly');
+  check(where(find(FINDER, { query: 'conifer', kind: 'instances' })) === 'valley:self: lib:listed: topotopo:builtin:topotopo/woods/grove game:unlisted: other:unlisted:', 'kind matches exactly');
+  check(where(find(FINDER, { tag: 'conifer' })) === 'valley:self: lib:listed: topotopo:builtin:topotopo/woods/fir+topotopo/woods/grove game:unlisted:studio/trees/pine other:unlisted:'
+    && !find(FINDER, { tag: 'conif' }).libraries.some((l) => l.hits.length) && where(find(FINDER, { tag: 'rock' })) === 'valley:self: lib:listed: topotopo:builtin:topotopo/woods/stone game:unlisted: other:unlisted:', 'tag matches exactly');
   const show = find(FINDER, { query: 'showcase' });
   check(show.libraries[1].hits.length === 8 && show.libraries[1].hits.every((h) => h.package === 'studio/kinds' && h.version === '2.1') && show.libraries[1].hits.find((h) => h.type === 'studio/kinds/mesh')?.alias === 'studio/kinds',
     `the package's own tags match too: every output of its newest version (${show.libraries[1].hits.map((h) => h.type).join(', ')})`);
@@ -1145,7 +1145,7 @@ section('search: the places a package looks in, by words, kind and tag; in a wor
     'the package\'s description does not: it lists its contents, which would match every output');
   check(where(find(FINDER, { query: 'conif' })) === where(s) && !find(FINDER, { query: 'onifer' }).libraries.some((l) => l.hits.length) && !find(FINDER, { query: 'ree' }).libraries.some((l) => l.hits.length),
     'a word matches the start of a word ("conif" finds conifers; "onifer" and "ree" find nothing)');
-  check(where(find(FINDER, { query: 'nordic boulder' })) === 'hunt:self: lib:listed:nordic/rocks/boulder topotopo:builtin: game:unlisted: other:unlisted:', 'every word must match');
+  check(where(find(FINDER, { query: 'nordic boulder' })) === 'valley:self: lib:listed:nordic/rocks/boulder topotopo:builtin: game:unlisted: other:unlisted:', 'every word must match');
   check(throws(() => find(FINDER, { kind: 'level' }), /^"level" is not a kind: mesh, instances, points, curves, terrain, textures, material, volume, scene$/), 'a kind not on the list says the list');
   // outside a workspace every registered library counts; the package itself; a folder in no package
   const used = find(dirs.forest, { tag: 'conifer' });
@@ -1157,10 +1157,10 @@ section('search: the places a package looks in, by words, kind and tag; in a wor
   const none = find(path.join(tmp, 'loose'), { tag: 'conifer' });
   check(none.package === null && none.libraries.map((l) => l.name).join() === 'game,lib,other,topotopo' && /\nthis folder is in no package, and only a package's graphs use packages: topotopo init/.test(searchText(none)),
     'a folder in no package: the registered libraries and TopoTopo\'s built-in one, and how to make it a package');
-  const atRoot = find(dirs.hunt, { tag: 'conifer' });
-  check(atRoot.package === null && atRoot.workspace === 'hunt' && /for the workspace "hunt"/.test(searchText(atRoot)) && atRoot.libraries.map((l) => l.standing).join() === 'self,listed,builtin,unlisted,unlisted',
+  const atRoot = find(dirs.valley, { tag: 'conifer' });
+  check(atRoot.package === null && atRoot.workspace === 'valley' && /for the workspace "valley"/.test(searchText(atRoot)) && atRoot.libraries.map((l) => l.standing).join() === 'self,listed,builtin,unlisted,unlisted',
     'at a workspace\'s root, in no package, search uses the workspace\'s lookup');
-  check(/^search "nothing-here": no output matches in the workspace "hunt", library "lib", TopoTopo's built-in library, library "game", library "other"$/.test(searchText(find(FINDER, { query: 'nothing-here' }))), 'nothing found: it says where it looked');
+  check(/^search "nothing-here": no output matches in the workspace "valley", library "lib", TopoTopo's built-in library, library "game", library "other"$/.test(searchText(find(FINDER, { query: 'nothing-here' }))), 'nothing found: it says where it looked');
 }
 
 // ------------------------------------------------------------------ the CLI
@@ -1208,21 +1208,21 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   // `topotopo libraries` is gone: it says where its work went; the workspace lists its shared libraries
   const gone = await run('libraries', ['add', 'game', CLI]);
   check(gone.code === 1 && gone.err === '`topotopo libraries` is gone: `topotopo workspace library add <entry>` lists a library for the workspace; outside a workspace every registered library counts', `topotopo libraries says where its work went: ${gone.err}`);
-  const wsFile = path.join(dirs.hunt, 'topotopo-workspace.json');
-  const add = await run('workspace', ['library', 'add', 'game', '--workspace', dirs.hunt]);
-  check(add.code === 0 && JSON.stringify(readJSON(wsFile).libraries) === '["lib","game"]' && /the workspace "hunt" lists "lib", "game" in .*topotopo-workspace\.json "libraries" now\nits packages find packages in the workspace itself, then in library "lib" \(.*\), library "game" \(.*\), then in TopoTopo's built-in library/.test(add.out),
+  const wsFile = path.join(dirs.valley, 'topotopo-workspace.json');
+  const add = await run('workspace', ['library', 'add', 'game', '--workspace', dirs.valley]);
+  check(add.code === 0 && JSON.stringify(readJSON(wsFile).libraries) === '["lib","game"]' && /the workspace "valley" lists "lib", "game" in .*topotopo-workspace\.json "libraries" now\nits packages find packages in the workspace itself, then in library "lib" \(.*\), library "game" \(.*\), then in TopoTopo's built-in library/.test(add.out),
     `workspace library add lists a registered library by its name: ${add.out}`);
-  const byFolder = await run('workspace', ['library', 'add', path.join('..', 'other')], dirs.hunt);
+  const byFolder = await run('workspace', ['library', 'add', path.join('..', 'other')], dirs.valley);
   check(byFolder.code === 0 && JSON.stringify(readJSON(wsFile).libraries) === '["lib","game","../other"]', `a folder, given as the person sees it, is written from the workspace: ${readJSON(wsFile).libraries}`);
-  check((await run('workspace', ['library', 'remove', dirs.other], dirs.hunt)).code === 0 && (await run('workspace', ['library', 'remove', 'game'], YARD)).code === 0 && JSON.stringify(readJSON(wsFile).libraries) === '["lib"]',
+  check((await run('workspace', ['library', 'remove', dirs.other], dirs.valley)).code === 0 && (await run('workspace', ['library', 'remove', 'game'], YARD)).code === 0 && JSON.stringify(readJSON(wsFile).libraries) === '["lib"]',
     'workspace library remove takes the entry, its folder or its name; the default workspace is the one around the current folder');
-  const inside = await run('workspace', ['library', 'add', './assets'], dirs.hunt);
+  const inside = await run('workspace', ['library', 'add', './assets'], dirs.valley);
   check(inside.code === 1 && /assets is inside the workspace \(.*\): its packages are found by themselves; .*topotopo-workspace\.json "libraries" lists shared libraries outside it/.test(inside.err), `a folder inside the workspace is refused: ${inside.err}`);
-  const pkgFolder = await run('workspace', ['library', 'add', ROCKS, '--workspace', dirs.hunt]);
+  const pkgFolder = await run('workspace', ['library', 'add', ROCKS, '--workspace', dirs.valley]);
   check(pkgFolder.code === 1 && /is a package's folder \(rocks\.topo\), not a library: .*"libraries" lists the folders of shared libraries/.test(pkgFolder.err), `a package's folder is no library: ${pkgFolder.err}`);
-  const unregistered = await run('workspace', ['library', 'add', 'nowhere', '--workspace', dirs.hunt]);
+  const unregistered = await run('workspace', ['library', 'add', 'nowhere', '--workspace', dirs.valley]);
   check(unregistered.code === 1 && /^"nowhere" is no folder here and no registered library \(game, lib, other\): .*"libraries" lists a registered library by its name; register it first \(topotopo library add nowhere <folder>\)/.test(unregistered.err), `an unregistered name is refused: ${unregistered.err}`);
-  check(/topotopo-workspace\.json does not list "nope": it lists "lib"/.test((await run('workspace', ['library', 'remove', 'nope', '--workspace', dirs.hunt])).err), 'and remove says what it lists for one it does not');
+  check(/topotopo-workspace\.json does not list "nope": it lists "lib"/.test((await run('workspace', ['library', 'remove', 'nope', '--workspace', dirs.valley])).err), 'and remove says what it lists for one it does not');
   check(/is in no workspace: topotopo workspace init <folder> makes one; outside a workspace every registered library counts/.test((await run('workspace', ['library', 'add', 'game'], CLI)).err), 'outside a workspace it says so');
 
   // a folder named must exist; a version is named apart
@@ -1270,13 +1270,13 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
     && !Object.keys(readManifest(RM).uses).length && !Object.keys(readLock(RM).packages).length && shown(path.join(RM, 'packages')).join() === 'lock.json', `remove: ${removed.out}`);
 
   // search, from a folder or for one named
-  const found = await run('search', ['conifer', '--kind', 'mesh'], path.join(dirs.hunt, 'levels', 'finder'));
+  const found = await run('search', ['conifer', '--kind', 'mesh'], path.join(dirs.valley, 'levels', 'finder'));
   check(found.code === 0 && /^search "conifer", kind mesh: \d+ outputs? in \d+ of the 5 places looked in, for package finder/.test(found.out) && /\n {2}studio\/trees\/pine {2}mesh \[conifer, tree\]/.test(found.out)
-    && /the workspace "hunt" does not list it: to use these, topotopo workspace library add game lists it/.test(found.out) && /\ntopotopo --help-node \S+ gives an output's params and inputs/.test(found.out), `search: ${found.out.split('\n')[0]}`);
+    && /the workspace "valley" does not list it: to use these, topotopo workspace library add game lists it/.test(found.out) && /\ntopotopo --help-node \S+ gives an output's params and inputs/.test(found.out), `search: ${found.out.split('\n')[0]}`);
   // packages at a workspace's root, in no package: the workspace's
-  const root = await run('packages', [dirs.hunt]);
-  check(root.code === 0 && /^the workspace "hunt" \(.*\), at its root, in no package: its topotopo-workspace\.json names the versions every package in it uses/.test(root.out) && /\nuses 1 package: 1 up to date\n {2}nordic\/rocks 1\.0 /.test(root.out)
-    && /\n {2}hunt\/crate +no version published yet {2}\[the workspace "hunt"\]/.test(root.out) && /\nlooks in: the workspace "hunt" \(.*\), library "lib" \(.*\), TopoTopo's built-in library\n/.test(root.out), `packages at a workspace's root:\n${root.out}`);
+  const root = await run('packages', [dirs.valley]);
+  check(root.code === 0 && /^the workspace "valley" \(.*\), at its root, in no package: its topotopo-workspace\.json names the versions every package in it uses/.test(root.out) && /\nuses 1 package: 1 up to date\n {2}nordic\/rocks 1\.0 /.test(root.out)
+    && /\n {2}valley\/crate +no version published yet {2}\[the workspace "valley"\]/.test(root.out) && /\nlooks in: the workspace "valley" \(.*\), library "lib" \(.*\), TopoTopo's built-in library\n/.test(root.out), `packages at a workspace's root:\n${root.out}`);
   const there = await run('search', ['--tag', 'conifer', CLI]);
   check(there.code === 0 && /for package cliproj/.test(there.out) && /\n {2}studio\/trees\/pine /.test(there.out), 'search for the package of a folder named (a path), --tag');
   check(/^no folder .*nowhere$/.test((await run('search', ['conifer', './nowhere'], CLI)).err), 'a folder that does not exist is an error');
@@ -1614,17 +1614,17 @@ section('the CLI: outdated, update and --apply');
 
 section('the workspace tool: the shared libraries of the open package\'s workspace, changed when the person says so; a broken config stops only the actions on registered libraries');
 {
-  const LT = path.join(dirs.hunt, 'levels', 'tool-package');
+  const LT = path.join(dirs.valley, 'levels', 'tool-package');
   writePackage(LT, {}, {});
   const o = await open(LT);
   const tool = workspaceTool({ session: () => o.ws, packages: () => o.pk, open: async () => ({ graphs: 0, assets: 0 }) });
   const say = async (a: any) => { try { const r = await tool.run(a); return { err: !!r.isError, text: r.content.map((c: any) => c.text ?? '').join('\n') }; } catch (e: any) { return { err: true, text: String(e.message) }; } };
-  const wsFile = path.join(dirs.hunt, 'topotopo-workspace.json');
+  const wsFile = path.join(dirs.valley, 'topotopo-workspace.json');
   const set = await say({ action: 'set', libraries: ['game'] });
   check(set.err && /"libraries" is no longer set on a package: the workspace lists the shared libraries its packages use \(workspace \{action:"libraries", add:"<name or folder>"\}/.test(set.text) && !('libraries' in readJSON(manifestFile(LT))),
     `set {libraries} is refused, saying where it went: ${set.text}`);
   const shownLibs = await say({ action: 'libraries' });
-  check(!shownLibs.err && /^the workspace "hunt" lists "lib" in .*topotopo-workspace\.json "libraries"\nits packages find packages in the workspace itself, then in library "lib"/.test(shownLibs.text), `libraries alone says what the workspace lists: ${shownLibs.text}`);
+  check(!shownLibs.err && /^the workspace "valley" lists "lib" in .*topotopo-workspace\.json "libraries"\nits packages find packages in the workspace itself, then in library "lib"/.test(shownLibs.text), `libraries alone says what the workspace lists: ${shownLibs.text}`);
   const added = await say({ action: 'libraries', add: 'game' });
   check(!added.err && JSON.stringify(readJSON(wsFile).libraries) === '["lib","game"]' && !(await say({ action: 'use', package: 'studio/grove' })).err, `libraries {add} writes the workspace file, and the library serves its packages: ${added.text.split('\n')[0]}`);
   check((await say({ action: 'libraries', add: '/abs/lib' })).err && JSON.stringify(readJSON(wsFile).libraries) === '["lib","game"]', 'an entry of the wrong form is refused, and nothing is written');
@@ -1705,57 +1705,57 @@ section('the places in order: precedence, two folders of one name, "topotopo/…
 {
   const box = (h: number): GraphSpec => ({ nodes: { b: { type: 'box', params: { size: [1, h, 1] } } }, output: 'b', outputs: { block: { node: 'b', kind: 'mesh', tags: ['block'], description: 'A block.' } } });
   // the workspace comes before the library it lists: a package of the workspace named studio/rules is the one used
-  const LOCAL = path.join(dirs.hunt, 'assets', 'rules-local');
+  const LOCAL = path.join(dirs.valley, 'assets', 'rules-local');
   writePackage(LOCAL, { name: 'studio/rules' }, { main: box(3) });
   check((await publish(LOCAL, 'the workspace\'s own rules')).version === '1.0', 'a package of the workspace publishes studio/rules 1.0 (library "lib" has 7.1)');
   const y = await open(YARD);
   const rules = y.pk.use('studio/rules');
-  const label = readJSON(path.join(dirs.hunt, 'topotopo-packages', 'lock.json')).packages['studio/rules']['1.0'].library;
-  check(/^added studio\/rules 1\.0 to workspace "hunt" .*from the workspace "hunt"/.test(rules.text) && label === '.', `the workspace before the library it lists; the lock names the workspace by its path from its store, "." (${rules.text.split(':')[0]}; ${label})`);
+  const label = readJSON(path.join(dirs.valley, 'topotopo-packages', 'lock.json')).packages['studio/rules']['1.0'].library;
+  check(/^added studio\/rules 1\.0 to workspace "valley" .*from the workspace "valley"/.test(rules.text) && label === '.', `the workspace before the library it lists; the lock names the workspace by its path from its store, "." (${rules.text.split(':')[0]}; ${label})`);
   const listed = packagesText(y.pk);
   check(/\n {2}studio\/rules 1\.0 {2}1 output {2}up to date; also in library "lib", not used\n/.test(listed), `packages says the later place has it too, not used:\n${listed.split('\n').find((l) => /studio\/rules/.test(l))}`);
   const hits = searchPackages(YARD, { tag: 'block' }).libraries;
-  check(hits[0].name === 'hunt' && hits[0].hits.some((h) => h.package === 'studio/rules' && h.also?.join() === 'library "lib"') && !hits[1].hits.some((h) => h.package === 'studio/rules'),
+  check(hits[0].name === 'valley' && hits[0].hits.some((h) => h.package === 'studio/rules' && h.also?.join() === 'library "lib"') && !hits[1].hits.some((h) => h.package === 'studio/rules'),
     'search finds it in the workspace, says the library has it too, and lists no hit for the copy not used');
   // a publishing package inside the workspace keeps its own copies: the lock names the workspace by its path from it
   const c = await open(CRATE);
   c.pk.use('studio/rules');
   check(readLock(CRATE).packages['studio/rules']['1.0'].library === '../../..', `a publishing package's own store names the workspace by its path to the workspace's root (${readLock(CRATE).packages['studio/rules']['1.0'].library})`);
   // two folders of one place publishing one name: the name is left out, both named, and publishing blocks
-  const TWIN = path.join(dirs.hunt, 'assets', 'props', 'crate-twin');
-  writePackage(TWIN, { name: 'hunt/crate' }, { main: box(1) });
+  const TWIN = path.join(dirs.valley, 'assets', 'props', 'crate-twin');
+  writePackage(TWIN, { name: 'valley/crate' }, { main: box(1) });
   forgetScans();
-  const clash = errorText(() => y.pk.use('hunt/crate'));
-  check(/^hunt\/crate is published by two folders of the workspace "hunt", .*crate and .*crate-twin: TopoTopo never picks one, so the name is not used until one is renamed/.test(clash), `two folders of one name: ${clash}`);
+  const clash = errorText(() => y.pk.use('valley/crate'));
+  check(/^valley\/crate is published by two folders of the workspace "valley", .*crate and .*crate-twin: TopoTopo never picks one, so the name is not used until one is renamed/.test(clash), `two folders of one name: ${clash}`);
   const blocked = await publish(CRATE, 'first crate');
-  check(!blocked.ok && blocked.blocks.some((b) => /crate-twin in the workspace "hunt" publishes as hunt\/crate too: one name, one folder per workspace or library/.test(b)), `publishing blocks while another folder holds its name: ${blocked.blocks.join(' | ')}`);
+  check(!blocked.ok && blocked.blocks.some((b) => /crate-twin in the workspace "valley" publishes as valley\/crate too: one name, one folder per workspace or library/.test(b)), `publishing blocks while another folder holds its name: ${blocked.blocks.join(' | ')}`);
   fs.rmSync(TWIN, { recursive: true });
-  check((await publish(CRATE, 'first crate')).ok && /^added hunt\/crate 1\.0 to workspace "hunt"/.test(y.pk.use('hunt/crate').text), 'one folder again: it publishes, and the workspace\'s packages find it by themselves');
+  check((await publish(CRATE, 'first crate')).ok && /^added valley\/crate 1\.0 to workspace "valley"/.test(y.pk.use('valley/crate').text), 'one folder again: it publishes, and the workspace\'s packages find it by themselves');
   // a package named "topotopo/…" outside the built-in library is left out, said
-  const FAKE = path.join(dirs.hunt, 'assets', 'fake');
+  const FAKE = path.join(dirs.valley, 'assets', 'fake');
   writePackage(FAKE, { name: 'topotopo/props' }, { main: box(1) });
   forgetScans();
   const said = packagesText(y.pk);
-  check(/the workspace "hunt": assets\/fake publishes as topotopo\/props, and the packages named "topotopo\/…" are TopoTopo's built-in library's: it is left out/.test(said) && y.pk.catalog().find((x) => x.package === 'topotopo/props')?.place === 'TopoTopo\'s built-in library',
+  check(/the workspace "valley": assets\/fake publishes as topotopo\/props, and the packages named "topotopo\/…" are TopoTopo's built-in library's: it is left out/.test(said) && y.pk.catalog().find((x) => x.package === 'topotopo/props')?.place === 'TopoTopo\'s built-in library',
     'a package named "topotopo/…" outside the built-in library is ignored with a problem; the name stays the built-in library\'s');
   fs.rmSync(FAKE, { recursive: true });
   // a registered library inside another registered library counts once, in the first; one inside the workspace is refused as a listed library
   const SUB = path.join(dirs.lib, 'sublib');
   writePackage(path.join(SUB, 'pebble'), { name: 'studio/pebble' }, { main: box(0.2) });
   addLibrary('sublib', SUB);
-  addLibrary('huntlib', path.join(dirs.hunt, 'assets'));
+  addLibrary('valleylib', path.join(dirs.valley, 'assets'));
   try {
     const f = await open(dirs.forest);
     const pebble = f.pk.catalog().filter((x) => x.package === 'studio/pebble');
     check(pebble.length === 1 && pebble[0].place === 'library "lib"' && !pebble[0].also.length, `a package reached through two registered libraries counts once, in the first (${pebble.map((x) => `${x.place} also ${x.also}`)})`);
-    const inWs = resolveListed(dirs.hunt, ['huntlib']);
-    check(!inWs.libs.length && /"huntlib" is inside the workspace \(.*\): its packages are found by themselves; remove it from "libraries"/.test(inWs.problems[0] ?? ''), `a listed library inside the workspace is a problem and skipped (${inWs.problems[0]})`);
-    const add = await run('workspace', ['library', 'add', 'huntlib', '--workspace', dirs.hunt]);
-    check(add.code === 1 && /library "huntlib" \(.*\) is inside the workspace: its packages are found by themselves/.test(add.err), `workspace library add refuses it: ${add.err}`);
+    const inWs = resolveListed(dirs.valley, ['valleylib']);
+    check(!inWs.libs.length && /"valleylib" is inside the workspace \(.*\): its packages are found by themselves; remove it from "libraries"/.test(inWs.problems[0] ?? ''), `a listed library inside the workspace is a problem and skipped (${inWs.problems[0]})`);
+    const add = await run('workspace', ['library', 'add', 'valleylib', '--workspace', dirs.valley]);
+    check(add.code === 1 && /library "valleylib" \(.*\) is inside the workspace: its packages are found by themselves/.test(add.err), `workspace library add refuses it: ${add.err}`);
   } finally {
     const { removeLibrary } = await import('../src/config.ts');
     removeLibrary('sublib');
-    removeLibrary('huntlib');
+    removeLibrary('valleylib');
     fs.rmSync(SUB, { recursive: true });
   }
 }
@@ -1823,7 +1823,7 @@ section('Godot: a .gdignore in the working folders of the packages inside a Godo
   const saved = new ArtifactStore(path.join(BARREL, 'exports')).list().map((a) => a.label);
   check(saved.join() === 'barrel.glb', `the viewer's saved outputs leave .import and .uasset files out (${saved})`);
   // outside a Godot project there are none
-  check(!exists(dirs.forest, 'inputs', '.gdignore') && !exists(dirs.forest, 'packages', '.gdignore') && !exists(ROCKS, 'versions', '.gdignore') && exists(dirs.hunt, 'topotopo-packages', '.gdignore'),
+  check(!exists(dirs.forest, 'inputs', '.gdignore') && !exists(dirs.forest, 'packages', '.gdignore') && !exists(ROCKS, 'versions', '.gdignore') && exists(dirs.valley, 'topotopo-packages', '.gdignore'),
     'outside a Godot project no package gets one; a workspace\'s shared copies always do');
 }
 

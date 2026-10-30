@@ -644,7 +644,7 @@ export type FollowPolicy = (working: { package: string; dir: string; place: stri
 
 /**
  * A published version found in a place the package looks in: the label the lock records for that place (`library`),
- * the place as people read it (`place`: the workspace "raven-hunt", library "props", TopoTopo's built-in library).
+ * the place as people read it (`place`: the workspace "my-game", library "props", TopoTopo's built-in library).
  */
 interface Place { library: string; place: string; dir: string; info: VersionInfo }
 

@@ -50,7 +50,7 @@ export interface PackageData extends CardData {
   /** one of TopoTopo's own packages (its built-in library): nothing to bake or edit here */
   builtin: boolean;
   rel: string;
-  /** where it is, for people: library "props", the workspace "raven-hunt" */
+  /** where it is, for people: library "props", the workspace "my-game" */
   place: string;
   links: { label: string; url: string }[];
   graph: string;

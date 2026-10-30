@@ -418,7 +418,7 @@ agents reach every package through the MCP `workspace` tool.
 ```bash
 topotopo library add props D:/shared/props
 topotopo library new props crates/lantern --title "Lantern" --tags prop
-topotopo workspace add D:/games/hunt/game
+topotopo workspace add D:/games/my-game
 topotopo web
 ```
 
@@ -447,11 +447,11 @@ Unreal's `Content/` or a folder in it. Explorer, the engine and the web app then
 keeps its content in `assets/`):
 
 ```text
-hunt/                            the Godot project
+my-game/                         the Godot project
   project.godot
-  topotopo-workspace.json        {"name": "hunt", "libraries": ["props"], "engine": {"type": "godot", "project": "project.godot"}}
+  topotopo-workspace.json        {"name": "my-game", "libraries": ["props"], "engine": {"type": "godot", "project": "project.godot"}}
   topotopo-packages/             one copy of each package version the workspace uses
-  assets/weapons/shotgun/        a package: shotgun.topo, graphs/, inputs/, exports/, attachments/
+  assets/props/lantern/          a package: lantern.topo, graphs/, inputs/, exports/, attachments/
   assets/levels/yard/            a package that uses studio/rocks from the props library
 ```
 

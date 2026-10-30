@@ -305,7 +305,7 @@ section('the Packages tab: a package\'s state and source, the Scene tree\'s mark
   check(fol.kind === 'live' && fol.text === 'live' && /shows the edits of \/lib\/trees \(library "lib"\) instead of the published copy of 1\.1/.test(fol.title) && /1\.3 is the newest/.test(fol.title),
     `live: said even when an update exists (${fol.text})`);
   check(pkgs.packageState(p({ error: 'no place this package looks in has a package studio/trees' })).kind === 'error', 'a package no place has: the error');
-  check(pkgs.placesText(['the workspace "hunt"', 'library "lib"']) === 'the workspace "hunt", library "lib"' && pkgs.packageState(p({ package: 'topotopo/nature', places: ['TopoTopo\'s built-in library'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
+  check(pkgs.placesText(['the workspace "valley"', 'library "lib"']) === 'the workspace "valley", library "lib"' && pkgs.packageState(p({ package: 'topotopo/nature', places: ['TopoTopo\'s built-in library'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
     && cur.title === '1.1 is the newest version in the places the package looks in', 'the badge names the place that has its package, TopoTopo\'s built-in library by what it is');
   check(/published copy of 1\.1: it changes only when you update/.test(pkgs.sourceText(p({}))) && /showing edits from lib\/trees as they are saved · exports use the published version · this session only/.test(pkgs.sourceText(p({ followed: { place: 'library "lib"', dir: '/lib/trees' } }))),
     'the source switch says what each state means');

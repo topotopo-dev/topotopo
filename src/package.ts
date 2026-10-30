@@ -494,7 +494,7 @@ export interface Libraries {
   self: LibraryAt | null;
 }
 
-/** A place as messages name it: the workspace "raven-hunt", library "props". */
+/** A place as messages name it: the workspace "my-game", library "props". */
 export const placeText = (l: Pick<LibraryAt, 'name' | 'workspace'>) => (l.workspace ? `the workspace "${l.name}"` : `library "${l.name}"`);
 /** TopoTopo's built-in library as messages name it. */
 export const BUILTIN_TEXT = 'TopoTopo\'s built-in library';
