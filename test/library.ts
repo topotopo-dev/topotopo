@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { addLibrary, addWorkspace, loadConfig, removeLibrary } from '../src/config.ts';
 import { initPackage, manifestAt, manifestFile, oldManifest, packageId, startPackage, notPackageFiles, parseManifest, packageDirOf, readManifest, slugify, writeManifest } from '../src/package.ts';
-import { bakeKey, createPackage, isStale, readBakeState, scanLibrary } from '../src/web/library.ts';
+import { bakeKey, createPackage, isStale, readBakeState, scanAll, scanLibrary } from '../src/web/library.ts';
 import { forgetScans, scanTree } from '../src/scan.ts';
 import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/package.ts';
 import { initWorkspace, parseWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
@@ -338,6 +338,31 @@ section('the scan: what it skips, what it enters, how deep');
   fs.mkdirSync(path.join(co, 'game'), { recursive: true });
   fs.writeFileSync(path.join(co, 'game', 'project.godot'), '[application]\n\nconfig/name="My Game"\nrun/main_scene="res://main.tscn"\n');
   check(initWorkspace(co).manifest.name === 'my-game', 'a new workspace takes its engine project\'s name');
+  // a registered workspace renamed: registered again under its new name, which every command then uses
+  const renamed = initWorkspace(game, { name: 'renamed' });
+  const regs = loadConfig().workspaces.filter((w) => path.resolve(w.path) === path.resolve(game)).map((w) => w.name);
+  check(regs.join() === 'renamed' && /registered again under its new name "renamed"/.test(renamed.text), `workspace init --name re-registers a registered workspace under its new name (${regs}; ${renamed.text.split('\n').find((l) => /registered/.test(l))})`);
+  const out: string[] = [], io2 = { out: (x: string) => out.push(x), err: (x: string) => out.push(`ERR ${x}`) };
+  const newIn = await commands.library(['new', 'renamed', 'props/stool'], 'topotopo', io2);
+  check(newIn === 0 && out.some((l) => /\/p\/renamed\/stool$/.test(l)) && scanAll().some((s) => s.workspace && s.name === 'renamed' && s.packages.some((p) => p.id === 'stool' && p.lib === 'renamed')),
+    `library new and the scans use the workspace's name (${out.join(' | ')})`);
+  // renamed by hand in its file: the name in the file is the one used
+  const wsFile = path.join(game, WORKSPACE_FILE);
+  fs.writeFileSync(wsFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(wsFile, 'utf8')), name: 'by-hand' }));
+  forgetScans();
+  out.length = 0;
+  const byHand = await commands.library(['new', 'by-hand', 'props/bench'], 'topotopo', io2);
+  check(byHand === 0 && out.some((l) => /\/p\/by-hand\/bench$/.test(l)) && scanAll().some((s) => s.workspace && s.name === 'by-hand'), `a workspace renamed in its file goes by the name in its file (${out.join(' | ')})`);
+  const { workspaceTool } = await import('../src/mcp/workspace.ts');
+  const tool = workspaceTool({ session: () => ({ dir: tmp }) as any, packages: () => ({ refresh() {} }) as any, open: async () => ({ graphs: 0, assets: 0 }) });
+  const said = async (a: any) => { try { return (await tool.run(a)).content.map((c: any) => c.text ?? '').join('\n'); } catch (e: any) { return `ERR ${e.message}`; } };
+  const mcpList = await said({ action: 'list', library: 'by-hand' }), mcpGet = await said({ action: 'get', library: 'by-hand', id: 'bench' });
+  check(/^workspace "by-hand" \(/.test(mcpList) && /\/p\/by-hand\/bench/.test(mcpList) && /^package by-hand\/bench: /.test(mcpGet), `the MCP workspace tool lists and gets it by the same name (${mcpList.split('\n')[0]}; ${mcpGet.split('\n')[0]})`);
+  addWorkspace('by-hand', game);
+  check(loadConfig().workspaces.filter((w) => path.resolve(w.path) === path.resolve(game)).map((w) => w.name).join() === 'by-hand', 'registering a folder again under its new name leaves one entry for it');
+  addWorkspace('other-ws', named);
+  fs.writeFileSync(path.join(named, WORKSPACE_FILE), JSON.stringify({ name: 'other-ws' }));
+  check(throws(() => initWorkspace(game, { name: 'other-ws' }), /"other-ws" is the name of another registered workspace .*: give the workspace another name/), 'a workspace takes no name another registered workspace has');
 }
 
 section('the engine project: at or above the workspace first, then below; what Unreal does not see; Godot export presets');

@@ -124,7 +124,13 @@ export function removeLibrary(name: string): WebConfig {
   return loadConfig();
 }
 
-/** Register (or re-point) a workspace in the config file by its name, keeping the file's other keys. */
+/** Two paths name the same folder (without case on Windows and macOS). */
+const sameFolder = (a: string, b: string) => (process.platform === 'linux' ? path.resolve(a) === path.resolve(b) : path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase());
+
+/**
+ * Register (or re-point) a workspace in the config file by its name, keeping the file's other keys; a folder is
+ * registered once (registered again under a new name, the old entry goes).
+ */
 export function addWorkspace(name: string, dir: string): WebConfig {
   if (!ID_RE.test(name)) throw new Error(`workspace name "${name}" must match ${ID_RE}`);
   if (name === BUILTIN_LIBRARY.name) throw new Error(`"${name}" is the name of TopoTopo's built-in library: give the workspace another name`);
@@ -132,7 +138,7 @@ export function addWorkspace(name: string, dir: string): WebConfig {
   const raw = rawConfig(file);
   const taken = nameTaken(raw, name, 'workspace');
   if (taken) throw new Error(taken);
-  const list: LibraryRef[] = (Array.isArray(raw.workspaces) ? raw.workspaces : []).filter((w: LibraryRef) => w?.name !== name);
+  const list: LibraryRef[] = (Array.isArray(raw.workspaces) ? raw.workspaces : []).filter((w: LibraryRef) => w?.name !== name && !(typeof w?.path === 'string' && sameFolder(path.resolve(path.dirname(file), w.path), dir)));
   list.push({ name, path: path.resolve(dir) });
   raw.workspaces = list;
   writeConfig(file, raw);

@@ -31,7 +31,7 @@ import path from 'node:path';
 import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig, removeLibrary } from '../config.ts';
-import { createPackage, isStale, readBakeState, scanAll } from '../web/library.ts';
+import { createPackage, isStale, readBakeState, scanAll, workspaceRef } from '../web/library.ts';
 import { initPackage, locate, oldManifestAbove, packageDirOf, slugify, workspaceFlag } from '../package.ts';
 import { forgetScans } from '../scan.ts';
 import type { WebConfig } from '../config.ts';
@@ -187,9 +187,10 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
     }
     if (sub === 'new') {
       if (!x || !y) fail(usage);
-      const ws = cfg.workspaces.find((w) => w.name === x);
-      const lib = cfg.libraries.find((l) => l.name === x) ?? (ws ? { ...ws, workspace: true } : null)
-        ?? fail(`no library or workspace "${x}" (${[...cfg.libraries, ...cfg.workspaces].map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>, or ${prog} workspace add <folder>`})`);
+      // a workspace by the name in its file (the name its packages and their pages go by)
+      const workspaces = cfg.workspaces.map(workspaceRef);
+      const lib = cfg.libraries.find((l) => l.name === x) ?? workspaces.find((w) => w.name === x)
+        ?? fail(`no library or workspace "${x}" (${[...cfg.libraries, ...workspaces].map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>, or ${prog} workspace add <folder>`})`);
       const p = createPackage(lib, y, { title: a.opt('--title'), description: a.opt('--description'), tags: a.opt('--tags')?.split(',').map((t) => t.trim()).filter(Boolean) });
       io.out(`package ${p.lib}/${p.id} → ${p.dir}`);
       io.out(`  page: http://127.0.0.1:${cfg.web.port}/p/${p.lib}/${p.id}`);

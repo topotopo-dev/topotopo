@@ -53,10 +53,13 @@ export type PlaceRef = LibraryRef & { workspace?: boolean };
 
 // ------------------------------------------------------------------------------------------------------------ scan
 
-/** Every package below a library's (or, `workspace`, a workspace's) root, sorted by path (src/scan.ts). */
+/**
+ * Every package below a library's (or, `workspace`, a workspace's) root, sorted by path (src/scan.ts). A workspace goes
+ * by the name in its file, which its packages carry, whatever name it was registered under.
+ */
 export function scanLibrary(lib: PlaceRef): LibraryScan {
   if (!lib.workspace) return scanTree(lib.name, lib.path);
-  try { return { ...scanWorkspace(path.resolve(lib.path)), name: lib.name, workspace: true }; }
+  try { return { ...scanWorkspace(path.resolve(lib.path)), workspace: true }; }
   catch (e: any) { return { name: lib.name, root: path.resolve(lib.path), packages: [], problems: [e.message], workspaces: [], workspace: true }; }
 }
 

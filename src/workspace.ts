@@ -13,10 +13,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE } from './graph/scope.ts';
-import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
+import { BUILTIN_LIBRARY, addWorkspace, loadConfig } from './config.ts';
 import { WORKSPACE_FILE, WORKSPACE_PACKAGES, workspaceFlag, copiesFor, libraryEntry, locate, manifestAt, parseUses, program, resolveListed, slugify, within, workspaceRepoFiles, writeAtomic } from './package.ts';
 import { gatherCopies } from './packages/registry.ts';
-import { forgetScans, scanTree } from './scan.ts';
+import { folderKey, forgetScans, scanTree } from './scan.ts';
 import type { Scan } from './scan.ts';
 import { detectEngine, engineTypeOf, godotIgnore, godotPresetReport, unrealSees } from './engines.ts';
 import type { EngineLink } from './engines.ts';
@@ -116,12 +116,14 @@ export function engineProjectName(dir: string, e: EngineLink): string | null {
  * A name a workspace takes: refused when it is TopoTopo's built-in library's or a registered library's (workspaces and
  * libraries share one set of names, so a web app address /p/<name>/<id> means one thing).
  */
-export function checkWorkspaceName(name: string, how = '--name <another name>') {
+export function checkWorkspaceName(name: string, how = '--name <another name>', dir?: string) {
   if (name === BUILTIN_LIBRARY.name) throw new Error(`"${name}" is the name of TopoTopo's built-in library: give the workspace another name (${how})`);
   let cfg;
   try { cfg = loadConfig(); } catch { return; }
   const lib = cfg.libraries.find((l) => l.name === name);
   if (lib) throw new Error(`"${name}" is the name of a registered library (${lib.path}): workspaces and libraries share one set of names; give the workspace another name (${how})`);
+  const other = dir ? cfg.workspaces.find((w) => w.name === name && folderKey(w.path) !== folderKey(dir)) : undefined;
+  if (other) throw new Error(`"${name}" is the name of another registered workspace (${other.path}): give the workspace another name (${how})`);
 }
 
 /**
@@ -262,7 +264,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   }
   // a new workspace is named after its engine project when that has a name (a checkout's folder may be named otherwise)
   if (!had && o.name === undefined && m.engine && m.engine !== 'none') m.name = engineProjectName(abs, m.engine) ?? m.name;
-  if (!had || o.name !== undefined) checkWorkspaceName(m.name, o.name === undefined ? `--name <another name>: it took "${m.name}" from ${m.engine && m.engine !== 'none' ? 'its engine project' : 'its folder'}` : '--name <another name>');
+  if (!had || o.name !== undefined) checkWorkspaceName(m.name, o.name === undefined ? `--name <another name>: it took "${m.name}" from ${m.engine && m.engine !== 'none' ? 'its engine project' : 'its folder'}` : '--name <another name>', abs);
   for (const l of o.libraries ?? []) {
     const entry = workspaceLibraryEntry(abs, l, o.cwd);
     if (!m.libraries.includes(entry)) m.libraries.push(entry);
@@ -270,6 +272,12 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   if (o.follow !== undefined) m.follow = o.follow;
   writeWorkspace(abs, m);
   workspaceRepoFiles(abs);
+  // a registered workspace renamed is registered again under its new name (the old one would name nothing)
+  let registered = '';
+  try {
+    const was = loadConfig().workspaces.find((w) => folderKey(w.path) === folderKey(abs));
+    if (was && was.name !== m.name) { addWorkspace(m.name, abs); registered = `registered again under its new name "${m.name}" (it was "${was.name}")`; }
+  } catch (e: any) { registered = `still registered under its old name: ${e.message}`; }
   const scan = scanWorkspace(abs, m);
   const engineLines: string[] = [];
   const project = engineFile(abs, m);
@@ -289,7 +297,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   const gathered = gatherCopies(abs);
   const libs = resolveListed(abs, m.libraries);
   const text = [
-    `${had ? 'updated' : 'made'} the workspace "${m.name}" (${path.join(abs, WORKSPACE_FILE)})`,
+    `${had ? 'updated' : 'made'} the workspace "${m.name}" (${path.join(abs, WORKSPACE_FILE)})${registered ? `; ${registered}` : ''}`,
     `engine: ${m.engine === 'none' ? 'none (kept: --engine godot:<path> or unreal:<path> names one)' : m.engine ? `${m.engine.type} ${m.engine.project}${found}` : `none found (--engine godot:<path>|unreal:<path>|none)`}`,
     ...engineLines,
     `shared libraries: ${libs.libs.length ? libs.libs.map((l) => l.entry).join(', ') : `none yet (${program()} workspace library add <name or folder>${workspaceFlag(abs, o.cwd)} lists one)`}; its packages find each other by themselves, then look in these, then in TopoTopo's built-in library`,
