@@ -214,7 +214,7 @@ export function frontPage(d: WebData, u: Urls): string {
   </section>` : '';
   const none = d.libraries.length ? '' : `<p class="empty">No libraries yet. Add a folder with <code>topotopo library add &lt;name&gt; &lt;folder&gt;</code>.</p>`;
   return shell('TopoTopo', u, `<header class="bar">
-  <a class="brand" href="${esc(u.home)}">TopoTopo</a>
+  <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
   <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ', the outputs of packages and TopoTopo\'s built-in packages' : ''}">
   <button id="clear" class="btn" type="button" hidden title="clear the search and the tags">Clear</button>
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
@@ -270,7 +270,7 @@ export function kitPage(k: KitData, u: Urls): string {
       <span class="kmeta"><code>${esc(o.type)}</code><span>${esc(o.label)}</span>${kindTagMarks(o) ? `<span class="tags">${kindTagMarks(o)}</span>` : ''}${o.params.length ? `<span class="dim small">params ${esc(o.params.join(', '))}</span>` : ''}</span>
     </div>`).join('');
   return shell(`${k.title} · TopoTopo`, u, `<header class="bar">
-  <a class="brand" href="${esc(u.home)}">TopoTopo</a>
+  <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
   <nav class="crumbs"><a href="${esc(u.home)}#kits">TopoTopo's built-in packages</a> / <span>${esc(k.id)}</span></nav>
 </header>
 <main class="wrap kit">
@@ -311,7 +311,7 @@ export function packagePage(p: PackageData, u: Urls): string {
     ? `<iframe class="view" src="${esc(u.embed(p.lib, p.id))}" title="${esc(p.title)} in 3D" allow="fullscreen"></iframe>`
     : `<img class="view" src="${esc(u.thumb(p.lib, p.id, p.version))}" alt="${esc(p.title)}">`;
   return shell(`${p.title} · TopoTopo`, u, `<header class="bar">
-  <a class="brand" href="${esc(u.home)}">TopoTopo</a>
+  <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
   <nav class="crumbs"><a href="${esc(u.home)}#lib-${esc(p.lib)}">${esc(p.lib)}</a>${p.collection ? ` / <span>${esc(p.collection)}</span>` : ''} / <span>${esc(p.id)}</span></nav>
 </header>
 <main class="wrap package">

@@ -670,7 +670,7 @@ section('outputs of the same package: by full name, the same version, no entry i
   const WARNLIB = path.join(PARTLIB, 'warnlib');
   writePackage(WARNLIB, { package: 'studio/warnlib' }, {
     piece: { description: 'A piece.', nodes: { w: { type: 'test_pkg_warn' } }, output: 'w', outputs: { piece: { node: 'w', kind: 'points', tags: ['piece'] } } },
-    main: { description: 'Two pieces.', nodes: { a: { type: 'studio/warnlib/piece' }, b: { type: 'studio/warnlib/piece' }, m: { type: 'merge', in: ['a', 'b'] } }, output: 'm', outputs: { lineup: { node: 'm', kind: 'points', tags: ['kit'] } } },
+    main: { description: 'Two pieces.', nodes: { a: { type: 'studio/warnlib/piece' }, b: { type: 'studio/warnlib/piece' }, m: { type: 'merge', in: ['a', 'b'] } }, output: 'm', outputs: { lineup: { node: 'm', kind: 'points', tags: ['pieces'] } } },
   });
   const wk = await publishPackage(openPackages(await newEngine(WARNLIB), WARNLIB), { dryRun: true });
   const gap = wk.warnings.filter((w) => /mind the gap/.test(w));
