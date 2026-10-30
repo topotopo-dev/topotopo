@@ -1,0 +1,16 @@
+{
+  "description": "A crate with a decal and a handle socket, in two LOD pieces.",
+  "nodes": {
+    "body": {"type": "box", "params": {"size": [0.6, 0.4, 0.4]}},
+    "lod0": {"type": "attrib_create", "in": ["body"], "params": {"name": "name", "class": "prim", "value": "crate_lod0"}},
+    "coarse": {"type": "box", "params": {"size": [0.6, 0.4, 0.4], "center": [0, 0, 0]}},
+    "lod1": {"type": "attrib_create", "in": ["coarse"], "params": {"name": "name", "class": "prim", "value": "crate_lod1"}},
+    "pieces": {"type": "merge", "in": ["lod0", "lod1"]},
+    "paint": {"type": "material", "in": ["pieces"], "params": {"name": "decal", "base_color_map": "inputs/decal.png", "roughness": 0.7}},
+    "handle": {"type": "scene_null", "in": ["paint"], "params": {"name": "handle", "translation": [0, 0.25, 0], "rotation": [0, 90, 0]}}
+  },
+  "output": "handle",
+  "outputs": {
+    "crate": {"node": "handle", "label": "Crate", "kind": "mesh", "tags": ["crate"], "description": "A crate with a handle socket."}
+  }
+}
