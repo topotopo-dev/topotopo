@@ -218,6 +218,11 @@ section('bake queue (child processes)');
     `workspace add registers it by its name, list shows it (${lines.join(' | ')})`);
   const lib = librariesFor(path.join(game, 'art', 'props', 'crate'));
   check(lib.libs.some((l) => l.from === 'workspace' && path.resolve(l.root) === path.resolve(game, 'art', 'lib')), 'its projects look in the workspace\'s libraries');
+  // a new workspace is named after its engine project (a checkout's folder may be called otherwise)
+  const co = path.join(tmp, 'checkout-4062d1');
+  fs.mkdirSync(path.join(co, 'game'), { recursive: true });
+  fs.writeFileSync(path.join(co, 'game', 'project.godot'), '[application]\n\nconfig/name="Raven Hunt"\nrun/main_scene="res://main.tscn"\n');
+  check(initWorkspace(co).manifest.name === 'raven-hunt', 'a new workspace takes its engine project\'s name');
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);

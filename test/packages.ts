@@ -35,7 +35,7 @@ import { encodePNG } from '../src/render/png.ts';
 import { Session } from '../src/session.ts';
 import { addLibrary, loadConfig } from '../src/config.ts';
 import { copiesFor, libraryEntry, parseManifest, readManifest } from '../src/project.ts';
-import { engineAssetsFor, initWorkspace, readWorkspace } from '../src/workspace.ts';
+import { engineAssetsFor, initWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
 import { resolveTarget, targetError } from '../src/io/targets.ts';
 import { checkAll, checkText } from '../src/packages/check.ts';
 import { scanLibrary } from '../src/gallery/library.ts';
@@ -1648,6 +1648,10 @@ section('a workspace: one shared copy of each package for every project in the g
     'the shared copies are kept from Godot\'s import (.gdignore) and committed byte for byte (.gitattributes), their lock and cache ignored');
   check(copiesFor(STONES).workspace === null && same(copiesFor(A).workspace, GAME) && same(copiesFor(A).packages, path.join(GAME, 'topotopo-packages')),
     'a package inside the workspace keeps its own copies (its uses are published with it); the other projects share the workspace\'s');
+  const sharedLock = () => readJSON(path.join(GAME, 'topotopo-packages', 'lock.json')).packages;
+  check(sharedLock()['ws/stones']['1.1'].library === './art/lib', `the moved lock names the library from the workspace, not from the project it came from (${sharedLock()['ws/stones']['1.1'].library})`);
+  const listed = workspaceText(GAME);
+  check(!/\n {2}topotopo-packages\//.test(listed) && !/problems:/.test(listed),`workspace lists no shared copy as a project (${listed.split('\n').filter((l) => /^ {2}/.test(l)).join(' | ')})`);
 
   const a = await open(A);
   const ra = await a.engine.cook(scene('ws/stones'));
@@ -1658,7 +1662,8 @@ section('a workspace: one shared copy of each package for every project in the g
   const b = await open(B);
   const notes = b.pk.addFor(scene('ws/sticks'));
   check(readWorkspace(GAME).uses['ws/sticks'] === '1.0' && !Object.keys(readManifest(B).uses).length && exists(GAME, 'topotopo-packages', 'ws', 'sticks', '1.0', 'version.json')
-    && /added ws\/sticks 1\.0 to workspace "wsgame" \(one copy for every project in it\)/.test(notes.join()), `a first use adds the package to the workspace: ${notes.join(' | ')}`);
+    && /added ws\/sticks 1\.0 to workspace "wsgame" \(one copy for every project in it\)/.test(notes.join()) && sharedLock()['ws/sticks']['1.0'].library === './art/lib',
+    `a first use adds the package to the workspace, its library named from the workspace: ${notes.join(' | ')}`);
   a.pk.refresh();
   const rs = await a.engine.cook(scene('ws/sticks'));
   check(size(rs, 1) === 3 && !a.pk.addFor(scene('ws/sticks')).length, `another project of the workspace uses it at once, adding nothing (${errorOf(rs)})`);
@@ -1717,9 +1722,12 @@ section('a workspace: one shared copy of each package for every project in the g
 
   // check: the newest version of every package in the workspace's libraries and every graph of its projects
   initWorkspace(GAME, { libraries: ['./art/lib'] });
+  // a fragment another graph or a script completes is skipped
+  json(path.join(B, 'graphs', 'piece.json'), { nodes: { m: { type: 'merge', in: ['relief', 'roads'] } }, output: 'm', fragment: true });
   const fine = await checkAll(A);
   const names = fine.items.map((i) => i.name).sort().join(', ');
-  check(names === 'scenes/a, scenes/b, scenes/c, ws/sticks 1.0, ws/stones 1.2' && fine.items.every((i) => !i.failures.length && i.cooked > 0) && /nothing broke; nothing was changed$/.test(checkText(fine)),
+  check(names === 'scenes/a, scenes/b, scenes/c, ws/sticks 1.0, ws/stones 1.2' && fine.items.every((i) => !i.failures.length && i.cooked > 0) && /nothing broke; nothing was changed$/.test(checkText(fine))
+    && /skipped, fragments \("fragment": true\) that another graph or a script completes: scenes\/b piece/.test(checkText(fine)),
     `check cooks the newest version of each package and every project of the workspace (${names}; ${fine.items.filter((i) => i.failures.length).map((i) => `${i.name}: ${i.failures.map((f) => f.error).join('; ')}`).join(' | ')})`);
   // a published version an engine change broke (here: a param its graph sets that the node does not have)
   const vgraph = path.join(STICKS, 'versions', '1.0', 'graphs', 'main.json'), kept = fs.readFileSync(vgraph);

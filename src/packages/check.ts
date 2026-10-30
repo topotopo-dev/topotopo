@@ -23,6 +23,8 @@ export interface CheckItem {
   name: string;
   cooked: number;
   failures: { where: string; error: string }[];
+  /** graphs not cooked: fragments ("fragment": true) that another graph or a script completes */
+  skipped: string[];
 }
 
 export interface CheckResult {
@@ -42,7 +44,7 @@ interface Job { graph: string; node?: string; label: string }
  * lock): an engine of its own with the folder's packages, graphs and assets, as `topotopo` cooks a file there. A
  * failure is the cook's errors with their hints; nothing is written (no package is added on first use).
  */
-async function cookIn(dir: string, jobs: Job[]): Promise<{ cooked: number; failures: CheckItem['failures'] }> {
+async function cookIn(dir: string, jobs: Job[]): Promise<{ cooked: number; failures: CheckItem['failures']; skipped: string[] }> {
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
   const failures: CheckItem['failures'] = [];
@@ -50,14 +52,16 @@ async function cookIn(dir: string, jobs: Job[]): Promise<{ cooked: number; failu
   if (pk.notice()) failures.push({ where: 'packages', error: pk.notice()! });
   for (const p of loadProject(engine, dir)) failures.push({ where: 'files', error: p });
   let cooked = 0;
+  const skipped: string[] = [];
   for (const j of jobs) {
     const spec = engine.root.graphs?.(j.graph);
     if (!spec) { failures.push({ where: j.label, error: `there is no graph "${j.graph}"` }); continue; }
+    if (spec.fragment === true) { skipped.push(j.graph); continue; }
     const r = await engine.cook(spec, { target: j.node });
     if (r.ok && r.geo) { cooked++; continue; }
     failures.push({ where: j.label, error: r.errors.map((e) => `[${e.node}] ${e.message}${e.hint ? ` (${e.hint})` : ''}`).join('; ') || 'it cooks to no geometry' });
   }
-  return { cooked, failures };
+  return { cooked, failures, skipped };
 }
 
 /** The newest published version of each package in the libraries, its outputs cooked in the version's folder. */
@@ -140,6 +144,8 @@ export function checkText(r: CheckResult): string {
     for (const f of i.failures) lines.push(`  ${f.where}: ${f.error}`);
   }
   if (fine.length) lines.push(`ok: ${fine.map((i) => `${i.what === 'package' ? i.name : `project ${i.name}`} (${i.cooked})`).join(', ')}`);
+  const skipped = r.items.filter((i) => i.skipped.length);
+  if (skipped.length) lines.push(`skipped, fragments ("fragment": true) that another graph or a script completes: ${skipped.map((i) => `${i.name} ${i.skipped.join(', ')}`).join('; ')}`);
   if (r.problems.length) lines.push(`could not read ${r.problems.length}:`, ...r.problems.map((p) => `  ${p}`));
   lines.push(broke.length
     ? `${broke.length} of ${r.items.length} broke; nothing was changed. A broken package version is fixed in its working folder and published again (${program()} publish); the projects take it with an update.`
