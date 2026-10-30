@@ -227,6 +227,16 @@ section('the scan: what it skips, what it enters, how deep');
     `a folder cut off by the depth cap is said, once (${s.problems.filter((p) => /below/.test(p))})`);
   // the workspace's own engine project is scanned like any other folder; a library scan skips every engine project
   check(scanTree('scan-own', root, { engine: path.join(root, 'other-game', 'project.godot') }).packages.some((p) => p.rel === 'other-game/assets/p'), 'the folder of the workspace\'s own engine project is scanned');
+  // a root that is a package itself: said, and not entered (its versions/ and packages/ hold copies, no packages of its own)
+  const rooted = path.join(tmp, 'scan-rooted');
+  const put = (rel: string, m: object) => { fs.mkdirSync(path.dirname(path.join(rooted, rel)), { recursive: true }); fs.writeFileSync(path.join(rooted, rel), JSON.stringify(m)); };
+  put('game.topo', { name: 'studio/game' });
+  put('versions/1.0/game.topo', { name: 'studio/game' });
+  put('packages/studio/oak/1.0/oak.topo', { name: 'studio/oak' });
+  put('levels/yard/yard.topo', {});
+  const rs = scanTree('rooted', rooted);
+  check(!rs.packages.length && rs.problems.length === 1 && /game\.topo: the folder of "rooted" is a package itself, and a package holds no other: nothing below it is looked in for packages/.test(rs.problems[0]),
+    `a root that is a package is said and not entered: its versions and copies are no packages (${rs.packages.map((p) => p.rel)}; ${rs.problems.join(' | ')})`);
   check(scanTree('scan', root) === s, 'a scan is kept for the length of a command');
   forgetScans();
   check(scanTree('scan', root) !== s, 'and read again once forgotten');
