@@ -127,6 +127,19 @@ export function parseEngineArg(arg: string, dir: string): EngineLink {
   return { type, project: rel(dir, abs), assets: '' };
 }
 
+/**
+ * The name an engine project gives itself, as a workspace name: project.godot's config/name, a .uproject's file name;
+ * null when it has none.
+ */
+export function engineProjectName(dir: string, e: EngineLink): string | null {
+  const file = path.resolve(dir, e.project);
+  if (e.type === 'unreal') return slugify(path.basename(file).replace(/\.uproject$/i, '')) || null;
+  try {
+    const m = /^config\/name\s*=\s*"([^"]*)"/m.exec(fs.readFileSync(file, 'utf8'));
+    return m ? slugify(m[1]) || null : null;
+  } catch { return null; }
+}
+
 export interface InitWorkspaceOptions { name?: string; engine?: string | 'none'; libraries?: string[]; assets?: string; follow?: boolean }
 
 /**
@@ -155,6 +168,8 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
     const all = findEngines(abs);
     if (all.length) { m.engine = all[0]; found = all.length > 1 ? ` (found ${all.length}: ${all.map((e) => e.project).join(', ')}; --engine picks another)` : ' (found)'; }
   }
+  // a new workspace is named after its engine project when that has a name (a checkout's folder may be named otherwise)
+  if (!had && o.name === undefined && m.engine) m.name = engineProjectName(abs, m.engine) ?? m.name;
   if (o.assets !== undefined) {
     if (!m.engine) throw new Error('--assets needs an engine project: --engine godot:<path to project.godot>');
     const assets = o.assets.trim().replace(/\\/g, '/').replace(/\/+$/, '');

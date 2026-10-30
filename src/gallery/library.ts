@@ -9,7 +9,7 @@ import { graphFiles } from '../session.ts';
 import { loadConfig } from '../config.ts';
 import type { GalleryConfig, LibraryRef } from '../config.ts';
 import type { ProjectLink, ProjectManifest } from '../project.ts';
-import { manifestFile, parseManifest, projectRepoFiles, readManifest, slugify, writeManifest } from '../project.ts';
+import { WORKSPACE_PACKAGES, manifestFile, parseManifest, projectRepoFiles, readManifest, slugify, writeManifest } from '../project.ts';
 
 /** Bumped when the baked files change shape (render options, GLB options), so every project bakes again. */
 export const BAKE_VERSION = 1;
@@ -22,6 +22,8 @@ const MAX_DEPTH = 8;
  * published versions and package copies, whose project.json files are not projects
  */
 const SKIP = new Set(['node_modules', 'graphs', 'assets', 'inputs', 'exports', 'attachments', 'versions', 'packages']);
+/** a folder no project is looked for in (a workspace's shared copies too; read when called: project.ts loads after this module) */
+const skipped = (name: string) => SKIP.has(name) || name === WORKSPACE_PACKAGES;
 const PKG_VERSION = (() => {
   // package.json sits two levels above both src/gallery/library.ts and dist/gallery/library.js
   try { return String(JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version); } catch { return '0'; }
@@ -89,7 +91,7 @@ export function scanLibrary(lib: LibraryRef): LibraryScan {
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-      if (!e.isDirectory() || e.name.startsWith('.') || SKIP.has(e.name)) continue;
+      if (!e.isDirectory() || e.name.startsWith('.') || skipped(e.name)) continue;
       walk(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1);
     }
   };
@@ -112,7 +114,7 @@ export interface CreateOptions { title?: string; description?: string; tags?: st
  */
 export function createProject(lib: LibraryRef, rel: string, o: CreateOptions = {}): Project {
   const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean);
-  if (!parts.length || parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || SKIP.has(p) || /[<>:"|?*\u0000-\u001f]/.test(p)))
+  if (!parts.length || parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || skipped(p) || /[<>:"|?*\u0000-\u001f]/.test(p)))
     throw new Error(`bad project path "${rel}": give folders below the library, e.g. "props/lantern"`);
   const root = path.resolve(lib.path);
   const dir = path.join(root, ...parts);

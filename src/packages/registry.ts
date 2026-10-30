@@ -482,6 +482,12 @@ function materialMaps(g: Geometry): OutputInfo['maps'] {
   return out;
 }
 
+/** A folder as a library entry written from `base`: "./lib", "../lib", "." */
+const pathFrom = (base: string, dir: string) => {
+  const rel = path.relative(base, dir).split(path.sep).join('/');
+  return !rel ? '.' : rel.startsWith('..') ? rel : `./${rel}`;
+};
+
 /** A workspace's name for messages (its folder's when its file cannot be read). */
 const workspaceName = (ws: string) => { try { return readWorkspace(ws).name; } catch { return path.basename(ws); } };
 
@@ -527,7 +533,10 @@ export function gatherCopies(ws: string): string[] {
           fs.rmSync(to, { recursive: true, force: true });
           copyTree(copyAt(from, pkg, v), to);
         }
-        (lock.packages[pkg] ??= {})[v] = both.packages[pkg][v];
+        // a library the project's lock names by its path from the project, named from the workspace
+        const e = both.packages[pkg][v], k = libraryEntry(e.library);
+        const at = 'path' in k && own.packages[pkg]?.[v] === e ? path.resolve(p.dir, k.path) : null;
+        (lock.packages[pkg] ??= {})[v] = at && fs.statSync(at, { throwIfNoEntry: false })?.isDirectory() ? { ...e, library: pathFrom(store.root, at) } : e;
       }
       const moved: string[] = [];
       for (const [pkg, v] of Object.entries(ownUses)) {
@@ -1378,9 +1387,18 @@ export class ProjectPackages implements SessionPackages {
     const listed = libs.flatMap((lib) => {
       const scan = scanLibrary({ name: lib.name, path: lib.root });
       problems.push(...scan.problems.map((p) => `${libraryText(lib.name)}: ${p}`));
-      return scan.projects.flatMap((p) => (p.manifest.package && !seen.has(path.resolve(p.dir).toLowerCase()) ? [{ package: p.manifest.package, library: lib.name, dir: p.dir, working: true }] : []));
+      return scan.projects.flatMap((p) => (p.manifest.package && !seen.has(path.resolve(p.dir).toLowerCase()) ? [{ package: p.manifest.package, library: this.lockName(lib), dir: p.dir, working: true }] : []));
     });
     return { libs, packages: [...builtin, ...listed], problems };
+  }
+
+  /**
+   * How the lock (and the messages) name a library: its own name (library.json) or its registered name, else its
+   * path from the folder of the copies' store, the project's or, for a workspace's shared copy, the workspace's.
+   */
+  private lockName(lib: LibraryAt): string {
+    if (!this.store || lib.name !== lib.entry || !('path' in libraryEntry(lib.entry))) return lib.name;
+    return pathFrom(this.store.root, lib.root);
   }
 
   /** The libraries, working folders and versions of a package in the libraries the project looks in; throws saying where it is not. */

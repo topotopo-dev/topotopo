@@ -154,7 +154,9 @@ ready-made output in any library ("a conifer", every terrain): library {action:"
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
 - build mode "merge" upserts nodes into the existing graph; edit ops: set, add, remove (auto-rewires), connect, rename, output, vars, bypass, replace, insert (after a node, rewiring its consumers).
-- Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the project.`,
+- Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the project.
+- "fragment": true marks a graph that is a piece another graph or a script completes (merging in nodes it names but
+  does not hold): it is never cooked on its own, and topotopo check skips it.`,
 
   inputs: `HUMAN INPUT (guides, blockouts and masks in the project inputs/ folder)
 People feed in their own material by dropping files into <project>/inputs/ (or onto the live viewer, or with its Add

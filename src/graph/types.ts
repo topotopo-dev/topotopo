@@ -157,6 +157,11 @@ export interface GraphSpec {
   params?: Record<string, VarDef>;
   description?: string;
   meta?: GraphMeta;
+  /**
+   * a piece another graph or a script completes (merges more nodes into it): never cooked on its own, so topotopo
+   * check skips it
+   */
+  fragment?: boolean;
 }
 
 export interface CookContext {
