@@ -34,7 +34,8 @@ import { exportSource } from '../src/io/source.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { Session } from '../src/session.ts';
 import { addLibrary, loadConfig } from '../src/config.ts';
-import { libraryEntry, parseManifest, readManifest } from '../src/project.ts';
+import { copiesFor, libraryEntry, parseManifest, readManifest } from '../src/project.ts';
+import { initWorkspace, readWorkspace } from '../src/workspace.ts';
 import { scanLibrary } from '../src/gallery/library.ts';
 import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/packages/registry.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -42,7 +43,7 @@ import { libraryTool } from '../src/mcp/library.ts';
 import { catalogText, topicText } from '../src/mcp/docs.ts';
 import { PACKAGE_COMMANDS, commands } from '../src/packages/commands.ts';
 import type { ProjectPackages, PublishResult } from '../src/packages/registry.ts';
-import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders } from '../src/packages/update.ts';
+import { applyUpdate, beforeAfter, beforeAfterText, outdatedText, overlayRenders, removePackage } from '../src/packages/update.ts';
 import { ROOT } from './fixtures.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-packages-'));
@@ -1605,6 +1606,76 @@ section('a follow policy: the used packages whose working folder it accepts');
     `a policy follows the used packages whose working folders it accepts (${by.join(', ')})`);
   check(!g.pk.setFollowPolicy(() => false).length && !g.pk.following().length, 'a policy that accepts none follows none');
   check(!g.pk.setFollowPolicy(null).length, 'null stops it');
+}
+
+section('a workspace: one shared copy of each package for every project in the game');
+{
+  const GAME = path.join(tmp, 'wsgame'), LIB = path.join(GAME, 'art', 'lib'), STONES = path.join(LIB, 'stones'), STICKS = path.join(LIB, 'sticks');
+  const A = path.join(GAME, 'scenes', 'a'), B = path.join(GAME, 'scenes', 'b'), C = path.join(GAME, 'scenes', 'c');
+  const box = (h: number): GraphSpec => ({ nodes: { b: { type: 'box', params: { size: [1, h, 1] } } }, output: 'b' });
+  const scene = (t: string): GraphSpec => ({ nodes: { s: { type: t } }, output: 's' });
+  const same = (x: string | null | undefined, y: string) => !!x && path.resolve(x).toLowerCase() === path.resolve(y).toLowerCase();
+  project(STONES, { package: 'ws/stones' }, { main: box(1) });
+  await publish(STONES, 'first');
+  setGraph(STONES, 'main', box(2));
+  await publish(STONES, 'taller');
+  project(STICKS, { package: 'ws/sticks' }, { main: box(3) });
+  await publish(STICKS, 'sticks');
+  project(A, { libraries: ['../../art/lib'] }, { main: scene('ws/stones') });
+  project(B, { libraries: ['../../art/lib'] }, { main: scene('ws/stones') });
+  // before the game is a workspace, each project keeps its own copies: here of two versions
+  (await open(A)).pk.use('ws/stones', { version: '1.0' });
+  (await open(B)).pk.use('ws/stones');
+  check(exists(A, 'packages', 'ws', 'stones', '1.0', 'version.json') && exists(B, 'packages', 'ws', 'stones', '1.1', 'version.json'), 'before the workspace each project keeps its own copy');
+
+  const made = initWorkspace(GAME, { engine: 'none' });
+  const m = readWorkspace(GAME), said = made.text.split('\n').slice(3).join(' | ');
+  check(m.uses['ws/stones'] === '1.1' && !Object.keys(readManifest(A).uses).length && !Object.keys(readManifest(B).uses).length && !exists(A, 'packages') && !exists(B, 'packages')
+    && exists(GAME, 'topotopo-packages', 'ws', 'stones', '1.1', 'version.json') && !exists(GAME, 'topotopo-packages', 'ws', 'stones', '1.0') && exists(GAME, 'topotopo-packages', 'lock.json')
+    && /used 1\.\d, another project 1\.\d; the workspace uses 1\.1/.test(said) && /moved the copies of scenes\/a/.test(said) && /moved the copies of scenes\/b/.test(said),
+    `workspace init moves the projects' copies into one shared copy, one version of each package for the game (${said})`);
+  check(exists(GAME, 'topotopo-packages', '.gdignore') && fs.readFileSync(path.join(GAME, '.gitignore'), 'utf8').includes('topotopo-packages/.lock') && fs.readFileSync(path.join(GAME, '.gitattributes'), 'utf8').includes('topotopo-packages/** -text'),
+    'the shared copies are kept from Godot\'s import (.gdignore) and committed byte for byte (.gitattributes), their lock and cache ignored');
+  check(copiesFor(STONES).workspace === null && same(copiesFor(A).workspace, GAME) && same(copiesFor(A).packages, path.join(GAME, 'topotopo-packages')),
+    'a package inside the workspace keeps its own copies (its uses are published with it); the other projects share the workspace\'s');
+
+  const a = await open(A);
+  const ra = await a.engine.cook(scene('ws/stones'));
+  check(a.pk.uses()['ws/stones'] === '1.1' && size(ra, 1) === 2, `a project in the workspace cooks the shared copy (${errorOf(ra) || `height ${size(ra, 1)}`})`);
+  check(/in workspace "wsgame" \(.*topotopo-workspace\.json names the versions every project in it uses/.test(packagesText(a.pk)), 'packages says the uses are the workspace\'s');
+
+  // a first use in one project adds the package for the whole game
+  const b = await open(B);
+  const notes = b.pk.addFor(scene('ws/sticks'));
+  check(readWorkspace(GAME).uses['ws/sticks'] === '1.0' && !Object.keys(readManifest(B).uses).length && exists(GAME, 'topotopo-packages', 'ws', 'sticks', '1.0', 'version.json')
+    && /added ws\/sticks 1\.0 to workspace "wsgame" \(one copy for every project in it\)/.test(notes.join()), `a first use adds the package to the workspace: ${notes.join(' | ')}`);
+  a.pk.refresh();
+  const rs = await a.engine.cook(scene('ws/sticks'));
+  check(size(rs, 1) === 3 && !a.pk.addFor(scene('ws/sticks')).length, `another project of the workspace uses it at once, adding nothing (${errorOf(rs)})`);
+
+  // Update: the before/after covers every project of the workspace, and applying changes them all
+  setGraph(STONES, 'main', box(4));
+  await publish(STONES, 'tallest');
+  setGraph(B, 'main', { nodes: { s: { type: 'ws/stones' }, k: { type: 'ws/sticks' }, m: { type: 'merge', in: ['s', 'k'] } }, output: 'm' });
+  const r = await beforeAfter(a.pk, 'ws/stones');
+  const files = r.uses.map((u) => u.file).sort().join(', ');
+  check(r.target.to === '1.2' && files === 'graphs/main.json, scenes/b/graphs/main.json' && r.compared.length === 2 && r.compared.every((c) => c.before.ok && c.after.ok && !!c.diff),
+    `Update's before/after covers every project that shares the copies (${files}; ${r.compared.map((c) => `${c.file} ${c.before.ok}/${c.after.ok} ${c.before.errors.join() || c.after.errors.join()}`).join('; ')})`);
+  const up = applyUpdate(a.pk, 'ws/stones', { from: '1.1', to: '1.2' });
+  b.pk.refresh();
+  const rb = await b.engine.cook(scene('ws/stones'));
+  check(readWorkspace(GAME).uses['ws/stones'] === '1.2' && size(rb, 1) === 4 && !exists(GAME, 'topotopo-packages', 'ws', 'stones', '1.1') && /updated ws\/stones 1\.1 → 1\.2 in workspace "wsgame", for every project in it/.test(up.text),
+    `applying updates every project in the workspace (${up.text.split('\n')[0]}; b cooks ${size(rb, 1)})`);
+  check(throws(() => removePackage(a.pk, 'ws/sticks'), /graph of the workspace's projects still names ws\/sticks: scenes\/b\/graphs\/main\.json k/),
+    `remove is refused while another project of the workspace names it (${errorText(() => removePackage(a.pk, 'ws/sticks'))})`);
+
+  // a project.json that still lists uses inside a workspace: said, and the next init moves them
+  project(C, { uses: { 'ws/stones': '1.2' } }, { main: scene('ws/stones') });
+  const c = await open(C);
+  check(/lists "uses" \(ws\/stones 1\.2\), but the project is in the workspace .*workspace init/.test(c.pk.notice() ?? ''), `a project that still lists its own uses in a workspace says how to move them (${c.pk.notice()})`);
+  const again = initWorkspace(GAME, {});
+  const c2 = await open(C);
+  check(!c2.pk.notice() && !Object.keys(readManifest(C).uses).length && size(await c2.engine.cook(scene('ws/stones')), 1) === 4, `init again moves them (${again.text.split('\n').slice(3).join(' | ')})`);
 }
 
 await engines[0]?.host.pool?.close();

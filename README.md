@@ -436,6 +436,13 @@ removed option makes a big version). A project that uses a package keeps its own
 itself. Hashes read text files with LF line ends, so a checkout that turns them into CRLF changes nothing, and `init`
 writes a `.gitattributes` that keeps `versions/` and `packages/` byte for byte.
 
+A game made of several TopoTopo projects can be a workspace: `topotopo workspace init` writes `topotopo-workspace.json`
+at the game's root, with the libraries every project inside looks in and the engine project the game is built with.
+The projects in a workspace share one copy of each package version, in `topotopo-packages/` beside that file, and its
+`uses` names one version of each package for the whole game: an update shows the before/after of every place any
+project uses the package and changes them all. A project that is itself a package keeps its own copies, since they
+are published with it.
+
 A project finds packages in the libraries its `project.json` lists, `"libraries": ["../shared/library", "game"]`: a
 path written from the project (`./lib`, `../lib`) for a library in the same repository, so every checkout and worktree
 reads its own, else a registered library's name. `topotopo libraries add ../shared/library` lists one when you say so;

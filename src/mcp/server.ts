@@ -62,7 +62,7 @@ async function openSession(dir: string) {
   if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) e.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
   await e.init();
   const { session: w, packages: pk, loaded } = openProject(e, dir, { watch: true });
-  log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.manifest?.uses ?? {}).length} packages used` : '; in no project'}`);
+  log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.uses()).length} packages used` : '; in no project'}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
   for (const x of loaded.graphErrors) log('graph not read:', x);
   for (const x of pk.check()) log('package problem:', x);

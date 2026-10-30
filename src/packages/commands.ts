@@ -38,7 +38,7 @@ import type { GalleryConfig } from '../config.ts';
  */
 export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'workspace [folder]', what: 'the workspace (the game) around a folder: its engine project, the libraries every project inside looks in, its projects' },
-  { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]', what: 'make a game\'s folder a workspace (topotopo-workspace.json; the engine project is found when not given), or change one' },
+  { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>]', what: 'make a game\'s folder a workspace (topotopo-workspace.json; the engine project is found when not given; its projects share one copy of each package, moved into topotopo-packages/), or change one' },
   { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the Gallery\'s hub, or list the registered ones' },
   { usage: 'init [folder] [--package owner/name]', what: 'make a folder a project (project.json, graphs/main.json), or set the package an existing project is' },
   { usage: 'libraries add|remove <folder or name> [folder]', what: 'list or unlist a library the project finds packages in: a folder by its path from the project, else a registered library\'s name' },

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { ID_RE, parsePackageName } from './graph/scope.ts';
 import { NAME_RE, PROJECT_FOLDERS, graphFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
-import { readWorkspace } from './workspace.ts';
+import { readWorkspace, writeWorkspace } from './workspace.ts';
 import type { GalleryConfig } from './config.ts';
 
 /** a package version: big.small, from 1.0 */
@@ -44,14 +44,23 @@ export function renameInto(from: string, to: string) {
 const STALE_LOCK_MS = 120_000;
 
 /**
- * Run `f` holding the project's lock, packages/.lock, a file only one process can create at a time: the CLI, the MCP
- * server and the viewer read, change and write project.json and packages/lock.json under it, so that none loses
- * another's change. Waits up to about ten seconds for another holder; a lock older than two minutes, or whose process
- * has ended, is taken over. Held again by the same process (a nested call), it just runs `f`.
+ * Run `f` holding the project's lock, .lock in the folder of its copies (copiesFor: packages/, or the workspace's
+ * topotopo-packages/ for a project that shares the workspace's copies), a file only one process can create at a time:
+ * the CLI, the MCP server and the viewer read, change and write project.json, the uses and the lock under it, so that
+ * none loses another's change. Waits up to about ten seconds for another holder; a lock older than two minutes, or
+ * whose process has ended, is taken over. Held again by the same process (a nested call), it just runs `f`.
  */
-const heldLocks = new Set<string>();
 export function withProjectLock<T>(dir: string, f: () => T): T {
-  const file = path.join(path.resolve(dir), 'packages', '.lock');
+  return withStoreLock(copiesFor(dir), f);
+}
+
+/** Run `f` holding the lock of a store of copies (withProjectLock). */
+export function withStoreLock<T>(store: CopyStore, f: () => T): T {
+  return withLockFile(path.join(store.packages, '.lock'), f);
+}
+
+const heldLocks = new Set<string>();
+function withLockFile<T>(file: string, f: () => T): T {
   if (heldLocks.has(file)) return f();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   for (let waited = 0; ; ) {
@@ -270,6 +279,12 @@ export function projectRepoFiles(dir: string) {
   addLines(path.join(dir, '.gitattributes'), ATTRIBUTES);
 }
 
+/** A workspace's .gitignore and .gitattributes, made or completed: its shared copies as a project's own are kept. */
+export function workspaceRepoFiles(dir: string) {
+  addLines(path.join(dir, '.gitignore'), [`${WORKSPACE_PACKAGES}/.cache.json`, `${WORKSPACE_PACKAGES}/.lock`]);
+  addLines(path.join(dir, '.gitattributes'), [`${WORKSPACE_PACKAGES}/** -text`]);
+}
+
 /**
  * A package name a person gives their project ("owner/name"): checked, and the owner "topotopo", which TopoTopo's own
  * packages have, refused.
@@ -485,10 +500,47 @@ export function resolveLibraries(lists: LibraryList[]): Libraries {
   return out;
 }
 
+// -------------------------------------------------------------------------------- where a project keeps its copies
+
+/** The folder beside topotopo-workspace.json that holds the workspace's one shared copy of each package version. */
+export const WORKSPACE_PACKAGES = 'topotopo-packages';
+
+/** Where a project's package copies are kept, and the file whose "uses" names the versions it uses. */
+export interface CopyStore {
+  /** the folder the store belongs to: the project's, or the workspace's */
+  root: string;
+  /** the folder of the copies (<owner>/<name>/<version>/, flat) and their lock.json */
+  packages: string;
+  /** the file whose "uses" lists the versions in use: the project's project.json, or the workspace's file */
+  usesFile: string;
+  /** the workspace whose one shared copy this is, or null: the project's own copies */
+  workspace: string | null;
+}
+
 /**
- * The folder whose packages/ holds a project's package copies and their lock (packages/lock.json): the project's own
- * folder. Where a workspace keeps one shared copy for all its projects (slice 2) this is the one place that changes.
+ * Where a project keeps its package copies: in a workspace, the workspace's one shared copy for every project in it
+ * (topotopo-packages/ beside topotopo-workspace.json, whose "uses" name one version of each package for the whole
+ * game); else, and for a project that is a package (its uses are published with it), its own packages/ beside its
+ * project.json.
  */
-export function copiesFor(project: string): string {
-  return path.resolve(project);
+export function copiesFor(project: string): CopyStore {
+  const dir = path.resolve(project);
+  const own: CopyStore = { root: dir, packages: path.join(dir, 'packages'), usesFile: manifestFile(dir), workspace: null };
+  let pkg: string | undefined;
+  try { pkg = readManifest(dir).package; } catch { /* not a project, or project.json is not valid: its own folder */ }
+  if (pkg) return own;
+  const ws = locate(dir).workspace;
+  return ws ? { root: ws, packages: path.join(ws, WORKSPACE_PACKAGES), usesFile: path.join(ws, WORKSPACE_FILE), workspace: ws } : own;
+}
+
+/** The versions a store's projects use: the "uses" of project.json, or of the workspace's file. */
+export function readUses(store: CopyStore): Record<string, string> {
+  return store.workspace ? readWorkspace(store.workspace).uses : readManifest(store.root).uses;
+}
+
+/** Write the uses of a store (hold its lock: withStoreLock). */
+export function writeUses(store: CopyStore, uses: Record<string, string>) {
+  const sorted = Object.fromEntries(Object.entries(uses).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  if (store.workspace) writeWorkspace(store.workspace, { ...readWorkspace(store.workspace), uses: sorted });
+  else writeManifest(store.root, { ...readManifest(store.root), uses: sorted });
 }

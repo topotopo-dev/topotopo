@@ -950,6 +950,12 @@ so it cooks anywhere without the libraries, and what it uses never changes by it
 about, and the warning goes once the copy is restored. init writes a .gitattributes that keeps versions/ and packages/
 byte for byte, and a .gitignore for packages/.cache.json (the hashes of the copies' files, kept between runs) and
 packages/.lock (held while a command, the viewer or an MCP server writes project.json and the lock).
+IN A WORKSPACE (a game's folder with topotopo-workspace.json; CLI: topotopo workspace init): its projects share one copy
+of each package version, in topotopo-packages/ beside that file, whose "uses" names the version the whole game uses.
+A first use in any of its projects adds the package there; Update compares every place every project uses it and
+changes them all; remove is refused while a project still names it. A project that is a package keeps its own "uses"
+and copies, which are published with it. workspace init moves the copies of the projects inside that kept their own
+(two projects that used different versions get the newer, said).
 LIBRARIES: a project finds packages only in the libraries its project.json lists, "libraries": ["../shared/library",
 "game"]: a path written from the project ("./lib", "../lib") for a library in the same repository (every checkout and
 worktree uses its own), else a registered library's name. An entry that does not work (no such folder, a name not
