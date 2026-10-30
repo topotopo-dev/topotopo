@@ -8,8 +8,8 @@
 // follow it), and a version published there is a new update.
 //
 //   GET  /api/packages               the package and the packages it uses (package null: the graphs are in no package)
-//   GET  /api/packages/search        ?q&kind&tag: the outputs of the packages in TopoTopo's built-in library and every
-//                                    library, by words, kind and tag, and whether the package can use them (Find packages)
+//   GET  /api/packages/search        ?q&kind&tag: the outputs of the packages in TopoTopo's built-in library and the places
+//                                    the package looks in, by words, kind and tag, and whether the package can use them (Find packages)
 //   GET  /api/packages/author        in a package that publishes versions: its last version, and whether its files changed since
 //   POST /api/packages/check         in a package that publishes versions: the publish dry run (every check, nothing written)
 //   POST /api/packages/compare       {package, to?}: the before/after, answered when it is done or stopped
@@ -29,7 +29,7 @@ import type { Geometry } from '../core/geometry.ts';
 import { diffOverlay } from '../explain.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
 import type { Scope } from '../graph/scope.ts';
-import { copiesFor, readUses } from '../package.ts';
+import { copiesFor, placeText, readUses } from '../package.ts';
 import { compareVersions, isDefaultOutput, loadPackage, PackageUses, publishedVersions, publishPackage, searchPackages, startsBigVersion, workingHash } from '../packages/registry.ts';
 import { BUILTIN_LIBRARY } from '../config.ts';
 import { parsePackageName } from '../graph/scope.ts';
@@ -71,12 +71,12 @@ export interface PackageRow {
   big?: string;
   /** every version after the one in use, oldest first */
   newer: VersionRow[];
-  /** the libraries that hold it, as the manifest lists them */
-  libraries: string[];
-  /** its working folders in those libraries: the follow switch needs exactly one */
-  working: { library: string; dir: string }[];
+  /** the place that has it, as people read it (the workspace "x", library "props", TopoTopo's built-in library) */
+  places: string[];
+  /** its working folder there: the follow switch needs one */
+  working: { place: string; dir: string }[];
   /** the working folder this session follows, null while it cooks from its copy */
-  followed: { library: string; dir: string } | null;
+  followed: { place: string; dir: string } | null;
   /** why its versions could not be looked up */
   error?: string;
   /** after a big update applied in this viewer: what the graphs must change for it, until the person dismisses it */
@@ -106,8 +106,8 @@ export interface CompareProgress {
 }
 
 export interface PackagesState {
-  /** the open package: its id, title, label, folder, the libraries it lists and the name it publishes under; null: the viewer's graphs are in no package (nothing to show) */
-  package: { id: string; title: string; label: string; dir: string; libraries: string[]; name: string | null } | null;
+  /** the open package: its id, title, label, folder, the places it finds packages in (TopoTopo's built-in library after them) and the name it publishes under; null: the viewer's graphs are in no package (nothing to show) */
+  package: { id: string; title: string; label: string; dir: string; places: string[]; name: string | null } | null;
   packages: PackageRow[];
   problems: string[];
   /** the before/after in progress, and the last one finished (GET /api/packages/compare has it in full) */
@@ -170,11 +170,11 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     const base = { running: run?.progress ?? null, compare: last ? { id: last.id, package: last.result.target.package, from: last.result.target.from, to: last.result.target.to } : null };
     if (!pk?.dir) return { package: null, packages: [], problems: [], ...base };
     pk.refresh();
-    if (!pk.manifest) return { package: { id: '', title: '', label: pk.label, dir: pk.dir, libraries: [], name: null }, packages: [], problems: [pk.error ?? `the manifest of ${pk.dir} cannot be read`], ...base };
+    if (!pk.manifest) return { package: { id: '', title: '', label: pk.label, dir: pk.dir, places: [], name: null }, packages: [], problems: [pk.error ?? `the manifest of ${pk.dir} cannot be read`], ...base };
     const problems: string[] = [];
     let outdated: ReturnType<PackageUses['outdated']> = [];
     try { outdated = pk.outdated(); } catch (e: any) { problems.push(e.message); }
-    const following = new Map(pk.following().map((f) => [f.package, { library: f.library, dir: f.dir }]));
+    const following = new Map(pk.following().map((f) => [f.package, { place: f.place, dir: f.dir }]));
     // where the package's graphs use each package: the nodes, and the output types they name
     const usedBy = new Map<string, PackageRow['usedBy']>(), usedTypes = new Set<string>();
     for (const [graph, g] of ws.graphs) for (const [node, spec] of Object.entries(g.nodes)) {
@@ -187,7 +187,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
       }
     }
     const developing = inside(pk.dir, TOPOTOPO_REPO);
-    const row = (o: { package: string; working: { library: string; dir: string }[] }, followed: { library: string; dir: string } | null) => {
+    const row = (o: { package: string; working: { place: string; dir: string }[] }, followed: { place: string; dir: string } | null) => {
       const builtin = o.package.startsWith('topotopo/');
       return { builtin, canFollow: !!followed || (o.working.length === 1 && (!builtin || developing)), usedBy: usedBy.get(o.package) ?? [] };
     };
@@ -197,15 +197,17 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
       return {
         package: o.package, version: o.version, ...(info ? { note: info.note, published: info.published, outputs } : {}),
         ...(o.small ? { small: o.small } : {}), ...(o.big ? { big: o.big } : {}),
-        newer: o.newer.map(versionRow), libraries: o.libraries, working: o.working, followed, ...row(o, followed),
+        newer: o.newer.map(versionRow), places: o.places, working: o.working, followed, ...row(o, followed),
         ...(o.error ? { error: o.error } : {}), ...(kept.has(o.package) ? { mustChange: kept.get(o.package) } : {}),
       };
     });
     // a package followed before the package uses it (a working folder without a published version, say)
-    for (const [p, f] of following) if (!packages.some((r) => r.package === p)) packages.push({ package: p, version: null, newer: [], libraries: [f.library], working: [f], followed: f, ...row({ package: p, working: [f] }, f) });
+    for (const [p, f] of following) if (!packages.some((r) => r.package === p)) packages.push({ package: p, version: null, newer: [], places: [f.place], working: [f], followed: f, ...row({ package: p, working: [f] }, f) });
     problems.push(...pk.check());
     const m = pk.manifest;
-    return { package: { id: pk.id ?? '', title: m.title, label: pk.label, dir: pk.dir, libraries: m.libraries, name: m.name ?? null }, packages: packages.sort(byName), problems: [...new Set(problems)], ...base };
+    let places: string[] = [];
+    try { const l = pk.libraries(); places = l.libs.map(placeText); problems.push(...l.problems); } catch (e: any) { problems.push(e.message); }
+    return { package: { id: pk.id ?? '', title: m.title, label: pk.label, dir: pk.dir, places, name: m.name ?? null }, packages: packages.sort(byName), problems: [...new Set(problems)], ...base };
   }
 
   /** Tell the pages that what the tab shows changed (`force`: after something a page did), and watch its folders. */
@@ -368,7 +370,7 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     const r = d.result, t = r.target;
     return {
       ok: true, id: d.id, package: r.package, stopped: r.stopped, ms: Math.round(r.ms), comparisons: r.total / 2,
-      target: { package: t.package, from: t.from, to: t.to, big: t.big, up: compareVersions(t.to, t.from) > 0, library: t.library, between: t.between.map(versionRow) },
+      target: { package: t.package, from: t.from, to: t.to, big: t.big, up: compareVersions(t.to, t.from) > 0, library: t.library, place: t.place, between: t.between.map(versionRow) },
       interfaceBig: r.interfaceBig, interfaceSmall: r.interfaceSmall, mustChange: r.mustChange, problems: r.problems,
       uses: r.uses.map((u) => ({ file: u.file, kind: u.kind, ...useOf(u) })),
       places: r.compared.map((c, index) => ({
@@ -497,10 +499,10 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
           if (u.pathname === '/api/packages') { json(200, state()); return true; }
           if (u.pathname === '/api/packages/author') { json(200, authorState()); return true; }
           if (u.pathname === '/api/packages/search') {
-            // Find packages: TopoTopo's built-in packages and every library's packages, and whether this package can use each
+            // Find packages: the places the package looks in and TopoTopo's built-in packages, and whether this package can use each
             const q = { query: u.searchParams.get('q') ?? '', ...(u.searchParams.get('kind') ? { kind: u.searchParams.get('kind')! } : {}), ...(u.searchParams.get('tag') ? { tag: u.searchParams.get('tag')! } : {}) };
-            const r = asked(() => searchPackages(pk?.dir ?? null, q));
-            json(200, { ...r, libraries: r.libraries.map((l) => ({ name: l.name, standing: l.standing, hits: l.hits })) });
+            const r = asked(() => searchPackages(pk?.start ?? ws.dir, q));
+            json(200, { ...r, libraries: r.libraries.map((l) => ({ name: l.name, place: l.place, standing: l.standing, hits: l.hits })) });
             return true;
           }
           if (u.pathname === '/api/packages/compare') { json(200, { compare: last ? summary(last) : null, running: run?.progress ?? null }); return true; }

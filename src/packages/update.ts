@@ -31,8 +31,8 @@ import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE, topoFiles } from '../session.ts';
 import { copiesFor, program } from '../package.ts';
-import { scanLibrary } from '../web/library.ts';
-import { compareInterfaces, compareVersions, kindChanges, libraryText, loadPackage } from './registry.ts';
+import { scanWorkspace } from '../workspace.ts';
+import { compareInterfaces, compareVersions, kindChanges, loadPackage } from './registry.ts';
 import type { PackageUses, UpdateTarget } from './registry.ts';
 
 /**
@@ -74,7 +74,9 @@ function packagesOf(pk: PackageUses): PackageAt[] {
   const out: PackageAt[] = [{ dir, rel: '' }];
   const ws = pk.store?.workspace;
   if (!ws) return out;
-  for (const p of scanLibrary({ name: 'workspace', path: ws }).packages) {
+  let found: ReturnType<typeof scanWorkspace>['packages'] = [];
+  try { found = scanWorkspace(ws).packages; } catch { /* its file cannot be read: the open package alone */ }
+  for (const p of found) {
     if (path.resolve(p.dir).toLowerCase() === path.resolve(dir).toLowerCase() || copiesFor(p.dir).workspace !== ws) continue;
     out.push({ dir: p.dir, rel: p.rel });
   }
@@ -423,7 +425,7 @@ export function beforeAfterText(r: BeforeAfter, closing: string): string {
   const t = r.target, up = compareVersions(t.to, t.from) > 0;
   const kind = t.big ? (up ? 'a big update' : 'back to an older big version') : up ? 'a small update' : 'back to an older version';
   const lines = [`before/after: ${t.package} ${t.from} → ${t.to} (${kind}) in ${r.package}; nothing has changed yet`];
-  lines.push(`${t.package} ${t.to} is in ${libraryText(t.library)}. ${up ? `The versions after ${t.from}` : `The versions it goes back over`}:`, ...t.between.map((v) => `  ${v.version}  "${v.note}"`));
+  lines.push(`${t.package} ${t.to} is in ${t.place}. ${up ? `The versions after ${t.from}` : `The versions it goes back over`}:`, ...t.between.map((v) => `  ${v.version}  "${v.note}"`));
   if (t.big) {
     const step = up ? `${t.to} is a big version` : `going back to ${t.to} crosses a big version`;
     lines.push(r.interfaceBig.length ? `${step}; what goes away or means something else:` : `${step}: nothing goes away between the two, and a version between was marked big by its author, its meaning changed in a way the tools cannot see (its note says how)`);
@@ -481,7 +483,7 @@ export function outdatedText(pk: PackageUses, mcp = false, folder?: string): str
   const counts = [late.length ? `${late.length} out of date` : '', fine.length ? `${fine.length} up to date` : '', failed.length || problems.length ? `could not check ${failed.length + problems.length}` : ''].filter(Boolean);
   const lines = [`${pk.holder} uses ${list.length} package${list.length === 1 ? '' : 's'}: ${counts.join(', ')}`];
   for (const o of late) {
-    lines.push(`  ${o.package} ${o.version}: ${[o.small ? `${o.small} is out` : '', o.big ? `${o.big} is out (big)` : ''].filter(Boolean).join(', ')}  [${o.libraries.map(libraryText).join(', ')}]`);
+    lines.push(`  ${o.package} ${o.version}: ${[o.small ? `${o.small} is out` : '', o.big ? `${o.big} is out (big)` : ''].filter(Boolean).join(', ')}  [${o.places.join(', ')}]`);
     // each newer version's note, and its outputs of another kind
     let was = pk.copyInfo(o.package, o.version);
     for (const v of o.newer) {

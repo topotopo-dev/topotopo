@@ -16,6 +16,7 @@ import { didYouMean, renameExprRefs } from './graph/params.ts';
 import { maybeSidecar, sidecarOf } from './io/sidecars.ts';
 import type { Sidecar } from './io/sidecars.ts';
 import { fileFormat } from './host/sidecars.ts';
+import { isEngineFile } from './engines.ts';
 
 export interface EditOp {
   op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert' | 'export';
@@ -464,7 +465,8 @@ export class Session {
   }
 
   /**
-   * Every file under inputs/, recursively: posix paths relative to it, sorted. Dot-files and dot-folders are skipped.
+   * Every file under inputs/, recursively: posix paths relative to it, sorted. Dot-files and dot-folders are skipped, as
+   * are the files an engine writes beside ours (*.import, *.uid, *.translation, *.uasset).
    * An export's sidecar (a heightmap's .json, <file>.source.json …) is kind "metadata", with the file it describes.
    */
   listInputs(): InputFile[] {
@@ -473,7 +475,7 @@ export class Session {
       let entries: fs.Dirent[];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
       for (const e of entries) {
-        if (e.name.startsWith('.')) continue;
+        if (e.name.startsWith('.') || (!e.isDirectory() && isEngineFile(e.name))) continue;
         const abs = path.join(dir, e.name), r = rel ? `${rel}/${e.name}` : e.name;
         let st: fs.Stats;
         try { st = fs.statSync(abs); } catch { continue; } // a broken link
