@@ -415,9 +415,11 @@ if (url) {
   check(/size 8\.000 × 8\.000 × 8\.000 m/.test(ins2.txt), 'a later edit there re-cooks it');
   const xf = await call('export', { path: 'exports/yard_followed.glb' });
   const frec = JSON.parse(fs.readFileSync(path.join(yard, 'exports', 'yard_followed.glb.source.json'), 'utf8')).source;
-  check(!xf.isError && typeof frec.packages?.['studio/crates@working'] === 'string' && !frec.packages['studio/crates@1.0'], `an export while following records the working folder: ${JSON.stringify(frec.packages)}`);
-  const blocked = await call('library', { action: 'publish', note: 'while following' });
-  check(blocked.isError && /this session follows studio\/crates from its working folder/.test(blocked.txt), 'publishing while following is refused');
+  check(!xf.isError && typeof frec.packages?.['studio/crates@1.0'] === 'string' && !Object.keys(frec.packages ?? {}).some((k) => k.endsWith('@working'))
+    && /this session shows studio\/crates live from its working folder, for looking; the export used the published studio\/crates 1\.0/.test(xf.txt),
+    `an export while following uses the published copy, records it and says so: ${JSON.stringify(frec.packages)}`);
+  const tryPub = await call('library', { action: 'publish', note: 'while following', dry_run: true });
+  check(!/stop following it to publish/.test(tryPub.txt) && /"package"/.test(tryPub.txt), `publishing is not refused for following (this project is no package: ${tryPub.txt.split('\n')[0]})`);
   const off = await call('library', { action: 'follow', package: 'studio/crates', on: false });
   check(!off.isError && /it resolves to its copy \(1\.0\) again/.test(off.txt), 'library follow on:false goes back to the copy');
 

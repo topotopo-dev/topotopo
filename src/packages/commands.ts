@@ -18,6 +18,7 @@
 //   topotopo publish [folder] --note "..." [--big] [--dry-run]        publish the next version of the project's package
 //   topotopo search [words] [folder] [--kind k] [--tag t]             the outputs of every library, for the project
 //   topotopo outdated [folder]                                        the newer versions of what it uses, with their notes
+//   topotopo check [folder]                                           cook what the workspace relies on; what broke and why
 //   topotopo update owner/name [folder] [--to 1.4] [--render <folder>]           the before/after of an update
 //   topotopo update owner/name [folder] --from 1.3 --to 1.4 --apply              apply the update you looked at
 // A folder named must exist (a project's folder, or one inside it); without one, the current folder's project. Each
@@ -48,6 +49,7 @@ export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'publish [folder] --note "..." [--big] [--dry-run]', what: 'publish the next version of the project\'s package into versions/; --dry-run checks everything and writes nothing' },
   { usage: 'search [words] [folder] [--kind k] [--tag t]', what: 'the outputs of every library, and whether the project can use them' },
   { usage: 'outdated [folder]', what: 'the packages the project uses that have newer versions, with their notes' },
+  { usage: 'check [folder]', what: 'cook the newest version of every package in the workspace\'s (or the project\'s) libraries, and every graph of its projects; list what broke and why, changing nothing' },
   { usage: 'update owner/name [folder] [--to 1.4] [--render <folder>]', what: 'the before/after of an update: every place the project uses it, cooked with both versions; nothing is written' },
   { usage: 'update owner/name [folder] --from 1.3 --to 1.4 --apply', what: 'apply the update you looked at: copy it in, set "uses" and the lock, delete the copies nothing uses' },
 ];
@@ -352,6 +354,23 @@ export async function outdatedCommand(argv: string[], prog: string, io: Io = con
 }
 
 /**
+ * `check [folder]`: cook the newest version of every package in the libraries of the workspace around the folder (or
+ * of its project), and every graph of its projects; say what broke and why. Writes nothing; exit code 1 when something
+ * broke (a build machine runs it after updating TopoTopo).
+ */
+export async function checkCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
+  return (await run(io, async () => {
+    const folder = args(argv, [], [], `usage: ${prog} check [folder]`).rest[0];
+    const at = path.resolve(folder ?? '.');
+    if (folder !== undefined && !fs.existsSync(at)) fail(`${at} does not exist`);
+    const { checkAll, checkText } = await import('./check.ts');
+    const r = await checkAll(at, { progress: (what) => io.err(`checking ${what}`) });
+    io.out(checkText(r));
+    return r.items.some((i) => i.failures.length) ? 1 : 0;
+  })) ?? 0;
+}
+
+/**
  * `update owner/name [folder] [--to <version>] [--render <folder>]`: the before/after of updating a package the project
  * uses, which writes nothing (--render writes its overlay renders into a folder); `--from <version> --to <version>
  * --apply` applies the update whose before/after the person saw. Ctrl+C stops a long before/after at the next node.
@@ -440,5 +459,5 @@ const workspaceCommand: Command = (argv, prog, io = consoleIo) => run(io, async 
 
 export const commands: Record<string, Command> = {
   gallery: galleryCommand, library: libraryCommand, edit: editCommand, workspace: workspaceCommand, init: initCommand, libraries: librariesCommand, use: useCommand,
-  remove: removeCommand, packages: packagesCommand, publish: publishCommand, search: searchCommand, outdated: outdatedCommand, update: updateCommand,
+  remove: removeCommand, packages: packagesCommand, publish: publishCommand, search: searchCommand, outdated: outdatedCommand, check: checkCommand, update: updateCommand,
 };

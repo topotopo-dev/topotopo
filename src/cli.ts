@@ -41,6 +41,7 @@
 //   node src/cli.ts publish [folder] --note "..." [--big] [--dry-run]
 //   node src/cli.ts search [words] [folder] [--kind k] [--tag t]
 //   node src/cli.ts outdated [folder]
+//   node src/cli.ts check [folder]
 //   node src/cli.ts update owner/name [folder] [--to 1.4] [--render <folder>]
 //   node src/cli.ts update owner/name [folder] --from 1.3 --to 1.4 --apply
 //   A graph-file cook adds a package its graph names for the first time (and says so); --locked fails instead, for a
@@ -201,7 +202,7 @@ if (argv[0] === 'view') {
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
-} else if (['gallery', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'update'].includes(argv[0])) {
+} else if (['gallery', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'check', 'update'].includes(argv[0])) {
   // the gallery website, its libraries and its editor; a project's packages (src/packages/commands.ts). A command that ends
   // gives its exit code; the gallery and the editor keep running
   const { commands } = await import('./packages/commands.ts');

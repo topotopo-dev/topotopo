@@ -139,3 +139,10 @@ pre.error { color: var(--err); }
   #search { max-width: none; flex-basis: 100%; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 }
+
+/* the workspaces (games) on the front page */
+.hub h2 { font-size: 18px; margin-top: 28px; }
+.workspace { border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0; }
+.workspace h3 { margin: 0 0 6px; font-size: 15px; }
+.vars.ws td:nth-child(2) { font: inherit; white-space: normal; }
+.workspace a { color: var(--accent); }
