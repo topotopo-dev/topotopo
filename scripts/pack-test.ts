@@ -120,7 +120,7 @@ try {
   const cook = sh(`npm exec --no -- ${BIN} roofs.json --render roofs.png --export roofs.glb`, app);
   const lock = fs.existsSync(path.join(app, 'packages', 'lock.json')) ? JSON.parse(fs.readFileSync(path.join(app, 'packages', 'lock.json'), 'utf8')) : {};
   const arch = newestOf('architecture');
-  check(new RegExp(`added topotopo/architecture ${re(arch)} to package app from library "topotopo" \\(TopoTopo's built-in library\\)`).test(cook) && lock.packages?.['topotopo/architecture']?.[arch]?.library === 'topotopo'
+  check(new RegExp(`added topotopo/architecture ${re(arch)} to package app from TopoTopo's built-in library`).test(cook) && lock.packages?.['topotopo/architecture']?.[arch]?.library === 'topotopo'
     && fs.existsSync(path.join(app, 'packages', 'topotopo', 'architecture', arch, 'version.json')), `the first use copies topotopo/architecture ${arch} in from the installed built-in library and locks it`);
   const png = path.join(app, 'roofs.png');
   const pngOk = fs.existsSync(png) && fs.readFileSync(png).subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && fs.statSync(png).size > 20000;
