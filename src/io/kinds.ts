@@ -1,5 +1,5 @@
 // What a cooked output is, and the export formats that fit it. Everything that shows an output (the viewer's cards and
-// Properties, the Packages tab, the Gallery, search and help) says what it is with one word, its kind: mesh, instances,
+// Properties, the Packages tab, the web app, search and help) says what it is with one word, its kind: mesh, instances,
 // points, curves, terrain, textures, material, volume, or scene for several of these (graph/outputs.ts KINDS). The viewer decides
 // it from the cooked geometry (OutputInfo.published) and says its size in a line beside it: "2,400 polygons, 1,204
 // points", "1,200 instances of 3 sources", "2049 × 2049 samples, 2 m apart", "1024 × 1024 px", a scene's parts each by

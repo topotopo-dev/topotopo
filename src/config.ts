@@ -1,5 +1,5 @@
-// The user's config: the libraries registered by name and the Gallery's settings, and TopoTopo's built-in library.
-//   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], workspaces: [{name, path}], gallery: {port, cors: [origins]}}
+// The user's config: the libraries registered by name and the web app's settings, and TopoTopo's built-in library.
+//   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], workspaces: [{name, path}], web: {port, cors: [origins]}}
 //   $TOPOTOPO_LIBRARIES                              more libraries: name=path entries separated by path.delimiter
 // TopoTopo carries a library of its own, its built-in library (BUILTIN_LIBRARY), which every package looks in without
 // listing it.
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { ID_RE } from './graph/scope.ts';
 import { slugify } from './package.ts';
 
-/** The Gallery's port when the config names none. */
+/** The web app's port when the config names none. */
 export const DEFAULT_PORT = 7340;
 
 export interface LibraryRef { name: string; path: string }
@@ -23,13 +23,13 @@ export interface LibraryRef { name: string; path: string }
  */
 export const BUILTIN_LIBRARY: LibraryRef = { name: 'topotopo', path: fileURLToPath(new URL('../library', import.meta.url)) };
 const builtinName = (name: string, from: string) => `${from}"${name}" is the name of TopoTopo's built-in library, which every package looks in: give this library another name`;
-export interface GalleryConfig {
+export interface WebConfig {
   /** the config file read (or the one `library add` writes) */
   file: string;
   libraries: LibraryRef[];
-  /** the workspaces (games) registered, by name: the Gallery's hub lists them */
+  /** the workspaces (games) registered, by name: the web app's front page lists them */
   workspaces: LibraryRef[];
-  gallery: { port: number; cors: string[] };
+  web: { port: number; cors: string[] };
 }
 
 // ---------------------------------------------------------------------------------------------------------- config
@@ -39,7 +39,7 @@ export function configFile(): string {
 }
 
 /** The user's config with defaults filled in; libraries from $TOPOTOPO_LIBRARIES come after the file's. */
-export function loadConfig(): GalleryConfig {
+export function loadConfig(): WebConfig {
   const file = configFile();
   let raw: any = {};
   if (fs.existsSync(file)) {
@@ -67,10 +67,10 @@ export function loadConfig(): GalleryConfig {
     if (!w || typeof w.name !== 'string' || typeof w.path !== 'string' || !ID_RE.test(w.name)) throw new Error(`${file}: each workspace is {"name": "...", "path": "..."} (a name of lower-case letters, digits, - and _)`);
     if (!workspaces.some((x) => x.name === w.name)) workspaces.push({ name: w.name, path: path.resolve(path.dirname(file), w.path) });
   }
-  const g = raw.gallery ?? {};
+  const g = raw.web ?? {};
   return {
     file, libraries, workspaces,
-    gallery: {
+    web: {
       port: Number.isInteger(g.port) ? g.port : DEFAULT_PORT,
       cors: Array.isArray(g.cors) ? g.cors.filter((o: unknown) => typeof o === 'string') : [],
     },
@@ -78,7 +78,7 @@ export function loadConfig(): GalleryConfig {
 }
 
 /** Add (or re-point) a library in the config file, keeping its other keys. */
-export function addLibrary(name: string, dir: string): GalleryConfig {
+export function addLibrary(name: string, dir: string): WebConfig {
   if (!ID_RE.test(name)) throw new Error(`library name "${name}" must match ${ID_RE} (e.g. "${slugify(name) || 'game'}")`);
   if (name === BUILTIN_LIBRARY.name) throw new Error(builtinName(name, ''));
   const file = configFile();
@@ -94,7 +94,7 @@ export function addLibrary(name: string, dir: string): GalleryConfig {
 }
 
 /** Register (or re-point) a workspace in the config file by its name, keeping the file's other keys. */
-export function addWorkspace(name: string, dir: string): GalleryConfig {
+export function addWorkspace(name: string, dir: string): WebConfig {
   if (!ID_RE.test(name)) throw new Error(`workspace name "${name}" must match ${ID_RE}`);
   const file = configFile();
   let raw: any = {};

@@ -1,4 +1,4 @@
-// The `library` tool: the person's libraries of packages (src/gallery/library.ts) and the packages of the open package
+// The `library` tool: the person's libraries of packages (src/web/library.ts) and the packages of the open package
 // (src/packages/registry.ts, src/packages/update.ts). An agent lists and searches every library, reads a package, makes
 // new ones, edits their project.json, bakes previews, and opens a package: the server's folder becomes that package's
 // folder, so build/edit/render/export work on it; or it makes the server's folder a package (init), when the person says
@@ -12,9 +12,9 @@ import type { Session } from '../session.ts';
 import type { ToolDef, ToolResult, Content } from './tools.ts';
 import { loadConfig } from '../config.ts';
 import { initPackage, ownPackageName, parseManifest, program, packageDirOf, readManifest, withPackageLock, writeManifest } from '../package.ts';
-import { createPackage, graphNames, isStale, listFiles, readBakeState, readGraph, scanAll } from '../gallery/library.ts';
-import type { GalleryConfig } from '../config.ts';
-import type { LibraryScan, Package } from '../gallery/library.ts';
+import { createPackage, graphNames, isStale, listFiles, readBakeState, readGraph, scanAll } from '../web/library.ts';
+import type { WebConfig } from '../config.ts';
+import type { LibraryScan, Package } from '../web/library.ts';
 import { KINDS } from '../graph/outputs.ts';
 import { NothingToUpdate, packageText, packagesText, publishPackage, publishText, searchPackages, searchText } from '../packages/registry.ts';
 import type { PackageUses } from '../packages/registry.ts';
@@ -32,9 +32,9 @@ export interface LibraryToolHost {
 }
 
 export function libraryTool(host: LibraryToolHost): ToolDef {
-  const scan = (): { cfg: GalleryConfig; scans: LibraryScan[] } => { const cfg = loadConfig(); return { cfg, scans: scanAll(cfg) }; };
-  const urlsOf = (cfg: GalleryConfig, p: Package) => {
-    const b = `http://127.0.0.1:${cfg.gallery.port}`;
+  const scan = (): { cfg: WebConfig; scans: LibraryScan[] } => { const cfg = loadConfig(); return { cfg, scans: scanAll(cfg) }; };
+  const urlsOf = (cfg: WebConfig, p: Package) => {
+    const b = `http://127.0.0.1:${cfg.web.port}`;
     return { page: `${b}/p/${p.lib}/${p.id}`, embed: `${b}/embed/${p.lib}/${p.id}`, thumb: `${b}/p/${p.lib}/${p.id}/thumb.png` };
   };
   const currentDir = () => packageDirOf(host.session().dir);
@@ -63,12 +63,12 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
 
   return {
     name: 'library',
-    description: 'The person\'s libraries of packages (the TopoTopo Gallery website shows them; a board links to them). A library is a folder; a package is a folder in it with project.json (title, description, tags, links to concept art/board pages) and its own graphs/, assets/, inputs/, exports/ and attachments/ (concept art and references). ' +
-      'list {query?, tag?, library?}: every package with status and gallery URL. get {library, id} (or the open package): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
+    description: 'The person\'s libraries of packages (the web app shows them; a board links to them). A library is a folder; a package is a folder in it with project.json (title, description, tags, links to concept art/board pages) and its own graphs/, assets/, inputs/, exports/ and attachments/ (concept art and references). ' +
+      'list {query?, tag?, library?}: every package with status and web app URL. get {library, id} (or the open package): manifest, graphs and vars, attachments, exports, bake state, URLs; thumbnail:true adds the baked image. ' +
       'open {library, id} | {path}: make that package the folder every tool and the live viewer work in, then build/edit/render/export work in it. create {library, path:"props/lantern", title?, description?, tags?, links?}: a new package, opened. ' +
       'workspace: the workspace (the game) around the open package: its engine project, the libraries every package inside looks in, its packages. workspace {init:true, path?, name?, engine?, assets?, libraries?} makes a game\'s folder (path, default: the folder above the open package that the person names) a workspace (topotopo-workspace.json; the engine project found when not given; its packages then share one copy of each package, in topotopo-packages/, and their own copies move there), when the person says so. ' +
       'init {package?}: make the server\'s folder a package (project.json, graphs/main.json, .gitignore, .gitattributes), when it is none and the person says so: only a package\'s graphs use packages (TopoTopo\'s own included), and a build that names one in a package outside any package fails saying so. ' +
-      'set {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?, libraries?}: edit project.json (graph = the graph the gallery shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the name the package publishes under, set once by its author; libraries = the libraries the package finds packages in, ["../lib", "game"]: a path from the package for a library in the same repository, else a registered name; set it only when the person names the library). bake {library?, id?}: render thumb.png and preview.glb now (the gallery also bakes on its own after changes). ' +
+      'set {library?, id?, title?, description?, tags?, links?, graph?, bake?, package?, libraries?}: edit project.json (graph = the graph its page shows; bake = {graph?, node?, frame?} what its preview shows; package = "owner/name", the name the package publishes under, set once by its author; libraries = the libraries the package finds packages in, ["../lib", "game"]: a path from the package for a library in the same repository, else a registered name; set it only when the person names the library). bake {library?, id?}: render thumb.png and preview.glb now (the web app also bakes on its own after changes). ' +
       `Packages of the open package: packages (what it uses and can use, one line each: version, outputs, up to date or the newer version that is out), packages {package} (one package: its versions and notes, its outputs with their kinds, tags, params and inputs); search {query?, kind?, tag?}: the outputs of every library (TopoTopo\'s built-in one, those the package lists, every registered one) by words, kind (${KINDS.join(', ')}) and tag, each with its full name, kind, tags, label, version and description, and whether the package can use it, else the "libraries" entry that would list its library; use {package:"owner/name", version?} adds one (a graph that names "owner/name/output" adds it too); remove {package} removes one no graph of the package names; follow {package, on} uses a package\'s working folder instead of its copy for this session. ` +
       'publish {dry_run:true, note?, big?} is a dry run: every check and cook, the version number it would get, its changes, blocks and warnings, nothing written. Publishing is permanent: run the dry run first, show it to the person, and publish {note, big?} only when they say so. ' +
       'outdated: the packages it uses that have newer versions, with their notes, and one line for those up to date. check: cook the newest version of every package in the libraries of the workspace (or the package) and every graph of its packages, and list what broke and why; it changes nothing (after a TopoTopo update, say). update {package, to?}: the before/after of updating it (to the newest version with the same big number; a big version needs "to"): every place the package uses it, cooked with the version in use and the new one, what changed in each, overlay renders, the notes of the versions between and, for a big version, what the graphs must change. It writes nothing. Show the before/after to the person and apply it only when they say so: update {package, from, to, apply:true} (the versions of the before/after they saw) copies the new version in, updates the uses and the lock, and deletes the copies nothing uses any more. See help topics "library" and "packages".',
@@ -91,7 +91,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         description: { type: 'string' },
         tags: { type: 'array', items: { type: 'string' } },
         links: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' } }, required: ['url'] }, description: 'links back to the board, concept pages, tickets' },
-        graph: { type: 'string', description: 'set: the graph the gallery shows and bakes (default "main")' },
+        graph: { type: 'string', description: 'set: the graph its page shows and bakes (default "main")' },
         bake: { type: 'object', properties: { graph: { type: 'string' }, node: { type: 'string' }, frame: { type: 'number' } }, description: 'set: what the preview shows instead of the graph output' },
         thumbnail: { type: 'boolean', description: 'get: include the baked thumbnail image' },
         init: { type: 'boolean', description: 'workspace: make the folder (path) a workspace, or change it' },
@@ -111,7 +111,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
     run: async (a, call) => {
       // the registered libraries are read and scanned only by the actions on them: a broken config or a slow library
       // does not stand in the way of the open package's packages
-      let scanned: { cfg: GalleryConfig; scans: LibraryScan[] } | null = null;
+      let scanned: { cfg: WebConfig; scans: LibraryScan[] } | null = null;
       const libs = () => (scanned ??= scan());
       // the packages of the open package as its files are now (a person may have edited project.json)
       if (['packages', 'search', 'use', 'remove', 'follow', 'publish', 'outdated', 'update'].includes(a.action)) host.packages().refresh();
@@ -152,10 +152,10 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
             ...(att.length ? [`attachments/ (${att.length}): ${att.slice(0, 30).map((f) => f.path).join(', ')}${att.length > 30 ? ', …' : ''}`] : []),
             ...(exp.length ? [`exports/ (${exp.length}): ${exp.slice(0, 30).map((f) => f.path).join(', ')}${exp.length > 30 ? ', …' : ''}`] : []),
             `preview: ${statusOf(p)}${s ? `, baked ${new Date(s.at).toISOString().slice(0, 16)}` : ''}${s && !s.ok ? `: ${s.error}` : ''}${Object.keys(m.bake).length ? `; bake ${JSON.stringify(m.bake)}` : ''}`,
-            `gallery: ${u.page}  embed: ${u.embed}  thumbnail: ${u.thumb}`,
+            `page: ${u.page}  embed: ${u.embed}  thumbnail: ${u.thumb}`,
           ];
           const content: Content[] = [{ type: 'text', text: lines.join('\n') }];
-          const thumb = path.join(p.dir, '.gallery', 'thumb.png');
+          const thumb = path.join(p.dir, '.web', 'thumb.png');
           if (a.thumbnail && fs.existsSync(thumb)) content.push({ type: 'image', data: fs.readFileSync(thumb).toString('base64'), mimeType: 'image/png' });
           return { content };
         }
@@ -163,9 +163,9 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           const p = pick(a, () => libs().scans);
           const r = await host.open(p.dir);
           let page = '';
-          try { page = ` Gallery page: ${urlsOf(libs().cfg, p).page}`; } catch { /* no config to read the port from */ }
+          try { page = ` Package page: ${urlsOf(libs().cfg, p).page}`; } catch { /* no config to read the port from */ }
           return text(`opened ${p.lib ? `${p.lib}/` : ''}${p.id} ("${p.manifest.title}"): every tool now works in ${p.dir} (${r.graphs} graphs, ${r.assets} assets). ` +
-            `Build into graph "${p.manifest.graph}" (the one the gallery shows); put reference images in attachments/ and guide files in inputs/.${page}`);
+            `Build into graph "${p.manifest.graph}" (the one its page shows); put reference images in attachments/ and guide files in inputs/.${page}`);
         }
         case 'create': {
           const { cfg } = libs();
@@ -175,8 +175,8 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           if (!lib) throw new Error(`no library "${a.library}" (${cfg.libraries.map((l) => l.name).join(', ') || `none: the person registers one with \`${program()} library add <name> <folder>\``})`);
           const p = createPackage(lib, a.path, { title: a.title, description: a.description, tags: a.tags, links: a.links });
           let opened = '';
-          if (a.open !== false) { await host.open(p.dir); opened = ' and opened it: build/edit now work in it (graph "main" is the one the gallery shows)'; }
-          return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Gallery page: ${urlsOf(cfg, p).page}`);
+          if (a.open !== false) { await host.open(p.dir); opened = ' and opened it: build/edit now work in it (graph "main" is the one its page shows)'; }
+          return text(`created ${p.lib}/${p.id} at ${p.dir}${opened}. Package page: ${urlsOf(cfg, p).page}`);
         }
         case 'workspace': {
           const { initWorkspace, workspaceText } = await import('../workspace.ts');
@@ -275,11 +275,11 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         }
         case 'bake': {
           const p = pick(a, () => libs().scans);
-          const { bakePackage } = await import('../gallery/bake.ts');
+          const { bakePackage } = await import('../web/bake.ts');
           const s = await bakePackage(p.dir);
           if (!s.ok) return text(`bake of ${p.id} failed: ${s.error}`, true);
           const content: Content[] = [{ type: 'text', text: `baked ${p.id} in ${s.ms} ms: ${s.points} points, ${s.prims} prims${s.glb ? '' : ' (no preview.glb: too large)'}${s.warnings?.length ? `; warnings: ${s.warnings.slice(0, 5).join('; ')}` : ''}` }];
-          content.push({ type: 'image', data: fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png')).toString('base64'), mimeType: 'image/png' });
+          content.push({ type: 'image', data: fs.readFileSync(path.join(p.dir, '.web', 'thumb.png')).toString('base64'), mimeType: 'image/png' });
           return { content };
         }
       }

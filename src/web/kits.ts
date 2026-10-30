@@ -1,5 +1,5 @@
 // TopoTopo's kits: the packages of TopoTopo's built-in library (library/ in the checkout), which every package can use.
-// The viewer's welcome and its "Find packages", and the Gallery's search and kit pages list them from here: each kit's
+// The viewer's welcome and its "Find packages", and the web app's search and kit pages list them from here: each kit's
 // title and description (its project.json), its newest version and the outputs that version publishes, with their
 // kinds, tags and the thumbnail the kit keeps of each (thumbs/<output>.png).
 import fs from 'node:fs';
@@ -27,7 +27,7 @@ export interface KitOutput {
 export interface Kit {
   /** "topotopo/street" */
   name: string;
-  /** "street": its folder, and its id in the Gallery */
+  /** "street": its folder, and its id in the web app */
   id: string;
   title: string;
   description: string;

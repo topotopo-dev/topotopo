@@ -425,7 +425,7 @@ section('the page\'s modules');
       else if (spec.startsWith('three/addons/') && !fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.resolve('three'))), '..', 'examples', 'jsm', spec.slice('three/addons/'.length))))
         problems.push(`${f} imports ${spec}, which three does not ship`);
     }
-    // embed.js is the gallery's embed page, not the editor: the one module allowed a model viewer's orbit camera
+    // embed.js is the web app's embed page, not the editor: the one module allowed a model viewer's orbit camera
     if (f !== 'embed.js' && /OrbitControls\.js|new\s+OrbitControls/.test(src)) problems.push(`${f} uses OrbitControls (section 3: our own camera controller)`);
     if (f !== 'embed.js' && /from\s+['"]\.\/embed\.js['"]/.test(src)) problems.push(`${f} imports the embed page's module`);
   }

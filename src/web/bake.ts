@@ -1,7 +1,7 @@
-// Baking a package's previews: .gallery/thumb.png (512 px matcap, or the graph's meta.thumbnail_render: a "pbr" one
-// renders through the asynchronous entry, which loads MikkTSpace and the textures itself) and .gallery/preview.glb
+// Baking a package's previews: .web/thumb.png (512 px matcap, or the graph's meta.thumbnail_render: a "pbr" one
+// renders through the asynchronous entry, which loads MikkTSpace and the textures itself) and .web/preview.glb
 // (meshopt), plus
-// .gallery/bake.json recording the bake key they were made from. The gallery never cooks in its own process (cooks
+// .web/bake.json recording the bake key they were made from. The web app never cooks in its own process (cooks
 // block the event loop and cannot be cancelled): BakeQueue runs `topotopo library bake <dir>` children one at a time,
 // with a shorter simulation limit, a hard time limit and a low priority. A failed bake keeps the previous files.
 import fs from 'node:fs';
@@ -16,7 +16,7 @@ import { createNodeHost } from '../host/node.ts';
 import { previewGLB, thumbOptions } from '../render/preview.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
-import { bakeKey, galleryDir, readBakeState } from './library.ts';
+import { bakeKey, webDir, readBakeState } from './library.ts';
 import { readManifest, writeAtomic } from '../package.ts';
 import type { BakeState } from './library.ts';
 import { openPackage } from '../open.ts';
@@ -33,7 +33,7 @@ export const BAKE_SIM_TIMEOUT_MS = 120_000;
 export async function bakePackage(dir: string): Promise<BakeState> {
   const m = readManifest(dir);
   const key = bakeKey(dir, m);
-  const out = galleryDir(dir);
+  const out = webDir(dir);
   fs.mkdirSync(out, { recursive: true });
   const t0 = performance.now();
   const finish = (s: Omit<BakeState, 'key' | 'at' | 'ms'>): BakeState => {
@@ -139,8 +139,8 @@ export class BakeQueue {
         const why = signal ? `stopped after ${((Date.now() - t0) / 1000).toFixed(0)} s (the bake time limit is ${(this.opts.timeoutMs ?? BAKE_TIMEOUT_MS) / 1000} s)` : `the bake process failed (exit ${code}): ${stderr.trim().split('\n').slice(-3).join(' ')}`;
         try {
           state = { key: bakeKey(dir, readManifest(dir)), at: Date.now(), ok: false, error: why };
-          fs.mkdirSync(galleryDir(dir), { recursive: true });
-          writeAtomic(path.join(galleryDir(dir), 'bake.json'), JSON.stringify(state, null, 1) + '\n');
+          fs.mkdirSync(webDir(dir), { recursive: true });
+          writeAtomic(path.join(webDir(dir), 'bake.json'), JSON.stringify(state, null, 1) + '\n');
         } catch { state = null; }
       }
       this.opts.log?.(`bake ${dir}: ${state?.ok ? `ok in ${state.ms} ms` : `failed: ${state?.error ?? 'no result'}`}`);

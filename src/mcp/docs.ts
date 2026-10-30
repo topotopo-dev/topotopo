@@ -28,7 +28,7 @@ PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in on
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
-LIBRARIES: the person's packages live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one. See help topic "library".
+LIBRARIES: the person's packages live in libraries the web app (topotopo web) shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one. See help topic "library".
 WORKSPACES: a game with topotopo-workspace.json at its root: its packages share the libraries it lists and one copy of each package version, and an export target "engine:<path>" writes into its engine project (Godot, Unreal). library {action:"workspace"} says what the open package's workspace holds; {action:"check"} cooks what it relies on and lists what broke (after a TopoTopo update). See help topic "workspace".
 PACKAGES: a package uses the published outputs of other packages as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the package once the graph validates. TopoTopo's own packages are four kits built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a package's graphs use packages: the server makes its package one when it starts if the folder holds nothing but a package's own folders (its first reply says so), and library {action:"init"} makes any other open package one when the person says so. library {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the package can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
 
@@ -72,14 +72,14 @@ export function graphLines(g: GraphSpec): string {
 }
 
 export const TOPICS: Record<string, string> = {
-  library: `LIBRARIES AND THE GALLERY
+  library: `LIBRARIES AND THE WEB APP
 A library is a folder the person listed (\`topotopo library add <name> <folder>\`, kept in ~/.topotopo/config.json). A
 package is any folder in it holding project.json, with the folders TopoTopo works with:
   props/lantern/project.json    {id, title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
   props/lantern/graphs/ assets/ inputs/ exports/  as in any package
-  props/lantern/attachments/    concept art, references, source files (shown on the package's gallery page)
-  props/lantern/.gallery/       thumb.png, preview.glb, bake.json: derived, never edit
-The parent folders ("props") are the package's collection. The gallery (\`topotopo gallery\`, http://127.0.0.1:7340)
+  props/lantern/attachments/    concept art, references, source files (shown on the package's page)
+  props/lantern/.web/       thumb.png, preview.glb, bake.json: derived, never edit
+The parent folders ("props") are the package's collection. The web app (\`topotopo web\`, http://127.0.0.1:7340)
 shows every library as a grid; each package has a page (/p/<library>/<id>), a thumbnail (…/thumb.png) and an
 iframe embed (/embed/<library>/<id>) that the person's board pastes; a package's page lists its versions and outputs
 with their kinds and tags (the grid's search finds outputs by name, kind and tag) and the packages it uses.
@@ -100,7 +100,7 @@ WORKING IN A PACKAGE
   simulations that settle after frame 1; bake.node to show one part).
 - library {action:"bake"} → render the previews now and see the thumbnail.
 Put reference images the person gives you in attachments/, guide files in inputs/. Links in "links" point back to the
-board or concept pages, so the gallery page and the board link both ways.
+board or concept pages, so the package page and the board link both ways.
 A package can publish versions that other packages use, and use packages itself: help topic "packages". To find a
 ready-made output in any library ("a conifer", every terrain): library {action:"search", query?, kind?, tag?}.`,
   graph: `GRAPH FORMAT
@@ -428,7 +428,7 @@ MATERIAL OUTPUTS (a material as a package output, kind "material": materials and
   use     {"type":"owner/materials/steel", "params":{...}} → input 1 of material {group:"@name=body*"} on the mesh: the
           material and its maps are copied in and assigned (from names one when the source holds several; name
           renames it). The material node's own colour and map params are not used then.
-  see     renders, the viewer and the Gallery show it on spheres (one per material) with its base colour maps;
+  see     renders, the viewer and the web app show it on spheres (one per material) with its base colour maps;
           publishing records each map's size (packages lists "maps baseColor 2048, normal 4096").
   export  format "textures": one PNG per map + materials.json (each material's values and the files of its maps), for
           engines to rebuild it; glb and usda need a mesh: export the mesh that uses it.`,
@@ -955,7 +955,7 @@ WHAT AN OUTPUT IS: its kind, its tags and its description, which search, the cat
   and the viewer warn before that. A kind not on the list is an error wherever the graph is read.
 - tags: free words search finds the output by: lower-case letters, digits and -, starting with a letter or digit, at
   most 64 characters, at most 16 per output, each once ("low-poly", "street-furniture"); a malformed one is an error. A
-  package's own "tags" in project.json stay the Gallery's; search matches both.
+  package's own "tags" in project.json stay the web app's; search matches both.
 - description: the output's "description", else its graph's "description" (a kit's outputs, one graph each, need no
   more). The default output carries the tags and description of the named output it is, if any.
 Every listing says an output's kind and tags the same way: mesh [conifer, low-poly].
@@ -1128,7 +1128,7 @@ workspace) says what the open package's workspace holds.
 - CHECK: library {action:"check"} (CLI: topotopo check) cooks the newest version of every package in the workspace's
   libraries and every graph of its packages, and lists what broke and why; it changes nothing. Run it after a
   TopoTopo update.
-- THE GALLERY lists the registered workspaces first (CLI: topotopo workspace add <folder>).`,
+- THE WEB APP's front page lists the registered workspaces first (CLI: topotopo workspace add <folder>).`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):

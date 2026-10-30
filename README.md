@@ -64,7 +64,7 @@ graph and its seeds, and the core is browser-ready.
   `inputs/<name>`.
 
 **Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, TopoTopo's own packages, the example
-gallery and the release notes, generated from this repository (`npm run site`).
+renders and the release notes, generated from this repository (`npm run site`).
 
 ![city](examples/renders/voronoi_city.png)
 
@@ -231,7 +231,7 @@ works in that package's folder. The first reply the agent gets says which of the
 | `explain` | describe a node's geometry in words: "reads as" summary, pieces, watertight, genus, flipped normals, symmetry planes, principal axis, wall thickness, degenerate faces, attributes, groups |
 | `diff` | compare two graphs, nodes or frames: counts, bbox delta, attribute/group changes, heightfields, images and SDF grids, Hausdorff and mean distance, verdict; `render: true` adds an overlay (grey same, blue only b, orange only a) |
 | `preview` | start the live viewer and return its URL |
-| `library` | the person's libraries of packages (the gallery): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a package the folder every tool and the viewer work in, or `init`, which makes the server's folder a package (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the open package's packages: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the package can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
+| `library` | the person's libraries of packages (the web app): `list` / `get` (with thumbnail) / `create` / `set` / `bake`, and `open`, which makes a package the folder every tool and the viewer work in, or `init`, which makes the server's folder a package (`set` with `libraries` lists the libraries it finds packages in, when the person names them); the open package's packages: `packages` (one line each; with `package`, one package's outputs), `search` (the outputs of every library by words, kind and tag, and whether the package can use them), `use`, `remove`, `follow` (a package's working folder for the session), `publish` (with `dry_run: true` a dry run, which the agent shows the person before publishing), `outdated` (the newer versions and their notes) and `update` (a before/after with overlay renders, applied with the versions it showed when the person says so) |
 
 ## Graph format
 
@@ -407,9 +407,9 @@ Landscape heightmap. Generate the sample with `npm run export:demo`; the plugin 
 the two-node PCG graph, coordinates, automation tests and editor verification steps. It is separate from the npm
 package; copy it into your Unreal project's `Plugins/` directory.
 
-## Gallery
+## Web app
 
-Keep packages in libraries on your PC and browse them as a website: `topotopo gallery` serves every library's packages
+Keep packages in libraries on your PC and browse them as a website: `topotopo web` serves every library's packages
 at http://127.0.0.1:7340 with a page, a thumbnail and an iframe embed for each, so a board or wiki can link a concept
 to the model. A package is a folder with a `project.json` (title, tags, links) and `attachments/` for
 concept art; previews bake by themselves when its graphs change, and agents reach every library through the MCP
@@ -418,7 +418,7 @@ concept art; previews bake by themselves when its graphs change, and agents reac
 ```bash
 topotopo library add game D:/game-assets
 topotopo library new game props/lantern --title "Lantern" --tags prop
-topotopo gallery
+topotopo web
 ```
 
 Each package has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
@@ -683,7 +683,7 @@ the worker pool, the WASM kernels and the MCP server over stdio. It takes about 
 
 `src/core` holds the geometry model and algorithms. `src/graph` holds the node system and cooking engine, and `src/nodes`
 the node library. The renderer is in `src/render`, import/export in `src/io`, and the MCP server, tools and docs in
-`src/mcp`. `src/viewer` has the live preview, `src/gallery` the gallery website of package libraries, and `src/host` the Node
+`src/mcp`. `src/viewer` has the live preview, `src/web` the web app for package libraries, and `src/host` the Node
 host (sandbox, files, fonts).
 `dist/` (not in git) is the compiled package: `npm run build` mirrors
 `src/` there one to one, so the built-in library, fonts, kernels and worker entry are found relative to either.

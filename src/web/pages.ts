@@ -1,7 +1,7 @@
-// The gallery's pages as plain HTML strings: the registered workspaces (the games), the grid of packages and
+// The web app's pages as plain HTML strings: the registered workspaces (the games), the grid of packages and
 // TopoTopo's kits, a package's page, a kit's page and the embed page. Pure functions
-// of their data and a URL builder, so the local server (src/gallery/server.ts) and a static build can share them.
-// Styles and the small page script are files: app/gallery.css and app/gallery.js here, app/embed.js in the viewer.
+// of their data and a URL builder, so the local server (src/web/server.ts) and a static build can share them.
+// Styles and the small page script are files: app/web.css and app/web.js here, app/embed.js in the viewer.
 
 export interface Urls {
   home: string;
@@ -10,15 +10,15 @@ export interface Urls {
   glb(lib: string, id: string, version?: string | number): string;
   embed(lib: string, id: string): string;
   file(lib: string, id: string, rel: string): string;
-  /** null where there is no editor (a static gallery) */
+  /** null where there is no editor (a static build) */
   edit(lib: string, id: string): string | null;
-  /** the gallery's own files (gallery.css, gallery.js) */
+  /** the web app's own files (web.css, web.js) */
   asset(name: string): string;
   /** the viewer's modules (embed.js, scene.js) */
   app(name: string): string;
   /** three.js: the import map's base for build/ and examples/jsm/ */
   three: string;
-  /** a kit's page and its thumbnail of an output (absent where there are none: a static gallery) */
+  /** a kit's page and its thumbnail of an output (absent where there are none: a static build) */
   kit?(id: string): string;
   kitThumb?(id: string, output: string): string;
 }
@@ -75,7 +75,7 @@ export interface PackageData extends CardData {
 
 /**
  * A registered workspace (a game) on the front page: its engine project, the libraries its packages look in, its
- * packages (linked when a library of the gallery holds them) and the packages it uses, those with a newer version marked.
+ * packages (linked when a library of the web app holds them) and the packages it uses, those with a newer version marked.
  */
 export interface WorkspaceCardData {
   name: string;
@@ -88,7 +88,7 @@ export interface WorkspaceCardData {
   problems: string[];
 }
 
-export interface GalleryData { libraries: { name: string; cards: CardData[] }[]; kits?: KitCardData[]; workspaces?: WorkspaceCardData[]; problems: string[] }
+export interface WebData { libraries: { name: string; cards: CardData[] }[]; kits?: KitCardData[]; workspaces?: WorkspaceCardData[]; problems: string[] }
 
 /** A kit's page: its card, its versions, its outputs (with their thumbnails) and the packages that use it. */
 export interface KitData extends KitCardData { versions: VersionRow[]; rows: (OutputRow & { thumb: string | null })[]; usedBy: UserRow[] }
@@ -107,8 +107,8 @@ function shell(title: string, u: Urls, body: string, opts: { page: string; data?
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="${esc(u.asset('gallery.css'))}">
-<script type="module" src="${esc(u.asset('gallery.js'))}"></script>
+<link rel="stylesheet" href="${esc(u.asset('web.css'))}">
+<script type="module" src="${esc(u.asset('web.js'))}"></script>
 </head>
 <body data-page="${opts.page}"${opts.data ? ` data-json="${esc(JSON.stringify(opts.data))}"` : ''}>
 ${body}
@@ -170,7 +170,7 @@ function kitCard(k: KitCardData, u: Urls) {
  * The front page: the registered workspaces first, then every library's packages grouped by collection, with search
  * and tag filters; packages are marked, and the search finds their outputs by name, kind and tag too.
  */
-export function galleryPage(d: GalleryData, u: Urls): string {
+export function frontPage(d: WebData, u: Urls): string {
   const kits = d.kits ?? [];
   const ws = d.workspaces ?? [];
   const link = (title: string, url?: string) => (url ? `<a href="${esc(url)}">${esc(title)}</a>` : esc(title));
@@ -213,8 +213,8 @@ export function galleryPage(d: GalleryData, u: Urls): string {
     <section class="collection" data-collection=""><div class="grid">${kits.map((k) => kitCard(k, u)).join('\n')}</div></section>
   </section>` : '';
   const none = d.libraries.length ? '' : `<p class="empty">No libraries yet. Add a folder with <code>topotopo library add &lt;name&gt; &lt;folder&gt;</code>.</p>`;
-  return shell('TopoTopo Gallery', u, `<header class="bar">
-  <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>
+  return shell('TopoTopo', u, `<header class="bar">
+  <a class="brand" href="${esc(u.home)}">TopoTopo</a>
   <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ', the outputs of packages and TopoTopo\'s kits' : ''}">
   <button id="clear" class="btn" type="button" hidden title="clear the search and the tags">Clear</button>
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
@@ -224,7 +224,7 @@ ${d.problems.length ? `<details class="problems"><summary>${d.problems.length} p
 ${tags.length ? `<nav class="chips" aria-label="Tags">${tags.map((t) => `<button class="chip" data-tag="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join('')}</nav>` : ''}
 ${wsSection}${none}${libs}${kitSection}
 <p class="empty" id="nomatch" hidden>Nothing matches. <button class="btn" type="button" data-clear>Clear the search</button></p>
-</main>`, { page: 'gallery' });
+</main>`, { page: 'front' });
 }
 
 function fileList(rows: FileRow[], lib: string, id: string, base: string, u: Urls) {
@@ -269,8 +269,8 @@ export function kitPage(k: KitData, u: Urls): string {
       <span class="kthumb">${o.thumb ? `<img src="${esc(o.thumb)}" alt="" loading="lazy" width="256" height="256">` : ''}</span>
       <span class="kmeta"><code>${esc(o.type)}</code><span>${esc(o.label)}</span>${kindTagMarks(o) ? `<span class="tags">${kindTagMarks(o)}</span>` : ''}${o.params.length ? `<span class="dim small">params ${esc(o.params.join(', '))}</span>` : ''}</span>
     </div>`).join('');
-  return shell(`${k.title} · TopoTopo Gallery`, u, `<header class="bar">
-  <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>
+  return shell(`${k.title} · TopoTopo`, u, `<header class="bar">
+  <a class="brand" href="${esc(u.home)}">TopoTopo</a>
   <nav class="crumbs"><a href="${esc(u.home)}#kits">TopoTopo's kits</a> / <span>${esc(k.id)}</span></nav>
 </header>
 <main class="wrap kit">
@@ -310,8 +310,8 @@ export function packagePage(p: PackageData, u: Urls): string {
   const view = p.glb
     ? `<iframe class="view" src="${esc(u.embed(p.lib, p.id))}" title="${esc(p.title)} in 3D" allow="fullscreen"></iframe>`
     : `<img class="view" src="${esc(u.thumb(p.lib, p.id, p.version))}" alt="${esc(p.title)}">`;
-  return shell(`${p.title} · TopoTopo Gallery`, u, `<header class="bar">
-  <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>
+  return shell(`${p.title} · TopoTopo`, u, `<header class="bar">
+  <a class="brand" href="${esc(u.home)}">TopoTopo</a>
   <nav class="crumbs"><a href="${esc(u.home)}#lib-${esc(p.lib)}">${esc(p.lib)}</a>${p.collection ? ` / <span>${esc(p.collection)}</span>` : ''} / <span>${esc(p.id)}</span></nav>
 </header>
 <main class="wrap package">

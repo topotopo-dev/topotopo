@@ -168,7 +168,7 @@ const holdsGraph = (j: unknown) => !!j && typeof j === 'object' && !Array.isArra
 /**
  * The graph files of a folder by graph name: graphs/<name>.json, and in a package (a folder holding project.json) the
  * graph files beside project.json, not below it, whose name graphs/ does not have. A file there is a graph when it
- * holds an object with "nodes"; an unreadable one is left out. The gallery, `topotopo edit` and the MCP server read a
+ * holds an object with "nodes"; an unreadable one is left out. The web app, `topotopo edit` and the MCP server read a
  * package's graphs here.
  */
 export function graphFiles(dir: string): Map<string, string> {
@@ -713,7 +713,7 @@ export class Session {
 
   /**
    * Follow what other processes write into graphs/ and assets/, and in a package the graph files beside project.json (a
-   * second Session on the same folder: the gallery's editor next to an MCP server, or a person editing the JSON). A
+   * second Session on the same folder: the web app's editor next to an MCP server, or a person editing the JSON). A
    * graph file whose content differs from the stored graph replaces it and notifies the listeners; a removed file
    * removes the graph. Our own writes read back equal, so they change nothing. An asset whose content changed is
    * registered again and every graph is notified (any may use it); a removed asset stays registered until the next

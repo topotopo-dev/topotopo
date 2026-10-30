@@ -13,7 +13,7 @@ import path from 'node:path';
 import { ID_RE } from './graph/scope.ts';
 import { WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, libraryEntry, locate, parseUses, program, resolveLibraries, slugify, workspaceRepoFiles, writeAtomic } from './package.ts';
 import { gatherCopies } from './packages/registry.ts';
-import { scanLibrary } from './gallery/library.ts';
+import { scanLibrary } from './web/library.ts';
 
 export { WORKSPACE_FILE };
 

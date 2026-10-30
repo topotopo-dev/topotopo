@@ -152,7 +152,7 @@ export function checkKits(kits = readKits()): string[] {
   return out;
 }
 
-/** A thumbnail: 256 px, deflate level 9 (the options live in src/render/preview.ts, shared with the gallery). */
+/** A thumbnail: 256 px, deflate level 9 (the options live in src/render/preview.ts, shared with the web app). */
 export const thumbnailPNG = (geo: any, g: GraphSpec): Uint8Array => renderThumb(geo, g, (d) => zlib.deflateSync(d, { level: 9 }));
 export { thumbOptions };
 

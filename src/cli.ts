@@ -25,7 +25,7 @@
 //   node src/cli.ts mcp [--package dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
-//   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/packages/commands.ts)
+//   node src/cli.ts web [--port 7340] [--library dir]  the web app for the libraries (src/packages/commands.ts)
 //   node src/cli.ts library add|list|new|bake …           registered libraries and packages; edit [folder] opens the
 //                                                         live viewer on a package
 // The workspace (the game) around packages (src/workspace.ts), a package and the packages it uses (src/packages/commands.ts,
@@ -148,7 +148,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output)`,
     `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
-    `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's packages, stable links for a board)`,
+    `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: every library's packages, stable links for a board)`,
     `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
     '       a package and the packages it uses (a folder named must exist; default: the current folder\'s package; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
@@ -202,9 +202,9 @@ if (argv[0] === 'view') {
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
-} else if (['gallery', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'check', 'update'].includes(argv[0])) {
-  // the gallery website, its libraries and its editor; a package and the packages it uses (src/packages/commands.ts). A command that ends
-  // gives its exit code; the gallery and the editor keep running
+} else if (['web', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'check', 'update'].includes(argv[0])) {
+  // the web app, its libraries and its editor; a package and the packages it uses (src/packages/commands.ts). A command that ends
+  // gives its exit code; the web app and the editor keep running
   const { commands } = await import('./packages/commands.ts');
   const code = await commands[argv[0]](argv.slice(1), prog);
   if (typeof code === 'number') process.exit(code);

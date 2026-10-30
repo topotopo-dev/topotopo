@@ -8,7 +8,7 @@ import { ID_RE, parsePackageName } from './graph/scope.ts';
 import { NAME_RE, PACKAGE_FOLDERS, graphFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
 import { readWorkspace, writeWorkspace } from './workspace.ts';
-import type { GalleryConfig } from './config.ts';
+import type { WebConfig } from './config.ts';
 
 /** a package version: big.small, from 1.0 */
 export const VERSION_RE = /^[1-9]\d*\.(0|[1-9]\d*)$/;
@@ -93,7 +93,7 @@ export interface PackageManifest {
   title: string;
   description: string;
   tags: string[];
-  /** the graph the gallery shows and bakes */
+  /** the graph its page shows and bakes */
   graph: string;
   /** what to bake instead of the graph's output: another graph, a node, a frame (simulations settle after frame 1) */
   bake: { graph?: string; node?: string; frame?: number };
@@ -233,7 +233,7 @@ export function libraryEntryFor(packageDir: string, given: string, cwd = process
     return rel.startsWith('.') ? rel : `./${rel}`;
   }
   if (ID_RE.test(given)) {
-    let cfg: GalleryConfig | null = null;
+    let cfg: WebConfig | null = null;
     try { cfg = loadConfig(); } catch { /* an unreadable config registers nothing */ }
     if (cfg?.libraries.some((l) => l.name === given) || given === BUILTIN_LIBRARY.name) return given;
     throw new Error(`"${given}" is no folder here and no registered library (${cfg?.libraries.map((l) => l.name).join(', ') || 'none are registered'}): give the library's folder, or register it first (${program()} library add ${given} <folder>)`);
@@ -256,7 +256,7 @@ export function packageDirOf(start: string): string | null {
  * What a package's .gitignore holds: files derived from it (previews, caches, the hashes of its copies' files) and the
  * lock its package commands hold while they write.
  */
-const IGNORED = ['.gallery/', '.cache/', 'packages/.cache.json', 'packages/.lock'];
+const IGNORED = ['.web/', '.cache/', 'packages/.cache.json', 'packages/.lock'];
 /**
  * What a package's .gitattributes holds: its published versions and its package copies are kept byte for byte, their
  * line ends never changed by a checkout (their hashes read text with LF line ends anyway, src/packages/registry.ts).
@@ -464,7 +464,7 @@ export interface LibraryList { file: string; base: string; entries: string[]; fr
  */
 export function resolveLibraries(lists: LibraryList[]): Libraries {
   const out: Libraries = { libs: [], problems: [] };
-  let cfg: GalleryConfig | null | undefined;
+  let cfg: WebConfig | null | undefined;
   for (const { file, base, entries, from } of lists) {
     const said = (entry: string, why: string) => out.problems.push(`${file} "libraries": "${entry}" ${why}; the other libraries still count`);
     const add = (entry: string, root: string) => {

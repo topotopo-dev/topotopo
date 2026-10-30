@@ -1,5 +1,5 @@
 // Previews of a cooked result, shared by the kits' thumbnails (scripts/gen-kits.ts), the live viewer's GLB routes
-// and the gallery's baked thumb.png / preview.glb (src/gallery/bake.ts). Host-agnostic: PNG compression is passed in.
+// and the web app's baked thumb.png / preview.glb (src/web/bake.ts). Host-agnostic: PNG compression is passed in.
 import type { Geometry } from '../core/geometry.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import type { ExportOptions } from '../io/common.ts';

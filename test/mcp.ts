@@ -31,7 +31,7 @@ const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-'));
 // the library tool reads the person's config: give it one of its own, never the real ~/.topotopo
 const libDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-lib-'));
 const configFile = path.join(libDir, 'config.json');
-fs.writeFileSync(configFile, JSON.stringify({ libraries: [{ name: 'game', path: path.join(libDir, 'lib') }], gallery: { port: 7399 } }));
+fs.writeFileSync(configFile, JSON.stringify({ libraries: [{ name: 'game', path: path.join(libDir, 'lib') }], web: { port: 7399 } }));
 fs.mkdirSync(path.join(libDir, 'lib'));
 // a folder of the person's (a file of their own in it): the server leaves it as it is, in no package
 fs.writeFileSync(path.join(wsDir, 'notes.md'), 'what this folder is for\n');
@@ -344,7 +344,7 @@ if (url) {
   const upd = await call('library', { action: 'set', description: 'An oil barrel', bake: { frame: 1 } });
   check(!upd.isError && JSON.parse(fs.readFileSync(path.join(projDir, 'project.json'), 'utf8')).description === 'An oil barrel', "library set edits the open package's project.json");
   const bk = await call('library', { action: 'bake' });
-  check(!bk.isError && !!bk.img && fs.existsSync(path.join(projDir, '.gallery', 'preview.glb')), 'library bake renders the previews and shows the thumbnail');
+  check(!bk.isError && !!bk.img && fs.existsSync(path.join(projDir, '.web', 'preview.glb')), 'library bake renders the previews and shows the thumbnail');
   const got = await call('library', { action: 'get', library: 'game', id: 'barrel', thumbnail: true });
   check(got.txt.includes('(open)') && got.txt.includes('main (shown)') && got.txt.includes('board: http://board.local/1') && !!got.img, 'library get: manifest, graphs, links, thumbnail');
   const back = await call('library', { action: 'open', path: fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-loose-')) });

@@ -37,7 +37,7 @@ export function welcomeOf(info) {
     kind: 'folder', title: baseName(folder) || 'This folder', sub: folder, kits,
     lead: 'This folder is not a TopoTopo package.',
     steps: [
-      'A package keeps its graphs, the packages they use and their exports together, and shows in the Gallery.',
+      'A package keeps its graphs, the packages they use and their exports together, and shows in the web app.',
       `Ask your agent to make this folder a package, or run: topotopo init "${folder}"`,
       'Your agent can also build a graph here as it is: it shows here at once.',
     ],

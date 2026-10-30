@@ -37,7 +37,7 @@ import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
 import { PackageUses } from '../packages/registry.ts';
-import { listKits, kitOutputsText } from '../gallery/kits.ts';
+import { listKits, kitOutputsText } from '../web/kits.ts';
 import { packageDirOf, readManifest } from '../package.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';

@@ -1,19 +1,19 @@
-// The gallery web server (src/gallery/server.ts): the grid, a package page, thumbnails (a placeholder before the first
+// The web app server (src/web/server.ts): the grid, a package page, thumbnails (a placeholder before the first
 // bake), preview.glb, the embed page, attachments (inside the package only, scripts never inline), /api/packages
 // (CORS only for listed origins), framing headers, the Host and Origin checks, a bake from a file change, a package's
 // versions and outputs and the packages a package uses, the registered workspaces on the front page and among a
 // package's users, and the pages' templates escaping what they show.
-//   node test/gallery.ts
+//   node test/web.ts
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { createPackage } from '../src/gallery/library.ts';
-import type { GalleryConfig } from '../src/config.ts';
-import { startGallery, runningGallery } from '../src/gallery/server.ts';
-import { esc, galleryPage } from '../src/gallery/pages.ts';
+import { createPackage } from '../src/web/library.ts';
+import type { WebConfig } from '../src/config.ts';
+import { startWeb, runningWeb } from '../src/web/server.ts';
+import { esc, frontPage } from '../src/web/pages.ts';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-gallery-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-web-'));
 let failures = 0, passes = 0;
 const check = (cond: any, msg: string) => { if (cond) passes++; else failures++; console.log(`${cond ? 'PASS' : 'FAIL'} ${msg}`); };
 const section = (s: string) => console.log(`\n== ${s}`);
@@ -27,9 +27,9 @@ const crate = createPackage(lib, 'props/crate', { title: 'Crate <b>&', tags: ['p
 fs.writeFileSync(path.join(crate.dir, 'attachments', 'concept.png'), fs.readFileSync(path.resolve('library/props/thumbs/crate.png')));
 fs.writeFileSync(path.join(crate.dir, 'attachments', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 fs.writeFileSync(path.join(tmp, 'secret.txt'), 'secret');
-const cfg: GalleryConfig = { file: path.join(tmp, 'config.json'), libraries: [lib], workspaces: [], gallery: { port: 0, cors: ['http://board.local:3000'] } };
+const cfg: WebConfig = { file: path.join(tmp, 'config.json'), libraries: [lib], workspaces: [], web: { port: 0, cors: ['http://board.local:3000'] } };
 
-const g = await startGallery({ config: cfg, port: 0 });
+const g = await startWeb({ config: cfg, port: 0 });
 const req = (p: string, o: { method?: string; headers?: Record<string, string> } = {}) => new Promise<{ status: number; headers: http.IncomingHttpHeaders; body: Buffer }>((resolve, reject) => {
   const r = http.request({ host: '127.0.0.1', port: g.port, path: p, method: o.method ?? 'GET', headers: o.headers }, (res) => {
     const chunks: Buffer[] = [];
@@ -51,16 +51,16 @@ try {
     const ph = page.body.toString();
     check(page.status === 200 && ph.includes('concept.png') && ph.includes('http://board.local/x') && ph.includes(`http://127.0.0.1:${g.port}/embed/game/crate`), 'the package page: attachments, links, the embed snippet with the absolute URL');
     check((await req('/p/game/nope')).status === 404, 'an unknown package is 404');
-    check((await req('/static/gallery.css')).status === 200 && (await req('/app/embed.js')).status === 200 && (await req('/vendor/three/build/three.module.js')).status === 200, 'styles, the embed module and three.js are served');
+    check((await req('/static/web.css')).status === 200 && (await req('/app/embed.js')).status === 200 && (await req('/vendor/three/build/three.module.js')).status === 200, 'styles, the embed module and three.js are served');
     check((await req('/static/../server.ts')).status === 404, 'no files outside the static folder');
     const health = JSON.parse((await req('/api/health')).body.toString());
-    check(health.gallery === true && health.packages === 1, 'health');
-    check(await runningGallery(g.port) === g.url, 'runningGallery recognises it');
+    check(health.web === true && health.packages === 1, 'health');
+    check(await runningWeb(g.port) === g.url, 'runningWeb recognises it');
   }
 
   section('bake on start, thumbnails, preview.glb, embed');
   {
-    check(await until(() => fs.existsSync(path.join(crate.dir, '.gallery', 'preview.glb')) && g.queue.size === 0, 60000), 'a never-baked package is baked on start');
+    check(await until(() => fs.existsSync(path.join(crate.dir, '.web', 'preview.glb')) && g.queue.size === 0, 60000), 'a never-baked package is baked on start');
     const t = await req('/p/game/crate/thumb.png');
     check(t.status === 200 && t.headers['content-type'] === 'image/png' && t.body.readUInt32BE(16) === 512, 'thumb.png is the baked 512 px thumbnail');
     const again = await req('/p/game/crate/thumb.png', { headers: { 'if-none-match': String(t.headers.etag) } });
@@ -98,9 +98,9 @@ try {
 
   section('changes');
   {
-    const at0 = JSON.parse(fs.readFileSync(path.join(crate.dir, '.gallery', 'bake.json'), 'utf8')).at;
+    const at0 = JSON.parse(fs.readFileSync(path.join(crate.dir, '.web', 'bake.json'), 'utf8')).at;
     fs.writeFileSync(path.join(crate.dir, 'graphs', 'main.json'), JSON.stringify({ nodes: { b: { type: 'sphere' } }, output: 'b' }));
-    const rebaked = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(crate.dir, '.gallery', 'bake.json'), 'utf8')).at !== at0; } catch { return false; } }, 30000);
+    const rebaked = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(crate.dir, '.web', 'bake.json'), 'utf8')).at !== at0; } catch { return false; } }, 30000);
     check(rebaked, 'a graph saved by another process is baked again');
     createPackage(lib, 'props/barrel', { graph: BOX });
     check(await until(async () => JSON.parse((await req('/api/health')).body.toString()).packages === 2, 10000), 'a new package folder appears');
@@ -110,9 +110,9 @@ try {
   section('a bake whose thumbnail renders with shading "pbr" (MikkTSpace loads itself)');
   {
     const shiny = createPackage(lib, 'props/shiny', { title: 'Shiny', graph: { nodes: { b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'] } }, output: 'uv', meta: { thumbnail_render: { shading: 'pbr' } } } as any });
-    const ok = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(shiny.dir, '.gallery', 'bake.json'), 'utf8')).at > 0; } catch { return false; } }, 60000);
-    const state = ok ? JSON.parse(fs.readFileSync(path.join(shiny.dir, '.gallery', 'bake.json'), 'utf8')) : null;
-    check(state?.ok === true && fs.existsSync(path.join(shiny.dir, '.gallery', 'thumb.png')), `the bake needs no preload script (${state?.error ?? 'ok'})`);
+    const ok = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(shiny.dir, '.web', 'bake.json'), 'utf8')).at > 0; } catch { return false; } }, 60000);
+    const state = ok ? JSON.parse(fs.readFileSync(path.join(shiny.dir, '.web', 'bake.json'), 'utf8')) : null;
+    check(state?.ok === true && fs.existsSync(path.join(shiny.dir, '.web', 'thumb.png')), `the bake needs no preload script (${state?.error ?? 'ok'})`);
   }
 
   section('a package without its default graph, and graph files beside project.json');
@@ -130,10 +130,10 @@ try {
     const page = (await req('/p/game/empty')).body.toString();
     check(/No default graph yet: this package has no graphs\. Ask your agent to build one/.test(page) && !/class="bake err/.test(page) && /No graphs yet\. Ask your agent to build one/.test(page),
       'its page says what to do, not an error');
-    check(!fs.existsSync(path.join(empty.dir, '.gallery', 'bake.json')), 'nothing is baked before it has a default graph');
+    check(!fs.existsSync(path.join(empty.dir, '.web', 'bake.json')), 'nothing is baked before it has a default graph');
     const bp = (await req('/p/game/beside')).body.toString();
     check(/<h3>tower <span class="tag">default<\/span>/.test(bp), 'a graph file beside project.json is a graph of the package, here its default one');
-    check(await until(() => fs.existsSync(path.join(beside.dir, '.gallery', 'thumb.png')), 60000), 'and is baked');
+    check(await until(() => fs.existsSync(path.join(beside.dir, '.web', 'thumb.png')), 60000), 'and is baked');
   }
 
   section('packages: a package\'s versions and outputs, the packages a package uses, the grid marks packages');
@@ -213,8 +213,8 @@ try {
   {
     check(esc(`<a href="x">'&`) === '&lt;a href=&quot;x&quot;&gt;&#39;&amp;', 'esc');
     const u = { home: '/', package: () => '/p', thumb: () => '/t', glb: () => '/g', embed: () => '/e', file: () => '/f', edit: () => null, asset: (n: string) => n, app: (n: string) => n, three: '/3/' };
-    const html = galleryPage({ libraries: [], problems: ['<script>'] }, u);
-    check(html.includes('&lt;script&gt;') && html.includes('library add'), 'problems are escaped; an empty gallery says how to add a library');
+    const html = frontPage({ libraries: [], problems: ['<script>'] }, u);
+    check(html.includes('&lt;script&gt;') && html.includes('library add'), 'problems are escaped; an empty web app says how to add a library');
   }
 } finally {
   g.close();

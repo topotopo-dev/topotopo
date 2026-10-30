@@ -1,4 +1,4 @@
-// The gallery web server: the registered workspaces (the games: engine, libraries, packages, the packages they use),
+// The web app server: the registered workspaces (the games: engine, libraries, packages, the packages they use),
 // every library's packages as a grid, a page per package with its 3D
 // preview, and stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their
 // notes and the outputs it publishes with their kinds and tags (from its versions' records), which the grid's search
@@ -18,18 +18,18 @@ import type { ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
-import { galleryDir, isStale, listFiles, readBakeState, scanLibrary } from './library.ts';
+import { webDir, isStale, listFiles, readBakeState, scanLibrary } from './library.ts';
 import { loadConfig } from '../config.ts';
 import { WORKSPACE_FILE, resolveLibraries } from '../package.ts';
 import { engineAddress, readWorkspace } from '../workspace.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
 import { graphFiles } from '../session.ts';
 import type { BakeState, LibraryScan, Package } from './library.ts';
-import type { GalleryConfig } from '../config.ts';
+import type { WebConfig } from '../config.ts';
 import { builtinVersions, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 import { BakeQueue } from './bake.ts';
-import { embedPage, galleryPage, kitPage, packagePage } from './pages.ts';
+import { embedPage, frontPage, kitPage, packagePage } from './pages.ts';
 import type { CardData, KitCardData, OutputRow, PackageData, Urls, UserRow, WorkspaceCardData } from './pages.ts';
 import { listKits } from './kits.ts';
 import type { Kit } from './kits.ts';
@@ -52,16 +52,16 @@ class HttpError extends Error {
   constructor(status: number, msg: string) { super(msg); this.status = status; }
 }
 
-export interface GalleryOptions {
-  /** default: the config's gallery.port (7340); 0 picks a free port (tests) */
+export interface WebOptions {
+  /** default: the config's web.port (7340); 0 picks a free port (tests) */
   port?: number;
-  config?: GalleryConfig;
+  config?: WebConfig;
   /** bake packages whose previews are missing or stale (default true) */
   bake?: boolean;
   log?: (msg: string) => void;
 }
 
-export interface Gallery {
+export interface WebServer {
   url: string;
   port: number;
   /** read the libraries again (the server does so on file changes and every 5 minutes) */
@@ -70,16 +70,16 @@ export interface Gallery {
   close: () => void;
 }
 
-/** A gallery answers here already: its URL, or null. */
-export async function runningGallery(port: number): Promise<string | null> {
+/** A web app answers here already: its URL, or null. */
+export async function runningWeb(port: number): Promise<string | null> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
     const j: any = await res.json();
-    return j?.gallery ? `http://127.0.0.1:${port}/` : null;
+    return j?.web ? `http://127.0.0.1:${port}/` : null;
   } catch { return null; }
 }
 
-export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
+export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const cfg = o.config ?? loadConfig();
   const log = o.log ?? (() => {});
   const bakeOn = o.bake ?? true;
@@ -150,7 +150,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         const rel = f ? String(f).split(path.sep).join('/') : '';
         if (path.isAbsolute(rel)) return; // the root itself went away: the periodic rescan notices
         const parts = rel.split('/');
-        if (parts.some((x) => x.startsWith('.') || x === 'node_modules')) return; // .gallery/, .cache/, .part files
+        if (parts.some((x) => x.startsWith('.') || x === 'node_modules')) return; // .web/, .cache/, .part files
         const p = scans.find((x) => x.root === s.root)?.packages.find((x) => rel === x.rel || rel.startsWith(x.rel + '/'));
         if (p) touched.add(keyOf(p));
         onChange();
@@ -208,10 +208,10 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     app: (name) => `/app/${name}`,
     three: '/vendor/three/',
   };
-  // TopoTopo's kits: read again on each page (a few small files), so a kit published while the gallery runs shows
+  // TopoTopo's kits: read again on each page (a few small files), so a kit published while the web app runs shows
   const kits = () => listKits();
   const kitOf = (name: string, all = kits()) => all.find((k) => k.name === name);
-  /** The newest version of a package the gallery knows of: its package's in a library, or TopoTopo's kits'. */
+  /** The newest version of a package the web app knows of: its package's in a library, or TopoTopo's kits'. */
   const newestOf = (name: string, homes = packageHomes(), all = kits()) =>
     [...(homes.get(name) ? publishedVersions(homes.get(name)!.dir, name) : []), ...(kitOf(name, all)?.versions ?? [])].map((x) => x.version).sort(compareVersions).at(-1);
   /** The packages of the libraries and the workspaces that use a package, with the version each uses. */
@@ -294,7 +294,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     const abs = (u: string) => base + u;
     const m = p.manifest, homes = packageHomes();
     const versions = m.package ? publishedVersions(p.dir, m.package) : [];
-    // the packages it uses: the version in use (its copy's record), and the newest the gallery knows of (TopoTopo's own
+    // the packages it uses: the version in use (its copy's record), and the newest the web app knows of (TopoTopo's own
     // also in TopoTopo's built-in library)
     const all = kits();
     const uses = Object.entries(m.uses).map(([name, v]) => {
@@ -306,7 +306,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     return {
       ...cardOf(p), rel: p.rel, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
       attachments: listFiles(path.join(p.dir, 'attachments')), exports: listFiles(path.join(p.dir, 'exports')),
-      glb: fs.existsSync(path.join(galleryDir(p.dir), 'preview.glb')), bake: s,
+      glb: fs.existsSync(path.join(webDir(p.dir), 'preview.glb')), bake: s,
       share: { link: abs(urls.package(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
       package: m.package ? {
         name: m.package,
@@ -369,7 +369,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     const head = (code: number, type: string, extra: Record<string, string> = {}) =>
       res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...extra });
     const send = (code: number, body: string | Uint8Array, type = 'text/plain; charset=utf-8', extra: Record<string, string> = {}) => { head(code, type, extra); res.end(req.method === 'HEAD' ? undefined : body); };
-    // pages may only be framed by the gallery itself; the embed page is made to be framed by a board
+    // pages may only be framed by the web app itself; the embed page is made to be framed by a board
     const html = (body: string, framable = false) => send(200, body, MIME['.html'], framable ? {} : { 'content-security-policy': "frame-ancestors 'self'" });
     const json = (code: number, body: unknown, extra: Record<string, string> = {}) => send(code, JSON.stringify(body), MIME['.json'], extra);
     try {
@@ -382,7 +382,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       const seg = u.pathname.split('/').slice(1);
 
       if (u.pathname === '/' || u.pathname === '/index.html') {
-        return html(galleryPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.packages.map(cardOf) })), kits: kits().map(kitCard), workspaces: games.map((g) => workspaceCard(g)), problems: scans.flatMap((s) => s.problems) }, urls));
+        return html(frontPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.packages.map(cardOf) })), kits: kits().map(kitCard), workspaces: games.map((g) => workspaceCard(g)), problems: scans.flatMap((s) => s.problems) }, urls));
       }
       if (seg[0] === 'static') { const p = readStatic(assetDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'app') { const p = readStatic(appDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
@@ -390,7 +390,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         const p = readStatic(threeDir, seg.slice(2).join('/'));
         return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream', { 'cache-control': 'max-age=3600' }) : send(404, 'not found');
       }
-      if (u.pathname === '/api/health') return json(200, { gallery: true, libraries: scans.length, packages: packages.size, baking: queue.size });
+      if (u.pathname === '/api/health') return json(200, { web: true, libraries: scans.length, packages: packages.size, baking: queue.size });
       if (u.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
         res.write(': hello\n\n');
@@ -399,8 +399,8 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         return;
       }
       if (u.pathname === '/api/packages') {
-        // a board on another origin may read the list when the config allows it (gallery.cors)
-        const cors: Record<string, string> = origin && cfg.gallery.cors.includes(origin) ? { 'access-control-allow-origin': origin, vary: 'Origin' } : { vary: 'Origin' };
+        // a board on another origin may read the list when the config allows it (web.cors)
+        const cors: Record<string, string> = origin && cfg.web.cors.includes(origin) ? { 'access-control-allow-origin': origin, vary: 'Origin' } : { vary: 'Origin' };
         if (req.method === 'OPTIONS') return send(204, '', 'text/plain', { ...cors, 'access-control-allow-methods': 'GET' });
         return json(200, { libraries: scans.map((s) => ({ name: s.name, packages: s.packages.length, problems: s.problems })), packages: listJSON() }, cors);
       }
@@ -419,7 +419,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       if (seg[0] === 'embed' && seg.length === 3) {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
         const s = readBakeState(p.dir);
-        const glb = fs.existsSync(path.join(galleryDir(p.dir), 'preview.glb'));
+        const glb = fs.existsSync(path.join(webDir(p.dir), 'preview.glb'));
         return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: String(s?.at ?? 0), packageUrl: urls.package(p.lib, p.id) }, urls), true);
       }
       if (seg[0] === 'p' && seg.length >= 3) {
@@ -428,7 +428,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         if (!rest.length || (rest.length === 1 && !rest[0])) return html(packagePage(packageData(p), urls));
         if (rest[0] === 'thumb.png' || rest[0] === 'preview.glb') {
           const s = readBakeState(p.dir);
-          const file = path.join(galleryDir(p.dir), rest[0]);
+          const file = path.join(webDir(p.dir), rest[0]);
           if (!fs.existsSync(file)) {
             bakeIfStale(p);
             if (rest[0] === 'thumb.png') return send(200, placeholderPNG(), 'image/png');
@@ -469,7 +469,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     }
   });
 
-  const port = o.port ?? cfg.gallery.port;
+  const port = o.port ?? cfg.web.port;
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => resolve());

@@ -38,7 +38,7 @@ import { copiesFor, libraryEntry, parseManifest, readManifest } from '../src/pac
 import { engineAssetsFor, initWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
 import { resolveTarget, targetError } from '../src/io/targets.ts';
 import { checkAll, checkText } from '../src/packages/check.ts';
-import { scanLibrary } from '../src/gallery/library.ts';
+import { scanLibrary } from '../src/web/library.ts';
 import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/packages/registry.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { libraryTool } from '../src/mcp/library.ts';
@@ -258,7 +258,7 @@ writePackage(ROCKS, { package: 'nordic/rocks', libraries: ['game'] }, {
 }, {
   'inputs/rock.obj': triangle(2), 'inputs/moss.png': grey(90),
   // not part of a version
-  'exports/old.glb': 'x', 'attachments/concept.png': grey(10), '.gallery/thumb.png': grey(20), 'notes.txt': 'notes', 'scripts/build.py': 'print(1)',
+  'exports/old.glb': 'x', 'attachments/concept.png': grey(10), '.web/thumb.png': grey(20), 'notes.txt': 'notes', 'scripts/build.py': 'print(1)',
 });
 
 // studio/trees: an asset, a graph_ref graph, an input, a package of its own (nordic/rocks), a viewer-only output
@@ -318,7 +318,7 @@ section('publishing: the first version, what it holds, its hash');
   const v = path.join(ROCKS, 'versions', '1.0');
   const files = listing(v);
   check(files.join() === 'graphs/main.json,inputs/moss.png,inputs/rock.obj,project.json,version.json', `a version holds project.json, graphs/, assets/, inputs/ and version.json (${files})`);
-  check(!files.some((f) => /exports|attachments|gallery|notes|scripts/.test(f)), 'and leaves exports/, attachments/, .gallery/, scripts and other files out');
+  check(!files.some((f) => /exports|attachments|\.web|notes|scripts/.test(f)), 'and leaves exports/, attachments/, .web/, scripts and other files out');
   const pj = readJSON(path.join(v, 'project.json'));
   check(pj.package === 'nordic/rocks' && !('libraries' in pj) && pj.id === 'rocks', 'its project.json is the package\'s, without "libraries"');
   const info = readJSON(path.join(v, 'version.json'));
@@ -1030,7 +1030,7 @@ section('TopoTopo\'s built-in library: looked in without listing it; copies and 
   check(late.package === 'topotopo/kit' && late.small === '1.1' && late.libraries.join() === 'topotopo' && /topotopo\/kit 1\.0: 1\.1 is out {2}\[library "topotopo" \(TopoTopo's built-in library\)\]\n {4}1\.1 {2}"a bigger cube"/.test(outdatedText(a2.pk)),
     `the new built-in version shows as an update (${outdatedText(a2.pk).split('\n')[1]})`);
   check(size(await a2.engine.cook(scene), 0) === 3, 'and the package keeps cooking the copy of 1.0 until it updates');
-  check(builtinVersions('topotopo/kit', BUILTIN).map((v) => v.version).join() === '1.0,1.1' && !builtinVersions('studio/trees', BUILTIN).length, 'the versions the built-in library holds (the Gallery names the newest)');
+  check(builtinVersions('topotopo/kit', BUILTIN).map((v) => v.version).join() === '1.0,1.1' && !builtinVersions('studio/trees', BUILTIN).length, 'the versions the built-in library holds (the web app names the newest)');
   const up = applyUpdate(a2.pk, 'topotopo/kit', { from: '1.0', to: '1.1' });
   check(/from library "topotopo" \(TopoTopo's built-in library\)/.test(up.text) && size(await a2.engine.cook({ nodes: { c: { type: 'topotopo/kit/cube' } } }), 0) === 2 && readLock(APP).packages['topotopo/kit']['1.1'].library === 'topotopo',
     `Update copies 1.1 in from the built-in library: ${up.text.split('\n')[0]}`);
@@ -1130,7 +1130,7 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   check(init.code === 0 && /^package cliproj → .*cliproj \(publishes as studio\/cli\)/.test(init.out) && readManifest(CLI).package === 'studio/cli' && exists(CLI, '.gitignore'), `init makes a folder a package: ${init.out.split('\n')[0]}`);
   const pj = readJSON(path.join(CLI, 'project.json'));
   check(Array.isArray(pj.libraries) && !pj.libraries.length && pj.graph === 'main' && !('bake' in pj) && !('links' in pj) && readJSON(path.join(CLI, 'graphs', 'main.json')).output === 'box',
-    `init writes "libraries": [] and a starter graphs/main.json, so the graph it shows is there, and no gallery fields (${JSON.stringify(pj)})`);
+    `init writes "libraries": [] and a starter graphs/main.json, so the graph it shows is there, and no web app fields (${JSON.stringify(pj)})`);
   check(fs.readFileSync(path.join(CLI, '.gitattributes'), 'utf8') === 'versions/** -text\npackages/** -text\n' && /\npackages\/\.cache\.json\npackages\/\.lock\n$/.test(fs.readFileSync(path.join(CLI, '.gitignore'), 'utf8')),
     'init keeps versions/ and packages/ byte for byte (.gitattributes), and leaves the hash cache and the lock out (.gitignore)');
   const PLAIN = path.join(dirs.repo, 'plainproj');

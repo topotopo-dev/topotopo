@@ -13,7 +13,7 @@ import { loadConfig } from '../config.ts';
 import { WORKSPACE_FILE, copiesFor, librariesFor, locate, program, resolveLibraries } from '../package.ts';
 import type { LibraryAt } from '../package.ts';
 import { readWorkspace } from '../workspace.ts';
-import { scanLibrary } from '../gallery/library.ts';
+import { scanLibrary } from '../web/library.ts';
 import { libraryText, loadPackage, openPackages, publishedVersions } from './registry.ts';
 
 /** What a check cooked of one package version or one package, and what failed. */

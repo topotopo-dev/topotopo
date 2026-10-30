@@ -1,15 +1,15 @@
-// The gallery's commands (src/cli.ts dispatches here):
-//   topotopo gallery [--port 7340] [--library <folder>] [--no-bake]   the gallery website on 127.0.0.1
+// The web app's commands (src/cli.ts dispatches here):
+//   topotopo web [--port 7340] [--library <folder>] [--no-bake]       the web app on 127.0.0.1
 //   topotopo library add <name> <folder>                             register a folder as a library (~/.topotopo/config.json)
 //   topotopo library list                                            the registered libraries, their packages and problems
 //   topotopo library new <library> <folder/name> [--title t] [--tags a,b] [--description d]
 //   topotopo library bake <package folder> | --stale | --all          bake previews in this process
-//   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a package (the gallery's editor)
+//   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a package (the web app's editor)
 // and a package's packages (src/packages/registry.ts, src/packages/update.ts), as PACKAGE_COMMANDS says them:
 //   topotopo workspace [folder]                                       the workspace (game) around a folder
 //   topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 //                                                                     make a game's folder a workspace, or change one
-//   topotopo workspace add|list [folder]                              register a workspace for the Gallery's hub; list them
+//   topotopo workspace add|list [folder]                              register a workspace for the web app's front page; list them
 //   topotopo init [folder] [--package owner/name]                     make a folder a package, or set the name it publishes under
 //   topotopo libraries add|remove <folder or name> [folder]           the libraries the package finds packages in
 //   topotopo use owner/name [folder] [--version 1.1]                  add a package from the libraries the package lists
@@ -29,9 +29,9 @@ import path from 'node:path';
 import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig } from '../config.ts';
-import { createPackage, isStale, readBakeState, scanAll } from '../gallery/library.ts';
+import { createPackage, isStale, readBakeState, scanAll } from '../web/library.ts';
 import { initPackage, libraryEntryFor, packageDirOf, readManifest, slugify } from '../package.ts';
-import type { GalleryConfig } from '../config.ts';
+import type { WebConfig } from '../config.ts';
 
 /**
  * The package commands as every list of them says them: src/cli.ts (its header and --help), this file's header, the
@@ -40,7 +40,7 @@ import type { GalleryConfig } from '../config.ts';
 export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'workspace [folder]', what: 'the workspace (the game) around a folder: its engine project, the libraries every package inside looks in, its packages' },
   { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]', what: 'make a game\'s folder a workspace (topotopo-workspace.json; the engine project is found when not given; its packages share one copy of each package, moved into topotopo-packages/; --follow shows its own packages live from their working folders, for looking), or change one' },
-  { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the Gallery\'s hub, or list the registered ones' },
+  { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the web app\'s front page, or list the registered ones' },
   { usage: 'init [folder] [--package owner/name]', what: 'make a folder a package (project.json, graphs/main.json), or set the name an existing package publishes under' },
   { usage: 'libraries add|remove <folder or name> [folder]', what: 'list or unlist a library the package finds packages in: a folder by its path from the package, else a registered library\'s name' },
   { usage: 'use owner/name [folder] [--version 1.1]', what: 'add a package: its newest version (or --version) in the libraries the package lists, copied into packages/' },
@@ -121,30 +121,30 @@ async function usesOfPackage(folder: string) {
 
 const quoted = (s: string) => (/[\s"]/.test(s) ? JSON.stringify(s) : s);
 
-// ---------------------------------------------------------------------------------------------------- the gallery
+// ---------------------------------------------------------------------------------------------------- the web app
 
-export async function galleryCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
+export async function webCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
   return run(io, async () => {
-    const a = args(argv, ['--port', '--library'], ['--no-bake'], `usage: ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]`);
-    let cfg: GalleryConfig = loadConfig();
+    const a = args(argv, ['--port', '--library'], ['--no-bake'], `usage: ${prog} web [--port 7340] [--library <folder>] [--no-bake]`);
+    let cfg: WebConfig = loadConfig();
     const extra = a.opt('--library');
     if (extra) {
       const name = slugify(path.basename(path.resolve(extra))) || 'library';
       cfg = { ...cfg, libraries: [...cfg.libraries.filter((l) => l.name !== name), { name, path: path.resolve(extra) }] };
     }
     if (!cfg.libraries.length) io.out(`no libraries yet: register a folder with \`${prog} library add <name> <folder>\` (or pass --library <folder>)`);
-    const port = a.opt('--port') !== undefined ? Number(a.opt('--port')) : cfg.gallery.port;
-    const { startGallery, runningGallery } = await import('../gallery/server.ts');
+    const port = a.opt('--port') !== undefined ? Number(a.opt('--port')) : cfg.web.port;
+    const { startWeb, runningWeb } = await import('../web/server.ts');
     try {
-      const g = await startGallery({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
+      const g = await startWeb({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
       const n = cfg.libraries.length;
-      io.out(`gallery: ${g.url}  (${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
+      io.out(`web app: ${g.url}  (${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
       if (g.queue.size) io.out(`baking ${g.queue.size} package(s) in the background`);
     } catch (e: any) {
       if (e?.code !== 'EADDRINUSE') throw e;
-      const url = await runningGallery(port);
-      if (url) { io.out(`gallery: ${url}  (already running)`); return 0; }
-      fail(`port ${port} is taken by another program: pass --port, or set "gallery": {"port": N} in ${cfg.file}`);
+      const url = await runningWeb(port);
+      if (url) { io.out(`web app: ${url}  (already running)`); return 0; }
+      fail(`port ${port} is taken by another program: pass --port, or set "web": {"port": N} in ${cfg.file}`);
     }
   });
 }
@@ -179,11 +179,11 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
       const lib = cfg.libraries.find((l) => l.name === x) ?? fail(`no library "${x}" (${cfg.libraries.map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>`})`);
       const p = createPackage(lib, y, { title: a.opt('--title'), description: a.opt('--description'), tags: a.opt('--tags')?.split(',').map((t) => t.trim()).filter(Boolean) });
       io.out(`package ${p.lib}/${p.id} → ${p.dir}`);
-      io.out(`  gallery: http://127.0.0.1:${cfg.gallery.port}/p/${p.lib}/${p.id}`);
+      io.out(`  page: http://127.0.0.1:${cfg.web.port}/p/${p.lib}/${p.id}`);
       return 0;
     }
     if (sub === 'bake') {
-      const { bakePackage } = await import('../gallery/bake.ts');
+      const { bakePackage } = await import('../web/bake.ts');
       let dirs: string[];
       if (a.has('--all') || a.has('--stale')) dirs = scanAll(cfg).flatMap((s) => s.packages).filter((p) => a.has('--all') || isStale(p)).map((p) => p.dir);
       else if (x) dirs = [packageOf(x, prog)];
@@ -215,7 +215,7 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
     const ws = openPackage(engine, dir, { watch: true }).session;
     const v = await startViewer(ws, a.opt('--port') !== undefined ? Number(a.opt('--port')) : undefined);
     if (a.has('--json')) {
-      // started by the gallery: report the URL, and stop once no page has been open for a while
+      // started by the web app: report the URL, and stop once no page has been open for a while
       io.out(JSON.stringify({ url: v.url }));
       let idleSince = Date.now();
       setInterval(() => {
@@ -436,7 +436,7 @@ const workspaceCommand: Command = (argv, prog, io = consoleIo) => run(io, async 
     if (a.has('--follow') && a.has('--no-follow')) fail('--follow or --no-follow, not both');
     const r = initWorkspace(folder, { name: a.opt('--name'), engine: a.opt('--engine'), assets: a.opt('--assets'), libraries: a.all('--library'), follow: a.has('--follow') ? true : a.has('--no-follow') ? false : undefined });
     io.out(r.text);
-    io.out(`next: ${prog} workspace add ${a.rest[0] ?? '.'} lists it in the Gallery's hub`);
+    io.out(`next: ${prog} workspace add ${a.rest[0] ?? '.'} lists it on the web app's front page`);
     return 0;
   }
   if (sub === 'add') {
@@ -458,6 +458,6 @@ const workspaceCommand: Command = (argv, prog, io = consoleIo) => run(io, async 
 });
 
 export const commands: Record<string, Command> = {
-  gallery: galleryCommand, library: libraryCommand, edit: editCommand, workspace: workspaceCommand, init: initCommand, libraries: librariesCommand, use: useCommand,
+  web: webCommand, library: libraryCommand, edit: editCommand, workspace: workspaceCommand, init: initCommand, libraries: librariesCommand, use: useCommand,
   remove: removeCommand, packages: packagesCommand, publish: publishCommand, search: searchCommand, outdated: outdatedCommand, check: checkCommand, update: updateCommand,
 };

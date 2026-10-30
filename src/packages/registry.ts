@@ -54,9 +54,9 @@ import { graphFiles, registerAssets } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { VERSION_RE, WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestFile, program, packageDirOf, readManifest, readUses, renameInto, withPackageLock, withStoreLock, writeAtomic, writeManifest, writeUses } from '../package.ts';
-import { scanLibrary } from '../gallery/library.ts';
+import { scanLibrary } from '../web/library.ts';
 import { readWorkspace } from '../workspace.ts';
-import type { GalleryConfig } from '../config.ts';
+import type { WebConfig } from '../config.ts';
 import type { CopyStore, Libraries, LibraryAt, PackageManifest } from '../package.ts';
 
 /** Publishing warns about a version above this size: every package that uses it keeps a copy. */
@@ -1425,7 +1425,7 @@ export class PackageUses implements SessionPackages {
     if (found.libraries.length) return found;
     // in a registered library the package does not list? Then the line that lists it: its path from the package when
     // it is near (the same repository, most likely), else its name
-    let cfg: GalleryConfig | null = null;
+    let cfg: WebConfig | null = null;
     try { cfg = loadConfig(); } catch { /* an unreadable config: only the listed libraries count */ }
     const listed = new Set(libs.map((l) => path.resolve(l.root).toLowerCase()));
     const scanProblems = scanned.problems.length ? `; and could not check ${scanned.problems.length}: ${scanned.problems.join('; ')}` : '';

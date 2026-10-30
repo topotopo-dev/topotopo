@@ -1,13 +1,13 @@
-// Libraries of packages, as the Gallery shows them: scanning a library for its packages (project.json files only: it
+// Libraries of packages, as the web app shows them: scanning a library for its packages (project.json files only: it
 // never creates folders and never cooks), creating a package in one, a package's files, and baking its previews
-// (.gallery/: thumb.png, preview.glb, bake.json, all derived). Packages themselves are src/package.ts.
+// (.web/: thumb.png, preview.glb, bake.json, all derived). Packages themselves are src/package.ts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { ID_RE } from '../graph/scope.ts';
 import { graphFiles } from '../session.ts';
 import { loadConfig } from '../config.ts';
-import type { GalleryConfig, LibraryRef } from '../config.ts';
+import type { WebConfig, LibraryRef } from '../config.ts';
 import type { PackageLink, PackageManifest } from '../package.ts';
 import { WORKSPACE_PACKAGES, manifestFile, parseManifest, packageRepoFiles, readManifest, slugify, writeManifest } from '../package.ts';
 
@@ -25,7 +25,7 @@ const SKIP = new Set(['node_modules', 'graphs', 'assets', 'inputs', 'exports', '
 /** a folder no package is looked for in (a workspace's shared copies too; read when called: package.ts loads after this module) */
 const skipped = (name: string) => SKIP.has(name) || name === WORKSPACE_PACKAGES;
 const PKG_VERSION = (() => {
-  // package.json sits two levels above both src/gallery/library.ts and dist/gallery/library.js
+  // package.json sits two levels above both src/web/library.ts and dist/web/library.js
   try { return String(JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version); } catch { return '0'; }
 })();
 
@@ -50,7 +50,7 @@ export interface Package {
   dir: string;
   /** posix path of the folder relative to the library root */
   rel: string;
-  /** the parent folders' path ("" at the top), how the gallery groups packages */
+  /** the parent folders' path ("" at the top), how the web app groups packages */
   collection: string;
   manifest: PackageManifest;
   /** newest change to project.json, graphs/ or assets/ (ms) */
@@ -99,7 +99,7 @@ export function scanLibrary(lib: LibraryRef): LibraryScan {
   return out;
 }
 
-export function scanAll(cfg: GalleryConfig = loadConfig()): LibraryScan[] {
+export function scanAll(cfg: WebConfig = loadConfig()): LibraryScan[] {
   return cfg.libraries.map(scanLibrary);
 }
 
@@ -170,7 +170,7 @@ export function readGraph(dir: string, name: string): any {
 
 // ------------------------------------------------------------------------------------------------------------ bake
 
-export const galleryDir = (dir: string) => path.join(dir, '.gallery');
+export const webDir = (dir: string) => path.join(dir, '.web');
 
 /**
  * What a bake depends on: the bake version, the package version, the manifest's graph and bake choice, every graph
@@ -192,7 +192,7 @@ export function bakeKey(dir: string, m: PackageManifest): string {
 }
 
 export function readBakeState(dir: string): BakeState | null {
-  try { return JSON.parse(fs.readFileSync(path.join(galleryDir(dir), 'bake.json'), 'utf8')); } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(path.join(webDir(dir), 'bake.json'), 'utf8')); } catch { return null; }
 }
 
 /** The package needs a bake: never baked, or something it depends on changed since. */

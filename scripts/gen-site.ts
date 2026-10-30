@@ -595,7 +595,7 @@ ${list.map(nodeSection).join('\n')}
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// TopoTopo's own packages and the examples gallery
+// TopoTopo's own packages and the examples
 
 page({
   out: 'packages/index.html',

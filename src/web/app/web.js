@@ -1,4 +1,4 @@
-// The gallery pages' script (src/gallery/pages.ts): search and tag filters on the grid (the search finds a package's
+// The script of the web app's pages (src/web/pages.ts): search and tag filters on the grid (the search finds a package's
 // outputs and TopoTopo's kits' too, by name, kind and tag, and shows those it found on the card; each library says how
 // many cards it shows, and Clear ends the filter, which a new visit starts without), copy buttons and actions on a
 // package page, and live updates from the server's event stream (a bake finished, packages added or removed).
@@ -6,7 +6,7 @@ const page = document.body.dataset.page;
 const data = document.body.dataset.json ? JSON.parse(document.body.dataset.json) : {};
 const $$ = (s) => [...document.querySelectorAll(s)];
 
-if (page === 'gallery') {
+if (page === 'front') {
   const search = document.getElementById('search'), clear = document.getElementById('clear');
   const chips = $$('.chip');
   const filter = () => {
@@ -74,7 +74,7 @@ es.onmessage = (m) => {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
   const key = `${data.lib}/${data.id}`;
-  if (page === 'gallery') {
+  if (page === 'front') {
     if (ev.list) { location.reload(); return; }
     if (ev.package) {
       const card = document.querySelector(`.card[data-key="${CSS.escape(ev.package)}"]`);

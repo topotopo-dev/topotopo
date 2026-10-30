@@ -31,7 +31,7 @@ import { encodePNG } from '../render/png.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { NAME_RE } from '../session.ts';
 import { copiesFor, program } from '../package.ts';
-import { scanLibrary } from '../gallery/library.ts';
+import { scanLibrary } from '../web/library.ts';
 import { compareInterfaces, compareVersions, kindChanges, libraryText, loadPackage } from './registry.ts';
 import type { PackageUses, UpdateTarget } from './registry.ts';
 

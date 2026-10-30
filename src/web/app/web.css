@@ -1,4 +1,4 @@
-/* The gallery's pages (src/gallery/pages.ts): the viewer's neutral dark editor colours, a card grid, a package page
+/* The web app's pages (src/web/pages.ts): the viewer's neutral dark editor colours, a card grid, a package page
    with the 3D view beside its details. One column below 860 px. */
 :root {
   --bg: #1f2124; --panel: #26282c; --panel2: #2c2f33; --line: #3a3d42; --text: #d6d9dd; --dim: #8c939b; --faint: #5d636b;

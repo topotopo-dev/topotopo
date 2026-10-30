@@ -1,4 +1,4 @@
-// Gallery libraries (src/gallery/library.ts, bake.ts): the config, scanning a library (packages, collections, what a
+// Libraries of the web app (src/web/library.ts, bake.ts): the config, scanning a library (packages, collections, what a
 // scan skips, id collisions), project.json validation, creating packages, the MCP server's package rule, the bake
 // key, and baking previews (a valid PNG and meshopt GLB; a failed bake keeps the previous files and says why).
 //   node test/library.ts
@@ -7,11 +7,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { addLibrary, loadConfig } from '../src/config.ts';
 import { startPackage, notPackageFiles, parseManifest, packageDirOf, readManifest, slugify, writeManifest } from '../src/package.ts';
-import { bakeKey, createPackage, isStale, readBakeState, scanLibrary } from '../src/gallery/library.ts';
+import { bakeKey, createPackage, isStale, readBakeState, scanLibrary } from '../src/web/library.ts';
 import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/package.ts';
 import { initWorkspace, parseWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
 import { commands } from '../src/packages/commands.ts';
-import { bakePackage, BakeQueue } from '../src/gallery/bake.ts';
+import { bakePackage, BakeQueue } from '../src/web/bake.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-library-'));
 process.env.TOPOTOPO_CONFIG = path.join(tmp, 'cfg', 'config.json');
@@ -25,7 +25,7 @@ const BOX = { nodes: { b: { type: 'box', params: { size: [1, 2, 1] } } }, output
 
 section('config');
 {
-  check(loadConfig().libraries.length === 0 && loadConfig().gallery.port === 7340, 'no config file: no libraries, port 7340');
+  check(loadConfig().libraries.length === 0 && loadConfig().web.port === 7340, 'no config file: no libraries, port 7340');
   const cfg = addLibrary('game', path.join(tmp, 'lib'));
   check(cfg.libraries.length === 1 && cfg.libraries[0].path === path.join(tmp, 'lib') && fs.existsSync(path.join(tmp, 'lib')), 'library add writes the config and makes the folder');
   addLibrary('game', path.join(tmp, 'lib'));
@@ -44,7 +44,7 @@ section('create and scan');
   const lantern = createPackage(lib, 'props/lantern', { title: 'Lantern', tags: ['prop', 'hero'], links: [{ label: 'concept', url: 'http://board.local/c/12' }], graph: BOX });
   check(lantern.id === 'lantern' && lantern.collection === 'props' && lantern.rel === 'props/lantern', 'a package in a collection');
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) check(fs.existsSync(path.join(lantern.dir, d)), `created ${d}/`);
-  check(fs.readFileSync(path.join(lantern.dir, '.gitignore'), 'utf8').includes('.gallery/'), '.gitignore keeps the derived files out');
+  check(fs.readFileSync(path.join(lantern.dir, '.gitignore'), 'utf8').includes('.web/'), '.gitignore keeps the derived files out');
   check(JSON.parse(fs.readFileSync(path.join(lantern.dir, 'graphs', 'main.json'), 'utf8')).output === 'b', 'the given graph is graphs/main.json');
   check(throws(() => createPackage(lib, 'decor/lantern'), /already|used by/), 'an id is unique in its library');
   check(throws(() => createPackage(lib, 'props/lantern/parts'), /inside another package/), 'no package inside a package');
@@ -126,8 +126,8 @@ section('bake');
   check(isStale(p), 'never baked: stale');
   const k0 = bakeKey(p.dir, p.manifest);
   const s = await bakePackage(p.dir);
-  const png = fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png'));
-  const glb = fs.readFileSync(path.join(p.dir, '.gallery', 'preview.glb'));
+  const png = fs.readFileSync(path.join(p.dir, '.web', 'thumb.png'));
+  const glb = fs.readFileSync(path.join(p.dir, '.web', 'preview.glb'));
   check(s.ok && s.key === k0 && s.points === 8 && s.glb, `baked: ${JSON.stringify(s)}`);
   check(png.subarray(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 512, 'thumb.png is a 512 px PNG');
   check(glb.toString('latin1', 0, 4) === 'glTF' && glb.toString('latin1').includes('EXT_meshopt_compression'), 'preview.glb is a meshopt GLB');
@@ -139,10 +139,10 @@ section('bake');
   check(!isStale(p), 'attachments do not');
   fs.writeFileSync(path.join(p.dir, 'graphs', 'main.json'), JSON.stringify({ nodes: { b: { type: 'nope' } }, output: 'b' }));
   check(isStale(p), 'a graph edit makes it stale');
-  const before = fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png'));
+  const before = fs.readFileSync(path.join(p.dir, '.web', 'thumb.png'));
   const bad = await bakePackage(p.dir);
   check(!bad.ok && /nope/.test(bad.error ?? '') && !isStale(p), `a failed bake records why, under the new key (${bad.error?.split('\n')[0]})`);
-  check(fs.readFileSync(path.join(p.dir, '.gallery', 'thumb.png')).equals(before) && fs.existsSync(path.join(p.dir, '.gallery', 'preview.glb')), 'a failed bake keeps the previous thumbnail and GLB');
+  check(fs.readFileSync(path.join(p.dir, '.web', 'thumb.png')).equals(before) && fs.existsSync(path.join(p.dir, '.web', 'preview.glb')), 'a failed bake keeps the previous thumbnail and GLB');
   writeManifest(p.dir, { ...readManifest(p.dir), graph: 'other' });
   fs.writeFileSync(path.join(p.dir, 'graphs', 'other.json'), JSON.stringify(BOX));
   const p2 = scanLibrary(lib).packages.find((x) => x.id === 'lantern')!;

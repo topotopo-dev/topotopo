@@ -1,7 +1,7 @@
 // Opening a folder to work in, in one place: the engine's root scope gets the package names of the package the folder
 // belongs to (its copies, the libraries it looks in, the working folders followed this session) before the session
 // gives it the folder's graphs and registers its assets, which may use packages. The MCP server, `topotopo edit`, the
-// Gallery's bake and the preview script open folders this way.
+// The web app's bake and the preview script open folders this way.
 import type { Engine } from './graph/engine.ts';
 import { Session } from './session.ts';
 import type { SessionOptions } from './session.ts';

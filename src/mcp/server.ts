@@ -43,10 +43,10 @@ log(start.log);
 const wsDir = start.dir;
 let firstNote = start.note;
 
-// The folder can change while the server runs (library {action:"open"} opens a gallery package): every tool and
+// The folder can change while the server runs (library {action:"open"} opens a library package): every tool and
 // the live viewer then work on the new folder. Each session has its own engine (asset registry, base directory,
 // packages, cache); the worker pool is shared by the process. Sessions follow what other processes write into their folders
-// (Session.watch: the gallery's editor, a person editing JSON). The packages a session follows (library
+// (Session.watch: the web app's editor, a person editing JSON). The packages a session follows (library
 // {action:"follow"}) resolve to their working folders as they are at each cook; the live viewer cooks its graphs again
 // when one of those folders changes.
 let engine: Engine, ws: Session, packages: PackageUses, tools: ToolDef[];
