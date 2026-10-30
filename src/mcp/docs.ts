@@ -28,9 +28,8 @@ PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in on
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
-LIBRARIES: the person's packages live in libraries the web app (topotopo web) shows (their board links to them). workspace {action:"list"} finds one, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one. See help topic "library".
-WORKSPACES: a game with topotopo-workspace.json at its root: its packages share the libraries it lists and one copy of each package version, and an export target "engine:<path>" writes into its engine project (Godot, Unreal). workspace {action:"show"} says what the open package's workspace holds; {action:"check"} cooks what it relies on and lists what broke (after a TopoTopo update). See help topic "workspace".
-PACKAGES: a package uses the published outputs of other packages as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the package once the graph validates. TopoTopo's own packages are four packages built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a package's graphs use packages: the server makes its package one when it starts if the folder holds nothing but a package's own folders (its first reply says so), and workspace {action:"init"} makes any other open package one when the person says so. workspace {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the package can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
+WORKSPACE, PACKAGE, LIBRARY: a package is a folder of graphs and the models they make, marked by one <id>.topo file; every tool works in the open package. A workspace is a game's folder with topotopo-workspace.json at its root: its packages share the libraries it lists and one copy of each package version, and an export target "engine:<path>" writes into its engine project (Godot, Unreal). A library is a registered folder of packages, shared across workspaces; the web app (topotopo web) shows every library (the person's board links to it), and TopoTopo ships one built in. The workspace tool works on all three: workspace {action:"list"} finds a package, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one, {action:"show"} says what the open package's workspace holds, {action:"check"} cooks what it relies on and lists what broke (after a TopoTopo update). See help topic "workspace".
+PACKAGES: a package uses the published outputs of other packages as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the package once the graph validates. TopoTopo's own packages are four packages built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a package's graphs use packages: when the server starts it makes its folder a package if the folder holds nothing but a package's own folders (its first reply says so), and workspace {action:"init"} makes any other folder one when the person says so. workspace {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the package can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -72,24 +71,29 @@ export function graphLines(g: GraphSpec): string {
 }
 
 export const TOPICS: Record<string, string> = {
-  library: `LIBRARIES AND THE WEB APP
-A library is a folder the person listed (\`topotopo library add <name> <folder>\`, kept in ~/.topotopo/config.json). A
-package is any folder in it holding one <id>.topo file, its manifest, with the folders TopoTopo works with:
-  props/lantern/lantern.topo    {title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
-  props/lantern/graphs/ assets/ inputs/ exports/  as in any package
+  workspace: `WORKSPACE, PACKAGE, LIBRARY (the three words, and the workspace tool)
+- A PACKAGE is a folder of graphs and the models they make, marked by one <id>.topo file, its manifest (the file's
+  name is the package id). Every tool works in one package, the open package; only a package's graphs use other
+  packages. A package that publishes versions is used by other packages by name (help topic "packages").
+- A WORKSPACE is a game's folder (or any 3D project's) with topotopo-workspace.json at its root: the packages inside
+  share the libraries it lists and one copy of each package version, and exports can go into its engine project.
+- A LIBRARY is a folder of packages registered on this machine by name (\`topotopo library add <name> <folder>\`, kept
+  in ~/.topotopo/config.json), shared across workspaces. TopoTopo ships one built in, "topotopo", with its own packages.
+The workspace tool works on all three; its actions that use or publish packages are in help topic "packages".
+
+A PACKAGE'S FOLDER
+  props/lantern/lantern.topo    {title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}],
+                                name?:"owner/name", uses, libraries}
+  props/lantern/graphs/ assets/ inputs/ exports/  graphs, saved assets, the person's input files, exports
   props/lantern/attachments/    concept art, references, source files (shown on the package's page)
   props/lantern/.web/           thumb.png, preview.glb, bake.json: derived, never edit
-The parent folders ("props") are the package's collection. The web app (\`topotopo web\`, http://127.0.0.1:7340)
-shows every library as a grid; each package has a page (/p/<library>/<id>), a thumbnail (…/thumb.png) and an
-iframe embed (/embed/<library>/<id>) that the person's board pastes; a package's page lists its versions and outputs
-with their kinds and tags (the grid's search finds outputs by name, kind and tag) and the packages it uses.
-It bakes the previews by itself after graphs, assets or inputs change, from the
-graph named in "graph" (or "bake": another graph, a node, a frame).
+A folder holds one package at most: two .topo files in a folder are an error.
 
 WORKING IN A PACKAGE
-- workspace {action:"list", query?, tag?} → find it; workspace {action:"get", library, id, thumbnail:true} → what it holds.
-- workspace {action:"open", library, id} → every tool (build, edit, render, export, inputs, assets, preview) now works
-  in that folder. Build the package's model into graph "main" (or the manifest's "graph").
+- workspace {action:"list", query?, tag?} → find one in the libraries; workspace {action:"get", library, id,
+  thumbnail:true} → what it holds.
+- workspace {action:"open", library, id} (or {path}) → every tool (build, edit, render, export, inputs, assets,
+  preview) now works in that folder. Build the package's model into graph "main" (or the manifest's "graph").
 - workspace {action:"create", library, path:"props/barrel", title, tags, links} → a new package, opened.
 - workspace {action:"init"} → the server's folder becomes a package where it is none (<id>.topo in its folder), when
   the person wants its graphs to use packages. When the server starts it makes its folder, named or not, a package
@@ -100,9 +104,41 @@ WORKING IN A PACKAGE
   simulations that settle after frame 1; bake.node to show one part).
 - workspace {action:"bake"} → render the previews now and see the thumbnail.
 Put reference images the person gives you in attachments/, guide files in inputs/. Links in "links" point back to the
-board or concept pages, so the package page and the board link both ways.
-A package can publish versions that other packages use, and use packages itself: help topic "packages". To find a
-ready-made output in any library ("a conifer", every terrain): workspace {action:"search", query?, kind?, tag?}.`,
+board or concept pages, so the package page and the board link both ways. To find a ready-made output in any library
+("a conifer", every terrain): workspace {action:"search", query?, kind?, tag?}.
+
+WORKSPACES: topotopo-workspace.json at the game's root:
+  {"name": "raven-hunt", "libraries": ["./art/topotopo"],
+   "engine": {"type": "godot", "project": "game/project.godot", "assets": "game/assets/topotopo"},
+   "follow": false, "uses": {"topotopo/props": "1.1"}}
+Paths are written from the workspace's folder. The person makes one: CLI topotopo workspace init <the game's folder>
+[--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow]; MCP workspace
+{action:"init_workspace", path, ...} when the person says so. workspace {action:"show"} (CLI: topotopo
+workspace) says what the open package's workspace holds.
+- LIBRARIES: every package inside looks for packages in its own manifest's "libraries", then in the workspace's, then
+  in TopoTopo's built-in library.
+- ONE COPY PER GAME: the packages inside share one copy of each package version, in topotopo-packages/ beside the
+  file, whose "uses" names one version of each package for the whole game. A first use in any package adds it there;
+  Update compares every place any package of the workspace uses the updated package, and applying changes them all. A
+  package that publishes versions keeps its own uses and copies (they are published with it). workspace init moves the
+  copies of the packages inside that kept their own.
+- FOLLOWING: "follow": true shows the workspace's own packages live from their working folders, for looking (the
+  viewer, renders, inspect); exports and publishing always use the published versions, and an export made while
+  following says which it used.
+- THE ENGINE: "engine" names the engine project and "assets" a folder inside it that exports may go to: an export
+  target whose path is "engine:props/crate.glb" is written there (Godot imports it as res://assets/topotopo/props/...).
+- CHECK: workspace {action:"check"} (CLI: topotopo check) cooks the newest version of every package in the workspace's
+  libraries and every graph of its packages, and lists what broke and why; it changes nothing. Run it after a
+  TopoTopo update.
+
+LIBRARIES AND THE WEB APP: a library holds packages in folders below it; the parent folders ("props") are a package's
+collection, and an id is unique in its library. The web app (\`topotopo web\`, http://127.0.0.1:7340) lists the
+registered workspaces first (CLI: topotopo workspace add <folder>), then every library as a grid, TopoTopo's built-in
+library last. Each package has a page (/p/<library>/<id>), a thumbnail (…/thumb.png) and an iframe embed
+(/embed/<library>/<id>) that the person's board pastes; a package's page lists its versions and outputs with their
+kinds and tags (the grid's search finds outputs by name, kind and tag), the packages that use it and those it uses.
+It bakes the previews by itself after graphs, assets or inputs change, from the graph named in "graph" (or "bake":
+another graph, a node, a frame); TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   graph: `GRAPH FORMAT
 {
   "nodes": {
@@ -926,7 +962,7 @@ the package's assets as my_stairs (an output whose graph names the package's oth
 assets {action:"get", name:"my_stairs"} shows it, assets {action:"save", name:"my_stairs", graph} writes it back, and
 {"type": "my_stairs"} uses it.`,
 
-  packages: `PACKAGES (a package uses another package's published outputs by name)
+  packages: `PACKAGES (a package uses another package's published outputs by name; help topic "workspace": the three words)
 A published package has a full name and versions. Its author names it once in its manifest, <id>.topo, "name":
 "owner/name" (lower-case letters, digits, - and _; the owner "topotopo" is reserved for TopoTopo's own), and publishes:
   workspace {action:"publish", dry_run:true}               CLI: topotopo publish [folder] --dry-run
@@ -1104,31 +1140,6 @@ EXPORTS record the package versions their graph used in the source block: "packa
 
 THE CLI COMMANDS (a folder named must exist; without one, the current folder's package):
 ${PACKAGE_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
-  workspace: `WORKSPACES (a game made of several TopoTopo packages)
-A workspace is a game's folder (or any 3D project's) with topotopo-workspace.json at its root:
-  {"name": "raven-hunt", "libraries": ["./art/topotopo"],
-   "engine": {"type": "godot", "project": "game/project.godot", "assets": "game/assets/topotopo"},
-   "follow": false, "uses": {"topotopo/props": "1.1"}}
-Paths are written from the workspace's folder. The person makes one: CLI topotopo workspace init <the game's folder>
-[--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow]; MCP workspace
-{action:"init_workspace", path, ...} when the person says so. workspace {action:"show"} (CLI: topotopo
-workspace) says what the open package's workspace holds.
-- LIBRARIES: every package inside looks for packages in its own manifest's "libraries", then in the workspace's, then
-  in TopoTopo's built-in library.
-- ONE COPY PER GAME: the packages inside share one copy of each package version, in topotopo-packages/ beside the
-  file, whose "uses" names one version of each package for the whole game. A first use in any package adds it there;
-  Update compares every place any package of the workspace uses the updated package, and applying changes them all. A
-  package that publishes versions keeps its own uses and copies (they are published with it). workspace init moves the copies of the
-  packages inside that kept their own.
-- FOLLOWING: "follow": true shows the workspace's own packages live from their working folders, for looking (the
-  viewer, renders, inspect); exports and publishing always use the published versions, and an export made while
-  following says which it used.
-- THE ENGINE: "engine" names the engine project and "assets" a folder inside it that exports may go to: an export
-  target whose path is "engine:props/crate.glb" is written there (Godot imports it as res://assets/topotopo/props/...).
-- CHECK: workspace {action:"check"} (CLI: topotopo check) cooks the newest version of every package in the workspace's
-  libraries and every graph of its packages, and lists what broke and why; it changes nothing. Run it after a
-  TopoTopo update.
-- THE WEB APP's front page lists the registered workspaces first (CLI: topotopo workspace add <folder>).`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):
