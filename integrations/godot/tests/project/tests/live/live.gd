@@ -99,6 +99,13 @@ func _run() -> void:
 	check(dock._status.text.begins_with("TopoTopo %s at " % host.runner.version), "the panel says which TopoTopo cooks: %s" % dock._status.text)
 	check(host.package_of_file(CRATE) == PROPS and host.package_of_file(PROPS) == PROPS and host.package_of_file("res://project.godot") == "", "the context menu's files: an output and the .topo belong to their package, other files to none")
 	check(host._inspector._can_handle(load(PROPS)), "the inspector shows a header on the package's status resource")
+	# Project > Tools > TopoTopo > Show TopoTopo Panel brings the panel back after it was closed
+	dock.close()
+	await get_tree().process_frame
+	var closed: bool = not dock.is_visible_in_tree()
+	host._on_menu(2)
+	await get_tree().process_frame
+	check(closed and dock.is_visible_in_tree() and dock.get_parent().get_class() == "EditorBottomPanel", "Show TopoTopo Panel opens the closed panel again, in the bottom panel")
 
 	# an edit, as TopoTopo's viewer saves it: a background cook while the editor runs, then the GLB is reimported
 	var before := imported_md5(CRATE)

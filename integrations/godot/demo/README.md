@@ -92,3 +92,9 @@ open level shows the new crate once the import has finished. Turn Live Cook on a
   Cook Report lists every output as `unchanged`).
 
 Edits in the viewer change the demo's graphs in this repository: `git checkout integrations/godot/demo` puts them back.
+
+## If something is off
+
+Note the step, and copy the lines starting with `TopoTopo:` from the Output panel and the first line of the TopoTopo
+panel (which TopoTopo it found, and from where). **Project > Tools > TopoTopo > Show TopoTopo Panel** brings the panel
+back when it is closed.
