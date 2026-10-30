@@ -329,3 +329,7 @@ running them needs the editor.
   the CSV; expanded reference GLBs are for the remaining ordinary objects and comparison.
 - The optional **Cook with TopoTopo** subprocess element is not implemented. Cook/export externally, then
   regenerate PCG. Executing a TopoTopo graph executes code; this plugin itself never launches `npx` or a shell.
+
+## News
+
+For releases of TopoTopo and this plugin, about once a month, join the [mailing list](https://topotopo.kit.com/54b6b32c3f).

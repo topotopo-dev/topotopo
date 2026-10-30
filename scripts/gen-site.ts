@@ -11,7 +11,7 @@
 //                        library/<kit>/thumbs
 //   examples/            every examples/*.json with its render, its description and the graph JSON itself
 //   releases/            docs/release/v*-release-notes.md converted from Markdown
-//   404.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg (docs/brand/mark.svg)
+//   404.html, subscribed.html, CNAME, .nojekyll, robots.txt, sitemap.xml, style.css (scripts/site/style.css), favicon.svg (docs/brand/mark.svg)
 // Links are relative, so the site works at the domain root, under a sub-path and from the file system; only 404.html,
 // which GitHub Pages serves for a missing path at any depth, uses root-absolute links. Only files a page uses are
 // copied. .github/workflows/pages.yml builds, checks and deploys the site on every push to main.
@@ -702,6 +702,13 @@ page({ out: '404.html', title: 'Page not found', nav: '', abs: true, description
 <h1>404</h1>
 <p>There is no page at this address. The site is regenerated from the repository, so a page may have moved.</p>
 <p class="cta"><a class="button primary" href="${u('index.html')}">Home</a><a class="button" href="${u('nodes/index.html')}">Node reference</a><a class="button" href="${u('examples/index.html')}">Examples</a></p>
+</div>`);
+
+// where the mailing list's confirmation link lands (Kit form settings → Confirmation email → redirect URL); not in the sitemap
+page({ out: 'subscribed.html', title: 'Subscribed', nav: '', abs: true, description: 'You are on the TopoTopo mailing list.' }, () => `<div class="notfound">
+<h1>You're subscribed</h1>
+<p>Thanks for confirming. TopoTopo news comes about once a month: releases and new packs. Every email has an unsubscribe link.</p>
+<p class="cta"><a class="button primary" href="${u('index.html')}">Home</a><a class="button" href="${u('examples/index.html')}">Examples</a></p>
 </div>`);
 
 // ---------------------------------------------------------------------------------------------------------------------
