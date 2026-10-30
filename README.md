@@ -441,7 +441,9 @@ at the game's root, with the libraries every project inside looks in and the eng
 The projects in a workspace share one copy of each package version, in `topotopo-packages/` beside that file, and its
 `uses` names one version of each package for the whole game: an update shows the before/after of every place any
 project uses the package and changes them all. A project that is itself a package keeps its own copies, since they
-are published with it.
+are published with it. With `--engine godot:game/project.godot --assets game/assets/topotopo` the workspace names
+the engine project and the folder in it that exports may go to: an export target whose path starts with `engine:`
+(`"export": {"format": "glb", "path": "engine:props/crate.glb"}`) is written there, where Godot imports it.
 
 A project finds packages in the libraries its `project.json` lists, `"libraries": ["../shared/library", "game"]`: a
 path written from the project (`./lib`, `../lib`) for a library in the same repository, so every checkout and worktree

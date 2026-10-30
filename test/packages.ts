@@ -35,7 +35,8 @@ import { encodePNG } from '../src/render/png.ts';
 import { Session } from '../src/session.ts';
 import { addLibrary, loadConfig } from '../src/config.ts';
 import { copiesFor, libraryEntry, parseManifest, readManifest } from '../src/project.ts';
-import { initWorkspace, readWorkspace } from '../src/workspace.ts';
+import { engineAssetsFor, initWorkspace, readWorkspace } from '../src/workspace.ts';
+import { resolveTarget, targetError } from '../src/io/targets.ts';
 import { scanLibrary } from '../src/gallery/library.ts';
 import { builtinVersions, compareInterfaces, lockFile, openPackages, packagesText, publishPackage, publishText, publishedVersions, readLock, searchPackages, searchText, startsBigVersion, textContent, versionHash } from '../src/packages/registry.ts';
 import { makeTools } from '../src/mcp/tools.ts';
@@ -1698,6 +1699,20 @@ section('a workspace: one shared copy of each package for every project in the g
   initWorkspace(GAME, { follow: false });
   setGraph(STONES, 'main', box(4));
   check(!(await open(A)).pk.following().length, 'follow off: the copies again');
+
+  // "engine:" export targets: into the engine project's assets folder the workspace names
+  write(path.join(GAME, 'godot', 'project.godot'), '[application]\n');
+  check(throws(() => initWorkspace(GAME, { engine: 'godot:godot/project.godot', assets: 'art' }), /--assets "art" must be a folder inside the engine project's folder \(godot\)/),
+    '--assets outside the engine project is refused: the engine imports only what lies inside it');
+  const eng = initWorkspace(GAME, { engine: 'godot:godot/project.godot', assets: 'godot/assets/topotopo' });
+  check(/"engine:" exports go to godot\/assets\/topotopo \(res:\/\/assets\/topotopo\)/.test(eng.text), `the workspace says where engine exports go, as Godot names it (${eng.text.split('\n')[1]})`);
+  check(targetError({ format: 'glb', path: 'engine:props/stones.glb' }) === null && targetError({ format: 'glb', path: 'engine:' }) === null && /inside the engine's assets folder/.test(targetError({ format: 'glb', path: 'engine:../x.glb' }) ?? '')
+    && JSON.stringify(resolveTarget({ format: 'glb', path: 'engine:' }, 'stones')) === '{"format":"glb","path":"stones.glb","options":{},"engine":true}', 'an "engine:" path is a target of its own, checked like one in exports/');
+  setGraph(A, 'main', { ...scene('ws/stones'), export: { format: 'glb', path: 'engine:props/stones.glb' } });
+  const all = spawnCli([path.join(A, 'graphs', 'main.json'), '--export-all']);
+  check(all.code === 0 && exists(GAME, 'godot', 'assets', 'topotopo', 'props', 'stones.glb') && !exists(A, 'exports', 'props'),
+    `--export-all writes an engine target into the engine project (${all.out.split('\n').filter((l) => /exported/.test(l)).join(' | ') || all.out.slice(-300)})`);
+  check(throws(() => engineAssetsFor(dirs.forest), /is in no workspace: .*workspace init/), 'outside a workspace an engine target says how to name the engine project');
 }
 
 await engines[0]?.host.pool?.close();

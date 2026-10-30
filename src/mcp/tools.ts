@@ -262,7 +262,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
-    return text(prepared.map((p) => exportReport(p.files, ws.exportDir, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
+    return text(prepared.map((p) => exportReport(p.files, p.root, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
       + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : '') + publishedLine(spec));
   };
 

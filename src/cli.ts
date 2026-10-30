@@ -465,7 +465,7 @@ async function cook() {
     writeTargets(prepared, exportsDir);
     // paths as the person finds them from where they ran the command
     const rel = (f: string) => path.relative(process.cwd(), f) || f;
-    for (const p of prepared) console.log(`exported ${p.label} → ${rel(path.join(exportsDir, ...p.target.path.split('/')))} — ${p.summary}${p.sourceFile ? `; source: ${rel(p.sourceFile)}` : ''}`);
+    for (const p of prepared) console.log(`exported ${p.label} → ${rel(path.join(p.root, ...p.target.path.split('/')))} — ${p.summary}${p.sourceFile ? `; source: ${rel(p.sourceFile)}` : ''}`);
     const skipped = published.filter((p) => !p.target).map((p) => p.label);
     if (skipped.length) console.log(`no export target (skipped): ${skipped.join(', ')}`);
     if (exportNote) console.log(exportNote);

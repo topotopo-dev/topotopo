@@ -143,8 +143,10 @@ ready-made output in any library ("a conifer", every terrain): library {action:"
   destinations are registered in the viewer too.
 - Optional "export" (on the graph for the default output, or on an entry of "outputs") is where that output
   exports: a format ("glb" → exports/<graph or output id>.glb) or {"format":"obj","path":"parts/a.obj","up_axis":"z"}
-  (the export tool's options), always inside exports/. The person's Export buttons in the viewer, export {output} /
-  export {all:true} and the CLI's --export-all write these targets; set one with edit {op:"export", output?, export}.
+  (the export tool's options), always inside exports/, or "path": "engine:props/crate.glb" inside the game engine's
+  assets folder that the workspace names (topotopo-workspace.json engine.assets: Godot imports it from there). The
+  person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
+  targets; set one with edit {op:"export", output?, export}.
   The viewer's Download buttons need no target: they offer the formats that fit the output (a heightfield: png16,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.

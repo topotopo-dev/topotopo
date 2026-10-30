@@ -57,7 +57,8 @@ export function createOutputPanel(ctx) {
   P.layerOf = (item) => shownLayer(item.heightfield, chosenLayers[item.id]);
 
   /** Where an export target's files go, in full: the person finds them there. */
-  const targetFile = (item) => inFolder(directory, item.target.path);
+  // a target inside the game engine's assets folder ("engine:props/crate.glb") is shown as written
+  const targetFile = (item) => (item.target.path.startsWith('engine:') ? item.target.path : inFolder(directory, item.target.path));
   function showDetails(item) {
     details.replaceChildren(); details.hidden = !item;
     if (!item) return;
