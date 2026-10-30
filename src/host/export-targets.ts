@@ -14,10 +14,9 @@ import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
 import type { ExportFile } from '../io/files.ts';
 import { exportSource, withExportOptions } from '../io/source.ts';
-import { resolvedExportOptions } from '../io/targets.ts';
+import { prefixGone, resolvedExportOptions } from '../io/targets.ts';
 import type { ExportSource } from '../io/source.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
-import { engineAssetsFor } from '../workspace.ts';
 import { topoFiles } from '../session.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
@@ -106,7 +105,7 @@ export interface PreparedTarget {
   label: string;
   node: string;
   target: ResolvedTarget;
-  /** the folder its files are written inside: the package's exports/, or the engine project's assets folder */
+  /** the folder its files are written inside: the package's exports/ */
   root: string;
   files: ExportFile[];
   summary: string;
@@ -124,12 +123,13 @@ export interface PreparedTarget {
 export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string> }
 
 /**
- * Serialize one published output to its target inside `exportsDir`, or for an "engine:" target inside the engine
- * package's assets folder the workspace around the package names (nothing is written yet). The export records its
- * source: the graph it is published from (p.spec), its vars and seeds, the node, `cook`'s frame and fps, its packages.
+ * Serialize one published output to its target inside `exportsDir` (nothing is written yet); a target still written
+ * with the export prefix that is gone is refused, saying what to write. The export records its source: the graph it is
+ * published from (p.spec), its vars and seeds, the node, `cook`'s frame and fps, its packages.
  */
 export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, host: Host, cook: TargetCook = {}): Promise<PreparedTarget> {
-  const root = p.target.engine ? engineAssetsFor(path.dirname(path.resolve(exportsDir))) : exportsDir;
+  if (p.target.refused) throw Object.assign(new Error(`"${p.label}" (${graph}): ${prefixGone(p.target.refused)}`), { status: 400 });
+  const root = exportsDir;
   const dest = insideRoot(root, path.join(root, ...p.target.path.split('/')));
   const source = exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,

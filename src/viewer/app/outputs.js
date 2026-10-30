@@ -57,8 +57,8 @@ export function createOutputPanel(ctx) {
   P.layerOf = (item) => shownLayer(item.heightfield, chosenLayers[item.id]);
 
   /** Where an export target's files go, in full: the person finds them there. */
-  // a target inside the game engine's assets folder ("engine:props/crate.glb") is shown as written
-  const targetFile = (item) => (item.target.path.startsWith('engine:') ? item.target.path : inFolder(directory, item.target.path));
+  // a target Export refuses (item.target.refused says why) is shown as the graph writes it
+  const targetFile = (item) => (item.target.refused ? item.target.path : inFolder(directory, item.target.path));
   function showDetails(item) {
     details.replaceChildren(); details.hidden = !item;
     if (!item) return;
@@ -80,6 +80,7 @@ export function createOutputPanel(ctx) {
     if (item.error) details.append(text('p', item.error, 'err'));
     else if (item.summary) { const f = document.createElement('details'); f.className = 'fold'; f.append(text('summary', 'Geometry details'), text('pre', item.summary, 'summary')); details.append(f); }
     if (item.exportable) details.append(text('p', item.target ? `Export writes ${targetFile(item)} (${item.target.format})` : 'Export asks for a format and a file in exports/ the first time; Download gives you a copy without that', 'dim'));
+    if (item.target?.refused) details.append(text('p', item.target.refused, 'warn'));
     if (item.live?.length) details.append(text('p', liveText(item), 'live'));
     if (item.files) {
       if (item.origin === 'saved' && !item.parent) details.append(text('p', `in ${directory}`, 'dim'));

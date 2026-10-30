@@ -39,7 +39,7 @@ import { primIntrinsic } from '../core/intrinsics.ts';
 import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
 import type { Host, StopSignal } from '../host/types.ts';
-import { targetError } from '../io/targets.ts';
+import { targetError, targetWarning } from '../io/targets.ts';
 import { allAliases, getNodeDef } from './registry.ts';
 import {
   DeferredExpr, REF_FUNCS, didYouMean, hasRefs, resolveParamName, resolveParams, scanNodeRefs, scanValue, vecOut,
@@ -622,10 +622,13 @@ export class Engine {
         else if (out.publish !== undefined && typeof out.publish !== 'boolean')
           errors.push({ node: path || '(graph)', message: `named output "${id}": "publish" must be true or false (false keeps it out of the published version), got ${JSON.stringify(out.publish)}` });
         else for (const i of outputFieldIssues(out)) errors.push({ node: path || '(graph)', message: `named output "${id}": ${i.message}`, hint: i.hint });
+        const w = out && typeof out === 'object' && out.export !== undefined && !targetError(out.export) ? targetWarning(out.export) : null;
+        if (w) warnings.push({ node: path || '(graph)', message: `named output "${id}": ${w}` });
       }
     }
     if (graph.export !== undefined && targetError(graph.export))
       errors.push({ node: path || '(graph)', message: targetError(graph.export)! });
+    else if (graph.export !== undefined && targetWarning(graph.export)) warnings.push({ node: path || '(graph)', message: targetWarning(graph.export)! });
     if (!names.length) errors.push({ node: path || '(graph)', message: 'graph has no nodes' });
     if (graph.output && !graph.nodes[graph.output])
       errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });
@@ -839,6 +842,8 @@ export class Engine {
       report.ms = now() - t0;
       return report;
     }
+    // what validating warns of (an export target written with a prefix that is gone) is said with the cook
+    if (!depth) report.warnings.push(...v.warnings);
     let target = opts.target;
     if (target === undefined) {
       const o = this.findOutput(graph, scope);

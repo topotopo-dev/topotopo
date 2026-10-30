@@ -139,7 +139,7 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
       if (!offered.length) return;
       if (download) { close({ format: format.value }); return; }
       const p = file.value.trim().replace(/\\/g, '/');
-      if (!p || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').some((s) => !s || s === '.' || s === '..')) { error.textContent = 'a path inside exports/ (or engine: and a path inside the game engine\'s assets folder), without ".." or a drive'; file.focus(); return; }
+      if (!p || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').some((s) => !s || s === '.' || s === '..')) { error.textContent = 'a path inside exports/, without ".." or a drive'; file.focus(); return; }
       close({ format: format.value, path: p });
     };
     sync();

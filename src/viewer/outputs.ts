@@ -36,7 +36,7 @@ import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
 import type { SidecarRole } from '../io/sidecars.ts';
 import { STOPPED } from '../graph/engine.ts';
-import { FORMAT_LABELS, TARGET_FORMATS, publishedOutputs, resolveTarget, targetError, targetExtension, targetFormat, targetPathText } from '../io/targets.ts';
+import { FORMAT_LABELS, TARGET_FORMATS, prefixGone, publishedOutputs, resolveTarget, targetError, targetExtension, targetFormat, targetPathText } from '../io/targets.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { summarize } from '../inspect.ts';
 
@@ -222,8 +222,8 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
   };
   /** The last export of a published output to its current target, from the receipts. */
   const lastSaved = (records: Artifact[], graph: string, p: PublishedOutput) => {
-    // an export into the engine project leaves no receipt in exports/
-    if (!p.target || p.target.engine) return undefined;
+    // a target refused (its path written with a prefix that is gone) writes nothing
+    if (!p.target || p.target.refused) return undefined;
     const dest = path.join(ws.exportDir, ...p.target.path.split('/'));
     let best: OutputEntry['saved'];
     for (const r of records) {
@@ -292,7 +292,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
         const key = sessionRevision, old = items.get(id);
         const named = p.output === null ? undefined : spec.outputs?.[p.output], pinned = named?.kind, tags = named?.tags;
         const meta = {
-          label: p.label, output: p.output, default: p.default, target: p.target ? { format: p.target.format, path: targetPathText(p.target), options: p.target.options } : null,
+          label: p.label, output: p.output, default: p.default, target: p.target ? { format: p.target.format, path: targetPathText(p.target), options: p.target.options, ...(p.target.refused ? { refused: prefixGone(p.target.refused) } : {}) } : null,
           saved: lastSaved(records, graph, p), ...(pinned ? { pinned } : {}), ...(Array.isArray(tags) && tags.length ? { tags } : {}), ...(live.length ? { live } : {}),
         };
         // the same inputs, or a graph held after a stop (the card keeps what it shows until something changes)

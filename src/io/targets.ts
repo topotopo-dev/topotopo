@@ -1,8 +1,8 @@
 // Export targets: where a graph's published outputs export to. graph.export is the default output's target and
 // graph.outputs[id].export a named output's: a format name ("glb"), or {format, path?, ...the export tool's options},
-// with the path inside the package's exports/ folder, or "engine:<path>" inside the game engine's assets folder that
-// the workspace names (topotopo-workspace.json engine.assets; "engine:" alone: the default file name there). The viewer's Export buttons, the MCP export tool and the CLI's
-// --export-all resolve targets here, so one target writes the same files everywhere. Pure: no file system.
+// with the path inside the package's exports/ folder (a workspace inside the engine project has exports/ inside it, and
+// the engine imports from there). The viewer's Export buttons, the MCP export tool and the CLI's --export-all resolve
+// targets here, so one target writes the same files everywhere. Pure: no file system.
 import type { ExportFormat } from './export.ts';
 import type { ExportTarget, GraphSpec } from '../graph/types.ts';
 
@@ -123,18 +123,33 @@ export function exportOptionsFromFlags(argv: string[]): Record<string, unknown> 
 const segmentOk = (s: string) => !!s && s !== '.' && s !== '..' && !/[<>:"|?*\x00-\x1f]/.test(s) && !/[. ]$/.test(s) && !/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(s);
 const pathOk = (p: unknown) => typeof p === 'string' && p.length <= 240 && !/^[A-Za-z]:|^[\\/]/.test(p) && p.replace(/\\/g, '/').split('/').every(segmentOk);
 
-/** The prefix of an export path inside the engine project's assets folder (the workspace's engine.assets). */
-export const ENGINE_PATH = 'engine:';
+/** The export path prefix that is gone ("engine:" is gone: a target is a path inside exports/); kept only to refuse it. */
+const GONE_PREFIX = 'engine:';
+/** A path written with the prefix that is gone. */
+const gonePrefix = (p: unknown): p is string => typeof p === 'string' && p.startsWith(GONE_PREFIX);
+/** What a target still written with the prefix that is gone is told, its path as written given. */
+export const prefixGone = (written: string) => {
+  const rest = written.slice(GONE_PREFIX.length);
+  return `export path "${written}": the "${GONE_PREFIX}" prefix is gone: an export target is a path inside its package's exports/ folder${rest ? ` ("${rest}")` : ''}, and a workspace inside the engine project has exports/ inside it, where the engine imports from`;
+};
 
-/** Why a target is invalid, or null when it is valid. */
+/**
+ * What a valid target is warned of when a graph is validated or cooked: a path still written with the prefix that is
+ * gone, which cooks, views and freezes in versions as it is but is refused where a file would be written. null for
+ * none.
+ */
+export function targetWarning(t: unknown): string | null {
+  const o: any = typeof t === 'string' ? null : t;
+  return o && typeof o === 'object' && gonePrefix(o.path) ? `${prefixGone(o.path)}; exporting it fails until its path is changed` : null;
+}
+
+/** Why a target is invalid, or null when it is valid (a path written with the prefix that is gone only warns: targetWarning). */
 export function targetError(t: unknown): string | null {
   const o: any = typeof t === 'string' ? { format: t } : t;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return 'export must be a format name ("glb") or {format, path?, ...options}';
   if (!targetFormat(o.format)) return `export format "${o.format}" is not one of ${TARGET_FORMATS.join(', ')} (or usd)`;
-  if (typeof o.path === 'string' && o.path.startsWith(ENGINE_PATH)) {
-    const rest = o.path.slice(ENGINE_PATH.length);
-    if (rest && !pathOk(rest)) return `export path "${o.path}" must stay inside the engine's assets folder: "engine:" and a relative path, without "..", a drive or a leading slash`;
-  } else if (o.path !== undefined && !pathOk(o.path)) return `export path "${o.path}" must stay inside exports/ (or the engine project's assets folder: "engine:props/crate.glb"): relative, without "..", a drive or a leading slash`;
+  if (gonePrefix(o.path)) { /* a warning (targetWarning), refused where a file would be written */ }
+  else if (o.path !== undefined && !pathOk(o.path)) return `export path "${o.path}" must stay inside exports/: relative, without "..", a drive or a leading slash`;
   for (const [k, v] of Object.entries(o)) {
     if (k === 'format' || k === 'path') continue;
     if (!OPTIONS.includes(k)) return `unknown export option "${k}" (options: ${OPTIONS.join(', ')})`;
@@ -150,10 +165,10 @@ export function targetError(t: unknown): string | null {
 
 export interface ResolvedTarget {
   format: ExportFormat;
-  /** posix path inside exports/ (or the engine's assets folder): a file, or a folder for unreal_landscape and textures */
+  /** posix path inside exports/: a file, or a folder for unreal_landscape and textures */
   path: string;
-  /** the path is inside the engine project's assets folder the workspace names ("engine:<path>"), not exports/ */
-  engine?: boolean;
+  /** the path as the graph writes it, when it still has the prefix that is gone: writing it is refused (prefixGone) */
+  refused?: string;
   /** the export tool's options (up_axis, scale, …) */
   options: Record<string, unknown>;
 }
@@ -165,12 +180,12 @@ export const fileStem = (s: string) => s.replace(/[^A-Za-z0-9_.-]+/g, '_').repla
 export function resolveTarget(t: ExportTarget, stem: string): ResolvedTarget {
   const { format, path, ...options } = typeof t === 'string' ? { format: t } : t;
   const f = targetFormat(format)!;
-  const engine = typeof path === 'string' && path.startsWith(ENGINE_PATH), rest = engine ? path.slice(ENGINE_PATH.length) : path;
-  return { format: f, path: (typeof rest === 'string' && rest ? rest : fileStem(stem) + targetExtension(f)).replace(/\\/g, '/'), options, ...(engine ? { engine: true } : {}) };
+  const gone = gonePrefix(path), rest = gone ? path.slice(GONE_PREFIX.length) : path;
+  return { format: f, path: (typeof rest === 'string' && rest ? rest : fileStem(stem) + targetExtension(f)).replace(/\\/g, '/'), options, ...(gone ? { refused: path } : {}) };
 }
 
-/** A target's path as written in a graph: "engine:" before one inside the engine's assets folder. */
-export const targetPathText = (t: ResolvedTarget) => (t.engine ? ENGINE_PATH : '') + t.path;
+/** A target's path as written in a graph (one still written with the prefix that is gone, as it is). */
+export const targetPathText = (t: ResolvedTarget) => t.refused ?? t.path;
 
 export interface PublishedOutput {
   /** the id in graph.outputs, or null for a default output that is no named output (its target is graph.export) */
