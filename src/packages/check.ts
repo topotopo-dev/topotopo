@@ -159,7 +159,7 @@ export function checkText(r: CheckResult): string {
   if (r.fixed.length) lines.push(`added ${r.fixed.length} missing .gdignore file${r.fixed.length === 1 ? '' : 's'}, which keep Godot's importer out of TopoTopo's working folders: ${r.fixed.join(', ')}`);
   if (r.problems.length) lines.push(`could not read ${r.problems.length}:`, ...r.problems.map((p) => `  ${p}`));
   lines.push(broke.length
-    ? `${broke.length} of ${r.items.length} broke; nothing else was changed. A broken package version is fixed in its working folder and published again (${program()} publish); the packages take it with an update.`
+    ? `${broke.length} of ${r.items.length} broke; nothing ${r.fixed.length ? 'else ' : ''}was changed. A broken package version is fixed in its working folder and published again (${program()} publish); the packages take it with an update.`
     : `nothing broke; ${r.fixed.length ? 'nothing else was changed' : 'nothing was changed'}`);
   return lines.join('\n');
 }
