@@ -437,10 +437,18 @@ func _package_done(run: Dictionary, pk: Dictionary) -> void:
 		_error("TopoTopo: %s: %s" % [st.id, e])
 	check(topo)
 	if is_stale(st.fresh):
-		# the package did not open (or its files changed while it cooked): say why; the same files are not cooked again
+		# the package did not open, or its files changed while it cooked: say why. Files changed meanwhile cook again
+		# (run_ended); the same files are not cooked again by themselves when the package did not open, nor after a second
+		# cook that left its record stale (TopoTopo and this addon would disagree on them).
 		st.error = String(rep.errors[0]) if rep.get("errors", []).size() else st.fresh.text
-		if stamp != "" and _watcher and _watcher.source_stamp(topo) == stamp:
+		var same: bool = stamp != "" and _watcher != null and _watcher.source_stamp(topo) == stamp
+		if same and (rep.get("record") == "none" or int(st.get("retries", 0)) >= 1):
 			st.crashed = stamp
+			st.retries = 0
+		else:
+			st.retries = int(st.get("retries", 0)) + 1 if same else 0
+	else:
+		st.retries = 0
 	_refresh[topo] = {"gated": gated, "written": rep.get("record") == "written" or written.size() > 0}
 	if rep.get("ok", false) and written.size():
 		toast("TopoTopo: %s updated: %s" % [st.id, ", ".join(written)], EditorToaster.SEVERITY_INFO)
@@ -693,6 +701,9 @@ func _startup() -> void:
 			print("TopoTopo: cooking %d stale package%s before the first scan: %s" % [stale.size(), "" if stale.size() == 1 else "s", ", ".join(stale)])
 			cook(stale, false, true, false)
 		elif bool(runner.settings.get("live_cook", true)):
+			var newer := stale.filter(func(t): return packages[t].fresh.why == "version")
+			if newer.size():
+				toast("TopoTopo %s is newer than the one that cooked %d package%s: cooking %s again" % [runner.version, newer.size(), "" if newer.size() == 1 else "s", "it" if newer.size() == 1 else "them"], EditorToaster.SEVERITY_INFO)
 			_watcher.cook_background(stale, false)
 	if not headless:
 		_watcher.rebaseline()

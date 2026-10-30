@@ -53,14 +53,15 @@ static func _stat(p: String) -> String:
 	return "%d:%d" % [FileAccess.get_modified_time(p), FileAccess.get_size(p)]
 
 
-## The times and sizes of a package's sources: its .topo, everything below graphs/, assets/ and inputs/ (and the
-## folders its outputs listed), and the files outside them its record names. Not the .topo's import file, which Godot
-## rewrites on every import of it: changed import options reimport the .topo, and that import cooks.
+## The state of a package's sources: its .topo, everything below graphs/, assets/ and inputs/ (and the folders its
+## outputs listed), and the files outside them its record names, by time and size; the .topo and the graphs by their
+## content (hashed again only when they change, which also sees two saves in the same second). Not the .topo's import
+## file, which Godot rewrites on every import of it: changed import options reimport the .topo, and that import cooks.
 func source_stamp(topo: String) -> String:
 	var st = host.packages.get(topo)
 	if st == null:
 		return ""
-	var parts := PackedStringArray([_stat(st.abs)])
+	var parts := PackedStringArray([host.record.file_content_sha(st.abs)])
 	var folders := ["graphs", "assets", "inputs"]
 	var rec = st.record
 	if typeof(rec) == TYPE_DICTIONARY:
@@ -70,7 +71,8 @@ func source_stamp(topo: String) -> String:
 	for folder in folders:
 		var dir := Record.abs_of(st.dir, folder)
 		for f in Record.listing(dir):
-			parts.append("%s/%s=%s" % [folder, f, _stat(dir.path_join(f))])
+			var file := dir.path_join(f)
+			parts.append("%s/%s=%s" % [folder, f, host.record.file_content_sha(file) if folder == "graphs" else _stat(file)])
 	if typeof(rec) == TYPE_DICTIONARY:
 		for rel in Record._sorted_keys(rec.get("sources", {})):
 			if not (rel.begins_with("graphs/") or rel.begins_with("assets/") or rel.begins_with("inputs/")):

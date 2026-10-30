@@ -352,6 +352,9 @@ section('4. an output\'s own Godot settings survive its recooks');
   const crateImport = `${abs(A.proj, OUTPUTS[0])}.import`, kitImport = `${abs(A.proj, KIT_GLB)}.import`;
   fs.writeFileSync(crateImport, fs.readFileSync(crateImport, 'utf8').replace(/^nodes\/root_type=.*$/m, 'nodes/root_type="StaticBody3D"'));
   fs.writeFileSync(kitImport, fs.readFileSync(kitImport, 'utf8').replace(/^importer=.*$/m, 'importer="MeshLibrary"'));
+  // Godot sees an edited .import by its time in whole seconds: one written in the second Godot last wrote it would go
+  // unseen (a person never edits that fast)
+  for (const f of [crateImport, kitImport]) { const t = Date.now() / 1000 + 2; fs.utimesSync(f, t, t); }
   let r = godot(A.proj, ['--import'], { label: 'import-settings' });
   let { data } = inspect(A.proj, [OUTPUTS[0], KIT_GLB]);
   check(!r.unexpected.length && data[OUTPUTS[0]]?.nodes?.[0]?.class === 'StaticBody3D' && data[KIT_GLB]?.class === 'MeshLibrary', `set by hand: crate's root is a StaticBody3D, kit imports as a MeshLibrary (${data[OUTPUTS[0]]?.nodes?.[0]?.class}, ${data[KIT_GLB]?.class})`);
@@ -477,6 +480,7 @@ section('11. the window\'s flow in a headless editor (tests/live): background co
   for (const l of lines) console.log(`     ${l}`);
   const failed = lines.filter((l) => l.startsWith('FAIL')).length;
   check(r.code === 0 && failed === 0 && lines.length >= 20 && !r.unexpected.length, `live.gd: ${lines.length - failed} passed, ${failed} failed`);
+  check(/TopoTopo: props \(res:\/\/assets\/props\/props\.topo\): cooked, current\n {2}last cook: ok, \d+ ms, record \w+\n {2}crate \(mesh\): unchanged → res:\/\/assets\/props\/outputs\/crate\/crate\.glb/.test(r.log.replace(/\r/g, '')), 'Show Cook Report prints the last cook to Output');
 }
 
 section('12. the demo project (integrations/godot/demo): one setup command, then it imports as its README says');

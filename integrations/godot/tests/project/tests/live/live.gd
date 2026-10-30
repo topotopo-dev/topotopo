@@ -186,5 +186,8 @@ func _run() -> void:
 		states[o.id] = o.state
 	check(same and states.get("crate") == "unchanged", "a no-op recook writes nothing and imports nothing (%s)" % JSON.stringify(states))
 
+	# Show Cook Report prints the last report to Output and shows the panel (scripts/test-godot.mjs reads the log)
+	host.show_report(PROPS)
+
 	print("live: %d passed, %d failed" % [passes, failures])
 	get_tree().quit(1 if failures else 0)
