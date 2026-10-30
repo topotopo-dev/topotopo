@@ -459,7 +459,7 @@ my-game/                         the Godot project
 below it (`--engine godot:<path>|unreal:<path>|none` names it), and says when Unreal will not see the workspace (outside
 the project's `Content/` or a plugin's), which packages lie outside an engine project found below it, and which Godot
 export presets would ship TopoTopo's files, with the `exclude_filter` entries to add (`*/attachments/*, */graphs/*,
-*/inputs/*, *.topo, */exports/*.source.json, */exports/exports.json`). `topotopo workspace library add props` lists a
+*/inputs/*, *.topo, */exports/*.source.json, */exports/.outputs.json`). `topotopo workspace library add props` lists a
 shared library for the workspace (a registered name, or a folder outside the workspace, written as its path from the
 workspace); `remove` unlists it. The tools never add a library by themselves.
 

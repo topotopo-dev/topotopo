@@ -1865,6 +1865,16 @@ section('Godot: a .gdignore in the working folders of the packages inside a Godo
   const { ArtifactStore } = await import('../src/host/artifacts.ts');
   const saved = new ArtifactStore(path.join(BARREL, 'exports')).list().map((a) => a.label);
   check(saved.join() === 'barrel.glb', `the viewer's saved outputs leave .import and .uasset files out (${saved})`);
+  // the exclude_filter entries the preset report names cover every file TopoTopo writes in exports/ beside the export
+  const { GODOT_EXCLUDES } = await import('../src/engines.ts');
+  const STOOL = path.join(GD, 'assets', 'stool');
+  writePackage(STOOL, {}, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  const exported = spawnCli([path.join(STOOL, 'graphs', 'main.json'), '--export', path.join(STOOL, 'exports', 'stool.glb')]);
+  const glob = (g: string) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+  const beside = shown(path.join(STOOL, 'exports')).length ? listing(path.join(STOOL, 'exports')).filter((f) => f !== 'stool.glb') : [];
+  const shipped = beside.filter((f) => !GODOT_EXCLUDES.some((g) => glob(g).test(`res://assets/stool/exports/${f}`) || glob(g).test(path.basename(f))));
+  check(exported.code === 0 && exists(STOOL, 'exports', 'stool.glb') && beside.length >= 2 && !shipped.length,
+    `every file an export writes beside it in exports/ (${beside.join(', ')}) matches an exclude_filter entry the preset report names${shipped.length ? `; not: ${shipped.join(', ')}` : ''}`);
   // outside a Godot project there are none
   check(!exists(dirs.forest, 'inputs', '.gdignore') && !exists(dirs.forest, 'packages', '.gdignore') && !exists(ROCKS, 'versions', '.gdignore') && exists(dirs.valley, 'topotopo-packages', '.gdignore'),
     'outside a Godot project no package gets one; a workspace\'s shared copies always do');

@@ -123,7 +123,7 @@ export function godotIgnoreMissing(pkgDir: string): string[] {
 }
 
 /** What a Godot export preset should exclude so that it ships none of TopoTopo's files. */
-export const GODOT_EXCLUDES = ['*/attachments/*', '*/graphs/*', '*/inputs/*', '*.topo', '*/exports/*.source.json', '*/exports/exports.json'];
+export const GODOT_EXCLUDES = ['*/attachments/*', '*/graphs/*', '*/inputs/*', '*.topo', '*/exports/*.source.json', '*/exports/.outputs.json'];
 
 /**
  * The export presets of a Godot project (export_presets.cfg in `projectDir`) that would ship TopoTopo's files: one that
