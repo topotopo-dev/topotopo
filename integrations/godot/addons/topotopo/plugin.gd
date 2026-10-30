@@ -802,24 +802,41 @@ func poll_viewers() -> void:
 			_viewers.erase(dir)
 
 
-## Remove the files a package's outputs no longer write (its orphans), with Godot's files beside them.
+## Remove the files a package's outputs no longer write (its orphans), with Godot's files beside them: their .import and
+## .uid, the textures Godot extracted from an orphan GLB (<name>_<image>.png beside it), and the folder when that
+## leaves it empty.
 func remove_orphans(topo: String) -> void:
 	var st = packages.get(topo)
 	if st == null or st.record == null:
 		return
 	var orphans = st.record.get("orphans", {})
+	var current := Record.output_files(st.record)
 	var removed := []
 	for f in orphans:
+		if current.has(f):
+			continue
 		var a := _abs(f)
-		for side in ["", ".import", ".uid"]:
-			if FileAccess.file_exists(a + side):
-				DirAccess.remove_absolute(a + side)
+		var files := [a]
+		if f.get_extension().to_lower() == "glb":
+			var prefix := a.get_file().get_basename() + "_"
+			for g in DirAccess.get_files_at(a.get_base_dir()):
+				var p := a.get_base_dir().path_join(g)
+				if g.begins_with(prefix) and ["png", "jpg", "jpeg", "webp"].has(g.get_extension().to_lower()) and not current.has(_res(p)):
+					files.append(p)
+		for file in files:
+			for side in ["", ".import", ".uid"]:
+				if FileAccess.file_exists(file + side):
+					DirAccess.remove_absolute(file + side)
 		removed.append(f)
+		if DirAccess.get_files_at(a.get_base_dir()).is_empty() and DirAccess.get_directories_at(a.get_base_dir()).is_empty():
+			DirAccess.remove_absolute(a.get_base_dir())
 	if removed.size():
 		print("TopoTopo: %s: removed %s" % [st.id, ", ".join(removed)])
 		EditorInterface.get_resource_filesystem().scan()
-		# the record still lists them until the next cook; cook it so the record forgets them
-		cook_now([topo], false)
+		# the record lists them until the next cook, which leaves out orphans that are gone: cook it now (its outputs
+		# are carried over when current)
+		if runner.found() and _watcher:
+			_watcher.cook_background([topo], false)
 
 
 ## Print a package's last report to Output.

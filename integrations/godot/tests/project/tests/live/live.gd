@@ -151,6 +151,23 @@ func _run() -> void:
 	mf.close()
 	check(await until(func(): return idle() and host.packages[PROPS].fresh.state == "ok" and host.packages[PROPS].error == "" and host.topo_import_valid(PROPS), 60.0), "the manifest restored: the package is current, its error gone, its .topo import valid")
 
+	# an output renamed in its graph leaves its old file as an orphan; Remove Orphans deletes it and the record forgets it
+	edit_graph(func(g):
+		g.outputs["box_crate"] = g.outputs["crate"]
+		g.outputs.erase("crate"))
+	var orphan_glb := CRATE
+	check(await until(func(): return idle() and host.packages[PROPS].fresh.state == "ok" and host.packages[PROPS].record.get("orphans", {}).has(orphan_glb), 60.0),
+		"a renamed output: its old GLB is kept as an orphan (%s)" % JSON.stringify(host.packages[PROPS].record.get("orphans", {})))
+	host.remove_orphans(PROPS)
+	check(await until(func(): return idle() and not FileAccess.file_exists(orphan_glb) and host.packages[PROPS].record.get("orphans", {}).is_empty(), 60.0), "Remove Orphans deletes it, and the record forgets it")
+	edit_graph(func(g):
+		g.outputs["crate"] = g.outputs["box_crate"]
+		g.outputs.erase("box_crate"))
+	check(await until(func(): return idle() and FileAccess.file_exists(CRATE) and host.packages[PROPS].fresh.state == "ok" and imported_md5(CRATE) == FileAccess.get_md5(CRATE), 60.0), "renamed back: crate.glb is cooked and imported again")
+	host.remove_orphans(PROPS)
+	check(await until(func(): return idle() and host.packages[PROPS].record.get("orphans", {}).is_empty() and not DirAccess.dir_exists_absolute("res://assets/props/outputs/box_crate"), 60.0),
+		"and box_crate.glb, now the orphan, is removed the same way, with the texture Godot extracted beside it and its folder")
+
 	# a deleted output comes back
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCATTER))
 	check(await until(func(): return idle() and FileAccess.file_exists(SCATTER), 60.0), "a deleted output is cooked again")

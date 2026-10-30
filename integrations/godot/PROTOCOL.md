@@ -14,7 +14,8 @@ it; `"install".cli` in the user's config (`~/.topotopo/config.json`, or the file
 (a checkout), else its `dist/cli.js`.
 
 Node, in this order: `TOPOTOPO_NODE`; the editor setting `filesystem/import/topotopo/node_path`; `"install".node` in the
-user's config; `node` found on `PATH`. Node 22.18 or newer runs TopoTopo.
+user's config; `node` found on `PATH`; then `C:/Program Files/nodejs`, `/usr/local/bin` and `/opt/homebrew/bin`. Node
+22.18 or newer runs TopoTopo.
 
 The install record, as `godot setup` writes it into the user's config (other keys of the file are kept):
 
