@@ -1,17 +1,20 @@
 @tool
 extends EditorPlugin
-## Drives the addon's window flow in a headless editor (step 11 of npm run test:godot): it adds the window's parts to
-## the TopoTopo plugin (panel, context menu, inspector), turns on Godot's "Import Resources When Unfocused" (a headless
-## editor never has focus), then changes a package's files the way TopoTopo's viewer or an agent does and checks what
-## the editor does: a background cook while the editor keeps running frames, the changed GLB reimported, a broken graph
-## failing the .topo and keeping the GLB, no cook loop, a deleted output restored, a no-op recook leaving the imports.
+## Drives the addon's window flow in a headless editor (step 11 of npm run test:godot; TOPOTOPO_GODOT_WINDOW=1 makes the
+## TopoTopo plugin work as with a window: panel, context menu, inspector, background cooks). It turns on Godot's
+## "Import Resources When Unfocused" (a headless editor never has focus), checks the startup cook of a package never
+## cooked, then changes a package's files the way TopoTopo's viewer or an agent does and checks what the editor does:
+## a background cook while the editor keeps running frames, the changed GLB reimported, a broken graph failing the
+## .topo and keeping the GLB, no cook loop, a deleted output restored, a no-op recook leaving the imports.
 ## Prints PASS/FAIL lines and quits with 1 on a failure.
-##   godot --headless --editor --path <project>   (with res://tests/live/plugin.cfg enabled)
+##   TOPOTOPO_GODOT_WINDOW=1 godot --headless --editor --path <project>   (with res://tests/live/plugin.cfg enabled)
 
 const PROPS := "res://assets/props/props.topo"
 const CRATE := "res://assets/props/outputs/crate/crate.glb"
 const SCATTER := "res://assets/props/outputs/scatter/scatter.glb"
 const GRAPH := "res://assets/props/graphs/crate.json"
+const KIT := "res://assets/kit/kit.topo"
+const KIT_GLB := "res://assets/kit/outputs/kit/kit.glb"
 
 var host: EditorPlugin
 var failures := 0
@@ -73,10 +76,14 @@ func _run() -> void:
 	if host == null:
 		get_tree().quit(1)
 		return
-	check(await until(idle, 120.0), "the editor starts and settles (first scan done, nothing cooking)")
+	check(not host.headless and host._dock != null, "TOPOTOPO_GODOT_WINDOW=1: the plugin works as with a window (panel, background cooks)")
+	# a headless editor never has focus: Godot's own setting lets imports run unfocused
 	EditorInterface.get_editor_settings().set_setting("interface/editor/behavior/import_resources_when_unfocused", true)
 	EditorInterface.get_editor_settings().set_setting("filesystem/import/topotopo/watch_interval", 0.2)
-	host.add_window_parts()
+	# the kit was never cooked: at startup it cooks in the background, and its GLB, in a new folder, is imported
+	check(await until(func(): return idle() and host.packages.get(KIT, {}).get("fresh", {}).get("state") == "ok" and imported_md5(KIT_GLB) != "" and imported_md5(KIT_GLB) == FileAccess.get_md5(KIT_GLB), 120.0),
+		"at startup the never-cooked kit cooks in the background and its new GLB is imported")
+	check(await until(func(): return host.topo_import_valid(KIT), 10.0), "the kit's .topo import is valid")
 	await wait(0.5)
 
 	# the panel, the context menu, the inspector
@@ -96,7 +103,7 @@ func _run() -> void:
 	# an edit, as TopoTopo's viewer saves it: a background cook while the editor runs, then the GLB is reimported
 	var before := imported_md5(CRATE)
 	var seq0: int = host.runner._seq
-	edit_graph(func(g): g.nodes.paint.params.roughness = 0.35)
+	edit_graph(func(g): g.nodes.paint.params.roughness = snappedf(fmod(float(g.nodes.paint.params.roughness) + 0.07, 1.0), 0.01))
 	var started := await until(func(): return host.packages[PROPS].cooking, 10.0)
 	var frame0 := Engine.get_process_frames()
 	check(started, "the watcher sees the edited graph and starts a background cook")
@@ -131,17 +138,18 @@ func _run() -> void:
 
 	# a package that does not open (a broken manifest): one cook says why, then nothing until its files change
 	var manifest := FileAccess.get_file_as_string(PROPS)
+	var seq_broken: int = host.runner._seq
 	var mf := FileAccess.open(PROPS, FileAccess.WRITE)
 	mf.store_string("{ not json")
 	mf.close()
-	check(await until(func(): return idle() and host.packages[PROPS].error != "", 60.0), "a broken manifest: the package says why: %s" % String(host.packages[PROPS].error).get_slice("\n", 0))
+	check(await until(func(): return idle() and host.packages[PROPS].error != "" and not host.topo_import_valid(PROPS), 60.0), "a broken manifest: the .topo import fails and the package says why: %s" % String(host.packages[PROPS].error).get_slice("\n", 0))
 	var seq2: int = host.runner._seq
 	await wait(2.0)
-	check(host.runner._seq == seq2, "no cook loop on a package that does not open")
+	check(host.runner._seq == seq2 and seq2 - seq_broken == 1, "one cook, and no cook loop on a package that does not open (%d)" % (host.runner._seq - seq_broken))
 	mf = FileAccess.open(PROPS, FileAccess.WRITE)
 	mf.store_string(manifest)
 	mf.close()
-	check(await until(func(): return idle() and host.packages[PROPS].fresh.state == "ok", 60.0), "the manifest restored: the package is current")
+	check(await until(func(): return idle() and host.packages[PROPS].fresh.state == "ok" and host.packages[PROPS].error == "" and host.topo_import_valid(PROPS), 60.0), "the manifest restored: the package is current, its error gone, its .topo import valid")
 
 	# a deleted output comes back
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCATTER))

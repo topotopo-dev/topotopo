@@ -142,6 +142,9 @@ func _cook_if_stale(topo: String, abs_topo: String, options: Dictionary, res: Pa
 		if not host.runner.found():
 			host.say_missing_once()
 			return _fail(res, "stale_no_topotopo", host.not_set_up_text(topo, fr), ERR_UNAVAILABLE)
+		# the last cook of these very files did not finish them: say why rather than cook them again (Recook retries)
+		if fr.why != "options" and host.failed_unchanged(topo):
+			return _fail(res, "failed", "TopoTopo: %s did not cook: %s" % [topo, host.packages[topo].error], FAILED)
 		# a running cook that has this package (the batch's, or the watcher's): wait for it; else cook it now
 		var run: Dictionary = host.runner.run_with(abs_topo)
 		if not run.is_empty():

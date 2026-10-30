@@ -68,7 +68,9 @@ func _get_plugin_name() -> String:
 
 
 func _enter_tree() -> void:
-	headless = DisplayServer.get_name() == "headless"
+	# a headless editor (--import, --export-*) cooks before its first scan and has no window parts;
+	# TOPOTOPO_GODOT_WINDOW=1 makes one work as with a window (the tests drive the window's flow that way)
+	headless = DisplayServer.get_name() == "headless" and OS.get_environment("TOPOTOPO_GODOT_WINDOW") != "1"
 	project = ProjectSettings.globalize_path("res://").replace("\\", "/").trim_suffix("/")
 	record = Record.new()
 	_register_settings()
@@ -97,11 +99,10 @@ func _enter_tree() -> void:
 
 ## The parts of the editor's window: the context menu, the inspector header, the panel, Project > Tools > TopoTopo, and
 ## the reaction to settings. A headless editor (--import, --export-*) has none, and cooks before its first scan
-## instead of in the background; the tests add them to a headless editor to drive the window's flow.
+## instead of in the background.
 func add_window_parts() -> void:
 	if _dock:
 		return
-	headless = false
 	_context_menu = ContextMenu.new()
 	_context_menu.host = self
 	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _context_menu)
@@ -119,8 +120,6 @@ func add_window_parts() -> void:
 	_menu.id_pressed.connect(_on_menu)
 	add_tool_submenu_item(MENU, _menu)
 	EditorInterface.get_editor_settings().settings_changed.connect(_on_settings_changed)
-	if _watcher:
-		_watcher.rebaseline()
 
 
 func _exit_tree() -> void:
@@ -296,6 +295,10 @@ func check(topo: String, opts = null) -> Dictionary:
 		st.fresh = {"state": "stale", "why": "record", "path": "", "note": "", "text": r.error}
 	else:
 		st.fresh = record.freshness(st.dir, r.record, o, project, runner.version if runner.found() else "")
+	if not is_stale(st.fresh) and not st.cooking:
+		# what made the last cook fail is gone (its record is current)
+		st.error = ""
+		st.crashed = ""
 	return st.fresh
 
 
@@ -307,6 +310,13 @@ func check_all() -> void:
 
 static func is_stale(fr: Dictionary) -> bool:
 	return fr.state == "stale" or fr.state == "never_cooked"
+
+
+## Whether the last cook of a package did not finish it and its files are the same since (it is not cooked again by
+## itself until they change; Recook retries).
+func failed_unchanged(topo: String) -> bool:
+	var st = packages.get(topo)
+	return st != null and st.crashed != "" and st.error != "" and _watcher != null and not headless and _watcher.source_stamp(topo) == st.crashed
 
 
 ## The report file of a package's cooks (res://.godot/topotopo/<id>-<md5 of its res path>.report.json).

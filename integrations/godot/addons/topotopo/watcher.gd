@@ -53,13 +53,14 @@ static func _stat(p: String) -> String:
 	return "%d:%d" % [FileAccess.get_modified_time(p), FileAccess.get_size(p)]
 
 
-## The times and sizes of a package's sources: its .topo and import options, everything below graphs/, assets/ and
-## inputs/ (and the folders its outputs listed), and the files outside them its record names.
+## The times and sizes of a package's sources: its .topo, everything below graphs/, assets/ and inputs/ (and the
+## folders its outputs listed), and the files outside them its record names. Not the .topo's import file, which Godot
+## rewrites on every import of it: changed import options reimport the .topo, and that import cooks.
 func source_stamp(topo: String) -> String:
 	var st = host.packages.get(topo)
 	if st == null:
 		return ""
-	var parts := PackedStringArray([_stat(st.abs), _stat(st.abs + ".import")])
+	var parts := PackedStringArray([_stat(st.abs)])
 	var folders := ["graphs", "assets", "inputs"]
 	var rec = st.record
 	if typeof(rec) == TYPE_DICTIONARY:
@@ -119,6 +120,9 @@ func _settle() -> void:
 		var fr: Dictionary = host.check(topo)
 		if host.is_stale(fr) and st.crashed != source_stamp(topo):
 			stale.append(topo)
+		elif not host.is_stale(fr):
+			# current again (a change undone): its .topo import follows
+			host.refresh_later(topo)
 	_dirty.clear()
 	host.packages_changed.emit()
 	if stale.is_empty() or not bool(host.runner.settings.get("live_cook", true)):

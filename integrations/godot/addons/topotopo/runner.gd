@@ -59,7 +59,12 @@ func reset() -> void:
 func describe() -> String:
 	if not found():
 		return "TopoTopo not found: " + problem
-	return "TopoTopo %s at %s (%s), node %s" % [version, cli, cli_from, node_version]
+	var s := "TopoTopo %s at %s (%s), node %s" % [version, cli, cli_from, node_version]
+	# a project pin inside the project: Godot imports node_modules unless it holds a .gdignore
+	var modules := cli.get_base_dir().get_base_dir().get_base_dir()
+	if cli_from == "node_modules" and (modules + "/").to_lower().begins_with((project + "/").to_lower()) and not FileAccess.file_exists(modules.path_join(".gdignore")):
+		s += "; warning: Godot imports %s: add an empty .gdignore to it" % modules
+	return s
 
 
 # ----------------------------------------------------------------------------------------------------- finding

@@ -19,9 +19,9 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { encodePNG } from '../src/render/png.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { contentSha } from '../src/packages/registry.ts';
-import { canonicalText, freshness, listing, readRecord } from '../src/host/cook.ts';
+import { COOK_PROTOCOL, RECORD_SCHEMA, canonicalText, freshness, listing, readRecord } from '../src/host/cook.ts';
 import type { CookRecord, EngineOptions, PackageReport } from '../src/host/cook.ts';
-import { GODOT_COMMANDS, GODOT_GLTF_EXTENSIONS, cookCommand, enablePlugin, excludeAddon, glbJson, godotCommand, godotSetup, godotStatus, markPng, pngPackage } from '../src/host/godot.ts';
+import { GODOT_COMMANDS, GODOT_GLTF_EXTENSIONS, GODOT_HIDDEN, cookCommand, enablePlugin, excludeAddon, glbJson, godotCommand, godotSetup, godotStatus, markPng, pngPackage } from '../src/host/godot.ts';
 import { topicText } from '../src/mcp/docs.ts';
 import { readInstall } from '../src/config.ts';
 import { TOPOTOPO_VERSION } from '../src/host/version.ts';
@@ -575,6 +575,26 @@ section('the commands: every list of them says them the same way');
     const missing = GODOT_COMMANDS.filter((c) => !text.includes(`${prefix}${c.usage}`)).map((c) => c.usage);
     check(!missing.length, `${where} lists every command as GODOT_COMMANDS says it${missing.length ? `: missing ${missing.join(' | ')}` : ''}`);
   }
+}
+
+// ------------------------------------------------------------------------------------------------ the addon
+section('the Godot addon speaks this TopoTopo: its version, protocol, record schema and file rules (npm run test:godot runs it)');
+{
+  const addon = path.join(ROOT, 'integrations', 'godot', 'addons', 'topotopo');
+  const read = (f: string) => fs.readFileSync(path.join(addon, f), 'utf8');
+  const cfg = read('plugin.cfg'), plugin = read('plugin.gd'), runner = read('runner.gd'), recordGd = read('record.gd');
+  check(new RegExp(`^version="${TOPOTOPO_VERSION.replace(/\./g, '\\.')}"$`, 'm').test(cfg), `plugin.cfg carries TopoTopo's version (${/^version="(.*)"$/m.exec(cfg)?.[1]})`);
+  check([plugin, runner].every((t) => new RegExp(`^const PROTOCOL := ${COOK_PROTOCOL}$`, 'm').test(t)) && new RegExp(`^const SCHEMA := ${RECORD_SCHEMA}$`, 'm').test(recordGd),
+    `plugin.gd and runner.gd speak protocol ${COOK_PROTOCOL}, record.gd reads schema ${RECORD_SCHEMA}`);
+  const list = (name: string) => [...(new RegExp(`^const ${name} := \\[([^\\]]*)\\]`, 'm').exec(recordGd)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  // a name is hashed raw when contentSha keeps a CR LF pair: the same names on both sides, among every name record.gd
+  // lists and common others
+  const binary = list('BINARY');
+  const raw = (e: string) => contentSha(`x.${e}`, new Uint8Array([13, 10])) === sha(new Uint8Array([13, 10]));
+  const probes = [...new Set([...binary, 'json', 'txt', 'md', 'gd', 'topo', 'csv', 'obj', 'mtl', 'svg', 'tres', 'tscn', 'gltf', 'usda', 'geo', 'ply', 'stl', 'psd', 'blend', 'heic', 'jxl', 'ktx3', 'woff3'])];
+  const differ = probes.filter((e) => raw(e) !== binary.includes(e));
+  check(binary.length >= 40 && !differ.length, `record.gd hashes the same names raw as contentSha (${binary.length} formats)${differ.length ? `; they differ on ${differ.join(', ')}` : ''}`);
+  check(list('ENGINE_FILES').sort().join() === 'import,translation,uasset,uid' && list('HIDDEN').join() === GODOT_HIDDEN.join(), 'record.gd leaves the same engine files out of listings and hides the same folders');
 }
 
 /**

@@ -468,7 +468,10 @@ section('11. the window\'s flow in a headless editor (tests/live): background co
   const pg = path.join(A.proj, 'project.godot');
   const text = fs.readFileSync(pg, 'utf8');
   fs.writeFileSync(pg, text.replace('enabled=PackedStringArray("res://addons/topotopo/plugin.cfg")', 'enabled=PackedStringArray("res://addons/topotopo/plugin.cfg", "res://tests/live/plugin.cfg")'));
-  const r = godot(A.proj, ['--editor'], { label: 'live', expect: [/TopoTopo: props > crate: \[body\]/, /Error importing 'res:\/\/assets\/props\/props\.topo'/, /TopoTopo: props: /, /TopoTopo: props\.topo did not cook/, /TopoTopo: res:\/\/assets\/props\/props\.topo did not cook/] });
+  // the kit as never cooked: the editor cooks it at startup, in the background
+  fs.rmSync(path.join(A.kit, 'outputs'), { recursive: true, force: true });
+  fs.rmSync(path.join(A.kit, '.topotopo'), { recursive: true, force: true });
+  const r = godot(A.proj, ['--editor'], { label: 'live', extraEnv: { TOPOTOPO_GODOT_WINDOW: '1' }, expect: [/TopoTopo: props > crate: \[body\]/, /Error importing 'res:\/\/assets\/props\/props\.topo'/, /TopoTopo: props: /, /TopoTopo: props\.topo did not cook/, /TopoTopo: res:\/\/assets\/props\/props\.topo did not cook/] });
   fs.writeFileSync(pg, text);
   const lines = r.log.split(/\r?\n/).filter((l) => /^(PASS|FAIL) /.test(l));
   for (const l of lines) console.log(`     ${l}`);
