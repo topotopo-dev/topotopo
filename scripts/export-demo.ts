@@ -63,10 +63,10 @@ if (tiles) {
   }
 }
 
-// Only replace the explicitly resolved export directory, never the workspace or one of its ancestors.
+// Only replace the explicitly resolved export directory, never the project or one of its ancestors.
 const rootFromOut = path.relative(out, root);
 if (out === path.parse(out).root || rootFromOut === '' || (!rootFromOut.startsWith('..' + path.sep) && rootFromOut !== '..' && !path.isAbsolute(rootFromOut))) {
-  throw new Error(`refusing to replace a workspace ancestor: ${out}`);
+  throw new Error(`refusing to replace a project ancestor: ${out}`);
 }
 if (fs.existsSync(out)) {
   if (fs.lstatSync(out).isSymbolicLink()) throw new Error(`refusing to replace a linked output directory: ${out}`);

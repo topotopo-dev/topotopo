@@ -17,7 +17,7 @@ import { outputKind } from '../src/io/kinds.ts';
 import { exportFilesAsync } from '../src/io/files.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { previewGLB } from '../src/render/preview.ts';
-import { openPackages, publishPackage, kindTagsText } from '../src/gallery/packages.ts';
+import { openPackages, publishPackage, kindTagsText } from '../src/packages/registry.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-materials-'));
 process.env.TOPOTOPO_CONFIG = path.join(tmp, 'cfg', 'config.json');

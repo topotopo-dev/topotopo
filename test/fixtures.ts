@@ -8,9 +8,10 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { BUILTIN_LIBRARY, initProject } from '../src/gallery/library.ts';
-import { openPackages } from '../src/gallery/packages.ts';
-import type { ProjectPackages } from '../src/gallery/packages.ts';
+import { BUILTIN_LIBRARY } from '../src/config.ts';
+import { initProject } from '../src/project.ts';
+import { openPackages } from '../src/packages/registry.ts';
+import type { ProjectPackages } from '../src/packages/registry.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { exportOBJ } from '../src/io/export.ts';
 import { encodeGreyPNG } from '../src/io/heightmap.ts';
@@ -284,7 +285,7 @@ export const PARAMS: Record<string, any> = {
   inflate: { steps: 12, pressure: 1.3 },
 };
 
-/** Node types that cannot cook standalone (subgraph input, references to workspace graphs). */
+/** Node types that cannot cook standalone (subgraph input, references to project graphs). */
 export const SKIP = new Set(['input', 'graph_ref']);
 
 /**

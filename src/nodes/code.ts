@@ -179,7 +179,6 @@ defineNode({
   // every var: besides the ones its code names, the "=expr" params it hands to lib.run can read any of them
   usesVars: true,
   // lib.run resolves node types in the scope, and the nodes it runs read the scope's files
-  usesScope: true,
   example: {
     type: 'script',
     params: { code: "const parts = [];\nfor (let i = 0; i < 5; i++) parts.push(await lib.run('box', { size: [1, i + 1, 1], center: [i * 1.5, (i + 1) / 2, 0] }));\nreturn lib.merge(parts);" },

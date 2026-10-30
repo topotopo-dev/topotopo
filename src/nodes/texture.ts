@@ -453,7 +453,6 @@ defineNode({
   },
   outputs: 'image <name> (default: the node name): C grey 0..1',
   // it cooks a text node, which reads its font through the scope
-  usesScope: true,
   usesNodeName: NAMED_BY_NODE,
   example: { type: 'tex_text', params: { resolution: [512, 128], text: 'EXIT', size: 0.7 } },
   async cook(ctx) {
@@ -506,7 +505,6 @@ defineNode({
     srgb: { type: 'bool', default: true, desc: 'the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never)' },
   },
   // relative paths read the scope's folder
-  usesScope: true,
   usesNodeName: NAMED_BY_NODE,
   signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
   outputs: 'image <name> (default: the node name): C grey or RGBA 0..1; A grey (the file\'s alpha, for a grey image of a file with alpha)',

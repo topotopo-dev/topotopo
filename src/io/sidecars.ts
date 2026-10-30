@@ -5,7 +5,7 @@
 //   meshes      <base>.meshes.json beside csv / points.json instance rows: Mesh → GLB, the source
 //   landscape   landscape.json in an unreal_landscape folder: the import settings, the files, the source
 // Each declares its "format" as its first key, so the first bytes of a file tell a sidecar from a geometry JSON. The
-// viewer's Outputs and Inputs lists (and Workspace.listInputs, ArtifactStore.list) show a sidecar with the file it
+// viewer's Outputs and Inputs lists (and Session.listInputs, ArtifactStore.list) show a sidecar with the file it
 // describes. Pure: callers pass names and the first bytes of the files.
 
 export type SidecarRole = 'source' | 'heightmap' | 'meshes' | 'landscape';

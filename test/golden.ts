@@ -11,7 +11,7 @@ import path from 'node:path';
 import { Engine } from '../src/graph/engine.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { openPackages } from '../src/gallery/packages.ts';
+import { openPackages } from '../src/packages/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, kitFixtureGraph } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff, sortedJSON } from './fingerprint.ts';

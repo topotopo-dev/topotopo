@@ -1,7 +1,7 @@
 // Live preview web server: serves the viewer page (index.html, a shell loading the ES modules of app/ and three.js
-// from /vendor/three/) that shows any graph/node of the workspace and refreshes over
+// from /vendor/three/) that shows any graph/node of the project and refreshes over
 // Server-Sent Events whenever a graph is rebuilt/edited.
-// It is also the human's control surface: files dropped on the page are stored in the workspace's inputs/ (under
+// It is also the human's control surface: files dropped on the page are stored in the project's inputs/ (under
 // `topotopo view`, the inputs/ beside the graph file) and shown as reference layers, the graph's exposed vars are set
 // from generated controls (POST /api/vars), and markers clicked into the view (sites, paths, zones, volumes) become
 // inputs/markers.json (POST /api/markers).
@@ -21,8 +21,8 @@ import zlib from 'node:zlib';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { varDeclaration, graphVarValue } from '../workspace.ts';
-import type { Workspace } from '../workspace.ts';
+import { varDeclaration, graphVarValue } from '../session.ts';
+import type { Session } from '../session.ts';
 import type { GraphSource } from './graph-file.ts';
 import { GeoBuilder } from '../core/geometry.ts';
 import type { Geometry } from '../core/geometry.ts';
@@ -36,9 +36,9 @@ import type { NodeProgress } from '../graph/engine.ts';
 import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
-import { ProjectPackages } from '../gallery/packages.ts';
+import { ProjectPackages } from '../packages/registry.ts';
 import { listKits, kitOutputsText } from '../gallery/kits.ts';
-import { projectDirOf, readManifest } from '../gallery/library.ts';
+import { projectDirOf, readManifest } from '../project.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
 import { imageFromPNGFile } from '../io/textures.ts';
@@ -177,34 +177,34 @@ interface VarsBatch { vars: Record<string, any>; waiters: ((r: VarsReply) => voi
 export interface ViewerOptions {
   /**
    * Where the inputs folder is, in words that follow "inputs/" on the page: `topotopo view` passes "beside house.json".
-   * Default: "in the workspace" (or the folder that holds it, when the workspace was given another inputs folder).
+   * Default: "in the project" (or the folder that holds it, when the project was given another inputs folder).
    */
   inputsWhere?: string;
   /**
-   * The graph file a graph comes from when it is not the workspace's own (`topotopo view`: viewGraphFile). The
-   * controls then set session values over that graph (Workspace.sessionVars) instead of editing it: they survive
+   * The graph file a graph comes from when it is not the project's own (`topotopo view`: viewGraphFile). The
+   * controls then set session values over that graph (Session.sessionVars) instead of editing it: they survive
    * reloads of the file, show where they differ from it, and POST /api/vars/save writes them into its vars. Export
    * targets set on the page go into the file. Both are minimal edits of its text.
    */
   source?: GraphSource;
 }
 
-/** A running viewer: its URL, the open pages (SSE clients), a workspace swap, and close. */
+/** A running viewer: its URL, the open pages (SSE clients), a session swap, and close. */
 export interface Viewer {
   url: string;
   /** pages open now (event-stream connections) */
   clients: () => number;
   /**
-   * Show another workspace (the MCP library tool's open): the routes serve it from now on and every open page
+   * Show another project (the MCP library tool's open): the routes serve it from now on and every open page
    * reconnects and reloads, so the URL stays the same.
    */
-  setWorkspace: (ws: Workspace) => void;
+  setSession: (ws: Session) => void;
   /** what a change in a package's working folder sets off, without waiting for the file watchers (tests) */
   pokePackages: (pkg?: string, rel?: string) => void;
   close: () => void;
 }
 
-export async function startViewer(ws: Workspace, port = Number(process.env.TOPOTOPO_PORT ?? 7341), opts: ViewerOptions = {}): Promise<Viewer> {
+export async function startViewer(ws: Session, port = Number(process.env.TOPOTOPO_PORT ?? 7341), opts: ViewerOptions = {}): Promise<Viewer> {
   const clients = new Set<http.ServerResponse>();
   const broadcast = (ev: object) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
@@ -213,7 +213,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   // a graph changed: after a stop the page keeps the geometry it has instead of fetching (and cooking) it again
   const graphChanged = (ev: { graph: string; version: number }) => broadcast({ ...ev, ...(ws.held(ev.graph) ? { stopped: true } : {}) });
   ws.listeners.add(graphChanged);
-  /** The project the viewer shows: that of the packages attached to the workspace, else the one its folder is in. */
+  /** The project the viewer shows: that of the packages attached to the session, else the one its folder is in. */
   const projectOf = (refresh = false) => {
     const pk = ws.packages instanceof ProjectPackages ? ws.packages : null;
     if (refresh && pk?.dir) pk.refresh();
@@ -240,7 +240,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
 
   // ---------------------------------------------------------------- the state of the cooks
   // {cook: {graph, running, last}} events: each node of the graph as it starts (before it can hold the thread for
-  // long: the workspace yields there), the rest of the progress at most every 100 ms, the end at once. A cook that
+  // long: the session yields there), the rest of the progress at most every 100 ms, the end at once. A cook that
   // only finds cached results is announced only when it lasts past 120 ms.
   const sessionMode = (graph: string) => opts.source?.graph === graph;
   const cookState = (graph: string) => {
@@ -316,8 +316,8 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   /** The one-node graph that loads an input. */
   const inputGraph = (rel: string, abs: string): GraphSpec => {
     // "inputs/<rel>", the path a graph's file node uses, resolves against the host's base directory: the folder that
-    // holds inputs/ under the MCP server (the workspace) and under `topotopo view` (the graph file's folder). A
-    // workspace whose engine resolves paths elsewhere (an embedding app, a test) gets the absolute path.
+    // holds inputs/ under the MCP server (its folder) and under `topotopo view` (the graph file's folder). A
+    // session whose engine resolves paths elsewhere (an embedding app, a test) gets the absolute path.
     const ref = `inputs/${rel}`;
     const p = path.resolve(ws.engine.host.resolvePath(ref)) === abs ? ref : abs;
     return { nodes: { f: { type: 'file', params: { path: p } } }, output: 'f' };
@@ -392,7 +392,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
   // latest value wins; values in between may never cook); the waiting requests are merged (the latest value of each
   // var wins) and applied by a single further cook. Every request is answered once its values are applied, or when a
   // stop (POST /api/cook/stop) ends the cook. Over a graph file the values are session values, set at once; in a
-  // workspace they edit the stored graph (an agent reads them there).
+  // project they edit the stored graph (an agent reads them there).
   const varQueues = new Map<string, { busy: boolean; next: VarsBatch | null }>();
   const varsState = (name: string) => {
     const g = ws.graphs.get(name);
@@ -543,9 +543,9 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
             name, output: last?.target || g.output || null, version: ws.versions.get(name) ?? 0,
             // vars: what the controls show; graphVars: the graph's own; overrides: the session values among them
             ...varsState(name), params: g.params ?? {},
-            // "file": the controls set session values over a graph file (saveable when it names the file); "workspace":
+            // "file": the controls set session values over a graph file (saveable when it names the file); "project":
             // they edit the stored graph
-            mode: sessionMode(name) ? 'file' : 'workspace', file: opts.source?.graph === name ? opts.source.label : null,
+            mode: sessionMode(name) ? 'file' : 'project', file: opts.source?.graph === name ? opts.source.label : null,
             cook: cookState(name),
             nodes: Object.entries(g.nodes).map(([n, spec]) => {
               const def = ws.engine.resolveDef(spec.type);
@@ -689,7 +689,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
     url: `http://127.0.0.1:${actual}/`,
     clients: () => clients.size,
     pokePackages: (pkg, rel) => packages.poke(pkg, rel),
-    setWorkspace: (next: Workspace) => {
+    setSession: (next: Session) => {
       if (next === ws || closed) return;
       ws.listeners.delete(graphChanged);
       ws.activityListeners.delete(onActivity);
@@ -707,7 +707,7 @@ export async function startViewer(ws: Workspace, port = Number(process.env.TOPOT
       outputs = makeOutputs();
       packages = makePackages();
       watchInputs();
-      // the pages reconnect (EventSource retries) and reload graphs, layers and guides from the new workspace
+      // the pages reconnect (EventSource retries) and reload graphs, layers and guides from the new project
       for (const c of clients) c.end();
       clients.clear();
     },

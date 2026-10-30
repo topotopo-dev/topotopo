@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { openPackages } from '../src/gallery/packages.ts';
+import { openPackages } from '../src/packages/registry.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { NodeSpec, GraphSpec } from '../src/graph/types.ts';
 import { halfEdges } from '../src/core/halfedge.ts';

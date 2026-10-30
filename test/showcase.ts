@@ -8,7 +8,7 @@ import zlib from 'node:zlib';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { openPackages } from '../src/gallery/packages.ts';
+import { openPackages } from '../src/packages/registry.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { renderArgs } from '../src/render/options.ts';
 import { encodePNG } from '../src/render/png.ts';

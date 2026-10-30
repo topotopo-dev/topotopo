@@ -1,5 +1,5 @@
 // Export sidecars on disk (io/sidecars.ts): which JSON files beside an export are its metadata, read from their first
-// bytes. Workspace.listInputs, ArtifactStore.list and the viewer's Outputs list ask here. The format a file declares
+// bytes. Session.listInputs, ArtifactStore.list and the viewer's Outputs list ask here. The format a file declares
 // is cached by its size and modification time, so listings read each file once.
 import fs from 'node:fs';
 import path from 'node:path';

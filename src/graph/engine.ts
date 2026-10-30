@@ -45,7 +45,6 @@ import {
   DeferredExpr, REF_FUNCS, didYouMean, hasRefs, resolveParamName, resolveParams, scanNodeRefs, scanValue, vecOut,
 } from './params.ts';
 import type { ExprRefs, ResolvedParams, TimeState } from './params.ts';
-import { migrateGraphDetailed } from './migrate.ts';
 import { outputFieldIssues } from './outputs.ts';
 import { parallelMap as runKernel } from './parallel.ts';
 import type { PoolStats } from './parallel.ts';
@@ -439,7 +438,7 @@ const PSUF = '\u0000params';
 export class Engine {
   host: Host;
   cache = new GeoCache();
-  /** the workspace's scope: the assets, graphs and files of every cook that is not given another (CookOptions.scope) */
+  /** the project's scope: the assets, graphs and files of every cook that is not given another (CookOptions.scope) */
   readonly root: Scope;
   /** base signatures of nodes found to depend on time while cooking */
   timeDeps = new Set<string>();
@@ -487,7 +486,7 @@ export class Engine {
       const r = scope.packages?.resolve(type);
       return r && !('error' in r) ? r : undefined;
     }
-    const a = this.asset(type, scope) ?? this.asset(type.replace(/^asset:/, ''), scope);
+    const a = this.asset(type, scope);
     if (a) return a.def;
     return getNodeDef(type);
   }
@@ -548,7 +547,6 @@ export class Engine {
     if (!/^[A-Za-z_][\w]*$/.test(name)) throw new Error(`asset name must be an identifier, got "${name}"`);
     const scope = opts.scope ?? this.root;
     if (getNodeDef(name) && !this.asset(name, scope)) throw new Error(`"${name}" clashes with a built-in node type`);
-    graph = migrateGraphDetailed(graph).graph;
     const issues = this.validate(graph, '', scope);
     if (issues.errors.length) throw new Error(`asset graph invalid: ${issues.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
     const hash = String(hashString(stableStringify(graph)));
@@ -788,10 +786,8 @@ export class Engine {
 
   /** Validate and resolve all params without cooking. */
   dryRun(graph: GraphSpec, vars?: Record<string, any>, scope: Scope = this.root): { errors: Issue[]; warnings: Issue[]; notes: string[]; output: string } {
-    const mig = migrateGraphDetailed(graph);
-    graph = mig.graph;
     const v = this.validate(graph, '', scope);
-    const notes: string[] = [...mig.notes];
+    const notes: string[] = [];
     const allVars = { ...(graph.vars ?? {}), ...(vars ?? {}) };
     if (!v.errors.length) {
       // reference functions need cooked nodes: their params are reported as deferred
@@ -834,17 +830,6 @@ export class Engine {
     report.frame = time.frame;
     report.time = time.time;
     report.fps = time.fps;
-    if (depth === 0) {
-      // documents are migrated once; nested graphs belong to their parent document
-      try {
-        const m = migrateGraphDetailed(graph);
-        graph = m.graph;
-        report.notes.push(...m.notes);
-      } catch (e: any) {
-        report.errors.push({ node: '(graph)', message: e.message });
-        return report;
-      }
-    }
     const scope = opts.scope ?? this.root;
     const v = this.validate(graph, '', scope);
     if (v.errors.length) {
@@ -920,7 +905,6 @@ export class Engine {
     if (!(step > 0)) throw new Error(`frame step must be > 0, got ${step}`);
     if (!(range.end >= range.start)) throw new Error(`frame range end (${range.end}) is before start (${range.start})`);
     const n = Math.floor((range.end - range.start) / step + 1e-9) + 1;
-    graph = migrateGraphDetailed(graph).graph;
     const failed: number[] = [];
     for (let i = 0; i < n; i++) {
       const frame = r9(range.start + i * step);

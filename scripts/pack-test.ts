@@ -13,8 +13,8 @@
 // - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the built-in library, the
 //   bundled font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location,
 //   and rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
-// - The MCP server over stdio as a client starts it (`npm exec --no -- topotopo mcp --workspace …`, which is what
-//   `npx -y topotopo mcp` runs once the package is installed) on a new workspace folder, which it makes a project:
+// - The MCP server over stdio as a client starts it (`npm exec --no -- topotopo mcp --project …`, which is what
+//   `npx -y topotopo mcp` runs once the package is installed) on a new folder, which it makes a project:
 //   catalog (TopoTopo's own packages too), a build that names a kit's output and copies the kit in from the installed
 //   built-in library, a build that uses sdf_grid, and the preview page with three.js served from the installed
 //   dependencies.
@@ -79,7 +79,7 @@ try {
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
   const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
   check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
-  const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|workspace|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
+  const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|project|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
     (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
   check(!stray.length, `tarball has no sources, tests, examples, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
   // every file of every version of TopoTopo's own packages: a version has the same files wherever it is
@@ -131,7 +131,7 @@ try {
 import { Engine, allNodeDefs } from '${NAME}';
 import meta from '${NAME}/package.json' with { type: 'json' };
 import { createNodeHost } from './node_modules/${NAME}/dist/host/node.js';
-import { BUILTIN_LIBRARY } from './node_modules/${NAME}/dist/gallery/library.js';
+import { BUILTIN_LIBRARY } from './node_modules/${NAME}/dist/config.js';
 import { createNodePool } from './node_modules/${NAME}/dist/host/pool.js';
 import { kernelsWasmURL, kernelsWasmVariant, getLoadedKernels } from './node_modules/${NAME}/dist/wasm/kernels.js';
 import { fileURLToPath } from 'node:url';
@@ -217,10 +217,10 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
 
   // ------------------------------------------------------------------------------------------------ MCP
   step(`MCP server: npm exec --no -- ${BIN} mcp`);
-  const ws = path.join(tmp, 'workspace');
+  const ws = path.join(tmp, 'project');
   const transport = new StdioClientTransport({
     // npm exec --no: the local bin or nothing (npx in a non-TTY would fall back to downloading a same-named package)
-    command: 'npm', args: ['exec', '--no', '--', BIN, 'mcp', '--workspace', ws], cwd: app,
+    command: 'npm', args: ['exec', '--no', '--', BIN, 'mcp', '--project', ws], cwd: app,
     env: { ...process.env, TOPOTOPO_PORT: '0' } as Record<string, string>, stderr: 'pipe',
   });
   let serverLog = '';
@@ -235,12 +235,12 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     check(client.getServerVersion()?.name === NAME && client.getServerVersion()?.version === pkg.version, `server ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
     const cat = await call('catalog', {});
     check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('topotopo/nature/rock'), 'catalog lists the nodes and the installed packages of TopoTopo\'s own');
-    // the documented setup: a new workspace folder, which the server made a project, so the first build that names a
+    // the documented setup: a new folder, which the server made a project, so the first build that names a
     // kit's output copies the kit in
     const rock = await call('build', { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' });
     const nature = newestOf('nature');
     check(fs.existsSync(path.join(ws, 'project.json')) && !rock.isError && new RegExp(`note: added topotopo/nature ${re(nature)}`).test(rock.txt) && fs.existsSync(path.join(ws, 'packages', 'topotopo', 'nature', nature, 'version.json')),
-      `a new workspace is a project: the first build copies topotopo/nature in from the installed built-in library: ${rock.txt.split('\n')[0]}`);
+      `a new folder is a project: the first build copies topotopo/nature in from the installed built-in library: ${rock.txt.split('\n')[0]}`);
     const b = await call('build', { graph: { nodes: { b: { type: 'box' }, g: { type: 'sdf_grid', in: ['b'], params: { voxel_size: 0.1 } }, m: { type: 'grid_to_mesh', in: ['g'] } } } });
     check(!b.isError && b.txt.includes('✓'), `build with sdf_grid (WASM kernels in the server): ${b.txt.split('\n')[0].slice(0, 80)}`);
     const pv = await call('preview', {});
@@ -251,8 +251,8 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
   } finally {
     await client.close().catch(() => {});
   }
-  check(/ready \(stdio\)/.test(serverLog) && /made the workspace .* a project \(project\.json\)/.test(serverLog) && /workspace .*: \d+ graphs, \d+ assets; project /.test(serverLog),
-    `server log: ${serverLog.split('\n').filter((l) => l.includes('workspace')).map((l) => l.trim()).join(' | ')}`);
+  check(/ready \(stdio\)/.test(serverLog) && /made the folder .* a project \(project\.json\)/.test(serverLog) && /session .*: \d+ graphs, \d+ assets; project /.test(serverLog),
+    `server log: ${serverLog.split('\n').filter((l) => l.includes('project') || l.includes('session')).map((l) => l.trim()).join(' | ')}`);
 } catch (e: any) {
   failures++;
   console.log(`FAIL ${e?.stack ?? e}`);

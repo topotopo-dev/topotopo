@@ -118,7 +118,7 @@ function npmPackages(): { deps: Dep[]; optional: OptionalDep[] } {
   const optional = new Map<string, OptionalDep>();
   const unsynced: string[] = [];
   for (const [key, e] of Object.entries<any>(lock.packages)) {
-    if (!key || e.dev || e.link) continue; // the project itself, dev-only packages, workspace links
+    if (!key || e.dev || e.link) continue; // the project itself, dev-only packages, project links
     const name: string = e.name ?? key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
     const version = String(e.version ?? '');
     const id = `${name}@${version}`;

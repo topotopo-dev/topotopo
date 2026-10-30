@@ -17,7 +17,7 @@ import type { Artifact } from '../host/artifacts.ts';
 import { prepareTarget, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import { sidecarFile } from '../host/sidecars.ts';
-import type { Workspace } from '../workspace.ts';
+import type { Session } from '../session.ts';
 import type { GraphSource } from './graph-file.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { Image, referenceableImages, imageToBytes, resizeLayer } from '../core/image.ts';
@@ -30,7 +30,7 @@ import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
 import { fittingFormats, kindMismatch, outputKind } from '../io/kinds.ts';
 import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
-import { ProjectPackages } from '../gallery/packages.ts';
+import { ProjectPackages } from '../packages/registry.ts';
 import type { FormatFit, HeightfieldInfo, OutputKind } from '../io/kinds.ts';
 import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
@@ -132,7 +132,7 @@ export interface OutputsOptions {
   first?: () => string | null | undefined;
 }
 
-export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsOptions = {}) {
+export function createOutputs(ws: Session, changed: () => void, opts: OutputsOptions = {}) {
   const store = new ArtifactStore(ws.exportDir);
   const items = new Map<string, Item>(), previewCache = new Map<string, Uint8Array>();
   let queue = Promise.resolve(), closed = false, lastFiles = '', exportQueue = Promise.resolve();
@@ -169,7 +169,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     return info;
   };
   /**
-   * A card whose cook a person stopped (Workspace.held) goes back to the card it replaced, with the last finished
+   * A card whose cook a person stopped (Session.held) goes back to the card it replaced, with the last finished
    * result; one that never finished says it was stopped.
    */
   const unstop = (item: Item, at?: string) => {
@@ -277,7 +277,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
     }
     // the session values (a person tuning a graph file in the viewer) are part of what each output shows, and so are
     // the packages: an update, or a save in a working folder the session follows, changes what they resolve to
-    const workspaceRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
+    const sessionRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
     // the packages shown live this session (their working folders): the results that use them hold unpublished edits
     const following = ws.packages instanceof ProjectPackages ? ws.packages.following().map((f) => f.package) : [];
@@ -288,7 +288,7 @@ export function createOutputs(ws: Workspace, changed: () => void, opts: OutputsO
       const live = following.length ? packagesNamedIn(spec).filter((x) => following.includes(x)) : [];
       for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name)) {
         const id = idFor('graph', graph, p.output === null ? 'default' : 'named', p.output ?? 'main'); alive.add(id);
-        const key = workspaceRevision, old = items.get(id);
+        const key = sessionRevision, old = items.get(id);
         const named = p.output === null ? undefined : spec.outputs?.[p.output], pinned = named?.kind, tags = named?.tags;
         const meta = {
           label: p.label, output: p.output, default: p.default, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null,

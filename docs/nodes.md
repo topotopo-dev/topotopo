@@ -9287,7 +9287,7 @@ The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} 
 
 category: `flow` · aliases: `object_merge`, `reference`, `ref`
 
-Use the output (or any node) of another graph in the workspace — compose scenes from separate graphs.
+Use the output (or any node) of another graph in the project — compose scenes from separate graphs.
 
 **Inputs**
 
@@ -9297,7 +9297,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `graph` | string | `""` |  |  |  | workspace graph name |
+| `graph` | string | `""` |  |  |  | project graph name |
 | `node` | string | `""` |  |  |  | node in that graph ("" = its output) |
 | `vars` | json | `{}` |  |  |  | override that graph's vars |
 
@@ -9587,7 +9587,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the project folder (the nearest folder with a project.json at or above the graph), else from the graph's folder (MCP: the workspace); folder mode needs directory support in the host |
+| `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the project folder (the nearest folder with a project.json at or above the graph), else from the graph's folder (MCP: the project); folder mode needs directory support in the host |
 | `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |

@@ -1,12 +1,12 @@
 // LLM-facing documentation: operating guide, topic pages, and generated node references.
 import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
-import { PACKAGE_COMMANDS } from '../gallery/cli.ts';
+import { PACKAGE_COMMANDS } from '../packages/commands.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
 WORKFLOW
-0. inputs {action:"list"} → the person's own files in the workspace inputs/ folder (guide curves, sites, zones, blockouts, PNG masks). Building a landscape or scene: look there first and build on them (help topic "inputs").
+0. inputs {action:"list"} → the person's own files in the project inputs/ folder (guide curves, sites, zones, blockouts, PNG masks). Building a landscape or scene: look there first and build on them (help topic "inputs").
 1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…) and TopoTopo's own packages, ready-made generators by full name (topotopo/architecture/house, topotopo/nature/tree_lowpoly, topotopo/street/road_strip …).
 2. help {nodes:[...]} for exact params before using unfamiliar nodes; help {topic:"wrangle"|"graph"|"recipes"…} for concepts.
 3. build {graph} the WHOLE network in one call (dry_run:true validates without cooking). Every response reports errors per node with did-you-mean hints.
@@ -28,8 +28,8 @@ PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in on
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
-LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the workspace of every tool, {action:"create"} starts one. See help topic "library".
-PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the project once the graph validates. TopoTopo's own packages are four kits built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a project's graphs use packages: the server makes its workspace one when it starts if the folder holds nothing but a workspace's own folders (its first reply says so), and library {action:"init"} makes any other open workspace one when the person says so. library {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the project can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
+LIBRARIES: the person's projects live in libraries the TopoTopo Gallery website shows (their board links to them). library {action:"list"} finds one, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one. See help topic "library".
+PACKAGES: a project uses the published outputs of other projects as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the project once the graph validates. TopoTopo's own packages are four kits built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a project's graphs use packages: the server makes its project one when it starts if the folder holds nothing but a project's own folders (its first reply says so), and library {action:"init"} makes any other open project one when the person says so. library {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in every library ("a conifer", every terrain) and says whether the project can use each, {action:"set", libraries:[...]} lists a library the person names, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
 
 /**
  * The complete example of help topic "inputs": guides.glb's path.* curves cut roads into a heightfield and its zone.*
@@ -73,9 +73,9 @@ export function graphLines(g: GraphSpec): string {
 export const TOPICS: Record<string, string> = {
   library: `LIBRARIES AND THE GALLERY
 A library is a folder the person listed (\`topotopo library add <name> <folder>\`, kept in ~/.topotopo/config.json). A
-project is any folder in it holding project.json, and is a workspace of its own:
+project is any folder in it holding project.json, with the folders TopoTopo works with:
   props/lantern/project.json    {id, title, description, tags, graph:"main", bake:{graph?, node?, frame?}, links:[{label, url}]}
-  props/lantern/graphs/ assets/ inputs/ exports/  as in any workspace
+  props/lantern/graphs/ assets/ inputs/ exports/  as in any project
   props/lantern/attachments/    concept art, references, source files (shown on the project's gallery page)
   props/lantern/.gallery/       thumb.png, preview.glb, bake.json: derived, never edit
 The parent folders ("props") are the project's collection. The gallery (\`topotopo gallery\`, http://127.0.0.1:7340)
@@ -90,9 +90,9 @@ WORKING IN A PROJECT
 - library {action:"open", library, id} → every tool (build, edit, render, export, inputs, assets, preview) now works
   in that folder. Build the project's model into graph "main" (or the manifest's "graph").
 - library {action:"create", library, path:"props/barrel", title, tags, links} → a new project, opened.
-- library {action:"init"} → the open workspace becomes a project where it is none (project.json in its folder), when
-  the person wants its graphs to use packages. When the server starts it makes its workspace, named or not, a project
-  if the folder is in no project and holds nothing but what a workspace makes itself (graphs/, assets/, exports/,
+- library {action:"init"} → the server's folder becomes a project where it is none (project.json in its folder), when
+  the person wants its graphs to use packages. When the server starts it makes its folder, named or not, a project
+  if the folder is in no project and holds nothing but what TopoTopo makes itself (graphs/, assets/, exports/,
   inputs/), or nothing at all; a folder with anything else in it (a repository, the person's own files) stays as it is
   until the person says so.
 - library {action:"set", tags, links, description, bake:{frame: 48}} → edit project.json (bake.frame for
@@ -151,10 +151,10 @@ ready-made output in any library ("a conifer", every terrain): library {action:"
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
 - build mode "merge" upserts nodes into the existing graph; edit ops: set, add, remove (auto-rewires), connect, rename, output, vars, bypass, replace, insert (after a node, rewiring its consumers).
-- Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the workspace.`,
+- Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the project.`,
 
-  inputs: `HUMAN INPUT (guides, blockouts and masks in the workspace inputs/ folder)
-People feed in their own material by dropping files into <workspace>/inputs/ (or onto the live viewer, or with its Add
+  inputs: `HUMAN INPUT (guides, blockouts and masks in the project inputs/ folder)
+People feed in their own material by dropping files into <project>/inputs/ (or onto the live viewer, or with its Add
 input button): meshes, guide curves and points drawn in Blender, Houdini or Unreal, placeholder blockouts, PNG masks and
 heightmaps. Every tool answer ends with a note when inputs/ has files new or changed since your last call. Before building a
 landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path} tells what one holds (polygons, open
@@ -873,11 +873,11 @@ Any graph with vars can be saved as a node type: assets {action:"save", name:"ro
 The graph's vars become parameters (add "params": {"var": {"desc": "...", "min": 0, "max": 1}} for docs/ranges).
 Inputs: put {"type":"input","params":{"index":0,"label":"surface"}} nodes in the graph.
 Then use it like any node: {"type": "rock_cluster", "in": ["terrain"], "params": {"count": 50}}.
-Assets are stored as JSON in workspace/assets and load on startup; list, get and delete work on them.
+Assets are stored as JSON in the project's assets/ folder and load on startup; list, get and delete work on them.
 Ready-made generators are TopoTopo's own packages, used by full name (help topic "packages"): walls, houses, roofs,
 stairs, rocks, trees, props and roads such as {"type": "topotopo/architecture/stairs", "params": {"steps": 12}}. To
 change one: assets {action:"fork", name:"topotopo/architecture/stairs", to:"my_stairs"} copies the output's graph into
-the workspace's assets as my_stairs (an output whose graph names the kit's other outputs adds the kit to the project);
+the project's assets as my_stairs (an output whose graph names the kit's other outputs adds the kit to the project);
 assets {action:"get", name:"my_stairs"} shows it, assets {action:"save", name:"my_stairs", graph} writes it back, and
 {"type": "my_stairs"} uses it.`,
 
@@ -957,7 +957,7 @@ registered, a package's folder instead of its library's) is reported, and the ot
 a library by themselves: library {action:"set", libraries:[...]} (CLI: topotopo libraries add|remove) does it when the
 person names one. Besides those, every project looks in TopoTopo's built-in library, "topotopo" (no other library takes
 that name): it holds TopoTopo's own packages (owner "topotopo"), which a project uses, copies and locks like any other;
-a newer version a TopoTopo release brings shows as an update. Only a project's graphs use packages: in a workspace that
+a newer version a TopoTopo release brings shows as an update. Only a project's graphs use packages: in a folder that
 is none, naming one fails and says so, and library {action:"init"} (CLI: topotopo init) makes it a project, when the
 person says so.
 - First use: a build or edit whose graph names a package the project does not use yet adds its newest version once the
@@ -1129,7 +1129,7 @@ FRAMING: every 3D view fits the bounds: the bbox corners fill the view with a sm
     scale 2 makes a 2× image.
 BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no ground grid or axis gizmo; the footer
   stays). grid:false drops the persp ground grid. underlay:"inputs/side.png" draws a reference image (PNG, relative to
-  the workspace) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
+  the project) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
   rectangle the bounds cover in that view, keeping its aspect, so a reference cropped to the object lines up with it),
   "width" / "height" (its width or height spans the bounds'), "view" (the whole view). Pick the view that matches the
   picture: render {views:"front", underlay:"inputs/side.png", size:"1600x500"}.
@@ -1187,7 +1187,7 @@ export {output:"crate"} / export {} (the default output) / export {all:true}: th
   "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
 PATHS: one rule for the CLI, the MCP server and the viewer: relative paths inside a graph (file nodes, material maps,
   image files) read from its project folder, the nearest folder with a project.json at or above the graph file, else
-  the graph file's folder (MCP: the workspace); exports/ is that project's (a graph in <project>/graphs/ exports into
+  the graph file's folder (MCP: the server's folder); exports/ is that project's (a graph in <project>/graphs/ exports into
   <project>/exports/, never beside itself), and exports/.outputs.json records the files by their project paths. The
   CLI's own --render / --export / --underlay paths are relative to the current folder.
 export {path:"exports/thing.glb"} — format from the extension:

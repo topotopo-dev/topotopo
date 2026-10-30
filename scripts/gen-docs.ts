@@ -9,7 +9,7 @@ import '../src/nodes/index.ts';
 import { CATEGORY_ORDER, allNodeDefs } from '../src/graph/registry.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { ProjectPackages } from '../src/gallery/packages.ts';
+import { ProjectPackages } from '../src/packages/registry.ts';
 import type { NodeDef, ParamDef } from '../src/graph/types.ts';
 
 export const NODES_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'nodes.md');

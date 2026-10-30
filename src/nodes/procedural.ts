@@ -240,7 +240,6 @@ defineNode({
     center: P.center(),
   },
   // a font path reads the scope's folder
-  usesScope: true,
   signatureExtra: (p, scope) => scope.files.findFont(p.font || undefined) ?? 'nofont',
   example: { type: 'text', params: { text: 'OPEN', size: 0.5, depth: 0.1 } },
   async cook({ p, scope, warn }) {
