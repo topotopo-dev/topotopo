@@ -10,6 +10,8 @@
 //   temp folder with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
 //   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
 //   makes the folder a package, and the cook's first use copies the built-in package in from the installed built-in library).
+// - The cook for Godot from the installed bin: `topotopo cook <package> --for godot --progress json` on the neutral props
+//   of the cook tests in a Godot project, and `topotopo godot status` reading it as current.
 // - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the built-in library, the
 //   bundled font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location,
 //   and rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
@@ -127,6 +129,24 @@ try {
   check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/skeleton_roofs.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
   check(fs.existsSync(path.join(app, 'roofs.glb')) && fs.readFileSync(path.join(app, 'roofs.glb')).subarray(0, 4).toString() === 'glTF', 'exported roofs.glb');
   console.log(cook.split('\n').filter((l) => /^(cooked|geometry|rendered|exported)/.test(l)).join('\n'));
+
+  // ------------------------------------------------------------------------------------------------ Godot
+  step(`Godot: npm exec --no -- ${BIN} cook … --for godot`);
+  // a Godot project with the neutral props package of the cook tests (test/data/cook/props), cooked by the installed bin
+  const game = path.join(tmp, 'godot game');
+  const copy = (from: string, to: string) => {
+    fs.mkdirSync(to, { recursive: true });
+    for (const e of fs.readdirSync(from, { withFileTypes: true })) (e.isDirectory() ? copy : fs.copyFileSync)(path.join(from, e.name), path.join(to, e.name));
+  };
+  copy(path.join(ROOT, 'test', 'data', 'cook', 'props'), path.join(game, 'props'));
+  fs.writeFileSync(path.join(game, 'project.godot'), 'config_version=5\n');
+  const cookEnv = { ...process.env, TOPOTOPO_CACHE: path.join(tmp, 'cook-cache') };
+  const progress = sh(`npm exec --no -- ${BIN} cook "${path.join(game, 'props')}" --for godot --progress json --quiet`, app, cookEnv).split(/\r?\n/).filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+  const crate = path.join(game, 'props', 'outputs', 'crate', 'crate.glb');
+  check(progress.at(-1)?.event === 'done' && progress.at(-1)?.ok && fs.existsSync(crate) && fs.readFileSync(crate).subarray(0, 4).toString() === 'glTF' && fs.existsSync(path.join(game, 'props', '.topotopo', 'godot.json')),
+    `cook --for godot writes the outputs and the record (${progress.filter((e) => e.event === 'output').map((e) => `${e.output}:${e.state}`).join(' ')})`);
+  const status = sh(`npm exec --no -- ${BIN} godot status "${game}"`, app, cookEnv);
+  check(/^\s+ok\s+res:\/\/props\/props\.topo/m.test(status), `godot status reads the package as current (${status.split('\n')[1]?.trim()})`);
 
   // ------------------------------------------------------------------------------------------------ library
   step(`library: import '${NAME}' from the installed package`);

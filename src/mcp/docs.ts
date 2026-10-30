@@ -2,6 +2,7 @@
 import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
 import { PACKAGE_COMMANDS } from '../packages/commands.ts';
+import { GODOT_COMMANDS } from '../host/godot-commands.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
@@ -1171,6 +1172,48 @@ EXPORTS record the package versions their graph used in the source block: "packa
 
 THE CLI COMMANDS (a folder named must exist; without one, the current folder's package):
 ${PACKAGE_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
+  godot: `GODOT (packages inside a Godot project, imported by the TopoTopo plugin)
+A package inside a Godot project imports as <id>.topo: the plugin (topotopo godot setup puts it in addons/topotopo/) cooks
+each published output into a plain GLB Godot imports itself, and keeps them current while graphs change (from the
+viewer, an agent over MCP, by hand). Levels place and load the GLBs, never the .topo.
+
+WHAT IS COOKED: the package's published outputs, the rule publishing uses: every named output of every graph without
+"publish": false, plus the default output (named after the package id when it is no named output), minus the skip
+list; each at frame 1 with its graph's var defaults, from the working folder, the packages it uses from their pinned
+copies (working folders are never followed). Nothing of the package is written but its outputs and its record: a graph
+naming a package it does not use, or a missing or edited copy, fails that output (as --locked does).
+  mesh, scene, instances, curves, points   <folder>/<id>/<id>.glb (per-output folders) or <folder>/<id>.glb (--flat)
+  textures                                  one PNG per image in that folder
+  terrain, material, volume                 not imported yet: listed as skipped, with why (a warning)
+The GLB: TopoTopo's glTF defaults (y up, metres, materials with embedded images, no compression or quantization),
+node names as authored (sockets from scene_null, _lod0/_lod1 pieces, Godot's -col/-colonly suffixes), packed instances
+as EXT_mesh_gpu_instancing (MultiMeshInstance3D in Godot; the instances' Cd as _COLOR), every required extension one
+Godot 4.7 reads, the source block in asset.extras.source with "package". No .source.json beside it.
+
+OPTIONS come from <id>.topo.import [params] (the Import dock), and the flags override them:
+  outputs/folder "outputs" (relative to the package, or res://…)        --into <folder>
+  outputs/per_output_folders true                                        --flat
+  outputs/skip "" (comma-separated output ids)                           --skip a,b
+  instances/mode 0 MultiMesh (packed) | 1 Expand (real copies)           --instancing packed|expand
+
+WRITING: one cook per package at a time (<package>/.topotopo/cook.lock); only files whose bytes changed are written
+(through <file>.topotopo-part), so Godot reimports only those; a failed output keeps its last good files and the others
+still update; a file at an output path is replaced only when the record lists it or it was cooked for this package
+(--adopt takes one over once, keeping its .import); an output no longer published leaves its files as orphans.
+THE RECORD <package>/.topotopo/godot.json (commit it with the outputs and their .import files): canonical JSON, no
+times, no machine paths; per output its deps (every file it read), files with their SHA-256, state and errors.
+A package is current when its record matches: the options, every source's hash (text read with LF line ends), the
+listings of graphs/, assets/, inputs/ and the folders outputs listed, every output file, and a TopoTopo no newer than
+the one that cooked it. Only outputs whose own deps changed cook again; results are shared through the cook cache
+(~/.topotopo/cache/cook, or $TOPOTOPO_CACHE/cook) by every checkout and worktree.
+
+EXIT CODES: 0 every output ok; 1 an output or package failed or timed out (records and reports still written);
+2 usage, setup or protocol error, a published copy, a package outside a Godot project (nothing written).
+CI: godot --headless --path game --import, then topotopo godot status game --strict.
+The plugin's contract (jobs file, progress lines, record schema, freshness): integrations/godot/PROTOCOL.md.
+
+THE CLI COMMANDS:
+${GODOT_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):
