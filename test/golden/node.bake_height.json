@@ -37,9 +37,9 @@
         },
         "kind": "image",
         "layers": {
-          "C": "eb64827de2b72a63",
-          "distance": "05de769d81ba7d7f",
-          "mask": "b25f6e8801636ef6",
+          "C": "d42fdd0520ae22df",
+          "distance": "f33aea6723214ded",
+          "mask": "5963c5b542beec4f",
           "missed": "9005a1b59538744f"
         },
         "name": "target"

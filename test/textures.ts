@@ -453,7 +453,15 @@ const UVBOX = { b: { type: 'box', params: { divisions: [2, 2, 2] } }, uv: { type
   for (let i = 0; i < wm.length; i++) if (wm[i] === 1) { const v = [wc[i * 4], wc[i * 4 + 1], wc[i * 4 + 2]].map((x) => Math.abs(x * 2 - 1)); if (Math.abs(Math.max(...v) - 1) > 1e-3) axisAligned = false; }
   check(axisAligned, 'bake_world_normal of a box: every covered texel is an axis direction');
   const vc = await image({ ...UVBOX, c: { type: 'color', in: ['uv'], params: { color: [0.2, 0.4, 0.6] } }, v: { type: 'bake_vertex_color', in: ['c'], params: { resolution: 16 } } }, 'v');
-  check(Math.abs(vc.layer('C')![0] - 0.2) < 1e-6 && Math.abs(vc.layer('C')![2] - 0.6) < 1e-6, 'bake_vertex_color writes Cd as it is (padding fills the gaps)');
+  {
+    // a covered texel, and an uncovered one beside it (filled by the padding), hold Cd as it is
+    const C = vc.layer('C')!, m = vc.layer('mask')!, W = 16;
+    const inside = m.indexOf(1);
+    let edge = -1;
+    for (let i = 0; i < W * W && edge < 0; i++) if (m[i] === 0 && [i - 1, i + 1, i - W, i + W].some((j) => j >= 0 && j < W * W && Math.abs((j % W) - (i % W)) <= 1 && m[j] === 1)) edge = i;
+    const is = (i: number) => i >= 0 && Math.abs(C[i * 4] - 0.2) < 1e-6 && Math.abs(C[i * 4 + 2] - 0.6) < 1e-6;
+    check(is(inside) && is(edge), 'bake_vertex_color writes Cd as it is (padding fills the gaps)');
+  }
   const th = await image({ ...UVBOX, t: { type: 'bake_thickness', in: ['uv'], params: { resolution: 32, samples: 8, max_distance: 2 } } }, 't');
   const tm = mean(th.layer('C')!, 1, 0, (i) => th.layer('mask')![i] === 1);
   check(tm > 0.45 && tm < 0.6, `bake_thickness of a unit box ≈ 1 m / 2 m (${f3(tm)})`);
