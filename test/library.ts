@@ -373,6 +373,15 @@ section('the scan: what it skips, what it enters, how deep');
   check(listing.some((l) => /^workspace by-hand  .*\(\d+ packages\)$/.test(l)) && listing.some((l) => /^decor-lib  .*decor {2}\(shown as the workspace "by-hand"'s, at decor\/\)$/.test(l)),
     `library list marks the workspaces and names a library inside one (${listing.filter((l) => !/^ {2}/.test(l)).join(' | ')})`);
   removeLibrary('decor-lib');
+  // two folders of one library holding one id: the MCP tool names both and asks for the folder
+  const twins = path.join(tmp, 'twin-ids');
+  for (const lv of ['level1', 'level2']) { fs.mkdirSync(path.join(twins, lv, 'ground'), { recursive: true }); fs.writeFileSync(path.join(twins, lv, 'ground', 'ground.topo'), JSON.stringify({ title: `Ground ${lv}` })); }
+  addLibrary('twin-ids', twins);
+  const twinGet = await said({ action: 'get', library: 'twin-ids', id: 'ground' });
+  const byPath = await said({ action: 'get', path: path.join(twins, 'level2', 'ground') });
+  check(/^ERR id "ground" is used by 2 folders of "twin-ids": level1\/ground, level2\/ground \(rename one's \.topo file\); give \{path\} for one$/.test(twinGet) && /"Ground level2"/.test(byPath),
+    `an id two folders of one library hold: the MCP tool names both and asks for the folder, which works (${twinGet})`);
+  removeLibrary('twin-ids');
   const cfgWas = process.env.TOPOTOPO_CONFIG!;
   process.env.TOPOTOPO_CONFIG = path.join(tmp, 'cfg-ws-only', 'config.json');
   fs.mkdirSync(path.dirname(process.env.TOPOTOPO_CONFIG), { recursive: true });

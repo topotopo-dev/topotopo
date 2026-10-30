@@ -64,7 +64,10 @@ export function workspaceTool(host: WorkspaceToolHost): ToolDef {
     if (a.id) {
       const hits = scans().flatMap((s) => s.packages).filter((p) => p.id === a.id && (!a.library || p.lib === a.library));
       if (hits.length === 1) return hits[0];
-      if (hits.length > 1) throw new Error(`id "${a.id}" is in several libraries (${hits.map((p) => p.lib).join(', ')}): give "library"`);
+      // two folders of one place holding the id (the scan said so): "library" cannot tell them apart, their folders can
+      const places = [...new Set(hits.map((p) => p.lib))];
+      if (hits.length > 1 && places.length === 1) throw new Error(`id "${a.id}" is used by ${hits.length} folders of "${places[0]}": ${hits.map((p) => p.rel).join(', ')} (rename one's .topo file); give {path} for one`);
+      if (hits.length > 1) throw new Error(`id "${a.id}" is in several libraries (${places.join(', ')}): give "library"`);
       throw new Error(`no package "${a.id}"${a.library ? ` in "${a.library}"` : ''}. workspace {action:"list"} lists them`);
     }
     const dir = a.path ? packageDirOf(path.resolve(a.path)) : currentDir();
