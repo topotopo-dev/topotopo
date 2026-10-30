@@ -1,4 +1,4 @@
-// Baking a project's previews: .gallery/thumb.png (512 px matcap, or the graph's meta.thumbnail_render: a "pbr" one
+// Baking a package's previews: .gallery/thumb.png (512 px matcap, or the graph's meta.thumbnail_render: a "pbr" one
 // renders through the asynchronous entry, which loads MikkTSpace and the textures itself) and .gallery/preview.glb
 // (meshopt), plus
 // .gallery/bake.json recording the bake key they were made from. The gallery never cooks in its own process (cooks
@@ -29,7 +29,7 @@ export const BAKE_TIMEOUT_MS = 300_000;
 /** the simulation limit inside a bake child (the engine's default is 600 s per node) */
 export const BAKE_SIM_TIMEOUT_MS = 120_000;
 
-/** Bake one project in this process. Never throws for a graph problem: the result (also in bake.json) says. */
+/** Bake one package in this process. Never throws for a graph problem: the result (also in bake.json) says. */
 export async function bakePackage(dir: string): Promise<BakeState> {
   const m = readManifest(dir);
   const key = bakeKey(dir, m);
@@ -46,14 +46,14 @@ export async function bakePackage(dir: string): Promise<BakeState> {
     if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) engine.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
     if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) engine.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
     await engine.init();
-    // the packages the project uses, from its copies (a bake adds none), its graphs and its assets
+    // the packages the package uses, from its copies (a bake adds none), its graphs and its assets
     const ws = openPackage(engine, dir).session;
     const name = m.bake.graph ?? m.graph;
     const g = ws.graphs.get(name);
-    if (!g) return finish({ ok: false, error: `no default graph yet: the project has no graph "${name}" (project.json "graph")` });
+    if (!g) return finish({ ok: false, error: `no default graph yet: the package has no graph "${name}" (project.json "graph")` });
     const r = await engine.cook(g, { target: m.bake.node, frame: m.bake.frame });
     if (!r.ok || !r.geo) return finish({ ok: false, error: r.errors.map((e) => `[${e.node}] ${e.message}`).join('\n') || 'the cook gave no geometry' });
-    // the asynchronous render: shading "pbr" needs MikkTSpace and the material's textures, which it loads (a project
+    // the asynchronous render: shading "pbr" needs MikkTSpace and the material's textures, which it loads (a package
     // needs no preload script of its own)
     const img = await renderGeometryAsync(r.geo, thumbOptions(g, THUMB_SIZE), (p) => engine.host.readFile(p));
     const side = img.width; // a single square view tile sits above the footer
@@ -75,13 +75,13 @@ export async function bakePackage(dir: string): Promise<BakeState> {
 const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', import.meta.url.endsWith('.ts') ? 'cli.ts' : 'cli.js');
 
 export interface BakeQueueOptions {
-  /** called after each bake with the project folder and its new state (null: the child died without one) */
+  /** called after each bake with the package folder and its new state (null: the child died without one) */
   onDone?: (dir: string, state: BakeState | null) => void;
   timeoutMs?: number;
   log?: (msg: string) => void;
 }
 
-/** Bakes in child processes, one at a time, each project once however often it is asked for meanwhile. */
+/** Bakes in child processes, one at a time, each package once however often it is asked for meanwhile. */
 export class BakeQueue {
   private queue: string[] = [];
   private running: string | null = null;

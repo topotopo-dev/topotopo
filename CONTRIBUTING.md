@@ -13,10 +13,10 @@ Thanks for your interest. A few things to know before you start.
   `npm run test:update` for its golden, add behavioural checks to the matching `test/*.ts`, and run `npm run docs`.
 - **Keep the core host-agnostic.** `src/core`, `src/graph` and `src/nodes` must not import Node APIs. Cooked geometry
   is immutable: `clone()` before writing. Y-up, metres, degrees, Houdini attribute names.
-- **TopoTopo's own packages are versioned.** A kit in `library/<kit>/` is a package project: change its graphs, run
+- **TopoTopo's own packages are versioned.** A kit in `library/<kit>/` is a package that publishes versions: change its graphs, run
   `npm run kits` (line-ups, thumbnails, the README table), then publish the change as the kit's next version with
   `npm run kits -- --publish <kit> --note "what changed"`, which numbers it as for any package. `npm test` fails while a
-  kit's working folder differs from its newest version: a change reaches projects only as a new version they update to.
+  kit's working folder differs from its newest version: a change reaches packages only as a new version they update to.
 - **Licences.** Dependencies that ship must be permissive: MIT, Apache-2.0, BSD, ISC, MPL-2.0, Unicode-3.0, Zlib, 0BSD, Unlicense or CC0. No GPL or AGPL anywhere in the tree. LGPL is tolerated only for optional native modules that our code never calls and that load dynamically if present (today: sharp/libvips, an optional dependency of gltf-transform); `npm run notice` lists them and flags anything outside this list.
   Run `npm run notice` after adding one so `NOTICE` carries its licence text; after a change to the Rust crates of
   `kernels/` (Cargo.lock) it needs `cargo`. `npm test` checks NOTICE without Rust.

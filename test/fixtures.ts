@@ -314,7 +314,7 @@ export const PARAMS: Record<string, any> = {
   inflate: { steps: 12, pressure: 1.3 },
 };
 
-/** Node types that cannot cook standalone (subgraph input, references to project graphs). */
+/** Node types that cannot cook standalone (subgraph input, references to package graphs). */
 export const SKIP = new Set(['input', 'graph_ref']);
 
 /**
@@ -412,7 +412,7 @@ export function graphIsEnvDependent(graph: GraphSpec): boolean {
 }
 
 /**
- * TopoTopo's own packages for an engine: a project in `dir` (default: a new temp folder) that uses every one of them,
+ * TopoTopo's own packages for an engine: a package in `dir` (default: a new temp folder) that uses every one of them,
  * their newest versions copied from the built-in library, attached to the engine's root, where their outputs resolve.
  */
 export function useKits(engine: Engine, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-kits-'))): PackageUses {
@@ -424,7 +424,7 @@ export function useKits(engine: Engine, dir = fs.mkdtempSync(path.join(os.tmpdir
 
 /**
  * An initialised engine whose host resolves relative paths in a fresh temp dir, which holds `cube.obj`
- * (the `file` node fixture). PARAMS.file.path is set to that absolute path. The temp dir is a project that uses
+ * (the `file` node fixture). PARAMS.file.path is set to that absolute path. The temp dir is a package that uses
  * TopoTopo's own packages (useKits), so node examples and the kits' fixtures cook their outputs.
  */
 export async function createFixtureEngine(): Promise<{ engine: Engine; tmp: string; objPath: string }> {

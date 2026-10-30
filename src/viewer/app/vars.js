@@ -77,7 +77,7 @@ export function controlList(params = {}, vars = {}) {
 
 /**
  * What a control's ↺ goes back to. Over a graph file ("file" mode) the graph's own value (graphVars), else its
- * declared default, else a blank of its type; in a project the declared default (undefined: no reset).
+ * declared default, else a blank of its type; in a package the declared default (undefined: no reset).
  */
 export function baseValue(mode, vd, graphVars, k) {
   if (mode !== 'file') return vd?.default;

@@ -96,7 +96,7 @@ function nodeSection(def: NodeDef): string[] {
 
 /**
  * The outputs of TopoTopo's own packages as node definitions (category "package"): every output and each kit's default
- * output, at the newest version TopoTopo's built-in library holds, as the catalog offers them outside a project.
+ * output, at the newest version TopoTopo's built-in library holds, as the catalog offers them outside a package.
  */
 export async function kitDefs(): Promise<NodeDef[]> {
   const engine = new Engine(createNodeHost({ workers: 0 }));
@@ -141,9 +141,9 @@ export function renderNodeReference(nodes: NodeDef[] = allNodeDefs(), packages: 
     if (c === 'package') {
       out.push('The outputs of TopoTopo\'s own packages, the kits in its built-in library ([library/](../library); see the README',
         'section "TopoTopo\'s own packages"), by full name; a kit\'s name alone is its default output, which lines its outputs up.',
-        'A project\'s graph names one like any node, and its first use copies the kit\'s version into the project. Their',
+        'A package\'s graph names one like any node, and its first use copies the kit\'s version into the package. Their',
         'parameters are the outputs\' typed vars; their inputs are the graphs\' `input` nodes. `assets {action: "fork"}`',
-        'copies one\'s graph into the project\'s assets to edit.', '');
+        'copies one\'s graph into the package\'s assets to edit.', '');
     }
     for (const def of byCat.get(c)!) out.push(...nodeSection(def));
   }

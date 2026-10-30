@@ -23,7 +23,7 @@ const goldenDir = path.join(ROOT, 'test', 'golden');
 const examplesDir = path.join(ROOT, 'examples');
 
 const { engine } = await createFixtureEngine();
-// the examples are a project: they cook TopoTopo's own packages from its copies
+// the examples are a package: they cook TopoTopo's own packages from its copies
 const exampleEngine = new Engine(createNodeHost({ baseDir: examplesDir }));
 await exampleEngine.init();
 openPackages(exampleEngine, examplesDir);

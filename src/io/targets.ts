@@ -1,6 +1,6 @@
 // Export targets: where a graph's published outputs export to. graph.export is the default output's target and
 // graph.outputs[id].export a named output's: a format name ("glb"), or {format, path?, ...the export tool's options},
-// with the path inside the project's exports/ folder, or "engine:<path>" inside the game engine's assets folder that
+// with the path inside the package's exports/ folder, or "engine:<path>" inside the game engine's assets folder that
 // the workspace names (topotopo-workspace.json engine.assets; "engine:" alone: the default file name there). The viewer's Export buttons, the MCP export tool and the CLI's
 // --export-all resolve targets here, so one target writes the same files everywhere. Pure: no file system.
 import type { ExportFormat } from './export.ts';

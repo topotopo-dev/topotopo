@@ -1,5 +1,5 @@
-// TopoTopo's own packages: the kits of its built-in library. library/<kit>/ is the package project of topotopo/<kit>:
-// one graph per output in graphs/, named as the output, and graphs/kit.json, the graph the project shows, whose output
+// TopoTopo's own packages: the kits of its built-in library. library/<kit>/ is the package package of topotopo/<kit>:
+// one graph per output in graphs/, named as the output, and graphs/kit.json, the graph the package shows, whose output
 // (the package's default output, and its preview) lines the kit's outputs up side by side. Its published versions are
 // in library/<kit>/versions/; an installed TopoTopo ships those alone. This script keeps the derived files in step with
 // the kits' graphs and publishes their versions, which nothing else does:
@@ -184,7 +184,7 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
   if (args.includes('--publish')) {
     const name = opt('--publish'), k = kits.find((x) => x.name === name);
     if (!k) { console.log(`--publish needs a kit: ${kits.map((x) => x.name).join(', ')}`); process.exit(1); }
-    // publishing cooks each output as a project that uses the kit does, in the kit's own scope
+    // publishing cooks each output as a package that uses the kit does, in the kit's own scope
     const { engine, pk } = await kitEngine(k);
     const r = await publishPackage(pk, { note: opt('--note'), big: args.includes('--big'), builtin: true });
     console.log(publishText(r));

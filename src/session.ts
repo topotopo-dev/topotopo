@@ -1,7 +1,7 @@
 // A session: a folder's named graphs (persisted as JSON files), saved assets, the human's input files, and the engine
 // that cooks them. Shared by the MCP server, the live viewer and the CLI.
 //   <dir>/graphs/<name>.json   graphs        <dir>/assets/<name>.json   saved assets
-//   <dir>/<name>.json          in a project (a folder with project.json), its graph files beside project.json are
+//   <dir>/<name>.json          in a package (a folder with project.json), its graph files beside project.json are
 //                              graphs too (examples/ keeps its graphs there); graphs/ wins a name both have
 //   <dir>/inputs/…             files people drop in (meshes, guide curves, PNG masks), read with file nodes; or a
 //                              folder given to the constructor (`topotopo view`: inputs/ beside the graph file)
@@ -38,7 +38,7 @@ export interface EditOp {
 
 export const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 
-/** A file under <project>/inputs. */
+/** A file under <package>/inputs. */
 export interface InputFile {
   /** posix path relative to inputs/ (a file node reads it as "inputs/" + path) */
   path: string;
@@ -159,17 +159,17 @@ export class EditRejected extends Error {
   }
 }
 
-/** The folders a project makes in its own folder (Session.load): graphs, assets, exports and inputs. */
+/** The folders a package makes in its own folder (Session.load): graphs, assets, exports and inputs. */
 export const PACKAGE_FOLDERS = ['graphs', 'assets', 'exports', 'inputs'];
 
 /** A graph file's text holds a graph: an object with "nodes" (project.json and other JSON files do not). */
 const holdsGraph = (j: unknown) => !!j && typeof j === 'object' && !Array.isArray(j) && !!(j as any).nodes && typeof (j as any).nodes === 'object';
 
 /**
- * The graph files of a folder by graph name: graphs/<name>.json, and in a project (a folder holding project.json) the
+ * The graph files of a folder by graph name: graphs/<name>.json, and in a package (a folder holding project.json) the
  * graph files beside project.json, not below it, whose name graphs/ does not have. A file there is a graph when it
  * holds an object with "nodes"; an unreadable one is left out. The gallery, `topotopo edit` and the MCP server read a
- * project's graphs here.
+ * package's graphs here.
  */
 export function graphFiles(dir: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -188,27 +188,27 @@ export function graphFiles(dir: string): Map<string, string> {
 }
 
 /**
- * The packages of the project a session's folder belongs to (src/packages/registry.ts), attached by whoever opens it: a graph
- * set or edited through the project that names a package the project does not use yet adds it (first use).
+ * The packages the package a session's folder belongs to uses (src/packages/registry.ts), attached by whoever opens it: a graph
+ * set or edited through the session that names a package the package does not use yet adds it (first use).
  */
 export interface SessionPackages {
   /**
-   * add the packages a graph names that the project does not use yet, once the graph validates (nothing is written for
+   * add the packages a graph names that the package does not use yet, once the graph validates (nothing is written for
    * one that does not); says what was added
    */
   addFor(graph: GraphSpec): string[];
   /**
-   * what a graph is checked with where nothing may be written (a dry run, a trial of a person's values): the project's
+   * what a graph is checked with where nothing may be written (a dry run, a trial of a person's values): the package's
    * packages, and those the graph names for the first time at the version build or edit would add, read where a library
    * holds them, nothing copied; the notes say what build or edit add; `id` is the id of a scope that resolves with it
    */
   dryRun(graph: GraphSpec): { resolver: PackageResolver; notes: string[]; id: string };
   /**
-   * the node type of an output of a package the project does not use yet, read where a library it looks in holds the
+   * the node type of an output of a package the package does not use yet, read where a library it looks in holds the
    * newest version (nothing copied): what help says about an output search found; null when none has it
    */
   describe(name: string): NodeDef | null;
-  /** why the project's graphs cannot use packages, and how that changes (null when they can) */
+  /** why the package's graphs cannot use packages, and how that changes (null when they can) */
   notice(): string | null;
   /** read again what changed on disk (project.json, the lock, working folders followed this session); true if anything did */
   refresh(): boolean;
@@ -237,11 +237,11 @@ export class Session {
   listeners = new Set<(ev: { graph: string; version: number }) => void>();
   /** told when the cooks of a graph start, move to another node (with that node's event), are asked to stop and end (see activity) */
   activityListeners = new Set<(graph: string, ev?: NodeProgress) => void>();
-  /** the packages of the project the session's folder belongs to, when whoever opened it attached them (src/packages/registry.ts) */
+  /** the packages of the package the session's folder belongs to, when whoever opened it attached them (src/packages/registry.ts) */
   packages: SessionPackages | null = null;
   /**
    * Session values: var values a person set in the live viewer over a graph file (`topotopo view`). They shadow the
-   * graph's vars in this project's cooks without changing the graph, and stay when the graph is replaced (a reload
+   * graph's vars in this package's cooks without changing the graph, and stay when the graph is replaced (a reload
    * of the file) unless the var's declaration changed (varDeclaration), the var is gone, or the graph now holds the
    * same value itself. graph → var → value and the declaration it was set under.
    */
@@ -254,7 +254,7 @@ export class Session {
   private cookSeq = new Map<string, number>();
   private recordedSeq = new Map<string, number>();
   private lastYield = 0;
-  /** graphs kept in a project's own folder (graphFiles): their file, where they are saved; the others go in graphs/ */
+  /** graphs kept in a package's own folder (graphFiles): their file, where they are saved; the others go in graphs/ */
   private besidePackage = new Map<string, string>();
   /** the inputs folder given to the constructor (SessionOptions.inputs), if any */
   private inputsAt: string | undefined;
@@ -279,7 +279,7 @@ export class Session {
   get inputDir() { return this.inputsAt ?? path.join(this.dir, 'inputs'); }
 
   load() {
-    // the project's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
+    // the package's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
     // is made by the first file written into it
     for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir, ...(this.inputsAt ? [] : [this.inputDir])]) fs.mkdirSync(d, { recursive: true });
     // as a package version reads them (registerAssets): an asset that uses one registered later is tried again
@@ -635,7 +635,7 @@ export class Session {
   /**
    * The one path for an edit, whoever makes it (the MCP edit tool, the viewer's controls): apply the ops, validate as a
    * dry run sees the graph (an invalid result throws EditRejected listing the per-node errors, and stores, adds and
-   * writes nothing), add the packages the graph now names to the project (first use), store, cook at `frame`, then
+   * writes nothing), add the packages the graph now names to the package (first use), store, cook at `frame`, then
    * notify the listeners. They hear after the cook so that what they read (lastReport, cached geometry) is the new
    * version's; a cook that throws still notifies, since the graph was stored. A cook that was stopped (`signal`,
    * Session.stop) does not: whoever stopped it cooks again or tells the listeners.
@@ -712,7 +712,7 @@ export class Session {
   private watchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
-   * Follow what other processes write into graphs/ and assets/, and in a project the graph files beside project.json (a
+   * Follow what other processes write into graphs/ and assets/, and in a package the graph files beside project.json (a
    * second Session on the same folder: the gallery's editor next to an MCP server, or a person editing the JSON). A
    * graph file whose content differs from the stored graph replaces it and notifies the listeners; a removed file
    * removes the graph. Our own writes read back equal, so they change nothing. An asset whose content changed is
@@ -762,7 +762,7 @@ export class Session {
       this.bump(name);
     };
     on(this.graphDir, graphChanged);
-    // a project's graph files beside project.json, when graphs/ has no graph of that name
+    // a package's graph files beside project.json, when graphs/ has no graph of that name
     if (fs.existsSync(path.join(this.dir, 'project.json'))) on(this.dir, (name, file) => {
       if (name === 'project' || fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
       if (!this.graphs.has(name) && fs.existsSync(file)) this.besidePackage.set(name, file);

@@ -1,4 +1,4 @@
-// The human-input layer for agents: the files people drop into <project>/inputs (meshes, guide curves and points,
+// The human-input layer for agents: the files people drop into <package>/inputs (meshes, guide curves and points,
 // PNG masks and heightmaps) and what each one holds: curves vs meshes vs points, bbox, names and roles, attributes,
 // materials. Registered by makeTools in tools.ts; help topic "inputs" (docs.ts) explains the guide conventions.
 import fs from 'node:fs';
@@ -53,8 +53,8 @@ interface Described {
 }
 
 /**
- * The path a file node reads an input with: relative to the folder the host resolves paths against (the project folder,
- * host/node.ts packageBaseDir), "inputs/<path>" when the server's folder is the project, as it mostly is.
+ * The path a file node reads an input with: relative to the folder the host resolves paths against (the package folder,
+ * host/node.ts packageBaseDir), "inputs/<path>" when the server's folder is the package, as it mostly is.
  */
 export function inputRef(ws: Session, rel: string): string {
   const base = ws.engine.host.resolvePath('.'), dir = path.relative(base, ws.inputDir);
@@ -94,7 +94,7 @@ export class InputDescriber {
     for (const k of [...this.cache.keys()]) if (!live.has(k)) this.cache.delete(k);
   }
 
-  /** Cook the one-node graph a file node would be (never a graph of the project) and read the result. */
+  /** Cook the one-node graph a file node would be (never a graph of the package) and read the result. */
   private async geometry(rel: string, ext: string): Promise<Described> {
     const r = await this.ws.engine.cook({ nodes: { f: { type: 'file', params: { path: rel } } }, output: 'f' });
     const warnings = r.warnings.map((w) => w.message);
@@ -342,7 +342,7 @@ export function inputsTool(ws: Session): ToolDef {
   const describer = new InputDescriber(ws);
   return {
     name: 'inputs',
-    description: 'The human\'s own material: files people drop into the project inputs/ folder (meshes, guide curves and points from Blender/Houdini/Unreal, blockouts, PNG masks and heightmaps). list: every file with kind (geometry/image/metadata/other; metadata = an export\'s sidecar such as a heightmap\'s .json or <file>.source.json), size, date and a summary (counts, curves vs meshes, bbox, object names; PNG size and bit depth). describe {path}: what a file node reads from it: polygons vs open polylines vs loose points vs packed prims, bbox in metres, attributes, groups, every name and role value, materials, warnings. Call list FIRST when building a landscape or scene: guides mark sites, paths, zones, volumes and blockouts (help topic "inputs"). Read a file with {type:"file", params:{path:"inputs/<path>"}}.',
+    description: 'The human\'s own material: files people drop into the package inputs/ folder (meshes, guide curves and points from Blender/Houdini/Unreal, blockouts, PNG masks and heightmaps). list: every file with kind (geometry/image/metadata/other; metadata = an export\'s sidecar such as a heightmap\'s .json or <file>.source.json), size, date and a summary (counts, curves vs meshes, bbox, object names; PNG size and bit depth). describe {path}: what a file node reads from it: polygons vs open polylines vs loose points vs packed prims, bbox in metres, attributes, groups, every name and role value, materials, warnings. Call list FIRST when building a landscape or scene: guides mark sites, paths, zones, volumes and blockouts (help topic "inputs"). Read a file with {type:"file", params:{path:"inputs/<path>"}}.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -377,7 +377,7 @@ export function inputsTool(ws: Session): ToolDef {
         `inputs/ (${ws.inputDir}): ${plural(files.length, 'file')} (${kinds.map(([k, c]) => `${c} ${k}`).join(', ')})`,
         ...rows,
         ...(skipped ? [`${plural(skipped, 'file')} not summarised within ${LIST_BUDGET_MS / 1000} s; list again (summaries are cached) or describe them one by one.`] : []),
-        `A file node reads one: {"type":"file","params":{"path":"${inputRef(ws, '<path>')}"}} (relative paths read from the project folder: the nearest project.json at or above the server's folder, else that folder). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.`,
+        `A file node reads one: {"type":"file","params":{"path":"${inputRef(ws, '<path>')}"}} (relative paths read from the package folder: the nearest project.json at or above the server's folder, else that folder). inputs {action:"describe", path} shows curves vs meshes, every name and role, attributes and materials; help {topic:"inputs"} explains the guide roles (site, path, zone, volume, blockout) and recipes.`,
         'OBJ/STL from Blender (Up = Z) and Unreal are Z-up: add "up_axis":"z". A .blend needs Blender installed (converted headlessly).',
       ].join('\n'));
     },

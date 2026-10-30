@@ -1,9 +1,9 @@
 // Writing exports for the CLI, the MCP server and the viewer: serialize with the export tool's options, then write
 // each file through a .part beside it, renamed into place. Published targets (io/targets.ts) write inside exports/
 // only, and every target is serialized before any file is written, so a failed cook or format changes nothing.
-// exports/ is the project's (exportsFolderFor): the folder of the nearest project.json above the graph, so a graph in
-// <project>/graphs/ exports into <project>/exports/, from the CLI, the MCP server and the viewer alike; a graph file in
-// no project exports beside itself.
+// exports/ is the package's (exportsFolderFor): the folder of the nearest project.json above the graph, so a graph in
+// <package>/graphs/ exports into <package>/exports/, from the CLI, the MCP server and the viewer alike; a graph file in
+// no package exports beside itself.
 // Every export records how it was made (io/source.ts): the caller passes the source block, and a target builds its own
 // from the graph it is published from.
 import fs from 'node:fs';
@@ -22,7 +22,7 @@ import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
 
-/** The project a path lies in: the nearest folder holding project.json, the path's own or one above it; null for none. */
+/** The package a path lies in: the nearest folder holding project.json, the path's own or one above it; null for none. */
 export function packageFolderOf(p: string): string | null {
   let d = path.resolve(p);
   if (fs.statSync(d, { throwIfNoEntry: false })?.isFile()) d = path.dirname(d);
@@ -35,9 +35,9 @@ export function packageFolderOf(p: string): string | null {
 }
 
 /**
- * Where a graph file's exports go: its project's exports/ folder (the nearest project.json above it), else exports/
+ * Where a graph file's exports go: its package's exports/ folder (the nearest project.json above it), else exports/
  * beside the graph. One rule for the CLI (--export-all, its receipts), `topotopo view` and the MCP server (whose
- * folder is the project folder).
+ * folder is the package folder).
  */
 export function exportsFolderFor(graphFile: string): string {
   const file = path.resolve(graphFile);
@@ -105,7 +105,7 @@ export interface PreparedTarget {
   label: string;
   node: string;
   target: ResolvedTarget;
-  /** the folder its files are written inside: the project's exports/, or the engine project's assets folder */
+  /** the folder its files are written inside: the package's exports/, or the engine project's assets folder */
   root: string;
   files: ExportFile[];
   summary: string;
@@ -124,7 +124,7 @@ export interface TargetCook { frame?: number; fps?: number; packages?: Record<st
 
 /**
  * Serialize one published output to its target inside `exportsDir`, or for an "engine:" target inside the engine
- * project's assets folder the workspace around the project names (nothing is written yet). The export records its
+ * package's assets folder the workspace around the package names (nothing is written yet). The export records its
  * source: the graph it is published from (p.spec), its vars and seeds, the node, `cook`'s frame and fps, its packages.
  */
 export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, host: Host, cook: TargetCook = {}): Promise<PreparedTarget> {

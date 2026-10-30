@@ -1,4 +1,4 @@
-/* The gallery's pages (src/gallery/pages.ts): the viewer's neutral dark editor colours, a card grid, a project page
+/* The gallery's pages (src/gallery/pages.ts): the viewer's neutral dark editor colours, a card grid, a package page
    with the 3D view beside its details. One column below 860 px. */
 :root {
   --bg: #1f2124; --panel: #26282c; --panel2: #2c2f33; --line: #3a3d42; --text: #d6d9dd; --dim: #8c939b; --faint: #5d636b;
@@ -62,7 +62,7 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 .out[hidden] { display: none; }
 .out code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 td .tags { margin-top: 4px; }
-/* a project that uses a package with a newer version */
+/* a package that uses a package with a newer version */
 .upd { align-self: flex-start; font-size: 11px; color: var(--accent); }
 #clear { padding: 4px 10px; }
 /* TopoTopo's kits: cards, and a kit's page with each output's thumbnail */
@@ -89,7 +89,7 @@ td .tags { margin-top: 4px; }
 .bake.empty { color: var(--text); }
 .s-baking { color: var(--accent); }
 
-.project { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "stage info" "more info"; padding-top: 16px; }
+.package { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "stage info" "more info"; padding-top: 16px; }
 .stage { grid-area: stage; }
 .view { display: block; width: 100%; aspect-ratio: 4 / 3; border: 1px solid var(--line); border-radius: 6px; background: var(--view); object-fit: contain; }
 .info { grid-area: info; min-width: 0; }
@@ -127,7 +127,7 @@ pre.error { color: var(--err); }
 .vars th { font-weight: 500; white-space: nowrap; }
 .vars td:nth-child(2) { font: var(--mono); white-space: nowrap; }
 .range { color: var(--faint); }
-/* a package's versions and outputs, the packages a project uses */
+/* a package's versions and outputs, the packages a package uses */
 .versions th, .uses th { font: var(--mono); }
 .outputs th code, .outputs th .dim { white-space: nowrap; }
 .outputs td:nth-child(2) { font: var(--font); font-size: 13px; }
@@ -135,7 +135,7 @@ pre.error { color: var(--err); }
 .newer { color: var(--accent); }
 
 @media (max-width: 860px) {
-  .project { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "info" "more"; }
+  .package { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "info" "more"; }
   .bar { flex-wrap: wrap; }
   #search { max-width: none; flex-basis: 100%; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }

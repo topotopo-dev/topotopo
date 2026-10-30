@@ -128,7 +128,7 @@ function heightmapAbout(sidecar: string): string | undefined {
 export interface OutputsOptions {
   /** the graph file a graph comes from (topotopo view): a target set on the page goes into it as a minimal edit */
   source?: GraphSource;
-  /** the graph whose results cook first (the project's default graph, which the page shows first) */
+  /** the graph whose results cook first (the package's default graph, which the page shows first) */
   first?: () => string | null | undefined;
 }
 
@@ -157,7 +157,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
   };
   /**
    * What a cooked result is, on its card: kind, words, size, heightfield; a published one's fitting formats, and a
-   * warning when it is not the kind its graph pins (publishing the project's package would block on it).
+   * warning when it is not the kind its graph pins (publishing the package would block on it).
    */
   const describe = (e: OutputEntry, g: Geometry) => {
     const info = outputKind(g);

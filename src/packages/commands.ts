@@ -1,27 +1,27 @@
 // The gallery's commands (src/cli.ts dispatches here):
 //   topotopo gallery [--port 7340] [--library <folder>] [--no-bake]   the gallery website on 127.0.0.1
 //   topotopo library add <name> <folder>                             register a folder as a library (~/.topotopo/config.json)
-//   topotopo library list                                            the registered libraries, their projects and problems
+//   topotopo library list                                            the registered libraries, their packages and problems
 //   topotopo library new <library> <folder/name> [--title t] [--tags a,b] [--description d]
-//   topotopo library bake <project folder> | --stale | --all          bake previews in this process
-//   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a project (the gallery's editor)
-// and a project's packages (src/packages/registry.ts, src/packages/update.ts), as PACKAGE_COMMANDS says them:
+//   topotopo library bake <package folder> | --stale | --all          bake previews in this process
+//   topotopo edit [folder] [--port 7341] [--json]                     the live viewer on a package (the gallery's editor)
+// and a package's packages (src/packages/registry.ts, src/packages/update.ts), as PACKAGE_COMMANDS says them:
 //   topotopo workspace [folder]                                       the workspace (game) around a folder
 //   topotopo workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
 //                                                                     make a game's folder a workspace, or change one
 //   topotopo workspace add|list [folder]                              register a workspace for the Gallery's hub; list them
-//   topotopo init [folder] [--package owner/name]                     make a folder a project, or set the package it is
-//   topotopo libraries add|remove <folder or name> [folder]           the libraries the project finds packages in
-//   topotopo use owner/name [folder] [--version 1.1]                  add a package from the libraries the project lists
-//   topotopo remove owner/name [folder]                               remove a package no graph of the project names
-//   topotopo packages [owner/name] [folder]                           what the project uses and can use; one package
-//   topotopo publish [folder] --note "..." [--big] [--dry-run]        publish the next version of the project's package
-//   topotopo search [words] [folder] [--kind k] [--tag t]             the outputs of every library, for the project
+//   topotopo init [folder] [--package owner/name]                     make a folder a package, or set the name it publishes under
+//   topotopo libraries add|remove <folder or name> [folder]           the libraries the package finds packages in
+//   topotopo use owner/name [folder] [--version 1.1]                  add a package from the libraries the package lists
+//   topotopo remove owner/name [folder]                               remove a package no graph of the package names
+//   topotopo packages [owner/name] [folder]                           what the package uses and can use; one package
+//   topotopo publish [folder] --note "..." [--big] [--dry-run]        publish the next version of the package
+//   topotopo search [words] [folder] [--kind k] [--tag t]             the outputs of every library, for the package
 //   topotopo outdated [folder]                                        the newer versions of what it uses, with their notes
 //   topotopo check [folder]                                           cook what the workspace relies on; what broke and why
 //   topotopo update owner/name [folder] [--to 1.4] [--render <folder>]           the before/after of an update
 //   topotopo update owner/name [folder] --from 1.3 --to 1.4 --apply              apply the update you looked at
-// A folder named must exist (a project's folder, or one inside it); without one, the current folder's project. Each
+// A folder named must exist (a package's folder, or one inside it); without one, the current folder's package. Each
 // package command returns its exit code and says what it did through an Io (the console by default), so that tests
 // run them in this process.
 import fs from 'node:fs';
@@ -38,19 +38,19 @@ import type { GalleryConfig } from '../config.ts';
  * help topic "packages" and README.md, each of which holds every usage as it is here (test/docs.ts checks).
  */
 export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
-  { usage: 'workspace [folder]', what: 'the workspace (the game) around a folder: its engine project, the libraries every project inside looks in, its projects' },
-  { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]', what: 'make a game\'s folder a workspace (topotopo-workspace.json; the engine project is found when not given; its projects share one copy of each package, moved into topotopo-packages/; --follow shows its own packages live from their working folders, for looking), or change one' },
+  { usage: 'workspace [folder]', what: 'the workspace (the game) around a folder: its engine project, the libraries every package inside looks in, its packages' },
+  { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]', what: 'make a game\'s folder a workspace (topotopo-workspace.json; the engine project is found when not given; its packages share one copy of each package, moved into topotopo-packages/; --follow shows its own packages live from their working folders, for looking), or change one' },
   { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the Gallery\'s hub, or list the registered ones' },
-  { usage: 'init [folder] [--package owner/name]', what: 'make a folder a project (project.json, graphs/main.json), or set the package an existing project is' },
-  { usage: 'libraries add|remove <folder or name> [folder]', what: 'list or unlist a library the project finds packages in: a folder by its path from the project, else a registered library\'s name' },
-  { usage: 'use owner/name [folder] [--version 1.1]', what: 'add a package: its newest version (or --version) in the libraries the project lists, copied into packages/' },
-  { usage: 'remove owner/name [folder]', what: 'remove a package no graph of the project names: its copy goes, with the copies nothing else uses' },
-  { usage: 'packages [owner/name] [folder]', what: 'what the project uses and can use, one line each; with a package, its versions and its outputs' },
-  { usage: 'publish [folder] --note "..." [--big] [--dry-run]', what: 'publish the next version of the project\'s package into versions/; --dry-run checks everything and writes nothing' },
-  { usage: 'search [words] [folder] [--kind k] [--tag t]', what: 'the outputs of every library, and whether the project can use them' },
-  { usage: 'outdated [folder]', what: 'the packages the project uses that have newer versions, with their notes' },
-  { usage: 'check [folder]', what: 'cook the newest version of every package in the workspace\'s (or the project\'s) libraries, and every graph of its projects; list what broke and why, changing nothing' },
-  { usage: 'update owner/name [folder] [--to 1.4] [--render <folder>]', what: 'the before/after of an update: every place the project uses it, cooked with both versions; nothing is written' },
+  { usage: 'init [folder] [--package owner/name]', what: 'make a folder a package (project.json, graphs/main.json), or set the name an existing package publishes under' },
+  { usage: 'libraries add|remove <folder or name> [folder]', what: 'list or unlist a library the package finds packages in: a folder by its path from the package, else a registered library\'s name' },
+  { usage: 'use owner/name [folder] [--version 1.1]', what: 'add a package: its newest version (or --version) in the libraries the package lists, copied into packages/' },
+  { usage: 'remove owner/name [folder]', what: 'remove a package no graph of the package names: its copy goes, with the copies nothing else uses' },
+  { usage: 'packages [owner/name] [folder]', what: 'what the package uses and can use, one line each; with a package, its versions and its outputs' },
+  { usage: 'publish [folder] --note "..." [--big] [--dry-run]', what: 'publish the next version of the package into versions/; --dry-run checks everything and writes nothing' },
+  { usage: 'search [words] [folder] [--kind k] [--tag t]', what: 'the outputs of every library, and whether the package can use them' },
+  { usage: 'outdated [folder]', what: 'the packages the package uses that have newer versions, with their notes' },
+  { usage: 'check [folder]', what: 'cook the newest version of every package in the workspace\'s (or the package\'s) libraries, and every graph of its packages; list what broke and why, changing nothing' },
+  { usage: 'update owner/name [folder] [--to 1.4] [--render <folder>]', what: 'the before/after of an update: every place the package uses it, cooked with both versions; nothing is written' },
   { usage: 'update owner/name [folder] --from 1.3 --to 1.4 --apply', what: 'apply the update you looked at: copy it in, set "uses" and the lock, delete the copies nothing uses' },
 ];
 
@@ -92,13 +92,13 @@ function args(argv: string[], valued: string[], flags: string[], usage: string) 
 }
 
 /**
- * The project a command acts on: the folder named (which must exist; a folder inside a project acts on that project),
- * else the current folder's. Fails for a folder in no project, saying how to make one.
+ * The package a command acts on: the folder named (which must exist; a folder inside a package acts on that package),
+ * else the current folder's. Fails for a folder in no package, saying how to make one.
  */
 function packageOf(folder: string | undefined, prog: string): string {
   const abs = path.resolve(folder ?? '.');
   if (folder !== undefined && !isDir(abs)) fail(`no folder ${abs}`);
-  return packageDirOf(abs) ?? fail(`${abs} is in no project: ${prog} init${folder === undefined ? '' : ` ${quoted(folder)}`} makes the folder a project (project.json)`);
+  return packageDirOf(abs) ?? fail(`${abs} is in no package: ${prog} init${folder === undefined ? '' : ` ${quoted(folder)}`} makes the folder a package (project.json)`);
 }
 
 const isDir = (abs: string) => !!fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory();
@@ -109,14 +109,14 @@ const versionGiven = (folder: string | undefined, meant: string) => {
   if (folder !== undefined && /^\d+(\.\d+)?$/.test(folder) && !isDir(path.resolve(folder))) fail(`"${folder}" is no folder here: ${meant}`);
 };
 
-/** The packages of a project, in an engine of their own (its worker pool closed by `close`). */
-async function usesOfPackage(project: string) {
+/** The packages a package uses, in an engine of their own (its worker pool closed by `close`). */
+async function usesOfPackage(folder: string) {
   const { Engine } = await import('../graph/engine.ts');
   const { createNodeHost } = await import('../host/node.ts');
   const { openPackages } = await import('./registry.ts');
-  const engine = new Engine(createNodeHost({ baseDir: project }));
+  const engine = new Engine(createNodeHost({ baseDir: folder }));
   await engine.init();
-  return { engine, pk: openPackages(engine, project), close: async () => { await engine.host.pool?.close(); } };
+  return { engine, pk: openPackages(engine, folder), close: async () => { await engine.host.pool?.close(); } };
 }
 
 const quoted = (s: string) => (/[\s"]/.test(s) ? JSON.stringify(s) : s);
@@ -139,7 +139,7 @@ export async function galleryCommand(argv: string[], prog: string, io: Io = cons
       const g = await startGallery({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
       const n = cfg.libraries.length;
       io.out(`gallery: ${g.url}  (${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
-      if (g.queue.size) io.out(`baking ${g.queue.size} project(s) in the background`);
+      if (g.queue.size) io.out(`baking ${g.queue.size} package(s) in the background`);
     } catch (e: any) {
       if (e?.code !== 'EADDRINUSE') throw e;
       const url = await runningGallery(port);
@@ -151,7 +151,7 @@ export async function galleryCommand(argv: string[], prog: string, io: Io = cons
 
 export async function libraryCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
   return run(io, async () => {
-    const usage = `usage: ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] [--description d] | bake <project folder> | bake --stale | bake --all`;
+    const usage = `usage: ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] [--description d] | bake <package folder> | bake --stale | bake --all`;
     const a = args(argv, ['--title', '--tags', '--description'], ['--stale', '--all'], usage);
     const [sub, x, y] = a.rest;
     let cfg = loadConfig();
@@ -164,8 +164,8 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
     if (sub === 'list') {
       if (!cfg.libraries.length) io.out(`no libraries (config ${cfg.file}): ${prog} library add <name> <folder>`);
       for (const s of scanAll(cfg)) {
-        io.out(`${s.name}  ${s.root}  (${s.projects.length} projects)`);
-        for (const p of s.projects) {
+        io.out(`${s.name}  ${s.root}  (${s.packages.length} packages)`);
+        for (const p of s.packages) {
           const st = readBakeState(p.dir);
           const status = !st ? 'not baked' : !st.ok ? 'bake failed' : isStale(p) ? 'stale' : 'baked';
           io.out(`  ${p.id.padEnd(24)} ${p.rel.padEnd(32)} ${status}${p.manifest.tags.length ? '  [' + p.manifest.tags.join(', ') + ']' : ''}`);
@@ -178,14 +178,14 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
       if (!x || !y) fail(usage);
       const lib = cfg.libraries.find((l) => l.name === x) ?? fail(`no library "${x}" (${cfg.libraries.map((l) => l.name).join(', ') || `none: ${prog} library add <name> <folder>`})`);
       const p = createPackage(lib, y, { title: a.opt('--title'), description: a.opt('--description'), tags: a.opt('--tags')?.split(',').map((t) => t.trim()).filter(Boolean) });
-      io.out(`project ${p.lib}/${p.id} → ${p.dir}`);
+      io.out(`package ${p.lib}/${p.id} → ${p.dir}`);
       io.out(`  gallery: http://127.0.0.1:${cfg.gallery.port}/p/${p.lib}/${p.id}`);
       return 0;
     }
     if (sub === 'bake') {
       const { bakePackage } = await import('../gallery/bake.ts');
       let dirs: string[];
-      if (a.has('--all') || a.has('--stale')) dirs = scanAll(cfg).flatMap((s) => s.projects).filter((p) => a.has('--all') || isStale(p)).map((p) => p.dir);
+      if (a.has('--all') || a.has('--stale')) dirs = scanAll(cfg).flatMap((s) => s.packages).filter((p) => a.has('--all') || isStale(p)).map((p) => p.dir);
       else if (x) dirs = [packageOf(x, prog)];
       else return fail(usage);
       let failed = 0;
@@ -201,7 +201,7 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
   });
 }
 
-/** `edit [folder]`: the live viewer on a project, following changes other processes make to it. */
+/** `edit [folder]`: the live viewer on a package, following changes other processes make to it. */
 export async function editCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
   return run(io, async () => {
     const a = args(argv, ['--port'], ['--json'], `usage: ${prog} edit [folder] [--port 7341] [--json]`);
@@ -228,37 +228,37 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
 
 // ---------------------------------------------------------------------------------------------------- packages
 
-/** `init [folder] [--package owner/name]`: make a folder a project, or set the package an existing project is. */
+/** `init [folder] [--package owner/name]`: make a folder a package, or set the name an existing package publishes under. */
 export async function initCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const a = args(argv, ['--package'], [], `usage: ${prog} init [folder] [--package owner/name]`);
     const r = initPackage(a.rest[0] ?? '.', { package: a.opt('--package') });
     io.out(r.said);
-    if (r.said.startsWith('project') && !/package .* (already|now)$/.test(r.said))
+    if (!/ publishes as \S+ (already|now)$/.test(r.said))
       io.out(`  graphs go in graphs/ (it shows "${r.manifest.graph}"); ${prog} libraries add <folder> lists a library it finds packages in; TopoTopo's own packages need none`);
     return 0;
   })) ?? 0;
 }
 
-/** `libraries add|remove <folder or registered name> [folder]`: the libraries the project lists, as the person says. */
+/** `libraries add|remove <folder or registered name> [folder]`: the libraries the package lists, as the person says. */
 export async function librariesCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const usage = `usage: ${prog} libraries add <library folder or registered name> [folder] | remove <library> [folder]`;
     const a = args(argv, [], [], usage);
     const [sub, given, folder] = a.rest;
     if ((sub !== 'add' && sub !== 'remove') || !given) fail(usage);
-    const project = packageOf(folder, prog);
-    const listed = readManifest(project).libraries;
-    const { pk, close } = await usesOfPackage(project);
+    const packageDir = packageOf(folder, prog);
+    const listed = readManifest(packageDir).libraries;
+    const { pk, close } = await usesOfPackage(packageDir);
     try {
       if (sub === 'add') {
-        const entry = libraryEntryFor(project, given);
+        const entry = libraryEntryFor(packageDir, given);
         if (listed.includes(entry)) { io.out(`project.json lists "${entry}" already`); return 0; }
         io.out(pk.setLibraries([...listed, entry]));
       } else {
         // the entry as listed, or the folder or registered name it stands for
         const abs = path.resolve(given);
-        const entry = listed.find((e) => e === given || e === given.replace(/\\/g, '/') || path.resolve(project, e) === abs);
+        const entry = listed.find((e) => e === given || e === given.replace(/\\/g, '/') || path.resolve(packageDir, e) === abs);
         if (!entry) fail(`project.json does not list "${given}": it lists ${listed.map((e) => `"${e}"`).join(', ') || 'no libraries'}`);
         io.out(pk.setLibraries(listed.filter((e) => e !== entry)));
       }
@@ -267,7 +267,7 @@ export async function librariesCommand(argv: string[], prog: string, io: Io = co
   })) ?? 0;
 }
 
-/** `use owner/name [folder] [--version 1.1]`: add a package to the project from the libraries it lists. */
+/** `use owner/name [folder] [--version 1.1]`: add a package to those the package uses, from the libraries it lists. */
 export async function useCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const usage = `usage: ${prog} use owner/name [folder] [--version 1.1]`;
@@ -284,7 +284,7 @@ export async function useCommand(argv: string[], prog: string, io: Io = consoleI
   })) ?? 0;
 }
 
-/** `remove owner/name [folder]`: remove a package no graph of the project names any more. */
+/** `remove owner/name [folder]`: remove a package no graph of the package names any more. */
 export async function removeCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const usage = `usage: ${prog} remove owner/name [folder]`;
@@ -296,7 +296,7 @@ export async function removeCommand(argv: string[], prog: string, io: Io = conso
   })) ?? 0;
 }
 
-/** `packages [owner/name] [folder]`: what the project uses and can use, one line each; or one package with its outputs. */
+/** `packages [owner/name] [folder]`: what the package uses and can use, one line each; or one package with its outputs. */
 export async function packagesCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const a = args(argv, [], [], `usage: ${prog} packages [owner/name] [folder]`);
@@ -310,7 +310,7 @@ export async function packagesCommand(argv: string[], prog: string, io: Io = con
 }
 
 /**
- * `publish [folder] --note "..." [--big] [--dry-run]`: publish the next version of the project's package; --dry-run
+ * `publish [folder] --note "..." [--big] [--dry-run]`: publish the next version of the package; --dry-run
  * says what publishing would do and writes nothing.
  */
 export async function publishCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
@@ -327,7 +327,7 @@ export async function publishCommand(argv: string[], prog: string, io: Io = cons
 }
 
 /**
- * `search [words] [folder] [--kind k] [--tag t]`: the outputs of every library, and whether the project can use them.
+ * `search [words] [folder] [--kind k] [--tag t]`: the outputs of every library, and whether the package can use them.
  * The folder is written as a path (".", "./forest", "../forest", an absolute path), so that a word is never one.
  */
 export async function searchCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
@@ -343,7 +343,7 @@ export async function searchCommand(argv: string[], prog: string, io: Io = conso
   })) ?? 0;
 }
 
-/** `outdated [folder]`: the packages the project uses that have newer versions, with their notes. */
+/** `outdated [folder]`: the packages the package uses that have newer versions, with their notes. */
 export async function outdatedCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
     const folder = args(argv, [], [], `usage: ${prog} outdated [folder]`).rest[0];
@@ -355,7 +355,7 @@ export async function outdatedCommand(argv: string[], prog: string, io: Io = con
 
 /**
  * `check [folder]`: cook the newest version of every package in the libraries of the workspace around the folder (or
- * of its project), and every graph of its projects; say what broke and why. Writes nothing; exit code 1 when something
+ * of its package), and every graph of its packages; say what broke and why. Writes nothing; exit code 1 when something
  * broke (a build machine runs it after updating TopoTopo).
  */
 export async function checkCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
@@ -371,8 +371,8 @@ export async function checkCommand(argv: string[], prog: string, io: Io = consol
 }
 
 /**
- * `update owner/name [folder] [--to <version>] [--render <folder>]`: the before/after of updating a package the project
- * uses, which writes nothing (--render writes its overlay renders into a folder); `--from <version> --to <version>
+ * `update owner/name [folder] [--to <version>] [--render <folder>]`: the before/after of updating a package in
+ * use, which writes nothing (--render writes its overlay renders into a folder); `--from <version> --to <version>
  * --apply` applies the update whose before/after the person saw. Ctrl+C stops a long before/after at the next node.
  * Nothing to update is no failure.
  */
@@ -385,8 +385,8 @@ export async function updateCommand(argv: string[], prog: string, io: Io = conso
     versionGiven(folder, `a version is named with --to, ${prog} update ${pkg} --to ${/^\d+$/.test(folder ?? '') ? `${folder}.0` : folder}`);
     const { applyUpdate, beforeAfter, beforeAfterText, overlayRenders } = await import('./update.ts');
     const { NothingToUpdate, loadPackage } = await import('./registry.ts');
-    const project = packageOf(folder, prog);
-    const { engine, pk, close } = await usesOfPackage(project);
+    const packageDir = packageOf(folder, prog);
+    const { engine, pk, close } = await usesOfPackage(packageDir);
     try {
       if (a.has('--apply')) {
         const from = a.opt('--from'), to = a.opt('--to');
@@ -395,7 +395,7 @@ export async function updateCommand(argv: string[], prog: string, io: Io = conso
         return 0;
       }
       if (a.has('--from')) fail(`--from goes with --apply\n${usage}`);
-      for (const p of loadPackage(engine, project)) io.err(`warning: ${p}`);
+      for (const p of loadPackage(engine, packageDir)) io.err(`warning: ${p}`);
       const stop = { aborted: false };
       const onStop = () => { stop.aborted = true; io.err('stopping at the next node (Ctrl+C again ends it at once); nothing is written'); };
       process.once('SIGINT', onStop);
@@ -423,7 +423,7 @@ export async function updateCommand(argv: string[], prog: string, io: Io = conso
 }
 
 /** The commands src/cli.ts dispatches here, by name. */
-/** `workspace [folder]`, `workspace init …`, `workspace add|list`: the game a project sits in (src/workspace.ts). */
+/** `workspace [folder]`, `workspace init …`, `workspace add|list`: the game a package sits in (src/workspace.ts). */
 const workspaceCommand: Command = (argv, prog, io = consoleIo) => run(io, async () => {
   const { initWorkspace, workspaceText, readWorkspace } = await import('../workspace.ts');
   const { addWorkspace } = await import('../config.ts');

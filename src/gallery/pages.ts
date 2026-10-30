@@ -1,11 +1,11 @@
-// The gallery's pages as plain HTML strings: the registered workspaces (the games), the grid of projects and
-// TopoTopo's kits, a project's page, a kit's page and the embed page. Pure functions
+// The gallery's pages as plain HTML strings: the registered workspaces (the games), the grid of packages and
+// TopoTopo's kits, a package's page, a kit's page and the embed page. Pure functions
 // of their data and a URL builder, so the local server (src/gallery/server.ts) and a static build can share them.
 // Styles and the small page script are files: app/gallery.css and app/gallery.js here, app/embed.js in the viewer.
 
 export interface Urls {
   home: string;
-  project(lib: string, id: string): string;
+  package(lib: string, id: string): string;
   thumb(lib: string, id: string, version?: string | number): string;
   glb(lib: string, id: string, version?: string | number): string;
   embed(lib: string, id: string): string;
@@ -25,13 +25,13 @@ export interface Urls {
 
 export interface CardData {
   lib: string; id: string; title: string; collection: string; tags: string[]; description: string; updated: number;
-  /** 'ok' | 'failed' | 'baking' | 'new', or 'empty': the project has not the graph project.json shows (nothing to bake yet) */
+  /** 'ok' | 'failed' | 'baking' | 'new', or 'empty': the package has not the graph project.json shows (nothing to bake yet) */
   status: string; version: string;
   /** a package: its full name and newest version (null before the first is published) */
   pkg?: { name: string; version: string | null };
   /** a package's outputs in its newest version, which the search finds by name, label, kind and tag */
   outputs?: { type: string; alias?: string; label: string; kind?: string; tags: string[] }[];
-  /** the packages it uses (the search finds a project by them), and those with a newer version than the one in use */
+  /** the packages it uses (the search finds a package by them), and those with a newer version than the one in use */
   usesPackages?: string[];
   updates?: { name: string; version: string; newest: string }[];
 }
@@ -43,7 +43,7 @@ export interface KitCardData {
   thumb: string | null;
   outputs: { type: string; label: string; kind?: string; tags: string[] }[];
 }
-/** A project that uses a package, with the version it uses. */
+/** A package that uses another, with the version it uses. */
 export interface UserRow { lib: string; id: string; title: string; version: string; url: string }
 
 export interface VarRow { name: string; value: unknown; desc?: string; min?: number; max?: number }
@@ -67,15 +67,15 @@ export interface PackageData extends CardData {
   created: string;
   /** absolute URLs for the copy boxes (the board pastes them) */
   share: { link: string; thumb: string; embed: string };
-  /** a package: its versions, newest first, the outputs of the newest, and the projects that use it */
+  /** a package: its versions, newest first, the outputs of the newest, and the packages that use it */
   package: { name: string; versions: VersionRow[]; outputs: OutputRow[]; usedBy?: UserRow[] } | null;
   /** the packages it uses: the version in use and its note, the package's page and its newest version when newer */
   uses: { name: string; version: string; note?: string; published?: string; url?: string; newest?: string }[];
 }
 
 /**
- * A registered workspace (a game) on the front page: its engine project, the libraries its projects look in, its
- * projects (linked when a library of the gallery holds them) and the packages it uses, those with a newer version marked.
+ * A registered workspace (a game) on the front page: its engine project, the libraries its packages look in, its
+ * packages (linked when a library of the gallery holds them) and the packages it uses, those with a newer version marked.
  */
 export interface WorkspaceCardData {
   name: string;
@@ -83,14 +83,14 @@ export interface WorkspaceCardData {
   /** "Godot · game/project.godot · exports to res://assets/topotopo", or null */
   engine: string | null;
   libraries: string[];
-  projects: { title: string; rel: string; url?: string; pkg?: string }[];
+  packages: { title: string; rel: string; url?: string; pkg?: string }[];
   uses: { name: string; version: string; url?: string; newest?: string }[];
   problems: string[];
 }
 
 export interface GalleryData { libraries: { name: string; cards: CardData[] }[]; kits?: KitCardData[]; workspaces?: WorkspaceCardData[]; problems: string[] }
 
-/** A kit's page: its card, its versions, its outputs (with their thumbnails) and the projects that use it. */
+/** A kit's page: its card, its versions, its outputs (with their thumbnails) and the packages that use it. */
 export interface KitData extends KitCardData { versions: VersionRow[]; rows: (OutputRow & { thumb: string | null })[]; usedBy: UserRow[] }
 
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -117,7 +117,7 @@ ${body}
 `;
 }
 
-/** A package's full name and newest version, as the grid and a project page mark it. */
+/** A package's full name and newest version, as the grid and a package page mark it. */
 const pkgMark = (p: { name: string; version: string | null }) =>
   `<span class="pkg" title="${esc(`package ${p.name}${p.version ? `, newest version ${p.version}` : ', no version published yet'}`)}">${esc(p.name)}${p.version ? ` ${esc(p.version)}` : ''}</span>`;
 const day = (iso: string) => (iso ? iso.slice(0, 10) : '');
@@ -126,16 +126,16 @@ const day = (iso: string) => (iso ? iso.slice(0, 10) : '');
 const kindTagMarks = (o: { kind?: string; tags: string[] }) =>
   `${o.kind ? `<span class="kind" title="what the output is">${esc(o.kind)}</span>` : ''}${o.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}`;
 
-/** The packages a project uses with a newer version: "ux/crates 1.2 is out". */
+/** The packages a package uses with a newer version: "ux/crates 1.2 is out". */
 const updateMark = (ups: NonNullable<CardData['updates']>) =>
   `<span class="upd" title="${esc(ups.map((x) => `${x.name} ${x.version} is in use; ${x.newest} is out`).join('\n'))}">${esc(ups.length === 1 ? `update: ${ups[0].name} ${ups[0].newest}` : `${ups.length} updates`)}</span>`;
 
 function card(c: CardData, u: Urls) {
-  // the search finds a project by the packages it uses too
+  // the search finds a package by the packages it uses too
   const hay = [c.title, c.id, c.collection, c.description, ...c.tags, c.pkg?.name ?? '', ...(c.usesPackages ?? [])].join(' ').toLowerCase();
   // a package's outputs: the search shows those it finds by their name, label, kind or tags
   const outs = (c.outputs ?? []).map((o) => `<span class="out" hidden data-hay="${esc([o.type, o.alias ?? '', o.label, o.kind ?? '', ...o.tags].join(' ').toLowerCase())}"><code>${esc(o.type)}</code>${kindTagMarks(o)}</span>`).join('');
-  return `<a class="card" href="${esc(u.project(c.lib, c.id))}" data-key="${esc(`${c.lib}/${c.id}`)}" data-hay="${esc(hay)}" data-tags="${esc(c.tags.join('\n'))}" data-collection="${esc(c.collection)}">
+  return `<a class="card" href="${esc(u.package(c.lib, c.id))}" data-key="${esc(`${c.lib}/${c.id}`)}" data-hay="${esc(hay)}" data-tags="${esc(c.tags.join('\n'))}" data-collection="${esc(c.collection)}">
   <span class="thumb"><img src="${esc(u.thumb(c.lib, c.id, c.version))}" alt="" loading="lazy" width="512" height="512"></span>
   <span class="meta">
     <span class="title">${esc(c.title)}</span>
@@ -167,7 +167,7 @@ function kitCard(k: KitCardData, u: Urls) {
 }
 
 /**
- * The front page: the registered workspaces first, then every library's projects grouped by collection, with search
+ * The front page: the registered workspaces first, then every library's packages grouped by collection, with search
  * and tag filters; packages are marked, and the search finds their outputs by name, kind and tag too.
  */
 export function galleryPage(d: GalleryData, u: Urls): string {
@@ -177,12 +177,12 @@ export function galleryPage(d: GalleryData, u: Urls): string {
   const wsSection = ws.length ? `
   <section class="hub" id="workspaces">
     <h2>Workspaces <span class="count">${ws.length}</span></h2>
-    <p class="dim small">The games your projects belong to: the libraries every project inside looks in, one copy of each package for the whole game, and the engine project exports go to.</p>
+    <p class="dim small">The games your packages belong to: the libraries every package inside looks in, one copy of each package for the whole game, and the engine project exports go to.</p>
     ${ws.map((w) => `<article class="workspace" id="ws-${esc(w.name)}">
       <h3>${esc(w.name)}${w.engine ? ` <span class="dim small">${esc(w.engine)}</span>` : ''}</h3>
       <table class="vars ws"><tbody>
         <tr><th>Libraries</th><td>${w.libraries.length ? w.libraries.map(esc).join(', ') : '<span class="dim">none listed</span>'}</td></tr>
-        <tr><th>Projects</th><td>${w.projects.length ? w.projects.map((p) => `${link(p.title, p.url)}${p.pkg ? ` <code>${esc(p.pkg)}</code>` : ''}`).join(', ') : '<span class="dim">none yet</span>'}</td></tr>
+        <tr><th>Packages</th><td>${w.packages.length ? w.packages.map((p) => `${link(p.title, p.url)}${p.pkg ? ` <code>${esc(p.pkg)}</code>` : ''}`).join(', ') : '<span class="dim">none yet</span>'}</td></tr>
         <tr><th>Packages</th><td>${w.uses.length ? w.uses.map((x) => `${link(x.name, x.url)} ${esc(x.version)}${x.newest ? ` <span class="newer">${esc(x.newest)} is out</span>` : ''}`).join(', ') : '<span class="dim">none used yet</span>'}</td></tr>
       </tbody></table>
       ${w.problems.length ? `<ul class="dim small">${w.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
@@ -202,20 +202,20 @@ export function galleryPage(d: GalleryData, u: Urls): string {
     </section>`).join('');
     return `
   <section class="library" id="lib-${esc(l.name)}">
-    <h2>${esc(l.name)} <span class="count" data-total="${l.cards.length}">${l.cards.length}</span></h2>${sections || '<p class="empty">No projects yet. Make one with <code>topotopo library new ' + esc(l.name) + ' &lt;folder/name&gt;</code> or ask your agent to make one.</p>'}
+    <h2>${esc(l.name)} <span class="count" data-total="${l.cards.length}">${l.cards.length}</span></h2>${sections || '<p class="empty">No packages yet. Make one with <code>topotopo library new ' + esc(l.name) + ' &lt;folder/name&gt;</code> or ask your agent to make one.</p>'}
   </section>`;
   }).join('');
-  // TopoTopo's kits: ready-made parts every project can use
+  // TopoTopo's kits: ready-made parts every package can use
   const kitSection = kits.length ? `
   <section class="library kits" id="kits">
     <h2>TopoTopo's kits <span class="count" data-total="${kits.length}">${kits.length}</span></h2>
-    <p class="dim small">Ready-made parts every project can use: ask your agent to use one by its name, such as <code>${esc(kits[0].outputs.find((o) => !/\/kit$/.test(o.type))?.type ?? kits[0].name)}</code>.</p>
+    <p class="dim small">Ready-made parts every package can use: ask your agent to use one by its name, such as <code>${esc(kits[0].outputs.find((o) => !/\/kit$/.test(o.type))?.type ?? kits[0].name)}</code>.</p>
     <section class="collection" data-collection=""><div class="grid">${kits.map((k) => kitCard(k, u)).join('\n')}</div></section>
   </section>` : '';
   const none = d.libraries.length ? '' : `<p class="empty">No libraries yet. Add a folder with <code>topotopo library add &lt;name&gt; &lt;folder&gt;</code>.</p>`;
   return shell('TopoTopo Gallery', u, `<header class="bar">
   <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>
-  <input id="search" type="search" placeholder="Search ${total} project${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search projects${outputs ? ', the outputs of packages and TopoTopo\'s kits' : ''}">
+  <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ', the outputs of packages and TopoTopo\'s kits' : ''}">
   <button id="clear" class="btn" type="button" hidden title="clear the search and the tags">Clear</button>
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
 </header>
@@ -233,8 +233,8 @@ function fileList(rows: FileRow[], lib: string, id: string, base: string, u: Url
 
 /** A package's versions with their notes and dates, and the outputs its newest version publishes with their kinds and tags. */
 function packageSection(pk: NonNullable<PackageData['package']>): string {
-  if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the project's folder publishes the first, which other projects can then use as <code>${esc(pk.name)}</code>.</p>`;
-  const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a project relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
+  if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the package's folder publishes the first, which other packages can then use as <code>${esc(pk.name)}</code>.</p>`;
+  const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a package relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
   const outputs = pk.outputs.map((o) => {
     const what = [`node "${o.node}" of graph "${o.graph}"`, o.params.length ? `params ${o.params.join(', ')}` : '', o.inputs.length ? `input${o.inputs.length > 1 ? 's' : ''} ${o.inputs.join(', ')}` : ''].filter(Boolean).join(' · ');
     const marks = kindTagMarks(o);
@@ -244,7 +244,7 @@ function packageSection(pk: NonNullable<PackageData['package']>): string {
     ${versionList(pk.versions, big)}
     <h2>Published outputs</h2>
     <table class="vars outputs"><tbody>${outputs}</tbody></table>
-    <p class="dim small">The outputs of ${esc(pk.versions[0].version)}: a project's graph uses one as a node type, <code>{"type": "${esc(pk.outputs[0]?.type ?? pk.name)}"}</code>, with its params.</p>
+    <p class="dim small">The outputs of ${esc(pk.versions[0].version)}: a package's graph uses one as a node type, <code>{"type": "${esc(pk.outputs[0]?.type ?? pk.name)}"}</code>, with its params.</p>
     ${usedBySection(pk.usedBy ?? [])}`;
 }
 
@@ -255,11 +255,11 @@ function versionList(versions: VersionRow[], big: (v: VersionRow) => string) {
     </details>`).join('')}</div>`;
 }
 
-/** The projects of the libraries and the workspaces that use a package, each linked, with the version it uses. */
+/** The packages of the libraries and the workspaces that use a package, each linked, with the version it uses. */
 function usedBySection(users: UserRow[]) {
   return `<h2>Used by <span class="count">${users.length}</span></h2>${users.length
     ? `<table class="vars uses"><tbody>${users.map((x) => `<tr><th><a href="${esc(x.url)}">${esc(x.title)}</a></th><td>${esc(x.version)}</td><td class="dim">${esc(x.lib)}</td></tr>`).join('')}</tbody></table>`
-    : '<p class="dim">No project in the libraries uses it yet.</p>'}`;
+    : '<p class="dim">No package in the libraries uses it yet.</p>'}`;
 }
 
 /** One of TopoTopo's kits: what it holds, each output with its thumbnail, kind and tags, its versions and users. */
@@ -277,7 +277,7 @@ export function kitPage(k: KitData, u: Urls): string {
   <h1>${esc(k.title)}</h1>
   <p class="pkgline">Package ${pkgMark({ name: k.name, version: k.version })}</p>
   <p class="desc">${esc(k.description)}</p>
-  <p class="dim small">One of TopoTopo's own packages: every project can use its outputs. Ask your agent to use one by its name, such as <code>${esc(k.rows.find((o) => !/\/kit$/.test(o.type))?.type ?? k.name)}</code>.</p>
+  <p class="dim small">One of TopoTopo's own packages: every package can use its outputs. Ask your agent to use one by its name, such as <code>${esc(k.rows.find((o) => !/\/kit$/.test(o.type))?.type ?? k.name)}</code>.</p>
   <h2>Outputs <span class="count">${k.rows.filter((o) => !/\/kit$/.test(o.type)).length}</span></h2>
   <div class="kit-outs">${rows}</div>
   <h2>Versions <span class="count">${k.versions.length}</span></h2>
@@ -286,7 +286,7 @@ export function kitPage(k: KitData, u: Urls): string {
 </main>`, { page: 'kit' });
 }
 
-/** The packages a project uses: the version in use and its note, and when a newer one is out. */
+/** The packages a package uses: the version in use and its note, and when a newer one is out. */
 function usesSection(uses: PackageData['uses']): string {
   if (!uses.length) return '';
   return `<h2>Packages it uses</h2>
@@ -294,7 +294,7 @@ function usesSection(uses: PackageData['uses']): string {
 }
 
 /**
- * A project's page: the 3D view, what it is, links, attachments, a package's versions and outputs, the packages it
+ * A package's page: the 3D view, what it is, links, attachments, a package's versions and outputs, the packages it
  * uses, graphs and their vars, and the snippets for a board.
  */
 export function packagePage(p: PackageData, u: Urls): string {
@@ -303,7 +303,7 @@ export function packagePage(p: PackageData, u: Urls): string {
   const snippet = (label: string, value: string) => `<label class="copy"><span>${label}</span><input readonly value="${esc(value)}"><button type="button" data-copy>Copy</button></label>`;
   const b = p.status === 'empty' ? null : p.bake;
   const bakeLine = p.status === 'empty'
-    ? (p.graphs.length ? `No default graph yet: project.json shows "${p.graph}", which this project does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this project has no graphs. Ask your agent to build one; the preview appears here when it exists.')
+    ? (p.graphs.length ? `No default graph yet: project.json shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
     : !b ? 'Not baked yet.'
     : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${b.points ?? 0} points, ${b.prims ?? 0} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
     : `Bake failed ${when(b.at)}`;
@@ -314,7 +314,7 @@ export function packagePage(p: PackageData, u: Urls): string {
   <a class="brand" href="${esc(u.home)}">TopoTopo <b>Gallery</b></a>
   <nav class="crumbs"><a href="${esc(u.home)}#lib-${esc(p.lib)}">${esc(p.lib)}</a>${p.collection ? ` / <span>${esc(p.collection)}</span>` : ''} / <span>${esc(p.id)}</span></nav>
 </header>
-<main class="wrap project">
+<main class="wrap package">
   <div class="stage">${view}</div>
   <aside class="info">
     <h1>${esc(p.title)}</h1>
@@ -341,11 +341,11 @@ export function packagePage(p: PackageData, u: Urls): string {
     ${p.package ? packageSection(p.package) : ''}
     ${usesSection(p.uses)}
     <h2>Graphs</h2>
-    ${p.graphs.length ? p.graphs.map((g) => `<div class="graph"><h3>${esc(g.name)}${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes</span></h3>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('') : '<p class="dim">No graphs yet. Ask your agent to build one in this project (its library tool opens the project); open the editor to watch it appear.</p>'}
+    ${p.graphs.length ? p.graphs.map((g) => `<div class="graph"><h3>${esc(g.name)}${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes</span></h3>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('') : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its library tool opens the package); open the editor to watch it appear.</p>'}
     ${p.exports.length ? `<h2>Exports</h2>${fileList(p.exports, p.lib, p.id, 'exports', u)}` : ''}
     <p class="dim small">Folder <code>${esc(p.rel)}</code> in library ${esc(p.lib)}${p.created ? ` · created ${esc(p.created)}` : ''} · updated ${esc(when(p.updated))}</p>
   </section>
-</main>`, { page: 'project', data: { lib: p.lib, id: p.id } });
+</main>`, { page: 'package', data: { lib: p.lib, id: p.id } });
 }
 
 /** The page a board embeds in an iframe: the baked preview.glb under an orbit camera, or the thumbnail. */

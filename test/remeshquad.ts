@@ -337,7 +337,7 @@ try {
   hash(parity.source_triangle, 4); hash(parity.barycentric, 8); hash(parity.src_prim, 4);
   console.log(`quad_parity_digest=${digest.toString(16).padStart(16, '0')}; ${parity.positions.length / 3} points, ${parity.prim_start.length - 1} faces`);
   const example = JSON.parse(fs.readFileSync(new URL('../examples/quad_remesh.json', import.meta.url), 'utf8')) as GraphSpec;
-  // the example's rock is topotopo/nature/rock: it cooks as a graph of the examples' project, from its copy
+  // the example's rock is topotopo/nature/rock: it cooks as a graph of the examples' package, from its copy
   openPackages(off, fileURLToPath(new URL('../examples/', import.meta.url)));
   for (const output of ['sphere_quad', 'box_quad', 'rock_quad', 'tube_quad']) {
     const geo = await cook(example.nodes, output);

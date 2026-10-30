@@ -1,7 +1,7 @@
-// Open the live viewer on a project without an MCP client; optionally load the examples.
-//   node scripts/preview.ts [--project dir] [--examples]
-// The folder (default: project/ in the repository) becomes a project by the MCP server's rule (startPackage: in no
-// project, and holding nothing but TopoTopo's own folders), so the examples that use TopoTopo's own packages cook
+// Open the live viewer on a package without an MCP client; optionally load the examples.
+//   node scripts/preview.ts [--package dir] [--examples]
+// The folder (default: package/ in the repository) becomes a package by the MCP server's rule (startPackage: in no
+// package, and holding nothing but TopoTopo's own folders), so the examples that use TopoTopo's own packages cook
 // there: their first use copies the kits into it.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,9 +13,9 @@ import { openPackage } from '../src/open.ts';
 import { startViewer } from '../src/viewer/server.ts';
 
 const argv = process.argv.slice(2);
-const i = argv.indexOf('--project');
+const i = argv.indexOf('--package');
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const start = startPackage(path.resolve(i >= 0 ? argv[i + 1] : path.join(root, 'project')));
+const start = startPackage(path.resolve(i >= 0 ? argv[i + 1] : path.join(root, 'package')));
 console.log(start.log);
 const wsDir = start.dir;
 const engine = new Engine(createNodeHost({ baseDir: wsDir }));
@@ -33,4 +33,4 @@ if (argv.includes('--examples')) {
   }
 }
 const v = await startViewer(ws);
-console.log(`preview: ${v.url}  (project ${wsDir}; Ctrl+C to stop)`);
+console.log(`preview: ${v.url}  (package ${wsDir}; Ctrl+C to stop)`);

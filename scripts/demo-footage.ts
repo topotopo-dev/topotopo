@@ -120,7 +120,7 @@ function cookError(s: Shot, r: CookReport): Error {
 async function newEngine(s: Shot): Promise<Engine> {
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.join(ROOT, s.graph)) }));
   await engine.init();
-  // a graph of a project (examples/ is one) cooks the packages it names from the project's copies
+  // a graph of a package (examples/ is one) cooks the packages it names from the package's copies
   openPackages(engine, path.dirname(path.join(ROOT, s.graph)));
   return engine;
 }

@@ -1,7 +1,7 @@
 // The gallery pages' script (src/gallery/pages.ts): search and tag filters on the grid (the search finds a package's
 // outputs and TopoTopo's kits' too, by name, kind and tag, and shows those it found on the card; each library says how
 // many cards it shows, and Clear ends the filter, which a new visit starts without), copy buttons and actions on a
-// project page, and live updates from the server's event stream (a bake finished, projects added or removed).
+// package page, and live updates from the server's event stream (a bake finished, packages added or removed).
 const page = document.body.dataset.page;
 const data = document.body.dataset.json ? JSON.parse(document.body.dataset.json) : {};
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -15,7 +15,7 @@ if (page === 'gallery') {
     let shown = 0;
     for (const card of $$('.card')) {
       const own = card.dataset.tags.split('\n'), hay = card.dataset.hay;
-      // an output is found when every word is in it or in its project, and at least one in the output itself
+      // an output is found when every word is in it or in its package, and at least one in the output itself
       const outs = [...card.querySelectorAll('.out')];
       const found = words.length ? outs.filter((o) => words.every((w) => o.dataset.hay.includes(w) || hay.includes(w)) && words.some((w) => o.dataset.hay.includes(w))) : [];
       const ok = (words.every((w) => hay.includes(w)) || found.length > 0) && tags.every((t) => own.includes(t));
@@ -44,7 +44,7 @@ if (page === 'gallery') {
   filter();
 }
 
-if (page === 'project') {
+if (page === 'package') {
   for (const b of $$('[data-copy]')) {
     b.addEventListener('click', async () => {
       const input = b.previousElementSibling;
@@ -67,7 +67,7 @@ if (page === 'project') {
   }
 }
 
-// live updates: a finished bake reloads that project's thumbnail (grid) or the page (project); a changed list reloads
+// live updates: a finished bake reloads that package's thumbnail (grid) or the page (package); a changed list reloads
 // the grid
 const es = new EventSource('/api/events');
 es.onmessage = (m) => {
@@ -76,8 +76,8 @@ es.onmessage = (m) => {
   const key = `${data.lib}/${data.id}`;
   if (page === 'gallery') {
     if (ev.list) { location.reload(); return; }
-    if (ev.project) {
-      const card = document.querySelector(`.card[data-key="${CSS.escape(ev.project)}"]`);
+    if (ev.package) {
+      const card = document.querySelector(`.card[data-key="${CSS.escape(ev.package)}"]`);
       if (!card) return;
       const st = card.querySelector('.status');
       if (ev.baking) { st.className = 'status s-baking'; st.textContent = 'baking…'; return; }
@@ -86,8 +86,8 @@ es.onmessage = (m) => {
       const img = card.querySelector('img');
       img.src = img.src.replace(/(\?v=[^&]*)?$/, `?v=${ev.version}`);
     }
-  } else if (page === 'project') {
-    if (ev.project === key && ev.baking) document.getElementById('bake').textContent = 'Baking…';
-    else if ((ev.project === key && !ev.baking) || ev.changed?.includes(key)) location.reload();
+  } else if (page === 'package') {
+    if (ev.package === key && ev.baking) document.getElementById('bake').textContent = 'Baking…';
+    else if ((ev.package === key && !ev.baking) || ev.changed?.includes(key)) location.reload();
   }
 };

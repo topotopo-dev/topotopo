@@ -147,7 +147,7 @@ export interface GraphSpec {
   /** where the default output exports to (io/targets.ts): a format ("glb"), or {format, path?, ...export options} */
   export?: ExportTarget;
   /**
-   * Named deliverables for the viewer. `output` remains the default cook target. A project that is a package publishes
+   * Named deliverables for the viewer. `output` remains the default cook target. A package that publishes versions publishes
    * every named output of its graphs but those with `publish: false` (viewer-only previews), with its kind (detected,
    * or pinned here and checked), its tags and its description (else the graph's): src/graph/outputs.ts.
    */

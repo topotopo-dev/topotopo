@@ -783,8 +783,8 @@ section('CLI arguments');
   const cat = cli('--catalog');
   check(cat.status === 0 && /\[package\]/.test(cat.stdout) && /^\s+topotopo\/architecture\/house — House built from a footprint polygon/m.test(cat.stdout), `--catalog lists the outputs of TopoTopo's own packages (status ${cat.status}, ${cat.stdout.length} chars)`);
   const hn = cli('--help-node', 'topotopo/architecture/house');
-  check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout) && /\nin this folder: package topotopo\/architecture: this graph is in no project/.test(hn.stdout),
-    '--help-node documents one, and says what naming it does in a folder that is in no project');
+  check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout) && /\nin this folder: package topotopo\/architecture: this graph is in no package/.test(hn.stdout),
+    '--help-node documents one, and says what naming it does in a folder that is in no package');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
   check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, library, graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
     '--catalog ends with the command line\'s help flags and the topic names');
@@ -933,9 +933,9 @@ section('CLI several renders per cook, triangle budget');
     '--max-triangles: 1.15M instance triangles draw as a subset by default and in full with a 2M budget');
 }
 
-section('relative paths read from the project folder');
+section('relative paths read from the package folder');
 {
-  // a graph in a project's graphs/ reads "inputs/…" from the project, cooked from anywhere; export targets go to its exports/
+  // a graph in a package's graphs/ reads "inputs/…" from the package, cooked from anywhere; export targets go to its exports/
   const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
   const proj = path.join(tmp, 'proj');
   fs.mkdirSync(path.join(proj, 'graphs'), { recursive: true });
@@ -946,10 +946,10 @@ section('relative paths read from the project folder');
   fs.writeFileSync(g, JSON.stringify({ nodes: { f: { type: 'file', params: { path: 'inputs/tri.obj' } } }, output: 'f', export: 'obj' }));
   const r = cli(g, '--export-all');
   check(init.status === 0 && r.status === 0 && /3 points, 1 prims/.test(r.stdout) && fs.existsSync(path.join(proj, 'exports', 'piece.obj')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
-    `a graph in graphs/ reads inputs/ of its project, and --export-all writes the project's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
+    `a graph in graphs/ reads inputs/ of its package, and --export-all writes the package's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
   check(packageBaseDir(path.join(proj, 'graphs')) === proj && packageBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'packageBaseDir: the nearest project.json, else the folder itself');
   const e = new Engine(createNodeHost({ baseDir: path.join(proj, 'graphs') }));
-  check(e.host.resolvePath('inputs/tri.obj') === path.join(proj, 'inputs', 'tri.obj'), 'the node host resolves relative paths against the project folder');
+  check(e.host.resolvePath('inputs/tri.obj') === path.join(proj, 'inputs', 'tri.obj'), 'the node host resolves relative paths against the package folder');
 }
 
 section('progress and stop: CookOptions.onNode, signal, ctx.checkpoint');

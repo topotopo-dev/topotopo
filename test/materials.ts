@@ -1,7 +1,7 @@
 // Material outputs: materials and their maps with no geometry are an output of kind "material". Made by
 // texture_to_material or material with nothing in input 0; used through the material node's input 1 (the entry and its
 // maps copied in, a clashing map renamed); shown on preview spheres; exported as PNGs + materials.json; published with
-// each map's size, and used from another project by its package name.
+// each map's size, and used from another package by its package name.
 //   node test/materials.ts
 import fs from 'node:fs';
 import os from 'node:os';
@@ -124,7 +124,7 @@ const MAPS: Record<string, NodeSpec> = {
     'materials.json: each material with its values and the files of its maps');
 }
 
-// ---------------------------------------------------------------- publishing and using it from another project
+// ---------------------------------------------------------------- publishing and using it from another package
 
 {
   const lib = path.join(tmp, 'lib'), mats = path.join(lib, 'mats'), house = path.join(tmp, 'house');
@@ -146,7 +146,7 @@ const MAPS: Record<string, NodeSpec> = {
   const bad = await publishPackage(openPackages(e2, mats), { note: 'wrong', dryRun: true } as any);
   check(bad.blocks.some((b) => /its "kind" is "material", and it cooks to mesh/.test(b)), 'pinned material that cooks to a mesh: publishing blocks');
   json(path.join(mats, 'graphs', 'main.json'), matGraph);
-  // another project uses it by name on its own mesh
+  // another package uses it by name on its own mesh
   json(path.join(house, 'project.json'), { id: 'house', title: 'house', graph: 'main', libraries: ['../lib'] });
   const houseGraph: GraphSpec = {
     nodes: {
@@ -164,7 +164,7 @@ const MAPS: Record<string, NodeSpec> = {
   const r = await e3.cook(houseGraph, { scope: pk.engine.root });
   const g = r.geo;
   check(r.ok && g && readMaterials(g).brick?.textures?.normal === 'image:brick_normal' && referenceableImages(g).get('brick_normal')?.width === 128,
-    `another project wears studio/mats/brick (${r.ok ? 'ok' : r.errors.map((x) => x.message).join('; ')})`);
+    `another package wears studio/mats/brick (${r.ok ? 'ok' : r.errors.map((x) => x.message).join('; ')})`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

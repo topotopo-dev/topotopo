@@ -1,4 +1,4 @@
-// TopoTopo's kits: the packages of TopoTopo's built-in library (library/ in the checkout), which every project can use.
+// TopoTopo's kits: the packages of TopoTopo's built-in library (library/ in the checkout), which every package can use.
 // The viewer's welcome and its "Find packages", and the Gallery's search and kit pages list them from here: each kit's
 // title and description (its project.json), its newest version and the outputs that version publishes, with their
 // kinds, tags and the thumbnail the kit keeps of each (thumbs/<output>.png).

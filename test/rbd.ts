@@ -24,7 +24,7 @@ const check = (ok: any, msg: string) => {
 };
 const engine = new Engine(createNodeHost({ baseDir: '.', workers: 0 }));
 await engine.init();
-// the rocks are TopoTopo's own (topotopo/nature/rock): one project that uses its kits, for every engine here
+// the rocks are TopoTopo's own (topotopo/nature/rock): one package that uses its kits, for every engine here
 const kits = useKits(engine).dir!;
 const R = await loadRapier();
 

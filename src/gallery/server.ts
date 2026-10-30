@@ -1,9 +1,9 @@
-// The gallery web server: the registered workspaces (the games: engine, libraries, projects, the packages they use),
-// every library's projects as a grid, a page per project with its 3D
+// The gallery web server: the registered workspaces (the games: engine, libraries, packages, the packages they use),
+// every library's packages as a grid, a page per package with its 3D
 // preview, and stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their
 // notes and the outputs it publishes with their kinds and tags (from its versions' records), which the grid's search
-// finds as well, and the projects that use it; any project's page the packages it uses, linked, and the grid marks a
-// project with an update. TopoTopo's kits (its built-in library) have cards and pages of their own (/k/<id>), with
+// finds as well, and the packages that use it; any package's page the packages it uses, linked, and the grid marks a
+// package with an update. TopoTopo's kits (its built-in library) have cards and pages of their own (/k/<id>), with
 // each output's thumbnail, and the search finds their outputs too. It reads
 // files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in editor"
 // starts a `topotopo edit` child.
@@ -56,7 +56,7 @@ export interface GalleryOptions {
   /** default: the config's gallery.port (7340); 0 picks a free port (tests) */
   port?: number;
   config?: GalleryConfig;
-  /** bake projects whose previews are missing or stale (default true) */
+  /** bake packages whose previews are missing or stale (default true) */
   bake?: boolean;
   log?: (msg: string) => void;
 }
@@ -87,23 +87,23 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
 
   // ---------------------------------------------------------------- libraries
   let scans: LibraryScan[] = [];
-  const projects = new Map<string, Package>();
+  const packages = new Map<string, Package>();
   const keyOf = (p: Package) => `${p.lib}/${p.id}`;
-  /** the registered workspaces: their files, and the projects inside each (read with the libraries) */
+  /** the registered workspaces: their files, and the packages inside each (read with the libraries) */
   let games: { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; scan: LibraryScan | null }[] = [];
   const rescan = () => {
     scans = cfg.libraries.map(scanLibrary);
-    projects.clear();
-    for (const s of scans) for (const p of s.projects) projects.set(keyOf(p), p);
+    packages.clear();
+    for (const s of scans) for (const p of s.packages) packages.set(keyOf(p), p);
     games = cfg.workspaces.map((w) => {
       try { const m = readWorkspace(w.path); return { name: m.name, dir: w.path, m, scan: scanLibrary({ name: m.name, path: w.path }) }; }
       catch (e: any) { return { name: w.name, dir: w.path, m: null, problem: e.message, scan: null }; }
     });
   };
   const find = (lib: string, id: string) => {
-    let p = projects.get(`${lib}/${id}`);
-    if (!p) { rescan(); p = projects.get(`${lib}/${id}`); } // made a moment ago, before the watch noticed
-    if (!p) throw new HttpError(404, `no project "${id}" in library "${lib}"`);
+    let p = packages.get(`${lib}/${id}`);
+    if (!p) { rescan(); p = packages.get(`${lib}/${id}`); } // made a moment ago, before the watch noticed
+    if (!p) throw new HttpError(404, `no package "${id}" in library "${lib}"`);
     return p;
   };
 
@@ -113,33 +113,33 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   const queue = new BakeQueue({
     log,
     onDone: (dir, state) => {
-      const p = [...projects.values()].find((x) => x.dir === dir);
-      if (p) broadcast({ project: keyOf(p), ok: state?.ok ?? false, version: state?.at ?? 0 });
+      const p = [...packages.values()].find((x) => x.dir === dir);
+      if (p) broadcast({ package: keyOf(p), ok: state?.ok ?? false, version: state?.at ?? 0 });
     },
   });
-  /** A project's graphs (graphs/, and graph files beside project.json), and whether it has the one project.json shows. */
+  /** A package's graphs (graphs/, and graph files beside project.json), and whether it has the one project.json shows. */
   const graphsOf = (p: Package) => graphFiles(p.dir);
   const hasDefault = (p: Package) => graphsOf(p).has(p.manifest.bake.graph ?? p.manifest.graph);
   const bakeIfStale = (p: Package) => {
-    // nothing to bake before the project has its default graph: its card says so ("no default graph yet")
+    // nothing to bake before the package has its default graph: its card says so ("no default graph yet")
     if (!bakeOn || queue.pending(p.dir) || !hasDefault(p)) return;
-    try { if (isStale(p) && queue.add(p.dir)) broadcast({ project: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
+    try { if (isStale(p) && queue.add(p.dir)) broadcast({ package: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
   };
   rescan();
-  for (const p of projects.values()) bakeIfStale(p);
+  for (const p of packages.values()) bakeIfStale(p);
 
   // A change below a library: project.json, graphs/, assets/ and inputs/ may need a bake; anything else may be a
-  // project made, moved or removed, or attachments: read the libraries again and tell the pages.
+  // package made, moved or removed, or attachments: read the libraries again and tell the pages.
   const touched = new Set<string>();
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   const onChange = () => {
     clearTimeout(changeTimer);
     changeTimer = setTimeout(() => {
-      const before = [...projects.keys()].join('\n');
+      const before = [...packages.keys()].join('\n');
       rescan();
-      for (const k of touched) { const p = projects.get(k); if (p) bakeIfStale(p); }
-      for (const p of projects.values()) if (!readBakeState(p.dir)) bakeIfStale(p);
-      broadcast({ changed: [...touched], list: before !== [...projects.keys()].join('\n') });
+      for (const k of touched) { const p = packages.get(k); if (p) bakeIfStale(p); }
+      for (const p of packages.values()) if (!readBakeState(p.dir)) bakeIfStale(p);
+      broadcast({ changed: [...touched], list: before !== [...packages.keys()].join('\n') });
       touched.clear();
     }, 500);
   };
@@ -151,7 +151,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         if (path.isAbsolute(rel)) return; // the root itself went away: the periodic rescan notices
         const parts = rel.split('/');
         if (parts.some((x) => x.startsWith('.') || x === 'node_modules')) return; // .gallery/, .cache/, .part files
-        const p = scans.find((x) => x.root === s.root)?.projects.find((x) => rel === x.rel || rel.startsWith(x.rel + '/'));
+        const p = scans.find((x) => x.root === s.root)?.packages.find((x) => rel === x.rel || rel.startsWith(x.rel + '/'));
         if (p) touched.add(keyOf(p));
         onChange();
       });
@@ -160,7 +160,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       watchers.push(w);
     } catch { /* no folder (a problem on the page) or no recursive watch: the periodic rescan covers it */ }
   }
-  const periodic = setInterval(() => { rescan(); for (const p of projects.values()) bakeIfStale(p); }, RESCAN_MS);
+  const periodic = setInterval(() => { rescan(); for (const p of packages.values()) bakeIfStale(p); }, RESCAN_MS);
   periodic.unref();
 
   // ---------------------------------------------------------------- editors
@@ -196,7 +196,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   const enc = encodeURIComponent;
   const urls: Urls & Required<Pick<Urls, 'kit' | 'kitThumb'>> = {
     home: '/',
-    project: (lib, id) => `/p/${enc(lib)}/${enc(id)}`,
+    package: (lib, id) => `/p/${enc(lib)}/${enc(id)}`,
     thumb: (lib, id, v) => `/p/${enc(lib)}/${enc(id)}/thumb.png${v ? `?v=${enc(String(v))}` : ''}`,
     glb: (lib, id, v) => `/p/${enc(lib)}/${enc(id)}/preview.glb${v ? `?v=${enc(String(v))}` : ''}`,
     embed: (lib, id) => `/embed/${enc(lib)}/${enc(id)}`,
@@ -211,34 +211,34 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
   // TopoTopo's kits: read again on each page (a few small files), so a kit published while the gallery runs shows
   const kits = () => listKits();
   const kitOf = (name: string, all = kits()) => all.find((k) => k.name === name);
-  /** The newest version of a package the gallery knows of: its project's in a library, or TopoTopo's kits'. */
+  /** The newest version of a package the gallery knows of: its package's in a library, or TopoTopo's kits'. */
   const newestOf = (name: string, homes = packageHomes(), all = kits()) =>
     [...(homes.get(name) ? publishedVersions(homes.get(name)!.dir, name) : []), ...(kitOf(name, all)?.versions ?? [])].map((x) => x.version).sort(compareVersions).at(-1);
-  /** The projects of the libraries and the workspaces that use a package, with the version each uses. */
+  /** The packages of the libraries and the workspaces that use a package, with the version each uses. */
   const usersOf = (name: string): UserRow[] => [
-    ...[...projects.values()].filter((p) => p.manifest.uses[name])
-      .map((p) => ({ lib: p.lib, id: p.id, title: p.manifest.title, version: p.manifest.uses[name], url: urls.project(p.lib, p.id) })),
+    ...[...packages.values()].filter((p) => p.manifest.uses[name])
+      .map((p) => ({ lib: p.lib, id: p.id, title: p.manifest.title, version: p.manifest.uses[name], url: urls.package(p.lib, p.id) })),
     ...games.filter((g) => g.m?.uses[name]).map((g) => ({ lib: 'workspace', id: g.name, title: `workspace ${g.name}`, version: g.m!.uses[name], url: `${urls.home}#ws-${enc(g.name)}` })),
   ].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
-  /** A registered workspace on the front page: its engine, libraries, projects and the packages it uses. */
+  /** A registered workspace on the front page: its engine, libraries, packages and the packages it uses. */
   const workspaceCard = (g: (typeof games)[number], homes = packageHomes(), all = kits()): WorkspaceCardData => {
-    if (!g.m) return { name: g.name, dir: g.dir, engine: null, libraries: [], projects: [], uses: [], problems: [g.problem ?? 'its file cannot be read'] };
+    if (!g.m) return { name: g.name, dir: g.dir, engine: null, libraries: [], packages: [], uses: [], problems: [g.problem ?? 'its file cannot be read'] };
     const e = g.m.engine;
     const libs = resolveLibraries([{ file: path.join(g.dir, WORKSPACE_FILE), base: g.dir, entries: g.m.libraries, from: 'workspace' }]);
-    const byDir = new Map([...projects.values()].map((p) => [path.resolve(p.dir).toLowerCase(), p]));
-    const inside = (g.scan?.projects ?? []).map((p) => {
+    const byDir = new Map([...packages.values()].map((p) => [path.resolve(p.dir).toLowerCase(), p]));
+    const inside = (g.scan?.packages ?? []).map((p) => {
       const at = byDir.get(path.resolve(p.dir).toLowerCase());
-      return { title: p.manifest.title, rel: p.rel, ...(at ? { url: urls.project(at.lib, at.id) } : {}), ...(p.manifest.package ? { pkg: p.manifest.package } : {}) };
+      return { title: p.manifest.title, rel: p.rel, ...(at ? { url: urls.package(at.lib, at.id) } : {}), ...(p.manifest.package ? { pkg: p.manifest.package } : {}) };
     });
     const uses = Object.entries(g.m.uses).map(([name, v]) => {
       const newest = newestOf(name, homes, all), home = homes.get(name), kit = kitOf(name, all);
-      const url = home ? urls.project(home.lib, home.id) : kit ? urls.kit(kit.id) : undefined;
+      const url = home ? urls.package(home.lib, home.id) : kit ? urls.kit(kit.id) : undefined;
       return { name, version: v, ...(url ? { url } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {
       name: g.name, dir: g.dir,
       engine: e ? `${e.type === 'godot' ? 'Godot' : 'Unreal'} · ${e.project}${e.assets ? ` · exports to ${engineAddress(e, e.assets)}` : ''}` : null,
-      libraries: libs.libs.map((l) => l.name), projects: inside, uses, problems: [...libs.problems, ...(g.scan?.problems ?? [])],
+      libraries: libs.libs.map((l) => l.name), packages: inside, uses, problems: [...libs.problems, ...(g.scan?.problems ?? [])],
     };
   };
   const kitCard = (k: Kit): KitCardData => ({
@@ -262,10 +262,10 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       ...(pkg ? { pkg } : {}), ...(outputs ? { outputs } : {}), ...(uses.length ? { usesPackages: uses } : {}), ...(updates.length ? { updates } : {}),
     };
   };
-  /** The projects that are packages, by full name: the first library's when two hold one. */
+  /** The packages that publish versions, by full name: the first library's when two hold one. */
   const packageHomes = () => {
     const homes = new Map<string, Package>();
-    for (const p of projects.values()) if (p.manifest.package && !homes.has(p.manifest.package)) homes.set(p.manifest.package, p);
+    for (const p of packages.values()) if (p.manifest.package && !homes.has(p.manifest.package)) homes.set(p.manifest.package, p);
     return homes;
   };
   /** A version's published outputs, each by the node type a graph names it with; "owner/name" alone is the default. */
@@ -300,14 +300,14 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     const uses = Object.entries(m.uses).map(([name, v]) => {
       const rec = copyRecord(p.dir, name, v), home = homes.get(name), kit = kitOf(name, all);
       const newest = newestOf(name, homes, all);
-      const url = home ? urls.project(home.lib, home.id) : kit ? urls.kit(kit.id) : undefined;
+      const url = home ? urls.package(home.lib, home.id) : kit ? urls.kit(kit.id) : undefined;
       return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(url ? { url } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {
       ...cardOf(p), rel: p.rel, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
       attachments: listFiles(path.join(p.dir, 'attachments')), exports: listFiles(path.join(p.dir, 'exports')),
       glb: fs.existsSync(path.join(galleryDir(p.dir), 'preview.glb')), bake: s,
-      share: { link: abs(urls.project(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
+      share: { link: abs(urls.package(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
       package: m.package ? {
         name: m.package,
         versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(m.package!, v) })),
@@ -317,18 +317,18 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       uses,
     };
   };
-  /** A kit's page: its versions, its outputs with their thumbnails, the projects that use it. */
+  /** A kit's page: its versions, its outputs with their thumbnails, the packages that use it. */
   const kitData = (k: Kit) => ({
     ...kitCard(k),
     versions: [...k.versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(k.name, v) })),
     rows: k.versions.length ? outputsOf(k.name, k.versions.at(-1)!).map((o) => ({ ...o, thumb: k.outputs.find((x) => x.type === o.type)?.thumb ? urls.kitThumb(k.id, o.type.slice(k.name.length + 1)) : null })) : [],
     usedBy: usersOf(k.name),
   });
-  const listJSON = () => [...projects.values()].map((p) => {
+  const listJSON = () => [...packages.values()].map((p) => {
     const c = cardOf(p);
     return {
       lib: p.lib, id: p.id, title: c.title, description: c.description, tags: c.tags, collection: c.collection, updated: p.updated, status: c.status,
-      url: base + urls.project(p.lib, p.id), thumb: base + urls.thumb(p.lib, p.id, c.version), embed: base + urls.embed(p.lib, p.id),
+      url: base + urls.package(p.lib, p.id), thumb: base + urls.thumb(p.lib, p.id, c.version), embed: base + urls.embed(p.lib, p.id),
       ...(c.pkg ? { package: c.pkg } : {}),
     };
   });
@@ -343,7 +343,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
     return placeholder;
   };
 
-  /** `files/<rest>` of a project: below attachments/ or exports/, never outside them (links included). */
+  /** `files/<rest>` of a package: below attachments/ or exports/, never outside them (links included). */
   const packageFile = (p: Package, rest: string) => {
     const parts = rest.split('/').map((x) => decodeURIComponent(x));
     // decoded segments: "%2F" and "%5C" must not smuggle separators (and so "..") past the split
@@ -351,10 +351,10 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       throw new HttpError(400, 'files/ serves attachments/<path> and exports/<path>');
     const root = path.join(p.dir, parts[0]);
     const abs = path.join(root, ...parts.slice(1));
-    if (!abs.startsWith(root + path.sep)) throw new HttpError(400, 'the path leaves the project');
+    if (!abs.startsWith(root + path.sep)) throw new HttpError(400, 'the path leaves the package');
     if (!fs.statSync(abs, { throwIfNoEntry: false })?.isFile()) throw new HttpError(404, `no file ${parts.join('/')}`);
     const real = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
-    if (real.startsWith('..') || path.isAbsolute(real)) throw new HttpError(400, 'the path leaves the project');
+    if (real.startsWith('..') || path.isAbsolute(real)) throw new HttpError(400, 'the path leaves the package');
     return abs;
   };
 
@@ -382,7 +382,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
       const seg = u.pathname.split('/').slice(1);
 
       if (u.pathname === '/' || u.pathname === '/index.html') {
-        return html(galleryPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.projects.map(cardOf) })), kits: kits().map(kitCard), workspaces: games.map((g) => workspaceCard(g)), problems: scans.flatMap((s) => s.problems) }, urls));
+        return html(galleryPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.packages.map(cardOf) })), kits: kits().map(kitCard), workspaces: games.map((g) => workspaceCard(g)), problems: scans.flatMap((s) => s.problems) }, urls));
       }
       if (seg[0] === 'static') { const p = readStatic(assetDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'app') { const p = readStatic(appDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
@@ -390,7 +390,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         const p = readStatic(threeDir, seg.slice(2).join('/'));
         return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream', { 'cache-control': 'max-age=3600' }) : send(404, 'not found');
       }
-      if (u.pathname === '/api/health') return json(200, { gallery: true, libraries: scans.length, projects: projects.size, baking: queue.size });
+      if (u.pathname === '/api/health') return json(200, { gallery: true, libraries: scans.length, packages: packages.size, baking: queue.size });
       if (u.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
         res.write(': hello\n\n');
@@ -398,11 +398,11 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         req.on('close', () => clients.delete(res));
         return;
       }
-      if (u.pathname === '/api/projects') {
+      if (u.pathname === '/api/packages') {
         // a board on another origin may read the list when the config allows it (gallery.cors)
         const cors: Record<string, string> = origin && cfg.gallery.cors.includes(origin) ? { 'access-control-allow-origin': origin, vary: 'Origin' } : { vary: 'Origin' };
         if (req.method === 'OPTIONS') return send(204, '', 'text/plain', { ...cors, 'access-control-allow-methods': 'GET' });
-        return json(200, { libraries: scans.map((s) => ({ name: s.name, projects: s.projects.length, problems: s.problems })), projects: listJSON() }, cors);
+        return json(200, { libraries: scans.map((s) => ({ name: s.name, packages: s.packages.length, problems: s.problems })), packages: listJSON() }, cors);
       }
       if (seg[0] === 'k' && seg.length >= 2) {
         const k = kits().find((x) => x.id === decodeURIComponent(seg[1])) ?? (() => { throw new HttpError(404, `no kit "${decodeURIComponent(seg[1])}" in TopoTopo's built-in library`); })();
@@ -420,7 +420,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
         const s = readBakeState(p.dir);
         const glb = fs.existsSync(path.join(galleryDir(p.dir), 'preview.glb'));
-        return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: String(s?.at ?? 0), packageUrl: urls.project(p.lib, p.id) }, urls), true);
+        return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: String(s?.at ?? 0), packageUrl: urls.package(p.lib, p.id) }, urls), true);
       }
       if (seg[0] === 'p' && seg.length >= 3) {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
@@ -452,7 +452,7 @@ export async function startGallery(o: GalleryOptions = {}): Promise<Gallery> {
         if (rest[0] === 'bake') {
           if (req.method !== 'POST') throw new HttpError(405, 'POST to bake again');
           const queued = queue.add(p.dir);
-          if (queued) broadcast({ project: keyOf(p), baking: true });
+          if (queued) broadcast({ package: keyOf(p), baking: true });
           return json(200, { ok: true, queued });
         }
         if (rest[0] === 'reveal') {

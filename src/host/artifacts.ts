@@ -1,7 +1,7 @@
 // Persistent output receipts shared by the CLI, MCP and viewer. Paths are registered by trusted host code;
 // HTTP callers only receive identifiers, never a route that reads an arbitrary absolute path. The receipts file
-// (exports/.outputs.json) holds the paths relative to the project, the folder exports/ is in ("exports/crate.glb"),
-// never a machine's absolute paths: the project folder can move, or be checked out elsewhere.
+// (exports/.outputs.json) holds the paths relative to the package, the folder exports/ is in ("exports/crate.glb"),
+// never a machine's absolute paths: the package folder can move, or be checked out elsewhere.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -24,9 +24,9 @@ export class ArtifactStore {
   dir: string;
   constructor(dir: string) { this.dir = path.resolve(dir); }
   get manifest() { return path.join(this.dir, '.outputs.json'); }
-  /** the folder the receipts' paths are relative to: the project (exports/'s folder) */
+  /** the folder the receipts' paths are relative to: the package (exports/'s folder) */
   private get base() { return path.dirname(this.dir); }
-  /** A path as the receipts file holds it: relative to the project, with "/" (absolute only on another drive). */
+  /** A path as the receipts file holds it: relative to the package, with "/" (absolute only on another drive). */
   private stored(p: string) {
     const rel = path.relative(this.base, path.resolve(p));
     return path.isAbsolute(rel) ? path.resolve(p) : rel.split(path.sep).join('/');

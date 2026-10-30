@@ -434,7 +434,7 @@ section('processes end with the pool in use');
   check(z.status === 0 && z.stdout.split('\n').slice(1).join('\n') === r.stdout.split('\n').slice(1).join('\n'), 'TOPOTOPO_WORKERS=0: the CLI prints the same summary');
   // MCP server: closing stdin ends the process
   const ws = path.join(tmp, 'ws');
-  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'mcp', 'server.ts'), '--project', ws], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'mcp', 'server.ts'), '--package', ws], { env, stdio: ['pipe', 'pipe', 'pipe'] });
   let err = '';
   child.stderr.on('data', (d) => { err += d; });
   await new Promise<void>((res) => { const iv = setInterval(() => { if (/ready/.test(err)) { clearInterval(iv); res(); } }, 50); setTimeout(() => { clearInterval(iv); res(); }, 20000); });

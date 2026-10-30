@@ -77,19 +77,19 @@ function blenderScript(): string {
 let envPool: WorkerPool | undefined | null = null;
 
 /**
- * The folder relative file paths resolve against, for a graph (or a session's folder) in `dir`: its project folder, the nearest
+ * The folder relative file paths resolve against, for a graph (or a session's folder) in `dir`: its package folder, the nearest
  * folder at or above `dir` with a project.json, else `dir` itself. One rule for the CLI (the graph file's folder), the
- * MCP server (its folder) and the viewer (the graph file's folder): a graph in a project's graphs/ reads
- * "inputs/ref.png" from the project's inputs/, wherever it is cooked from, and exports into the project's exports/
+ * MCP server (its folder) and the viewer (the graph file's folder): a graph in a package's graphs/ reads
+ * "inputs/ref.png" from the package's inputs/, wherever it is cooked from, and exports into the package's exports/
  * (export-targets.ts exportsFolderFor).
  */
 export function packageBaseDir(dir: string): string {
-  // the project lookup is the one export targets use (exports/ of the same folder): one function for both rules
+  // the package lookup is the one export targets use (exports/ of the same folder): one function for both rules
   return packageFolderOf(dir) ?? path.resolve(dir);
 }
 
 export interface NodeHostOptions {
-  /** the graph's (or the session's) folder: relative paths resolve against its project folder (packageBaseDir) */
+  /** the graph's (or the session's) folder: relative paths resolve against its package folder (packageBaseDir) */
   baseDir?: string;
   /**
    * Worker threads for Host.pool. Default: TOPOTOPO_WORKERS (availableParallelism() - 1 when unset), shared by every
@@ -388,8 +388,8 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   };
 }
 
-// Projects and their packages for scripts that cook outside the CLI and the MCP server (a world generator): open a
-// project (its packages, graphs and assets in the engine's root scope), add what a graph names on first use, cook.
+// Packages and the packages they use, for scripts that cook outside the CLI and the MCP server (a world generator): open a
+// package (its packages, graphs and assets in the engine's root scope), add what a graph names on first use, cook.
 //   const engine = new Engine(createNodeHost({ baseDir: dir })); await engine.init();
 //   const { packages } = openPackage(engine, dir); packages.addFor(graph); await engine.cook(graph);
 export { openPackage } from '../open.ts';

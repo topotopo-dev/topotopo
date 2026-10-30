@@ -205,12 +205,12 @@ export function createProps(ctx) {
 // (release, Enter, a pick) is one undo step.
 // Over a graph file (`topotopo view`, mode "file") the values are session values over the file: a mark shows each one
 // that differs from the file, ↺ goes back to the file's value, Reset all does so for all of them, and Save values
-// writes them into the file's vars. In a project the values edit the stored graph and ↺ goes to the declared default.
+// writes them into the file's vars. In a package the values edit the stored graph and ↺ goes to the declared default.
 function createControls(ctx) {
   const box = $('controls'), count = $('controls-count');
   const bar = $('controls-session'), barText = bar.querySelector('.stext'), saveBtn = $('vars-save'), resetBtn = $('vars-reset');
   const ctl = {
-    graph: null, mode: 'project', file: null, graphVars: {}, rows: new Map(), active: null, deferred: null, saving: false,
+    graph: null, mode: 'package', file: null, graphVars: {}, rows: new Map(), active: null, deferred: null, saving: false,
     pending: {}, timer: 0, lastSend: -1e9, seq: 0,
     // var → id of its newest POST not answered yet / time its newest POST was answered: older server state is ignored
     unacked: new Map(), ackAt: new Map(),
@@ -396,7 +396,7 @@ function createControls(ctx) {
       ctl.rows.clear(); ctl.deferred = null;
       ctl.graph = name;
     }
-    ctl.mode = g?.mode ?? 'project'; ctl.file = g?.file ?? null;
+    ctl.mode = g?.mode ?? 'package'; ctl.file = g?.file ?? null;
     const params = g?.params ?? {}, vars = g?.vars ?? {};
     ctl.graphVars = g?.graphVars ?? vars;
     const { declared, other } = controlList(params, vars);
@@ -476,7 +476,7 @@ function createControls(ctx) {
     const rows = names.map((k) => ctl.rows.get(k)).filter((r) => r && r.base !== undefined && !same(ctl.values.get(r.name), r.base));
     if (!rows.length) return;
     const graph = ctl.graph, before = new Map(rows.map((r) => [r.name, ctl.values.get(r.name)])), after = new Map(rows.map((r) => [r.name, r.base]));
-    // over a graph file null drops the session value; in a project the default is stored
+    // over a graph file null drops the session value; in a package the default is stored
     for (const r of rows) { r.set(r.base); queueVar(r.name, ctl.mode === 'file' ? null : r.base, false, true, r.base); }
     const apply = (m) => {
       if (ctl.graph !== graph) { api.vars(graph, Object.fromEntries(m)); return; }

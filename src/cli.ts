@@ -22,13 +22,13 @@
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
 //   node src/cli.ts --catalog | --help-node scatter | --help-topic export | --version
-//   node src/cli.ts mcp [--project dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
+//   node src/cli.ts mcp [--package dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         files dropped on the page go to inputs/ beside the graph file
 //   node src/cli.ts gallery [--port 7340] [--library dir]  the gallery website of the libraries (src/packages/commands.ts)
-//   node src/cli.ts library add|list|new|bake …           registered libraries and projects; edit [folder] opens the
-//                                                         live viewer on a project
-// The workspace (the game) around projects (src/workspace.ts), a project and its packages (src/packages/commands.ts,
+//   node src/cli.ts library add|list|new|bake …           registered libraries and packages; edit [folder] opens the
+//                                                         live viewer on a package
+// The workspace (the game) around packages (src/workspace.ts), a package and the packages it uses (src/packages/commands.ts,
 // src/packages/registry.ts, src/packages/update.ts):
 //   node src/cli.ts workspace [folder]
 //   node src/cli.ts workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--assets <folder>] [--library <folder or name>] [--follow | --no-follow]
@@ -107,11 +107,11 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           --json: the uv, budget or scene report as JSON',
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
-    '         [--export-all] (every output with an export target in the graph, into exports/ of its project folder)',
-    '         relative paths in the graph (file nodes, maps) read from its project folder: the nearest folder with a project.json at or',
+    '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
+    '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a project.json at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
-    '         [--follow owner/name] (show that package\'s working folder in the project\'s libraries instead of its copy, for this run: renders and inspect use it, exports the published copy; repeat it)',
-    '         [--locked] (a build machine: a package the graph names that the project does not use, or a copy missing or edited by hand, fails the run instead of being added)',
+    '         [--follow owner/name] (show that package\'s working folder in the package\'s libraries instead of its copy, for this run: renders and inspect use it, exports the published copy; repeat it)',
+    '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
@@ -145,13 +145,13 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                       in its sidecar; replay: --output/--node, --frame, --fps, --var per var, --format and each option as its flag',
     '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
-    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a project: its packages' outputs too, --help-node owner/name/output)`,
-    `       ${prog} mcp [--project dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
+    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output)`,
+    `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
-    `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's projects, stable links for a board)`,
-    `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <project>|--stale|--all   (registered libraries)`,
-    `       ${prog} edit [folder] [--port 7341]   (the live viewer on a project, default the current folder's)`,
-    '       a project and its packages (a folder named must exist; default: the current folder\'s project; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
+    `       ${prog} gallery [--port 7340] [--library <folder>] [--no-bake]   (the gallery website: every library's packages, stable links for a board)`,
+    `       ${prog} library add <name> <folder> | list | new <library> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
+    `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
+    '       a package and the packages it uses (a folder named must exist; default: the current folder\'s package; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
     ...PACKAGE_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
   ].join('\n'));
   process.exit(0);
@@ -170,7 +170,7 @@ if (argv.includes('--help-topic')) {
   process.exit(0);
 }
 if (argv.includes('--catalog') || opt('--help-node')) {
-  // node types, the current folder's assets, the outputs of the packages its project uses, and those of TopoTopo's own
+  // node types, the current folder's assets, the outputs of the packages its package uses, and those of TopoTopo's own
   // packages (house, stairs, …) it does not use yet
   const engine = new Engine(createNodeHost({ baseDir: process.cwd() }));
   await engine.init();
@@ -179,9 +179,9 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   if (argv.includes('--catalog')) console.log(catalogText(defs, { cli: true }));
   else {
     const name = opt('--help-node')!;
-    // an output of a package the project does not use yet is read where its library holds it (nothing is copied)
+    // an output of a package that the package does not use yet is read where its library holds it (nothing is copied)
     const d = defs.find((x) => x.type === name) ?? (name.includes('/') ? engine.resolveDef(name) ?? pk.describe(name) ?? undefined : undefined);
-    // a package output this folder cannot cook as it is (one of TopoTopo's own it does not use, a folder in no project)
+    // a package output this folder cannot cook as it is (one of TopoTopo's own it does not use, a folder in no package)
     const why = name.includes('/') && !engine.resolveDef(name) ? engine.packageIssue(name) : null;
     const said = why ? `${why.error}${why.hint ? ` (${why.hint})` : ''}` : '';
     console.log(d ? `${nodeDoc(d)}${said ? `\nin this folder: ${said}` : ''}` : said || `unknown node "${name}" (see --catalog)`);
@@ -203,13 +203,13 @@ if (argv[0] === 'view') {
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
 } else if (['gallery', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'check', 'update'].includes(argv[0])) {
-  // the gallery website, its libraries and its editor; a project's packages (src/packages/commands.ts). A command that ends
+  // the gallery website, its libraries and its editor; a package and the packages it uses (src/packages/commands.ts). A command that ends
   // gives its exit code; the gallery and the editor keep running
   const { commands } = await import('./packages/commands.ts');
   const code = await commands[argv[0]](argv.slice(1), prog);
   if (typeof code === 'number') process.exit(code);
 } else if (argv[0] === 'mcp') {
-  // `topotopo mcp [--project dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
+  // `topotopo mcp [--package dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin
   process.argv.splice(2, 1);
   await import('./mcp/server.ts');
@@ -273,10 +273,10 @@ async function cook() {
   }
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
   await engine.init();
-  // the packages of the project the file belongs to: one the graph names for the first time is added (said), and
+  // the packages of the package the file belongs to: one the graph names for the first time is added (said), and
   // --follow uses a package's working folder for this run. A graph that does not validate as a dry run sees it adds
   // nothing: its errors are said and the run ends. --locked (a build machine) adds nothing and changes no file: a
-  // package the project does not use, or a copy missing or edited by hand, fails the run instead.
+  // package the package does not use, or a copy missing or edited by hand, fails the run instead.
   let pk: ReturnType<typeof openPackages>;
   try { pk = openPackages(engine, path.dirname(path.resolve(file)), { follow: followArgs }); } catch (e) { fail(`--follow: ${(e as Error).message}`); }
   const dry = pk!.dryRun(graph);
@@ -379,7 +379,7 @@ async function cook() {
   async function writeOutputs(r: CookReport, frame?: number) {
     const geo = r.geo!;
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
-    // Receipts for the viewer's saved files, only for files inside the project's exports/ (exportsFolderFor): a run whose
+    // Receipts for the viewer's saved files, only for files inside the package's exports/ (exportsFolderFor): a run whose
     // output goes elsewhere leaves no exports/ folder behind (the viewer lists that folder's files without receipts too).
     const exportsDir = exportsFolderFor(file);
     const record = (paths: string[], format: string) => {
@@ -450,7 +450,7 @@ async function cook() {
     if (argv.includes('--export-all')) await exportAll();
   }
 
-  /** --export-all: every published output with an export target (io/targets.ts), into the project's exports/ (exportsFolderFor). */
+  /** --export-all: every published output with an export target (io/targets.ts), into the package's exports/ (exportsFolderFor). */
   async function exportAll() {
     const name = graphName(file), exportsDir = exportsFolderFor(file);
     const published = publishedOutputs(name, graph, engine.findOutput(graph).name);

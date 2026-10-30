@@ -1,6 +1,6 @@
 // Cook and render every graph in examples/ to examples/renders/<name>.png.
 // A graph's meta.render (any render tool option: views, checker, color_by, azimuth, wireframe, section_axis, glyphs, …) overrides the default quad view.
-// examples/ is a project: the graphs that name TopoTopo's own packages cook them from its copies in examples/packages/.
+// examples/ is a package: the graphs that name TopoTopo's own packages cook them from its copies in examples/packages/.
 //   node test/showcase.ts [filter]
 import fs from 'node:fs';
 import path from 'node:path';

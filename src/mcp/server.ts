@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // TopoTopo MCP server (stdio). Exposes the geometry engine as tools for LLM agents.
-//   node src/mcp/server.ts [--project <dir>] [--viewer]
-//   topotopo mcp [--project <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
-// Env: TOPOTOPO_PROJECT, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_SIM_TIMEOUT_MS, TOPOTOPO_WORKERS
+//   node src/mcp/server.ts [--package <dir>] [--viewer]
+//   topotopo mcp [--package <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
+// Env: TOPOTOPO_PACKAGE, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_SIM_TIMEOUT_MS, TOPOTOPO_WORKERS
 // stdout carries the MCP protocol — log only to stderr.
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -25,25 +25,25 @@ import type { PackageUses } from '../packages/registry.ts';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
-const named = argOf('--project') ?? process.env.TOPOTOPO_PROJECT;
+const named = argOf('--package') ?? process.env.TOPOTOPO_PACKAGE;
 
 const log = (...a: any[]) => process.stderr.write('[topotopo] ' + a.join(' ') + '\n');
 
 // hints name the command a person runs: the sources from a clone, or the installed package's
 setProgram(import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo');
 
-// The folder, named (--project, TOPOTOPO_PROJECT) or not (<cwd>/topotopo, which takes the name of the folder it
-// is in), becomes a project when the server starts if it is in no project and holds nothing but what TopoTopo makes
+// The folder, named (--package, TOPOTOPO_PACKAGE) or not (<cwd>/topotopo, which takes the name of the folder it
+// is in), becomes a package when the server starts if it is in no package and holds nothing but what TopoTopo makes
 // itself (graphs/, assets/, exports/, inputs/), or nothing at all, as a new one does: then its graphs use packages,
-// TopoTopo's own among them, as they come. A folder in a project works in that project's folder. A folder with
+// TopoTopo's own among them, as they come. A folder in a package works in that package's folder. A folder with
 // anything else in it (a repository, a folder of the person's) stays as it is: library {action:"init"} makes it a
-// project when the person says so (startPackage, src/project.ts). The first tool reply says what happened.
+// package when the person says so (startPackage, src/package.ts). The first tool reply says what happened.
 const start = startPackage(path.resolve(named ?? path.join(process.cwd(), 'topotopo')), named ? {} : { name: path.basename(process.cwd()) });
 log(start.log);
 const wsDir = start.dir;
 let firstNote = start.note;
 
-// The folder can change while the server runs (library {action:"open"} opens a gallery project): every tool and
+// The folder can change while the server runs (library {action:"open"} opens a gallery package): every tool and
 // the live viewer then work on the new folder. Each session has its own engine (asset registry, base directory,
 // packages, cache); the worker pool is shared by the process. Sessions follow what other processes write into their folders
 // (Session.watch: the gallery's editor, a person editing JSON). The packages a session follows (library
@@ -62,7 +62,7 @@ async function openSession(dir: string) {
   if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) e.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
   await e.init();
   const { session: w, packages: pk, loaded } = openPackage(e, dir, { watch: true });
-  log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; project ${pk.dir}, ${Object.keys(pk.uses()).length} packages used` : '; in no project'}`);
+  log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; package ${pk.dir}, ${Object.keys(pk.uses()).length} packages used` : '; in no package'}`);
   for (const x of loaded.assetErrors) log('asset error:', x);
   for (const x of loaded.graphErrors) log('graph not read:', x);
   for (const x of pk.check()) log('package problem:', x);
@@ -95,8 +95,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const progress = token === undefined ? undefined : (done: number, total: number, message: string) => {
     extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: done, total, message } }).catch(() => {});
   };
-  // the first reply says where the server works when that is news: a folder that became a project, one left as it is,
-  // the project a folder lies in
+  // the first reply says where the server works when that is news: a folder that became a package, one left as it is,
+  // the package a folder lies in
   const note = firstNote;
   firstNote = null;
   let r: any;

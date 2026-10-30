@@ -1,5 +1,5 @@
 // TopoTopo's own packages, the kits of its built-in library (library/<kit>/, scripts/gen-kits.ts): every output, cooked
-// as a project that uses the kit cooks it, documents its params, follows the kits' conventions and cooks at its defaults
+// as a package that uses the kit cooks it, documents its params, follows the kits' conventions and cooks at its defaults
 // and at both ends of every numeric range.
 //   node test/kits.ts [filter]
 // Per output: description, 3–10 params each with type, default (= the var), desc and a range or options; every prim
@@ -10,7 +10,7 @@
 // Per kit: topotopo/<folder>, one output per graph named as its file with a pinned kind and tags (which its newest
 // version records, the line-up "kit" among them), the graph it shows lines its outputs up (its default output cooks),
 // and its working folder is its newest version; the thumbnails and the README table are current
-// (gen-kits --check). Also: the assets tool forks an output's graph into the project's assets, which keeps list, get,
+// (gen-kits --check). Also: the assets tool forks an output's graph into the package's assets, which keeps list, get,
 // save and delete for its own; the catalog and help list the outputs with their descriptions.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,7 +38,7 @@ const check = (ok: boolean, msg: string) => { checks++; if (!ok) fail(msg); };
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-kits-'));
 const engine = new Engine(createNodeHost({ baseDir: tmp }));
 await engine.init();
-const pk = useKits(engine, path.join(tmp, 'project'));
+const pk = useKits(engine, path.join(tmp, 'package'));
 check(!pk.check().length, `the kits load without problems: ${pk.check().join('; ')}`);
 
 const kits = readKits();
@@ -201,7 +201,7 @@ for (const k of kits) {
   }
 }
 
-// ---- the tools: the project's own assets, a fork of an output's graph into them, the catalog and help
+// ---- the tools: the package's own assets, a fork of an output's graph into them, the catalog and help
 if (!filter || 'stairs house'.includes(filter)) {
   const wsDir = path.join(tmp, 'ws');
   initPackage(wsDir);
@@ -213,18 +213,18 @@ if (!filter || 'stairs house'.includes(filter)) {
   const tools = makeTools(ws);
   const tool = (n: string) => tools.find((t) => t.name === n)!;
   const txt = async (n: string, a: any) => { try { const r = await tool(n).run(a); return { err: !!r.isError, text: r.content.map((c: any) => c.text ?? '').join('\n') }; } catch (e: any) { return { err: true, text: String(e.message) }; } };
-  check(/^no assets yet/.test((await txt('assets', { action: 'list' })).text), 'a new project has no assets of its own');
+  check(/^no assets yet/.test((await txt('assets', { action: 'list' })).text), 'a new package has no assets of its own');
   const fork = await txt('assets', { action: 'fork', name: 'topotopo/architecture/stairs', to: 'my_stairs' });
   const forked = path.join(wsDir, 'assets', 'my_stairs.json');
-  check(!fork.err && fs.existsSync(forked) && e2.asset('my_stairs')?.def.category === 'asset' && !!JSON.parse(fs.readFileSync(forked, 'utf8')).params?.steps, `fork copies the output's graph into the project's assets: ${fork.text.split('\n')[0]}`);
+  check(!fork.err && fs.existsSync(forked) && e2.asset('my_stairs')?.def.category === 'asset' && !!JSON.parse(fs.readFileSync(forked, 'utf8')).params?.steps, `fork copies the output's graph into the package's assets: ${fork.text.split('\n')[0]}`);
   const rf = await e2.cook({ nodes: { s: { type: 'my_stairs', params: { steps: 9 } } } });
   check(rf.ok && !!rf.geo && rf.geo.numPrims > 0, `the forked asset cooks: ${rf.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
   const house = await txt('assets', { action: 'fork', name: 'topotopo/architecture/house' });
   check(!house.err && !!e2.asset('house') && readManifest(wsDir).uses['topotopo/architecture'] === kits.find((x) => x.name === 'architecture')!.versions.at(-1)!.version && /added topotopo\/architecture/.test(house.text),
-    `a fork whose graph names the kit's other outputs adds the kit to the project (first use): ${house.text.split('\n').slice(0, 2).join(' | ')}`);
+    `a fork whose graph names the kit's other outputs adds the kit to the package (first use): ${house.text.split('\n').slice(0, 2).join(' | ')}`);
   check((await e2.cook({ nodes: { h: { type: 'house', params: { floors: 1 } } } })).ok, 'and it cooks with the kit\'s walls and roof');
   const list = await txt('assets', { action: 'list' });
-  check(/my_stairs — Straight stairs/.test(list.text) && /house — House built from a footprint polygon/.test(list.text), `assets list shows the project's assets: ${list.text.split('\n').slice(0, 3).join(' | ')}`);
+  check(/my_stairs — Straight stairs/.test(list.text) && /house — House built from a footprint polygon/.test(list.text), `assets list shows the package's assets: ${list.text.split('\n').slice(0, 3).join(' | ')}`);
   const get = await txt('assets', { action: 'get', name: 'my_stairs' });
   check(/## my_stairs \(asset\)/.test(get.text) && /"steps"/.test(get.text), 'assets get shows one with its graph');
   const del = await txt('assets', { action: 'delete', name: 'my_stairs' });
@@ -237,8 +237,8 @@ if (!filter || 'stairs house'.includes(filter)) {
   check(/\[package\]/.test(cat.text) && /topotopo\/architecture\/wall_segment ◦ — Straight wall from x = 0 to x = wall_length/.test(cat.text) && /topotopo\/nature\/rock ◦ — Low-poly rock/.test(cat.text),
     'catalog lists the kits\' outputs with their descriptions');
   const help = await txt('help', { nodes: ['topotopo/architecture/stairs', 'topotopo/nature/rock'] });
-  check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this project: package topotopo\/nature is not in this project's uses/.test(help.text),
-    'help documents an output, and says when the project does not use its kit yet');
+  check(help.text.includes('## topotopo/architecture/stairs (package)') && help.text.includes('steps int') && /in this package: package topotopo\/nature is not in this package's uses/.test(help.text),
+    'help documents an output, and says when the package does not use its kit yet');
   check(/\ntopotopo\/nature\/rock ◦ — Low-poly rock[^\n]* {2}\(mesh \[rock, stone, boulder, low-poly\]\)\n/.test(`\n${cat.text.split('\n').map((l) => l.trim()).join('\n')}\n`) && /\nwhat it is: instances \[forest, trees, conifer/.test((await txt('help', { nodes: ['topotopo/nature/forest_patch'] })).text)
     && /topotopo\/nature\/forest_patch/.test((await txt('catalog', { search: 'conifer' })).text), 'the catalog and help give an output\'s kind and tags, and the catalog\'s search finds a tag');
   // a bare name is no node type, and nothing makes it one: the error names the output of that name, used or not
@@ -252,7 +252,7 @@ if (!filter || 'stairs house'.includes(filter)) {
   await loose.init();
   openPackages(loose, looseDir);
   const outside = (await loose.cook({ nodes: { s: { type: 'stairs' } }, output: 's' })).errors.map((e) => e.message).join('; ');
-  check(/^unknown node type "stairs" — did you mean topotopo\/architecture\/stairs[,?]/.test(outside), `outside a project as well: ${outside}`);
+  check(/^unknown node type "stairs" — did you mean topotopo\/architecture\/stairs[,?]/.test(outside), `outside a package as well: ${outside}`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -325,7 +325,7 @@ defineNode({
   aliases: ['heightfield_file', 'heightmap_import', 'hf_from_image', 'heightfield_image'],
   inputs: [{ name: 'heightfield', desc: 'optional: write the image into this field', optional: true }],
   params: {
-    path: { type: 'path', default: '', desc: 'PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph\'s folder', aliases: ['file', 'filename'] },
+    path: { type: 'path', default: '', desc: 'PNG file or URL; a relative path reads from the package folder (nearest project.json), else the graph\'s folder', aliases: ['file', 'filename'] },
     layer: layerParam('height', 'layer to write'),
     height_min: { type: 'float', default: 0, desc: 'value for black (0)', aliases: ['min', 'low'] },
     height_max: { type: 'float', default: 10, desc: 'value for white (1)', aliases: ['max', 'high'] },

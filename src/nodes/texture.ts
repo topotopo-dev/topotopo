@@ -603,7 +603,7 @@ defineNode({
   aliases: ['image_read', 'png_read', 'texture_file'],
   inputs: [{ name: 'geo', desc: 'optional: add the image to this geometry (chain image_file nodes, or carry a mesh); else the output holds only the image', optional: true }],
   params: {
-    path: { type: 'path', default: '', desc: 'PNG file (relative to the project folder, e.g. "inputs/brick.png") or URL', aliases: ['file', 'filename'] },
+    path: { type: 'path', default: '', desc: 'PNG file (relative to the package folder, e.g. "inputs/brick.png") or URL', aliases: ['file', 'filename'] },
     name: nameParam(),
     layers: { type: 'enum', options: [...PNG_LAYERS], default: 'auto', desc: 'auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels', aliases: ['channels'] },
     srgb: { type: 'bool', default: true, desc: 'the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never)' },
@@ -624,7 +624,7 @@ defineNode({
   },
   async cook(ctx) {
     const { p, type, scope } = ctx;
-    if (!String(p.path ?? '').trim()) throw new NodeError(`${type}: path is empty`, 'a PNG relative to the project folder (people drop theirs into inputs/) or a URL');
+    if (!String(p.path ?? '').trim()) throw new NodeError(`${type}: path is empty`, 'a PNG relative to the package folder (people drop theirs into inputs/) or a URL');
     let img: Image;
     try {
       img = await readImageFile((f) => scope.files.readFile(f), p.path, { name: outName(ctx), layers: p.layers, srgb: !!p.srgb });
@@ -2088,7 +2088,7 @@ defineNode({
     'metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and ' +
     'assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render ' +
     '{textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the ' +
-    'result is the material alone with the maps it uses: a material output (kind material), which other projects ' +
+    'result is the material alone with the maps it uses: a material output (kind material), which other packages ' +
     'assign through input 1 of the material node.',
   aliases: ['texture_material', 'material_textures', 'attach_textures', 'apply_textures'],
   inputs: [

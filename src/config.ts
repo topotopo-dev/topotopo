@@ -1,7 +1,7 @@
 // The user's config: the libraries registered by name and the Gallery's settings, and TopoTopo's built-in library.
 //   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], workspaces: [{name, path}], gallery: {port, cors: [origins]}}
 //   $TOPOTOPO_LIBRARIES                              more libraries: name=path entries separated by path.delimiter
-// TopoTopo carries a library of its own, its built-in library (BUILTIN_LIBRARY), which every project looks in without
+// TopoTopo carries a library of its own, its built-in library (BUILTIN_LIBRARY), which every package looks in without
 // listing it.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,12 +17,12 @@ export interface LibraryRef { name: string; path: string }
 
 /**
  * TopoTopo's built-in library: TopoTopo's own packages (owner "topotopo"), shipped in library/ beside src/ and dist/.
- * Every project looks in it without listing it, and no other library takes its name. Its folder <name> holds the
+ * Every package looks in it without listing it, and no other library takes its name. Its folder <name> holds the
  * versions of topotopo/<name> (versions/<version>/); in TopoTopo's repository it is the package's working folder as well,
- * a project, while an installed TopoTopo ships the versions alone (src/packages/registry.ts reads it).
+ * a package, while an installed TopoTopo ships the versions alone (src/packages/registry.ts reads it).
  */
 export const BUILTIN_LIBRARY: LibraryRef = { name: 'topotopo', path: fileURLToPath(new URL('../library', import.meta.url)) };
-const builtinName = (name: string, from: string) => `${from}"${name}" is the name of TopoTopo's built-in library, which every project looks in: give this library another name`;
+const builtinName = (name: string, from: string) => `${from}"${name}" is the name of TopoTopo's built-in library, which every package looks in: give this library another name`;
 export interface GalleryConfig {
   /** the config file read (or the one `library add` writes) */
   file: string;

@@ -586,7 +586,7 @@ ${nodesSidebar(c)}
 <div class="content">
 <h1 id="${esc(c)}-nodes">${esc(c)} nodes</h1>
 <p class="intro">${isPackage
-  ? `${list.length} outputs of TopoTopo's own packages, the kits in its built-in library (see <a href="${u('packages/index.html')}">TopoTopo's own packages</a>), by full name; a kit's name alone is its default output, which lines its outputs up. A project's graph names one like any node, and its first use copies the kit's version into the project. Their parameters are the outputs' typed vars and their inputs the graphs' <code>input</code> nodes; <code>assets {action: "fork"}</code> copies one's graph into the project's assets to edit.`
+  ? `${list.length} outputs of TopoTopo's own packages, the kits in its built-in library (see <a href="${u('packages/index.html')}">TopoTopo's own packages</a>), by full name; a kit's name alone is its default output, which lines its outputs up. A package's graph names one like any node, and its first use copies the kit's version into the package. Their parameters are the outputs' typed vars and their inputs the graphs' <code>input</code> nodes; <code>assets {action: "fork"}</code> copies one's graph into the package's assets to edit.`
   : `${list.length} node type${list.length > 1 ? 's' : ''} in the <code>${esc(c)}</code> category.`}</p>
 <ul class="chips">${list.map((d) => `<li><a href="#${esc(d.type)}">${esc(d.type)}</a></li>`).join('')}</ul>
 ${list.map(nodeSection).join('\n')}
@@ -620,8 +620,8 @@ ${d?.package?.tags?.length ? `<p class="meta">tags: ${d.package.tags.map(esc).jo
 <p class="intro">${kitOutputs.length} ready-made generators in ${kits.length} kits, TopoTopo's own packages: walls, windows and doors, whole
 houses, roofs, stairs, railings and floors, props, trees and rocks, roads and street furniture, and generators that dress
 a road or a terrain. TopoTopo carries them built in (<a href="${esc(repoUrl('library'))}">library/</a>), so they work
-offline and every project finds them without listing a library. A project's graph names an output by its full name; the
-first use copies the kit's version into the project and locks it, as for any package, and a newer version a TopoTopo
+offline and every package finds them without listing a library. A package's graph names an output by its full name; the
+first use copies the kit's version into the package and locks it, as for any package, and a newer version a TopoTopo
 release brings shows as an update. Each output documents its typed parameters, puts its pivot at the base and tags every
 piece with <code>name</code> and <code>material</code>; it says what it is (its kind) and carries tags a search finds it by
 (<code>topotopo search --tag street-furniture</code>, or the MCP <code>library</code> tool's <code>search</code>, across

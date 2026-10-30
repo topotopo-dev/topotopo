@@ -1,4 +1,4 @@
-// Opening a folder to work in, in one place: the engine's root scope gets the package names of the project the folder
+// Opening a folder to work in, in one place: the engine's root scope gets the package names of the package the folder
 // belongs to (its copies, the libraries it looks in, the working folders followed this session) before the session
 // gives it the folder's graphs and registers its assets, which may use packages. The MCP server, `topotopo edit`, the
 // Gallery's bake and the preview script open folders this way.
@@ -19,7 +19,7 @@ export interface OpenOptions extends SessionOptions {
 
 export interface Opened { session: Session; packages: PackageUses; loaded: ReturnType<Session['load']> }
 
-/** A session on `dir`, with the packages of the project it belongs to, its graphs and its assets. */
+/** A session on `dir`, with the packages of the package it belongs to, its graphs and its assets. */
 export function openPackage(engine: Engine, dir: string, o: OpenOptions = {}): Opened {
   const packages = openPackages(engine, dir, { follow: o.follow, builtin: o.builtin });
   const session = new Session(dir, engine, o);

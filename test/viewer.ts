@@ -450,7 +450,7 @@ section('GET /api/input: "inputs/<rel>" through the host, the path a graph uses'
   const mcp = await cookedPath(path.join(tmp, 'mcp_ws'), path.join(tmp, 'mcp_ws'));
   const other = await cookedPath(path.join(tmp, 'embedded_ws'), path.join(tmp, 'elsewhere'));
   check(view.ok && view.path === 'inputs/tri.obj' && mcp.ok && mcp.path === 'inputs/tri.obj',
-    `inputs/ beside the graph file (view) and in an MCP project: cooked as "inputs/tri.obj" (${view.path}, ${mcp.path})`);
+    `inputs/ beside the graph file (view) and in an MCP package: cooked as "inputs/tri.obj" (${view.path}, ${mcp.path})`);
   check(other.ok && other.path === path.join(tmp, 'embedded_ws', 'inputs', 'tri.obj'), `an engine based elsewhere: the absolute path (${other.path})`);
   check(mcp.where === 'in this folder' && view.where === `in ${graphDir}`,
     `the page's default words for the folder: "${mcp.where}", or the folder holding a given one ("${view.where}")`);
@@ -527,7 +527,7 @@ section('POST /api/vars: a burst during a cook is applied by one more cook');
     const g = ws.getGraph('g');
     check(g.vars?.s === 5 && g.vars?.t === 1, 'the latest values are stored');
     const stored = JSON.parse(fs.readFileSync(path.join(ws.graphDir, 'g.json'), 'utf8'));
-    check(stored.vars.s === 5 && stored.vars.t === 1, 'and persisted in the project');
+    check(stored.vars.s === 5 && stored.vars.t === 1, 'and persisted in the package');
   } finally { v.close(); }
 }
 
@@ -563,7 +563,7 @@ section('a dropped PNG and an image-only graph show as textured quads');
 
 section('markers: POST /api/markers writes inputs/markers.json, read back through a file node');
 {
-  // the engine the CLI and the MCP server use, its base directory the project: agents read "inputs/markers.json"
+  // the engine the CLI and the MCP server use, its base directory the package: agents read "inputs/markers.json"
   const dir = path.join(tmp, 'mk');
   const engine = new Engine(createNodeHost({ baseDir: dir }));
   await engine.init();
@@ -676,7 +676,7 @@ section('markers: POST /api/markers writes inputs/markers.json, read back throug
   }
 }
 
-section('two projects on one folder (Session.watch)');
+section('two packages on one folder (Session.watch)');
 {
   const dir = path.join(tmp, 'shared');
   const open = async () => {
@@ -705,7 +705,7 @@ section('two projects on one folder (Session.watch)');
   } finally { a.unwatch(); b.unwatch(); }
 }
 
-section('a project\'s graph files beside project.json (examples/ keeps its graphs there)');
+section('a package\'s graph files beside project.json (examples/ keeps its graphs there)');
 {
   const dir = path.join(tmp, 'beside');
   fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
@@ -716,19 +716,19 @@ section('a project\'s graph files beside project.json (examples/ keeps its graph
   fs.writeFileSync(path.join(dir, 'graphs', 'twice.json'), box(4));
   fs.mkdirSync(path.join(dir, 'more'));
   fs.writeFileSync(path.join(dir, 'more', 'deep.json'), box(5));
-  check(!graphFiles(dir).has('tower'), 'a folder that is no project: only graphs/ holds graphs');
+  check(!graphFiles(dir).has('tower'), 'a folder that is no package: only graphs/ holds graphs');
   fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify({ id: 'beside', title: 'Beside', graph: 'tower' }));
   const files = graphFiles(dir);
   check([...files.keys()].sort().join() === 'tower,twice' && files.get('twice') === path.join(dir, 'graphs', 'twice.json') && files.get('tower') === path.join(dir, 'tower.json'),
-    `in a project: graph files beside project.json too, not below it, not other JSON; graphs/ wins a name both have (${[...files].map(([k, f]) => `${k}=${path.relative(dir, f)}`).join(', ')})`);
+    `in a package: graph files beside project.json too, not below it, not other JSON; graphs/ wins a name both have (${[...files].map(([k, f]) => `${k}=${path.relative(dir, f)}`).join(', ')})`);
   const open = async () => { const e = new Engine(createNodeHost({ baseDir: dir })); await e.init(); const w = new Session(dir, e); w.load(); w.watch(); return w; };
   const a = await open(), b = await open();
   try {
-    check(a.graphs.has('tower') && a.graphs.has('twice') && !a.graphs.has('notes') && !a.graphs.has('deep'), 'a project on the project loads them');
+    check(a.graphs.has('tower') && a.graphs.has('twice') && !a.graphs.has('notes') && !a.graphs.has('deep'), 'a package on the package loads them');
     await a.edit('tower', [{ op: 'set', node: 'b', params: { size: [2, 2, 2] } }]);
     check(JSON.parse(fs.readFileSync(path.join(dir, 'tower.json'), 'utf8')).nodes.b.params.size[0] === 2 && !fs.existsSync(path.join(dir, 'graphs', 'tower.json')),
       'an edit is saved into the graph\'s own file, not into graphs/');
-    check(await until(() => b.graphs.get('tower')?.nodes.b.params?.size?.[0] === 2, 5000), 'another project on the project follows the file');
+    check(await until(() => b.graphs.get('tower')?.nodes.b.params?.size?.[0] === 2, 5000), 'another package on the package follows the file');
     fs.writeFileSync(path.join(dir, 'gate.json'), box(6));
     check(await until(() => b.graphs.has('gate'), 5000), 'a graph file saved beside project.json appears');
     fs.rmSync(path.join(dir, 'gate.json'));
@@ -737,9 +737,9 @@ section('a project\'s graph files beside project.json (examples/ keeps its graph
     check(fs.existsSync(path.join(dir, 'graphs', 'fresh.json')), 'a new graph goes into graphs/');
     const v = await startViewer(a, 0);
     try {
-      const info: any = await (await fetch(v.url + 'api/project')).json();
-      check(info.project?.id === 'beside' && info.project.graph === 'tower' && info.folder === dir && Array.isArray(info.kits),
-        `GET /api/project: the project, its default graph and the folder (${JSON.stringify({ ...info, kits: info.kits?.length })})`);
+      const info: any = await (await fetch(v.url + 'api/package')).json();
+      check(info.package?.id === 'beside' && info.package.graph === 'tower' && info.folder === dir && Array.isArray(info.kits),
+        `GET /api/package: the package, its default graph and the folder (${JSON.stringify({ ...info, kits: info.kits?.length })})`);
       check(info.kits.some((k: any) => k.name === 'topotopo/street' && /outputs: bench/.test(k.outputs)), 'and TopoTopo\'s kits with their outputs');
     } finally { v.close(); }
   } finally { a.unwatch(); b.unwatch(); }
@@ -761,15 +761,15 @@ section('viewer setSession');
   const ac = new AbortController();
   try {
     const names = async () => ((await (await fetch(v.url + 'api/graphs')).json()) as any[]).map((g: any) => g.name).join();
-    check(await names() === 'first', 'serves the first project');
+    check(await names() === 'first', 'serves the first package');
     let ended = false;
     const stream = fetch(v.url + 'api/events', { signal: ac.signal }).then(async (r) => { for await (const _ of r.body as any) { /* read */ } ended = true; }).catch(() => {});
     check(await until(() => v.clients() === 1, 3000), 'clients() counts the open page');
     v.setSession(two);
-    check(await names() === 'second', 'after setSession the routes serve the new project at the same URL');
+    check(await names() === 'second', 'after setSession the routes serve the new package at the same URL');
     check(await until(() => ended, 3000) && v.clients() === 0, 'open pages are disconnected so they reconnect and reload');
     await two.edit('second', [{ op: 'set', node: 's', params: { radius: 2 } }]);
-    check(two.listeners.size === 2 && one.listeners.size === 0, 'the viewer (events and outputs) listens to the new project only');
+    check(two.listeners.size === 2 && one.listeners.size === 0, 'the viewer (events and outputs) listens to the new package only');
     void stream;
   } finally { ac.abort(); v.close(); }
 }

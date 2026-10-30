@@ -1,4 +1,4 @@
-/* the left panel's tabs: Scene, Outputs, Inputs, and Packages while the project uses packages, which shortens its
+/* the left panel's tabs: Scene, Outputs, Inputs, and Packages while the package uses packages, which shortens its
    label when the panel is too narrow for all four */
 .phead.tabs { padding: 0; gap: 0; align-items: stretch; }
 .phead.tabs [role=tab] { flex: none; white-space: nowrap; padding: 6px 5px 5px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--dim); font: inherit; letter-spacing: .05em; text-transform: uppercase; }
@@ -77,9 +77,9 @@ button:disabled { opacity: .45; cursor: default; }
 .export-writes.part { color: var(--sel); }
 .export-writes.err { color: var(--err); }
 .export-live { font-size: 11px; color: var(--guide); }
-/* the Packages tab: the project, Find packages, a box per package (packages.js) */
+/* the Packages tab: the package, Find packages, a box per package (packages.js) */
 .packages-bar { position: sticky; top: 0; z-index: 1; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-.pkg-project { font-size: 12px; }
+.pkg-package { font-size: 12px; }
 .pkg-search { width: 100%; padding: 4px 6px; }
 .pkg-found { display: flex; flex-direction: column; gap: 2px; padding: 6px 4px 8px; border-bottom: 1px solid var(--line); }
 .pkg-libhead { margin: 6px 4px 2px; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }

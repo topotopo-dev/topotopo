@@ -1,6 +1,6 @@
-// Libraries of projects, as the Gallery shows them: scanning a library for its projects (project.json files only: it
-// never creates folders and never cooks), creating a project in one, a project's files, and baking its previews
-// (.gallery/: thumb.png, preview.glb, bake.json, all derived). Projects themselves are src/project.ts.
+// Libraries of packages, as the Gallery shows them: scanning a library for its packages (project.json files only: it
+// never creates folders and never cooks), creating a package in one, a package's files, and baking its previews
+// (.gallery/: thumb.png, preview.glb, bake.json, all derived). Packages themselves are src/package.ts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -11,18 +11,18 @@ import type { GalleryConfig, LibraryRef } from '../config.ts';
 import type { PackageLink, PackageManifest } from '../package.ts';
 import { WORKSPACE_PACKAGES, manifestFile, parseManifest, packageRepoFiles, readManifest, slugify, writeManifest } from '../package.ts';
 
-/** Bumped when the baked files change shape (render options, GLB options), so every project bakes again. */
+/** Bumped when the baked files change shape (render options, GLB options), so every package bakes again. */
 export const BAKE_VERSION = 1;
-/** a library name or project id: lower-case letters, digits, "-" and "_", starting with a letter or digit (the package name rule) */
+/** a library name or package id: lower-case letters, digits, "-" and "_", starting with a letter or digit (the package name rule) */
 export { ID_RE };
 
 const MAX_DEPTH = 8;
 /**
- * folders a scan never enters (besides dot-folders); a project's own folders are never entered either, nor its
- * published versions and package copies, whose project.json files are not projects
+ * folders a scan never enters (besides dot-folders); a package's own folders are never entered either, nor its
+ * published versions and package copies, whose project.json files are not packages
  */
 const SKIP = new Set(['node_modules', 'graphs', 'assets', 'inputs', 'exports', 'attachments', 'versions', 'packages']);
-/** a folder no project is looked for in (a workspace's shared copies too; read when called: project.ts loads after this module) */
+/** a folder no package is looked for in (a workspace's shared copies too; read when called: package.ts loads after this module) */
 const skipped = (name: string) => SKIP.has(name) || name === WORKSPACE_PACKAGES;
 const PKG_VERSION = (() => {
   // package.json sits two levels above both src/gallery/library.ts and dist/gallery/library.js
@@ -50,29 +50,29 @@ export interface Package {
   dir: string;
   /** posix path of the folder relative to the library root */
   rel: string;
-  /** the parent folders' path ("" at the top), how the gallery groups projects */
+  /** the parent folders' path ("" at the top), how the gallery groups packages */
   collection: string;
   manifest: PackageManifest;
   /** newest change to project.json, graphs/ or assets/ (ms) */
   updated: number;
 }
 
-export interface LibraryScan { name: string; root: string; projects: Package[]; problems: string[] }
+export interface LibraryScan { name: string; root: string; packages: Package[]; problems: string[] }
 
 // ------------------------------------------------------------------------------------------------------------ scan
 
 const mtime = (p: string) => fs.statSync(p, { throwIfNoEntry: false })?.mtimeMs ?? 0;
 const jsonFiles = (dir: string) => { try { return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort(); } catch { return []; } };
 
-/** Every project below a library root, sorted by path. Ids used twice: the first path keeps it, the others are problems. */
+/** Every package below a library root, sorted by path. Ids used twice: the first path keeps it, the others are problems. */
 export function scanLibrary(lib: LibraryRef): LibraryScan {
   const root = path.resolve(lib.path);
-  const out: LibraryScan = { name: lib.name, root, projects: [], problems: [] };
+  const out: LibraryScan = { name: lib.name, root, packages: [], problems: [] };
   if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) { out.problems.push(`library "${lib.name}": no folder ${root}`); return out; }
   const seen = new Map<string, string>();
   const walk = (dir: string, rel: string, depth: number) => {
     if (fs.existsSync(manifestFile(dir))) {
-      if (!rel) { out.problems.push(`${manifestFile(dir)}: the library folder itself is not a project; put projects in folders below it`); }
+      if (!rel) { out.problems.push(`${manifestFile(dir)}: the library folder itself is not a package; put packages in folders below it`); }
       else {
         try {
           const manifest = readManifest(dir);
@@ -81,7 +81,7 @@ export function scanLibrary(lib: LibraryRef): LibraryScan {
           else {
             seen.set(manifest.id, rel);
             const updated = Math.round(Math.max(mtime(manifestFile(dir)), ...['graphs', 'assets'].flatMap((d) => jsonFiles(path.join(dir, d)).map((f) => mtime(path.join(dir, d, f))))));
-            out.projects.push({ lib: lib.name, id: manifest.id, dir, rel, collection: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', manifest, updated });
+            out.packages.push({ lib: lib.name, id: manifest.id, dir, rel, collection: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '', manifest, updated });
           }
         } catch (e: any) { out.problems.push(e.message); }
         return;
@@ -108,23 +108,23 @@ export function scanAll(cfg: GalleryConfig = loadConfig()): LibraryScan[] {
 export interface CreateOptions { title?: string; description?: string; tags?: string[]; links?: PackageLink[]; graph?: object }
 
 /**
- * A new project at `<library root>/<rel>` ("props/lantern"): project.json, the project folders, attachments/, a
+ * A new package at `<library root>/<rel>` ("props/lantern"): project.json, the package folders, attachments/, a
  * .gitignore for the derived files and a .gitattributes that keeps its versions and copies byte for byte. `graph` (a
- * graph spec) becomes graphs/main.json. Fails when the folder holds a project already or the id is taken in the library.
+ * graph spec) becomes graphs/main.json. Fails when the folder holds a package already or the id is taken in the library.
  */
 export function createPackage(lib: LibraryRef, rel: string, o: CreateOptions = {}): Package {
   const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean);
   if (!parts.length || parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || skipped(p) || /[<>:"|?*\u0000-\u001f]/.test(p)))
-    throw new Error(`bad project path "${rel}": give folders below the library, e.g. "props/lantern"`);
+    throw new Error(`bad package path "${rel}": give folders below the library, e.g. "props/lantern"`);
   const root = path.resolve(lib.path);
   const dir = path.join(root, ...parts);
-  if (fs.existsSync(manifestFile(dir))) throw new Error(`${dir} is a project already`);
+  if (fs.existsSync(manifestFile(dir))) throw new Error(`${dir} is a package already`);
   const id = slugify(parts[parts.length - 1]);
   if (!ID_RE.test(id)) throw new Error(`"${parts[parts.length - 1]}" gives no usable id: use letters or digits`);
   const scan = scanLibrary(lib);
-  const taken = scan.projects.find((p) => p.id === id);
+  const taken = scan.packages.find((p) => p.id === id);
   if (taken) throw new Error(`id "${id}" is used by ${taken.rel} in library "${lib.name}": pick another folder name`);
-  if (scan.projects.some((p) => dir.startsWith(p.dir + path.sep))) throw new Error(`${rel} is inside another project`);
+  if (scan.packages.some((p) => dir.startsWith(p.dir + path.sep))) throw new Error(`${rel} is inside another package`);
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) fs.mkdirSync(path.join(dir, d), { recursive: true });
   packageRepoFiles(dir);
   const manifest = parseManifest({
@@ -133,15 +133,15 @@ export function createPackage(lib: LibraryRef, rel: string, o: CreateOptions = {
   }, id);
   writeManifest(dir, manifest);
   if (o.graph) fs.writeFileSync(path.join(dir, 'graphs', 'main.json'), JSON.stringify(o.graph, null, 2));
-  return scanLibrary(lib).projects.find((p) => p.id === id)!;
+  return scanLibrary(lib).packages.find((p) => p.id === id)!;
 }
 
-// ------------------------------------------------------------------------------------------------------ project files
+// ------------------------------------------------------------------------------------------------------ package files
 
 export interface PackageFile { path: string; size: number; mtime: number; image: boolean }
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif)$/i;
 
-/** Files under a project subfolder (attachments/, exports/), recursively: posix paths, dot-files skipped. */
+/** Files under a package subfolder (attachments/, exports/), recursively: posix paths, dot-files skipped. */
 export function listFiles(dir: string): PackageFile[] {
   const out: PackageFile[] = [];
   const walk = (d: string, rel: string, depth: number) => {
@@ -160,10 +160,10 @@ export function listFiles(dir: string): PackageFile[] {
   return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
-/** A project's graph names: graphs/ and the graph files beside project.json (graphFiles). */
+/** A package's graph names: graphs/ and the graph files beside project.json (graphFiles). */
 export const graphNames = (dir: string) => [...graphFiles(dir).keys()];
 
-/** A project's graph file, parsed (null when missing or unreadable). */
+/** A package's graph file, parsed (null when missing or unreadable). */
 export function readGraph(dir: string, name: string): any {
   try { return JSON.parse(fs.readFileSync(path.join(dir, 'graphs', name + '.json'), 'utf8')); } catch { return null; }
 }
@@ -195,7 +195,7 @@ export function readBakeState(dir: string): BakeState | null {
   try { return JSON.parse(fs.readFileSync(path.join(galleryDir(dir), 'bake.json'), 'utf8')); } catch { return null; }
 }
 
-/** The project needs a bake: never baked, or something it depends on changed since. */
+/** The package needs a bake: never baked, or something it depends on changed since. */
 export function isStale(p: Package): boolean {
   const s = readBakeState(p.dir);
   return !s || s.key !== bakeKey(p.dir, p.manifest);

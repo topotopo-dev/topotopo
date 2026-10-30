@@ -3675,7 +3675,7 @@ category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, 
 
 Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims, or one from a material output; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the project folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used. With nothing in input 0 the result is the material alone: a material output.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the package folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used. With nothing in input 0 the result is the material alone: a material output.
 
 **Inputs**
 
@@ -7664,7 +7664,7 @@ Houdini: HeightField File. One sample per pixel; image column = X, row = Z with 
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph's folder |
+| `path` | path | `""` |  |  | `file`, `filename` | PNG file or URL; a relative path reads from the package folder (nearest project.json), else the graph's folder |
 | `layer` | string | `"height"` |  |  |  | layer to write |
 | `height_min` | float | `0` |  |  | `min`, `low` | value for black (0) |
 | `height_max` | float | `10` |  |  | `max`, `high` | value for white (1) |
@@ -9287,7 +9287,7 @@ The body is a nested graph. Inside it, an {"type":"input","params":{"index":0}} 
 
 category: `flow` · aliases: `object_merge`, `reference`, `ref`
 
-Use the output (or any node) of another graph in the project — compose scenes from separate graphs.
+Use the output (or any node) of another graph in the package — compose scenes from separate graphs.
 
 **Inputs**
 
@@ -9297,7 +9297,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `graph` | string | `""` |  |  |  | project graph name |
+| `graph` | string | `""` |  |  |  | package graph name |
 | `node` | string | `""` |  |  |  | node in that graph ("" = its output) |
 | `vars` | json | `{}` |  |  |  | override that graph's vars |
 
@@ -9587,7 +9587,7 @@ None (generator).
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the project folder (the nearest folder with a project.json at or above the graph), else from the graph's folder (MCP: the project); folder mode needs directory support in the host |
+| `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a project.json at or above the graph), else from the graph's folder (MCP: the package); folder mode needs directory support in the host |
 | `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
@@ -9703,9 +9703,9 @@ Houdini: a Null object; Blender/Unreal: an Empty / socket. Adds one isolated poi
 
 The outputs of TopoTopo's own packages, the kits in its built-in library ([library/](../library); see the README
 section "TopoTopo's own packages"), by full name; a kit's name alone is its default output, which lines its outputs up.
-A project's graph names one like any node, and its first use copies the kit's version into the project. Their
+A package's graph names one like any node, and its first use copies the kit's version into the package. Their
 parameters are the outputs' typed vars; their inputs are the graphs' `input` nodes. `assets {action: "fork"}`
-copies one's graph into the project's assets to edit.
+copies one's graph into the package's assets to edit.
 
 ### topotopo/architecture
 
@@ -10899,7 +10899,7 @@ Houdini: Attribute from Map; Unreal PCG: Get Texture Data + Sample Texture. proj
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename`, `map`, `texture`, `image` | PNG file or URL; a relative path reads from the project folder (nearest project.json), else the graph's folder |
+| `path` | path | `""` |  |  | `file`, `filename`, `map`, `texture`, `image` | PNG file or URL; a relative path reads from the package folder (nearest project.json), else the graph's folder |
 | `name` | string | `""` |  |  | `attrib`, `attribute`, `output` | output attribute ("" = Cd for channel rgb, else mask) |
 | `channel` | enum | `"luminance"` |  | `luminance`, `r`, `g`, `b`, `a`, `rgb` |  | which channel (rgb writes a vector) |
 | `projection` | enum | `"uv"` |  | `uv`, `xz`, `xy`, `yz` | `mapping` | uv attribute or a planar projection (xz = top view) |
@@ -12710,7 +12710,7 @@ Houdini COP: File; Substance: Bitmap. The image is named after this node, like e
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the project folder, e.g. "inputs/brick.png") or URL |
+| `path` | path | `""` |  |  | `file`, `filename` | PNG file (relative to the package folder, e.g. "inputs/brick.png") or URL |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `layers` | enum | `"auto"` |  | `auto`, `grey`, `rgba` | `channels` | auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels |
 | `srgb` | bool | `true` |  |  |  | the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never) |
@@ -15773,7 +15773,7 @@ category: `texture` · aliases: `texture_material`, `material_textures`, `attach
 
 Attach images as texture maps (base colour, normal, roughness, ORM) to a named material and assign it; the images travel with the geometry and exporters embed them.
 
-Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other projects assign through input 1 of the material node.
+Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other packages assign through input 1 of the material node.
 
 **Inputs**
 
