@@ -24,7 +24,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file) · [scene_null](#scene_null)
-- [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/kit](#topotopoarchitecturekit) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/kit](#topotoponaturekit) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/kit](#topotopopropskit) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/kit](#topotopostreetkit) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
+- [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
 - [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
@@ -9709,13 +9709,13 @@ copies one's graph into the package's assets to edit.
 
 ### topotopo/architecture
 
-category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `architecture`
+category: `package` · kind: `mesh` · tags: `lineup`, `architecture`
 
-TopoTopo's architecture kit, its 17 outputs side by side at their defaults.
+TopoTopo's architecture package, its 17 outputs side by side at their defaults.
 
 The package's default output and its preview, from arch to window_frame along +X, 1 m apart.
 topotopo/architecture 1.0: first version
-The default output of package topotopo/architecture 1.0: it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
+The default output of package topotopo/architecture 1.0: it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
 
 **Inputs**
 
@@ -9872,7 +9872,7 @@ House built from a footprint polygon: one wall_segment per footprint edge (facin
 
 ![topotopo/architecture/house](../library/architecture/thumbs/house.png)
 
-Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are this kit's own wall_segment and roof_skeleton outputs, so a change to those changes every house. Pivot: the footprint's origin on the ground. Pieces come from those outputs (wall, window_frame, door_frame, roof).
+Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are this package's own wall_segment and roof_skeleton outputs, so a change to those changes every house. Pivot: the footprint's origin on the ground. Pieces come from those outputs (wall, window_frame, door_frame, roof).
 topotopo/architecture 1.0: first version
 Output "house" of package topotopo/architecture 1.0 (House): it cooks node "out" of the package's graph "house"; its params are the vars of that graph the node reads.
 
@@ -9895,15 +9895,15 @@ Output "house" of package topotopo/architecture 1.0 (House): it cooks node "out"
 | `overhang` | float | `0.5` | 0..2 |  |  | eave overhang (m) |
 | `door` | bool | `true` |  |  |  | a door on the first footprint edge |
 
-### topotopo/architecture/kit
+### topotopo/architecture/lineup
 
-category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `architecture`
+category: `package` · kind: `mesh` · tags: `lineup`, `architecture`
 
-TopoTopo's architecture kit, its 17 outputs side by side at their defaults.
+TopoTopo's architecture package, its 17 outputs side by side at their defaults.
 
 The package's default output and its preview, from arch to window_frame along +X, 1 m apart.
 topotopo/architecture 1.0: first version
-Output "kit" of package topotopo/architecture 1.0 (Architecture kit): it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
+Output "lineup" of package topotopo/architecture 1.0 (Architecture line-up): it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
 
 **Inputs**
 
@@ -10165,7 +10165,7 @@ None (generator).
 
 category: `package` · kind: `mesh` · tags: `wall`, `window`, `building`, `modular`
 
-Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this kit's window_frame and door_frame outputs.
+Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this package's window_frame and door_frame outputs.
 
 ![topotopo/architecture/wall_segment](../library/architecture/thumbs/wall_segment.png)
 
@@ -10222,13 +10222,13 @@ None (generator).
 
 ### topotopo/nature
 
-category: `package` · kind: `scene` · tags: `kit`, `lineup`, `nature`
+category: `package` · kind: `scene` · tags: `lineup`, `nature`
 
-TopoTopo's nature kit, its 8 outputs side by side at their defaults.
+TopoTopo's nature package, its 8 outputs side by side at their defaults.
 
 The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.
 topotopo/nature 1.0: first version
-The default output of package topotopo/nature 1.0: it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
+The default output of package topotopo/nature 1.0: it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
 
 **Inputs**
 
@@ -10353,15 +10353,15 @@ Output "grass_clumps" of package topotopo/nature 1.0 (Grass): it cooks node "out
 | `ground_size` | float | `4` | 0.5..20 |  |  | size of the ground patch used when nothing is connected (m) |
 | `seed` | int | `0` | 0..1000 |  |  | random seed |
 
-### topotopo/nature/kit
+### topotopo/nature/lineup
 
-category: `package` · kind: `scene` · tags: `kit`, `lineup`, `nature`
+category: `package` · kind: `scene` · tags: `lineup`, `nature`
 
-TopoTopo's nature kit, its 8 outputs side by side at their defaults.
+TopoTopo's nature package, its 8 outputs side by side at their defaults.
 
 The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.
 topotopo/nature 1.0: first version
-Output "kit" of package topotopo/nature 1.0 (Nature kit): it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
+Output "lineup" of package topotopo/nature 1.0 (Nature line-up): it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
 
 **Inputs**
 
@@ -10429,7 +10429,7 @@ None (generator).
 
 category: `package` · kind: `instances` · tags: `rocks`, `stone`, `ground-cover`, `scatter`
 
-Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this kit's rock output) sunk slightly into the ground.
+Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this package's rock output) sunk slightly into the ground.
 
 ![topotopo/nature/scatter_rocks](../library/nature/thumbs/scatter_rocks.png)
 
@@ -10482,13 +10482,13 @@ None (generator).
 
 ### topotopo/props
 
-category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `props`
+category: `package` · kind: `mesh` · tags: `lineup`, `props`
 
-TopoTopo's props kit, its 5 outputs side by side at their defaults.
+TopoTopo's props package, its 5 outputs side by side at their defaults.
 
 The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.
 topotopo/props 1.0: first version
-The default output of package topotopo/props 1.0: it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
+The default output of package topotopo/props 1.0: it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
 
 **Inputs**
 
@@ -10553,15 +10553,15 @@ None (generator).
 | `gap` | float | `0.01` | 0..0.03 |  |  | gap between planks (m) |
 | `seed` | int | `0` | 0..1000 |  |  | random seed of the plank tint |
 
-### topotopo/props/kit
+### topotopo/props/lineup
 
-category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `props`
+category: `package` · kind: `mesh` · tags: `lineup`, `props`
 
-TopoTopo's props kit, its 5 outputs side by side at their defaults.
+TopoTopo's props package, its 5 outputs side by side at their defaults.
 
 The package's default output and its preview, from barrel to sandbag_wall along +X, 1 m apart.
 topotopo/props 1.0: first version
-Output "kit" of package topotopo/props 1.0 (Props kit): it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
+Output "lineup" of package topotopo/props 1.0 (Props line-up): it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
 
 **Inputs**
 
@@ -10656,13 +10656,13 @@ None (generator).
 
 ### topotopo/street
 
-category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `street`
+category: `package` · kind: `mesh` · tags: `lineup`, `street`
 
-TopoTopo's street kit, its 7 outputs side by side at their defaults.
+TopoTopo's street package, its 7 outputs side by side at their defaults.
 
 The package's default output and its preview, from bench to sign_post along +X, 1 m apart.
 topotopo/street 1.0: first version
-The default output of package topotopo/street 1.0: it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
+The default output of package topotopo/street 1.0: it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
 
 **Inputs**
 
@@ -10780,24 +10780,6 @@ Output "fence" of package topotopo/street 1.0 (Fence): it cooks node "out" of th
 | `picket_spacing` | float | `0.15` | 0.08..0.5 |  |  | picket style: distance between pickets (m) |
 | `seed` | int | `0` | 0..1000 |  |  | random seed of the board tint |
 
-### topotopo/street/kit
-
-category: `package` · kind: `mesh` · tags: `kit`, `lineup`, `street`
-
-TopoTopo's street kit, its 7 outputs side by side at their defaults.
-
-The package's default output and its preview, from bench to sign_post along +X, 1 m apart.
-topotopo/street 1.0: first version
-Output "kit" of package topotopo/street 1.0 (Street kit): it cooks node "kit" of the package's graph "kit"; its params are the vars of that graph the node reads.
-
-**Inputs**
-
-None (generator).
-
-**Parameters**
-
-None.
-
 ### topotopo/street/lamp_post
 
 category: `package` · kind: `mesh` · tags: `lamp`, `street-light`, `lighting`, `street-furniture`
@@ -10823,6 +10805,24 @@ None (generator).
 | `arms` | int | `1` | 0..4 |  |  | number of arms (0 = lantern on top) |
 | `pole_radius` | float | `0.07` | 0.03..0.3 |  |  | pole radius at the base (m) |
 | `lamp_size` | float | `0.4` | 0.15..1.2 |  |  | shade diameter (m) |
+
+### topotopo/street/lineup
+
+category: `package` · kind: `mesh` · tags: `lineup`, `street`
+
+TopoTopo's street package, its 7 outputs side by side at their defaults.
+
+The package's default output and its preview, from bench to sign_post along +X, 1 m apart.
+topotopo/street 1.0: first version
+Output "lineup" of package topotopo/street 1.0 (Street line-up): it cooks node "lineup" of the package's graph "lineup"; its params are the vars of that graph the node reads.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+None.
 
 ### topotopo/street/road_strip
 

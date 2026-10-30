@@ -2,9 +2,9 @@
   "package": "topotopo/architecture",
   "version": "1.0",
   "note": "first version",
-  "published": "2026-10-29T16:36:47.383Z",
+  "published": "2026-10-30T12:01:47.914Z",
   "big": false,
-  "hash": "1c25c304ad82e30ff1ee5f00943442501496cc228d652704ee69f3252aa4e1a6",
+  "hash": "6750a1ee778d3f9b2c257204b46fd03c06895a465b19707b624f0b9285148bf1",
   "outputs": {
     "arch": {
       "graph": "arch",
@@ -345,7 +345,7 @@
         "footprint",
         "modular"
       ],
-      "description": "House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_skeleton hip roof that follows the footprint exactly (straight skeleton: L-shapes, courtyards and any simple polygon get correct valleys and ridges). Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are this kit's own wall_segment and roof_skeleton outputs, so a change to those changes every house. Pivot: the footprint's origin on the ground. Pieces come from those outputs (wall, window_frame, door_frame, roof).",
+      "description": "House built from a footprint polygon: one wall_segment per footprint edge (facing outward, floors stacked, a door on the first edge), topped with a roof_skeleton hip roof that follows the footprint exactly (straight skeleton: L-shapes, courtyards and any simple polygon get correct valleys and ridges). Input 0 is an optional closed polygon on the XZ ground plane; without it a width × depth rectangle is used. The walls, windows, doors and roof are this package's own wall_segment and roof_skeleton outputs, so a change to those changes every house. Pivot: the footprint's origin on the ground. Pieces come from those outputs (wall, window_frame, door_frame, roof).",
       "sliders": {
         "width": {
           "type": "float",
@@ -409,17 +409,16 @@
         }
       ]
     },
-    "kit": {
-      "graph": "kit",
-      "node": "kit",
-      "label": "Architecture kit",
+    "lineup": {
+      "graph": "lineup",
+      "node": "lineup",
+      "label": "Architecture line-up",
       "kind": "mesh",
       "tags": [
-        "kit",
         "lineup",
         "architecture"
       ],
-      "description": "TopoTopo's architecture kit, its 17 outputs side by side at their defaults. The package's default output and its preview, from arch to window_frame along +X, 1 m apart.",
+      "description": "TopoTopo's architecture package, its 17 outputs side by side at their defaults. The package's default output and its preview, from arch to window_frame along +X, 1 m apart.",
       "sliders": {},
       "inputs": []
     },
@@ -968,7 +967,7 @@
         "building",
         "modular"
       ],
-      "description": "Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this kit's window_frame and door_frame outputs. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
+      "description": "Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this package's window_frame and door_frame outputs. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
       "sliders": {
         "wall_length": {
           "type": "float",
@@ -1105,15 +1104,14 @@
     }
   },
   "default": {
-    "graph": "kit",
-    "node": "kit",
+    "graph": "lineup",
+    "node": "lineup",
     "kind": "mesh",
     "tags": [
-      "kit",
       "lineup",
       "architecture"
     ],
-    "description": "TopoTopo's architecture kit, its 17 outputs side by side at their defaults. The package's default output and its preview, from arch to window_frame along +X, 1 m apart.",
+    "description": "TopoTopo's architecture package, its 17 outputs side by side at their defaults. The package's default output and its preview, from arch to window_frame along +X, 1 m apart.",
     "sliders": {},
     "inputs": []
   },

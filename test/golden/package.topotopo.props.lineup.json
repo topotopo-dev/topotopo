@@ -35,8 +35,8 @@
       "topology": "9f0c80fe9a7d5824"
     }
   },
-  "name": "package.topotopo.props.kit",
+  "name": "package.topotopo.props.lineup",
   "ok": true,
-  "source": "topotopo/props/kit at its defaults (test/fixtures.ts)",
+  "source": "topotopo/props/lineup at its defaults (test/fixtures.ts)",
   "warnings": []
 }

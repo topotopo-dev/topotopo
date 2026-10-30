@@ -57,8 +57,8 @@ export interface PackageRow {
    * "owner/name" for a default output that is no named output; `used` when a graph of the package names it
    */
   outputs?: { type: string; label?: string; kind?: string; tags: string[]; used?: boolean }[];
-  /** one of TopoTopo's own packages (a built-in package) */
-  kit: boolean;
+  /** one of TopoTopo's own packages (its built-in library) */
+  builtin: boolean;
   /**
    * it can show the edits of its working folder live: it has exactly one, and it is not one of TopoTopo's own unless the
    * package is inside TopoTopo's own repository (whose library folder holds the built-in packages' working folders)
@@ -188,8 +188,8 @@ export function createPackages(ws: Session, broadcast: (ev: object) => void) {
     }
     const developing = inside(pk.dir, TOPOTOPO_REPO);
     const row = (o: { package: string; working: { library: string; dir: string }[] }, followed: { library: string; dir: string } | null) => {
-      const kit = o.package.startsWith('topotopo/');
-      return { kit, canFollow: !!followed || (o.working.length === 1 && (!kit || developing)), usedBy: usedBy.get(o.package) ?? [] };
+      const builtin = o.package.startsWith('topotopo/');
+      return { builtin, canFollow: !!followed || (o.working.length === 1 && (!builtin || developing)), usedBy: usedBy.get(o.package) ?? [] };
     };
     const packages: PackageRow[] = outdated.map((o) => {
       const info = pk.copyInfo(o.package, o.version), followed = following.get(o.package) ?? null;

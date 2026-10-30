@@ -16,15 +16,15 @@ export function pageTitle(info) {
 export const defaultGraph = (info, names) => (info?.package && names.includes(info.package.graph) ? info.package.graph : names[0] ?? null);
 
 /**
- * The welcome while there is no graph: {kind, title, sub, lead, steps, kits}. kind "package" (a package without graphs)
+ * The welcome while there is no graph: {kind, title, sub, lead, steps, builtin}. kind "package" (a package without graphs)
  * or "folder" (a folder that is no package).
  */
 export function welcomeOf(info) {
-  const kits = info?.kits ?? [];
+  const builtin = info?.builtin ?? [];
   if (info?.package) {
     const p = info.package;
     return {
-      kind: 'package', title: p.title || p.id, sub: `package ${p.id}${p.name ? ` · publishes as ${p.name}` : ''}`, kits,
+      kind: 'package', title: p.title || p.id, sub: `package ${p.id}${p.name ? ` · publishes as ${p.name}` : ''}`, builtin,
       lead: 'This package has no graphs yet.',
       steps: [
         'Ask your agent to build one here, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s built-in packages."',
@@ -34,7 +34,7 @@ export function welcomeOf(info) {
   }
   const folder = info?.folder ?? '';
   return {
-    kind: 'folder', title: baseName(folder) || 'This folder', sub: folder, kits,
+    kind: 'folder', title: baseName(folder) || 'This folder', sub: folder, builtin,
     lead: 'This folder is not a TopoTopo package.',
     steps: [
       'A package keeps its graphs, the packages they use and their exports together, and shows in the web app.',
@@ -56,10 +56,10 @@ export function renderWelcome(host, info, show) {
     if (at < 0) p.textContent = s; else p.append(s.slice(0, at + 5), el('code', '', s.slice(at + 5)));
     box.append(p);
   }
-  if (w.kits.length) {
+  if (w.builtin.length) {
     box.append(el('h2', '', 'TopoTopo\'s built-in packages: ready-made parts your agent can use'));
-    const list = el('ul', 'welcome-kits');
-    for (const k of w.kits) {
+    const list = el('ul', 'welcome-builtin');
+    for (const k of w.builtin) {
       const li = el('li');
       li.append(el('strong', '', k.title), el('span', 'dim', ` · ${k.name}${k.version ? ` ${k.version}` : ''}`), el('div', 'dim', k.outputs));
       li.title = k.description;

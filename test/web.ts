@@ -1,8 +1,9 @@
 // The web app server (src/web/server.ts): the grid, a package page, thumbnails (a placeholder before the first
 // bake), preview.glb, the embed page, attachments (inside the package only, scripts never inline), /api/packages
 // (CORS only for listed origins), framing headers, the Host and Origin checks, a bake from a file change, a package's
-// versions and outputs and the packages a package uses, the registered workspaces on the front page and among a
-// package's users, and the pages' templates escaping what they show.
+// versions and outputs and the packages it uses, TopoTopo's built-in library as a library with the same package pages,
+// the registered workspaces on the front page and among a package's users, and the pages' templates escaping what
+// they show.
 //   node test/web.ts
 import fs from 'node:fs';
 import http from 'node:http';
@@ -11,6 +12,7 @@ import path from 'node:path';
 import { createPackage } from '../src/web/library.ts';
 import type { WebConfig } from '../src/config.ts';
 import { startWeb, runningWeb } from '../src/web/server.ts';
+import { builtinLibrary } from '../src/packages/registry.ts';
 import { esc, frontPage } from '../src/web/pages.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-web-'));
@@ -21,6 +23,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred: () => boolean | Promise<boolean>, ms: number) => { const t0 = Date.now(); while (!(await pred()) && Date.now() - t0 < ms) await sleep(100); return pred(); };
 
 const lib = { name: 'game', path: path.join(tmp, 'lib') };
+/** TopoTopo's built-in packages, a library the web app always shows */
+const BUILTIN = builtinLibrary().length;
 fs.mkdirSync(lib.path);
 const BOX = { nodes: { b: { type: 'box' } }, output: 'b' };
 const crate = createPackage(lib, 'props/crate', { title: 'Crate <b>&', tags: ['props'], graph: BOX, links: [{ label: 'board', url: 'http://board.local/x' }] });
@@ -54,7 +58,7 @@ try {
     check((await req('/static/web.css')).status === 200 && (await req('/app/embed.js')).status === 200 && (await req('/vendor/three/build/three.module.js')).status === 200, 'styles, the embed module and three.js are served');
     check((await req('/static/../server.ts')).status === 404, 'no files outside the static folder');
     const health = JSON.parse((await req('/api/health')).body.toString());
-    check(health.web === true && health.packages === 1, 'health');
+    check(health.web === true && health.packages === 1 + BUILTIN && health.libraries === 2, `health: the library's package and TopoTopo's built-in ones (${BUILTIN})`);
     check(await runningWeb(g.port) === g.url, 'runningWeb recognises it');
   }
 
@@ -103,7 +107,7 @@ try {
     const rebaked = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(crate.dir, '.web', 'bake.json'), 'utf8')).at !== at0; } catch { return false; } }, 30000);
     check(rebaked, 'a graph saved by another process is baked again');
     createPackage(lib, 'props/barrel', { graph: BOX });
-    check(await until(async () => JSON.parse((await req('/api/health')).body.toString()).packages === 2, 10000), 'a new package folder appears');
+    check(await until(async () => JSON.parse((await req('/api/health')).body.toString()).packages === 2 + BUILTIN, 10000), 'a new package folder appears');
     check((await req('/p/game/barrel')).status === 200, 'and has its page');
   }
 
@@ -171,20 +175,23 @@ try {
       && /placeholder="Search \d+ packages and \d+ outputs"/.test(grid), 'the grid\'s search finds a package\'s outputs by name, kind and tag: each card carries them, shown when the search finds them');
     check(/data-hay="[^"]*studio\/trees/.test(cardOf('game/forest')) && /<span class="upd" title="studio\/trees 1\.0 is in use; 1\.1 is out">update: studio\/trees 1\.1<\/span>/.test(cardOf('game/forest')),
       'a package\'s card: the search finds it by the packages it uses, and it says that an update exists');
-    // TopoTopo's built-in packages: on the grid, searchable, with a page and thumbnails, and the packages that use them
-    const kit = cardOf('kit/props');
-    check(/<section class="library kits" id="kits">/.test(grid) && /href="\/k\/props" data-key="kit\/props"/.test(grid) && /<span class="out" hidden data-hay="topotopo\/props\/barrel [^"]*"><code>topotopo\/props\/barrel<\/code>/.test(kit) && /src="\/k\/props\/thumbs\/[a-z_]+\.png"/.test(kit),
-      'TopoTopo\'s built-in packages have cards on the grid, whose search finds their outputs');
-    const kp = (await req('/k/props')).body.toString();
-    check(/<h1>Props kit<\/h1>/.test(kp) && /<code>topotopo\/props\/barrel<\/code>/.test(kp) && /<img src="\/k\/props\/thumbs\/barrel\.png"/.test(kp) && /<h2>Used by <span class="count">0<\/span>/.test(kp),
-      'a built-in package\'s page: its outputs with their thumbnails, its versions, the packages that use it');
-    const th = await req('/k/props/thumbs/barrel.png');
-    check(th.status === 200 && th.headers['content-type'] === 'image/png' && (await req('/k/props/thumbs/..%2Fprops.topo')).status === 404 && (await req('/k/nope')).status === 404,
-      'a built-in package\'s thumbnails are served, nothing else of its folder');
+    // TopoTopo's built-in library: a library like the others, last on the grid; its packages have the package page
+    const props = cardOf('topotopo/props');
+    check(/<section class="library" id="lib-topotopo">/.test(grid) && grid.indexOf('id="lib-topotopo"') > grid.indexOf('id="lib-game"') && /TopoTopo's built-in library: ready-made packages every package can use/.test(grid)
+      && /href="\/p\/topotopo\/props" data-key="topotopo\/props"/.test(grid) && /<span class="out" hidden data-hay="topotopo\/props\/barrel [^"]*"><code>topotopo\/props\/barrel<\/code>/.test(props) && /src="\/p\/topotopo\/props\/thumb\.png\?v=1\.0"/.test(props),
+      'TopoTopo\'s built-in library is a library on the grid, the last one, and its cards\' search finds their outputs');
+    const pp = (await req('/p/topotopo/props')).body.toString();
+    check(/<h1>Props<\/h1>/.test(pp) && /class="pkgline">Package <span class="pkg"[^>]*>topotopo\/props 1\.0<\/span>/.test(pp) && /<img class="othumb" src="\/p\/topotopo\/props\/thumbs\/barrel\.png"[^>]*><code>topotopo\/props\/barrel<\/code>/.test(pp)
+      && /<h2>Used by <span class="count">0<\/span>/.test(pp) && /One of TopoTopo&#39;s own packages: every package can use its outputs/.test(pp) && !/Open in editor|data-post="bake"/.test(pp),
+      'a built-in package has the package page: its versions, its outputs with their thumbnails, the packages that use it, nothing to edit or bake');
+    const th = await req('/p/topotopo/props/thumbs/barrel.png'), thumb = await req('/p/topotopo/props/thumb.png');
+    check(th.status === 200 && th.headers['content-type'] === 'image/png' && thumb.status === 200 && thumb.body.length > 1000 && (await req('/p/topotopo/props/thumbs/..%2Fprops.topo')).status === 404
+      && (await req('/p/topotopo/nope')).status === 404 && (await req('/p/topotopo/props/bake', { method: 'POST' })).status === 400,
+      'a built-in package\'s thumbnails are served (its card shows one of its outputs\'), nothing else of its folder, and it is not baked here');
     edit(forest.dir, (m) => { m.uses = { ...m.uses, 'topotopo/props': '1.0' }; });
     g.rescan();
     const user2 = (await req('/p/game/forest')).body.toString();
-    check(/<th><a href="\/k\/props">topotopo\/props<\/a><\/th><td>1\.0<\/td>/.test(user2) && /<a href="\/p\/game\/forest">Forest<\/a>/.test((await req('/k/props')).body.toString()),
+    check(/<th><a href="\/p\/topotopo\/props">topotopo\/props<\/a><\/th><td>1\.0<\/td>/.test(user2) && /<a href="\/p\/game\/forest">Forest<\/a>/.test((await req('/p/topotopo/props')).body.toString()),
       'a package\'s page links the built-in packages it uses, and the built-in package\'s page lists the package');
     const api = JSON.parse((await req('/api/packages')).body.toString());
     check(JSON.stringify(api.packages.find((x: any) => x.id === 'trees')?.package) === '{"name":"studio/trees","version":"1.1"}' && api.packages.find((x: any) => x.id === 'forest')?.package === undefined,
@@ -202,9 +209,9 @@ try {
     const home = (await req('/')).body.toString();
     const block = home.slice(home.indexOf('id="workspaces"'), home.indexOf('id="lib-'));
     check(home.indexOf('id="ws-hunt"') > 0 && home.indexOf('id="ws-hunt"') < home.indexOf('id="lib-game"') && /Godot · game\/project\.godot · exports to res:\/\/assets\/topotopo/.test(block)
-      && /Pump hall/.test(block) && /<a href="\/k\/props">topotopo\/props<\/a> 1\.0/.test(block),
+      && /Pump hall/.test(block) && /<a href="\/p\/topotopo\/props">topotopo\/props<\/a> 1\.0/.test(block),
       `the front page lists the workspace first: its engine, its packages, the packages it uses (${block.replace(/\s+/g, ' ').slice(0, 900)})`);
-    check(/<a href="\/#ws-hunt">workspace hunt<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/k/props')).body.toString()), 'a built-in package\'s users include the workspaces that use it');
+    check(/<a href="\/#ws-hunt">workspace hunt<\/a><\/th><td>1\.0<\/td><td class="dim">workspace<\/td>/.test((await req('/p/topotopo/props')).body.toString()), 'a built-in package\'s users include the workspaces that use it');
     cfg.workspaces.length = 0;
     g.rescan();
   }

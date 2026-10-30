@@ -8,7 +8,7 @@
 // example is what `help` shows: it must not teach a graph that warns). Files the examples
 // name (images, meshes) are written to the engine's temp dir from the test fixtures, and graph_ref resolves every
 // package graph name to a small terrain graph; the engine's package uses TopoTopo's own packages (useBuiltin), which
-// some examples name. The kits themselves are covered by test/builtin.ts.
+// some examples name. The built-in packages themselves are covered by test/builtin.ts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { allNodeDefs, getNodeDef } from '../src/graph/registry.ts';

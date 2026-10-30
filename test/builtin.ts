@@ -1,4 +1,4 @@
-// TopoTopo's own packages, the built-in packages of its built-in library (library/<name>/, scripts/gen-kits.ts): every output, cooked
+// TopoTopo's own packages, the built-in packages of its built-in library (library/<name>/, scripts/gen-builtin.ts): every output, cooked
 // as a package that uses the built-in package cooks it, documents its params, follows the built-in packages' conventions and cooks at its defaults
 // and at both ends of every numeric range.
 //   node test/builtin.ts [filter]
@@ -8,9 +8,9 @@
 // 1 s. Then every numeric param at its min and max, every enum option and every bool flipped must cook without errors
 // (and stay watertight when promised), and curve/surface outputs must also cook on their fixture input.
 // Per built-in package: topotopo/<folder>, one output per graph named as its file with a pinned kind and tags (which its newest
-// version records, the line-up "kit" among them), the graph it shows lines its outputs up (its default output cooks),
+// version records, the line-up "lineup" among them), the graph it shows lines its outputs up (its default output cooks),
 // and its working folder is its newest version; the thumbnails and the README table are current
-// (gen-kits --check). Also: the assets tool forks an output's graph into the package's assets, which keeps list, get,
+// (gen-builtin --check). Also: the assets tool forks an output's graph into the package's assets, which keeps list, get,
 // save and delete for its own; the catalog and help list the outputs with their descriptions.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,7 +27,7 @@ import { openPackages } from '../src/packages/registry.ts';
 import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { SHOWN, checkKits, lineupGraph, lineupText, readKits } from '../scripts/gen-kits.ts';
+import { SHOWN, checkBuiltin, lineupGraph, lineupText, readBuiltin } from '../scripts/gen-builtin.ts';
 import { BUILTIN_INPUTS, checkGeo, builtinFixtureGraph, useBuiltin } from './fixtures.ts';
 
 const filter = process.argv.slice(2).find((a) => !a.startsWith('--'));
@@ -41,10 +41,10 @@ await engine.init();
 const pk = useBuiltin(engine, path.join(tmp, 'package'));
 check(!pk.check().length, `the built-in packages load without problems: ${pk.check().join('; ')}`);
 
-const kits = readKits();
-const outputs = kits.flatMap((k) => k.outputs);
-check(kits.length >= 4 && outputs.length >= 30, `at least 4 built-in packages and 30 outputs (${kits.length}, ${outputs.length})`);
-if (!filter) for (const p of checkKits(kits)) fail(p);
+const all = readBuiltin();
+const outputs = all.flatMap((k) => k.outputs);
+check(all.length >= 4 && outputs.length >= 30, `at least 4 built-in packages and 30 outputs (${all.length}, ${outputs.length})`);
+if (!filter) for (const p of checkBuiltin(all)) fail(p);
 
 const NUMERIC = new Set(['float', 'int']);
 const MAX_COOK_MS = 1000;
@@ -98,7 +98,7 @@ function conventions(where: string, g0: Geometry, graph: GraphSpec, defaults: bo
 interface Row { name: string; ms: number; prims: number; variants: number; worst: number; worstAt: string }
 const rows: Row[] = [];
 
-for (const k of kits) {
+for (const k of all) {
   if (filter && !k.outputs.some((o) => o.type.includes(filter))) continue;
   // ---- the built-in package: its package, one output per graph, the graph it shows, its default output
   check(k.manifest.name === k.package && k.manifest.graph === SHOWN && fs.existsSync(path.join(k.dir, `${k.name}.topo`)), `library/${k.name}/${k.name}.topo: name ${k.package}, graph "${SHOWN}"`);
@@ -108,11 +108,11 @@ for (const k of kits) {
     const out = o.graph.outputs?.[o.name];
     check(!!out?.kind && (out.tags?.length ?? 0) >= 3, `${o.file}: a pinned kind and at least 3 tags (${out?.kind}; ${out?.tags?.join(', ')})`);
   }
-  // what the newest version records: every output's kind and tags, the line-up ("kit") among them
+  // what the newest version records: every output's kind and tags, the line-up ("lineup") among them
   const newest = k.versions.at(-1);
   const recorded = newest ? Object.entries(newest.outputs) : [];
-  check(recorded.length === k.outputs.length + 1 && recorded.every(([, x]) => !!x.kind && !!x.tags?.length) && !!newest?.outputs.kit && newest.default.kind === newest.outputs.kit.kind,
-    `${k.package} ${newest?.version}: every output with its kind and tags, the line-up "kit" its default output (${recorded.filter(([, x]) => !x.kind || !x.tags?.length).map(([n]) => n).join(', ') || 'all recorded'})`);
+  check(recorded.length === k.outputs.length + 1 && recorded.every(([, x]) => !!x.kind && !!x.tags?.length) && !!newest?.outputs.lineup && newest.default.kind === newest.outputs.lineup.kind,
+    `${k.package} ${newest?.version}: every output with its kind and tags, the line-up "lineup" its default output (${recorded.filter(([, x]) => !x.kind || !x.tags?.length).map(([n]) => n).join(', ') || 'all recorded'})`);
   const sizes = new Map<string, [number, number]>();
   for (const o of k.outputs) {
     const r = await engine.cook({ nodes: { o: { type: o.type } }, output: 'o' });
@@ -120,7 +120,7 @@ for (const k of kits) {
   }
   if (sizes.size === k.outputs.length) {
     const shown = fs.readFileSync(path.join(k.dir, 'graphs', `${SHOWN}.json`), 'utf8').replace(/\r\n/g, '\n');
-    check(shown === lineupText(lineupGraph(k, sizes)), `library/${k.name}/graphs/${SHOWN}.json lines up the outputs as they cook: run npm run kits`);
+    check(shown === lineupText(lineupGraph(k, sizes)), `library/${k.name}/graphs/${SHOWN}.json lines up the outputs as they cook: run npm run builtin`);
   }
   const d = await engine.cook({ nodes: { k: { type: k.package } }, output: 'k' });
   check(d.ok && !!d.geo && d.geo.numPrims >= k.outputs.length && !d.warnings.length, `${k.package}, the default output, lines the outputs up: ${d.errors.map((e) => e.message).join('; ')}${d.warnings.map((w) => w.message).join('; ')}`);
@@ -220,7 +220,7 @@ if (!filter || 'stairs house'.includes(filter)) {
   const rf = await e2.cook({ nodes: { s: { type: 'my_stairs', params: { steps: 9 } } } });
   check(rf.ok && !!rf.geo && rf.geo.numPrims > 0, `the forked asset cooks: ${rf.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
   const house = await txt('assets', { action: 'fork', name: 'topotopo/architecture/house' });
-  check(!house.err && !!e2.asset('house') && readManifest(wsDir).uses['topotopo/architecture'] === kits.find((x) => x.name === 'architecture')!.versions.at(-1)!.version && /added topotopo\/architecture/.test(house.text),
+  check(!house.err && !!e2.asset('house') && readManifest(wsDir).uses['topotopo/architecture'] === all.find((x) => x.name === 'architecture')!.versions.at(-1)!.version && /added topotopo\/architecture/.test(house.text),
     `a fork whose graph names the package's other outputs adds the built-in package to the package (first use): ${house.text.split('\n').slice(0, 2).join(' | ')}`);
   check((await e2.cook({ nodes: { h: { type: 'house', params: { floors: 1 } } } })).ok, 'and it cooks with the built-in package\'s walls and roof');
   const list = await txt('assets', { action: 'list' });
@@ -259,5 +259,5 @@ fs.rmSync(tmp, { recursive: true, force: true });
 rows.sort((a, b) => b.ms - a.ms);
 console.log('\noutput                                default ms  prims   variants  slowest variant');
 for (const r of rows) console.log(`${r.name.padEnd(38)}${r.ms.toFixed(0).padStart(9)}  ${String(r.prims).padStart(6)}  ${String(r.variants).padStart(8)}  ${r.worst.toFixed(0).padStart(5)} ms (${r.worstAt})`);
-console.log(`\nbuilt-in packages: ${kits.length} packages, ${rows.length} outputs, ${rows.reduce((s, r) => s + r.variants, 0)} variant cooks, ${checks} checks, ${fails} failed`);
+console.log(`\nbuilt-in packages: ${all.length} packages, ${rows.length} outputs, ${rows.reduce((s, r) => s + r.variants, 0)} variant cooks, ${checks} checks, ${fails} failed`);
 process.exit(fails ? 1 : 0);

@@ -363,14 +363,14 @@ section('graph file edits (json-edit.ts): only what changes');
 section('the tab\'s title, the welcome, and messages that clear themselves (section 4)');
 {
   const welcome = await import('../src/viewer/app/welcome.js');
-  const kits = [{ name: 'topotopo/street', title: 'Street kit', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
-  const proj = { package: { id: 'lantern', title: 'Lantern', graph: 'main', name: null }, folder: 'C:\\work\\lantern', file: null, kits };
-  const loose = { package: null, folder: '/home/me/stuff', file: null, kits };
+  const builtin = [{ name: 'topotopo/street', title: 'Street', description: '…', version: '1.1', outputs: '7 outputs: bench' }];
+  const proj = { package: { id: 'lantern', title: 'Lantern', graph: 'main', name: null }, folder: 'C:\\work\\lantern', file: null, builtin };
+  const loose = { package: null, folder: '/home/me/stuff', file: null, builtin };
   check(welcome.pageTitle(proj) === 'Lantern · TopoTopo' && welcome.pageTitle(loose) === 'stuff · TopoTopo' && welcome.pageTitle({ package: null, folder: '/tmp/x', file: 'house.json' }) === 'house.json · TopoTopo',
     'the tab is titled after the package (a graph file, a folder)');
   check(welcome.defaultGraph(proj, ['a', 'main']) === 'main' && welcome.defaultGraph(proj, ['a', 'b']) === 'a' && welcome.defaultGraph(loose, []) === null, 'the package\'s default graph is shown first');
   const wp = welcome.welcomeOf(proj), wf = welcome.welcomeOf(loose);
-  check(wp.kind === 'package' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.kits.length === 1,
+  check(wp.kind === 'package' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.builtin.length === 1,
     'a package without graphs: its name, ask your agent, TopoTopo\'s built-in packages');
   check(wf.kind === 'folder' && /not a TopoTopo package/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no package says so and how to make it one');
   check(status.messageLife('saved 2 values', 'ok') === 6000 && status.messageLife('no such node', 'err') === 12000 && status.messageLife('undid move', '', 2000) === 6000 && status.messageLife('x', '', 9000) === 9000,

@@ -98,7 +98,7 @@ function nodeSection(def: NodeDef): string[] {
  * The outputs of TopoTopo's own packages as node definitions (category "package"): every output and each package's default
  * output, at the newest version TopoTopo's built-in library holds, as the catalog offers them outside a package.
  */
-export async function kitDefs(): Promise<NodeDef[]> {
+export async function builtinDefs(): Promise<NodeDef[]> {
   const engine = new Engine(createNodeHost({ workers: 0 }));
   await engine.init();
   const pk = new PackageUses(engine, null);
@@ -110,7 +110,7 @@ export async function kitDefs(): Promise<NodeDef[]> {
 
 /** docs/nodes.md as it should be: every node type and every output of TopoTopo's own packages. */
 export async function referenceMarkdown(): Promise<string> {
-  return renderNodeReference(allNodeDefs(), await kitDefs());
+  return renderNodeReference(allNodeDefs(), await builtinDefs());
 }
 
 /**

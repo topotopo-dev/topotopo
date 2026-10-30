@@ -1,10 +1,10 @@
 {
-  "graph": "kit",
+  "graph": "lineup",
   "bake": {},
-  "title": "Props kit",
-  "description": "TopoTopo's props kit: barrels, crates, pallets, sandbag walls and pipe runs.",
+  "title": "Props",
+  "description": "TopoTopo's props package: barrels, crates, pallets, sandbag walls and pipe runs.",
   "tags": [
-    "kit"
+    "built-in"
   ],
   "links": [],
   "created": "2026-10-28",

@@ -35,7 +35,7 @@ const NAME: string = pkg.name;
 const BIN = Object.keys(pkg.bin)[0];
 
 /** The newest version TopoTopo's built-in library holds of a built-in package, which a first use copies in. */
-const newestOf = (kit: string) => fs.readdirSync(path.join(ROOT, 'library', kit, 'versions')).filter((v) => /^\d+\.\d+$/.test(v))
+const newestOf = (name: string) => fs.readdirSync(path.join(ROOT, 'library', name, 'versions')).filter((v) => /^\d+\.\d+$/.test(v))
   .sort((a, b) => { const [x, y] = a.split('.').map(Number), [u, w] = b.split('.').map(Number); return x - u || y - w; }).at(-1)!;
 /** A version as a regular expression matches it. */
 const re = (v: string) => v.replace(/\./g, '\\.');

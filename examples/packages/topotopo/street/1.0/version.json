@@ -2,9 +2,9 @@
   "package": "topotopo/street",
   "version": "1.0",
   "note": "first version",
-  "published": "2026-10-29T16:36:52.576Z",
+  "published": "2026-10-30T12:01:50.950Z",
   "big": false,
-  "hash": "1c4fd042666677ca770f286f27da632a8642ecf34fee16b63615edf730601a2a",
+  "hash": "c691773d575eb1a5653ba4ec43cd35a761ed26685272700b9e5e1586ef309c3b",
   "outputs": {
     "bench": {
       "graph": "bench",
@@ -231,20 +231,6 @@
         }
       ]
     },
-    "kit": {
-      "graph": "kit",
-      "node": "kit",
-      "label": "Street kit",
-      "kind": "mesh",
-      "tags": [
-        "kit",
-        "lineup",
-        "street"
-      ],
-      "description": "TopoTopo's street kit, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
-      "sliders": {},
-      "inputs": []
-    },
     "lamp_post": {
       "graph": "lamp_post",
       "node": "out",
@@ -294,6 +280,19 @@
           "desc": "shade diameter (m)"
         }
       },
+      "inputs": []
+    },
+    "lineup": {
+      "graph": "lineup",
+      "node": "lineup",
+      "label": "Street line-up",
+      "kind": "mesh",
+      "tags": [
+        "lineup",
+        "street"
+      ],
+      "description": "TopoTopo's street package, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
+      "sliders": {},
       "inputs": []
     },
     "road_strip": {
@@ -407,15 +406,14 @@
     }
   },
   "default": {
-    "graph": "kit",
-    "node": "kit",
+    "graph": "lineup",
+    "node": "lineup",
     "kind": "mesh",
     "tags": [
-      "kit",
       "lineup",
       "street"
     ],
-    "description": "TopoTopo's street kit, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
+    "description": "TopoTopo's street package, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
     "sliders": {},
     "inputs": []
   },

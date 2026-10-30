@@ -738,9 +738,9 @@ section('a package\'s graph files beside its manifest (examples/ keeps its graph
     const v = await startViewer(a, 0);
     try {
       const info: any = await (await fetch(v.url + 'api/package')).json();
-      check(info.package?.id === 'beside' && info.package.graph === 'tower' && info.folder === dir && Array.isArray(info.kits),
-        `GET /api/package: the package, its default graph and the folder (${JSON.stringify({ ...info, kits: info.kits?.length })})`);
-      check(info.kits.some((k: any) => k.name === 'topotopo/street' && /outputs: bench/.test(k.outputs)), 'and TopoTopo\'s built-in packages with their outputs');
+      check(info.package?.id === 'beside' && info.package.graph === 'tower' && info.folder === dir && Array.isArray(info.builtin),
+        `GET /api/package: the package, its default graph and the folder (${JSON.stringify({ ...info, builtin: info.builtin?.length })})`);
+      check(info.builtin.some((k: any) => k.name === 'topotopo/street' && /outputs: bench/.test(k.outputs)), 'and TopoTopo\'s built-in packages with their outputs');
     } finally { v.close(); }
   } finally { a.unwatch(); b.unwatch(); }
 }

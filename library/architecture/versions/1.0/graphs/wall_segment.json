@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this kit's window_frame and door_frame outputs. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
+  "description": "Straight wall from x = 0 to x = wall_length with window (and an optional door) openings cut by a boolean, filled with this package's window_frame and door_frame outputs. The openings are spread in equal bays; the door takes the middle bay. Modular: segments placed end to end line up. Pivot at the start of the wall, on the ground, centred in thickness (+Z = outside). Pieces: wall (plaster) plus the frames' pieces. Every piece is closed (the wall is one watertight solid).",
   "params": {
     "wall_length": { "type": "float", "default": 4, "min": 0.5, "max": 60, "desc": "length along X (m)" },
     "height": { "type": "float", "default": 3, "min": 1, "max": 10, "desc": "height (m)" },

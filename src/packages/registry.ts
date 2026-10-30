@@ -1864,6 +1864,31 @@ export function builtinVersions(pkg: string, builtin = BUILTIN_LIBRARY.path): Ve
   return owner === RESERVED_OWNER && name && ID_RE.test(name) ? publishedVersions(path.join(builtin, name), pkg) : [];
 }
 
+/** A package of TopoTopo's built-in library, as the web app and the viewer list it. */
+export interface BuiltinPackage {
+  /** "street": its folder, and its id in the built-in library */
+  id: string;
+  /** "topotopo/street" */
+  name: string;
+  dir: string;
+  /** where its manifest and graphs are read: its working folder (in TopoTopo's repository), else its newest version */
+  from: string;
+  manifest: PackageManifest;
+  /** every version, oldest first */
+  versions: VersionInfo[];
+}
+
+/** The packages of TopoTopo's built-in library, by id; one that cannot be read is left out. */
+export function builtinLibrary(builtin = BUILTIN_LIBRARY.path): BuiltinPackage[] {
+  return builtinPackages(builtin, new Set()).flatMap((f) => {
+    try {
+      const versions = publishedVersions(f.dir, f.package), newest = versions.at(-1);
+      const from = f.working ? f.dir : newest ? path.join(f.dir, 'versions', newest.version) : null;
+      return from ? [{ id: path.basename(f.dir), name: f.package, dir: f.dir, from, manifest: readManifest(from), versions }] : [];
+    } catch { return []; }
+  });
+}
+
 /** The record of a version a package holds a copy of (packages/<owner>/<name>/<version>/), null when it holds none. */
 export function copyRecord(dir: string, pkg: string, v: string): VersionInfo | null {
   try { return readVersionInfo(copyAt(path.join(dir, 'packages'), pkg, v)); } catch { return null; }

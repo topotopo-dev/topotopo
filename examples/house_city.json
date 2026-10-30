@@ -1,5 +1,5 @@
 {
-  "description": "Nested generators: the house of TopoTopo's architecture kit, topotopo/architecture/house (walls from its wall_segment per footprint edge + its roof_skeleton), spawned on a grid of lots, each lot varying the house's parameters from its point attributes. A new version of the kit's wall_segment or roof_skeleton changes every house once the examples update to it.",
+  "description": "Nested generators: the house of TopoTopo's architecture package, topotopo/architecture/house (walls from its wall_segment per footprint edge + its roof_skeleton), spawned on a grid of lots, each lot varying the house's parameters from its point attributes. A new version of the package's wall_segment or roof_skeleton changes every house once the examples update to it.",
   "vars": { "houses_x": 4, "houses_z": 3, "spacing": 16, "seed": 7 },
   "meta": { "render": { "views": ["persp"], "azimuth": 38, "elevation": 28, "shading": "matcap" } },
   "nodes": {

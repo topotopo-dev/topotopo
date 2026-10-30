@@ -112,8 +112,8 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .welcome-box code { font: var(--mono); color: var(--text); background: var(--bg); padding: 1px 4px; border-radius: 2px; overflow-wrap: anywhere; }
 .welcome-sub { color: var(--dim); font: var(--mono); overflow-wrap: anywhere; }
 .welcome-lead { font-size: 14px; color: var(--sel); }
-.welcome-kits { margin: 0; padding-left: 18px; }
-.welcome-kits li { margin: 4px 0; }
+.welcome-builtin { margin: 0; padding-left: 18px; }
+.welcome-builtin li { margin: 4px 0; }
 #boxsel { position: absolute; border: 1px dashed var(--sel); background: rgba(240, 160, 48, 0.06); pointer-events: none; }
 #viewport.placing #gl { cursor: crosshair; }
 #viewport.nav #gl { cursor: move; }

@@ -1050,7 +1050,7 @@ outputs are listed by the catalog (category "package") and help even where the p
   topotopo/props         crate barrel pallet sandbag_wall pipe_run
   topotopo/street        road_strip lamp_post bollard bench sign_post fence cable
   {"type": "topotopo/architecture/stairs", "params": {"steps": 12, "style": "open"}}   {"type": "topotopo/nature/rock"}
-  A built-in package's name alone ("topotopo/nature"), or its output "kit", is its default output: its outputs side by side. Every
+  A built-in package's name alone ("topotopo/nature"), or its output "lineup", is its default output: its outputs side by side. Every
   output has a pinned kind (mesh; instances for scatter_rocks, forest_patch and grass_clumps; the nature package's line-up a
   scene) and tags (search {tag:"street-furniture"}, {query:"conifer"}, {tag:"low-poly"}). Pivots sit at the base (y = 0,
   Y up, metres; walls start at x = 0, roofs at the wall top); every piece has prim name and material. Outputs that

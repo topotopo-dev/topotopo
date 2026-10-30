@@ -36,8 +36,8 @@
       "topology": "36246a55fff8ca5f"
     }
   },
-  "name": "package.topotopo.street.kit",
+  "name": "package.topotopo.street.lineup",
   "ok": true,
-  "source": "topotopo/street/kit at its defaults (test/fixtures.ts)",
+  "source": "topotopo/street/lineup at its defaults (test/fixtures.ts)",
   "warnings": []
 }

@@ -162,7 +162,7 @@ try {
       `the outputs of the version in use, with their kinds and tags, marked where the package uses them (${JSON.stringify(t.outputs)})`);
     check(JSON.stringify(t.usedBy.map((u: any) => `${u.graph} › ${u.node}`).sort()) === JSON.stringify(['main › pine', 'main › small_pine', 'scene › t', 'yard › t']) && t.usedBy.every((u: any) => u.type === 'studio/trees/pine'),
       `the nodes of the package's graphs that use a package (${t.usedBy.map((u: any) => `${u.graph} › ${u.node}`)})`);
-    check(!t.kit && t.canFollow && s.package.title === 'forest' && s.package.name === null, 'a package with one working folder can show it live; the package by its title');
+    check(!t.builtin && t.canFollow && s.package.title === 'forest' && s.package.name === null, 'a package with one working folder can show it live; the package by its title');
     const found = (await get('/api/packages/search?q=tree')).j;
     const hits = found.libraries.flatMap((l: any) => l.hits.map((h: any) => `${l.standing}:${h.type}${h.used ? `@${h.used}` : ''}`));
     check(hits.includes('listed:studio/trees/pine@1.0') && hits.some((h: string) => h.startsWith('builtin:topotopo/nature/')),

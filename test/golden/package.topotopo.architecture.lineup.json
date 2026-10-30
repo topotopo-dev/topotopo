@@ -41,8 +41,8 @@
       "topology": "36ae382ef71e30cc"
     }
   },
-  "name": "package.topotopo.architecture.kit",
+  "name": "package.topotopo.architecture.lineup",
   "ok": true,
-  "source": "topotopo/architecture/kit at its defaults (test/fixtures.ts)",
+  "source": "topotopo/architecture/lineup at its defaults (test/fixtures.ts)",
   "warnings": []
 }

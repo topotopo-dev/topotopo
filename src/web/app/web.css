@@ -65,14 +65,9 @@ td .tags { margin-top: 4px; }
 /* a package that uses a package with a newer version */
 .upd { align-self: flex-start; font-size: 11px; color: var(--accent); }
 #clear { padding: 4px 10px; }
-/* TopoTopo's built-in packages: cards, and a built-in package's page with each output's thumbnail */
-.kits > p { margin: -4px 0 12px; }
-.kit-outs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.kit-out { display: flex; gap: 10px; align-items: flex-start; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
-.kthumb { flex: none; width: 96px; height: 96px; background: var(--view); border-radius: 4px; overflow: hidden; }
-.kthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.kmeta { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; }
-.kmeta code { overflow-wrap: anywhere; }
+/* a library's note under its heading (TopoTopo's built-in library), and an output's thumbnail on a package's page */
+.library > .note { margin: -4px 0 12px; }
+.othumb { display: block; width: 96px; height: 96px; margin-bottom: 4px; background: var(--view); border-radius: 4px; object-fit: cover; }
 /* versions: each opens to the outputs it published */
 .versions { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
 .version { border-bottom: 1px solid var(--line); }

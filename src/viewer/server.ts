@@ -36,8 +36,8 @@ import type { NodeProgress } from '../graph/engine.ts';
 import { packagesNamedIn } from '../graph/packages.ts';
 import { createOutputs } from './outputs.ts';
 import { createPackages } from './packages.ts';
-import { PackageUses } from '../packages/registry.ts';
-import { listKits, kitOutputsText } from '../web/kits.ts';
+import { PackageUses, builtinLibrary, isDefaultOutput } from '../packages/registry.ts';
+import type { VersionInfo } from '../packages/registry.ts';
 import { packageDirOf, packageId, readManifest } from '../package.ts';
 import { renderGeometry } from '../render/raster.ts';
 import { encodePNG } from '../render/png.ts';
@@ -66,6 +66,12 @@ const PART_RE = /(^|\/)\.[^/]*\.part$/;
 class HttpError extends Error {
   status: number;
   constructor(status: number, msg: string) { super(msg); this.status = status; }
+}
+
+/** A built-in package's outputs in a line, its line-up left out: "7 outputs: bench, bollard, cable …". */
+function outputsLine(v: VersionInfo, most = 6): string {
+  const names = Object.entries(v.outputs).filter(([, o]) => !isDefaultOutput(v, o)).map(([k]) => k);
+  return `${names.length} output${names.length === 1 ? '' : 's'}${names.length ? `: ${names.slice(0, most).join(', ')}${names.length > most ? ' …' : ''}` : ''}`;
 }
 
 /** The shape every geometry route serves: the same GLB options as /api/geo; images alone show as textured quads. */
@@ -223,14 +229,17 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     return m && dir ? { id: packageId(dir), title: m.title, description: m.description, graph: m.graph, name: m.name ?? null, dir } : null;
   };
   // TopoTopo's built-in packages, read once: they change only with TopoTopo itself
-  let kits: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
+  let builtin: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
   /**
    * GET /api/package: the package the viewer shows (null for a folder that is in no package), the folder, the graph
    * file of `topotopo view`, and TopoTopo's built-in packages.
    */
   const packageInfo = () => {
-    kits ??= listKits().map((k) => ({ name: k.name, title: k.title, description: k.description, version: k.version, outputs: kitOutputsText(k) }));
-    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, kits };
+    builtin ??= builtinLibrary().map((b) => {
+      const v = b.versions.at(-1);
+      return { name: b.name, title: b.manifest.title, description: b.manifest.description, version: v?.version ?? null, outputs: v ? outputsLine(v) : '0 outputs' };
+    });
+    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin };
   };
   // the package's default graph cooks its cards first
   const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => packageOf()?.graph });

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this kit's rock output) sunk slightly into the ground. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).",
+  "description": "Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this package's rock output) sunk slightly into the ground. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).",
   "params": {
     "density": {
       "type": "float",

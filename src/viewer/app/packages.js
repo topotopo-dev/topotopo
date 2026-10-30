@@ -277,7 +277,7 @@ export function createPackagesPanel(ctx, host) {
     if (p.error) box.append(el('div', 'pkg-sub err', p.error));
     // where it comes from: the published copy, or the live folder (the switch names both)
     if (p.canFollow) box.append(sourceSwitch(p));
-    else box.append(el('div', 'pkg-note', p.kit ? `${p.version ? `version ${p.version}` : 'not published'} from TopoTopo's built-in packages` : sourceText(p)));
+    else box.append(el('div', 'pkg-note', p.builtin ? `${p.version ? `version ${p.version}` : 'not published'} from TopoTopo's built-in library` : sourceText(p)));
     // a save in its working folder, offered here (cleared by the switch, Not now or Update)
     if (offers.has(p.package) && !p.followed) {
       const o = el('div', 'pkg-offer');

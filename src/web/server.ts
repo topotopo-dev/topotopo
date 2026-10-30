@@ -1,12 +1,11 @@
 // The web app server: the registered workspaces (the games: engine, libraries, packages, the packages they use),
-// every library's packages as a grid, a page per package with its 3D
-// preview, and stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their
-// notes and the outputs it publishes with their kinds and tags (from its versions' records), which the grid's search
+// every library's packages as a grid, TopoTopo's built-in library last, a page per package with its 3D preview, and
+// stable URLs a board pastes (link, thumbnail, iframe embed). A package's page lists its versions with their notes and
+// the outputs it publishes with their kinds, tags and thumbnails (from its versions' records), which the grid's search
 // finds as well, and the packages that use it; any package's page the packages it uses, linked, and the grid marks a
-// package with an update. TopoTopo's built-in packages (its built-in library) have cards and pages of their own (/k/<id>), with
-// each output's thumbnail, and the search finds their outputs too. It reads
-// files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in editor"
-// starts a `topotopo edit` child.
+// package with an update. The built-in library's packages have the same page; they are never baked or edited here:
+// their thumbnails are those each keeps of its outputs (thumbs/<output>.png). It reads files and serves baked previews;
+// it never cooks: bakes run in child processes (BakeQueue) and "Open in editor" starts a `topotopo edit` child.
 // Bound to 127.0.0.1 on a fixed port (stable links); requests must name this server as their Host, and writes must
 // come from its own pages.
 import http from 'node:http';
@@ -19,20 +18,18 @@ import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { webDir, isStale, listFiles, readBakeState, scanLibrary } from './library.ts';
-import { loadConfig } from '../config.ts';
+import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { WORKSPACE_FILE, resolveLibraries } from '../package.ts';
 import { engineAddress, readWorkspace } from '../workspace.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
 import { graphFiles } from '../session.ts';
 import type { BakeState, LibraryScan, Package } from './library.ts';
 import type { WebConfig } from '../config.ts';
-import { builtinVersions, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion } from '../packages/registry.ts';
+import { builtinLibrary, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 import { BakeQueue } from './bake.ts';
-import { embedPage, frontPage, kitPage, packagePage } from './pages.ts';
-import type { CardData, KitCardData, OutputRow, PackageData, Urls, UserRow, WorkspaceCardData } from './pages.ts';
-import { listKits } from './kits.ts';
-import type { Kit } from './kits.ts';
+import { embedPage, frontPage, packagePage } from './pages.ts';
+import type { CardData, OutputRow, PackageData, Urls, UserRow, WorkspaceCardData } from './pages.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const assetDir = path.join(here, 'app');
@@ -89,16 +86,45 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   let scans: LibraryScan[] = [];
   const packages = new Map<string, Package>();
   const keyOf = (p: Package) => `${p.lib}/${p.id}`;
+  /** one of TopoTopo's own packages: never baked or edited here */
+  const isBuiltin = (p: Package) => p.lib === BUILTIN_LIBRARY.name;
+  /**
+   * The built-in library's packages, by folder: where their graphs are read (the working folder in TopoTopo's
+   * repository, else the newest version) and the output whose thumbnail stands for each.
+   */
+  const builtinAt = new Map<string, { from: string; thumb: string | null }>();
+  /** TopoTopo's built-in library as a library: its packages' manifests from their working folders or newest versions */
+  const scanBuiltin = (): LibraryScan => {
+    builtinAt.clear();
+    const list = builtinLibrary();
+    for (const b of list) {
+      const newest = b.versions.at(-1);
+      const thumb = newest ? Object.keys(newest.outputs).find((o) => fs.existsSync(path.join(b.dir, 'thumbs', `${o}.png`))) ?? null : null;
+      builtinAt.set(b.dir, { from: b.from, thumb });
+    }
+    return {
+      name: BUILTIN_LIBRARY.name, root: BUILTIN_LIBRARY.path, problems: [],
+      packages: list.map((b) => ({ lib: BUILTIN_LIBRARY.name, id: b.id, dir: b.dir, rel: b.id, collection: '', manifest: b.manifest, updated: Date.parse(b.versions.at(-1)?.published ?? '') || 0 })),
+    };
+  };
   /** the registered workspaces: their files, and the packages inside each (read with the libraries) */
   let games: { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; scan: LibraryScan | null }[] = [];
   const rescan = () => {
-    scans = cfg.libraries.map(scanLibrary);
+    // TopoTopo's built-in library last, read again each time: a built-in package published while the web app runs shows
+    scans = [...cfg.libraries.map(scanLibrary), scanBuiltin()];
     packages.clear();
     for (const s of scans) for (const p of s.packages) packages.set(keyOf(p), p);
     games = cfg.workspaces.map((w) => {
       try { const m = readWorkspace(w.path); return { name: m.name, dir: w.path, m, scan: scanLibrary({ name: m.name, path: w.path }) }; }
       catch (e: any) { return { name: w.name, dir: w.path, m: null, problem: e.message, scan: null }; }
     });
+  };
+  /** Read TopoTopo's built-in library again (a few small files), the other libraries as they were scanned. */
+  const refreshBuiltin = () => {
+    const b = scanBuiltin();
+    for (const k of [...packages.keys()]) if (k.startsWith(`${BUILTIN_LIBRARY.name}/`)) packages.delete(k);
+    for (const p of b.packages) packages.set(keyOf(p), p);
+    scans = [...scans.filter((s) => s.name !== BUILTIN_LIBRARY.name), b];
   };
   const find = (lib: string, id: string) => {
     let p = packages.get(`${lib}/${id}`);
@@ -117,12 +143,16 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (p) broadcast({ package: keyOf(p), ok: state?.ok ?? false, version: state?.at ?? 0 });
     },
   });
-  /** A package's graphs (graphs/, and graph files beside its manifest), and whether it has the one its manifest shows. */
-  const graphsOf = (p: Package) => graphFiles(p.dir);
+  /**
+   * A package's graphs (graphs/, and graph files beside its manifest; a built-in package's where it is read from), and
+   * whether it has the one its manifest shows.
+   */
+  const graphsOf = (p: Package) => graphFiles(builtinAt.get(p.dir)?.from ?? p.dir);
   const hasDefault = (p: Package) => graphsOf(p).has(p.manifest.bake.graph ?? p.manifest.graph);
   const bakeIfStale = (p: Package) => {
-    // nothing to bake before the package has its default graph: its card says so ("no default graph yet")
-    if (!bakeOn || queue.pending(p.dir) || !hasDefault(p)) return;
+    // nothing to bake before the package has its default graph: its card says so ("no default graph yet"); TopoTopo's
+    // own packages are never baked here
+    if (!bakeOn || isBuiltin(p) || queue.pending(p.dir) || !hasDefault(p)) return;
     try { if (isStale(p) && queue.add(p.dir)) broadcast({ package: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
   };
   rescan();
@@ -145,6 +175,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   };
   const watchers: fs.FSWatcher[] = [];
   for (const s of scans) {
+    if (s.name === BUILTIN_LIBRARY.name) continue; // nothing of it is baked here: read again at each rescan
     try {
       const w = fs.watch(s.root, { recursive: true }, (_ev, f) => {
         const rel = f ? String(f).split(path.sep).join('/') : '';
@@ -194,26 +225,26 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
 
   // ---------------------------------------------------------------- page data
   const enc = encodeURIComponent;
-  const urls: Urls & Required<Pick<Urls, 'kit' | 'kitThumb'>> = {
+  const urls: Urls = {
     home: '/',
     package: (lib, id) => `/p/${enc(lib)}/${enc(id)}`,
     thumb: (lib, id, v) => `/p/${enc(lib)}/${enc(id)}/thumb.png${v ? `?v=${enc(String(v))}` : ''}`,
     glb: (lib, id, v) => `/p/${enc(lib)}/${enc(id)}/preview.glb${v ? `?v=${enc(String(v))}` : ''}`,
     embed: (lib, id) => `/embed/${enc(lib)}/${enc(id)}`,
     file: (lib, id, rel) => `/p/${enc(lib)}/${enc(id)}/files/${rel.split('/').map(enc).join('/')}`,
-    edit: (lib, id) => `/p/${enc(lib)}/${enc(id)}/edit`,
-    kit: (id) => `/k/${enc(id)}`,
-    kitThumb: (id, output) => `/k/${enc(id)}/thumbs/${enc(output)}.png`,
+    // TopoTopo's own packages are edited in TopoTopo's repository, not from here
+    edit: (lib, id) => (lib === BUILTIN_LIBRARY.name ? null : `/p/${enc(lib)}/${enc(id)}/edit`),
     asset: (name) => `/static/${name}`,
     app: (name) => `/app/${name}`,
     three: '/vendor/three/',
   };
-  // TopoTopo's built-in packages: read again on each page (a few small files), so a built-in package published while the web app runs shows
-  const kits = () => listKits();
-  const kitOf = (name: string, all = kits()) => all.find((k) => k.name === name);
-  /** The newest version of a package the web app knows of: its package's in a library, or TopoTopo's built-in packages'. */
-  const newestOf = (name: string, homes = packageHomes(), all = kits()) =>
-    [...(homes.get(name) ? publishedVersions(homes.get(name)!.dir, name) : []), ...(kitOf(name, all)?.versions ?? [])].map((x) => x.version).sort(compareVersions).at(-1);
+  /** A package's thumbnail of one of its outputs (thumbs/<output>.png, which TopoTopo's built-in packages keep). */
+  const outputThumb = (p: Package, output: string) => (fs.existsSync(path.join(p.dir, 'thumbs', `${output}.png`)) ? `/p/${enc(p.lib)}/${enc(p.id)}/thumbs/${enc(output)}.png` : undefined);
+  /** The newest version of a package the web app knows of: its home's, in a library or TopoTopo's built-in one. */
+  const newestOf = (name: string, homes = packageHomes()) => {
+    const home = homes.get(name);
+    return home ? publishedVersions(home.dir, name).at(-1)?.version : undefined;
+  };
   /** The packages of the libraries and the workspaces that use a package, with the version each uses. */
   const usersOf = (name: string): UserRow[] => [
     ...[...packages.values()].filter((p) => p.manifest.uses[name])
@@ -221,7 +252,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     ...games.filter((g) => g.m?.uses[name]).map((g) => ({ lib: 'workspace', id: g.name, title: `workspace ${g.name}`, version: g.m!.uses[name], url: `${urls.home}#ws-${enc(g.name)}` })),
   ].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
   /** A registered workspace on the front page: its engine, libraries, packages and the packages it uses. */
-  const workspaceCard = (g: (typeof games)[number], homes = packageHomes(), all = kits()): WorkspaceCardData => {
+  const workspaceCard = (g: (typeof games)[number], homes = packageHomes()): WorkspaceCardData => {
     if (!g.m) return { name: g.name, dir: g.dir, engine: null, libraries: [], packages: [], uses: [], problems: [g.problem ?? 'its file cannot be read'] };
     const e = g.m.engine;
     const libs = resolveLibraries([{ file: path.join(g.dir, WORKSPACE_FILE), base: g.dir, entries: g.m.libraries, from: 'workspace' }]);
@@ -231,9 +262,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       return { title: p.manifest.title, rel: p.rel, ...(at ? { url: urls.package(at.lib, at.id) } : {}), ...(p.manifest.name ? { pkg: p.manifest.name } : {}) };
     });
     const uses = Object.entries(g.m.uses).map(([name, v]) => {
-      const newest = newestOf(name, homes, all), home = homes.get(name), kit = kitOf(name, all);
-      const url = home ? urls.package(home.lib, home.id) : kit ? urls.kit(kit.id) : undefined;
-      return { name, version: v, ...(url ? { url } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
+      const newest = newestOf(name, homes), home = homes.get(name);
+      return { name, version: v, ...(home ? { url: urls.package(home.lib, home.id) } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {
       name: g.name, dir: g.dir,
@@ -241,12 +271,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       libraries: libs.libs.map((l) => l.name), packages: inside, uses, problems: [...libs.problems, ...(g.scan?.problems ?? [])],
     };
   };
-  const kitCard = (k: Kit): KitCardData => ({
-    id: k.id, name: k.name, title: k.title, description: k.description, tags: k.tags, version: k.version,
-    thumb: k.outputs.find((o) => o.thumb)?.id ?? null,
-    outputs: k.outputs.map((o) => ({ type: o.type, label: o.label, ...(o.kind ? { kind: o.kind } : {}), tags: o.tags })),
-  });
-  const status = (p: Package, s: BakeState | null) => (!hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
+  const status = (p: Package, s: BakeState | null) => (isBuiltin(p) ? 'ok' : !hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
   const cardOf = (p: Package): CardData => {
     const s = readBakeState(p.dir);
     const m = p.manifest;
@@ -257,31 +282,39 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     // the packages it uses, and those of them with a newer version: the card says so
     const uses = Object.keys(m.uses);
     const updates = uses.flatMap((name) => { const n = newestOf(name); return n && compareVersions(n, m.uses[name]) > 0 ? [{ name, version: m.uses[name], newest: n }] : []; });
+    // a built-in package's thumbnail changes with its versions, a package's with its bakes
+    const version = isBuiltin(p) ? newest?.version ?? '0' : String(s?.at ?? 0);
     return {
-      lib: p.lib, id: p.id, title: m.title, collection: p.collection, tags: m.tags, description: m.description, updated: p.updated, status: status(p, s), version: String(s?.at ?? 0),
+      lib: p.lib, id: p.id, title: m.title, collection: p.collection, tags: m.tags, description: m.description, updated: p.updated, status: status(p, s), version,
       ...(pkg ? { pkg } : {}), ...(outputs ? { outputs } : {}), ...(uses.length ? { usesPackages: uses } : {}), ...(updates.length ? { updates } : {}),
     };
   };
-  /** The packages that publish versions, by full name: the first library's when two hold one. */
+  /** The packages that publish versions, by full name: the first library's when two hold one, TopoTopo's own among them. */
   const packageHomes = () => {
     const homes = new Map<string, Package>();
     for (const p of packages.values()) if (p.manifest.name && !homes.has(p.manifest.name)) homes.set(p.manifest.name, p);
     return homes;
   };
-  /** A version's published outputs, each by the node type a graph names it with; "owner/name" alone is the default. */
-  const outputsOf = (name: string, v: VersionInfo): OutputRow[] => {
+  /**
+   * A version's published outputs, each by the node type a graph names it with ("owner/name" alone is the default),
+   * with the thumbnail the package `p` keeps of it, if any.
+   */
+  const outputsOf = (name: string, v: VersionInfo, p?: Package): OutputRow[] => {
     const isDefault = (o: { graph: string; node: string }) => isDefaultOutput(v, o);
-    const row = (type: string, o: VersionInfo['default'], dflt: boolean): OutputRow => ({
-      type, ...(dflt ? { alias: name } : {}), label: o.label ?? '', ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [],
-      graph: o.graph, node: o.node, params: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`),
-    });
-    const rows = Object.entries(v.outputs).map(([k, o]) => row(`${name}/${k}`, o, isDefault(o)));
+    const row = (type: string, o: VersionInfo['default'], dflt: boolean, output?: string): OutputRow => {
+      const thumb = p && output ? outputThumb(p, output) : undefined;
+      return {
+        type, ...(dflt ? { alias: name } : {}), label: o.label ?? '', ...(o.kind ? { kind: o.kind } : {}), tags: o.tags ?? [],
+        graph: o.graph, node: o.node, params: Object.keys(o.sliders), inputs: o.inputs.map((i) => i.label || `input ${i.index}`), ...(thumb ? { thumb } : {}),
+      };
+    };
+    const rows = Object.entries(v.outputs).map(([k, o]) => row(`${name}/${k}`, o, isDefault(o), k));
     // a default output that is no named output is listed by the package's name alone
     if (!Object.values(v.outputs).some(isDefault)) rows.unshift(row(name, v.default, false));
     return rows;
   };
   const packageData = (p: Package): PackageData => {
-    const s = readBakeState(p.dir);
+    const builtin = isBuiltin(p), s = builtin ? null : readBakeState(p.dir);
     const graphs = [...graphsOf(p)].map(([name, file]) => {
       let g: any = {};
       try { g = JSON.parse(fs.readFileSync(file, 'utf8')) ?? {}; } catch { /* unreadable: listed without nodes */ }
@@ -294,36 +327,25 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const abs = (u: string) => base + u;
     const m = p.manifest, homes = packageHomes();
     const versions = m.name ? publishedVersions(p.dir, m.name) : [];
-    // the packages it uses: the version in use (its copy's record), and the newest the web app knows of (TopoTopo's own
-    // also in TopoTopo's built-in library)
-    const all = kits();
+    // the packages it uses: the version in use (its copy's record), its home's page and the newest version there
     const uses = Object.entries(m.uses).map(([name, v]) => {
-      const rec = copyRecord(p.dir, name, v), home = homes.get(name), kit = kitOf(name, all);
-      const newest = newestOf(name, homes, all);
-      const url = home ? urls.package(home.lib, home.id) : kit ? urls.kit(kit.id) : undefined;
-      return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(url ? { url } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
+      const rec = copyRecord(p.dir, name, v), home = homes.get(name), newest = newestOf(name, homes);
+      return { name, version: v, ...(rec ? { note: rec.note, published: rec.published } : {}), ...(home ? { url: urls.package(home.lib, home.id) } : {}), ...(newest && compareVersions(newest, v) > 0 ? { newest } : {}) };
     });
     return {
-      ...cardOf(p), rel: p.rel, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
+      ...cardOf(p), builtin, rel: p.rel, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
       attachments: listFiles(path.join(p.dir, 'attachments')), exports: listFiles(path.join(p.dir, 'exports')),
-      glb: fs.existsSync(path.join(webDir(p.dir), 'preview.glb')), bake: s,
+      glb: !builtin && fs.existsSync(path.join(webDir(p.dir), 'preview.glb')), bake: s,
       share: { link: abs(urls.package(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
       package: m.name ? {
         name: m.name,
         versions: [...versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(m.name!, v) })),
-        outputs: versions.length ? outputsOf(m.name, versions.at(-1)!) : [],
+        outputs: versions.length ? outputsOf(m.name, versions.at(-1)!, p) : [],
         usedBy: usersOf(m.name),
       } : null,
       uses,
     };
   };
-  /** A built-in package's page: its versions, its outputs with their thumbnails, the packages that use it. */
-  const kitData = (k: Kit) => ({
-    ...kitCard(k),
-    versions: [...k.versions].reverse().map((v) => ({ version: v.version, note: v.note, published: v.published, big: startsBigVersion(v.version), marked: v.big, outputs: outputsOf(k.name, v) })),
-    rows: k.versions.length ? outputsOf(k.name, k.versions.at(-1)!).map((o) => ({ ...o, thumb: k.outputs.find((x) => x.type === o.type)?.thumb ? urls.kitThumb(k.id, o.type.slice(k.name.length + 1)) : null })) : [],
-    usedBy: usersOf(k.name),
-  });
   const listJSON = () => [...packages.values()].map((p) => {
     const c = cardOf(p);
     return {
@@ -382,7 +404,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       const seg = u.pathname.split('/').slice(1);
 
       if (u.pathname === '/' || u.pathname === '/index.html') {
-        return html(frontPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.packages.map(cardOf) })), kits: kits().map(kitCard), workspaces: games.map((g) => workspaceCard(g)), problems: scans.flatMap((s) => s.problems) }, urls));
+        // TopoTopo's built-in library as it is now: a built-in package published while the web app runs shows
+        refreshBuiltin();
+        return html(frontPage({ libraries: scans.map((s) => ({ name: s.name, cards: s.packages.map(cardOf), ...(s.name === BUILTIN_LIBRARY.name ? { builtin: true } : {}) })), workspaces: games.map((g) => workspaceCard(g)), problems: scans.flatMap((s) => s.problems) }, urls));
       }
       if (seg[0] === 'static') { const p = readStatic(assetDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'app') { const p = readStatic(appDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
@@ -404,28 +428,29 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         if (req.method === 'OPTIONS') return send(204, '', 'text/plain', { ...cors, 'access-control-allow-methods': 'GET' });
         return json(200, { libraries: scans.map((s) => ({ name: s.name, packages: s.packages.length, problems: s.problems })), packages: listJSON() }, cors);
       }
-      if (seg[0] === 'k' && seg.length >= 2) {
-        const k = kits().find((x) => x.id === decodeURIComponent(seg[1])) ?? (() => { throw new HttpError(404, `no package "${decodeURIComponent(seg[1])}" in TopoTopo's built-in library`); })();
-        if (seg.length === 2 || (seg.length === 3 && !seg[2])) return html(kitPage(kitData(k), urls));
-        // a built-in package's thumbnail of one of its outputs (thumbs/<output>.png), nothing else of its folder
-        if (seg[2] === 'thumbs' && seg.length === 4) {
-          const name = decodeURIComponent(seg[3]);
-          const o = /^([a-z0-9][a-z0-9_-]*)\.png$/.exec(name) && k.outputs.find((x) => `${x.id}.png` === name && x.thumb);
-          if (!o) throw new HttpError(404, `no thumbnail ${name}`);
-          return send(200, fs.readFileSync(o.thumb!), 'image/png', { 'cache-control': 'max-age=3600' });
-        }
-        throw new HttpError(404, 'not found');
-      }
       if (seg[0] === 'embed' && seg.length === 3) {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
-        const s = readBakeState(p.dir);
-        const glb = fs.existsSync(path.join(webDir(p.dir), 'preview.glb'));
-        return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: String(s?.at ?? 0), packageUrl: urls.package(p.lib, p.id) }, urls), true);
+        const c = cardOf(p);
+        const glb = !isBuiltin(p) && fs.existsSync(path.join(webDir(p.dir), 'preview.glb'));
+        return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: c.version, packageUrl: urls.package(p.lib, p.id) }, urls), true);
       }
       if (seg[0] === 'p' && seg.length >= 3) {
         const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
         const rest = seg.slice(3);
         if (!rest.length || (rest.length === 1 && !rest[0])) return html(packagePage(packageData(p), urls));
+        // a package's thumbnail of one of its outputs (thumbs/<output>.png), nothing else of that folder
+        if (rest[0] === 'thumbs' && rest.length === 2) {
+          const name = decodeURIComponent(rest[1]);
+          const file = /^[a-z0-9][a-z0-9_-]*\.png$/.test(name) ? path.join(p.dir, 'thumbs', name) : '';
+          if (!file || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) throw new HttpError(404, `no thumbnail ${name}`);
+          return send(200, fs.readFileSync(file), 'image/png', { 'cache-control': 'max-age=3600' });
+        }
+        // a built-in package: the thumbnail of its first output that has one; no 3D preview
+        if (isBuiltin(p) && (rest[0] === 'thumb.png' || rest[0] === 'preview.glb')) {
+          const thumb = builtinAt.get(p.dir)?.thumb;
+          if (rest[0] === 'preview.glb' || !thumb) return rest[0] === 'thumb.png' ? send(200, placeholderPNG(), 'image/png') : json(404, { error: 'TopoTopo\'s built-in packages have no 3D preview here' });
+          return send(200, fs.readFileSync(path.join(p.dir, 'thumbs', `${thumb}.png`)), 'image/png', { 'cache-control': 'max-age=3600' });
+        }
         if (rest[0] === 'thumb.png' || rest[0] === 'preview.glb') {
           const s = readBakeState(p.dir);
           const file = path.join(webDir(p.dir), rest[0]);
@@ -444,6 +469,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           const disp: Record<string, string> = INLINE.has(ext) ? {} : { 'content-disposition': `attachment; filename="${path.basename(abs).replace(/["\\\r\n]/g, '_')}"` };
           return send(200, fs.readFileSync(abs), FILE_TYPES[ext] ?? 'application/octet-stream', { ...disp, 'content-security-policy': 'sandbox' });
         }
+        if ((rest[0] === 'edit' || rest[0] === 'bake') && isBuiltin(p)) throw new HttpError(400, 'TopoTopo\'s built-in packages are not edited or baked here: TopoTopo\'s repository publishes them');
         if (rest[0] === 'edit') {
           const url = await editorFor(p);
           res.writeHead(302, { location: url, 'cache-control': 'no-store' });

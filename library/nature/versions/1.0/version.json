@@ -2,9 +2,9 @@
   "package": "topotopo/nature",
   "version": "1.0",
   "note": "first version",
-  "published": "2026-10-29T16:36:49.276Z",
+  "published": "2026-10-30T12:01:48.932Z",
   "big": false,
-  "hash": "3239ab8956e8f641eb816c15a267319d2fa5d45d9075e30bcd717097469fa9a4",
+  "hash": "c5658d33c4aec40470bff942eab0e250b59946d8dbd853ffbdd551674bb890b8",
   "outputs": {
     "bush": {
       "graph": "bush",
@@ -270,17 +270,16 @@
         }
       ]
     },
-    "kit": {
-      "graph": "kit",
-      "node": "kit",
-      "label": "Nature kit",
+    "lineup": {
+      "graph": "lineup",
+      "node": "lineup",
+      "label": "Nature line-up",
       "kind": "scene",
       "tags": [
-        "kit",
         "lineup",
         "nature"
       ],
-      "description": "TopoTopo's nature kit, its 8 outputs side by side at their defaults. The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.",
+      "description": "TopoTopo's nature package, its 8 outputs side by side at their defaults. The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.",
       "sliders": {},
       "inputs": []
     },
@@ -411,7 +410,7 @@
         "ground-cover",
         "scatter"
       ],
-      "description": "Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this kit's rock output) sunk slightly into the ground. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).",
+      "description": "Rocks scattered on a surface (input 0; without one, an 8 × 8 m ground patch at y = 0): the slope mask keeps faces flatter than max_slope, scatter by density with a minimum spacing, rocks aligned to the surface with random yaw, tilt and scale, overlaps pruned, then packed copies of three rock variants (this package's rock output) sunk slightly into the ground. Output: packed instances (unpack for polygons); the input surface is not included. Pivot = the surface. Piece: rock (rock).",
       "sliders": {
         "density": {
           "type": "float",
@@ -520,15 +519,14 @@
     }
   },
   "default": {
-    "graph": "kit",
-    "node": "kit",
+    "graph": "lineup",
+    "node": "lineup",
     "kind": "scene",
     "tags": [
-      "kit",
       "lineup",
       "nature"
     ],
-    "description": "TopoTopo's nature kit, its 8 outputs side by side at their defaults. The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.",
+    "description": "TopoTopo's nature package, its 8 outputs side by side at their defaults. The package's default output and its preview, from bush to tree_lowpoly along +X, 1 m apart.",
     "sliders": {},
     "inputs": []
   },

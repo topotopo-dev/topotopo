@@ -79,7 +79,7 @@
     "docs": "node scripts/gen-docs.ts",
     "site": "node scripts/gen-site.ts",
     "site:check": "node scripts/check-site.ts",
-    "kits": "node scripts/gen-kits.ts",
+    "builtin": "node scripts/gen-builtin.ts",
     "typecheck": "tsc --noEmit",
     "notice": "node scripts/gen-notice.ts",
     "notice:check": "node scripts/gen-notice.ts --check"

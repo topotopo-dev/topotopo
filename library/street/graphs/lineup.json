@@ -1,5 +1,5 @@
 {
-  "description": "TopoTopo's street kit, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
+  "description": "TopoTopo's street package, its 7 outputs side by side at their defaults. The package's default output and its preview, from bench to sign_post along +X, 1 m apart.",
   "nodes": {
     "bench": {"type":"topotopo/street/bench"},
     "bench_at": {"type":"transform","in":["bench"],"params":{"translate":[0.9,0,0]}},
@@ -15,8 +15,8 @@
     "road_strip_at": {"type":"transform","in":["road_strip"],"params":{"translate":[36.809,0,0]}},
     "sign_post": {"type":"topotopo/street/sign_post"},
     "sign_post_at": {"type":"transform","in":["sign_post"],"params":{"translate":[50.358,0,0]}},
-    "kit": {"type":"merge","in":["bench_at","bollard_at","cable_at","fence_at","lamp_post_at","road_strip_at","sign_post_at"]}
+    "lineup": {"type":"merge","in":["bench_at","bollard_at","cable_at","fence_at","lamp_post_at","road_strip_at","sign_post_at"]}
   },
-  "output": "kit",
-  "outputs": {"kit":{"node":"kit","label":"Street kit","kind":"mesh","tags":["kit","lineup","street"]}}
+  "output": "lineup",
+  "outputs": {"lineup":{"node":"lineup","label":"Street line-up","kind":"mesh","tags":["lineup","street"]}}
 }
