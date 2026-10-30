@@ -1881,7 +1881,11 @@ section('a workspace: one shared copy of each package for every package in it');
     'a package inside the workspace that publishes keeps its own copies (its uses are published with it); the other packages share the workspace\'s');
   const sharedLock = () => readJSON(path.join(GAME, 'topotopo-packages', 'lock.json')).packages;
   check(sharedLock()['ws/stones']['1.1'].library === 'wsart', `the moved lock keeps the label it had: a registered name (${sharedLock()['ws/stones']['1.1'].library})`);
-  check(librariesFor(A).libs.map((l) => `${l.name}:${l.from}`).join() === 'wsgame:self', 'inside the workspace, the registered library within it is no place of its own: its packages are the workspace\'s');
+  const inWs = searchPackages(A, { query: 'stones' });
+  const inWsHits = inWs.libraries.flatMap((l) => l.hits.map((h) => `${l.name}:${l.standing}:${h.type}`));
+  check(librariesFor(A).libs.map((l) => `${l.name}:${l.from}`).join() === 'wsgame:self' && !inWs.libraries.some((l) => l.name === 'wsart') && inWsHits.join() === 'wsgame:self:ws/stones'
+    && !/workspace library add wsart/.test(searchText(inWs)),
+    `inside the workspace, the registered library within it is no place of its own, and search does not offer it as one to list: its packages are the workspace's (${inWsHits.join(' ')})`);
   const listed = workspaceText(GAME);
   check(!/\n {2}topotopo-packages\//.test(listed) && !/problems:/.test(listed) && /\n {2}art\/lib\/stones {2}package ws\/stones/.test(listed), `workspace lists its packages as the scan finds them, no shared copy among them (${listed.split('\n').filter((l) => /^ {2}/.test(l)).join(' | ')})`);
 
@@ -2028,6 +2032,38 @@ section('two listed libraries of one name are two places: the first has the name
   const s = searchPackages(USER, { tag: 'dupe' });
   const where = s.libraries.filter((l) => l.hits.length).map((l) => `${path.basename(l.root)}:${l.hits.map((h) => h.type).join('+')}`).join(' ');
   check(where === 'props-wt:dup/crate/block props-main:dup/barrel/block', `search shows each package once, under the place that has it (${where})`);
+}
+
+section('a registered library the workspace does not list: named only when listing it would help');
+{
+  const { removeLibrary } = await import('../src/config.ts');
+  const block = (tag: string): GraphSpec => ({ nodes: { b: { type: 'box' } }, output: 'b', outputs: { block: { node: 'b', kind: 'mesh', tags: [tag] } } });
+  // a registered library that holds the workspace: the workspace cannot list it, so neither lookup nor search says to
+  const STUDIO = path.join(tmp, 'holder'), GAME = path.join(STUDIO, 'game'), HALL = path.join(GAME, 'hall');
+  writePackage(path.join(STUDIO, 'props', 'crate'), { name: 'hold/crate' }, { main: block('held') });
+  await publish(path.join(STUDIO, 'props', 'crate'), 'first');
+  addLibrary('holder', STUDIO);
+  json(path.join(GAME, 'topotopo-workspace.json'), { name: 'held-game', libraries: [], engine: 'none' });
+  writePackage(HALL, {}, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  const hall = await open(HALL);
+  const missing = errorText(() => hall.pk.use('hold/crate'));
+  const held = searchPackages(HALL, { tag: 'held' });
+  check(/^no place this package looks in has a package hold\/crate/.test(missing) && !/workspace library add holder/.test(missing) && !held.libraries.some((l) => l.name === 'holder'),
+    `a registered library holding the workspace is not named as one to list (${missing.slice(0, 160)}; ${held.libraries.map((l) => `${l.name}:${l.standing}`).join(' ')})`);
+  removeLibrary('holder');
+  // a registered library inside a listed one: its packages are the listed one's, shown once
+  const LIBS = path.join(tmp, 'outer-libs'), SUB = path.join(LIBS, 'sub'), WS = path.join(tmp, 'nest-ws'), USER = path.join(WS, 'user');
+  writePackage(path.join(SUB, 'crate'), { name: 'nest/crate' }, { main: block('nested') });
+  await publish(path.join(SUB, 'crate'), 'first');
+  addLibrary('outer-libs', LIBS);
+  addLibrary('outer-sub', SUB);
+  json(path.join(WS, 'topotopo-workspace.json'), { name: 'nest-ws', libraries: ['outer-libs'], engine: 'none' });
+  writePackage(USER, {}, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  const nested = searchPackages(USER, { tag: 'nested' });
+  const hits = nested.libraries.flatMap((l) => l.hits.map((h) => `${l.name}:${l.standing}:${h.type}`));
+  check(hits.join() === 'outer-libs:listed:nest/crate/block' && !/workspace library add outer-sub/.test(searchText(nested)), `a package found through a listed library is not shown again under a registered library inside it (${hits.join(' ')})`);
+  removeLibrary('outer-libs');
+  removeLibrary('outer-sub');
 }
 
 await engines[0]?.host.pool?.close();

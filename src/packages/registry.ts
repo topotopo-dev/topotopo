@@ -1525,12 +1525,13 @@ export class PackageUses implements SessionPackages {
     if (pkg.split('/')[0] === RESERVED_OWNER)
       throw new Error(`${BUILTIN_TEXT}, which alone holds the packages named "${RESERVED_OWNER}/…", has no package ${pkg}${dym(pkg, s)}${scanProblems}`);
     if (s.workspace) {
-      // in a registered library the workspace does not list? Then the command that lists it
+      // in a registered library the workspace does not list? Then the command that lists it (not for a library inside
+      // the workspace, whose packages are the workspace's, nor one holding it, which the workspace cannot list)
       let cfg: WebConfig | null = null;
       try { cfg = loadConfig(); } catch { /* an unreadable config: only the listed libraries count */ }
       const listed = new Set(s.libs.map((l) => folderKey(l.root)));
       for (const lib of cfg?.libraries ?? []) {
-        if (listed.has(folderKey(lib.path)) || within(lib.path, s.workspace)) continue;
+        if (listed.has(folderKey(lib.path)) || within(lib.path, s.workspace) || within(s.workspace, lib.path)) continue;
         if (scanTree(lib.name, lib.path).packages.some((p) => p.manifest.name === pkg))
           throw new Error(`${pkg} is in library "${lib.name}" (${lib.path}), which the workspace "${workspaceName(s.workspace)}" does not list: ${program()} workspace library add ${lib.name} lists it (MCP: workspace {action:"libraries", add:"${lib.name}"}, when the person says so)${scanProblems}`);
       }
@@ -2627,17 +2628,22 @@ export function searchPackages(start: string, q: SearchQuery, opts: { builtin?: 
     ...scanned.libs.map((l) => ({ name: l.name, place: placeText(l), root: l.root, standing: standingOf(l) })),
     { name: BUILTIN_LIBRARY.name, place: BUILTIN_TEXT, root: builtin, standing: 'builtin' as const },
   ];
-  // in a workspace: the registered libraries it does not list, whose packages it does not use
+  // in a workspace: the registered libraries it does not list, whose packages it does not use; not one inside the
+  // workspace or a library it lists (its packages are found there already), nor one holding the workspace (which the
+  // workspace cannot list), and no package folder a place looked in reaches already
   const unlisted: { name: string; root: string; folders: PackageFolder[] }[] = [];
   if (scanned.workspace) {
     const seen = new Set(scanned.libs.map((l) => folderKey(l.root)));
+    const reached = new Set(scanned.packages.map((p) => folderKey(p.dir)));
     try {
       for (const l of [...loadConfig().libraries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-        if (seen.has(folderKey(l.path)) || within(l.path, scanned.workspace)) continue;
+        if (seen.has(folderKey(l.path)) || scanned.libs.some((x) => within(l.path, x.root)) || within(scanned.workspace, l.path)) continue;
         seen.add(folderKey(l.path));
         const scan = scanTree(l.name, l.path), place = `library "${l.name}"`;
+        const folders = scan.packages.flatMap((p) => (p.manifest.name && p.manifest.name.split('/')[0] !== RESERVED_OWNER && !reached.has(folderKey(p.dir)) ? [{ package: p.manifest.name, library: l.name, place, at: folderKey(l.path), dir: p.dir, working: true }] : []));
+        if (!folders.length && scan.packages.some((p) => reached.has(folderKey(p.dir)))) continue;
         for (const p of scan.problems) problems.add(`${place}: ${p}`);
-        unlisted.push({ name: l.name, root: l.path, folders: scan.packages.flatMap((p) => (p.manifest.name && p.manifest.name.split('/')[0] !== RESERVED_OWNER ? [{ package: p.manifest.name, library: l.name, place, at: folderKey(l.path), dir: p.dir, working: true }] : [])) });
+        unlisted.push({ name: l.name, root: l.path, folders });
         libs.push({ name: l.name, place, root: l.path, standing: 'unlisted' });
       }
     } catch (e: any) { problems.add(e.message); }
