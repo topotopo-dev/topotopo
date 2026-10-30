@@ -80,6 +80,7 @@ for (const [from, target] of [
   ['viewer/server.js', './app/markers.js'],
   ['index.js', './index.d.ts'],
   ['host/godot.js', '../cli.js'],
+  ['host/godot.js', '../../integrations/godot/addons/topotopo/plugin.cfg'],
 ]) {
   const p = path.resolve(path.dirname(path.join(DIST, from)), target);
   if (!fs.existsSync(p)) problems.push(`dist/${from} looks for ${target}, which is missing (${rel(p)})`);

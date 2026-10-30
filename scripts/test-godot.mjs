@@ -25,6 +25,11 @@
 //   8. An export pack (all resources, include *.json, *.txt) carries the outputs and none of TopoTopo's files.
 //   9. The same project with a Godot.NET.Sdk .csproj and no build imports cleanly.
 //  10. Two fresh projects give byte-identical GLBs and records.
+//  11. The window's flow in a headless editor (tests/live/live.gd adds the panel, context menu and inspector): an edit
+//      cooks in the background while the editor runs and the GLB is reimported; a broken graph or manifest fails
+//      without a cook loop; a deleted output comes back; a no-op recook writes and imports nothing.
+//  12. The demo project: `topotopo godot setup` changes none of its files, and its first import gives what its README
+//      shows (sockets, LOD pieces, a MultiMesh scatter, a texture set).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -469,6 +474,31 @@ section('11. the window\'s flow in a headless editor (tests/live): background co
   for (const l of lines) console.log(`     ${l}`);
   const failed = lines.filter((l) => l.startsWith('FAIL')).length;
   check(r.code === 0 && failed === 0 && lines.length >= 20 && !r.unexpected.length, `live.gd: ${lines.length - failed} passed, ${failed} failed`);
+}
+
+section('12. the demo project (integrations/godot/demo): one setup command, then it imports as its README says');
+{
+  const DEMO = path.join(ROOT, 'integrations', 'godot', 'demo');
+  const demo = path.join(tmp, 'demo é');
+  copyDir(DEMO, demo);
+  const before = Object.fromEntries(filesBelow(demo).map((f) => [f, sha(fs.readFileSync(path.join(demo, f)))]));
+  const s = topotopo(['godot', 'setup', demo]);
+  const touched = filesBelow(demo).filter((f) => !f.startsWith('addons/topotopo/') && before[f] !== (fs.existsSync(path.join(demo, f)) ? sha(fs.readFileSync(path.join(demo, f))) : undefined));
+  check(s.code === 0 && !touched.length && /enabled in project\.godot already/.test(s.out) && /hidden from Godot already/.test(s.out) && /\.gitignore has the cook's lines already/.test(s.out),
+    `topotopo godot setup adds the addon and changes no file of the demo${touched.length ? ` (changed: ${touched.join(', ')})` : ''}`);
+  write(path.join(demo, 'tests', 'check_import.gd'), fs.readFileSync(path.join(TEST_PROJECT, 'tests', 'check_import.gd')));
+  const r = godot(demo, ['--import'], { label: 'demo-import' });
+  check(!r.unexpected.length && /cooking 3 stale packages before the first scan/.test(r.log), 'the first import cooks the three packages, no ERROR');
+  const crate = 'res://assets/crate/outputs/crate/crate.glb', ground = 'res://assets/yard/outputs/ground/ground.glb', stones = 'res://assets/yard/outputs/stones/stones.glb';
+  const maps = ['brick_color', 'brick_normal', 'brick_roughness'].map((m) => `res://assets/bricks/outputs/bricks/${m}.png`);
+  const { data } = inspect(demo, [crate, ground, stones, ...maps, 'res://assets/crate/crate.topo', 'res://assets/yard/yard.topo', 'res://assets/bricks/bricks.topo']);
+  const nodes = (f) => (data[f]?.nodes ?? []).map((n) => `${n.name}:${n.class}`);
+  check(['handle:Node3D', 'side_left:Node3D', 'side_right:Node3D', 'crate_lod0:MeshInstance3D', 'crate_lod1:MeshInstance3D'].every((n) => nodes(crate).includes(n)), `crate.glb: three sockets and two LOD pieces (${nodes(crate).join(', ')})`);
+  check((data[crate]?.nodes ?? []).flatMap((n) => n.materials ?? []).every((m) => m.albedo_texture === 'res://assets/crate/outputs/crate/crate_wood.png'), 'crate.glb: its material uses the extracted plank texture');
+  const mm = (data[stones]?.nodes ?? []).filter((n) => n.class === 'MultiMeshInstance3D');
+  check(mm.length === 3 && mm.reduce((a, n) => a + n.instance_count, 0) === 40 && mm.every((n) => n.use_colors), `stones.glb: 40 stones in three MultiMeshInstance3D nodes, tinted (${mm.map((n) => `${n.name} × ${n.instance_count}`).join(', ')})`);
+  check(data[ground]?.class === 'PackedScene' && maps.every((m) => data[m]?.class === 'CompressedTexture2D'), 'ground.glb is a scene, the brick maps are textures');
+  check(['crate', 'yard', 'bricks'].every((p) => data[`res://assets/${p}/${p}.topo`]?.status === 'ok'), 'every .topo is ok');
 }
 
 console.log(`\ntest:godot: ${passes} passed, ${failures} failed (${runs} Godot runs; logs in ${LOGS})`);

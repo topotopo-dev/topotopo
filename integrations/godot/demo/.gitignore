@@ -1,0 +1,13 @@
+# Godot's own files, the addon (topotopo godot setup copies it in) and everything the cook writes: the demo starts
+# uncooked, and its scenes are yours to make. In a game, commit the outputs, their .import files and the records.
+.godot/
+/addons/topotopo/
+*.import
+*.uid
+outputs/
+.topotopo/
+**/exports/*
+!**/exports/.gdignore
+/*.tscn
+*.topotopo-part
+**/.topotopo/cook.lock

@@ -1,0 +1,16 @@
+{
+  "description": "A brick texture set: base colour, normal and roughness maps from one brick pattern, each a PNG in Godot.",
+  "nodes": {
+    "pattern_color": {"type": "tex_pattern", "params": {"resolution": [256, 256], "pattern": "bricks", "count": [4, 8], "gap": 0.06, "bevel": 0.1, "variation": 0.3, "seed": 7}},
+    "brick_color": {"type": "tex_colorize", "in": ["pattern_color"], "params": {"ramp": [[0, "#8c857a"], [0.15, "#5e2a1c"], [1, "#b04a32"]]}},
+    "pattern_height": {"type": "tex_pattern", "params": {"resolution": [256, 256], "pattern": "bricks", "count": [4, 8], "gap": 0.06, "bevel": 0.1, "seed": 7}},
+    "brick_normal": {"type": "tex_normal_from_height", "in": ["pattern_height"], "params": {"depth": 0.015, "size": 1}},
+    "pattern_rough": {"type": "tex_pattern", "params": {"resolution": [256, 256], "pattern": "bricks", "count": [4, 8], "gap": 0.06, "bevel": 0.1, "variation": 0.3, "seed": 7}},
+    "brick_roughness": {"type": "tex_colorize", "in": ["pattern_rough"], "params": {"ramp": [[0, "#f2f2f2"], [1, "#b3b3b3"]]}},
+    "set": {"type": "merge", "in": ["brick_color", "brick_normal", "brick_roughness"]}
+  },
+  "output": "set",
+  "outputs": {
+    "bricks": {"node": "set", "label": "Bricks", "kind": "textures", "tags": ["bricks", "texture-set"], "description": "Base colour, normal and roughness maps."}
+  }
+}
