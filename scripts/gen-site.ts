@@ -55,6 +55,7 @@ const CONTACT = /<([^<>\s]+@[^<>\s]+)>/.exec(String(pkg.author ?? ''))?.[1] ?? n
 const CF_BEACON_TOKEN = 'e166f98611114840beed8a8e61ea96bd';
 // The mailing list (Kit, double opt-in): a plain form posting to the list's subscribe endpoint, no third-party script.
 const NEWS_FORM = 'https://app.kit.com/forms/10119525/subscriptions';
+const YOUTUBE = 'https://www.youtube.com/@topotopodev';
 const COMMIT = (() => {
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
   try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; }
@@ -708,7 +709,8 @@ page({ out: '404.html', title: 'Page not found', nav: '', abs: true, description
 page({ out: 'subscribed.html', title: 'Subscribed', nav: '', abs: true, description: 'You are on the TopoTopo mailing list.' }, () => `<div class="notfound">
 <h1>You're subscribed! 😲😊🥰</h1>
 <p>Thanks for confirming. TopoTopo news comes about once a month: releases, new packs and free stuff. Every email has an unsubscribe link.</p>
-<p class="cta"><a class="button primary" href="${u('index.html')}">Home</a><a class="button" href="${u('examples/index.html')}">Examples</a></p>
+<p>While you're here: a star on GitHub helps others find TopoTopo, and the YouTube channel shows it in action.</p>
+<p class="cta"><a class="button primary" href="${esc(REPO)}">Star on GitHub</a><a class="button" href="${YOUTUBE}?sub_confirmation=1">Subscribe on YouTube</a><a class="button" href="${u('index.html')}">Home</a></p>
 </div>`);
 
 // ---------------------------------------------------------------------------------------------------------------------
