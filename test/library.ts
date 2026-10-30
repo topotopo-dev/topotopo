@@ -184,6 +184,9 @@ section('bake');
   check(png.subarray(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 512, 'thumb.png is a 512 px PNG');
   check(glb.toString('latin1', 0, 4) === 'glTF' && glb.toString('latin1').includes('EXT_meshopt_compression'), 'preview.glb is a meshopt GLB');
   check(!isStale(p), 'after a bake: not stale');
+  // what an engine writes beside the inputs it imports is not TopoTopo's: no new key, no bake
+  for (const f of ['guide.obj.import', 'guide.uid', 'Guide.uasset', 'labels.translation']) fs.writeFileSync(path.join(p.dir, 'inputs', f), 'engine');
+  check(bakeKey(p.dir, p.manifest) === k0 && !isStale(p), 'files an engine writes beside the inputs (.import, .uid, .uasset, .translation) leave the bake key as it was');
   fs.writeFileSync(path.join(p.dir, 'inputs', 'guide.obj'), 'v 0 0 0\n');
   check(isStale(p), 'a new input file makes it stale');
   await bakePackage(p.dir);
