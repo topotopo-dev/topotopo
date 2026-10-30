@@ -17,6 +17,7 @@ import { maybeSidecar, sidecarOf } from './io/sidecars.ts';
 import type { Sidecar } from './io/sidecars.ts';
 import { fileFormat } from './host/sidecars.ts';
 import { isEngineFile } from './engines.ts';
+import { targetRefusal } from './io/targets.ts';
 
 export interface EditOp {
   op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert' | 'export';
@@ -617,6 +618,9 @@ export class Session {
         case 'export': {
           // the target of the default output, or of a named one; null removes it (validated with the graph)
           if (op.export === undefined) throw new Error(`${where}: give "export": a format ("glb"), {format, path?, ...options}, or null`);
+          // a new target never takes the prefix that is gone (one a graph holds already only warns when it cooks)
+          const refused = op.export === null ? null : targetRefusal(op.export);
+          if (refused) throw new Error(`${where}: ${refused}`);
           if (op.output === undefined) { if (op.export === null) delete g.export; else g.export = op.export; break; }
           const out = g.outputs?.[op.output];
           if (!out) {

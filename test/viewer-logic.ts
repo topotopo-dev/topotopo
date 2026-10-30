@@ -401,6 +401,10 @@ section('output cards: what an output is, its formats and downloads');
   check(pop.writesLine(png) === '16-bit PNG + JSON sidecar · not the instances' && pop.writesLine(glb) === 'binary glTF', 'a format\'s line: what it writes, and what it leaves out');
   const inside = { ...glb, writes: 'binary glTF with its textures and how it was made inside (+ .source.json in exports/)' };
   check(pop.writesLine(inside, true) === 'binary glTF with its textures and how it was made inside' && /in exports\//.test(pop.writesLine(inside)), 'a download does not say what an export adds in exports/');
+  check(typeof pop.exportPathError === 'function' && /the "engine:" prefix is gone: write the path inside exports\/ \("props\/crate\.glb"\)/.test(pop.exportPathError('engine:props/crate.glb'))
+    && pop.exportPathError('props/crate.glb') === '' && /without "\.\." or a drive/.test(pop.exportPathError('../x.glb')) && /without "\.\." or a drive/.test(pop.exportPathError('C:/x.glb'))
+    && pop.targetPathShown('engine:props/crate.glb') === 'props/crate.glb' && pop.targetPathShown('a.glb') === 'a.glb',
+    'the Export popover refuses an "engine:" path, saying the path without it, and shows a refused target\'s path without the prefix');
   check(pop.downloadName(card, glb) === 'land.glb' && pop.downloadName(card, png) === 'land.zip' && pop.downloadName({ ...card, target: { format: 'glb', path: 'parts/rock.glb' } }, glb) === 'rock.glb'
     && pop.downloadName({ ...card, output: 'trees', target: { format: 'csv', path: 'pcg/trees.points.json' } }, { ...png, format: 'csv' }) === 'trees.zip', 'download names: the target\'s file, else the output\'s stem; a zip unless one file');
   check(pop.downloadSpec({ target: { format: 'obj', path: 'a/b.obj', options: { up_axis: 'z' } } }, 'obj').up_axis === 'z' && pop.downloadSpec({ target: { format: 'obj', path: 'a.obj', options: {} } }, 'glb') === 'glb',

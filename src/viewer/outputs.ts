@@ -36,7 +36,7 @@ import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
 import type { SidecarRole } from '../io/sidecars.ts';
 import { STOPPED } from '../graph/engine.ts';
-import { FORMAT_LABELS, TARGET_FORMATS, prefixGone, publishedOutputs, resolveTarget, targetError, targetExtension, targetFormat, targetPathText } from '../io/targets.ts';
+import { FORMAT_LABELS, TARGET_FORMATS, prefixGone, publishedOutputs, resolveTarget, targetError, targetRefusal, targetExtension, targetFormat, targetPathText } from '../io/targets.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { summarize } from '../inspect.ts';
 
@@ -398,7 +398,8 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
           return await exclusive(async () => {
             const graph = item.entry.graph!;
             if (body.export !== undefined) {
-              if (body.export !== null && targetError(body.export)) err(400, targetError(body.export)!);
+              // a target that is invalid, or written with the prefix that is gone, is refused before it is set or saved
+              if (body.export !== null) { const why = targetError(body.export) ?? targetRefusal(body.export); if (why) err(400, why); }
               try { await ws.edit(graph, [{ op: 'export', ...(item.entry.output === null ? {} : { output: item.entry.output! }), export: body.export }]); }
               catch (e) { err(400, (e as Error).message); }
               // a graph from a file: the target goes into the file (only that key changes), the session values stay

@@ -143,6 +143,15 @@ export function targetWarning(t: unknown): string | null {
   return o && typeof o === 'object' && gonePrefix(o.path) ? `${prefixGone(o.path)}; exporting it fails until its path is changed` : null;
 }
 
+/**
+ * Why a target is refused where it is set (the edit op "export", the viewer's Export) or a file would be written: its
+ * path still has the prefix that is gone. null for any other target (targetError checks the rest).
+ */
+export function targetRefusal(t: unknown): string | null {
+  const o: any = typeof t === 'string' ? null : t;
+  return o && typeof o === 'object' && gonePrefix(o.path) ? prefixGone(o.path) : null;
+}
+
 /** Why a target is invalid, or null when it is valid (a path written with the prefix that is gone only warns: targetWarning). */
 export function targetError(t: unknown): string | null {
   const o: any = typeof t === 'string' ? { format: t } : t;

@@ -68,6 +68,8 @@ check(ws.applyEdits('asset', [{ op: 'export', output: 'other', export: 'obj' }])
 check(ws.applyEdits('asset', [{ op: 'export', export: 'glb' }, { op: 'export', export: null }]).graph.export === undefined, 'export null removes a target');
 let unknown = ''; try { ws.applyEdits('asset', [{ op: 'export', output: 'othr', export: 'glb' }]); } catch (e) { unknown = (e as Error).message; }
 check(/did you mean other/.test(unknown), 'an export op for an unknown output suggests the right one');
+let goneOp = ''; try { ws.applyEdits('asset', [{ op: 'export', output: 'other', export: { format: 'glb', path: 'engine:props/crate.glb' } }]); } catch (e) { goneOp = (e as Error).message; }
+check(/export path "engine:props\/crate\.glb": the "engine:" prefix is gone: .*\("props\/crate\.glb"\)/.test(goneOp), `the export op refuses a new target with the "engine:" prefix that is gone (${goneOp})`);
 check(Object.keys(FORMAT_LABELS).sort().join() === [...EXPORT_FORMATS].sort().join(), 'the target formats are exactly the export formats');
 let viewer = await startViewer(ws, 0);
 const get = async (route: string) => { const r = await fetch(viewer.url + route); return { status: r.status, data: await r.json() as any }; };
@@ -256,6 +258,12 @@ try {
     const quiet = saves.length;
     await spyPost({ id: model.id, export: { format: 'glb', path: 'asset.glb', scale: 2 } });
     check(quiet === 0 && saves.length === 1 && saves[0][0].path.at(-1) === 'export' && (saves[0][0].value as any)?.scale === 2, 'setting a target writes it into the graph file (topotopo view); exporting alone does not');
+    // a target with the "engine:" prefix that is gone is refused before it is set: the graph and its file keep theirs
+    const kept = JSON.stringify(ws.graphs.get('asset'));
+    const gone = await spyPost({ id: model.id, export: { format: 'glb', path: 'engine:props/crate.glb' } });
+    const goneSaid = await gone.json() as any;
+    check(gone.status === 400 && /the "engine:" prefix is gone/.test(goneSaid.error ?? '') && saves.length === 1 && JSON.stringify(ws.graphs.get('asset')) === kept && !fs.existsSync(path.join(ws.exportDir, 'props', 'crate.glb')),
+      `Export with an "engine:" path is refused before the target is set or saved into the graph file (${goneSaid.error})`);
   } finally { spy.close(); }
   const beforeFailure = fs.readFileSync(path.join(ws.exportDir, 'parts', 'nacelle.obj'));
   await ws.edit('asset', [{ op: 'set', node: 'model', params: { path: 'missing.obj' } }]);
