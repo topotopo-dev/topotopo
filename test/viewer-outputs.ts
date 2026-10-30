@@ -265,6 +265,15 @@ try {
     check(gone.status === 400 && /the "engine:" prefix is gone/.test(goneSaid.error ?? '') && saves.length === 1 && JSON.stringify(ws.graphs.get('asset')) === kept && !fs.existsSync(path.join(ws.exportDir, 'props', 'crate.glb')),
       `Export with an "engine:" path is refused before the target is set or saved into the graph file (${goneSaid.error})`);
   } finally { spy.close(); }
+  // a graph that holds an "engine:" target already: the card shows it, and Export and Export all write nothing for it
+  ws.setGraph('gone', { nodes: { b: { type: 'box' } }, output: 'b', export: { format: 'glb', path: 'engine:props/gone.glb' } }); ws.bump('gone');
+  items = await settled();
+  const goneCard = items.find((x: any) => x.graph === 'gone' && x.default);
+  const goneOne = await post({ id: goneCard?.id }), goneAll = await command('export-all', {});
+  check(goneOne.status === 400 && /the "engine:" prefix is gone/.test(goneOne.data.error ?? '') && goneAll.status === 400 && /the "engine:" prefix is gone/.test(goneAll.data.error ?? '')
+    && !fs.existsSync(path.join(ws.exportDir, 'props', 'gone.glb')) && !fs.existsSync(path.join(ws.exportDir, 'gone.glb')),
+    `the viewer's Export and Export all refuse a target the graph holds with the "engine:" prefix, and write nothing (${goneOne.data.error}; ${goneAll.status})`);
+  ws.deleteGraph('gone'); ws.bump('gone');
   const beforeFailure = fs.readFileSync(path.join(ws.exportDir, 'parts', 'nacelle.obj'));
   await ws.edit('asset', [{ op: 'set', node: 'model', params: { path: 'missing.obj' } }]);
   items = await settled();

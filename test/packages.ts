@@ -2015,6 +2015,12 @@ section('a workspace: one shared copy of each package for every package in it');
   const all = spawnCli([path.join(A, 'graphs', 'main.json'), '--export-all']);
   check(all.code === 1 && /--export-all: "main": export path "engine:props\/stones\.glb": the "engine:" prefix is gone/.test(all.out) && !exists(A, 'exports', 'props') && !exists(A, 'exports', 'stones.glb'),
     `--export-all refuses it and writes nothing (${all.out.split('\n').filter((l) => /export-all/.test(l)).join(' | ')})`);
+  // the MCP export tool writes a graph's targets through the same step a viewer's Export does: refused there too
+  const mcpA = await open(A), exportTool = makeTools(mcpA.ws).find((t) => t.name === 'export')!;
+  const exportSaid = async (a: any) => { try { const r = await exportTool.run(a); return `${r.isError ? 'ERR ' : ''}${r.content.map((c: any) => c.text ?? '').join('\n')}`; } catch (e: any) { return `ERR ${e.message}`; } };
+  const one = await exportSaid({ graph: 'main' }), every = await exportSaid({ graph: 'main', all: true });
+  check(/^ERR .*export path "engine:props\/stones\.glb": the "engine:" prefix is gone/.test(one) && /^ERR .*the "engine:" prefix is gone/.test(every) && !exists(A, 'exports', 'props') && !exists(A, 'exports', 'stones.glb'),
+    `the MCP export tool refuses it and writes nothing (${one.split('\n')[0].slice(0, 160)})`);
   setGraph(A, 'main', scene('ws/stones'));
 
   // check: the workspace's own packages (the versions of those that publish, the graphs of the others)
