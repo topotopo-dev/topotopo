@@ -1844,6 +1844,16 @@ section('Godot: a .gdignore in the working folders of the packages inside a Godo
   writePackage(yard, {}, {});
   (await open(yard)).pk.use('nordic/rocks');
   check(exists(GD, 'topotopo-packages', '.gdignore') && exists(yard, 'inputs', '.gdignore'), 'the workspace\'s shared copies too, and the working folders of the package that uses them');
+  // a package made by init and opened (the viewer, the MCP server, edit): the inputs/ its session makes gets one at once
+  const { initPackage } = await import('../src/package.ts');
+  const fresh = path.join(GD, 'levels', 'fresh'), elsewhere = path.join(tmp, 'plain-session');
+  initPackage(fresh);
+  initPackage(elsewhere);
+  const hadInputs = exists(fresh, 'inputs');
+  await open(fresh);
+  await open(elsewhere);
+  check(!hadInputs && exists(fresh, 'inputs', '.gdignore') && exists(elsewhere, 'inputs') && !exists(elsewhere, 'inputs', '.gdignore'),
+    'a session that makes the package\'s inputs/ inside a Godot project puts a .gdignore in it at once; outside one, none');
   // check reports and adds one that is missing
   fs.rmSync(path.join(BARREL, 'inputs', '.gdignore'));
   const ck = await checkAll(BARREL);
