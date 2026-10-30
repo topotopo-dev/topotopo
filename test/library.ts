@@ -51,6 +51,29 @@ section('create and scan');
   check(throws(() => createPackage(lib, 'decor/lantern'), /already|used by/), 'an id is unique in its library');
   check(throws(() => createPackage(lib, 'props/lantern/parts'), /inside another package/), 'no package inside a package');
   check(throws(() => createPackage(lib, '../out'), /bad package path/) && throws(() => createPackage(lib, 'Saved/x'), /bad package path/) && throws(() => createPackage(lib, 'node_modules/x'), /bad package path/), 'no path outside the library, nor through a folder the scan never enters');
+  // a path the scan would never reach: refused before anything is written, as the scan says it
+  {
+    const paths = { name: 'paths', path: path.join(tmp, 'paths') };
+    const put = (rel: string, text: string) => { fs.mkdirSync(path.dirname(path.join(paths.path, rel)), { recursive: true }); fs.writeFileSync(path.join(paths.path, rel), text); };
+    put('tool/Tool.csproj', '');
+    put('other-game/project.godot', 'config/name="Other"\n');
+    put('nested-ws/topotopo-workspace.json', '{"name": "nested"}');
+    put('checkout/package.json', '{"name": "topotopo"}');
+    const refused = (rel: string, why: RegExp) => {
+      let said = '';
+      try { createPackage(paths, rel); } catch (e: any) { said = e.message; }
+      return why.test(said) && !fs.existsSync(path.join(paths.path, ...rel.split('/'))) ? '' : `${rel}: ${said || 'made'}`;
+    };
+    const wrong = [
+      refused('tool/bin/crate', /^bad package path "tool\/bin\/crate": tool\/bin: C#'s bin folder beside a \.csproj or \.sln, which the scan never enters/),
+      refused('other-game/props/barrel', /^bad package path .*: other-game: another engine project \(it holds project\.godot\), which the scan does not enter/),
+      refused('nested-ws/x', /nested-ws: another workspace \(it holds topotopo-workspace\.json\), which the scan does not enter/),
+      refused('checkout/y', /checkout: a TopoTopo checkout, which the scan does not enter/),
+      refused('a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q', /a\/b\/c\/d\/e\/f\/g\/h\/i\/j\/k\/l\/m\/n\/o\/p\/q: more than 16 folders below .*, deeper than the scan looks/),
+    ].filter(Boolean);
+    check(!wrong.length, `a path the scan never reaches is refused, nothing written: C#'s bin, another engine project, another workspace, a checkout, deeper than 16 (${wrong.join(' | ')})`);
+    check(createPackage(paths, 'a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p').rel === 'a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p' && createPackage(paths, 'plain/bin/kept').rel === 'plain/bin/kept', 'a path the scan reaches is made: 16 folders deep, a bin folder with no .csproj beside it');
+  }
   check(createPackage(lib, 'assets/props/stool').rel === 'assets/props/stool', 'a plain folder named assets holds packages');
   fs.rmSync(path.join(lib.path, 'assets'), { recursive: true });
   createPackage(lib, 'Crate Big');

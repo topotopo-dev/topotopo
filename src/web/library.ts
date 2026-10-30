@@ -11,9 +11,9 @@ import { loadConfig } from '../config.ts';
 import type { WebConfig, LibraryRef } from '../config.ts';
 import type { PackageLink, PackageManifest } from '../package.ts';
 import { manifestAt, parseManifest, packageRepoFiles, slugify, within, writeManifest } from '../package.ts';
-import { folderKey, forgetScans, scanTree } from '../scan.ts';
+import { folderKey, forgetScans, scanTree, unscanned } from '../scan.ts';
 import type { Package, Scan } from '../scan.ts';
-import { readWorkspace, scanWorkspace } from '../workspace.ts';
+import { engineFile, readWorkspace, scanWorkspace } from '../workspace.ts';
 import { godotIgnore, isEngineFile } from '../engines.ts';
 
 export type { Package };
@@ -93,6 +93,11 @@ export function createPackage(lib: PlaceRef, rel: string, o: CreateOptions = {})
   const taken = scan.packages.find((p) => p.id === id);
   if (taken) throw new Error(`id "${id}" is used by ${taken.rel} in ${lib.workspace ? 'the workspace' : 'library'} "${lib.name}": pick another folder name`);
   if (scan.packages.some((p) => dir.startsWith(p.dir + path.sep))) throw new Error(`${rel} is inside another package`);
+  // a folder the scan never reaches holds no package it finds (src/scan.ts says why)
+  let engine: string | null = null;
+  if (lib.workspace) { try { engine = engineFile(root, readWorkspace(root)); } catch { /* its file cannot be read: the scan finds nothing either */ } }
+  const unreached = unscanned(root, dir, { engine });
+  if (unreached) throw new Error(`bad package path "${rel}": ${unreached}: ${lib.workspace ? 'the workspace' : 'the library'} would not find a package there; pick another folder`);
   for (const d of ['graphs', 'assets', 'inputs', 'exports', 'attachments']) fs.mkdirSync(path.join(dir, d), { recursive: true });
   packageRepoFiles(dir);
   const manifest = parseManifest({
@@ -103,7 +108,9 @@ export function createPackage(lib: PlaceRef, rel: string, o: CreateOptions = {})
   godotIgnore(dir);
   if (o.graph) fs.writeFileSync(path.join(dir, 'graphs', 'main.json'), JSON.stringify(o.graph, null, 2));
   forgetScans();
-  return scanLibrary(lib).packages.find((p) => folderKey(p.dir) === folderKey(dir))!;
+  const made = scanLibrary(lib).packages.find((p) => folderKey(p.dir) === folderKey(dir));
+  if (!made) throw new Error(`made the package ${dir}, and the scan of ${lib.workspace ? 'the workspace' : 'library'} "${lib.name}" does not find it: ${scanLibrary(lib).problems.find((p) => p.includes(parts.join('/'))) ?? 'see topotopo library list'}`);
+  return made;
 }
 
 /** A registered workspace's name as a place of the web app (and createPackage), or null when its file cannot be read. */
