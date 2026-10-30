@@ -98,6 +98,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
         name: { type: 'string', description: 'workspace init: its name (default: the folder\'s)' },
         engine: { type: 'string', description: 'workspace init: the engine project, "godot:game/project.godot" or "unreal:Game.uproject" from the workspace folder, or "none" (default: the one found below it)' },
         assets: { type: 'string', description: 'workspace init: the folder in the engine project exports may go to, from the workspace folder' },
+        follow: { type: 'boolean', description: 'workspace init: true shows the workspace\'s own packages live from their working folders, for looking (exports use the published versions); false stops it' },
         open: { type: 'boolean', description: 'create: open the new project (default true)' },
         package: { type: 'string', description: 'use / remove / follow / update / packages: a package, "owner/name"; set and init: the package the project is' },
         on: { type: 'boolean', description: 'follow: true to follow the package\'s working folder (default), false to go back to its copy' },
@@ -181,7 +182,7 @@ export function libraryTool(host: LibraryToolHost): ToolDef {
           const { initWorkspace, workspaceText } = await import('../workspace.ts');
           if (a.init) {
             if (!a.path) throw new Error('workspace {init:true} needs path: the game\'s folder (its root), as the person names it');
-            const r = initWorkspace(path.resolve(host.session().dir, String(a.path)), { name: a.name, engine: a.engine, assets: a.assets, libraries: Array.isArray(a.libraries) ? a.libraries : undefined });
+            const r = initWorkspace(path.resolve(host.session().dir, String(a.path)), { name: a.name, engine: a.engine, assets: a.assets, libraries: Array.isArray(a.libraries) ? a.libraries : undefined, follow: typeof a.follow === 'boolean' ? a.follow : undefined });
             host.packages().refresh();
             return text(`${r.text}\n${workspaceText(r.dir)}`);
           }

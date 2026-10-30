@@ -143,8 +143,10 @@ ready-made output in any library ("a conifer", every terrain): library {action:"
   destinations are registered in the viewer too.
 - Optional "export" (on the graph for the default output, or on an entry of "outputs") is where that output
   exports: a format ("glb" → exports/<graph or output id>.glb) or {"format":"obj","path":"parts/a.obj","up_axis":"z"}
-  (the export tool's options), always inside exports/. The person's Export buttons in the viewer, export {output} /
-  export {all:true} and the CLI's --export-all write these targets; set one with edit {op:"export", output?, export}.
+  (the export tool's options), always inside exports/, or "path": "engine:props/crate.glb" inside the game engine's
+  assets folder that the workspace names (topotopo-workspace.json engine.assets: Godot imports it from there). The
+  person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
+  targets; set one with edit {op:"export", output?, export}.
   The viewer's Download buttons need no target: they offer the formats that fit the output (a heightfield: png16,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
@@ -1016,10 +1018,11 @@ outputs are listed by the catalog (category "package") and help even where the p
   update. In an installed TopoTopo they have no working folder to follow; TopoTopo's repository publishes them.
 
 FOLLOWING, for one session: library {action:"follow", package:"studio/trees", on:true} (CLI: --follow studio/trees on a
-graph cook or topotopo view) uses the package's working folder in the project's libraries instead of its copy, until
-on:false or the end of the session; nothing about it is saved. Every edit there re-cooks, exports record it
-("studio/trees@working" and the hash of its files), and publishing the project is refused while it lasts. Other
-packages' versions keep the copies they hold.
+graph cook or topotopo view) shows the package's working folder in the project's libraries instead of its copy, until
+on:false or the end of the session; nothing about it is saved. Every edit there re-cooks. Following is for looking
+(the viewer, renders, inspect): exports and publishing use the published copy, and an export made while following
+says which published version it used. A workspace with "follow": true (topotopo workspace init --follow) follows its
+own packages this way, those whose working folder is inside it. Other packages' versions keep the copies they hold.
 
 OUT OF DATE AND UPDATE: what a project uses changes only by an update, after a before/after.
 - library {action:"outdated"} (CLI: topotopo outdated) lists the packages the project uses that have newer versions:
@@ -1050,7 +1053,8 @@ version in use (a) and the new one (b), its progress in the cook line and Stop; 
 as b or both overlaid, with what changed in a line; it applies only when the person confirms, and a big version whose
 graphs must change asks once more and gives the person a line to copy for you. "Source: Published | Live folder" shows
 a package's working folder for the viewer's session (never saved; not offered for TopoTopo's kits outside TopoTopo's
-repository); results and exports that use it are marked as holding unpublished edits, and a save in a working folder
+repository); results that use it are marked as showing unpublished edits, their exports and downloads write the
+published version, and a save in a working folder
 the session does not follow is offered in that package's box.
 
 EXPORTS record the package versions their graph used in the source block: "packages": {"studio/trees@1.3": "<hash>"}.

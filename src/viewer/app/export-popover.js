@@ -92,8 +92,8 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', `${download ? 'Download' : 'Export'} ${item.label}`);
     const title = el('div', 'export-title', download ? `Download ${item.label}` : item.target ? `Export target of ${item.label}` : `Export ${item.label}`);
     const about = el('div', 'export-about dim', item.about ?? '');
-    // a result that uses a package shown live: the file holds its unpublished edits
-    const live = item.live?.length ? el('div', 'export-live', `Includes the unpublished edits of ${item.live.join(', ')} (live folder, this session)`) : null;
+    // a result that uses a package shown live: the file holds the published version, not the edits shown
+    const live = item.live?.length ? el('div', 'export-live', `Writes the published ${item.live.join(', ')}, not the live edits shown`) : null;
     const format = el('select'); format.setAttribute('aria-label', 'Format');
     for (const f of offered) format.append(new Option(f.misfit ? `${f.label} (does not fit)` : f.label, f.format));
     if (startFormat) format.value = startFormat;
@@ -139,7 +139,7 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
       if (!offered.length) return;
       if (download) { close({ format: format.value }); return; }
       const p = file.value.trim().replace(/\\/g, '/');
-      if (!p || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').some((s) => !s || s === '.' || s === '..')) { error.textContent = 'a path inside exports/, without ".." or a drive'; file.focus(); return; }
+      if (!p || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').some((s) => !s || s === '.' || s === '..')) { error.textContent = 'a path inside exports/ (or engine: and a path inside the game engine\'s assets folder), without ".." or a drive'; file.focus(); return; }
       close({ format: format.value, path: p });
     };
     sync();

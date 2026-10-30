@@ -95,6 +95,27 @@ export function findEngines(dir: string): EngineLink[] {
 
 const rel = (from: string, to: string) => path.relative(path.resolve(from), path.resolve(to)).split(path.sep).join('/') || '.';
 
+/**
+ * The folder "engine:" export paths write into, for a folder inside a workspace: the engine project's assets folder its
+ * file names (engine.assets). Throws saying how to set one.
+ */
+export function engineAssetsFor(start: string): string {
+  const ws = locate(start).workspace;
+  const how = (at: string) => `${program()} workspace init ${at} --engine godot:<path to project.godot> --assets <folder inside the engine project>`;
+  const what = '"engine:" export paths write into the game engine\'s assets folder';
+  if (!ws) throw new Error(`${what}, and ${path.resolve(start)} is in no workspace: ${how('<the game\'s folder>')} makes one`);
+  const m = readWorkspace(ws);
+  if (!m.engine) throw new Error(`${what}, and the workspace "${m.name}" names no engine project: ${how(ws)}`);
+  if (!m.engine.assets) throw new Error(`${what}, and the workspace "${m.name}" names none for ${m.engine.project}: ${program()} workspace init ${ws} --assets <folder inside ${path.posix.dirname(m.engine.project)}>`);
+  return path.resolve(ws, m.engine.assets);
+}
+
+/** Where an engine project imports a folder from: "res://assets/topotopo" for Godot, "Content/TopoTopo" for Unreal. */
+export function engineAddress(e: EngineLink, folder: string): string {
+  const rel = path.posix.relative(path.posix.dirname(e.project), folder.replace(/\\/g, '/'));
+  return e.type === 'godot' ? `res://${rel}` : rel;
+}
+
 /** "godot:game/project.godot" (or a bare path whose file name says the engine) as an engine link. */
 export function parseEngineArg(arg: string, dir: string): EngineLink {
   const m = /^(godot|unreal):(.+)$/i.exec(arg.trim());
@@ -106,7 +127,7 @@ export function parseEngineArg(arg: string, dir: string): EngineLink {
   return { type, project: rel(dir, abs), assets: '' };
 }
 
-export interface InitWorkspaceOptions { name?: string; engine?: string | 'none'; libraries?: string[]; assets?: string }
+export interface InitWorkspaceOptions { name?: string; engine?: string | 'none'; libraries?: string[]; assets?: string; follow?: boolean }
 
 /**
  * Make `dir` (a game's root) a workspace: topotopo-workspace.json with its name, the libraries given and the engine
@@ -136,16 +157,22 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   }
   if (o.assets !== undefined) {
     if (!m.engine) throw new Error('--assets needs an engine project: --engine godot:<path to project.godot>');
-    m.engine.assets = o.assets.trim().replace(/\\/g, '/');
+    const assets = o.assets.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    // the engine imports only what lies inside its project's folder
+    const home = path.posix.dirname(m.engine.project), rel = path.posix.relative(home, assets);
+    if (!assets || rel.startsWith('..') || path.posix.isAbsolute(rel)) throw new Error(`--assets "${o.assets}" must be a folder inside the engine project's folder (${home === '.' ? 'the workspace' : home}), written from the workspace: ${m.engine.type === 'godot' ? 'Godot' : 'Unreal'} imports only what lies there`);
+    m.engine.assets = assets;
   }
+  if (o.follow !== undefined) m.follow = o.follow;
   writeWorkspace(abs, m);
   workspaceRepoFiles(abs);
   // the projects inside that kept their own copies share the workspace's now
   const gathered = gatherCopies(abs);
   const text = [
     `${had ? 'updated' : 'made'} the workspace "${m.name}" (${path.join(abs, WORKSPACE_FILE)})`,
-    `engine: ${m.engine ? `${m.engine.type} ${m.engine.project}${found}${m.engine.assets ? `, exports to ${m.engine.assets}` : ''}` : 'none'}`,
+    `engine: ${m.engine ? `${m.engine.type} ${m.engine.project}${found}${m.engine.assets ? `, "engine:" exports go to ${m.engine.assets} (${engineAddress(m.engine, m.engine.assets)})` : ''}` : 'none'}`,
     `libraries: ${m.libraries.length ? m.libraries.join(', ') : 'none yet (topotopo workspace init --library <folder or name>)'}; every project inside looks in them after its own`,
+    `follow its own packages live: ${m.follow ? 'on (their working folders inside the workspace show in the viewer and renders, for looking; exports use the published versions)' : 'off'}`,
     ...gathered,
   ].join('\n');
   return { dir: abs, manifest: m, text };

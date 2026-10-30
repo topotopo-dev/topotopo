@@ -227,14 +227,18 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     return reportResult(name, r, a, extraNotes);
   };
 
-  const resolveNodeGeo = async (a: any) => {
+  const resolveNodeGeo = async (a: any, forExport = false) => {
     const name = a.graph ?? a.name ?? 'main'; // `name` is what build/edit call it; accept both
     const g = ws.getGraph(name);
     const target = a.node || undefined;
-    const r = await engine.cook(g, { target, frame: a.frame });
+    // an export uses the published copies of the packages the session shows live (following is for looking)
+    const scope = forExport && ws.packages?.publishedNote?.(g) ? ws.packages.published?.() : null;
+    const r = await engine.cook(g, { target, frame: a.frame, ...(scope ? { scope } : {}) });
     if (!r.ok || !r.geo) throw new Error(reportText(name, r));
-    return { r, name, geo: r.geo };
+    return { r, name, geo: r.geo, scope };
   };
+  /** What an export of a graph made while following says (the published versions it used), on a line of its own. */
+  const publishedLine = (spec: GraphSpec) => { const n = ws.packages?.publishedNote?.(spec); return n ? `\n${n}` : ''; };
 
   /** export without a path: the graph's targets (the default output's, a named one's, or all), inside exports/ */
   const exportTargets = async (a: any): Promise<ToolResult> => {
@@ -252,14 +256,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     if (!targets.length) return text(`no output of "${name}" has an export target: set one with ${hint(undefined)}, or pass path`, true);
     const prepared: PreparedTarget[] = [];
     for (const p of targets) {
-      const r = await ws.cook(name, p.node, a.frame);
+      const r = await ws.cook(name, p.node, a.frame, { kind: 'export' });
       if (!r.ok || !r.geo) return text(reportText(name, r), true);
-      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec) }));
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.() ?? engine.root) }));
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
-    return text(prepared.map((p) => exportReport(p.files, ws.exportDir, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
-      + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : ''));
+    return text(prepared.map((p) => exportReport(p.files, p.root, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
+      + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : '') + publishedLine(spec));
   };
 
   const tools: ToolDef[] = [
@@ -470,17 +474,17 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
       },
       run: async (a) => {
         if (a.path === undefined) return exportTargets(a);
-        const { geo, name, r } = await resolveNodeGeo(a);
+        const { geo, name, r, scope } = await resolveNodeGeo(a, true);
         const p = path.resolve(ws.dir, a.path);
         const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
         const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt0] ?? fmt0) as ExportFormat;
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
         const source = exportSource({
           graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
-          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name)), version: TOPOTOPO_VERSION,
+          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), version: TOPOTOPO_VERSION,
         });
         const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
-        return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)`);
+        return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name))}`);
       },
     },
     {

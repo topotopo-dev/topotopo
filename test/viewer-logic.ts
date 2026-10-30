@@ -307,7 +307,7 @@ section('the Packages tab: a package\'s state and source, the Scene tree\'s mark
   check(pkgs.packageState(p({ error: 'no library this project lists has a package studio/trees' })).kind === 'error', 'a package its libraries do not have: the error');
   check(pkgs.librariesText(['topotopo', '../lib']) === 'TopoTopo\'s built-in library, library "../lib"' && pkgs.packageState(p({ package: 'topotopo/nature', libraries: ['topotopo'] })).title === '1.1 is the newest version in TopoTopo\'s built-in library'
     && cur.title === '1.1 is the newest version in the project\'s libraries', 'the badge names the libraries that hold its package, TopoTopo\'s built-in library by what it is');
-  check(/published copy of 1\.1: it changes only when you update/.test(pkgs.sourceText(p({}))) && /showing edits from lib\/trees as they are saved · exports use these edits too, marked unpublished · this session only/.test(pkgs.sourceText(p({ followed: { library: '../lib', dir: '/lib/trees' } }))),
+  check(/published copy of 1\.1: it changes only when you update/.test(pkgs.sourceText(p({}))) && /showing edits from lib\/trees as they are saved · exports use the published version · this session only/.test(pkgs.sourceText(p({ followed: { library: '../lib', dir: '/lib/trees' } }))),
     'the source switch says what each state means');
   check(!/you are editing|I'm editing/.test(pkgs.savedOffer('studio/trees')) && /new edits in its working folder that are not published yet/.test(pkgs.savedOffer('studio/trees')), 'the offer after a save does not assume the reader is its author');
   const named = pkgs.outputLine('studio/trees', { type: 'studio/trees/pine', kind: 'mesh', tags: ['conifer'], used: true }), dflt = pkgs.outputLine('studio/trees', { type: 'studio/trees', tags: [] });

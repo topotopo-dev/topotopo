@@ -57,7 +57,8 @@ export function createOutputPanel(ctx) {
   P.layerOf = (item) => shownLayer(item.heightfield, chosenLayers[item.id]);
 
   /** Where an export target's files go, in full: the person finds them there. */
-  const targetFile = (item) => inFolder(directory, item.target.path);
+  // a target inside the game engine's assets folder ("engine:props/crate.glb") is shown as written
+  const targetFile = (item) => (item.target.path.startsWith('engine:') ? item.target.path : inFolder(directory, item.target.path));
   function showDetails(item) {
     details.replaceChildren(); details.hidden = !item;
     if (!item) return;
@@ -226,7 +227,7 @@ export function createOutputPanel(ctx) {
         if (item.default && entries.filter((v) => !v.parent && v.exportable).length > 1) { const b = text('span', 'default', 'badge default'); b.title = 'the graph\'s default output: what the graph shows and exports when no output is named'; marks.push(b); }
         const kind = kindBadge(item);
         if (kind) { const b = text('span', kind, 'badge kind'); b.title = 'what it is'; marks.push(b); }
-        // it uses a package shown live: unpublished edits, in its exports too
+        // it uses a package shown live: unpublished edits on show (its exports use the published version)
         if (item.live?.length) { const b = text('span', 'unpublished edits', 'badge live'); b.title = liveText(item); marks.push(b); }
         badges.replaceChildren(...marks);
         tags.replaceChildren(...(item.tags ?? []).map((t) => text('span', t, 'tag')));

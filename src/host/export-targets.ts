@@ -17,6 +17,7 @@ import { exportSource, withExportOptions } from '../io/source.ts';
 import { resolvedExportOptions } from '../io/targets.ts';
 import type { ExportSource } from '../io/source.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
+import { engineAssetsFor } from '../workspace.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
@@ -104,6 +105,8 @@ export interface PreparedTarget {
   label: string;
   node: string;
   target: ResolvedTarget;
+  /** the folder its files are written inside: the project's exports/, or the engine project's assets folder */
+  root: string;
   files: ExportFile[];
   summary: string;
   warnings: string[];
@@ -120,36 +123,42 @@ export interface PreparedTarget {
 export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string> }
 
 /**
- * Serialize one published output to its target inside `exportsDir` (nothing is written yet). The export records its
+ * Serialize one published output to its target inside `exportsDir`, or for an "engine:" target inside the engine
+ * project's assets folder the workspace around the project names (nothing is written yet). The export records its
  * source: the graph it is published from (p.spec), its vars and seeds, the node, `cook`'s frame and fps, its packages.
  */
 export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, host: Host, cook: TargetCook = {}): Promise<PreparedTarget> {
-  const dest = insideRoot(exportsDir, path.join(exportsDir, ...p.target.path.split('/')));
+  const root = p.target.engine ? engineAssetsFor(path.dirname(path.resolve(exportsDir))) : exportsDir;
+  const dest = insideRoot(root, path.join(root, ...p.target.path.split('/')));
   const source = exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
     format: p.target.format, options: p.target.options, packages: cook.packages, version: TOPOTOPO_VERSION,
   });
   const r = await serializeExport(geo, p.target.format, dest, p.target.options, host, source);
-  for (const f of r.files) insideRoot(exportsDir, f.path);
+  for (const f of r.files) insideRoot(root, f.path);
   return {
-    graph, output: p.output, label: p.label, node: p.node, target: p.target, files: r.files, summary: r.summary, warnings: r.warnings,
+    graph, output: p.output, label: p.label, node: p.node, target: p.target, root, files: r.files, summary: r.summary, warnings: r.warnings,
     sourceFile: r.sourceFile, sourceManifest: r.sourceManifest,
   };
 }
 
-/** Write prepared targets and record their receipts; two targets writing one file are refused before any write. */
+/**
+ * Write prepared targets and record the receipts of those inside `exportsDir` (the viewer lists that folder); two
+ * targets writing one file are refused before any write.
+ */
 export function writeTargets(prepared: PreparedTarget[], exportsDir: string): number {
   const owner = new Map<string, PreparedTarget>();
   for (const p of prepared) for (const f of p.files) {
     const key = path.resolve(f.path).toLowerCase(), other = owner.get(key);
     // status: the viewer answers 409 (the request conflicts with itself); the CLI and MCP print the message
-    if (other && other !== p) throw Object.assign(new Error(`"${other.label}" (${other.graph}) and "${p.label}" (${p.graph}) both write ${path.relative(exportsDir, f.path)}: give one a different export path`), { status: 409 });
+    if (other && other !== p) throw Object.assign(new Error(`"${other.label}" (${other.graph}) and "${p.label}" (${p.graph}) both write ${path.relative(p.root, f.path)}: give one a different export path`), { status: 409 });
     owner.set(key, p);
   }
   const store = new ArtifactStore(exportsDir);
   let written = 0;
   for (const p of prepared) {
-    written += writeExportFiles(p.files, exportsDir);
+    written += writeExportFiles(p.files, p.root);
+    if (path.resolve(p.root) !== path.resolve(exportsDir)) continue;
     store.record(p.files.map((f) => f.path), { label: p.target.path, graph: p.graph, node: p.node, format: p.target.format, output: p.output ?? '' });
   }
   return written;

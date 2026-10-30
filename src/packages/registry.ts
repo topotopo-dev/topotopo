@@ -736,6 +736,8 @@ export class ProjectPackages implements SessionPackages {
   /** the project's own package, its graphs as they are now ("" until its graphs name one of its outputs) */
   private selfStamp = '';
   private selfLoaded: Loaded | PackageIssue | null = null;
+  /** the same, its uses resolving to the published copies whatever this session follows (publishing) */
+  private selfPublished: Loaded | PackageIssue | null = null;
   /** why first use could not add a package, said when a graph names it */
   private unavailable = new Map<string, string>();
   private disk = '';
@@ -769,6 +771,43 @@ export class ProjectPackages implements SessionPackages {
   /** The versions the project uses (its own, or its workspace's), as last read. */
   uses(): Record<string, string> { return this.root.uses; }
 
+  /**
+   * What exports and publishing resolve package names with: the published copies, whatever this session follows
+   * (following a working folder is for looking: the viewer, renders). The project's own resolver while nothing is
+   * followed.
+   */
+  publishedResolver(): PackageResolver {
+    if (!this.followed.size) return this.resolver;
+    return { resolve: (name) => this.resolveIn({ ...this.root, follows: false }, name), names: () => this.namesIn({ ...this.root, follows: false }) };
+  }
+
+  private publishedAt: Scope | null = null;
+  /**
+   * SessionPackages.published: while this session follows working folders, the scope exports cook in, like the root
+   * (its assets, graphs and folder) but resolving packages to their published copies; null while nothing is followed
+   * (exports cook in the root, as everything else).
+   */
+  published(): Scope | null {
+    if (!this.followed.size) return null;
+    const root = this.engine.root;
+    this.publishedAt ??= this.engine.createScope(`published copies ${sha(this.dir ?? '').slice(0, 12)}`, {
+      folder: root.files.resolvePath('.'), assets: root.assets, graphs: (n) => root.graphs?.(n), packages: this.publishedResolver(),
+    });
+    return this.publishedAt;
+  }
+
+  /**
+   * What an export of `graph` made while following says (null when the graph names no followed package): the
+   * published versions it used, the working folders being for looking only.
+   */
+  publishedNote(graph: GraphSpec): string | null {
+    const named = new Set(packagesNamedIn(graph));
+    const live = [...this.followed.values()].filter((f) => named.has(f.package));
+    if (!live.length) return null;
+    const used = live.map((f) => (this.root.uses[f.package] ? `${f.package} ${this.root.uses[f.package]}` : `${f.package} (no published version in use: publish one, and use it)`));
+    return `this session shows ${live.map((f) => f.package).join(', ')} live from ${live.length === 1 ? 'its working folder' : 'their working folders'}, for looking; the export used the published ${used.join(', ')}`;
+  }
+
   /** SessionPackages: why the graphs cannot use packages (a folder in no project, a project.json that is not valid). */
   notice(): string | null {
     if (!this.dir) return `this folder is in no project, so its graphs cannot use packages yet, TopoTopo's own among them: ${makeProject()}`;
@@ -786,7 +825,7 @@ export class ProjectPackages implements SessionPackages {
     // a version that loaded stays as it is (it is frozen); one that could not load, or loaded with a warning, is tried again
     this.forgetWarned();
     // the project's own package is read again with its uses and lock (its files are hashed again when next named)
-    this.selfLoaded = null;
+    this.selfLoaded = null; this.selfPublished = null;
     this.selfStamp = '';
     if (!this.dir) return;
     try {
@@ -841,8 +880,9 @@ export class ProjectPackages implements SessionPackages {
    * scope with its graphs, assets, files and copies, a node type per published output. null for a project that names
    * no package.
    */
-  ownPackage(): Loaded | PackageIssue | null {
-    return this.root.self ? this.root.self.get() : null;
+  ownPackage(published = false): Loaded | PackageIssue | null {
+    if (!this.root.self) return null;
+    return published && this.followed.size ? this.loadSelf(this.root.self.package, false) : this.root.self.get();
   }
 
   /** The package of the project's uses that needs version `v` of `pkg`: the package itself, or one that uses it. */
@@ -1016,21 +1056,26 @@ export class ProjectPackages implements SessionPackages {
    * The project's own package (the project is the package `pkg`) as its graphs are now: its graphs name their own
    * outputs, which cook from the project's folder, as they would from a working folder the session follows.
    */
-  private loadSelf(pkg: string): Loaded | PackageIssue {
+  private loadSelf(pkg: string, follows = true): Loaded | PackageIssue {
+    if (!follows) return this.selfPublished ??= this.buildSelf(pkg, false);
     if (this.selfLoaded) return this.selfLoaded;
-    const key = `${pkg} (this project)`;
+    return this.selfLoaded = this.buildSelf(pkg, true);
+  }
+
+  /** the project's own package from its graphs as they are now, its uses following this session's folders or not */
+  private buildSelf(pkg: string, follows: boolean): Loaded | PackageIssue {
+    const key = `${pkg} (this project${follows ? '' : ', published copies'})`;
     if (this.loading.has(key)) return { error: `${key} uses itself (through ${[...this.loading].join(' → ')})` };
     this.loading.add(key);
     let r: Loaded | PackageIssue;
     try {
       this.selfStamp ||= workingHash(this.dir!);
       // its outputs may use the packages this session follows: their results are keyed by those folders too
-      const signature = sha(`${this.selfStamp}|${this.joint}`);
-      const ctx: Context = { label: key, uses: this.root.uses, packages: this.root.packages, lock: this.root.lock, follows: true };
-      r = this.build({ pkg, version: null, dir: this.dir!, hash: this.selfStamp, signature, manifest: this.manifest!, ctx, scope: `${pkg}@project-${signature.slice(0, 16)}` });
+      const signature = sha(`${this.selfStamp}|${follows ? this.joint : ''}`);
+      const ctx: Context = { label: key, uses: this.root.uses, packages: this.root.packages, lock: this.root.lock, follows };
+      r = this.build({ pkg, version: null, dir: this.dir!, hash: this.selfStamp, signature, manifest: this.manifest!, ctx, scope: `${pkg}@project-${follows ? '' : 'published-'}${signature.slice(0, 16)}` });
     } catch (e: any) { r = { error: `${key} (${this.dir}): ${e.message}` }; }
     finally { this.loading.delete(key); }
-    this.selfLoaded = r;
     return r;
   }
 
@@ -1412,7 +1457,7 @@ export class ProjectPackages implements SessionPackages {
     this.restamp();
     this.rewatch();
     const v = this.root.uses[pkg];
-    return `following ${pkg} for this session: its working folder ${w.dir} (${libraryText(w.library)}) instead of ${v ? `the copy of ${v}` : 'a copy (the project does not use it yet)'}; its edits re-cook, exports record it, and publishing this project is refused while it lasts`;
+    return `following ${pkg} for this session: its working folder ${w.dir} (${libraryText(w.library)}) instead of ${v ? `the copy of ${v}` : 'a copy (the project does not use it yet)'}; its edits re-cook, for looking: exports and publishing use the published copy`;
   }
 
   /**
@@ -1458,7 +1503,7 @@ export class ProjectPackages implements SessionPackages {
     }
     const joint = this.followed.size ? sha([...this.followed.values()].map((f) => `${f.package} ${f.stamp}\n`).sort().join('')) : '';
     if (joint !== this.joint) { this.joint = joint; changed = true; }
-    if (changed) { this.followLoaded.clear(); this.selfLoaded = null; }
+    if (changed) { this.followLoaded.clear(); this.selfLoaded = null; this.selfPublished = null; }
     return changed;
   }
 
@@ -1469,7 +1514,7 @@ export class ProjectPackages implements SessionPackages {
     try { s = workingHash(this.dir); } catch (e: any) { s = `unreadable: ${e.message}`; }
     if (s === this.selfStamp) return false;
     this.selfStamp = s;
-    this.selfLoaded = null;
+    this.selfLoaded = null; this.selfPublished = null;
     return true;
   }
 
@@ -1824,6 +1869,14 @@ export function openPackages(engine: Engine, start: string, opts: { follow?: str
   const pk = new ProjectPackages(engine, projectDirOf(start), { builtin: opts.builtin });
   engine.root.packages = pk.resolver;
   for (const f of opts.follow ?? []) pk.follow(f, true);
+  // a workspace that follows its own packages ("follow": true): the used packages whose working folder is inside it
+  const ws = pk.dir ? locate(pk.dir).workspace : null;
+  let follow = false;
+  if (ws) try { follow = readWorkspace(ws).follow; } catch { /* said by workspace and packages */ }
+  if (ws && follow) {
+    const inside = (d: string) => { const r = path.relative(ws, d); return !!r && !r.startsWith('..') && !path.isAbsolute(r); };
+    pk.setFollowPolicy((w) => inside(w.dir));
+  }
   return pk;
 }
 
@@ -2028,7 +2081,8 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
     else if (m.package !== `${RESERVED_OWNER}/${inBuiltin}`) r.blocks.push(`the folder ${inBuiltin} of TopoTopo's built-in library holds the package ${RESERVED_OWNER}/${inBuiltin}, and its project.json names ${m.package}`);
   } else if (m.package.split('/')[0] === RESERVED_OWNER) r.blocks.push(`the owner "${RESERVED_OWNER}" is reserved for TopoTopo's own packages, which TopoTopo's repository publishes into its built-in library: publish under your own owner`);
   if (!note && !dryRun) r.blocks.push('a version needs a note, one line on what changed: --note "..." (library {action:"publish", note})');
-  for (const f of pk.following()) r.blocks.push(`this session follows ${f.package} from its working folder (${f.dir}): stop following it to publish`);
+  const live = pk.following();
+  if (live.length) r.warnings.push(`this session shows ${live.map((f) => f.package).join(', ')} live from ${live.length === 1 ? 'its working folder' : 'their working folders'}: the version was checked with the published copies the project uses, which it holds`);
   // a package keeps its name: versions/ of another name are not this package's
   if (m.package) {
     const others = new Map<string, string[]>();
@@ -2048,7 +2102,7 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
   const graphs = readGraphs(dir, unread);
   const outs = folderOutputs(m, graphs);
   // the package as a project that uses it cooks it: its own scope, its graphs as they are now
-  const self = m.package ? pk.ownPackage() : null;
+  const self = m.package ? pk.ownPackage(true) : null;
   if (self && 'error' in self) r.blocks.push(self.error);
   r.blocks.push(...(self && !('error' in self) ? self.fileProblems : unread), ...outs.problems);
   if (self && !('error' in self)) r.blocks.push(...self.loops.values());
@@ -2060,7 +2114,8 @@ export async function publishPackage(pk: ProjectPackages, o: PublishOptions): Pr
   const sameNamed = (x: FolderOutput) => (x.name === null ? outs.named.find((n) => n.graph === x.graph && n.node === x.node) : undefined);
   const kinds = new Map<FolderOutput, Kind>();
   const maps = new Map<FolderOutput, OutputInfo['maps']>();
-  const scope = pk.engine.root.packages === pk.resolver ? pk.engine.root : { ...pk.engine.root, id: `publish ${m.package}`, packages: pk.resolver };
+  const published = pk.publishedResolver();
+  const scope = pk.engine.root.packages === published ? pk.engine.root : { ...pk.engine.root, id: `publish ${m.package}${published === pk.resolver ? '' : ' published copies'}`, packages: published };
   // an output that builds on others of the package (a kit's line-up, a house of the kit's walls) cooks after them, and
   // a warning of theirs is said once, under the output it belongs to, not again under each output that builds on it
   const byName = new Map(all.map((x) => [x.name ?? '', x]));

@@ -36,7 +36,7 @@ import type { Kind } from '../graph/outputs.ts';
 import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
 import type { SidecarRole } from '../io/sidecars.ts';
 import { STOPPED } from '../graph/engine.ts';
-import { FORMAT_LABELS, TARGET_FORMATS, publishedOutputs, resolveTarget, targetError, targetExtension, targetFormat } from '../io/targets.ts';
+import { FORMAT_LABELS, TARGET_FORMATS, publishedOutputs, resolveTarget, targetError, targetExtension, targetFormat, targetPathText } from '../io/targets.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { summarize } from '../inspect.ts';
 
@@ -71,7 +71,7 @@ export interface OutputEntry {
   tags?: string[];
   /** it shows the last finished result, not the values now: its cook was stopped */
   stale?: boolean;
-  /** the packages it uses whose working folder this session shows live: it holds their unpublished edits, and so do its exports */
+  /** the packages it uses whose working folder this session shows live: it shows their unpublished edits (its exports use the published versions) */
   live?: string[];
   /** a named output: the kind its graph pins ("kind" in its outputs), and what it says when it cooks to another */
   pinned?: string; warning?: string;
@@ -222,7 +222,8 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
   };
   /** The last export of a published output to its current target, from the receipts. */
   const lastSaved = (records: Artifact[], graph: string, p: PublishedOutput) => {
-    if (!p.target) return undefined;
+    // an export into the engine project leaves no receipt in exports/
+    if (!p.target || p.target.engine) return undefined;
     const dest = path.join(ws.exportDir, ...p.target.path.split('/'));
     let best: OutputEntry['saved'];
     for (const r of records) {
@@ -279,7 +280,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     // the packages: an update, or a save in a working folder the session follows, changes what they resolve to
     const sessionRevision = digest(JSON.stringify([...ws.graphs].map(([n, g]) => [n, g, ws.sessionVars(n)])) + inputStamp + JSON.stringify([...sourceFiles]) + (ws.packages?.revision() ?? ''));
     const records = store.records();
-    // the packages shown live this session (their working folders): the results that use them hold unpublished edits
+    // the packages shown live this session (their working folders): the results that use them show unpublished edits
     const following = ws.packages instanceof ProjectPackages ? ws.packages.following().map((f) => f.package) : [];
     // the graph the page shows first cooks first: its cards are queued before the others'
     const first = opts.first?.();
@@ -291,7 +292,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
         const key = sessionRevision, old = items.get(id);
         const named = p.output === null ? undefined : spec.outputs?.[p.output], pinned = named?.kind, tags = named?.tags;
         const meta = {
-          label: p.label, output: p.output, default: p.default, target: p.target ? { format: p.target.format, path: p.target.path, options: p.target.options } : null,
+          label: p.label, output: p.output, default: p.default, target: p.target ? { format: p.target.format, path: targetPathText(p.target), options: p.target.options } : null,
           saved: lastSaved(records, graph, p), ...(pinned ? { pinned } : {}), ...(Array.isArray(tags) && tags.length ? { tags } : {}), ...(live.length ? { live } : {}),
         };
         // the same inputs, or a graph held after a stop (the card keeps what it shows until something changes)
@@ -357,7 +358,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     const r = await ws.cook(graph, p.node, undefined, { kind: 'export' });
     if (r.stopped) err(409, `${p.label} (${graph}): the export was stopped at ${r.stopped}; nothing was written`);
     if (!r.ok || !r.geo) err(422, `${p.label} (${graph}): ` + (r.errors.map((e) => `${e.node}: ${e.message}`).join('; ') || 'no geometry'));
-    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(ws.engine, p.spec) });
+    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(ws.engine, p.spec, ws.packages?.published?.() ?? ws.engine.root) });
   };
   /** One export at a time, so two clicks never interleave their writes. */
   const exclusive = async <T>(work: () => Promise<T>): Promise<T> => {
@@ -413,7 +414,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
             const prepared = await prepare(graph, p as PublishedOutput & { target: ResolvedTarget });
             writeTargets([prepared], ws.exportDir);
             rescan(); changed();
-            json({ ok: true, path: p.target.path, file: path.join(ws.exportDir, ...p.target.path.split('/')), files: prepared.files.length, summary: prepared.summary, warnings: prepared.warnings });
+            json({ ok: true, path: targetPathText(p.target), file: path.join(prepared.root, ...p.target.path.split('/')), files: prepared.files.length, summary: prepared.summary, warnings: prepared.warnings });
             return true;
           });
         }
@@ -421,7 +422,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
           // {id, export?}: the export (its target, or the format and options given) as a download; nothing is written
           const body = await readJSON(req), item = get(body?.id);
           if (!item.entry.exportable) err(400, 'only a published output downloads in a format of choice; a saved file downloads as it is');
-          const p = published(item.entry), spec = body.export ?? (p.target ? { format: p.target.format, path: p.target.path, ...p.target.options } : null);
+          const p = published(item.entry), spec = body.export ?? (p.target ? { format: p.target.format, path: targetPathText(p.target), ...p.target.options } : null);
           if (!spec) err(400, 'choose a format to download');
           if (targetError(spec)) err(400, targetError(spec)!);
           const target = resolveTarget(spec, p.output ?? item.entry.graph!);
