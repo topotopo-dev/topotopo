@@ -30,6 +30,8 @@
 //      without a cook loop; a deleted output comes back; a no-op recook writes and imports nothing.
 //  12. The demo project: `topotopo godot setup` changes none of its files, and its first import gives what its README
 //      shows (sockets, LOD pieces, a MultiMesh scatter, a texture set).
+//  13. Invalid import options fail that package without script errors or blocking another package's cook; restoring
+//      the options makes the package current again.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -506,6 +508,23 @@ section('12. the demo project (integrations/godot/demo): one setup command, then
   check(mm.length === 3 && mm.reduce((a, n) => a + n.instance_count, 0) === 40 && mm.every((n) => n.use_colors), `stones.glb: 40 stones in three MultiMeshInstance3D nodes, tinted (${mm.map((n) => `${n.name} × ${n.instance_count}`).join(', ')})`);
   check(data[ground]?.class === 'PackedScene' && maps.every((m) => data[m]?.class === 'CompressedTexture2D'), 'ground.glb is a scene, the brick maps are textures');
   check(['crate', 'yard', 'bricks'].every((p) => data[`res://assets/${p}/${p}.topo`]?.status === 'ok'), 'every .topo is ok');
+}
+
+section('13. an invalid output folder fails its package without breaking the batch');
+{
+  const file = path.join(B.props, 'props.topo');
+  const original = fs.readFileSync(`${file}.import`, 'utf8');
+  const before = sha(fs.readFileSync(abs(B.proj, OUTPUTS[0])));
+  const kitBefore = sha(fs.readFileSync(abs(B.proj, KIT_GLB)));
+  write(`${file}.import`, original.replace(/^outputs\/folder=.*$/m, 'outputs/folder="res://../outside"'));
+  editJson(path.join(B.kit, 'graphs', 'kit.json'), (g) => { g.nodes.box.params.size[0] += 0.1; });
+  const r = godot(B.proj, ['--import'], { label: 'import-invalid-options', expect: [/TopoTopo: res:\/\/assets\/props\/props\.topo: the output folder .* is outside the Godot project/, /Error importing 'res:\/\/assets\/props\/props\.topo'/] });
+  check(r.code === 0 && !r.unexpected.length && r.expected.length > 0, 'invalid options give a package error, no script errors');
+  check(!importOf(file).valid && sha(fs.readFileSync(abs(B.proj, OUTPUTS[0]))) === before, 'the invalid package fails its import and keeps its last good GLB');
+  check(importOf(path.join(B.kit, 'kit.topo')).valid && sha(fs.readFileSync(abs(B.proj, KIT_GLB))) !== kitBefore, 'the other stale package still cooks and imports');
+  write(`${file}.import`, original);
+  const restored = godot(B.proj, ['--import'], { label: 'import-options-restored' });
+  check(restored.code === 0 && !restored.unexpected.length && importOf(file).valid && topotopo(['godot', 'status', B.proj, '--strict']).code === 0, 'restoring the options makes every package current');
 }
 
 console.log(`\ntest:godot: ${passes} passed, ${failures} failed (${runs} Godot runs; logs in ${LOGS})`);

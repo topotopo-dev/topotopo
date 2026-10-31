@@ -337,21 +337,31 @@ func job_for(topo: String, opts = null) -> Dictionary:
 ## before it is imported (a background cook). Returns the run, or {} when nothing could start.
 func cook(topos: Array, force := false, blocking := false, gated := true, opts := {}) -> Dictionary:
 	var jobs := []
+	var selected := []
 	for t in topos:
 		if packages.has(t) and not packages[t].copy and not packages[t].root:
-			jobs.append(job_for(t, opts.get(t)))
+			var o: Dictionary = opts[t] if typeof(opts.get(t)) == TYPE_DICTIONARY else options_for(t)
+			if o.has("error"):
+				check(t, o)
+				packages[t].error = o.error
+				packages[t].crashed = _watcher.source_stamp(t) if _watcher and not headless else ""
+				_error("TopoTopo: %s: %s" % [t, o.error])
+				continue
+			jobs.append(job_for(t, o))
+			selected.append(t)
 	if jobs.is_empty():
+		packages_changed.emit()
 		return {}
 	var run := runner.start(jobs, force)
 	if run.has("error"):
-		for t in topos:
+		for t in selected:
 			if packages.has(t):
 				packages[t].error = run.error
 		_error("TopoTopo: the cook could not start: %s" % run.error)
 		packages_changed.emit()
 		return {}
 	run.gated = gated
-	for t in topos:
+	for t in selected:
 		if packages.has(t):
 			packages[t].cooking = true
 			packages[t].progress = "waiting"
