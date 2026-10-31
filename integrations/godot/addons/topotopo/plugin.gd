@@ -54,6 +54,7 @@ var _batch := PackedStringArray()
 var _nested_scenes := {}
 var _scene_retry_md5 := {}
 var _force_reimport := {}
+var _flushing := false
 ## Files a cook wrote, to import (res:// -> true when the import waits for the focus rule).
 var _pending := {}
 ## .topo files whose status resource may be behind their record: res:// -> {gated (waits for the focus rule),
@@ -587,6 +588,15 @@ func needs_import(file: String) -> String:
 ## status resource is behind their record. Files Godot imported itself meanwhile are left alone. A file in a folder
 ## Godot's file system does not hold yet is found by a scan (Godot's update_file cannot add folders).
 func flush() -> void:
+	# Import progress can run editor frames and callbacks before reimport_files returns.
+	if _flushing:
+		return
+	_flushing = true
+	_flush()
+	_flushing = false
+
+
+func _flush() -> void:
 	if _pending.is_empty() and _refresh.is_empty():
 		return
 	var efs := EditorInterface.get_resource_filesystem()

@@ -85,6 +85,16 @@ func _run() -> void:
 		"at startup the never-cooked kit cooks in the background and its new GLB is imported")
 	check(await until(func(): return host.topo_import_valid(KIT), 10.0), "the kit's .topo import is valid")
 	await wait(0.5)
+	# Godot can run callbacks before reimport_files returns. A nested flush must leave queued work for later.
+	var efs := EditorInterface.get_resource_filesystem()
+	efs.resources_reimported.connect(func(_paths):
+		host._pending[CRATE] = true
+		host.flush()
+		check(host._pending.has(CRATE), "an import callback cannot consume the next flush's queued work"), CONNECT_ONE_SHOT)
+	host._pending[CRATE] = true
+	host._force_reimport[CRATE] = true
+	host.flush()
+	await until(idle, 10.0)
 
 	# the panel, the context menu, the inspector
 	var dock = host._dock
