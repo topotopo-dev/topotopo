@@ -121,6 +121,7 @@ func _run() -> void:
 	await until(func(): return host.topo_import_valid(PROPS), 5.0)
 	check(host.topo_import_valid(PROPS), "the .topo import is valid")
 	_check_materials()
+	await _check_scene_reload()
 
 	# a broken graph: the GLB stays, the .topo import fails, the panel shows the error, nothing cooks again by itself
 	var good := FileAccess.get_md5(CRATE)
@@ -187,7 +188,7 @@ func _run() -> void:
 	image.save_png(reference)
 	host.remove_orphans(PROPS)
 	check(FileAccess.file_exists(reference), "Remove Orphans keeps an unrelated image with the same filename prefix")
-	check(await until(func(): return idle() and not FileAccess.file_exists(orphan_glb) and host.packages[PROPS].record.get("orphans", {}).is_empty(), 60.0), "Remove Orphans deletes it, and the record forgets it")
+	check(await until(func(): return idle() and not FileAccess.file_exists(orphan_glb) and host.packages[PROPS].record.get("orphans", {}).is_empty() and imported_md5(reference) == FileAccess.get_md5(reference), 60.0), "Remove Orphans deletes it, and the record forgets it")
 	# Let the rescan finish before removing the probe's image, so it cannot disappear during its import.
 	for suffix in ["", ".import", ".uid"]:
 		if FileAccess.file_exists(reference + suffix):
@@ -223,6 +224,40 @@ func _run() -> void:
 
 	print("live: %d passed, %d failed" % [passes, failures])
 	get_tree().quit(1 if failures else 0)
+
+
+## Texture extraction can import a nested batch while the GLB imports. Check the actual open scene, not just its md5.
+func _check_scene_reload() -> void:
+	const SCENE := "res://live_reload.tscn"
+	var f := FileAccess.open(SCENE, FileAccess.WRITE)
+	f.store_string('[gd_scene load_steps=2 format=3]\n[ext_resource type="PackedScene" path="%s" id="1"]\n[node name="LiveReload" type="Node3D"]\n[node name="Crate" parent="." instance=ExtResource("1")]\n' % CRATE)
+	f.close()
+	EditorInterface.get_resource_filesystem().scan()
+	await until(func(): return not EditorInterface.get_resource_filesystem().is_scanning(), 10.0)
+	EditorInterface.open_scene_from_path(SCENE)
+	var opened := await until(func(): return EditorInterface.get_edited_scene_root() != null and EditorInterface.get_edited_scene_root().scene_file_path == SCENE, 10.0)
+	check(opened, "open a scene with an imported instance for the live geometry check")
+	if not opened:
+		return
+	EditorInterface.get_edited_scene_root().get_node("Crate").position.x = 2.5
+	EditorInterface.mark_scene_as_unsaved()
+	var image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	image.fill(Color.RED)
+	image.save_png("res://assets/props/inputs/decal.png")
+	var before := imported_md5(CRATE)
+	edit_graph(func(g):
+		g.nodes.body.params.size[0] = 0.91
+		g.nodes.coarse.params.size[0] = 0.91)
+	check(await until(func(): return idle() and imported_md5(CRATE) != before and imported_md5(CRATE) == FileAccess.get_md5(CRATE), 60.0), "a geometry and embedded texture edit is cooked and imported")
+	check(await until(func():
+		var root := EditorInterface.get_edited_scene_root()
+		var mesh := root.get_node_or_null("Crate/crate_lod0") as MeshInstance3D
+		return mesh != null and is_equal_approx(mesh.mesh.get_aabb().size.x, 0.91), 10.0), "the already-placed instance gets its new geometry after nested texture imports")
+	check(is_equal_approx(EditorInterface.get_edited_scene_root().get_node("Crate").position.x, 2.5), "live scene refresh preserves the instance's unsaved transform")
+	EditorInterface.close_scene()
+	for suffix in ["", ".uid"]:
+		if FileAccess.file_exists(SCENE + suffix):
+			DirAccess.remove_absolute(SCENE + suffix)
 
 
 ## Converting one instance must not change other users of its mesh or lose import material overrides.

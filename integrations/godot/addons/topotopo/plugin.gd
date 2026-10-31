@@ -49,6 +49,11 @@ var _menu: PopupMenu
 
 var _batch_depth := 0
 var _batch := PackedStringArray()
+## Godot's nested texture import can clear its outer scene-reload list. Reimport those scenes once after
+## the outer batch finishes, when their extracted textures are current. Let Godot preserve the edited instances.
+var _nested_scenes := {}
+var _scene_retry_md5 := {}
+var _force_reimport := {}
 ## Files a cook wrote, to import (res:// -> true when the import waits for the focus rule).
 var _pending := {}
 ## .topo files whose status resource may be behind their record: res:// -> {gated (waits for the focus rule),
@@ -473,6 +478,10 @@ func _package_done(run: Dictionary, pk: Dictionary) -> void:
 func _on_reimporting(paths: PackedStringArray) -> void:
 	_batch_depth += 1
 	if _batch_depth != 1:
+		if not headless and not EditorInterface.get_open_scene_roots().is_empty():
+			for f in _batch:
+				if f.get_extension() == "glb" and package_of_file(f) != "":
+					_nested_scenes[f] = true
 		return
 	_batch = paths
 	# one cook process for every stale package of the batch; each .topo's _import waits for its package
@@ -497,6 +506,13 @@ func _on_reimporting(paths: PackedStringArray) -> void:
 func _on_reimported(_paths: PackedStringArray) -> void:
 	_batch_depth = maxi(0, _batch_depth - 1)
 	if _batch_depth == 0:
+		for f in _nested_scenes:
+			var md5 := FileAccess.get_md5(f)
+			if md5 != "" and _scene_retry_md5.get(f, "") != md5:
+				_scene_retry_md5[f] = md5
+				_force_reimport[f] = true
+				_pending[f] = true
+		_nested_scenes.clear()
 		_batch = PackedStringArray()
 		queue_flush()
 
@@ -585,10 +601,12 @@ func flush() -> void:
 		if gated and not allowed:
 			continue
 		_pending.erase(f)
+		var force := _force_reimport.has(f)
+		_force_reimport.erase(f)
 		if not FileAccess.file_exists(_abs(f)):
 			continue
 		var need := needs_import(f)
-		if need == "":
+		if need == "" and not force:
 			continue
 		if not _efs_knows(f):
 			efs.update_file(f)
