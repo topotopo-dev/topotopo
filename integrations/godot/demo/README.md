@@ -80,13 +80,15 @@ Ask the agent to restore the connection: the icon, the panel and the level are c
 
 ## 8. A cook inside an import
 
-Turn off **Editor Settings > FileSystem > Import > TopoTopo > Live Cook**, change the crate in the viewer and save
-(nothing cooks). Select `crate.topo`, and in the Import dock press **Reimport**: the import cooks the crate, and the
+Open **Editor Settings**, enable **Advanced Settings**, then turn off **FileSystem > Import > TopoTopo > Live Cook**.
+Change the crate in the viewer: it saves automatically, but nothing cooks. Select `crate.topo`, and in the Import
+dock press **Reimport**: the import cooks the crate, and the
 open level shows the new crate once the import has finished. Turn Live Cook on again.
 
 ## 9. Deleted, closed, recooked
 
-- Delete `crate.glb` in the FileSystem dock: it comes back.
+- Delete `crate.glb` in the FileSystem dock: it comes back. Godot may reset that file's import settings when it
+  disappears; restore any custom settings after this check.
 - Close Godot, change a graph (in the viewer, or `graphs/crate.json` in a text editor), open the demo again: it cooks
   at startup.
 - Right-click `crate.topo` and choose **Recook**: when nothing changed, nothing is written or imported again (Show
