@@ -1,7 +1,9 @@
 {
   "description": "A crate: a bevelled box with a plank texture (LOD 0) and a plain box (LOD 1), a handle socket on the lid and a socket on each side.",
+  "vars": {"width": 0.8},
+  "params": {"width": {"type": "float", "default": 0.8, "min": 0.4, "max": 2, "label": "Width", "desc": "The crate's width in metres; the side sockets follow it."}},
   "nodes": {
-    "body": {"type": "box", "params": {"size": [0.8, 0.6, 0.6]}},
+    "body": {"type": "box", "params": {"size": ["=width", 0.6, 0.6]}},
     "rounded": {"type": "poly_bevel", "in": ["body"], "params": {"offset": 0.03}},
     "lod0": {"type": "attrib_create", "in": ["rounded"], "params": {"name": "name", "class": "prim", "value": "crate_lod0"}},
     "lod1": {"type": "attrib_create", "in": ["body"], "params": {"name": "name", "class": "prim", "value": "crate_lod1"}},
@@ -11,8 +13,8 @@
     "textured": {"type": "merge", "in": ["pieces", "wood"]},
     "paint": {"type": "material", "in": ["textured"], "params": {"name": "crate_wood", "base_color_map": "image:wood", "roughness": 0.8}},
     "handle": {"type": "scene_null", "in": ["paint"], "params": {"name": "handle", "translation": [0, 0.32, 0]}},
-    "side_left": {"type": "scene_null", "in": ["handle"], "params": {"name": "side_left", "translation": [-0.42, 0, 0], "rotation": [0, -90, 0]}},
-    "side_right": {"type": "scene_null", "in": ["side_left"], "params": {"name": "side_right", "translation": [0.42, 0, 0], "rotation": [0, 90, 0]}}
+    "side_left": {"type": "scene_null", "in": ["handle"], "params": {"name": "side_left", "translation": ["=-width / 2 - 0.02", 0, 0], "rotation": [0, -90, 0]}},
+    "side_right": {"type": "scene_null", "in": ["side_left"], "params": {"name": "side_right", "translation": ["=width / 2 + 0.02", 0, 0], "rotation": [0, 90, 0]}}
   },
   "output": "side_right",
   "outputs": {

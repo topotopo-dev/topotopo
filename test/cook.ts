@@ -385,6 +385,38 @@ section('unique names: two graphs publishing one output, and a named output taki
     `a named output called like the package: the default output and it fail, naming both graphs; the others cook (${def.errors[0]?.message.slice(0, 70)})`);
 }
 
+section('unreadable graphs preserve the previous record and cannot become current');
+{
+  const P = project('unreadable'), pkg = path.join(P, 'props');
+  check((await cookPkg(pkg)).code === 0, 'the package cooks before its graph is broken');
+  const graph = path.join(pkg, 'graphs', 'crate.json'), original = read(graph);
+  const record = read(path.join(pkg, '.topotopo', 'godot.json'));
+  const glb = path.join(pkg, 'outputs', 'crate', 'crate.glb'), good = read(glb);
+  write(graph, '{ broken');
+  const r = await cookPkg(pkg);
+  check(r.code === 1 && !r.rep!.ok && r.rep!.errors.some((e) => e.includes('graphs/crate.json')), 'a graph that cannot be parsed fails the cook and names its file');
+  check(read(glb).equals(good) && read(path.join(pkg, '.topotopo', 'godot.json')).equals(record), 'the last good output and record stay intact, without declaring the output an orphan');
+  check(fresh(pkg, P).state === 'stale', 'the broken graph cannot be marked current');
+  write(graph, original);
+  check((await cookPkg(pkg)).code === 0 && fresh(pkg, P).state === 'ok', 'restoring the graph makes the package current again');
+}
+
+section('a malformed duplicate output cannot be replaced by its valid declaration');
+{
+  const P = project('malformed-duplicate'), pkg = path.join(P, 'props');
+  editJson(path.join(pkg, 'props.topo'), (m) => { m.graph = 'crate'; });
+  check((await cookPkg(pkg)).code === 0, 'the default named output cooks before the duplicate is added');
+  const glb = path.join(pkg, 'outputs', 'crate', 'crate.glb'), good = read(glb);
+  write(path.join(pkg, 'graphs', 'twin.json'), JSON.stringify({ nodes: { b: { type: 'box' } }, output: 'b', outputs: { crate: { node: 'missing' } } }));
+  editJson(path.join(pkg, 'graphs', 'crate.json'), (g) => { g.nodes.body.params.size = [2, 2, 2]; });
+  const r = await cookPkg(pkg), crates = r.rep!.outputs.filter((o) => o.id === 'crate');
+  check(r.code === 1 && crates.length === 1 && crates[0].state === 'failed', 'one failed result for the conflicting id');
+  check(read(glb).equals(good) && readRecord(pkg, 'godot')!.outputs.crate.state === 'failed' && fresh(pkg, P).state === 'failed', 'the last good bytes stay and the record agrees with the failed cook');
+  check(!r.rep!.outputs.some((o) => o.id === 'props'), 'the invalid default does not reappear under the package id');
+  fs.rmSync(path.join(pkg, 'graphs', 'twin.json'));
+  check((await cookPkg(pkg)).code === 0 && fresh(pkg, P).state === 'ok', 'removing the duplicate lets the changed output cook');
+}
+
 section('the lock: a cook waits for another cook of the package, and takes over a dead one\'s lock');
 {
   const F = project('f');

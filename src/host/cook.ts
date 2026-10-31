@@ -504,6 +504,9 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
     try { old = readRecord(job.dir, flavour.for); } catch (e: any) { rep.warnings.push(`${e.message}; the package is cooked anew`); }
     if (old && (old.schema !== RECORD_SCHEMA || old.for !== flavour.for)) old = null;
     const listed = packageOutputs(job.dir);
+    // If the output list cannot be read reliably, preserve the previous record and files. Otherwise a broken
+    // graph could look like deliberately removed outputs and turn the package falsely current.
+    if (listed.problems.length) throw new Error(listed.problems.join('\n'));
     const notes = [...listed.problems];
     say({ event: 'start', package: slash(job.topo), outputs: listed.outputs.length + listed.invalid.length });
     started = true;

@@ -477,15 +477,28 @@ export function packageOutputs(dir: string): { outputs: PackageOutput[]; invalid
   const graphs = readGraphs(dir, unread);
   const files = graphFiles(dir);
   const outs = folderOutputs(m, graphs);
-  const invalid = [...outs.invalid];
+  const invalid: InvalidOutput[] = [];
+  for (const bad of outs.invalid) {
+    const have = invalid.find((x) => x.id === bad.id);
+    if (have) {
+      have.graphs = [...new Set([...have.graphs, ...bad.graphs])];
+      have.message += `; ${bad.message}`;
+    } else invalid.push({ ...bad, graphs: [...bad.graphs] });
+  }
+  // A valid declaration cannot rescue another declaration of the same name that is malformed.
+  for (const bad of invalid) for (const good of outs.named) {
+    if (good.name === bad.id && !bad.graphs.includes(good.graph)) bad.graphs.push(good.graph);
+  }
   const problems = [...unread, ...outs.problems.filter((p) => !invalid.some((x) => x.message === p) && !/^output "[^"]+" \(graph "[^"]+"\)(: | names no node)/.test(p))];
   const one = (x: FolderOutput, key: string, isDefault: boolean): PackageOutput => ({
     id: key, name: x.name, graph: x.graph, file: files.get(x.graph) ?? path.join(dir, 'graphs', `${x.graph}.json`), spec: x.spec, node: x.node,
     ...(x.label ? { label: x.label } : {}), ...(x.kind ? { kind: x.kind } : {}), default: isDefault,
   });
-  const outputs = outs.named.map((x) => one(x, x.name!, !!outs.default && x.graph === outs.default.graph && x.node === outs.default.node));
+  const outputs = outs.named.filter((x) => !invalid.some((bad) => bad.id === x.name))
+    .map((x) => one(x, x.name!, !!outs.default && x.graph === outs.default.graph && x.node === outs.default.node));
   const d = outs.default;
-  if (d && !outputs.some((o) => o.default)) {
+  const invalidDefault = d && invalid.some((bad) => bad.graphs.includes(d.graph) && d.spec.outputs?.[bad.id]?.node === d.node);
+  if (d && !invalidDefault && !outputs.some((o) => o.default)) {
     const clash = outputs.find((o) => o.id === id);
     if (clash) {
       invalid.push({

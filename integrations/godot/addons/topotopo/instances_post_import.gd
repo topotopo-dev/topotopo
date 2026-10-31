@@ -52,10 +52,8 @@ func _replace(n: MeshInstance3D, root: Node) -> void:
 	mmi.visibility_range_fade_mode = n.visibility_range_fade_mode
 	mmi.gi_mode = n.gi_mode
 	mmi.multimesh = mm
-	if colors.size():
-		_colour_materials(n, mmi)
-	elif n.material_override:
-		mmi.material_override = n.material_override
+	mmi.material_overlay = n.material_overlay
+	_copy_materials(n, mmi, colors.size() > 0)
 	var parent := n.get_parent()
 	var at := n.get_index()
 	parent.remove_child(n)
@@ -69,19 +67,30 @@ func _replace(n: MeshInstance3D, root: Node) -> void:
 	n.free()
 
 
-## Instance colours show through a material that takes the colour as albedo: one surface, a material override on the
-## instance; more surfaces, each surface's material (copies, so the mesh's other users keep theirs).
-func _colour_materials(n: MeshInstance3D, mmi: MultiMeshInstance3D) -> void:
+## Keep the effective materials, including Godot's import overrides. Instance colours use material copies; surface
+## overrides need a private mesh because MultiMeshInstance3D has no per-instance surface override API.
+func _copy_materials(n: MeshInstance3D, mmi: MultiMeshInstance3D, coloured: bool) -> void:
+	if n.material_override:
+		mmi.material_override = _coloured(n.material_override) if coloured else n.material_override
+		return
 	var mesh := n.mesh
 	if mesh == null:
 		return
 	if mesh.get_surface_count() <= 1:
-		var base: Material = n.material_override if n.material_override else (n.get_active_material(0) if mesh.get_surface_count() == 1 else null)
-		mmi.material_override = _coloured(base)
+		var base: Material = n.get_active_material(0) if mesh.get_surface_count() == 1 else null
+		mmi.material_override = _coloured(base) if coloured else base
 		return
 	if mesh is ArrayMesh:
+		var overrides := coloured
 		for i in mesh.get_surface_count():
-			(mesh as ArrayMesh).surface_set_material(i, _coloured(mesh.surface_get_material(i)))
+			overrides = overrides or n.get_surface_override_material(i) != null
+		if not overrides:
+			return
+		var copy: ArrayMesh = mesh.duplicate()
+		for i in mesh.get_surface_count():
+			var base := n.get_active_material(i)
+			copy.surface_set_material(i, _coloured(base) if coloured else base)
+		mmi.multimesh.mesh = copy
 
 
 func _coloured(base: Material) -> Material:

@@ -174,6 +174,11 @@ chunk names it), or with `--adopt`. A failed output keeps its last good files. A
 `<package>/.topotopo/cook.lock` (the holder's pid); a lock whose process has ended is taken over. `godot setup` adds
 `*.topotopo-part` and `**/.topotopo/cook.lock` to the project's `.gitignore`.
 
+When the published output list cannot be read (for example, malformed graph JSON or a missing default graph), the
+cook fails with a package-level error and keeps the previous files and record. It cannot treat unreadable outputs
+as removed outputs or mark the package current. A malformed declaration also fails any otherwise valid declaration
+of the same output id.
+
 ## The record
 
 `<package>/.topotopo/godot.json`, committed with the outputs and their `.import` files. Canonical JSON: keys sorted at
@@ -213,7 +218,7 @@ bytes change.
 |---|---|
 | `folders` | folder (relative to the package) → its listing: always `assets`, `graphs`, `inputs`, plus every folder an output listed |
 | `name` | the publish name, or `null` |
-| `notes` | package-level notes (strings): graphs that cannot be read, a missing default output, files read from outside the project |
+| `notes` | package-level notes (strings), including files read from outside the project |
 | `options` | the options the package was cooked with |
 | `orphans` | file (`res://`) → the output it belonged to; files kept on disk, removed only by the user |
 | `outputs` | output id → its entry. The default output is named after its output name, or the package id when it has none |

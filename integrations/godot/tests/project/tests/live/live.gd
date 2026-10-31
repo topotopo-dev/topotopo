@@ -120,6 +120,7 @@ func _run() -> void:
 	check(host.runner._seq == seq0 + 1 and host.packages[PROPS].fresh.state == "ok", "one cook, and the package is current")
 	await until(func(): return host.topo_import_valid(PROPS), 5.0)
 	check(host.topo_import_valid(PROPS), "the .topo import is valid")
+	_check_materials()
 
 	# a broken graph: the GLB stays, the .topo import fails, the panel shows the error, nothing cooks again by itself
 	var good := FileAccess.get_md5(CRATE)
@@ -143,6 +144,21 @@ func _run() -> void:
 	edit_graph(func(g): g.nodes.body.erase("in"))
 	check(await until(func(): return idle() and host.packages[PROPS].fresh.state == "ok" and host.topo_import_valid(PROPS), 60.0), "fixed: the package is current and the .topo imports again")
 
+	# Unreadable JSON in a hidden graph is an error, not the deliberate removal of its outputs.
+	var graph_text := FileAccess.get_file_as_string(GRAPH)
+	var seq_json: int = host.runner._seq
+	var broken_graph := FileAccess.open(GRAPH, FileAccess.WRITE)
+	broken_graph.store_string("{ not json")
+	broken_graph.close()
+	check(await until(func(): return idle() and host.packages[PROPS].error != "" and not host.topo_import_valid(PROPS), 60.0),
+		"malformed graph JSON fails the package import and keeps its last good record")
+	await wait(2.0)
+	check(host.runner._seq == seq_json + 1 and FileAccess.get_md5(CRATE) == good, "malformed graph JSON keeps the GLB and is not retried until edited")
+	broken_graph = FileAccess.open(GRAPH, FileAccess.WRITE)
+	broken_graph.store_string(graph_text)
+	broken_graph.close()
+	check(await until(func(): return idle() and host.packages[PROPS].fresh.state == "ok" and host.topo_import_valid(PROPS), 60.0), "restoring graph JSON restores the valid import")
+
 	# a package that does not open (a broken manifest): one cook says why, then nothing until its files change
 	var manifest := FileAccess.get_file_as_string(PROPS)
 	var seq_broken: int = host.runner._seq
@@ -165,8 +181,17 @@ func _run() -> void:
 	var orphan_glb := CRATE
 	check(await until(func(): return idle() and host.packages[PROPS].fresh.state == "ok" and host.packages[PROPS].record.get("orphans", {}).has(orphan_glb), 60.0),
 		"a renamed output: its old GLB is kept as an orphan (%s)" % JSON.stringify(host.packages[PROPS].record.get("orphans", {})))
+	var reference := orphan_glb.get_base_dir().path_join("crate_reference.png")
+	var image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	image.fill(Color.BLUE)
+	image.save_png(reference)
 	host.remove_orphans(PROPS)
+	check(FileAccess.file_exists(reference), "Remove Orphans keeps an unrelated image with the same filename prefix")
 	check(await until(func(): return idle() and not FileAccess.file_exists(orphan_glb) and host.packages[PROPS].record.get("orphans", {}).is_empty(), 60.0), "Remove Orphans deletes it, and the record forgets it")
+	# Let the rescan finish before removing the probe's image, so it cannot disappear during its import.
+	for suffix in ["", ".import", ".uid"]:
+		if FileAccess.file_exists(reference + suffix):
+			DirAccess.remove_absolute(reference + suffix)
 	edit_graph(func(g):
 		g.outputs["crate"] = g.outputs["box_crate"]
 		g.outputs.erase("box_crate"))
@@ -198,3 +223,44 @@ func _run() -> void:
 
 	print("live: %d passed, %d failed" % [passes, failures])
 	get_tree().quit(1 if failures else 0)
+
+
+## Converting one instance must not change other users of its mesh or lose import material overrides.
+func _check_materials() -> void:
+	for coloured in [false, true]:
+		for global_override in [false, true]:
+			var scene := Node3D.new()
+			var mesh := ArrayMesh.new()
+			var shape := BoxMesh.new()
+			var base := StandardMaterial3D.new()
+			for i in 2:
+				mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, shape.get_mesh_arrays())
+				mesh.surface_set_material(i, base)
+			var shadow := ArrayMesh.new()
+			shadow.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, shape.get_mesh_arrays())
+			mesh.shadow_mesh = shadow
+			var plain := MeshInstance3D.new()
+			plain.mesh = mesh
+			scene.add_child(plain)
+			var marked := MeshInstance3D.new()
+			marked.mesh = mesh
+			scene.add_child(marked)
+			var material := StandardMaterial3D.new()
+			material.albedo_color = Color.BLUE
+			if global_override:
+				marked.material_override = material
+			else:
+				marked.set_surface_override_material(1, material)
+			marked.material_overlay = base
+			marked.set_meta("topotopo_instances", PackedFloat32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]))
+			if coloured:
+				marked.set_meta("topotopo_instance_colors", PackedFloat32Array([1, 0.5, 0.5, 1]))
+			host._post_import._post_process(scene)
+			var converted: MultiMeshInstance3D = scene.get_child(1)
+			var effective: BaseMaterial3D = converted.material_override if global_override else converted.multimesh.mesh.surface_get_material(1)
+			check(mesh.surface_get_material(1) == base and not base.vertex_color_use_as_albedo,
+				"MultiMesh leaves the shared mesh and its materials unchanged (coloured %s, override %s)" % [coloured, global_override])
+			check(effective.albedo_color == Color.BLUE and effective.vertex_color_use_as_albedo == coloured and converted.material_overlay == base,
+				"MultiMesh preserves the effective override and overlay (coloured %s, override %s)" % [coloured, global_override])
+			check(converted.multimesh.mesh.shadow_mesh == shadow, "MultiMesh keeps the shadow mesh")
+			scene.free()

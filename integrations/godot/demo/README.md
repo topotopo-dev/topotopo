@@ -28,7 +28,7 @@ and records where TopoTopo and node are, so Godot finds them; the demo has the r
 Open Godot 4.7, **Import** the demo's `project.godot`, and open it.
 
 - A **TopoTopo** tab is in the bottom panel. Its first line names the TopoTopo it found, for example
-  `TopoTopo 0.4.0 at C:/WORK/topotopo/src/cli.ts (the install record …), node v24…`.
+  `TopoTopo 0.4.0 at <TopoTopo folder>/src/cli.ts (the install record …), node v24…`.
 - The three packages cook in the background while the editor stays usable: the panel shows each one cooking, then
   `ok`. The outputs appear in the FileSystem dock under `assets/*/outputs/`.
 - **Project > Tools > TopoTopo** has Cook Stale Packages, Recook All and Show TopoTopo Panel.
@@ -47,16 +47,17 @@ from the TopoTopo panel) into the viewport. Save the scene as `level.tscn` and k
 ## 4. Change a package while the level is open
 
 Right-click `assets/crate/crate.topo` (or `crate.glb`) and choose **Open in TopoTopo**. The browser opens TopoTopo's
-viewer on the crate. Change something, for example the `size` of the node `body`, and save. Click back into Godot.
+viewer on the crate. Under **Controls** on the right, change **Width** from `0.8` to `1.2`. The package saves the
+change automatically. Click back into Godot.
 
 - Within a few seconds a toast says `TopoTopo: crate updated: crate`, and the open level shows the new crate.
 - The editor stays usable while it cooks.
 
 ## 5. Work side by side
 
-- With Godot unfocused (you are in the browser), save another change: Godot does not import it until you click back
+- With Godot unfocused (you are in the browser), change **Width** again: Godot does not import it until you click back
   into Godot, which is Godot's own rule.
-- Tick **Import When Unfocused** in the TopoTopo panel (Godot's own setting) and save a change in the viewer: the level
+- Tick **Import When Unfocused** in the TopoTopo panel (Godot's own setting) and change **Width** in the viewer: the level
   updates without clicking into Godot.
 - With Godot focused, ask an agent to change the crate over MCP: the level updates the same way.
 
@@ -67,15 +68,15 @@ the crate again in the viewer: after its reimport the root is still a `StaticBod
 
 ## 7. A graph that does not cook
 
-Break the crate: open `assets/crate/graphs/crate.json` in a text editor, change `"in": ["rounded"]` of the node `lod0`
-to `"in": ["nowhere"]`, and save.
+Ask your agent to temporarily break the crate's `lod0` input connection (replace `rounded` with `nowhere` in
+`assets/crate/graphs/crate.json`). Keep the level open while it does this.
 
 - `crate.topo` gets Godot's red ImportFail icon.
 - An error toast says `TopoTopo: crate: 1 of 1 outputs did not cook; the last good result is kept`.
 - Output has `TopoTopo: crate > crate: [<node>] <message>`, and the panel shows the error under the output.
 - The level keeps the last good crate.
 
-Put `"in": ["rounded"]` back and save: the icon, the panel and the level are current again.
+Ask the agent to restore the connection: the icon, the panel and the level are current again.
 
 ## 8. A cook inside an import
 

@@ -476,7 +476,8 @@ func _on_reimporting(paths: PackedStringArray) -> void:
 		if not packages.has(p) or not runner.found() or not runner.run_with(_abs(p)).is_empty():
 			continue
 		var o := options_for(p)
-		if is_stale(check(p, o)):
+		var fr := check(p, o)
+		if is_stale(fr) and (fr.why == "options" or not failed_unchanged(p)):
 			stale.append(p)
 			opts[p] = o
 	if stale.size():
@@ -830,10 +831,12 @@ func remove_orphans(topo: String) -> void:
 		var files := [a]
 		if f.get_extension().to_lower() == "glb":
 			var prefix := a.get_file().get_basename() + "_"
-			for g in DirAccess.get_files_at(a.get_base_dir()):
-				var p := a.get_base_dir().path_join(g)
-				if g.begins_with(prefix) and ["png", "jpg", "jpeg", "webp"].has(g.get_extension().to_lower()) and not current.has(_res(p)):
-					files.append(p)
+			# Only textures the imported scene actually uses. A matching filename alone does not make an image ours.
+			for dependency in ResourceLoader.get_dependencies(f):
+				var texture := dependency.get_slice("::", dependency.get_slice_count("::") - 1)
+				if texture.begins_with("res://") and texture.get_base_dir() == f.get_base_dir() and texture.get_file().begins_with(prefix) \
+						and ["png", "jpg", "jpeg", "webp"].has(texture.get_extension().to_lower()) and not current.has(texture):
+					files.append(_abs(texture))
 		for file in files:
 			for side in ["", ".import", ".uid"]:
 				if FileAccess.file_exists(file + side):
