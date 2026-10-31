@@ -13,6 +13,10 @@ config_version=5
 config/name="TopoTopo demo"
 config/features=PackedStringArray("4.7", "Forward Plus")
 
+[dotnet]
+
+project/assembly_name="TopoTopo demo"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/topotopo/plugin.cfg")
