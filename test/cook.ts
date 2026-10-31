@@ -24,6 +24,10 @@ import type { CookRecord, EngineOptions, PackageReport } from '../src/host/cook.
 import { GODOT_COMMANDS, GODOT_GLTF_EXTENSIONS, GODOT_HIDDEN, cookCommand, enablePlugin, excludeAddon, glbJson, godotCommand, godotSetup, godotStatus, markPng, pngPackage } from '../src/host/godot.ts';
 import { topicText } from '../src/mcp/docs.ts';
 import { readInstall } from '../src/config.ts';
+import { Engine } from '../src/graph/engine.ts';
+import { createNodeHost } from '../src/host/node.ts';
+import { Session } from '../src/session.ts';
+import { godotIgnore, godotIgnoreMissing } from '../src/engines.ts';
 import { TOPOTOPO_VERSION } from '../src/host/version.ts';
 import { ROOT } from './fixtures.ts';
 
@@ -518,6 +522,27 @@ section('godot setup: the addon, the install record, .gdignore, the plugin, .git
   check(rootSaid.some((l) => /not supported: props\.topo makes the project's root a package/.test(l)) && !fs.existsSync(path.join(R, 'graphs', '.gdignore')), 'a package at the project\'s root is refused, and no .gdignore is written for it');
   const st = godotStatus(R);
   check(!st.ok && st.root.length === 1, 'status lists it as unsupported');
+
+  // Opening the viewer makes working folders that did not exist when setup ran.
+  new Session(PS, new Engine(createNodeHost({ baseDir: PS }))).load();
+  check(['graphs', 'assets', 'inputs', 'exports'].every((d) => fs.existsSync(path.join(PS, d, '.gdignore'))),
+    'opening the viewer after setup hides its newly created working folders');
+  const missing = path.join(PS, 'assets', '.gdignore');
+  if (fs.existsSync(missing)) fs.unlinkSync(missing);
+  check(godotIgnoreMissing(PS).includes(missing) && godotIgnore(PS).includes(missing),
+    'the shared ignore check detects and repairs an exposed addon working folder');
+  const custom = path.join(S, 'assets', 'custom'), externalInputs = path.join(tmp, 'external-inputs');
+  copyDir(FIXTURE, custom);
+  new Session(custom, new Engine(createNodeHost({ baseDir: custom })), { inputs: externalInputs }).load();
+  check(['graphs', 'assets', 'exports'].every((d) => fs.existsSync(path.join(custom, d, '.gdignore'))) && !fs.existsSync(externalInputs),
+    'a viewer with external inputs still hides its own working folders without creating the external folder');
+  godotIgnore(S);
+  check(!fs.existsSync(path.join(S, 'assets', '.gdignore')), 'the addon never hides the Godot project root assets folder');
+  const plain = project('viewer-without-addon');
+  const plainPackage = path.join(plain, 'props');
+  new Session(plainPackage, new Engine(createNodeHost({ baseDir: plainPackage }))).load();
+  check(['graphs', 'assets', 'exports'].every((d) => !fs.existsSync(path.join(plainPackage, d, '.gdignore'))) && fs.existsSync(path.join(plainPackage, 'inputs', '.gdignore')),
+    'without the addon, the ordinary Godot export workflow keeps graphs, assets and exports visible');
 }
 
 section('godot status: every package Godot sees; --strict exits 1 on stale, failed, never cooked and exposed');

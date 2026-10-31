@@ -22,7 +22,7 @@ import { resolvedExportOptions } from '../io/targets.ts';
 import { texturesExport } from '../io/textures.ts';
 import { baseOf } from '../io/common.ts';
 import { manifestAt, program, slugify, writeAtomic } from '../package.ts';
-import { godotProjectOf } from '../engines.ts';
+import { GODOT_PLUGIN_IGNORED, godotProjectOf } from '../engines.ts';
 import { setInstall } from '../config.ts';
 import { forgetScans } from '../scan.ts';
 import { MANIFEST_EXT } from '../session.ts';
@@ -46,7 +46,7 @@ export const GODOT_GLTF_EXTENSIONS = [
 ];
 
 /** A package's TopoTopo folders, which Godot should not import (each with an empty .gdignore). */
-export const GODOT_HIDDEN = ['graphs', 'assets', 'inputs', 'exports', 'versions', 'packages'];
+export const GODOT_HIDDEN = GODOT_PLUGIN_IGNORED;
 /** The addon's folder in a project, and its plugin.cfg as project.godot names it. */
 export const ADDON_DIR = 'addons/topotopo';
 export const PLUGIN_CFG = `res://${ADDON_DIR}/plugin.cfg`;

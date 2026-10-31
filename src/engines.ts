@@ -98,17 +98,27 @@ export function godotProjectOf(dir: string): string | null {
 
 /** TopoTopo's working folders of a package, which are not game content: Godot imports none of them (a .gdignore in each). */
 export const GODOT_IGNORED = ['versions', 'packages', 'inputs'];
+/** With the import addon, cooked outputs replace these working folders as Godot's source assets. */
+export const GODOT_PLUGIN_IGNORED = ['graphs', 'assets', 'inputs', 'exports', 'versions', 'packages'];
+
+function godotIgnoredFolders(pkgDir: string): string[] {
+  const project = godotProjectOf(pkgDir);
+  if (!project) return [];
+  // A package at the project root is unsupported by the addon: never hide the game's assets/ there.
+  return path.resolve(pkgDir) !== project && fs.statSync(path.join(project, 'addons', 'topotopo', 'plugin.cfg'), { throwIfNoEntry: false })?.isFile()
+    ? GODOT_PLUGIN_IGNORED : GODOT_IGNORED;
+}
 
 /**
  * Inside a Godot project (project.godot at or above the package), keep Godot's importer out of a package's working
  * folders: an empty .gdignore in each of versions/, packages/ and inputs/ that is there, and in the folders of `make`
  * (made when they are not there yet), so the file is in place before the first version or copy lands. Nothing outside a
- * Godot project. Returns the files it added (none when they were all there).
+ * Godot project. With the TopoTopo addon installed, also hide the package's graphs/, assets/ and exports/ as they
+ * appear (for example when the viewer opens after setup). Returns the files it added (none when they were all there).
  */
 export function godotIgnore(pkgDir: string, make: string[] = []): string[] {
-  if (!godotProjectOf(pkgDir)) return [];
   const added: string[] = [];
-  for (const d of GODOT_IGNORED) {
+  for (const d of godotIgnoredFolders(pkgDir)) {
     const folder = path.join(pkgDir, d), f = path.join(folder, '.gdignore');
     if (fs.existsSync(f) || (!make.includes(d) && !fs.statSync(folder, { throwIfNoEntry: false })?.isDirectory())) continue;
     try { fs.mkdirSync(folder, { recursive: true }); fs.writeFileSync(f, ''); added.push(f); } catch { /* Godot imports them: harmless */ }
@@ -118,8 +128,7 @@ export function godotIgnore(pkgDir: string, make: string[] = []): string[] {
 
 /** The .gdignore files a package inside a Godot project lacks in the working folders it has (godotIgnore adds them); none outside one. */
 export function godotIgnoreMissing(pkgDir: string): string[] {
-  if (!godotProjectOf(pkgDir)) return [];
-  return GODOT_IGNORED.filter((d) => fs.statSync(path.join(pkgDir, d), { throwIfNoEntry: false })?.isDirectory()).map((d) => path.join(pkgDir, d, '.gdignore')).filter((f) => !fs.existsSync(f));
+  return godotIgnoredFolders(pkgDir).filter((d) => fs.statSync(path.join(pkgDir, d), { throwIfNoEntry: false })?.isDirectory()).map((d) => path.join(pkgDir, d, '.gdignore')).filter((f) => !fs.existsSync(f));
 }
 
 /** What a Godot export preset should exclude so that it ships none of TopoTopo's files. */

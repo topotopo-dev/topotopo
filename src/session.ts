@@ -293,8 +293,8 @@ export class Session {
     // the package's own inputs/ is made at once (people open it to drop files in); a folder given to the constructor
     // is made by the first file written into it
     for (const d of [this.dir, this.graphDir, this.assetDir, this.exportDir, ...(this.inputsAt ? [] : [this.inputDir])]) fs.mkdirSync(d, { recursive: true });
-    // inside a Godot project the package's own inputs/ is no game content: Godot imports nothing in it
-    if (!this.inputsAt) godotIgnore(this.dir, ['inputs']);
+    // Hide package working folders from Godot, including folders first created after addon setup.
+    godotIgnore(this.dir, this.inputsAt ? [] : ['inputs']);
     // as a package version reads them (registerAssets): an asset that uses one registered later is tried again
     const assetErrors: string[] = [], graphErrors: string[] = [];
     registerAssets(this.engine, this.engine.root, this.dir, assetErrors);
