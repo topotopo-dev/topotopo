@@ -1,0 +1,6 @@
+{
+  "title": "Bricks",
+  "description": "A brick texture set: base colour, normal and roughness maps.",
+  "graph": "bricks",
+  "name": "demo/bricks"
+}

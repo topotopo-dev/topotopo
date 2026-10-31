@@ -1,11 +1,14 @@
 // Docs staleness: docs/nodes.md must match what scripts/gen-docs.ts generates from the registry and TopoTopo's own
 // packages, and the
-// README's node table must list every node type (its "N+ node types" claim must hold).
+// README's node table must list every node type (its "N+ node types" claim must hold), and the help topic "godot" and
+// README's Godot section every command of the cook for Godot.
 //   node test/docs.ts
 import fs from 'node:fs';
 import path from 'node:path';
 import { readNodesMd, referenceMarkdown } from '../scripts/gen-docs.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
+import { topicText } from '../src/mcp/docs.ts';
+import { GODOT_COMMANDS } from '../src/host/godot-commands.ts';
 import { ROOT } from './fixtures.ts';
 
 let fail = 0;
@@ -39,5 +42,11 @@ else {
 }
 for (const m of readme.matchAll(/(\d+)\+ node types/g))
   if (Number(m[1]) > defs.length) { fail++; console.log(`FAIL README.md claims "${m[0]}" but the registry has ${defs.length}`); }
+
+// the help topic "godot" and README's Godot section name every command of the cook for Godot as it is
+const topic = topicText('godot') ?? '';
+const unsaid = GODOT_COMMANDS.filter((c) => !topic.includes(`topotopo ${c.usage}`) || !readme.includes(`topotopo ${c.usage}`)).map((c) => c.usage.split(' ').slice(0, 2).join(' '));
+if (!topic || unsaid.length) { fail++; console.log(`FAIL the help topic "godot" or README.md misses ${unsaid.join(', ') || 'the topic itself'}`); }
+else console.log(`docs: the help topic "godot" and README.md list all ${GODOT_COMMANDS.length} Godot commands`);
 
 process.exit(fail ? 1 : 0);

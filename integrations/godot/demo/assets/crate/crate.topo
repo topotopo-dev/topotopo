@@ -1,0 +1,6 @@
+{
+  "title": "Crate",
+  "description": "A wooden crate with a handle socket on its lid and a socket on each side, in two LOD pieces.",
+  "graph": "crate",
+  "name": "demo/crate"
+}

@@ -10,6 +10,9 @@
 //   temp folder with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
 //   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
 //   makes the folder a package, and the cook's first use copies the built-in package in from the installed built-in library).
+// - The cook for Godot from the installed bin: `topotopo cook <package> --for godot --progress json` on the neutral props
+//   of the cook tests in a Godot project, `topotopo godot status` reading it as current, and `topotopo godot setup`
+//   copying the addon the package carries (integrations/godot/addons/topotopo, every file of it in the tarball).
 // - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the built-in library, the
 //   bundled font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location,
 //   and rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
@@ -80,6 +83,13 @@ try {
   ];
   const missing = required.filter((f) => !files.includes(f));
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
+  // the Godot addon, whole (topotopo godot setup copies it into a project), and none of its tests or demo
+  const addonFiles: string[] = [];
+  const walkAddon = (dir: string, rel: string) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = `${rel}/${e.name}`; if (e.isDirectory()) walkAddon(path.join(dir, e.name), r); else addonFiles.push(r); } };
+  walkAddon(path.join(ROOT, 'integrations', 'godot', 'addons', 'topotopo'), 'integrations/godot/addons/topotopo');
+  const addonMissing = addonFiles.filter((f) => !files.includes(f));
+  check(addonFiles.length > 10 && !addonMissing.length && !files.some((f) => /^integrations\/godot\/(tests|demo)\//.test(f)),
+    `tarball has every file of the Godot addon (${addonFiles.length}) and not its tests or demo${addonMissing.length ? `; missing: ${addonMissing.join(', ')}` : ''}`);
   const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
   check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
   const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
@@ -127,6 +137,28 @@ try {
   check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/skeleton_roofs.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
   check(fs.existsSync(path.join(app, 'roofs.glb')) && fs.readFileSync(path.join(app, 'roofs.glb')).subarray(0, 4).toString() === 'glTF', 'exported roofs.glb');
   console.log(cook.split('\n').filter((l) => /^(cooked|geometry|rendered|exported)/.test(l)).join('\n'));
+
+  // ------------------------------------------------------------------------------------------------ Godot
+  step(`Godot: npm exec --no -- ${BIN} cook … --for godot`);
+  // a Godot project with the neutral props package of the cook tests (test/data/cook/props), cooked by the installed bin
+  const game = path.join(tmp, 'godot game');
+  const copy = (from: string, to: string) => {
+    fs.mkdirSync(to, { recursive: true });
+    for (const e of fs.readdirSync(from, { withFileTypes: true })) (e.isDirectory() ? copy : fs.copyFileSync)(path.join(from, e.name), path.join(to, e.name));
+  };
+  copy(path.join(ROOT, 'test', 'data', 'cook', 'props'), path.join(game, 'props'));
+  fs.writeFileSync(path.join(game, 'project.godot'), 'config_version=5\n');
+  const cookEnv = { ...process.env, TOPOTOPO_CACHE: path.join(tmp, 'cook-cache') };
+  const progress = sh(`npm exec --no -- ${BIN} cook "${path.join(game, 'props')}" --for godot --progress json --quiet`, app, cookEnv).split(/\r?\n/).filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+  const crate = path.join(game, 'props', 'outputs', 'crate', 'crate.glb');
+  check(progress.at(-1)?.event === 'done' && progress.at(-1)?.ok && fs.existsSync(crate) && fs.readFileSync(crate).subarray(0, 4).toString() === 'glTF' && fs.existsSync(path.join(game, 'props', '.topotopo', 'godot.json')),
+    `cook --for godot writes the outputs and the record (${progress.filter((e) => e.event === 'output').map((e) => `${e.output}:${e.state}`).join(' ')})`);
+  const status = sh(`npm exec --no -- ${BIN} godot status "${game}"`, app, cookEnv);
+  check(/^\s+ok\s+res:\/\/props\/props\.topo/m.test(status), `godot status reads the package as current (${status.split('\n')[1]?.trim()})`);
+  const setup = sh(`npm exec --no -- ${BIN} godot setup "${game}"`, app, cookEnv);
+  check(/copied the addon/.test(setup) && fs.existsSync(path.join(game, 'addons', 'topotopo', 'plugin.cfg')) && fs.existsSync(path.join(game, 'addons', 'topotopo', 'plugin.gd'))
+    && fs.readFileSync(path.join(game, 'project.godot'), 'utf8').includes('enabled=PackedStringArray("res://addons/topotopo/plugin.cfg")'),
+    `godot setup copies the addon the installed package carries into addons/topotopo/ and enables it (${setup.split('\n')[0]})`);
 
   // ------------------------------------------------------------------------------------------------ library
   step(`library: import '${NAME}' from the installed package`);

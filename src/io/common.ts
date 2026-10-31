@@ -66,6 +66,12 @@ export interface ExportOptions {
    */
   instancing?: 'packed' | 'expand';
   /**
+   * glTF with packed instances: write the instances' Cd (with Alpha, VEC4) as the `_COLOR` instance accessor even
+   * without `custom`, and no other per-instance attribute, for engines that read instance colours alone (Godot's
+   * MultiMesh: src/host/godot.ts sets it). Default false.
+   */
+  instanceColors?: boolean;
+  /**
    * csv / points.json with packed prims: 'rows' (default) = the instance stream, one row per instance with its full
    * transform (P, orient, scale; PCG Position/Rotation/Scale), a Mesh column naming the source and the anchor
    * attributes; 'expand' = the points of the expanded geometry (as with instancing 'expand').

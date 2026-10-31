@@ -65,29 +65,48 @@ export function withStoreLock<T>(store: CopyStore, f: () => T): T {
 const heldLocks = new Set<string>();
 function withLockFile<T>(file: string, f: () => T): T {
   if (heldLocks.has(file)) return f();
+  const release = takeLock(file, {
+    held: () => `${file} is held by another TopoTopo process (the viewer, an MCP server or a command) changing the packages this one uses; try again when it is done, or delete the file if no such process runs`,
+  });
+  heldLocks.add(file);
+  try { return f(); } finally { heldLocks.delete(file); release(); }
+}
+
+/** Is the process `pid` running? (A process of another user counts as running.) */
+export function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (k: any) { return k?.code === 'EPERM'; }
+}
+
+/**
+ * Take a lock file: a file only one process can create at a time, holding the taker's pid. Waits for its holder, up to
+ * `waitMs` (default about ten seconds), then throws with `held()`'s message. A lock whose process has ended, or that
+ * this process left, is taken over; one older than two minutes too, unless `pidOnly` (a cook can hold its lock for
+ * longer: only an ended process makes it stale). Returns the function that releases it.
+ */
+export function takeLock(file: string, o: { pidOnly?: boolean; waitMs?: number; held?: (pid: number) => string } = {}): () => void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const limit = o.waitMs ?? 10_000;
   for (let waited = 0; ; ) {
     try {
       fs.writeFileSync(file, `${process.pid} ${new Date().toISOString()}\n`, { flag: 'wx' });
       break;
     } catch (e: any) {
       if (e?.code !== 'EEXIST') throw e;
-      let stale = false;
+      let stale = false, pid = 0;
       try {
-        const [pid] = fs.readFileSync(file, 'utf8').split(' ');
+        pid = Number(fs.readFileSync(file, 'utf8').trim().split(/\s+/)[0]);
         const age = Date.now() - fs.statSync(file).mtimeMs;
-        let alive = true;
-        try { process.kill(Number(pid), 0); } catch (k: any) { alive = k?.code === 'EPERM'; }
-        stale = age > STALE_LOCK_MS || !alive || Number(pid) === process.pid;
+        // no pid yet: its taker is writing it (a moment), or it ended before it could
+        stale = !pid ? age > 2000 : (!o.pidOnly && age > STALE_LOCK_MS) || !processAlive(pid) || pid === process.pid;
       } catch { /* removed meanwhile: try again */ }
       if (stale) { fs.rmSync(file, { force: true }); continue; }
-      if (waited > 10_000) throw new Error(`${file} is held by another TopoTopo process (the viewer, an MCP server or a command) changing the packages this one uses; try again when it is done, or delete the file if no such process runs`);
+      if (waited > limit) throw new Error(o.held ? o.held(pid) : `${file} is held by process ${pid}`);
       pause(50);
       waited += 50;
     }
   }
-  heldLocks.add(file);
-  try { return f(); } finally { heldLocks.delete(file); fs.rmSync(file, { force: true }); }
+  return () => fs.rmSync(file, { force: true });
 }
 
 export interface PackageLink { label: string; url: string }

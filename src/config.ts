@@ -1,6 +1,7 @@
 // The user's config: the libraries and workspaces registered by name (one set of names for both), the web app's
 // settings, and TopoTopo's built-in library.
-//   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], workspaces: [{name, path}], web: {port, cors: [origins]}}
+//   ~/.topotopo/config.json (or $TOPOTOPO_CONFIG)   {libraries: [{name, path}], workspaces: [{name, path}], web: {port, cors: [origins]},
+//                                                    install: {node, cli} (where engine plugins find TopoTopo: topotopo godot setup)}
 //   $TOPOTOPO_LIBRARIES                              more libraries: name=path entries separated by path.delimiter
 // TopoTopo carries a library of its own, its built-in library (BUILTIN_LIBRARY), which every package looks in without
 // listing it. A package in a workspace finds packages in the workspace and the libraries its file lists; outside a
@@ -143,4 +144,27 @@ export function addWorkspace(name: string, dir: string): WebConfig {
   raw.workspaces = list;
   writeConfig(file, raw);
   return loadConfig();
+}
+
+/** Where an engine plugin finds TopoTopo on this machine: absolute paths of node and of the CLI it runs. */
+export interface InstallRecord { node: string; cli: string }
+
+/**
+ * Record in the config file (keeping its other keys) where TopoTopo is installed, "install": {node, cli}: an engine
+ * plugin that runs cooks reads it when nothing else names TopoTopo (topotopo godot setup writes it). Returns the file.
+ */
+export function setInstall(install: InstallRecord): string {
+  const file = configFile();
+  const raw = rawConfig(file);
+  raw.install = { node: path.resolve(install.node), cli: path.resolve(install.cli) };
+  writeConfig(file, raw);
+  return file;
+}
+
+/** The install record of the config file, or null when it has none. */
+export function readInstall(): InstallRecord | null {
+  const file = configFile();
+  if (!fs.existsSync(file)) return null;
+  const i = rawConfig(file)?.install;
+  return i && typeof i.node === 'string' && typeof i.cli === 'string' ? { node: i.node, cli: i.cli } : null;
 }

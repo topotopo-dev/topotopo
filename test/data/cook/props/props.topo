@@ -1,0 +1,7 @@
+{
+  "title": "Props",
+  "description": "Neutral props for the engine cook tests: a crate with a socket, a scatter of instances, a texture set, an island.",
+  "graph": "yard",
+  "created": "2026-10-30",
+  "name": "studio/props"
+}

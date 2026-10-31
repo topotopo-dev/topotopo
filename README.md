@@ -407,6 +407,39 @@ Landscape heightmap. Generate the sample with `npm run export:demo`; the plugin 
 the two-node PCG graph, coordinates, automation tests and editor verification steps. It is separate from the npm
 package; copy it into your Unreal project's `Plugins/` directory.
 
+## Godot 4.7
+
+A package inside a Godot project imports into it as `<id>.topo`: each published output becomes a plain GLB that Godot
+imports itself (sockets as `Node3D`, LOD pieces as sibling meshes, packed instances as `MultiMeshInstance3D`), and a
+textures output becomes PNGs. Levels place and load the GLBs; their Advanced Import Settings survive every recook.
+Only outputs whose sources changed cook again, only files whose bytes changed are written, and a failed output keeps
+its last good GLB. The GLBs, their `.import` files and the record `<package>/.topotopo/godot.json` are committed, so a
+teammate or build machine without TopoTopo still builds the game.
+
+```text
+topotopo godot setup <godot project folder> [--no-enable]
+topotopo godot status <godot project folder> [--strict] [--json]
+topotopo cook <.topo | package folder | folder>... --for godot [--into <folder>] [--flat] [--skip a,b] [--instancing packed|expand] [--adopt] [--force] [--no-cache] [--timeout <s>] [--report <file>] [--progress json] [--quiet]
+topotopo cook --jobs <jobs.json> [--force] [--no-cache] [--progress json]
+```
+
+`godot setup` copies the plugin into `addons/topotopo/`, records where TopoTopo is, hides each package's TopoTopo
+folders from Godot (`.gdignore`), enables the plugin, adds the cook's files to `.gitignore` and keeps the addon out of
+every export preset. `godot status --strict` exits 1 when a package is stale, failed, never cooked or exposes its
+folders: run it in CI after `godot --headless --import`. `topotopo cook --for godot` writes exactly what the plugin
+writes (options from `<id>.topo.import`, flags override them). Exit codes: 0 ok, 1 an output or package failed, 2 a
+usage or setup error. `--help-topic godot` has the details; the plugin's contract is
+[integrations/godot/PROTOCOL.md](integrations/godot/PROTOCOL.md).
+
+In the editor, the plugin ([integrations/godot/addons/topotopo](integrations/godot/addons/topotopo/README.md)) cooks
+in the background while you work: save a graph in TopoTopo's viewer (right-click a `.topo` or one of its outputs:
+**Open in TopoTopo**) or let an agent change it over MCP, and the changed GLBs reimport and open levels update. A
+failed output shows Godot's ImportFail icon on the `.topo`, an Output line naming the node, a toast and a row in the
+**TopoTopo** panel, while levels keep the last good GLB. Without TopoTopo on a machine, the committed outputs are used
+and `godot --headless --path <project> --script res://addons/topotopo/tools/check.gd` checks them in CI. To try it,
+set up the demo project with `topotopo godot setup integrations/godot/demo` and follow its
+[README](integrations/godot/demo/README.md).
+
 ## Web app
 
 `topotopo web` is a file explorer of your workspaces and libraries with TopoTopo's knowledge on top, at
@@ -501,7 +534,8 @@ engine project, another workspace and a TopoTopo checkout.
 
 **Godot.** Inside a Godot project TopoTopo keeps a `.gdignore` in each package's `versions/`, `packages/` and `inputs/`,
 its working folders, so Godot imports none of them; `topotopo check` adds one that is missing. `attachments/`,
-`exports/` and `graphs/` stay visible to the engine. Files Godot writes beside ours (`*.import`, `*.uid`,
+`exports/` and `graphs/` stay visible to the engine, until `topotopo godot setup` hides `graphs/`, `assets/` and
+`exports/` too for the Godot plugin (see [Godot 4.7](#godot-47)). Files Godot writes beside ours (`*.import`, `*.uid`,
 `*.translation`) never count as TopoTopo's: a package publishes the same version with or without them.
 
 **Unreal.** Auto Reimport (Editor Preferences, Loading and Saving) watches `Content/` and imports a new or changed
@@ -695,6 +729,7 @@ and nowhere else), and `npm test` fails while a built-in package's working folde
 | remesh | `npm run test:remesh` | remesh_isotropic edge lengths, watertightness, Cd continuity, box features, adaptive size, group/boundary/seams, timing; decimate seams, lock_border, points; mesh_repair winding, duplicates, holes, non-manifold split, slivers, self-intersections; lod levels and names |
 | quad remesh | `node test/remeshquad.ts` | Rust/WASM quad extraction, provenance, continuous UVs and seams, groups, determinism and pool parity; `node bench/remeshquad.ts` measures the 100k-triangle case |
 | mcp | `node test/mcp.ts` | the MCP server end to end over stdio |
+| cook | `npm run test:cook` | `cook --for godot` on neutral props: layout, the record, GLBs Godot reads, determinism, incremental cooks, failures, the foreign-file guard, orphans, options, the lock, the cache, the jobs file, `godot setup` and `status`, and the freshness golden values the Godot addon is tested against (`node test/cook.ts --update` rewrites them) |
 | arrays | `node test/arrays.ts` | array attributes: storage, merge and builder rules, wrangle `f[]@`/`i[]@`/`s[]@` and helpers, `attrib_array`, JSON, inspect, fingerprints, every node type fed array attributes |
 | packed | `node test/packed.ts` | packed prims: model (clone, subsets, merge dedup, builder, bbox), pack/unpack round trips, packed copies equal real copies, transforms, auto-unpack, JSON/GLB/USD, render budget, every node type fed instances |
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, crops and tiles that match the whole map, erosion determinism and mass conservation, the same erosion settings at three spacings, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
@@ -710,6 +745,14 @@ and nowhere else), and `npm test` fails while a built-in package's working folde
 
 Fixtures (source geometry, per-node inputs and params) live in `test/fixtures.ts`; `fixtureGraphFor(type)` builds the
 graph every layer uses to cook a node.
+
+**The Godot addon** has its own tests, outside `npm test` because they need Godot:
+`GODOT=<the Godot 4.7 editor, on Windows its _console.exe> npm run test:godot` runs the addon in that editor, headless,
+with its settings and cache in a temp folder: the GDScript port of the record and freshness against the golden values
+of `test/cook.ts`, first and incremental imports, sockets, extracted textures and MultiMesh buffers as the cook wrote
+them, an output's own Godot settings surviving recooks, failures, a machine without TopoTopo, published copies, an
+export pack, a C# project, the window's flow (background cooks, reimports, the panel) and the demo project. Without
+`GODOT` it is skipped.
 
 **Golden fingerprints.** A fingerprint holds counts, the bbox (rounded to 1e-4), the attribute schema and group names
 per class, and hashes of positions (quantised to 1e-5), topology and every attribute (1e-4). They are stable across runs

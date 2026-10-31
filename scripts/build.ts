@@ -62,7 +62,7 @@ for (const f of js) {
 }
 
 // module-relative files (src/host/node.ts, src/config.ts, src/web/library.ts, src/wasm/kernels.ts, src/host/pool.ts, src/host/version.ts,
-// src/viewer/server.ts)
+// src/viewer/server.ts, src/host/godot.ts)
 for (const [from, target] of [
   ['config.js', '../library'],
   ['web/library.js', '../../package.json'],
@@ -79,6 +79,8 @@ for (const [from, target] of [
   ['viewer/server.js', './app/style.css'],
   ['viewer/server.js', './app/markers.js'],
   ['index.js', './index.d.ts'],
+  ['host/godot.js', '../cli.js'],
+  ['host/godot.js', '../../integrations/godot/addons/topotopo/plugin.cfg'],
 ]) {
   const p = path.resolve(path.dirname(path.join(DIST, from)), target);
   if (!fs.existsSync(p)) problems.push(`dist/${from} looks for ${target}, which is missing (${rel(p)})`);

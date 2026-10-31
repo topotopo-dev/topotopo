@@ -1,0 +1,24 @@
+{
+  "description": "A yard: its ground (the default output), a scatter of three kinds of stones, a texture set and an island.",
+  "nodes": {
+    "ground": {"type": "grid", "params": {"size": [4, 4], "divisions": [2, 2]}},
+    "a": {"type": "box", "params": {"size": [0.2, 0.2, 0.2]}},
+    "a_named": {"type": "attrib_create", "in": ["a"], "params": {"name": "name", "class": "prim", "value": "stone_a"}},
+    "b": {"type": "sphere", "params": {"radius": 0.1, "rows": 4, "cols": 6}},
+    "b_named": {"type": "attrib_create", "in": ["b"], "params": {"name": "name", "class": "prim", "value": "stone_b"}},
+    "c": {"type": "tube", "params": {"radius": 0.08, "height": 0.2, "cols": 6}},
+    "c_named": {"type": "attrib_create", "in": ["c"], "params": {"name": "name", "class": "prim", "value": "stone_c"}},
+    "kit": {"type": "merge", "in": ["a_named", "b_named", "c_named"]},
+    "spots": {"type": "add", "params": {"points": [[0, 0, 0], [1, 0, 0], [2, 0, 0], [0, 0, 1], [1, 0, 1], [2, 0, 1], [0, 0, 2]]}},
+    "dress": {"type": "wrangle", "in": ["spots"], "params": {"code": "i@variant = @ptnum % 3; v@Cd = [(@ptnum % 2) * 0.5 + 0.25, 0.4, 1 - @ptnum / 10]; v@scale = [1 + @ptnum * 0.25, 0.5 + (@ptnum % 2), 1];"}},
+    "scatter": {"type": "copy_to_points", "in": ["kit", "dress"], "params": {"pack": true, "variants": "name"}},
+    "panels": {"type": "tex_noise", "params": {"resolution": [16, 16], "scale": 2, "octaves": 2, "seed": 3, "name": "panel_noise"}},
+    "island": {"type": "heightfield", "params": {"size": [4, 4], "resolution": 1, "height": 0.5}}
+  },
+  "output": "ground",
+  "outputs": {
+    "scatter": {"node": "scatter", "label": "Scatter", "kind": "instances"},
+    "panels": {"node": "panels", "label": "Panels", "kind": "textures"},
+    "island": {"node": "island", "label": "Island", "kind": "terrain"}
+  }
+}

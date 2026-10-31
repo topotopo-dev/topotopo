@@ -1,0 +1,72 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="dock.gd" id="1_dock"]
+
+[node name="TopoTopo" type="EditorDock"]
+script = ExtResource("1_dock")
+
+[node name="Box" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Top" type="HBoxContainer" parent="Box"]
+layout_mode = 2
+
+[node name="Status" type="Label" parent="Box/Top"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 1
+text = "TopoTopo"
+text_overrun_behavior = 3
+
+[node name="Locate" type="Button" parent="Box/Top"]
+layout_mode = 2
+tooltip_text = "Set where TopoTopo is (Editor Settings > FileSystem > Import > TopoTopo > Topotopo Path): its src/cli.ts, dist/cli.js, or its folder."
+text = "Locate TopoTopo..."
+
+[node name="Unfocused" type="CheckButton" parent="Box/Top"]
+layout_mode = 2
+tooltip_text = "Godot's own Editor Settings > Interface > Editor > Import Resources When Unfocused: cooked outputs update while you work in TopoTopo beside Godot."
+text = "Import When Unfocused"
+
+[node name="CookStale" type="Button" parent="Box/Top"]
+layout_mode = 2
+tooltip_text = "Cook every package whose outputs are behind its files."
+text = "Cook Stale"
+
+[node name="Tree" type="Tree" parent="Box"]
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+size_flags_vertical = 3
+columns = 3
+column_titles_visible = true
+hide_root = true
+select_mode = 1
+
+[node name="Actions" type="HBoxContainer" parent="Box"]
+layout_mode = 2
+
+[node name="Open" type="Button" parent="Box/Actions"]
+layout_mode = 2
+tooltip_text = "Open TopoTopo's live viewer on the package in the browser."
+text = "Open in TopoTopo"
+
+[node name="Recook" type="Button" parent="Box/Actions"]
+layout_mode = 2
+tooltip_text = "Cook every output of the package again, ignoring the record and the cache."
+text = "Recook"
+
+[node name="ShowOutputs" type="Button" parent="Box/Actions"]
+layout_mode = 2
+tooltip_text = "Show the package's outputs in the FileSystem dock."
+text = "Show Outputs"
+
+[node name="ShowReport" type="Button" parent="Box/Actions"]
+layout_mode = 2
+tooltip_text = "Print the package's last cook report to Output."
+text = "Show Report"
+
+[node name="RemoveOrphans" type="Button" parent="Box/Actions"]
+layout_mode = 2
+tooltip_text = "Delete the files outputs had and have no more (a level may still use them)."
+text = "Remove Orphans"

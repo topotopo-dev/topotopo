@@ -390,18 +390,29 @@ const describedAs = (g: GraphSpec) => (typeof g.description === 'string' ? g.des
  * What a package folder publishes: every named output of every graph in graphs/ but those marked "publish": false, and
  * the default output, the output node of the graph the manifest shows (with the tags and description of the named
  * output it is, if any). Names that are not ids, clashes, a malformed kind, tag or description and a missing default
- * are problems (publishing blocks on them); a clashing name is left out.
+ * are problems (publishing blocks on them); a clashing name is left out. `invalid`: those of them that have a usable
+ * name (a clash, an output naming no node, a malformed field), which an engine cook fails by that name.
  */
-function folderOutputs(m: PackageManifest, graphs: Map<string, GraphSpec>): { named: FolderOutput[]; default: FolderOutput | null; problems: string[] } {
+function folderOutputs(m: PackageManifest, graphs: Map<string, GraphSpec>): { named: FolderOutput[]; default: FolderOutput | null; problems: string[]; invalid: InvalidOutput[] } {
   const problems: string[] = [];
+  // outputs with a usable name that cannot be published as they are (an engine cook fails them by name)
+  const invalid: InvalidOutput[] = [];
   const byName = new Map<string, FolderOutput[]>();
   for (const [graph, spec] of graphs) {
     for (const [id, out] of Object.entries(spec.outputs ?? {})) {
       if (!out || typeof out !== 'object' || out.publish === false) continue;
       if (!ID_RE.test(id)) { problems.push(`output "${id}" (graph "${graph}") is not a package output name: lower-case letters, digits, - and _, starting with a letter or digit`); continue; }
-      if (typeof out.node !== 'string' || !Object.hasOwn(spec.nodes, out.node)) { problems.push(`output "${id}" (graph "${graph}") names no node of its graph`); continue; }
+      if (typeof out.node !== 'string' || !Object.hasOwn(spec.nodes, out.node)) {
+        problems.push(`output "${id}" (graph "${graph}") names no node of its graph`);
+        invalid.push({ id, graphs: [graph], message: `output "${id}" (graph "${graph}") names no node of its graph` });
+        continue;
+      }
       const issues = outputFieldIssues(out);
-      if (issues.length) { for (const i of issues) problems.push(`output "${id}" (graph "${graph}"): ${i.message} (${i.hint})`); continue; }
+      if (issues.length) {
+        for (const i of issues) problems.push(`output "${id}" (graph "${graph}"): ${i.message} (${i.hint})`);
+        invalid.push({ id, graphs: [graph], message: issues.map((i) => `output "${id}" (graph "${graph}"): ${i.message} (${i.hint})`).join('; ') });
+        continue;
+      }
       const description = (typeof out.description === 'string' ? out.description.trim() : '') || describedAs(spec);
       const list = byName.get(id) ?? [];
       list.push({
@@ -413,8 +424,11 @@ function folderOutputs(m: PackageManifest, graphs: Map<string, GraphSpec>): { na
   }
   const named: FolderOutput[] = [];
   for (const [id, list] of byName) {
-    if (list.length > 1) problems.push(`output "${id}" is published by graphs ${list.map((o) => `"${o.graph}"`).join(' and ')}: output names are unique in a package (mark all but one "publish": false, or rename)`);
-    else named.push(list[0]);
+    if (list.length > 1) {
+      const said = `output "${id}" is published by graphs ${list.map((o) => `"${o.graph}"`).join(' and ')}: output names are unique in a package (mark all but one "publish": false, or rename)`;
+      problems.push(said);
+      invalid.push({ id, graphs: list.map((o) => o.graph), message: said });
+    } else named.push(list[0]);
   }
   let def: FolderOutput | null = null;
   const shown = graphs.get(m.graph);
@@ -424,7 +438,77 @@ function folderOutputs(m: PackageManifest, graphs: Map<string, GraphSpec>): { na
     const same = named.find((x) => x.graph === m.graph && x.node === shown.output), description = same ? same.description : describedAs(shown);
     def = { name: null, graph: m.graph, spec: shown, node: shown.output, ...(same?.kind ? { kind: same.kind } : {}), tags: same?.tags ?? [], ...(description ? { description } : {}) };
   }
-  return { named: named.sort((a, b) => (a.name! < b.name! ? -1 : 1)), default: def, problems };
+  return { named: named.sort((a, b) => (a.name! < b.name! ? -1 : 1)), default: def, problems, invalid };
+}
+
+/** An output a package names that cannot be published as it is: its name, the graphs that name it, and why. */
+export interface InvalidOutput { id: string; graphs: string[]; message: string }
+
+/**
+ * A published output of a package folder as an engine cook names it (packageOutputs): its id (its name; the default
+ * output's is its name when it is a named output too, else the package id), the graph and node it cooks, the graph's
+ * file, its label and pinned kind, and whether it is the default output.
+ */
+export interface PackageOutput {
+  id: string;
+  /** the output's name in its graph's "outputs"; null for a default output that is no named output */
+  name: string | null;
+  graph: string;
+  /** the graph's file (graphs/<graph>.json, or a graph file beside the manifest) */
+  file: string;
+  spec: GraphSpec;
+  node: string;
+  label?: string;
+  kind?: Kind;
+  default: boolean;
+}
+
+/**
+ * What a package folder publishes, by the rule publishing uses (folderOutputs): every named output of every graph
+ * without "publish": false, and the default output (the output node of the graph the manifest shows), named after the
+ * package id when it is no named output. `invalid`: names that cannot be published as they are (two graphs naming one
+ * output, a default output whose name, the package id, a named output has too, an output naming no node or with a
+ * malformed field), each with why; `problems`: the rest of what is wrong (graphs that cannot be read, names that are no
+ * ids, no default output). Throws for a folder that is no package. Sorted by id.
+ */
+export function packageOutputs(dir: string): { outputs: PackageOutput[]; invalid: InvalidOutput[]; problems: string[] } {
+  const m = readManifest(dir), id = packageId(dir);
+  const unread: string[] = [];
+  const graphs = readGraphs(dir, unread);
+  const files = graphFiles(dir);
+  const outs = folderOutputs(m, graphs);
+  const invalid: InvalidOutput[] = [];
+  for (const bad of outs.invalid) {
+    const have = invalid.find((x) => x.id === bad.id);
+    if (have) {
+      have.graphs = [...new Set([...have.graphs, ...bad.graphs])];
+      have.message += `; ${bad.message}`;
+    } else invalid.push({ ...bad, graphs: [...bad.graphs] });
+  }
+  // A valid declaration cannot rescue another declaration of the same name that is malformed.
+  for (const bad of invalid) for (const good of outs.named) {
+    if (good.name === bad.id && !bad.graphs.includes(good.graph)) bad.graphs.push(good.graph);
+  }
+  const problems = [...unread, ...outs.problems.filter((p) => !invalid.some((x) => x.message === p) && !/^output "[^"]+" \(graph "[^"]+"\)(: | names no node)/.test(p))];
+  const one = (x: FolderOutput, key: string, isDefault: boolean): PackageOutput => ({
+    id: key, name: x.name, graph: x.graph, file: files.get(x.graph) ?? path.join(dir, 'graphs', `${x.graph}.json`), spec: x.spec, node: x.node,
+    ...(x.label ? { label: x.label } : {}), ...(x.kind ? { kind: x.kind } : {}), default: isDefault,
+  });
+  const outputs = outs.named.filter((x) => !invalid.some((bad) => bad.id === x.name))
+    .map((x) => one(x, x.name!, !!outs.default && x.graph === outs.default.graph && x.node === outs.default.node));
+  const d = outs.default;
+  const invalidDefault = d && invalid.some((bad) => bad.graphs.includes(d.graph) && d.spec.outputs?.[bad.id]?.node === d.node);
+  if (d && !invalidDefault && !outputs.some((o) => o.default)) {
+    const clash = outputs.find((o) => o.id === id);
+    if (clash) {
+      invalid.push({
+        id, graphs: [...new Set([d.graph, clash.graph])],
+        message: `the default output ("${d.node}" of graph "${d.graph}") is named after the package, "${id}", and output "${id}" (graph "${clash.graph}") has that name too: rename that output, or publish "${d.node}" as a named output`,
+      });
+      outputs.splice(outputs.indexOf(clash), 1);
+    } else if (!invalid.some((x) => x.id === id)) outputs.push(one(d, id, true));
+  }
+  return { outputs: outputs.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)), invalid: invalid.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)), problems };
 }
 
 /**

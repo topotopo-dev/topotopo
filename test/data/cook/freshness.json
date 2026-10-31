@@ -1,0 +1,1648 @@
+{
+ "about": "Freshness golden values for the Godot addon (record.gd): contentSha of each file, and packages whose freshness is checked against their files. Made by test/cook.ts (node test/cook.ts --update); integrations/godot/PROTOCOL.md defines the rules.",
+ "contentSha": [
+  {
+   "name": "graphs/a.json",
+   "what": "LF text, hashed as it is",
+   "base64": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+   "sha": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840"
+  },
+  {
+   "name": "graphs/a.json",
+   "what": "the same text with CRLF line ends: the same hash",
+   "base64": "ew0KICAibm9kZXMiOiB7ImIiOiB7InR5cGUiOiAiYm94In19LA0KICAib3V0cHV0IjogImIiDQp9DQo=",
+   "sha": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840"
+  },
+  {
+   "name": "inputs/lone.txt",
+   "what": "a lone CR is kept; CRLF is read as LF",
+   "base64": "b25lDXR3bw0KdGhyZWUK",
+   "sha": "6439d8f0e58367e0e4268860083f1b3d0bc2310435b5609dd5912d8494adb207"
+  },
+  {
+   "name": "inputs/decal.png",
+   "what": "a PNG (a binary format by its name) is hashed raw, CR LF bytes and all",
+   "base64": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+   "sha": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25"
+  },
+  {
+   "name": "inputs/blob.txt",
+   "what": "text with a NUL in its first 8000 bytes is binary: hashed raw, CRLF kept",
+   "base64": "YQ0KYgBjDQo=",
+   "sha": "6727f5477f0fdedf4bc5e3997b3a4d3d8cea5a1191db81409540b0493b422b5c"
+  },
+  {
+   "name": "inputs/IMAGE.PNG",
+   "what": "binary names ignore case",
+   "base64": "ew0KICAibm9kZXMiOiB7ImIiOiB7InR5cGUiOiAiYm94In19LA0KICAib3V0cHV0IjogImIiDQp9DQo=",
+   "sha": "c07a56de76921b07800f639381d66926a4b91365592c351cbdbad4cb34a82959"
+  }
+ ],
+ "cases": [
+  {
+   "name": "ok",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "ok",
+    "why": "",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "ok with a CRLF checkout of a graph",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ew0KICAibm9kZXMiOiB7ImIiOiB7InR5cGUiOiAiYm94In19LA0KICAib3V0cHV0IjogImIiDQp9DQo=",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "ok",
+    "why": "",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "ok with the files engines write beside ours",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K",
+    "props/inputs/decal.png.import": "W3JlbWFwXQo=",
+    "props/graphs/a.json.uid": "dWlkOi8veAo=",
+    "props/inputs/.gdignore": "",
+    "props/inputs/.hidden/x.txt": "eA==",
+    "props/inputs/decal.png.topotopo-part": "cGFydA=="
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "ok",
+    "why": "",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "ok when TopoTopo is not found",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": null,
+   "expect": {
+    "state": "ok",
+    "why": "",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "never cooked",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": null,
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "never_cooked",
+    "why": "record",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "a newer schema",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 2,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "newer_schema",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "another flavour",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "unreal",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "schema",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "other options",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": [
+     "a"
+    ]
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "options",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "the same options, skip in another order",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": [
+      "b",
+      "a"
+     ]
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": [
+     "a",
+     "b"
+    ]
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "ok",
+    "why": "",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "a source changed",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJncmlkIn19LAogICJvdXRwdXQiOiAiYiIKfQo=",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "source",
+    "path": "graphs/a.json",
+    "note": ""
+   }
+  },
+  {
+   "name": "a binary source changed",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYIIA",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "source",
+    "path": "inputs/decal.png",
+    "note": ""
+   }
+  },
+  {
+   "name": "a source missing",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "source",
+    "path": "props.topo",
+    "note": ""
+   }
+  },
+  {
+   "name": "a new file in inputs",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K",
+    "props/inputs/new.txt": "bmV3Cg=="
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "folder",
+    "path": "inputs",
+    "note": ""
+   }
+  },
+  {
+   "name": "a new graph in a subfolder",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K",
+    "props/graphs/more/b.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg=="
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "folder",
+    "path": "graphs",
+    "note": ""
+   }
+  },
+  {
+   "name": "a file gone from inputs",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "folder",
+    "path": "inputs",
+    "note": ""
+   }
+  },
+  {
+   "name": "an output file changed",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBjaGFuZ2VkIGJ5IGhhbmQK"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "output",
+    "path": "res://props/outputs/a/a.glb",
+    "note": ""
+   }
+  },
+  {
+   "name": "an output file missing",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg=="
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "output",
+    "path": "res://props/outputs/a/a.glb",
+    "note": ""
+   }
+  },
+  {
+   "name": "a newer TopoTopo is installed",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.10.0",
+   "expect": {
+    "state": "stale",
+    "why": "version",
+    "path": "",
+    "note": ""
+   }
+  },
+  {
+   "name": "an older TopoTopo is installed",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.1"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "ok",
+    "why": "",
+    "path": "",
+    "note": "update_topotopo"
+   }
+  },
+  {
+   "name": "a failed output",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "ewogICJub2RlcyI6IHsiYiI6IHsidHlwZSI6ICJib3gifX0sCiAgIm91dHB1dCI6ICJiIgp9Cg==",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K"
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [
+       {
+        "node": "b",
+        "message": "broken",
+        "hint": ""
+       }
+      ],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "failed",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.4.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "failed",
+    "why": "failed",
+    "path": "a",
+    "note": ""
+   }
+  },
+  {
+   "name": "the first rule that applies wins",
+   "files": {
+    "project.godot": "Y29uZmlnX3ZlcnNpb249NQo=",
+    "props/props.topo": "ewogICJ0aXRsZSI6ICJQcm9wcyIsCiAgImdyYXBoIjogImEiCn0K",
+    "props/graphs/a.json": "Y2hhbmdlZAo=",
+    "props/inputs/decal.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAF0lEQVR42mP4z8DwHwwZGP7/5+Xi5QIAQEgGKSO6X8QAAAAASUVORK5CYII=",
+    "props/inputs/notes.txt": "bm90aGluZyByZWFkcyB0aGlzCg==",
+    "props/outputs/a/a.glb": "Z2xURiBzdGFuZHMgaW4gZm9yIGEgY29va2VkIEdMQg0K",
+    "props/inputs/new.txt": "bmV3Cg=="
+   },
+   "package": "props",
+   "record": {
+    "folders": {
+     "assets": [],
+     "graphs": [
+      "a.json"
+     ],
+     "inputs": [
+      "decal.png",
+      "notes.txt"
+     ]
+    },
+    "for": "godot",
+    "name": null,
+    "notes": [],
+    "options": {
+     "folder": "res://props/outputs",
+     "instancing": "packed",
+     "per_output_folders": true,
+     "skip": []
+    },
+    "orphans": {},
+    "outputs": {
+     "a": {
+      "default": true,
+      "deps": [
+       "graphs/a.json",
+       "inputs/decal.png",
+       "props.topo"
+      ],
+      "errors": [],
+      "files": {
+       "res://props/outputs/a/a.glb": "8c9958d491d542e07b9269894e6637c63785becb88cbf60ab5d4eb1a7448287b"
+      },
+      "folders": [],
+      "graph": "a",
+      "instances": {},
+      "kind": "mesh",
+      "label": "a",
+      "node": "b",
+      "state": "ok",
+      "warnings": []
+     }
+    },
+    "package": "props",
+    "schema": 1,
+    "skipped": {},
+    "sources": {
+     "graphs/a.json": "ed0da71c74346afa18347829652ebf42b5c10ca79faffc25301c217452d69840",
+     "inputs/decal.png": "e7ea60275f2167f8f82af19686524964e5f13af10b9083e6d25889ac45cf5c25",
+     "props.topo": "1e2f94809f7c263347dde3ab7b482faf187635f0073592eb3f40554c02f7323c"
+    },
+    "topotopo": "0.1.0"
+   },
+   "options": {
+    "folder": "res://props/outputs",
+    "instancing": "packed",
+    "per_output_folders": true,
+    "skip": []
+   },
+   "installed": "0.4.0",
+   "expect": {
+    "state": "stale",
+    "why": "source",
+    "path": "graphs/a.json",
+    "note": ""
+   }
+  }
+ ]
+}
