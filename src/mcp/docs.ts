@@ -158,13 +158,20 @@ says what the open package's workspace holds: its packages as the scan finds the
 
 LIBRARIES AND THE WEB APP: a library holds packages in folders below it; the parent folders ("props") are a package's
 collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340)
-lists the registered workspaces first (CLI: topotopo workspace add <folder>) with their packages and shared libraries,
-then every library as a grid (a library inside a registered workspace is the workspace's), TopoTopo's built-in library
-last. Each package has a page (/p/<library or workspace>/<id>), a thumbnail (…/thumb.png) and an iframe embed
-(/embed/<library or workspace>/<id>) that the person's board pastes; a package's page lists its versions and outputs
-with their kinds and tags (the grid's search finds outputs by name, kind and tag), the packages that use it and those
-it uses. It bakes the previews by itself after graphs, assets or inputs change, from the graph named in "graph" (or
-"bake": another graph, a node, a frame); TopoTopo's own packages show the thumbnails they keep of their outputs.`,
+mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries: the front page
+shows each as a card (TopoTopo's built-in library last) and searches every package and output; every folder is a page
+(/w/<workspace>/<path>/, /l/<library>/<path>/) with its flags, its package when it holds a .topo file (preview,
+versions, outputs with their kinds and tags, the packages that use it and those it uses, graphs, exports), its notes,
+its subfolders and its files by type (images, sounds and videos in players, models in 3D). Notes: every .md and .txt
+file of a folder is a box on its page, in file name order; markdown renders, and a link shows what it leads to (an
+image inline, a sound or video in a player, a .glb in 3D, a folder as a card, a YouTube or Vimeo address in its
+player), relative to the note's folder, res:// from the Godot project, /Game/ from Unreal's Content/; a link to a
+missing file is a flag. The other flags: a preview that did not cook, a package with no version or with changes no
+version holds, an export older than its graph, published outputs no package of the workspace uses. Each package keeps
+a stable address (/p/<library or workspace>/<id>, leading to its folder page), a thumbnail (…/thumb.png) and an iframe
+embed (/embed/<library or workspace>/<id>) that the person's board pastes. It bakes the previews by itself after
+graphs, assets or inputs change, from the graph named in "graph" (or "bake": another graph, a node, a frame);
+TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   graph: `GRAPH FORMAT
 {
   "nodes": {

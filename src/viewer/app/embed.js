@@ -1,7 +1,10 @@
 // The embed page (src/web/pages.ts embedPage): a baked preview.glb under an orbit camera, made to sit in an iframe
-// on a board. Not the editor viewport: no panels, no diagnostic overlays, and three's
-// OrbitControls (left drag orbits, right drag pans, wheel zooms, as model viewers do), slowly turning until touched.
-// The thumbnail behind the canvas stays visible until the model is in, and when it cannot load.
+// on a board or a package's folder page; and the 3D view of a model file on a folder page (modelPage: a .glb, or a
+// .gltf whose buffers and textures load from beside it). Not the editor viewport: no panels, no diagnostic overlays,
+// and three's OrbitControls (left drag orbits, right drag pans, wheel zooms, as model viewers do), slowly turning until
+// touched. In a page that scrolls (data-wheel="click") the wheel scrolls that page until the view is clicked, and
+// again once the pointer leaves it; with Ctrl held it zooms at once. The thumbnail behind the canvas, when there is
+// one, stays visible until the model is in, and when it cannot load.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { parseGLB, createLights } from './scene.js';
@@ -19,6 +22,18 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.6;
 controls.addEventListener('start', () => { controls.autoRotate = false; });
 const lights = createLights(scene);
+
+// the wheel: in a page that scrolls, the page's until the view is clicked
+const hint = document.getElementById('hint');
+if (canvas.dataset.wheel === 'click') {
+  let armed = false;
+  const arm = (on) => { armed = on; if (hint) hint.style.opacity = on ? '0' : '1'; };
+  controls.enableZoom = false;
+  canvas.addEventListener('pointerdown', () => arm(true));
+  canvas.addEventListener('pointerleave', () => arm(false));
+  // before OrbitControls sees the event: Ctrl zooms without a click (and keeps the browser's page zoom out of it)
+  window.addEventListener('wheel', (e) => { controls.enableZoom = armed || e.ctrlKey; }, { capture: true, passive: true });
+}
 
 let dirty = true;
 controls.addEventListener('change', () => { dirty = true; });
@@ -52,9 +67,11 @@ function frame(root) {
 
 async function load() {
   try {
-    const res = await fetch(canvas.dataset.src);
+    const src = new URL(canvas.dataset.src, location.href);
+    const res = await fetch(src);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const root = await parseGLB(await res.arrayBuffer());
+    // a .gltf finds its buffers and textures beside it
+    const root = await parseGLB(await res.arrayBuffer(), new URL('.', src).href);
     root.traverse((o) => {
       // a point's size in pixels, as in the editor, not in metres
       if (o.isPoints) { o.material.size = 3; o.material.sizeAttenuation = false; }
@@ -63,7 +80,10 @@ async function load() {
     scene.add(root);
     resize();
     frame(root);
-    document.getElementById('poster').hidden = true;
+    const poster = document.getElementById('poster');
+    if (poster) poster.hidden = true;
+    note.textContent = '';
+    if (hint) hint.hidden = false;
   } catch (e) {
     canvas.hidden = true;
     note.textContent = `3D preview unavailable (${e.message})`;

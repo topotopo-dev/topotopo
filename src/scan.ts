@@ -26,11 +26,11 @@ import type { PackageManifest } from './package.ts';
 
 /** How deep below its root a scan looks. */
 export const SCAN_DEPTH = 16;
-/** Folders a scan never enters, anywhere (lower case). */
-const SKIP = new Set(['node_modules', 'topotopo-packages', 'binaries', 'intermediate', 'saved', 'deriveddatacache', '__externalactors__', '__externalobjects__']);
+/** Folders a scan never enters, anywhere (lower case). The web app hides the same folders (src/web/folders.ts). */
+export const SKIP = new Set(['node_modules', 'topotopo-packages', 'binaries', 'intermediate', 'saved', 'deriveddatacache', '__externalactors__', '__externalobjects__']);
 /** C#'s build folders: skipped beside a *.csproj or *.sln. */
 const DOTNET = new Set(['bin', 'obj']);
-const WORKSPACE_FILE = 'topotopo-workspace.json';
+export const WORKSPACE_FILE = 'topotopo-workspace.json';
 
 export interface Package {
   /** the name of the workspace or library it was found in */
@@ -71,16 +71,19 @@ const byName = (a: fs.Dirent, b: fs.Dirent) => (a.name < b.name ? -1 : a.name > 
 export const folderKey = (p: string) => (process.platform === 'linux' ? path.resolve(p) : path.resolve(p).toLowerCase());
 
 /** A folder holding a package.json named "topotopo": a TopoTopo checkout. */
-function isCheckout(dir: string): boolean {
+export function isCheckout(dir: string): boolean {
   try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))?.name === 'topotopo'; } catch { return false; /* not JSON: a folder like any other */ }
 }
 
-/** Why the scan never enters a folder named `name` whose parent holds the files `parentFiles`; null when it may. */
-function skippedName(name: string, parentFiles: string[]): string | null {
+/**
+ * Why the scan never enters a folder named `name` whose parent holds the files `parentFiles` (or a function that lists
+ * them, called only when they matter); null when it may. The web app hides the same folders.
+ */
+export function skippedName(name: string, parentFiles: string[] | (() => string[])): string | null {
   const lower = name.toLowerCase();
   if (name.startsWith('.')) return 'a dot folder';
   if (SKIP.has(lower)) return `a ${name} folder`;
-  if (DOTNET.has(lower) && parentFiles.some((f) => /\.(csproj|sln)$/i.test(f))) return `C#'s ${name} folder beside a .csproj or .sln`;
+  if (DOTNET.has(lower) && (typeof parentFiles === 'function' ? parentFiles() : parentFiles).some((f) => /\.(csproj|sln)$/i.test(f))) return `C#'s ${name} folder beside a .csproj or .sln`;
   return null;
 }
 
@@ -128,6 +131,11 @@ export function unscanned(root: string, dir: string, o: ScanOptions = {}): strin
 const scans = new Map<string, Scan>();
 /** Forget the scans kept: the next one reads the folders again. */
 export function forgetScans() { scans.clear(); }
+/** Forget the scans kept of one root (a workspace's or library's folder): the others stay. */
+export function forgetScansOf(root: string) {
+  const k = `|${folderKey(root)}|`;
+  for (const key of [...scans.keys()]) if (key.includes(k)) scans.delete(key);
+}
 
 /**
  * The packages below a workspace's or library's root (see the top of this file), kept until forgetScans(). `name`:

@@ -409,30 +409,54 @@ package; copy it into your Unreal project's `Plugins/` directory.
 
 ## Web app
 
-Keep packages in workspaces and libraries on your PC and browse them as a website: `topotopo web` serves the registered
-workspaces and every library's packages at http://127.0.0.1:7340 with a page, a thumbnail and an iframe embed for
-each, so a board or wiki can link a concept to the model. A package is a folder with one `<id>.topo` file, its manifest
-(title, tags, links), and `attachments/` for concept art; previews bake by themselves when its graphs change, and
-agents reach every package through the MCP `workspace` tool.
+`topotopo web` is a file explorer of your workspaces and libraries with TopoTopo's knowledge on top, at
+http://127.0.0.1:7340. Every folder is a page that mirrors the folder on disk, so you audit a game where its files are.
 
 ```bash
-topotopo library add props D:/shared/props
-topotopo library new props crates/lantern --title "Lantern" --tags prop
 topotopo workspace add D:/games/my-game
+topotopo library add props D:/shared/props
 topotopo web
 ```
 
-Each package has a page at `/p/<library>/<id>`, a thumbnail at `/p/<library>/<id>/thumb.png` and an embed for boards at
-`/embed/<library>/<id>`; a workspace's package is at `/p/<workspace>/<id>` (workspaces and libraries share one set of
-names). The front page lists the registered workspaces first, each with its engine project, the shared libraries it
-lists and its packages; then every library as a grid (a library inside a registered workspace is the workspace's), and
-TopoTopo's built-in library last, a library like the others: its packages have the same page (`/p/topotopo/<id>`),
-with each output's thumbnail.
-A package's page lists its versions (each opens to the outputs it published), the outputs of the newest with
-their kinds and tags, the packages that use it and the packages it uses. The grid marks
-packages with their full name and packages that have an update; its search finds packages by the packages they use and
-the outputs of every package, TopoTopo's own among them, by name, kind and tag. A package without the graph its manifest shows says "no
-default graph yet" instead of a failed bake.
+- **Front page**: each registered workspace and library as a card with a few pictures from inside and its counts of
+  packages, folders, files and flags; TopoTopo's built-in library last. The search finds every package by name, tag
+  and the packages it uses, and their outputs by name, kind and tag.
+- **Folder pages** at `/w/<workspace>/<path>/` and `/l/<library>/<path>/`: the folder's flags, its notes, a card per
+  subfolder (with a picture and counts) and its files by type: images to view large, sounds and videos in players,
+  models (`.glb`, `.gltf`) in 3D on a click, the rest to open or download. The same addresses serve the files, read
+  only and with ranges (players seek); SVG and HTML are downloads only.
+- **Notes**: every `.md` and `.txt` file in a folder is a box on its page: a `README` first, then documents, then
+  text files, each in file name order (`01-overview.md` first). A folder of many notes shows 24 as boxes (always those
+  with a flag) and lists the rest with its files; a link to one of them opens it on its folder's page. Markdown
+  renders (front matter as the note's properties, headings, lists, emphasis, code, quotes, tables, links, images; raw
+  HTML stays text). A link shows what it leads to: an image, a sound or video in a player, a model as a 3D view, a
+  folder or package as a card titled with the link's words, a YouTube or Vimeo address in its privacy player
+  (youtube-nocookie.com, player.vimeo.com, the only outside content the web app loads), a heading (`#usage`,
+  `other.md#setup`), anything else as a link. Alone in its paragraph the card, picture or player stands in its place;
+  in running text the link stays a link, marked with an icon, and the card, picture or player follows the paragraph.
+  Paths are read from the note's folder (`/` from the workspace's root); `res://` from the Godot project, `/Game/`
+  from Unreal's `Content/`. A link to a missing file is struck through. A path that leaves the tree, names a drive or
+  a network share (`\\host\share`) or passes hidden folders stays text and is never looked up.
+- **Packages**: a folder with a `.topo` file shows its package on its page, in one piece: the baked preview in 3D
+  (the wheel scrolls the page until you click into it, or hold Ctrl), description, tags and links, Open in editor and
+  Re-bake, its published outputs, versions, the packages that use it and those it uses, its graphs and exports; then
+  its notes and attachments. Previews bake by themselves when graphs change; after a failed bake the last good preview
+  stays, marked.
+- **Flags**, at the top of a page and counted on the cards of the folders above it: a link in a note to a missing
+  file, a preview that did not cook (with why), a package that publishes versions and has none or has changes no
+  version holds, an export older than its graph (its recorded source no longer matches the graph), published outputs
+  that no package of the workspace uses. Each says what to do. Audits run in the background and are made again for
+  the workspace or library that changed; a very large tree is audited in part, and its pages say where it stopped.
+- **Hidden**: dot folders, `node_modules`, `topotopo-packages/`, a package's `versions/` and `packages/`, the engines'
+  caches (`.godot`, `Intermediate`, `Saved`, `DerivedDataCache`, `Binaries`) and the files Godot writes beside yours
+  (`*.import`, `*.uid`), also when reached by another name (a link, a Windows short name); Unreal's `.uasset` and
+  `.umap` files are one line with a count. An engine project inside a workspace is one card that opens as pages of
+  its own, not audited.
+
+Each package keeps a stable address for boards and wikis: `/p/<workspace or library>/<id>` leads to its folder page,
+`/p/<…>/<id>/thumb.png` is its thumbnail and `/embed/<…>/<id>` a 3D view to frame. Workspaces and libraries share one
+set of names; a library inside a registered workspace shows as the workspace's folder. The web app listens on
+127.0.0.1 only and never cooks in its own process.
 
 ## Workspaces, packages and libraries
 
@@ -729,7 +753,7 @@ the worker pool, the WASM kernels and the MCP server over stdio. It takes about 
 
 `src/core` holds the geometry model and algorithms. `src/graph` holds the node system and cooking engine, and `src/nodes`
 the node library. The renderer is in `src/render`, import/export in `src/io`, and the MCP server, tools and docs in
-`src/mcp`. `src/viewer` has the live preview, `src/web` the web app for package libraries, and `src/host` the Node
+`src/mcp`. `src/viewer` has the live preview, `src/web` the web app (a page per folder of the workspaces and libraries), and `src/host` the Node
 host (sandbox, files, fonts).
 `dist/` (not in git) is the compiled package: `npm run build` mirrors
 `src/` there one to one, so the built-in library, fonts, kernels and worker entry are found relative to either.

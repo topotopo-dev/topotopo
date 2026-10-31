@@ -1,17 +1,24 @@
-// The web app's pages as plain HTML strings: the registered workspaces (the games), the grid of every library's
-// packages (TopoTopo's built-in library among them), a package's page and the embed page. Pure functions of their data
-// and a URL builder, so the local server (src/web/server.ts) and a static build can share them.
+// The web app's pages as plain HTML strings: the front page (the registered workspaces and libraries as cards, a
+// search over every package and output), the package block a package's folder page shows (src/web/folder-page.ts),
+// the embed page a board frames and the 3D view of a model file. Pure functions of their data and a URL builder.
 // Styles and the small page script are files: app/web.css and app/web.js here, app/embed.js in the viewer.
 
 export interface Urls {
   home: string;
+  /** a package's stable address (/p/<library or workspace>/<id>): it leads to its folder page */
   package(lib: string, id: string): string;
   thumb(lib: string, id: string, version?: string | number): string;
   glb(lib: string, id: string, version?: string | number): string;
   embed(lib: string, id: string): string;
   file(lib: string, id: string, rel: string): string;
-  /** null where there is no editor (a static build) */
+  /** null where there is no editor (TopoTopo's built-in packages) */
   edit(lib: string, id: string): string | null;
+  /** a folder page of a workspace ("w") or library ("l"), '' for its root */
+  folder(kind: string, name: string, rel: string): string;
+  /** a file of a workspace or library, as the browser shows it */
+  raw(kind: string, name: string, rel: string): string;
+  /** the 3D view of a model file (glb, gltf) */
+  model(kind: string, name: string, rel: string): string;
   /** the web app's own files (web.css, web.js) */
   asset(name: string): string;
   /** the viewer's modules (embed.js, scene.js) */
@@ -24,6 +31,8 @@ export interface CardData {
   lib: string; id: string; title: string; collection: string; tags: string[]; description: string; updated: number;
   /** 'ok' | 'failed' | 'baking' | 'new', or 'empty': the package has not the graph its manifest shows (nothing to bake yet) */
   status: string; version: string;
+  /** its folder page */
+  url?: string;
   /** a package: its full name and newest version (null before the first is published) */
   pkg?: { name: string; version: string | null };
   /** a package's outputs in its newest version, which the search finds by name, label, kind and tag */
@@ -55,9 +64,13 @@ export interface PackageData extends CardData {
   links: { label: string; url: string }[];
   graph: string;
   graphs: { name: string; nodes: number; vars: VarRow[] }[];
-  attachments: FileRow[];
-  exports: FileRow[];
+  /** its attachments/ files: images and the rest, each with its URL (a model's 3D view as `model`) */
+  attachments: (FileRow & { url: string; model?: string })[];
+  /** its exports/ files, each with its URL (a model's 3D view as `model`) and, when its graph changed since, `stale` */
+  exports: (FileRow & { url: string; model?: string; stale?: boolean })[];
   glb: boolean;
+  /** it has a preview picture (a baked thumb.png, a built-in package's output's) */
+  thumb: boolean;
   bake: { at: number; ok: boolean; error?: string; ms?: number; glb?: boolean; points?: number; prims?: number; warnings?: string[] } | null;
   created: string;
   /** absolute URLs for the copy boxes (the board pastes them) */
@@ -68,31 +81,38 @@ export interface PackageData extends CardData {
   uses: { name: string; version: string; note?: string; published?: string; url?: string; newest?: string }[];
 }
 
-/**
- * A registered workspace on the front page: its engine project, the shared libraries it lists, its packages (every folder
- * in it with a .topo file, each linked to its page) and the packages it uses, those with a newer version marked.
- */
-export interface WorkspaceCardData {
+/** A registered workspace or library on the front page: what it is, a few pictures from inside, its counts. */
+export interface RootCardData {
+  kind: 'w' | 'l';
   name: string;
   dir: string;
-  /** "Godot · ../project.godot", or null */
-  engine: string | null;
-  libraries: string[];
-  packages: { title: string; rel: string; url?: string; pkg?: string }[];
-  uses: { name: string; version: string; url?: string; newest?: string }[];
-  problems: string[];
+  url: string;
+  /** "Godot · My Game" for a workspace with an engine project */
+  engine?: string;
+  builtin?: boolean;
+  /** up to four thumbnails: packages' previews first, then images */
+  thumbs: string[];
+  packages: number;
+  folders: number;
+  files: number;
+  flags: number;
+  /** the folder or its file cannot be read: what is wrong */
+  problem?: string;
+  /** its audit stopped short (a very large tree): there may be more flags than counted */
+  cut?: boolean;
 }
 
-/** The front page's data: every library's cards (`builtin`: TopoTopo's built-in library), the workspaces, the problems. */
-export interface WebData { libraries: { name: string; cards: CardData[]; builtin?: boolean }[]; workspaces?: WorkspaceCardData[]; problems: string[] }
+/** The front page's data: the workspaces, the libraries (TopoTopo's built-in one last), every package for the search. */
+export interface WebData { workspaces: RootCardData[]; libraries: RootCardData[]; packages: CardData[]; problems: string[] }
 
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
-const when = (ms: number) => (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '');
+export const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(0)} KB` : n < 1 << 30 ? `${(n / 2 ** 20).toFixed(1)} MB` : `${(n / 2 ** 30).toFixed(2)} GB`);
+export const when = (ms: number) => (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '');
+export const count = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
 const STATUS: Record<string, string> = { ok: '', failed: 'bake failed', baking: 'baking…', new: 'not baked yet', empty: 'no default graph yet' };
 
-function shell(title: string, u: Urls, body: string, opts: { page: string; data?: object }) {
+export function shell(title: string, u: Urls, body: string, opts: { page: string; data?: object }) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -110,8 +130,8 @@ ${body}
 `;
 }
 
-/** A package's full name and newest version, as the grid and a package page mark it. */
-const pkgMark = (p: { name: string; version: string | null }) =>
+/** A package's full name and newest version, as a card and a package's folder page mark it. */
+export const pkgMark = (p: { name: string; version: string | null }) =>
   `<span class="pkg" title="${esc(`package ${p.name}${p.version ? `, newest version ${p.version}` : ', no version published yet'}`)}">${esc(p.name)}${p.version ? ` ${esc(p.version)}` : ''}</span>`;
 const day = (iso: string) => (iso ? iso.slice(0, 10) : '');
 
@@ -123,16 +143,17 @@ const kindTagMarks = (o: { kind?: string; tags: string[] }) =>
 const updateMark = (ups: NonNullable<CardData['updates']>) =>
   `<span class="upd" title="${esc(ups.map((x) => `${x.name} ${x.version} is in use; ${x.newest} is out`).join('\n'))}">${esc(ups.length === 1 ? `update: ${ups[0].name} ${ups[0].newest}` : `${ups.length} updates`)}</span>`;
 
-function card(c: CardData, u: Urls) {
+/** A package's card in the search results. */
+export function card(c: CardData, u: Urls) {
   // the search finds a package by the packages it uses too
-  const hay = [c.title, c.id, c.collection, c.description, ...c.tags, c.pkg?.name ?? '', ...(c.usesPackages ?? [])].join(' ').toLowerCase();
+  const hay = [c.title, c.id, c.lib, c.collection, c.description, ...c.tags, c.pkg?.name ?? '', ...(c.usesPackages ?? [])].join(' ').toLowerCase();
   // a package's outputs: the search shows those it finds by their name, label, kind or tags
   const outs = (c.outputs ?? []).map((o) => `<span class="out" hidden data-hay="${esc([o.type, o.alias ?? '', o.label, o.kind ?? '', ...o.tags].join(' ').toLowerCase())}"><code>${esc(o.type)}</code>${kindTagMarks(o)}</span>`).join('');
-  return `<a class="card" href="${esc(u.package(c.lib, c.id))}" data-key="${esc(`${c.lib}/${c.id}`)}" data-hay="${esc(hay)}" data-tags="${esc(c.tags.join('\n'))}" data-collection="${esc(c.collection)}">
+  return `<a class="card" href="${esc(c.url ?? u.package(c.lib, c.id))}" data-key="${esc(`${c.lib}/${c.id}`)}" data-hay="${esc(hay)}">
   <span class="thumb"><img src="${esc(u.thumb(c.lib, c.id, c.version))}" alt="" loading="lazy" width="512" height="512"></span>
   <span class="meta">
     <span class="title">${esc(c.title)}</span>
-    <span class="sub">${c.collection ? `${esc(c.collection)} · ` : ''}${esc(c.id)}</span>
+    <span class="sub">${esc(c.lib)}${c.collection ? ` / ${esc(c.collection)}` : ''} / ${esc(c.id)}</span>
     ${c.pkg ? pkgMark(c.pkg) : ''}
     ${c.tags.length ? `<span class="tags">${c.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>` : ''}
     ${outs ? `<span class="outs">${outs}</span>` : ''}
@@ -142,88 +163,94 @@ function card(c: CardData, u: Urls) {
 </a>`;
 }
 
+/** Up to four pictures as one tile: one fills it, two side by side, three or four in a grid. */
+export function mosaic(thumbs: string[], fallback: string) {
+  const t = thumbs.slice(0, 4);
+  if (!t.length) return `<span class="mosaic m0"><span class="mono">${esc(fallback)}</span></span>`;
+  return `<span class="mosaic m${t.length}">${t.map((s) => `<img src="${esc(s)}" alt="" loading="lazy">`).join('')}</span>`;
+}
+
+/** A flag count as a badge (nothing for none). */
+export const flagBadge = (n: number) => (n ? `<span class="fbadge" title="${esc(count(n, 'flag'))}: things TopoTopo can tell need a look">${esc(count(n, 'flag'))}</span>` : '');
+
+function rootCard(r: RootCardData) {
+  const stat = (n: number, one: string, many: string, cls = '', more = '') => `<span class="stat${cls}"><b>${n.toLocaleString('en')}${more}</b> <span>${n === 1 && !more ? one : many}</span></span>`;
+  // the flags first: the figure a look at the card is for
+  const stats = [
+    stat(r.flags, 'flag', 'flags', r.flags ? ' fstat' : r.cut ? '' : ' ok', r.cut ? '+' : ''),
+    stat(r.packages, 'package', 'packages'), stat(r.folders, 'folder', 'folders'), stat(r.files, 'file', 'files'),
+  ].join('');
+  const sub = r.builtin ? 'TopoTopo\'s built-in library' : r.kind === 'w' ? `Workspace${r.engine ? ` · ${r.engine}` : ''}` : 'Library';
+  return `<a class="rcard${r.kind === 'w' ? ' ws' : ''}" href="${esc(r.url)}" data-root="${esc(`${r.kind}/${r.name}`)}">
+  ${mosaic(r.thumbs, r.name.slice(0, 2).toUpperCase())}
+  <span class="rbody">
+    <span class="rsub">${esc(sub)}</span>
+    <span class="rtitle">${esc(r.name)}</span>
+    <span class="stats">${stats}</span>
+    ${r.problem ? `<span class="rprob">${esc(r.problem)}</span>` : ''}
+    ${r.cut ? '<span class="rcut">Audited in part: a very large tree (its page says where it stopped)</span>' : ''}
+    <span class="path">${esc(r.dir)}</span>
+  </span>
+</a>`;
+}
+
 /**
- * The front page: the registered workspaces first, then every library's packages grouped by collection (TopoTopo's
- * built-in library last), with search and tag filters; packages are marked, and the search finds their outputs by
- * name, kind and tag too.
+ * The front page: the registered workspaces as large cards, then the libraries (TopoTopo's built-in one last), each a
+ * door to its folder pages; the search finds every package by name, tag and the packages it uses, and their outputs
+ * by name, kind and tag.
  */
 export function frontPage(d: WebData, u: Urls): string {
-  const ws = d.workspaces ?? [];
-  const link = (title: string, url?: string) => (url ? `<a href="${esc(url)}">${esc(title)}</a>` : esc(title));
-  const wsSection = ws.length ? `
-  <section class="hub" id="workspaces">
-    <h2>Workspaces <span class="count">${ws.length}</span></h2>
-    <p class="dim small">Your workspaces: every folder in one with a .topo file is a package of it, they find each other by themselves and use the shared libraries it lists, with one copy of each package version for the whole workspace.</p>
-    ${ws.map((w) => `<article class="workspace" id="ws-${esc(w.name)}">
-      <h3>${esc(w.name)}${w.engine ? ` <span class="dim small">${esc(w.engine)}</span>` : ''}</h3>
-      <table class="vars ws"><tbody>
-        <tr><th>Shared libraries</th><td>${w.libraries.length ? w.libraries.map(esc).join(', ') : '<span class="dim">none listed</span>'}</td></tr>
-        <tr><th>Packages</th><td>${w.packages.length ? w.packages.map((p) => `${link(p.title, p.url)}${p.pkg ? ` <code>${esc(p.pkg)}</code>` : ''}`).join(', ') : '<span class="dim">none yet</span>'}</td></tr>
-        <tr><th>Uses</th><td>${w.uses.length ? w.uses.map((x) => `${link(x.name, x.url)} ${esc(x.version)}${x.newest ? ` <span class="newer">${esc(x.newest)} is out</span>` : ''}`).join(', ') : '<span class="dim">none used yet</span>'}</td></tr>
-      </tbody></table>
-      ${w.problems.length ? `<ul class="dim small">${w.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
-      <p class="dim small"><code>${esc(w.dir)}</code></p>
-    </article>`).join('\n')}
-  </section>` : '';
-  const tags = [...new Set(d.libraries.flatMap((l) => l.cards.flatMap((c) => c.tags)))].sort();
-  const total = d.libraries.reduce((n, l) => n + l.cards.length, 0);
-  const outputs = d.libraries.reduce((n, l) => n + l.cards.reduce((k, c) => k + (c.outputs?.length ?? 0), 0), 0);
-  const libs = d.libraries.map((l) => {
-    const groups = new Map<string, CardData[]>();
-    for (const c of l.cards) { const g = groups.get(c.collection) ?? []; g.push(c); groups.set(c.collection, g); }
-    const sections = [...groups].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([coll, cards]) => `
-    <section class="collection" data-collection="${esc(coll)}">
-      ${coll ? `<h3>${esc(coll)}</h3>` : ''}
-      <div class="grid">${cards.map((c) => card(c, u)).join('\n')}</div>
-    </section>`).join('');
-    // TopoTopo's built-in library: ready-made packages every package can use, by an output's name
-    const example = l.builtin ? l.cards.flatMap((c) => c.outputs ?? []).find((o) => !o.alias)?.type : undefined;
-    const note = l.builtin ? `
-    <p class="note dim small">TopoTopo's built-in library: ready-made packages every package can use. Ask your agent to use an output by its name${example ? `, such as <code>${esc(example)}</code>` : ''}.</p>` : '';
-    return `
-  <section class="library" id="lib-${esc(l.name)}">
-    <h2>${esc(l.name)} <span class="count" data-total="${l.cards.length}">${l.cards.length}</span></h2>${note}${sections || '<p class="empty">No packages yet. Make one with <code>topotopo library new ' + esc(l.name) + ' &lt;folder/name&gt;</code> or ask your agent to make one.</p>'}
-  </section>`;
-  }).join('');
-  const none = d.libraries.some((l) => !l.builtin) ? '' : `<p class="empty">No libraries of your own yet. Add a folder with <code>topotopo library add &lt;name&gt; &lt;folder&gt;</code>.</p>`;
+  const outputs = d.packages.reduce((n, c) => n + (c.outputs?.length ?? 0), 0);
+  const total = d.packages.length;
+  const ws = d.workspaces.length
+    ? `<div class="rgrid big">${d.workspaces.map(rootCard).join('\n')}</div>`
+    : `<p class="empty">No workspace registered yet. Make a folder one with <code>topotopo workspace init &lt;folder&gt;</code>, or register one with <code>topotopo workspace add &lt;folder&gt;</code>.</p>`;
+  const own = d.libraries.filter((l) => !l.builtin);
+  const libs = `<div class="rgrid">${d.libraries.map(rootCard).join('\n')}</div>${own.length ? '' : `<p class="empty small">No library of your own yet. Add a folder with <code>topotopo library add &lt;name&gt; &lt;folder&gt;</code>.</p>`}`;
   return shell('TopoTopo', u, `<header class="bar">
   <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
   <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ' and their outputs' : ''}">
-  <button id="clear" class="btn" type="button" hidden title="clear the search and the tags">Clear</button>
+  <button id="clear" class="btn" type="button" hidden title="clear the search">Clear</button>
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
 </header>
-<main class="wrap">
-${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''} in the libraries</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
-${tags.length ? `<nav class="chips" aria-label="Tags">${tags.map((t) => `<button class="chip" data-tag="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join('')}</nav>` : ''}
-${wsSection}${none}${libs}
-<p class="empty" id="nomatch" hidden>Nothing matches. <button class="btn" type="button" data-clear>Clear the search</button></p>
+<main class="wrap front">
+${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''}</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
+<section class="roots" id="workspaces">
+  <h2>Workspaces <span class="count">${d.workspaces.length}</span></h2>
+  ${ws}
+</section>
+<section class="roots" id="libraries">
+  <h2>Libraries <span class="count">${d.libraries.length}</span></h2>
+  ${libs}
+</section>
+<section id="results" hidden>
+  <h2>Packages <span class="count" id="found" data-total="${total}">${total}</span></h2>
+  <div class="grid">${d.packages.map((c) => card(c, u)).join('\n')}</div>
+  <p class="empty" id="nomatch" hidden>Nothing matches. <button class="btn" type="button" data-clear>Clear the search</button></p>
+</section>
 </main>`, { page: 'front' });
-}
-
-function fileList(rows: FileRow[], lib: string, id: string, base: string, u: Urls) {
-  return `<ul class="files">${rows.map((f) => `<li><a href="${esc(u.file(lib, id, `${base}/${f.path}`))}"${f.image ? '' : ' download'}>${esc(f.path)}</a><span>${size(f.size)}</span></li>`).join('')}</ul>`;
 }
 
 /** A package's versions with their notes and dates, and the outputs its newest version publishes with their kinds and tags. */
 function packageSection(pk: NonNullable<PackageData['package']>): string {
-  if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the package's folder publishes the first, which other packages can then use as <code>${esc(pk.name)}</code>.</p>`;
+  if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the package's folder publishes the first, which other packages can then use as <code>${esc(pk.name)}</code>.</p>${usedBySection(pk.usedBy ?? [])}`;
   const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a package relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
   const outputs = pk.outputs.map((o) => {
     const what = [`node "${o.node}" of graph "${o.graph}"`, o.params.length ? `params ${o.params.join(', ')}` : '', o.inputs.length ? `input${o.inputs.length > 1 ? 's' : ''} ${o.inputs.join(', ')}` : ''].filter(Boolean).join(' · ');
     const marks = kindTagMarks(o);
     return `<tr><th>${o.thumb ? `<img class="othumb" src="${esc(o.thumb)}" alt="" loading="lazy" width="96" height="96">` : ''}<code>${esc(o.type)}</code>${o.alias ? `<br><code>${esc(o.alias)}</code> <span class="dim">(the default)</span>` : ''}</th><td>${esc(o.label)}${marks ? `<span class="tags">${marks}</span>` : ''}</td><td class="dim">${esc(what)}</td></tr>`;
   }).join('');
-  return `<h2>Versions <span class="count">${pk.versions.length}</span></h2>
-    ${versionList(pk.versions, big)}
-    <h2>Published outputs</h2>
-    <table class="vars outputs"><tbody>${outputs}</tbody></table>
+  return `<h2>Published outputs <span class="count">${pk.outputs.length}</span></h2>
+    <div class="table"><table class="vars outputs"><tbody>${outputs}</tbody></table></div>
     <p class="dim small">The outputs of ${esc(pk.versions[0].version)}: a package's graph uses one as a node type, <code>{"type": "${esc(pk.outputs[0]?.type ?? pk.name)}"}</code>, with its params.</p>
+    <h2>Versions <span class="count">${pk.versions.length}</span></h2>
+    ${versionList(pk.versions, big)}
     ${usedBySection(pk.usedBy ?? [])}`;
 }
 
 /** The versions, newest first: each opens to the outputs it published. */
 function versionList(versions: VersionRow[], big: (v: VersionRow) => string) {
-  return `<div class="versions">${versions.map((v, i) => `<details class="version" id="v-${esc(v.version)}"${i === 0 ? '' : ''}><summary><span class="vn">${esc(v.version)}</span>${big(v)}<span class="vd">${esc(day(v.published))}</span><span class="vt">${esc(v.note)}</span></summary>
+  return `<div class="versions">${versions.map((v) => `<details class="version" id="v-${esc(v.version)}"><summary><span class="vn">${esc(v.version)}</span>${big(v)}<span class="vd">${esc(day(v.published))}</span><span class="vt">${esc(v.note)}</span></summary>
       ${v.outputs?.length ? `<ul class="vouts">${v.outputs.map((o) => `<li><code>${esc(o.type)}</code>${o.label ? ` ${esc(o.label)}` : ''}${kindTagMarks(o) ? `<span class="tags">${kindTagMarks(o)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="dim small">Its record lists no outputs.</p>'}
     </details>`).join('')}</div>`;
 }
@@ -235,19 +262,21 @@ function usedBySection(users: UserRow[]) {
     : '<p class="dim">No package in the libraries uses it yet.</p>'}`;
 }
 
-/** The packages a package uses: the version in use and its note, and when a newer one is out. */
-function usesSection(uses: PackageData['uses']): string {
+/**
+ * The packages a package (or a workspace) uses: the version in use, when a newer one is out, its date and its note
+ * (one line; the whole note on hover and on the package's page).
+ */
+export function usesSection(uses: PackageData['uses']): string {
   if (!uses.length) return '';
-  return `<h2>Packages it uses</h2>
-    <table class="vars uses"><tbody>${uses.map((x) => `<tr><th>${x.url ? `<a href="${esc(x.url)}">${esc(x.name)}</a>` : esc(x.name)}</th><td>${esc(x.version)}</td><td class="dim">${esc([x.note, day(x.published ?? '')].filter(Boolean).join(' · '))}${x.newest ? ` <span class="newer">${esc(x.newest)} is out</span>` : ''}</td></tr>`).join('')}</tbody></table>`;
+  return `<h2>Packages it uses <span class="count">${uses.length}</span></h2>
+    <table class="vars uses"><tbody>${uses.map((x) => `<tr><th>${x.url ? `<a href="${esc(x.url)}">${esc(x.name)}</a>` : esc(x.name)}</th><td>${esc(x.version)}</td><td class="unotes"><span class="urow">${x.newest ? `<span class="newer">${esc(x.newest)} is out</span>` : ''}${x.published ? `<span class="udate">${esc(day(x.published))}</span>` : ''}${x.note ? `<span class="unote" title="${esc(x.note)}">${esc(x.note)}</span>` : ''}</span></td></tr>`).join('')}</tbody></table>`;
 }
 
 /**
- * A package's page: the 3D view, what it is, links, attachments, a package's versions and outputs, the packages it
- * uses, graphs and their vars, and the snippets for a board.
+ * A package on its folder page, the top part: its 3D view (the baked preview) beside what it is, its links, its
+ * actions (Open in editor, Re-bake), how its preview cooked and the snippets for a board.
  */
-export function packagePage(p: PackageData, u: Urls): string {
-  const images = p.attachments.filter((f) => f.image), other = p.attachments.filter((f) => !f.image);
+export function packageBlock(p: PackageData, u: Urls): string {
   const edit = u.edit(p.lib, p.id);
   const snippet = (label: string, value: string) => `<label class="copy"><span>${label}</span><input readonly value="${esc(value)}"><button type="button" data-copy>Copy</button></label>`;
   const b = p.status === 'empty' || p.builtin ? null : p.bake;
@@ -256,53 +285,113 @@ export function packagePage(p: PackageData, u: Urls): string {
     ? `One of TopoTopo's own packages: every package can use its outputs. Ask your agent to use one by its name${example ? `, such as ${example}` : ''}.`
     : p.status === 'empty'
     ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
+    : p.status === 'baking' ? 'Baking its preview…'
     : !b ? 'Not baked yet.'
-    : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${b.points ?? 0} points, ${b.prims ?? 0} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
+    : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${(b.points ?? 0).toLocaleString('en')} points, ${(b.prims ?? 0).toLocaleString('en')} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
     : `Bake failed ${when(b.at)}`;
+  // the 3D view; else the preview picture at its own size; else a short word that there is none yet, and why
+  const none = p.status === 'empty' ? 'No preview yet: this package has no graph to bake' : p.status === 'baking' ? 'No preview yet: baking it…' : b && !b.ok ? 'No preview: its graph did not cook' : 'No preview yet';
   const view = p.glb
     ? `<iframe class="view" src="${esc(u.embed(p.lib, p.id))}" title="${esc(p.title)} in 3D" allow="fullscreen"></iframe>`
-    : `<img class="view" src="${esc(u.thumb(p.lib, p.id, p.version))}" alt="${esc(p.title)}">`;
-  return shell(`${p.title} · TopoTopo`, u, `<header class="bar">
-  <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
-  <nav class="crumbs"><a href="${esc(u.home)}#lib-${esc(p.lib)}">${esc(p.lib)}</a>${p.collection ? ` / <span>${esc(p.collection)}</span>` : ''} / <span>${esc(p.id)}</span></nav>
-</header>
-<main class="wrap package">
-  <div class="stage">${view}</div>
+    : p.thumb ? `<img class="view pic" src="${esc(u.thumb(p.lib, p.id, p.version))}" alt="${esc(p.title)}" width="512" height="512">`
+    : `<div class="view none"><span class="cube"></span><p>${esc(none)}</p></div>`;
+  // a bake that failed leaves the last good preview: marked as such
+  const old = !!b && !b.ok && (p.glb || p.thumb);
+  return `<section class="pkgblock" data-key="${esc(`${p.lib}/${p.id}`)}">
+  <div class="stage${old ? ' old' : ''}">${view}${old ? '<span class="oldmark">Last good preview: the newest graph did not cook</span>' : ''}</div>
   <aside class="info">
-    <h1>${esc(p.title)}</h1>
-    ${p.pkg ? `<p class="pkgline">Package ${pkgMark(p.pkg)}</p>` : ''}
+    ${p.pkg ? `<p class="pkgline">Package ${pkgMark(p.pkg)}</p>` : '<p class="pkgline">Package <span class="dim">(publishes no versions)</span></p>'}
     ${p.description ? `<p class="desc">${esc(p.description)}</p>` : ''}
     ${p.tags.length ? `<p class="tags">${p.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</p>` : ''}
     ${p.links.length ? `<ul class="links">${p.links.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a></li>`).join('')}</ul>` : ''}
     <div class="actions">
       ${edit ? `<a class="btn primary" href="${esc(edit)}" target="_blank" rel="noopener">Open in editor</a>` : ''}
-      ${p.builtin ? '' : '<button class="btn" type="button" data-post="bake">Re-bake</button>'}
-      <button class="btn" type="button" data-post="reveal">Show folder</button>
+      ${p.builtin || p.status === 'empty' ? '' : `<button class="btn" type="button" data-post="${esc(`${u.package(p.lib, p.id)}/bake`)}">Re-bake</button>`}
     </div>
     <p class="bake ${b && !b.ok ? 'err' : ''}${p.status === 'empty' ? ' empty' : ''}" id="bake">${esc(bakeLine)}</p>
     ${b && !b.ok && b.error ? `<pre class="error">${esc(b.error)}</pre>` : ''}
     ${b?.warnings?.length ? `<details class="warn"><summary>${b.warnings.length} warning${b.warnings.length > 1 ? 's' : ''}</summary><pre>${esc(b.warnings.join('\n'))}</pre></details>` : ''}
-    <h2>On your board</h2>
+    <details class="board"><summary>On your board</summary>
     ${snippet('Link', p.share.link)}
     ${snippet('Image', `<a href="${p.share.link}"><img src="${p.share.thumb}" alt="${esc(p.title)}" width="256"></a>`)}
     ${snippet('3D embed', `<iframe src="${p.share.embed}" width="640" height="480" style="border:0" allow="fullscreen" title="${esc(p.title)}"></iframe>`)}
+    </details>
   </aside>
-  <section class="more">
-    ${images.length ? `<h2>Attachments</h2><div class="shots">${images.map((f) => `<a href="${esc(u.file(p.lib, p.id, `attachments/${f.path}`))}" target="_blank"><img src="${esc(u.file(p.lib, p.id, `attachments/${f.path}`))}" alt="${esc(f.path)}" loading="lazy"><span>${esc(f.path)}</span></a>`).join('')}</div>` : ''}
-    ${other.length ? `${images.length ? '' : '<h2>Attachments</h2>'}${fileList(other, p.lib, p.id, 'attachments', u)}` : ''}
-    ${p.package ? packageSection(p.package) : ''}
-    ${usesSection(p.uses)}
-    <h2>Graphs</h2>
-    ${p.graphs.length ? p.graphs.map((g) => `<div class="graph"><h3>${esc(g.name)}${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes</span></h3>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('') : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its workspace tool opens the package); open the editor to watch it appear.</p>'}
-    ${p.exports.length ? `<h2>Exports</h2>${fileList(p.exports, p.lib, p.id, 'exports', u)}` : ''}
-    <p class="dim small">Folder <code>${esc(p.rel)}</code> in ${esc(p.place)}${p.created ? ` · created ${esc(p.created)}` : ''} · updated ${esc(when(p.updated))}</p>
-  </section>
-</main>`, { page: 'package', data: { lib: p.lib, id: p.id } });
+</section>`;
 }
 
-/** The page a board embeds in an iframe: the baked preview.glb under an orbit camera, or the thumbnail. */
+/**
+ * A package on its folder page, right below its preview: its published outputs and versions, the packages that use it
+ * and those it uses beside its graphs and their vars and its exports (those older than their graph marked). One column
+ * when it publishes no versions and uses no package.
+ */
+export function packageCols(p: PackageData): string {
+  const graphs = p.graphs.length
+    ? `<div class="graphs">${p.graphs.map((g) => `<details class="graph"${p.graphs.length <= 3 ? ' open' : ''}><summary><b>${esc(g.name)}</b>${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes${g.vars.length ? ` · ${g.vars.length} vars` : ''}</span></summary>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</details>`).join('')}</div>`
+    : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its workspace tool opens the package); open the editor to watch it appear.</p>';
+  const left = `${p.package ? packageSection(p.package) : ''}${usesSection(p.uses)}`;
+  return `<section class="pkgmore">
+    <div class="pkgcols${left ? '' : ' solo'}">
+      ${left ? `<div>${left}</div>` : ''}
+      <div>
+        <h2>Graphs <span class="count">${p.graphs.length}</span></h2>
+        ${graphs}
+        ${p.exports.length ? `<h2>Exports <span class="count">${p.exports.length}</span></h2>${fileList(p.exports)}` : ''}
+      </div>
+    </div>
+  </section>`;
+}
+
+/** A package on its folder page, last: its attachments, where it is and its stable link. */
+export function packageEnd(p: PackageData, u: Urls): string {
+  return `<section class="pkgend">
+    ${attachments(p)}
+    <p class="dim small">${esc(p.place)}${p.created ? ` · created ${esc(p.created)}` : ''} · updated ${esc(when(p.updated))} · <a href="${esc(u.package(p.lib, p.id))}">stable link</a></p>
+  </section>`;
+}
+
+/**
+ * A package's attachments: its images as tiles and its other files as a list. Many images show one from each
+ * folder first (its first by name: a concept before its renders), the rest a click away.
+ */
+function attachments(p: PackageData): string {
+  if (!p.attachments.length) return '';
+  const images = p.attachments.filter((f) => f.image), other = p.attachments.filter((f) => !f.image);
+  const tile = (f: PackageData['attachments'][number]) => `<a class="tile" href="${esc(f.url)}" data-view="image" data-name="${esc(f.path)}"><img src="${esc(f.url)}" alt="" loading="lazy" decoding="async"><span>${esc(f.path)}</span></a>`;
+  let shown = images;
+  if (images.length > 16) {
+    const firsts = new Map<string, (typeof images)[number]>();
+    for (const f of images) { const top = f.path.includes('/') ? f.path.slice(0, f.path.indexOf('/')) : f.path; if (!firsts.has(top)) firsts.set(top, f); }
+    shown = [...firsts.values()].slice(0, 16);
+  }
+  const rest = images.length - shown.length;
+  return `<h2>Attachments <span class="count">${p.attachments.length}</span></h2>
+    ${shown.length ? `<div class="igrid">${shown.map(tile).join('')}</div>` : ''}
+    ${rest > 0 ? `<details class="allatt"><summary>All ${images.length} images</summary><div class="igrid">${images.map(tile).join('')}</div></details>` : ''}
+    ${other.length ? `<details class="allatt"${other.length <= 8 ? ' open' : ''}><summary>${other.length} other file${other.length === 1 ? '' : 's'}</summary>${fileList(other)}</details>` : ''}`;
+}
+
+const fileList = (rows: (FileRow & { url: string; model?: string; stale?: boolean })[]) =>
+  `<ul class="flist">${rows.map((f) => `<li><a href="${esc(f.url)}"${f.image ? ` data-view="image" data-name="${esc(f.path)}"` : f.model ? ` data-view="model" data-src="${esc(f.model)}" data-name="${esc(f.path)}"` : ''}>${esc(f.path)}</a>${f.stale ? ' <span class="stale" title="its graph changed since it was exported">older than its graph</span>' : ''}<span>${size(f.size)}</span></li>`).join('')}</ul>`;
+
+/**
+ * The page a board embeds in an iframe (and a package's folder page shows): the baked preview.glb under an orbit
+ * camera, or the thumbnail. It sits in a page that scrolls, so the wheel scrolls that page until the view is clicked
+ * (or with Ctrl held).
+ */
 export function embedPage(e: { lib: string; id: string; title: string; glb: boolean; version: string; packageUrl: string }, u: Urls): string {
-  const thumb = u.thumb(e.lib, e.id, e.version);
+  return viewPage({ title: e.title, poster: u.thumb(e.lib, e.id, e.version), src: e.glb ? u.glb(e.lib, e.id, e.version) : null, link: e.packageUrl, wheel: 'click' }, u);
+}
+
+/** The 3D view of a model file (glb, gltf) of a folder: what a page opens when a model is clicked. */
+export function modelPage(m: { title: string; src: string; link: string }, u: Urls): string {
+  return viewPage({ title: m.title, poster: null, src: m.src, link: m.link, wheel: 'zoom' }, u);
+}
+
+/** The import map the 3D views load three.js with (inline: its hash is in their content policy). */
+export const importMap = (u: Urls) => JSON.stringify({ imports: { three: `${u.three}build/three.module.js`, 'three/addons/': `${u.three}examples/jsm/` } });
+
+function viewPage(e: { title: string; poster: string | null; src: string | null; link: string; wheel: 'click' | 'zoom' }, u: Urls): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -317,15 +406,17 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .badge { position: absolute; left: 8px; bottom: 8px; padding: 3px 7px; border-radius: 3px; background: rgba(31, 33, 36, 0.8); color: inherit; text-decoration: none; }
 .badge:hover { color: #f0a030; }
 .note { position: absolute; right: 8px; bottom: 8px; color: #8c939b; }
+.hint { position: absolute; right: 8px; top: 8px; padding: 3px 8px; border-radius: 3px; background: rgba(31, 33, 36, 0.8); color: #8c939b; pointer-events: none; transition: opacity 0.2s; }
 </style>
-${e.glb ? `<script type="importmap">${JSON.stringify({ imports: { three: `${u.three}build/three.module.js`, 'three/addons/': `${u.three}examples/jsm/` } })}</script>
+${e.src ? `<script type="importmap">${importMap(u)}</script>
 <script type="module" src="${esc(u.app('embed.js'))}"></script>` : ''}
 </head>
 <body>
-<img class="poster" id="poster" src="${esc(thumb)}" alt="${esc(e.title)}">
-${e.glb ? `<canvas id="gl" data-src="${esc(u.glb(e.lib, e.id, e.version))}"></canvas>` : ''}
-<a class="badge" href="${esc(e.packageUrl)}" target="_blank" rel="noopener">${esc(e.title)} · TopoTopo</a>
-<span class="note" id="note"></span>
+${e.poster ? `<img class="poster" id="poster" src="${esc(e.poster)}" alt="${esc(e.title)}">` : ''}
+${e.src ? `<canvas id="gl" data-src="${esc(e.src)}" data-wheel="${e.wheel}"></canvas>` : ''}
+${e.src && e.wheel === 'click' ? '<span class="hint" id="hint" hidden>Click to zoom with the wheel</span>' : ''}
+<a class="badge" href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.title)} · TopoTopo</a>
+<span class="note" id="note">${e.src && !e.poster ? 'Loading…' : ''}</span>
 </body>
 </html>
 `;

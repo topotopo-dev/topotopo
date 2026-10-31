@@ -141,8 +141,8 @@ export async function webCommand(argv: string[], prog: string, io: Io = consoleI
     const { startWeb, runningWeb } = await import('../web/server.ts');
     try {
       const g = await startWeb({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
-      const n = cfg.libraries.length;
-      io.out(`web app: ${g.url}  (${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
+      const n = cfg.libraries.length, w = cfg.workspaces.length;
+      io.out(`web app: ${g.url}  (${w ? `${w} workspace${w === 1 ? '' : 's'}: ${cfg.workspaces.map((x) => x.name).join(', ')}; ` : ''}${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
       if (g.queue.size) io.out(`baking ${g.queue.size} package(s) in the background`);
     } catch (e: any) {
       if (e?.code !== 'EADDRINUSE') throw e;

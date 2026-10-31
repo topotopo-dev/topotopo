@@ -532,8 +532,8 @@ export class MeshObject {
 // --------------------------------------------------------------------------------------------- loading GLBs
 // meshopt for the web app's baked preview.glb (the live routes send plain GLB)
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-/** Parse a GLB buffer into a three.js scene, or throw. */
-export const parseGLB = (buf) => new Promise((resolve, reject) => loader.parse(buf, '', (g) => resolve(g.scene), reject));
+/** Parse a GLB buffer (or a glTF document, its other files read from `base`) into a three.js scene, or throw. */
+export const parseGLB = (buf, base = '') => new Promise((resolve, reject) => loader.parse(buf, base, (g) => resolve(g.scene), reject));
 /** A PNG arrives as flat quads with unlit materials named "image:<name>" (src/render/texview.ts): a picture. */
 export function isPicture(root) {
   let meshes = 0, all = true;
