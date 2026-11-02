@@ -1,0 +1,34 @@
+{
+ "description": "Hand-written reference solution for task spiral_staircase: one build call, the same path a model's calls take. The architecture package's spiral_stairs output: 20 treads, 27 degrees each, with its handrail.",
+ "turns": [
+  {
+   "calls": [
+    {
+     "name": "build",
+     "input": {
+      "name": "main",
+      "graph": {
+       "nodes": {
+        "stairs": {
+         "type": "topotopo/architecture/spiral_stairs",
+         "params": {
+          "steps": 20,
+          "rise": 0.2,
+          "turn": 27,
+          "radius": 1.3,
+          "column_radius": 0.14,
+          "railing": true
+         }
+        }
+       },
+       "output": "stairs"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "text": "The architecture package's spiral_stairs output: 20 treads, 27 degrees each, with its handrail."
+  }
+ ]
+}

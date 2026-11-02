@@ -470,3 +470,20 @@ export function isolateConfig(): string {
   return file;
 }
 isolateConfig();
+
+/**
+ * The example packages: folders of examples/ that are packages of their own (an <id>.topo file and graphs/), such as
+ * examples/guided_town, whose guides live in its own inputs/. Each graph as {name, dir, file}; dir is the package
+ * folder its relative paths read from. examples/packages/ holds the examples' copies of TopoTopo's packages, not one.
+ */
+export function examplePackageGraphs(): { name: string; dir: string; file: string }[] {
+  const root = path.join(ROOT, 'examples'), out: { name: string; dir: string; file: string }[] = [];
+  for (const d of fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== 'packages').map((e) => e.name).sort()) {
+    const dir = path.join(root, d), graphs = path.join(dir, 'graphs');
+    if (!fs.readdirSync(dir).some((f) => f.endsWith('.topo')) || !fs.existsSync(graphs)) continue;
+    const files = fs.readdirSync(graphs).filter((x) => x.endsWith('.json')).sort();
+    // a package of one graph goes by the package's name
+    for (const f of files) out.push({ name: files.length === 1 ? d : `${d}.${path.basename(f, '.json')}`, dir, file: path.join(graphs, f) });
+  }
+  return out;
+}

@@ -1,0 +1,335 @@
+{
+ "description": "Hand-written reference solution for task windsor_chair: one build call, the same path a model's calls take. Bevelled seat, four splayed legs, stretchers, seven spindles on an arc and a swept top rail.",
+ "turns": [
+  {
+   "calls": [
+    {
+     "name": "build",
+     "input": {
+      "name": "main",
+      "graph": {
+       "nodes": {
+        "seat_box": {
+         "type": "box",
+         "params": {
+          "size": [
+           0.46,
+           0.045,
+           0.43
+          ],
+          "center": [
+           0,
+           0.45,
+           0
+          ]
+         }
+        },
+        "seat": {
+         "type": "bevel",
+         "in": [
+          "seat_box"
+         ],
+         "params": {
+          "distance": 0.015,
+          "divisions": 2
+         }
+        },
+        "leg": {
+         "type": "tube",
+         "params": {
+          "radius": 0.019,
+          "radius_top": 0.016,
+          "height": 0.45,
+          "cols": 10,
+          "center": [
+           0,
+           0.225,
+           0
+          ]
+         }
+        },
+        "leg0": {
+         "type": "transform",
+         "in": [
+          "leg"
+         ],
+         "params": {
+          "rotate": [
+           7,
+           0,
+           -8
+          ],
+          "translate": [
+           0.17,
+           0.0,
+           0.15
+          ]
+         }
+        },
+        "leg1": {
+         "type": "transform",
+         "in": [
+          "leg"
+         ],
+         "params": {
+          "rotate": [
+           7,
+           0,
+           8
+          ],
+          "translate": [
+           -0.17,
+           0.0,
+           0.15
+          ]
+         }
+        },
+        "leg2": {
+         "type": "transform",
+         "in": [
+          "leg"
+         ],
+         "params": {
+          "rotate": [
+           -7,
+           0,
+           -8
+          ],
+          "translate": [
+           0.17,
+           0.0,
+           -0.13
+          ]
+         }
+        },
+        "leg3": {
+         "type": "transform",
+         "in": [
+          "leg"
+         ],
+         "params": {
+          "rotate": [
+           -7,
+           0,
+           8
+          ],
+          "translate": [
+           -0.17,
+           0.0,
+           -0.13
+          ]
+         }
+        },
+        "stretch_side_l": {
+         "type": "tube",
+         "params": {
+          "radius": 0.011,
+          "height": 0.29,
+          "cols": 8,
+          "axis": "z",
+          "center": [
+           0.185,
+           0.17,
+           0.01
+          ]
+         }
+        },
+        "stretch_side_r": {
+         "type": "tube",
+         "params": {
+          "radius": 0.011,
+          "height": 0.29,
+          "cols": 8,
+          "axis": "z",
+          "center": [
+           -0.185,
+           0.17,
+           0.01
+          ]
+         }
+        },
+        "stretch_mid": {
+         "type": "tube",
+         "params": {
+          "radius": 0.011,
+          "height": 0.37,
+          "cols": 8,
+          "axis": "x",
+          "center": [
+           0,
+           0.17,
+           0.01
+          ]
+         }
+        },
+        "spindle": {
+         "type": "tube",
+         "params": {
+          "radius": 0.008,
+          "radius_top": 0.006,
+          "height": 0.52,
+          "cols": 8,
+          "center": [
+           0,
+           0.26,
+           0
+          ]
+         }
+        },
+        "spindle_pts": {
+         "type": "points",
+         "params": {
+          "points": [
+           [
+            -0.1645,
+            0.47,
+            -0.125
+           ],
+           [
+            -0.1221,
+            0.47,
+            -0.1649
+           ],
+           [
+            -0.065,
+            0.47,
+            -0.191
+           ],
+           [
+            0.0,
+            0.47,
+            -0.2
+           ],
+           [
+            0.065,
+            0.47,
+            -0.191
+           ],
+           [
+            0.1221,
+            0.47,
+            -0.1649
+           ],
+           [
+            0.1645,
+            0.47,
+            -0.125
+           ]
+          ]
+         }
+        },
+        "spindles": {
+         "type": "copy_to_points",
+         "in": [
+          "spindle",
+          "spindle_pts"
+         ]
+        },
+        "rail_curve": {
+         "type": "curve",
+         "params": {
+          "points": [
+           [
+            -0.1973,
+            0.98,
+            -0.1281
+           ],
+           [
+            -0.1666,
+            0.98,
+            -0.1735
+           ],
+           [
+            -0.1205,
+            0.98,
+            -0.2093
+           ],
+           [
+            -0.0631,
+            0.98,
+            -0.2321
+           ],
+           [
+            0.0,
+            0.98,
+            -0.24
+           ],
+           [
+            0.0631,
+            0.98,
+            -0.2321
+           ],
+           [
+            0.1205,
+            0.98,
+            -0.2093
+           ],
+           [
+            0.1666,
+            0.98,
+            -0.1735
+           ],
+           [
+            0.1973,
+            0.98,
+            -0.1281
+           ]
+          ],
+          "smooth": true
+         }
+        },
+        "top_rail": {
+         "type": "sweep",
+         "in": [
+          "rail_curve"
+         ],
+         "params": {
+          "shape": "rect",
+          "size": [
+           0.05,
+           0.035
+          ]
+         }
+        },
+        "parts": {
+         "type": "merge",
+         "in": [
+          "seat",
+          "leg0",
+          "leg1",
+          "leg2",
+          "leg3",
+          "stretch_side_l",
+          "stretch_side_r",
+          "stretch_mid",
+          "spindles",
+          "top_rail"
+         ]
+        },
+        "wood": {
+         "type": "material",
+         "in": [
+          "parts"
+         ],
+         "params": {
+          "name": "wood_oak",
+          "base_color": [
+           0.55,
+           0.36,
+           0.2
+          ],
+          "roughness": 0.6
+         }
+        }
+       },
+       "output": "wood"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "text": "Bevelled seat, four splayed legs, stretchers, seven spindles on an arc and a swept top rail."
+  }
+ ]
+}

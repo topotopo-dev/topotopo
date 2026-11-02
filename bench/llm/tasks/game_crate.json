@@ -1,0 +1,15 @@
+{
+  "id": "game_crate",
+  "title": "Game-ready sci-fi crate",
+  "category": "props",
+  "prompt": "Build a game-ready sci-fi cargo crate, a 1.2 m cube with bevelled edges, recessed side panels and raised corner guards. It must be a closed, watertight mesh with UVs and stay under 6,000 triangles.",
+  "checks": [
+    { "kind": "cooks" },
+    { "kind": "extent", "axis": "x", "min": 1.0, "max": 1.5, "label": "about 1.2 m in x" },
+    { "kind": "extent", "axis": "y", "min": 1.0, "max": 1.5, "label": "about 1.2 m in y" },
+    { "kind": "extent", "axis": "z", "min": 1.0, "max": 1.5, "label": "about 1.2 m in z" },
+    { "kind": "triangles", "min": 100, "max": 6000, "label": "100–6,000 triangles" },
+    { "kind": "closed", "label": "closed and watertight" },
+    { "kind": "uv", "label": "has uv" }
+  ]
+}

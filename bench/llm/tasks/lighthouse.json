@@ -1,0 +1,13 @@
+{
+  "id": "lighthouse",
+  "title": "Lighthouse on a rock",
+  "category": "architecture",
+  "prompt": "Build a lighthouse on a small rocky islet: a tapered tower 20–30 m tall with red and white bands, a gallery with a railing near the top, and a glazed lantern room with a roof. The islet is irregular rock, a little wider than the tower's base.",
+  "checks": [
+    { "kind": "cooks" },
+    { "kind": "extent", "axis": "y", "min": 18, "max": 45, "label": "18–45 m tall" },
+    { "kind": "extent", "axis": "longest_horizontal", "min": 6, "max": 80, "label": "an islet 6–80 m across" },
+    { "kind": "materials", "min": 3, "label": "3 or more materials (red, white, glass, rock…)" },
+    { "kind": "triangles", "min": 500, "max": 600000 }
+  ]
+}

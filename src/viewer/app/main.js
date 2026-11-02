@@ -7,7 +7,7 @@ import { createViews, CAMERA_NAMES, SHADINGS } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
-import { createGuides, PLACE_KINDS } from './guides.js';
+import { createGuides, PLACE_KINDS, guideId } from './guides.js';
 import { createSelect } from './select.js';
 import { createOutliner } from './outliner.js';
 import { createProps } from './props.js';
@@ -459,7 +459,13 @@ function syncTop() {
   $('quad').textContent = views.quad ? 'single' : 'quad';
   const mode = ctx.guides.mode;
   $('mode').textContent = mode ? `placing ${EDITOR_NAMES[mode]}` : '';
+  for (const b of $('guide-tools').querySelectorAll('button')) b.classList.toggle('on', (PLACE_KINDS[b.dataset.tool] ?? null) === mode);
 }
+for (const b of $('guide-tools').querySelectorAll('button')) b.addEventListener('click', () => {
+  // the tools work on the guides, which the scene shows (a result shown alone hides them)
+  if (b.dataset.tool === 'selectMode' && ctx.outputs?.active) ctx.outputs.scene();
+  run(b.dataset.tool); b.blur();
+});
 function setActive(i) { if (i >= 0 && views.active !== i) { views.active = i; syncTop(); requestOverlays(); } }
 function toggleQuad(at = cursor.slot) {
   if (views.quad && at >= 0) views.active = at;
@@ -517,11 +523,15 @@ function run(action) {
       slot.shading = { displayWire: 'wire', displayShaded: 'shaded', displayShadedWire: 'shadedWire' }[action]; break;
     case 'displayCycle': slot.shading = DISPLAY_CYCLE[(DISPLAY_CYCLE.indexOf(slot.shading) + 1) % 3]; break;
     case 'wireToggle': slot.lastShading = slot.shading === 'wire' ? slot.lastShading : slot.shading; slot.shading = slot.shading === 'wire' ? slot.lastShading ?? 'shaded' : 'wire'; break;
-    case 'placeNull': case 'placeCurve': case 'placeArea': case 'placeVolume': ctx.guides.setMode(PLACE_KINDS[action]); return syncTop();
+    case 'placeNull': case 'placeCurve': case 'placeArea': case 'placeVolume':
+      // guides are drawn in the scene, not over a result shown alone
+      if (ctx.outputs?.active) ctx.outputs.scene();
+      ctx.guides.setMode(PLACE_KINDS[action]); return syncTop();
     case 'finish': case 'removeLast': ctx.guides.key(action); return;
     case 'cancel': {
       if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body, preset);
       if (ctx.select.press) return ctx.select.cancel();
+      if (drag?.kind === 'guide') { const d = drag; drag = null; ctx.guides.dragEnd(true); try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } return; }
       if (ctx.guides.key('cancel')) return;
       ctx.guides.setMode(null); ctx.selection.clear(); return syncTop();
     }
@@ -608,8 +618,11 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   if (e.button !== 0) return;
-  if (ctx.guides.mode) { drag = { kind: 'place', slot, id: e.pointerId }; ctx.guides.pointerDown(slot, x, y); }
-  else { drag = { kind: 'select', slot, id: e.pointerId }; ctx.select.down(slot, x, y, e); }
+  if (ctx.guides.mode) { drag = { kind: 'place', slot, id: e.pointerId }; ctx.guides.pointerDown(slot, x, y); return; }
+  // a plain press on a guide grabs it (Shift and Ctrl presses add to and take from the selection, as ever)
+  const h = !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey ? ctx.guides.handleAt(slot, x, y) : null;
+  if (h) { drag = { kind: 'guide', slot, x, y, id: e.pointerId, h }; ctx.guides.dragStart(slot, x, y, h); return; }
+  drag = { kind: 'select', slot, id: e.pointerId }; ctx.select.down(slot, x, y, e);
 });
 canvas.addEventListener('pointermove', (e) => {
   const { x, y } = at(e);
@@ -622,6 +635,7 @@ canvas.addEventListener('pointermove', (e) => {
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
     } else if (drag.kind === 'place') ctx.guides.pointerMove(drag.slot, x, y);
+    else if (drag.kind === 'guide') ctx.guides.dragMove(drag.slot, x, y);
     else ctx.select.move(x, y);
     return;
   }
@@ -630,7 +644,12 @@ canvas.addEventListener('pointermove', (e) => {
   cursor.slot = slot; cursor.x = x; cursor.y = y;
   if (slot >= 0 && views.cam(slot).ortho) requestOverlays();
   if (ctx.guides.mode) { if (slot >= 0) ctx.guides.pointerMove(slot, x, y); }
-  else ctx.select.hover(slot, x, y);
+  else {
+    ctx.select.hover(slot, x, y);
+    // what a press would grab: a point (CV, null, corner) or a whole guide
+    const h = slot >= 0 ? ctx.guides.handleAt(slot, x, y) : null;
+    canvas.style.cursor = h ? (h.part === 'body' ? 'move' : 'crosshair') : '';
+  }
 });
 const endDrag = (e, cancel = false) => {
   if (!drag || e.pointerId !== drag.id) return;
@@ -640,8 +659,17 @@ const endDrag = (e, cancel = false) => {
   const { x, y } = at(e);
   if (d.kind === 'nav') saveViews();
   else if (d.kind === 'place') { if (!cancel) ctx.guides.pointerUp(d.slot, x, y); }
+  else if (d.kind === 'guide') {
+    // a press that did not move is a click: it selects the guide
+    if (!ctx.guides.dragEnd(cancel) && !cancel) ctx.selection.apply([guideId(d.h.id)]);
+  }
   else if (cancel) ctx.select.cancel(); else ctx.select.up(x, y);
 };
+canvas.addEventListener('dblclick', (e) => {
+  if (ctx.guides.mode || drag) return;
+  const { x, y } = at(e), slot = views.slotAt(x, y);
+  if (slot >= 0) ctx.guides.doubleClick(slot, x, y);
+});
 canvas.addEventListener('pointerup', (e) => endDrag(e));
 canvas.addEventListener('pointercancel', (e) => endDrag(e, true));
 canvas.addEventListener('lostpointercapture', (e) => endDrag(e, true));
@@ -730,7 +758,9 @@ const es = api.events({
   async message(ev) {
     if (ev.cook !== undefined) { setCook(ev.cook.graph, ev.cook); if (ev.cook.graph === ctx.graph.name) updateCook(); return; }
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
-    if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); return; }
+    // the scene's result too: a graph that reads inputs/ (the guides in markers.json) cooks again; one that does not
+    // answers from its cache
+    if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); if (!ctx.isolated) loadGeo(); return; }
     if (ev.compare !== undefined) { await ctx.packages.onCompare(ev.compare); renderCook(); return; }
     if (ev.packages !== undefined) { ctx.packages.onEvent(ev); return; }
     await refreshGraphs();

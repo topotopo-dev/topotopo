@@ -1,0 +1,13 @@
+{
+  "id": "spiral_staircase",
+  "title": "Spiral staircase",
+  "category": "architecture",
+  "prompt": "Build a spiral staircase of 20 separate steps winding once and a half around a central column, rising 4 m, with a handrail that follows the outer edge of the steps on posts.",
+  "checks": [
+    { "kind": "cooks" },
+    { "kind": "extent", "axis": "y", "min": 3.5, "max": 6, "label": "3.5–6 m tall" },
+    { "kind": "extent", "axis": "longest_horizontal", "min": 1.5, "max": 8, "label": "1.5–8 m across" },
+    { "kind": "pieces", "min": 21, "label": "21+ pieces (20 steps and a column at least)" },
+    { "kind": "triangles", "min": 200, "max": 300000 }
+  ]
+}
