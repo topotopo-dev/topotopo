@@ -11,6 +11,7 @@ import { api } from './api.js';
 import * as M from './markers.js';
 import { COLORS, fatSegments, lineMaterial, disposeTree } from './scene.js';
 import { fmtLen } from './units.js';
+import { AXIS_VIEWS } from './camera.js';
 
 export const guideId = (id) => `guide:${id}`;
 export const PLACE_KINDS = { placeNull: 'site', placeCurve: 'path', placeArea: 'zone', placeVolume: 'volume' };
@@ -398,5 +399,118 @@ export function createGuides(ctx) {
     G.drawDraft(); G.hint();
   };
   G.leave = () => { if (G.cursor) { G.cursor = null; G.drawDraft(); } };
+
+  // ------------------------------------------------------------------ dragging (select mode)
+  // A plain left press on a guide grabs what is under it: a null's point, a CV of a curve or an area or a volume's
+  // ground corner moves that point (onto the geometry under the pointer, else in the plane through it facing the
+  // view); a press on a line or a volume's edge moves the whole guide in that plane. The guide follows the pointer
+  // and is saved once, on release, as one undo step. Double-click a CV to remove it, a line to add one there.
+  /** The plane a drag moves in: horizontal in persp, top and bottom; the view's own axis plane in front, right… */
+  const dragPlane = (slot, at) => {
+    const c = ctx.views.cam(slot), f = c.name === 'persp' ? [0, -1, 0] : AXIS_VIEWS[c.name]?.f ?? [0, -1, 0];
+    const n = new THREE.Vector3(Math.abs(f[0]), Math.abs(f[1]), Math.abs(f[2]));
+    return new THREE.Plane().setFromNormalAndCoplanarPoint(n, at);
+  };
+  const onPlane = (slot, x, y, plane) => ctx.views.ray(slot, x, y).ray.intersectPlane(plane, new THREE.Vector3());
+  /**
+   * What a press at (x, y) would grab: {id, part: 'point' | 'corner' | 'body', k, seg?, t?, at: [x, y, z]} or null.
+   * Points (CVs, a null, corners) win over lines within their few pixels; the nearest wins among guides.
+   */
+  G.handleAt = (slot, x, y) => {
+    if (ctx.isolated) return null;
+    const cam = ctx.views.camera(slot);
+    const proj = (p) => ctx.views.project(slot, V3(p), cam);
+    let best = null;
+    const offer = (d, h, limit) => { if (d <= limit && d < (best?.d ?? Infinity)) best = { ...h, d }; };
+    for (const m of G.list) {
+      if (G.hidden.has(m.id)) continue;
+      const id = m.id;
+      if (m.kind === 'site') { const c = proj(m.points[0]); if (c) offer(Math.hypot(c.x - x, c.y - y), { id, part: 'point', k: 0, at: m.points[0] }, CROSS_PX); continue; }
+      if (m.kind === 'volume') {
+        M.volumeCorners(m).forEach((p, k) => { const c = proj(p); if (c) offer(Math.hypot(c.x - x, c.y - y) - 2, { id, part: 'corner', k, at: p }, CV_PX + 2); });
+        const { lo, hi } = M.boxOf(m);
+        for (const [a, b] of boxEdges(lo, hi)) {
+          const A = ctx.views.project(slot, a, cam), B = ctx.views.project(slot, b, cam);
+          if (A && B) offer(segDist(x, y, A, B) + 1, { id, part: 'body', at: [a.x, lo[1], a.z] }, PICK_PX);
+        }
+        continue;
+      }
+      m.points.forEach((p, k) => { const c = proj(p); if (c) offer(Math.hypot(c.x - x, c.y - y) - 2, { id, part: 'point', k, at: p }, CV_PX + 2); });
+      M.segmentsOf(m).forEach(([i, j], s) => {
+        const A = proj(m.points[i]), B = proj(m.points[j]);
+        if (!A || !B) return;
+        const dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy;
+        const t = l2 ? Math.max(0, Math.min(1, ((x - A.x) * dx + (y - A.y) * dy) / l2)) : 0;
+        const a = m.points[i], b = m.points[j];
+        offer(segDist(x, y, A, B) + 1, { id, part: 'body', seg: s, t, at: [0, 1, 2].map((ax) => a[ax] + (b[ax] - a[ax]) * t) }, PICK_PX);
+      });
+    }
+    return best;
+  };
+  /** A left press on a handle starts a drag (nothing moves until the pointer does). */
+  G.dragStart = (slot, x, y, h) => {
+    const m = byId(h.id);
+    if (!m) return;
+    G.dragging = { slot, x, y, h, start: M.cloneMarkers([m])[0], plane: dragPlane(slot, V3(h.at)), from: null, moved: false, live: null };
+    G.dragging.from = onPlane(slot, x, y, G.dragging.plane);
+  };
+  /** The guide under the drag, moved for the pointer at (x, y). */
+  G.dragMove = (slot, x, y) => {
+    const d = G.dragging;
+    if (!d) return;
+    if (!d.moved && Math.hypot(x - d.x, y - d.y) <= 4) return;
+    d.moved = true;
+    let next = null;
+    if (d.h.part === 'body') {
+      const p = onPlane(d.slot, x, y, d.plane);
+      if (!p || !d.from) return;
+      next = M.translateMarker(d.start, [p.x - d.from.x, p.y - d.from.y, p.z - d.from.z]);
+    } else {
+      // onto the geometry under the pointer, as placing does; off it, in the plane through the point
+      const hit = ctx.surfacePoint(d.slot, x, y);
+      const p = hit?.surface ? hit.point : onPlane(d.slot, x, y, d.plane);
+      if (!p) return;
+      next = d.h.part === 'corner' ? M.resizeVolume(d.start, d.h.k, [p.x, p.y, p.z]) : M.movePoint(d.start, d.h.k, [p.x, p.y, p.z]);
+    }
+    if (!next) return;
+    d.live = next;
+    const i = G.list.findIndex((o) => o.id === d.h.id);
+    if (i >= 0) G.list[i] = next;
+    entries(); G.draw(); ctx.emit('guides');
+    const what = d.h.part === 'body' ? next.name : d.h.part === 'corner' ? `a corner of ${next.name}` : next.kind === 'site' ? next.name : `CV ${d.h.k} of ${next.name}`;
+    ctx.message(`moving ${what}`, 'busy');
+  };
+  /** The release: one undo step and one save for the whole drag; false when nothing moved (the press was a click). */
+  G.dragEnd = (cancel = false) => {
+    const d = G.dragging;
+    G.dragging = null;
+    if (!d || !d.moved || !d.live) return false;
+    const i = G.list.findIndex((o) => o.id === d.h.id);
+    if (i < 0) return true;
+    G.list[i] = d.start; // the list as it was, so the change records the drag as one step
+    if (cancel) { entries(); G.draw(); ctx.message(''); return true; }
+    const live = d.live;
+    const label = d.h.part === 'body' || live.kind === 'site' ? `move ${live.name}` : d.h.part === 'corner' ? `resize ${live.name}` : `move CV ${d.h.k} of ${live.name}`;
+    G.change(label, (list) => { const j = list.findIndex((o) => o.id === live.id); if (j < 0) return false; list[j] = live; });
+    ctx.message(`${label} · ${M.EDITOR_NAMES[live.kind]} saved to inputs/markers.json`, 'ok', 1500);
+    return true;
+  };
+  /** Double-click in select mode: on a CV removes it, on a line of a curve or an area adds a CV there. */
+  G.doubleClick = (slot, x, y) => {
+    const h = G.handleAt(slot, x, y), m = h && byId(h.id);
+    if (!m || (m.kind !== 'path' && m.kind !== 'zone')) return false;
+    if (h.part === 'point') {
+      const next = M.removePoint(m, h.k);
+      if (!next) { ctx.message(`${m.name} keeps its CV: a${m.kind === 'zone' ? 'n area needs 3' : ' curve needs 2'}`, '', 2000); return true; }
+      G.change(`remove CV ${h.k} of ${m.name}`, (list) => { list[list.findIndex((o) => o.id === m.id)] = next; });
+      ctx.message(`removed CV ${h.k} of ${m.name}`, 'ok', 1500);
+      return true;
+    }
+    const next = M.insertPoint(m, h.seg, h.at);
+    if (!next) return false;
+    G.change(`add a CV to ${m.name}`, (list) => { list[list.findIndex((o) => o.id === m.id)] = next; });
+    ctx.message(`added a CV to ${m.name} · drag it, double-click it to remove it`, 'ok', 2000);
+    return true;
+  };
   return G;
 }

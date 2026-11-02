@@ -236,9 +236,12 @@ landscape or scene, call inputs {action:"list"}; inputs {action:"describe", path
 polylines, loose points, packed prims; bbox in metres; attributes; every name and role value; materials). Read a file
 with a file node: {"type":"file","params":{"path":"inputs/guides.glb"}} (relative paths read from the package folder,
 the nearest folder with a .topo file at or above the graph, else the graph's folder; the list gives the exact path).
-MARKERS: what a person places by clicking in the live viewer (Site / Path / Zone / Volume modes) is written as
-  inputs/markers.json with the same name and role attributes (sites: points with pscale and orient; paths open and
-  zones closed polylines; volumes closed boxes), so describe it and read it like any other input.
+MARKERS: what a person places by clicking in the live viewer (the guides tools: null, curve, area, volume; they drag
+  them about afterwards) is written as inputs/markers.json with the same name and role attributes (sites: points with
+  pscale and orient; paths open and zones closed polylines; volumes closed boxes), so describe it and read it like any
+  other input. A graph meant to be directed by guides reads the file with "missing": "empty"
+  ({"type":"file","params":{"path":"inputs/markers.json","missing":"empty"}}): it cooks before the first guide is
+  drawn, and again each time the guides change.
 FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"), obj/stl/ply (no up axis:
   Unreal exports and Blender exports with Up = Z are Z-up, so add "up_axis":"z"), geo/bgeo (Houdini), csv and
   points.json (one point per row; columns such as name, role, pscale become point attributes), blend (needs Blender

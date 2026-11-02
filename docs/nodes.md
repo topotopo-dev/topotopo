@@ -9593,6 +9593,7 @@ None (generator).
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
 | `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances) |
 | `instancing` | enum | `"packed"` |  | `packed`, `expand` |  | glTF shared meshes and EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry |
+| `missing` | enum | `"error"` |  | `error`, `empty` | `if_missing`, `optional` | a file that is not there: error stops the cook; empty gives no geometry and a warning, for an input a person may not have made yet, such as inputs/markers.json before the first guide is drawn (the cook runs again when it appears) |
 
 **Example**
 

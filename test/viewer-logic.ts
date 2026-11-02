@@ -39,7 +39,7 @@ section('keymap presets (section 9)');
 {
   check(km.PRESETS.map((p: any) => p.id).join() === 'topotopo,maya,houdini,blender' && km.DEFAULT_PRESET === 'topotopo', 'four presets, TopoTopo the default');
   const ids = km.PRESETS.map((p: any) => p.id);
-  check(km.ROWS.length === 22 && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
+  check(km.ROWS.length === 24 && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
     `every row of the table has binding text in every preset (${km.ROWS.length} rows)`);
   const later = km.ROWS.filter((r: any) => r.phase === 2);
   check(later.map((r: any) => r.label).join(' | ') === 'move / rotate / scale | snap to grid (held) | snap to surface or curve (held) | snap to point (held) | snapping on / off'
@@ -94,6 +94,33 @@ section('keymap presets (section 9)');
   check(km.overlayRows('blender').length === km.ROWS.length && km.overlayRows('blender').find((r: any) => r.label === 'frame all')?.text === 'Home'
     && km.overlayRows('maya').filter((r: any) => !r.built).length === 5, 'the overlay lists the active preset\'s whole table, the phase 2 rows marked');
   check(km.canonical('shift+ctrl+z') === 'Ctrl+Shift+Z' && !!throws(() => km.canonical('Hyper+A')), 'chords have one spelling; unknown modifiers are refused');
+}
+
+section('guides: dragging, adding and removing points');
+{
+  const curve = { id: 'c', kind: 'path', name: 'road', points: [[0, 0, 0], [10, 0, 0], [10, 0, 10]] };
+  const area = { id: 'a', kind: 'zone', name: 'park', points: [[0, 0, 0], [4, 0, 0], [4, 0, 4]] };
+  const box = { id: 'v', kind: 'volume', name: 'clear', points: [[0, 1, 0], [4, 1, 2]], height: 3 };
+  const moved = mk.movePoint(curve, 1, [10.0004, 0.5, -2.1234]);
+  check(JSON.stringify(moved.points) === '[[0,0,0],[10,0.5,-2.123],[10,0,10]]' && JSON.stringify(curve.points[1]) === '[10,0,0]' && moved.name === 'road',
+    'movePoint moves one point, to the millimetre, leaving the marker it was given alone');
+  check(mk.movePoint(curve, 3, [0, 0, 0]) === null && mk.movePoint(box, 1, [0, 5, 2]) === null, 'movePoint refuses a point that is not there, and a volume whose corners would share an x or a z');
+  check(JSON.stringify(mk.translateMarker(curve, [1, 2, 3]).points) === '[[1,2,3],[11,2,3],[11,2,13]]', 'translateMarker moves every point');
+  check(JSON.stringify(mk.segmentsOf(curve)) === '[[0,1],[1,2]]' && JSON.stringify(mk.segmentsOf(area)) === '[[0,1],[1,2],[2,0]]' && mk.segmentsOf(box).length === 0,
+    'segmentsOf: a curve\'s CV to CV, an area\'s also its closing edge; volumes none');
+  check(JSON.stringify(mk.insertPoint(curve, 0, [5, 0, 0]).points) === '[[0,0,0],[5,0,0],[10,0,0],[10,0,10]]'
+    && JSON.stringify(mk.insertPoint(area, 2, [2, 0, 2]).points) === '[[0,0,0],[4,0,0],[4,0,4],[2,0,2]]' && mk.insertPoint(curve, 2, [0, 0, 0]) === null,
+    'insertPoint lands between the segment\'s ends (an area\'s closing edge at the end); no segment, no point');
+  check(JSON.stringify(mk.removePoint(curve, 1).points) === '[[0,0,0],[10,0,10]]' && mk.removePoint(mk.removePoint(curve, 1), 0) === null
+    && mk.removePoint(area, 0) === null && mk.removePoint(box, 0) === null,
+    'removePoint keeps a curve at 2 CVs and an area at 3 corners; volumes have no CVs to remove');
+  const c = mk.volumeCorners(box);
+  check(JSON.stringify(c) === '[[0,1,0],[4,1,0],[4,1,2],[0,1,2]]', 'volumeCorners walks the four ground corners at the lower y');
+  const r = mk.resizeVolume(box, 2, [6, 9, 5]);
+  check(JSON.stringify(r.points) === '[[0,1,0],[6,1,5]]' && r.height === 3 && JSON.stringify(mk.resizeVolume(box, 0, [-2, 0, -1]).points) === '[[4,1,2],[-2,1,-1]]'
+    && mk.resizeVolume(box, 2, [0, 0, 7]) === null,
+    'resizeVolume drags a ground corner in x and z, the opposite corner and the height stay; a flat box is refused');
+  check(mk.parseMarkers({ markers: [moved, mk.insertPoint(area, 1, [5, 0, 2]), r] }).length === 3, 'every edit gives a marker the server takes');
 }
 
 section('guides: the marker rules the server uses');

@@ -19,6 +19,13 @@
     <label class="tb" title="the current view's shading; see ? for active key bindings">shading <select id="view-shading"></select></label>
     <span class="tb readout" id="step" title="the current view's grid step"></span>
     <button class="tb" id="quad" title="single / quad view">quad</button>
+    <span class="tb tools" id="guide-tools" role="group" aria-label="guide tools" title="guides: nulls, curves, areas and volumes you place to direct the graph and the agent; they are saved as inputs/markers.json">guides
+      <button data-tool="selectMode" title="select and drag: drag a guide to move it, a point to move that point; double-click a curve to add a CV, a CV to remove it">select</button>
+      <button data-tool="placeNull" title="place nulls: click the ground or the geometry (Shift+1)">null</button>
+      <button data-tool="placeCurve" title="draw a curve: click its CVs, Enter finishes (Shift+2)">curve</button>
+      <button data-tool="placeArea" title="draw an area: click its corners, Enter closes it (Shift+3)">area</button>
+      <button data-tool="placeVolume" title="drag a volume: drag a rectangle on the ground (Shift+4)">volume</button>
+    </span>
     <button class="tb" id="edge-check" title="edge check: draw open (pink), non-manifold (yellow) and flipped (violet) edges over the meshes, as the render tool does">edge check</button>
     <span class="grow"></span>
     <button class="tb" id="scene-view" title="back to the whole scene: the graph's output with the reference layers and guides">Scene</button>
