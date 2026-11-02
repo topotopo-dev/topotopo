@@ -492,7 +492,11 @@ export function createGuides(ctx) {
     const i = G.list.findIndex((o) => o.id === d.h.id);
     if (i < 0) return true;
     G.list[i] = d.start; // the list as it was, so the change records the drag as one step
-    if (cancel) { entries(); G.draw(); ctx.emit('guides'); ctx.message(''); return true; }
+    if (cancel) {
+      // An earlier queued save may already have captured the live preview. Reconcile after it finishes; without
+      // an in-flight save this sees the original saved body and writes nothing.
+      entries(); G.draw(); save(); ctx.emit('guides'); ctx.message(''); return true;
+    }
     const live = d.live;
     const label = d.h.part === 'body' || live.kind === 'site' ? `move ${live.name}` : d.h.part === 'corner' ? `resize ${live.name}` : `move CV ${d.h.k} of ${live.name}`;
     G.change(label, (list) => { const j = list.findIndex((o) => o.id === live.id); if (j < 0) return false; list[j] = live; });

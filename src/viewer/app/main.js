@@ -2,7 +2,7 @@
 // the status bar and the server's event stream. The camera moves only when the person moves it or frames: loading,
 // cooking, saving and placing never frame (the one exception is the very first view, when nothing is remembered).
 import * as THREE from 'three';
-import { api } from './api.js';
+import { api, coalesce } from './api.js';
 import { createViews, CAMERA_NAMES, SHADINGS } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
@@ -42,15 +42,7 @@ const ctx = {
   on(type, f) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(f); },
   emit(type) { if (type !== 'hover') version++; for (const f of listeners.get(type) ?? []) f(); for (const f of listeners.get('*') ?? []) f(type); },
   version: () => version,
-  /** At most one run of fn at a time; calls during a run ask for one more run after it, and wait for that. */
-  coalesce(fn) {
-    let busy = null, again = false;
-    return () => {
-      if (busy) { again = true; return busy; }
-      busy = (async () => { try { do { again = false; await fn(); } while (again); } finally { busy = null; } })();
-      return busy;
-    };
-  },
+  coalesce,
 };
 
 // ------------------------------------------------------------------------------------------- messages

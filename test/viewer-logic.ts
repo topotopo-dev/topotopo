@@ -17,6 +17,7 @@ import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
 import { createUndo } from '../src/viewer/app/undo.js';
 import { createGuides } from '../src/viewer/app/guides.js';
+import { api, coalesce } from '../src/viewer/app/api.js';
 import * as THREE from 'three';
 import * as mesh from '../src/viewer/app/mesh.js';
 import * as vars from '../src/viewer/app/vars.js';
@@ -157,6 +158,49 @@ section('guides: perspective insertion and drag cancellation');
   events.length = 0;
   guides.dragEnd(true);
   check(JSON.stringify(guides.list[0]) === JSON.stringify(original) && events.includes('guides') && undo.length === 1, 'cancelling a live drag restores geometry and notifies Properties without saving or adding undo');
+}
+
+section('guides: cancellation while a prior save is queued');
+{
+  const originalSave = api.saveMarkers, pending: ((r: any) => void)[] = [], bodies: any[] = [];
+  let persisted: any = null;
+  api.saveMarkers = (body: string) => {
+    const snapshot = JSON.parse(body);
+    bodies.push(snapshot);
+    return new Promise((resolve) => pending.push((result) => { persisted = snapshot; resolve(result); }));
+  };
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const finishSave = async () => { const resolve = pending.shift(); if (resolve) resolve({ ok: true, count: 1, points: 1, prims: 0 }); await tick(); };
+  try {
+    const ctx: any = {
+      store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
+      selection: { has: () => false, prune: () => {} }, undo: { push: () => {} }, requestRender: () => {},
+      message: () => {}, emit: () => {}, pxWorld: () => 0.01, layers: {}, surfacePoint: () => null, coalesce,
+      views: { cam: () => ({ name: 'top' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
+    };
+    const guides = createGuides(ctx);
+    guides.list = [{ id: 'n', kind: 'site', name: 'null1', points: [[0, 0, 0]], radius: 5 }];
+    guides.saved = mk.markersBody(guides.list);
+    guides.setSize('n', 'radius', 6); // this save is in flight
+    guides.setSize('n', 'radius', 7); // this save waits behind it
+    guides.dragStart(0, 0, 0, { id: 'n', part: 'point', k: 0, at: [0, 0, 0] });
+    guides.dragMove(0, 10, 0);
+    await finishSave(); // the queued save now captures the preview at x=10
+    check(bodies.length === 2 && bodies[1].markers[0].points[0][0] === 10, 'the deferred-save fixture reaches a live drag preview captured by an earlier queued edit');
+    guides.dragEnd(true);
+    await finishSave(); // the preview reaches disk after cancellation
+    check(bodies.length === 3 && bodies[2].markers[0].points[0][0] === 0, 'cancel queues the original point behind a preview already being saved');
+    await finishSave();
+    check(persisted.markers[0].points[0][0] === 0 && persisted.markers[0].radius === 7 && !guides.saving(), 'after deferred saves drain, disk and the cancelled local guide agree and the earlier size edit is kept');
+    const writes = bodies.length;
+    const idle = createGuides(ctx);
+    idle.list = mk.cloneMarkers(guides.list); idle.saved = mk.markersBody(idle.list);
+    idle.dragStart(0, 0, 0, { id: 'n', part: 'point', k: 0, at: [0, 0, 0] });
+    idle.dragMove(0, 10, 0);
+    idle.dragEnd(true);
+    await tick();
+    check(bodies.length === writes && !idle.saving(), 'cancelling an ordinary drag with no pending save performs no network write');
+  } finally { api.saveMarkers = originalSave; }
 }
 
 section('guides: the marker rules the server uses');
