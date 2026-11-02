@@ -28,7 +28,7 @@ import { builtinLibrary, workingHash } from '../src/packages/registry.ts';
 import { esc, frontPage } from '../src/web/pages.ts';
 import { folderPage } from '../src/web/folder-page.ts';
 import { markdownLinks, renderMarkdown } from '../src/web/markdown.ts';
-import { imageSize, linkText, resolveLink, videoPlayer, walkTree } from '../src/web/folders.ts';
+import { imageSize, linkText, listFolder, PathError, resolveIn, resolveLink, videoPlayer, walkTree } from '../src/web/folders.ts';
 import { canonicalJSON } from '../src/io/source.ts';
 import { sha256Hex } from '../src/core/sha256.ts';
 
@@ -629,6 +629,41 @@ try {
     const caseless = fs.existsSync(path.join(yard, 'NOTES'));
     const upper = await fr('/w/yard/NOTES/');
     check(!caseless ? upper.status === 404 : upper.status === 301 && upper.headers.location === '/w/yard/notes/', `a folder asked for in another letter case leads to its own address (its flags are found by it)${caseless ? '' : ' (a case-sensitive file system: 404)'}`);
+  }
+
+  section('folder pages: links written through a root alias');
+  {
+    const target = path.join(tmp, 'alias-target'), alias = path.join(tmp, 'alias-root'), outside = path.join(tmp, 'alias-outside');
+    write(path.join(target, 'visible', 'readme.txt'), 'visible');
+    write(path.join(target, '.secret', 'key.txt'), 'secret');
+    write(path.join(outside, 'key.txt'), 'outside');
+    const type = process.platform === 'win32' ? 'junction' : 'dir';
+    fs.symlinkSync(target, alias, type);
+    fs.symlinkSync(path.join(alias, 'visible'), path.join(target, 'visible-link'), type);
+    fs.symlinkSync(path.join(alias, '.secret'), path.join(target, 'hidden-link'), type);
+    fs.symlinkSync(outside, path.join(target, 'outside-link'), type);
+    const status = (parts: string[]) => {
+      try { return { code: 200, abs: resolveIn(alias, parts).abs }; }
+      catch (e) { if (e instanceof PathError) return { code: e.status, abs: '' }; throw e; }
+    };
+    const visible = status(['visible-link', 'readme.txt']);
+    check(visible.code === 200 && fs.readFileSync(visible.abs, 'utf8') === 'visible', 'an internal link written with the configured root alias remains readable');
+    check(status(['hidden-link', 'key.txt']).code === 404, 'a hidden target written with the root alias is hidden, not misclassified as outside');
+    const names = listFolder(alias, '', alias).folders.map((f) => f.name);
+    check(names.includes('visible-link') && !names.includes('hidden-link') && !names.includes('outside-link'), 'listing through a root alias shows visible internal links and hides hidden or external links');
+    const stat = fs.statSync, lstat = fs.lstatSync, native = fs.realpathSync.native;
+    const looked: string[] = [];
+    const sensitive = [path.join(target, '.secret'), path.join(alias, '.secret'), outside];
+    const guard = (fn: (...args: any[]) => any) => (file: any, ...args: any[]) => {
+      const p = path.resolve(String(file));
+      if (sensitive.some((d) => p === d || p.startsWith(d + path.sep))) { looked.push(p); throw new Error('unsafe lookup'); }
+      return fn(file, ...args);
+    };
+    try {
+      (fs as any).statSync = guard(stat); (fs as any).lstatSync = guard(lstat); fs.realpathSync.native = guard(native) as typeof native;
+      check(status(['hidden-link', 'missing.txt']).code === 404 && !looked.length, 'a missing child through a root-alias link is hidden before its target is probed');
+      check(status(['outside-link', 'key.txt']).code === 400 && !looked.length, 'root-alias handling still rejects an outside target before probing it');
+    } finally { fs.statSync = stat; fs.lstatSync = lstat; fs.realpathSync.native = native; }
   }
 
   section('folder pages: the look, in the markup');

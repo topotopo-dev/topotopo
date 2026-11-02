@@ -105,7 +105,7 @@ const leaves = (r: string) => r === '..' || r.startsWith(`..${path.sep}`) || pat
  */
 export function realBelow(top: string, abs: string, dotsOnly = false): { rel: string } | { why: string; out: boolean } {
   const outside = { why: 'it leads out of the folder', out: true };
-  const relative = path.relative(path.resolve(top), path.resolve(abs));
+  const root = path.resolve(top), relative = path.relative(root, path.resolve(abs));
   if (leaves(relative)) return outside;
   let realTop: string;
   try { realTop = fs.realpathSync.native(top); } catch { return { why: 'it cannot be read', out: false }; }
@@ -131,7 +131,11 @@ export function realBelow(top: string, abs: string, dotsOnly = false): { rel: st
       try { target = fs.readlinkSync(next); } catch { return { why: 'it cannot be read', out: false }; }
       // readlink reads the link itself. Reject network and device targets before any call follows them.
       if (/^[\\/]{2}/.test(target)) return outside;
-      const r = path.relative(realTop, path.resolve(current, target));
+      const destination = path.resolve(current, target);
+      let r = path.relative(realTop, destination);
+      // A junction can retain the configured root's short name or alias. That prefix already resolves to
+      // realTop; map it without following the target, so hidden and external paths are still checked first.
+      if (leaves(r)) r = path.relative(root, destination);
       if (leaves(r)) return outside;
       parts = [...(r ? r.split(path.sep) : []), ...parts];
       current = realTop;
