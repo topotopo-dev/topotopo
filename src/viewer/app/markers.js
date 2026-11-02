@@ -204,3 +204,63 @@ export function hatchSegments(pts, spacing) {
   }
   return out;
 }
+
+// ------------------------------------------------------------------ direct edits (dragging in the view)
+// Each takes a marker and returns a new one (the input is left alone), points kept to the millimetre; null when the
+// edit would break the kind's rules (MARKER_POINTS, a volume's corners differing in x and z).
+const mm3 = (p) => [mm(p[0]), mm(p[1]), mm(p[2])];
+const withPoints = (m, points) => ({ ...m, points });
+
+/** Point `k` (a null's point, a CV, a volume's ground corner as stored) moved to `p`. */
+export function movePoint(m, k, p) {
+  if (!(k >= 0 && k < m.points.length)) return null;
+  const points = m.points.map((q, i) => (i === k ? mm3(p) : q.slice()));
+  if (m.kind === 'volume' && (points[0][0] === points[1][0] || points[0][2] === points[1][2])) return null;
+  return withPoints(m, points);
+}
+
+/** The whole guide moved by `d` [dx, dy, dz]. */
+export const translateMarker = (m, d) => withPoints(m, m.points.map((p) => mm3([p[0] + d[0], p[1] + d[1], p[2] + d[2]])));
+
+/**
+ * The segments of a curve or an area as pairs of point indices: a curve's k → k+1, an area's also its closing edge
+ * (last → 0). Nulls and volumes have none.
+ */
+export function segmentsOf(m) {
+  if (m.kind !== 'path' && m.kind !== 'zone') return [];
+  const n = m.points.length, out = [];
+  for (let k = 0; k + 1 < n; k++) out.push([k, k + 1]);
+  if (m.kind === 'zone' && n >= 3) out.push([n - 1, 0]);
+  return out;
+}
+
+/** A new CV at `p` on segment `s` (segmentsOf's index): it lands between the segment's two ends. */
+export function insertPoint(m, s, p) {
+  const seg = segmentsOf(m)[s];
+  if (!seg) return null;
+  const points = m.points.map((q) => q.slice());
+  // the closing edge of an area (last → 0) takes its new corner at the end
+  points.splice(seg[1] === 0 ? points.length : seg[1], 0, mm3(p));
+  return withPoints(m, points);
+}
+
+/** CV `k` removed; null when the guide would have fewer points than its kind needs (a curve 2, an area 3). */
+export function removePoint(m, k) {
+  if (m.kind !== 'path' && m.kind !== 'zone') return null;
+  if (!(k >= 0 && k < m.points.length) || m.points.length - 1 < minPoints(m.kind)) return null;
+  return withPoints(m, m.points.filter((_, i) => i !== k).map((q) => q.slice()));
+}
+
+/** A volume's four ground corners [x, lo y, z], walked around the box: (lo x, lo z), (hi x, lo z), (hi x, hi z), (lo x, hi z). */
+export function volumeCorners(m) {
+  const { lo, hi } = boxOf(m);
+  return [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], lo[1], hi[2]], [lo[0], lo[1], hi[2]]];
+}
+
+/** A volume with ground corner `k` (volumeCorners' order) dragged to `p` in x and z; the opposite corner stays. */
+export function resizeVolume(m, k, p) {
+  const c = volumeCorners(m), fixed = c[(k + 2) % 4], y = c[0][1];
+  const a = mm3([fixed[0], y, fixed[2]]), b = mm3([p[0], y, p[2]]);
+  if (a[0] === b[0] || a[2] === b[2]) return null;
+  return withPoints(m, [a, b]);
+}

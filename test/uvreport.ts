@@ -7,6 +7,7 @@ import '../src/nodes/index.ts';
 import { GeoBuilder } from '../src/core/geometry.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import { uvReport } from '../src/core/uvreport.ts';
+import { uvOverlapPairs } from '../src/core/uvoverlap.ts';
 import { inspect } from '../src/inspect.ts';
 
 let fail = 0, pass = 0;
@@ -158,6 +159,15 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   check(/texel density \(texels\/m at 1000×1000\): 412\.3 over 2 charts/.test(text) && /utilization per tile: 1001 25\.0%, 1002 9\.0%/.test(text), 'inspect uv prints the density and the per-tile lines');
   const one = uvReport(mesh([quad(0, 0, 0.1, 0.1, 0.6, 0.6, 'a')]));
   check(one.tileUtilization.length === 0, 'one tile: no per-tile list (utilization says it)');
+}
+
+{
+  // many large triangles on one uv (instanced copies of a mesh, cooked out): the candidate grid would list each in
+  // thousands of cells and overflow; the scan stops and says so, the report is marked incomplete
+  const n = 20000, U = new Float64Array(n * 6), signed = new Float64Array(n).fill(0.5), valid = Array.from({ length: n }, (_, i) => i);
+  for (let t = 0; t < n; t++) U.set([0, 0, 1, 0, 0, 1], t * 6);
+  const scan = uvOverlapPairs(U, valid, signed, () => {});
+  check(scan.stopped && /too many to compare/.test(scan.reason ?? '') && scan.testedPairs === 0, `a uv grid too deep to list stops the scan with a reason (${scan.reason})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

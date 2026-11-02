@@ -64,7 +64,16 @@ export interface OverlapScan {
   testedPairs: number;
   /** maxTests was reached: later candidates were counted but not tested */
   stopped: boolean;
+  /** why the scan stopped before testing every candidate, when it was not maxTests */
+  reason?: string;
 }
+
+/**
+ * The most cell entries the candidate grid holds. Each triangle is listed in every cell its box touches; many large
+ * triangles sharing the tile (hundreds of instanced copies of one mesh, all on the same uv) would list billions,
+ * past the Int32 offsets and any memory. Past this the scan stops, unfinished, instead.
+ */
+const MAX_LISTED = 1 << 26;
 
 export interface OverlapScanOptions {
   /** most exact pair tests (default unlimited) */
@@ -102,6 +111,16 @@ export function uvOverlapPairs(U: Float64Array, valid: ArrayLike<number>, signed
   const cs = span / cells;
   const nx = Math.max(1, Math.min(1024, Math.ceil((maxU - minU) / cs) || 1)), ny = Math.max(1, Math.min(1024, Math.ceil((maxV - minV) / cs) || 1));
   const cellOf = (u: number, n: number, lo: number) => Math.max(0, Math.min(n - 1, Math.floor((u - lo) / cs)));
+  let listed = 0;
+  for (let i = 0; i < nv; i++) {
+    const t = valid[i];
+    listed += (cellOf(bb[t * 4 + 3], ny, minV) - cellOf(bb[t * 4 + 1], ny, minV) + 1) * (cellOf(bb[t * 4 + 2], nx, minU) - cellOf(bb[t * 4], nx, minU) + 1);
+  }
+  if (listed > MAX_LISTED) {
+    scan.stopped = true;
+    scan.reason = `${nv.toLocaleString('en-US')} triangles cover the uv grid ${Math.round(listed / nv).toLocaleString('en-US')} cells deep on average (many large triangles on the same uv, as instanced copies are): too many to compare`;
+    return scan;
+  }
   const counts = new Int32Array(nx * ny + 1);
   for (let i = 0; i < nv; i++) {
     const t = valid[i];

@@ -47,6 +47,9 @@ export const ROWS = [
   },
   { label: 'place a null / curve / area / volume', maya: ['Shift+1 / 2 / 3 / 4', { keys: place }], houdini: ['Shift+1 / 2 / 3 / 4', { keys: place }], blender: ['Shift+1 / 2 / 3 / 4', { keys: place }] },
   { label: 'finish a curve / remove its last point / cancel', maya: ['Enter / Backspace / Esc', { keys: curve }], houdini: ['Enter / Backspace / Esc', { keys: curve }], blender: ['Enter / Backspace / Esc', { keys: curve }] },
+  // the mouse in select mode (main.js and guides.js handle these; no chords to bind)
+  { label: 'move a guide / one of its points', maya: ['L drag its line / the point'], houdini: ['L drag its line / the point'], blender: ['L drag its line / the point'] },
+  { label: 'add a CV to a curve or area / remove one', maya: ['double-click its line / the CV'], houdini: ['double-click its line / the CV'], blender: ['double-click its line / the CV'] },
   { label: 'delete the selection', maya: ['Delete', { keys: { Delete: 'delete' } }], houdini: ['Delete', { keys: { Delete: 'delete' } }], blender: ['X, Delete', { keys: { X: 'delete', Delete: 'delete' } }] },
   {
     label: 'undo / redo (guides and vars)',

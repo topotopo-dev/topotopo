@@ -1,0 +1,12 @@
+{
+  "graph": "lineup",
+  "bake": {},
+  "title": "Nature",
+  "description": "TopoTopo's nature package: rocks and cliff blocks, low-poly trees, bushes and logs, and forests, grass clumps and scattered rocks that dress a surface.",
+  "tags": [
+    "built-in"
+  ],
+  "links": [],
+  "created": "2026-10-28",
+  "name": "topotopo/nature"
+}

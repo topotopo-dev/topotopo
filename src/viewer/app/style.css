@@ -33,6 +33,11 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #top .readout { font: var(--mono); color: var(--dim); min-width: 84px; }
 #top .mode { color: var(--sel); }
 #top button.tb.on { border-color: var(--sel); color: var(--sel); }
+#top .tools { gap: 0; }
+#top .tools button { margin-left: -1px; border-radius: 0; }
+#top .tools button:first-of-type { margin-left: 4px; border-radius: 3px 0 0 3px; }
+#top .tools button:last-of-type { border-radius: 0 3px 3px 0; }
+#top .tools button.on { border-color: var(--sel); color: var(--sel); position: relative; }
 .grow { flex: 1; }
 
 /* panels */

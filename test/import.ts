@@ -79,6 +79,27 @@ try {
   const engine = new Engine(host); await engine.init();
   const cooked = await engine.cook(fileGraph('scene.glb'));
   check(cooked.ok && cooked.geo?.numPacked === 3, 'scene with sparse extras cooks through file node');
+  // an input a person has not made yet (the viewer's guides): missing "empty" cooks to nothing, then reads it once there
+  const guides = fileGraph('inputs/markers.json', { missing: 'empty' });
+  const before = await engine.cook(guides);
+  const strict = await engine.cook(fileGraph('inputs/markers.json'));
+  check(before.ok && before.geo!.numPoints === 0 && before.warnings.some((w) => /no file "inputs\/markers\.json" yet/.test(w.message))
+    && !strict.ok && strict.errors.some((e) => /cannot read "inputs\/markers\.json"/.test(e.message)),
+    'missing "empty": a file that is not there gives an empty result and a warning; the default still stops the cook');
+  fs.mkdirSync(path.join(tmp, 'inputs'));
+  const onePoint = await engine.cook({ nodes: { p: { type: 'points', params: { points: [[1, 0, 2]] } } }, output: 'p' });
+  fs.writeFileSync(path.join(tmp, 'inputs', 'markers.json'), await exportGeometryAsync(onePoint.geo!, 'json'));
+  const after = await engine.cook(guides);
+  check(after.ok && after.geo!.numPoints === 1, 'missing "empty": the same graph reads the file once it appears (its stamp is in the cache key)');
+  fs.writeFileSync(path.join(tmp, 'missing-buffer.gltf'), JSON.stringify({
+    asset: { version: '2.0' }, buffers: [{ uri: 'missing.bin', byteLength: 36 }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 36 }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }], nodes: [{ mesh: 0 }], scenes: [{ nodes: [0] }], scene: 0,
+  }));
+  const dependentMissing = await engine.cook(fileGraph('missing-buffer.gltf', { missing: 'empty' }));
+  check(!dependentMissing.ok && dependentMissing.errors.some((e) => /missing\.bin/.test(e.message)) && !dependentMissing.warnings.some((w) => /no file .* yet/.test(w.message)),
+    'missing "empty" never hides a missing external glTF buffer behind an existing primary file');
 
   // Single-use meshes stay expanded; unrelated scenes do not affect shared-mesh counts.
   const single = new Document(), sb = single.createBuffer();

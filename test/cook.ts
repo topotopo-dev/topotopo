@@ -588,9 +588,17 @@ section('LFS: output folders no pattern covers, in a repository that uses LFS');
     check(st.packages[0].lfs.includes('res://assets/props/outputs/panels') && st.packages[0].lfs.length === 4, `*.glb alone: every output folder lacks a PNG pattern (${st.packages[0].lfs.join(', ')})`);
     const said = godotSetup(L, { addon: path.join(tmp, 'addon-src') });
     check(said.some((l) => /uses LFS and no pattern covers res:\/\/assets\/props\/outputs\/crate/.test(l)), 'setup warns about them');
+    // Git reports the physical root even when the caller reaches it through a junction or symlink.
+    const alias = path.join(tmp, 'lfs alias');
+    fs.symlinkSync(L, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const aliased = godotStatus(alias);
+    check(JSON.stringify(aliased.packages[0].lfs) === JSON.stringify(st.packages[0].lfs), 'status through a directory alias reports the same uncovered output folders');
+    const aliasSaid = godotSetup(alias, { addon: path.join(tmp, 'addon-src') });
+    check(aliasSaid.some((l) => /uses LFS and no pattern covers res:\/\/assets\/props\/outputs\/crate/.test(l)), 'setup through a directory alias warns about uncovered outputs');
     write(path.join(L, '.gitattributes'), '*.glb filter=lfs diff=lfs merge=lfs -text\n*.png filter=lfs diff=lfs merge=lfs -text\n');
     st = godotStatus(L);
     check(!st.packages[0].lfs.length && st.ok, 'with *.png covered too, none');
+    check(!godotStatus(alias).packages[0].lfs.length, 'covered patterns are found through a directory alias, including nonexistent probe files');
     const plain = godotStatus(path.join(tmp, 'status'));
     check(plain.packages.every((p) => !p.lfs.length), 'a project in no repository using LFS gets no LFS warning');
   }

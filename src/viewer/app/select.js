@@ -36,13 +36,14 @@ export function createSelect(ctx) {
   };
   /**
    * Where a guide lands under a viewport point: the surface of the output or of a reference layer (not pictures,
-   * not the markers file), else the slot's construction plane. {point, surface} or null.
+   * not the markers file), else the slot's construction plane. {point, surface} or null. `layersOnly`: the reference
+   * layers alone (a dragged guide must not land on what the graph builds from it).
    */
-  S.surfacePoint = (slot, x, y) => {
+  S.surfacePoint = (slot, x, y, { layersOnly = false } = {}) => {
     const rc = ctx.views.ray(slot, x, y);
     let best = null;
     for (const e of meshEntries()) {
-      if (e.surface === false || e.mesh.bboxMode) continue;
+      if (e.surface === false || e.mesh.bboxMode || (layersOnly && e.kind !== 'layer')) continue;
       const h = e.mesh.pick(rc, 0);
       if (h && h.dist < (best?.dist ?? Infinity)) best = h;
     }

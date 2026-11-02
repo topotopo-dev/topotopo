@@ -16,6 +16,9 @@ import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
 import { createUndo } from '../src/viewer/app/undo.js';
+import { createGuides } from '../src/viewer/app/guides.js';
+import { api, coalesce } from '../src/viewer/app/api.js';
+import * as THREE from 'three';
 import * as mesh from '../src/viewer/app/mesh.js';
 import * as vars from '../src/viewer/app/vars.js';
 import * as status from '../src/viewer/app/status.js';
@@ -39,7 +42,7 @@ section('keymap presets (section 9)');
 {
   check(km.PRESETS.map((p: any) => p.id).join() === 'topotopo,maya,houdini,blender' && km.DEFAULT_PRESET === 'topotopo', 'four presets, TopoTopo the default');
   const ids = km.PRESETS.map((p: any) => p.id);
-  check(km.ROWS.length === 22 && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
+  check(km.ROWS.length === 24 && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
     `every row of the table has binding text in every preset (${km.ROWS.length} rows)`);
   const later = km.ROWS.filter((r: any) => r.phase === 2);
   check(later.map((r: any) => r.label).join(' | ') === 'move / rotate / scale | snap to grid (held) | snap to surface or curve (held) | snap to point (held) | snapping on / off'
@@ -94,6 +97,110 @@ section('keymap presets (section 9)');
   check(km.overlayRows('blender').length === km.ROWS.length && km.overlayRows('blender').find((r: any) => r.label === 'frame all')?.text === 'Home'
     && km.overlayRows('maya').filter((r: any) => !r.built).length === 5, 'the overlay lists the active preset\'s whole table, the phase 2 rows marked');
   check(km.canonical('shift+ctrl+z') === 'Ctrl+Shift+Z' && !!throws(() => km.canonical('Hyper+A')), 'chords have one spelling; unknown modifiers are refused');
+}
+
+section('guides: dragging, adding and removing points');
+{
+  const curve = { id: 'c', kind: 'path', name: 'road', points: [[0, 0, 0], [10, 0, 0], [10, 0, 10]] };
+  const area = { id: 'a', kind: 'zone', name: 'park', points: [[0, 0, 0], [4, 0, 0], [4, 0, 4]] };
+  const box = { id: 'v', kind: 'volume', name: 'clear', points: [[0, 1, 0], [4, 1, 2]], height: 3 };
+  const moved = mk.movePoint(curve, 1, [10.0004, 0.5, -2.1234]);
+  check(JSON.stringify(moved.points) === '[[0,0,0],[10,0.5,-2.123],[10,0,10]]' && JSON.stringify(curve.points[1]) === '[10,0,0]' && moved.name === 'road',
+    'movePoint moves one point, to the millimetre, leaving the marker it was given alone');
+  check(mk.movePoint(curve, 3, [0, 0, 0]) === null && mk.movePoint(box, 1, [0, 5, 2]) === null, 'movePoint refuses a point that is not there, and a volume whose corners would share an x or a z');
+  check(JSON.stringify(mk.translateMarker(curve, [1, 2, 3]).points) === '[[1,2,3],[11,2,3],[11,2,13]]', 'translateMarker moves every point');
+  check(JSON.stringify(mk.segmentsOf(curve)) === '[[0,1],[1,2]]' && JSON.stringify(mk.segmentsOf(area)) === '[[0,1],[1,2],[2,0]]' && mk.segmentsOf(box).length === 0,
+    'segmentsOf: a curve\'s CV to CV, an area\'s also its closing edge; volumes none');
+  check(JSON.stringify(mk.insertPoint(curve, 0, [5, 0, 0]).points) === '[[0,0,0],[5,0,0],[10,0,0],[10,0,10]]'
+    && JSON.stringify(mk.insertPoint(area, 2, [2, 0, 2]).points) === '[[0,0,0],[4,0,0],[4,0,4],[2,0,2]]' && mk.insertPoint(curve, 2, [0, 0, 0]) === null,
+    'insertPoint lands between the segment\'s ends (an area\'s closing edge at the end); no segment, no point');
+  check(JSON.stringify(mk.removePoint(curve, 1).points) === '[[0,0,0],[10,0,10]]' && mk.removePoint(mk.removePoint(curve, 1), 0) === null
+    && mk.removePoint(area, 0) === null && mk.removePoint(box, 0) === null,
+    'removePoint keeps a curve at 2 CVs and an area at 3 corners; volumes have no CVs to remove');
+  const c = mk.volumeCorners(box);
+  check(JSON.stringify(c) === '[[0,1,0],[4,1,0],[4,1,2],[0,1,2]]', 'volumeCorners walks the four ground corners at the lower y');
+  const r = mk.resizeVolume(box, 2, [6, 9, 5]);
+  check(JSON.stringify(r.points) === '[[0,1,0],[6,1,5]]' && r.height === 3 && JSON.stringify(mk.resizeVolume(box, 0, [-2, 0, -1]).points) === '[[4,1,2],[-2,1,-1]]'
+    && mk.resizeVolume(box, 2, [0, 0, 7]) === null,
+    'resizeVolume drags a ground corner in x and z, the opposite corner and the height stay; a flat box is refused');
+  check(mk.parseMarkers({ markers: [moved, mk.insertPoint(area, 1, [5, 0, 2]), r] }).length === 3, 'every edit gives a marker the server takes');
+}
+
+section('guides: perspective insertion and drag cancellation');
+{
+  const camera = new THREE.PerspectiveCamera(90, 1, 0.1, 1000);
+  camera.updateMatrixWorld();
+  const project = (_slot: number, p: THREE.Vector3) => { const q = p.clone().project(camera); return { x: (q.x + 1) * 500, y: (1 - q.y) * 500 }; };
+  const events: string[] = [], undo: any[] = [];
+  const ctx: any = {
+    store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} },
+    objects: new Map(), guidesRoot: new THREE.Group(), hover: null, isolated: false,
+    selection: { has: () => false, prune: () => {}, apply: () => {} },
+    pxWorld: () => 0.01, requestRender: () => {}, message: () => {},
+    coalesce: () => () => {}, emit: (event: string) => events.push(event), undo: { push: (step: any) => undo.push(step) },
+    views: {
+      camera: () => camera, project,
+      ray: (_slot: number, x: number, y: number) => { const r = new THREE.Raycaster(); r.setFromCamera(new THREE.Vector2(x / 500 - 1, 1 - y / 500), camera); return r; },
+    },
+  };
+  const guides = createGuides(ctx), curve = { id: 'persp', kind: 'path', name: 'curve1', points: [[-1, 0, -2], [5, 0, -20]] };
+  guides.list = [curve];
+  const a = project(0, new THREE.Vector3(...curve.points[0])), b = project(0, new THREE.Vector3(...curve.points[1]));
+  const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
+  const hit = guides.handleAt(0, x, y), p = project(0, new THREE.Vector3(...hit.at));
+  check(hit.part === 'body' && Math.hypot(p.x - x, p.y - y) < 1e-6, 'perspective guide picking uses the world point under the click, with unequal endpoint depths');
+  guides.doubleClick(0, x, y);
+  const cv = project(0, new THREE.Vector3(...guides.list[0].points[1]));
+  check(guides.list[0].points.length === 3 && Math.hypot(cv.x - x, cv.y - y) < 1 && undo.length === 1, 'double-click inserts the CV at the clicked perspective location as one undo step');
+  const original = mk.cloneMarkers(guides.list)[0], live = mk.translateMarker(original, [4, 0, 0]);
+  guides.list[0] = live;
+  guides.dragging = { start: original, live, moved: true, h: { id: original.id, part: 'body' } };
+  events.length = 0;
+  guides.dragEnd(true);
+  check(JSON.stringify(guides.list[0]) === JSON.stringify(original) && events.includes('guides') && undo.length === 1, 'cancelling a live drag restores geometry and notifies Properties without saving or adding undo');
+}
+
+section('guides: cancellation while a prior save is queued');
+{
+  const originalSave = api.saveMarkers, pending: ((r: any) => void)[] = [], bodies: any[] = [];
+  let persisted: any = null;
+  api.saveMarkers = (body: string) => {
+    const snapshot = JSON.parse(body);
+    bodies.push(snapshot);
+    return new Promise((resolve) => pending.push((result) => { persisted = snapshot; resolve(result); }));
+  };
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const finishSave = async () => { const resolve = pending.shift(); if (resolve) resolve({ ok: true, count: 1, points: 1, prims: 0 }); await tick(); };
+  try {
+    const ctx: any = {
+      store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
+      selection: { has: () => false, prune: () => {} }, undo: { push: () => {} }, requestRender: () => {},
+      message: () => {}, emit: () => {}, pxWorld: () => 0.01, layers: {}, surfacePoint: () => null, coalesce,
+      views: { cam: () => ({ name: 'top' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
+    };
+    const guides = createGuides(ctx);
+    guides.list = [{ id: 'n', kind: 'site', name: 'null1', points: [[0, 0, 0]], radius: 5 }];
+    guides.saved = mk.markersBody(guides.list);
+    guides.setSize('n', 'radius', 6); // this save is in flight
+    guides.setSize('n', 'radius', 7); // this save waits behind it
+    guides.dragStart(0, 0, 0, { id: 'n', part: 'point', k: 0, at: [0, 0, 0] });
+    guides.dragMove(0, 10, 0);
+    await finishSave(); // the queued save now captures the preview at x=10
+    check(bodies.length === 2 && bodies[1].markers[0].points[0][0] === 10, 'the deferred-save fixture reaches a live drag preview captured by an earlier queued edit');
+    guides.dragEnd(true);
+    await finishSave(); // the preview reaches disk after cancellation
+    check(bodies.length === 3 && bodies[2].markers[0].points[0][0] === 0, 'cancel queues the original point behind a preview already being saved');
+    await finishSave();
+    check(persisted.markers[0].points[0][0] === 0 && persisted.markers[0].radius === 7 && !guides.saving(), 'after deferred saves drain, disk and the cancelled local guide agree and the earlier size edit is kept');
+    const writes = bodies.length;
+    const idle = createGuides(ctx);
+    idle.list = mk.cloneMarkers(guides.list); idle.saved = mk.markersBody(idle.list);
+    idle.dragStart(0, 0, 0, { id: 'n', part: 'point', k: 0, at: [0, 0, 0] });
+    idle.dragMove(0, 10, 0);
+    idle.dragEnd(true);
+    await tick();
+    check(bodies.length === writes && !idle.saving(), 'cancelling an ordinary drag with no pending save performs no network write');
+  } finally { api.saveMarkers = originalSave; }
 }
 
 section('guides: the marker rules the server uses');

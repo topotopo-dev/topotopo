@@ -18,3 +18,5 @@ bench/last.json
 .cache/
 **/packages/.cache.json
 **/packages/.lock
+bench/llm/results/
+bench/llm/report/

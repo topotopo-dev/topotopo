@@ -435,6 +435,7 @@ defineNode({
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
     weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances)' },
     instancing: { type: 'enum', options: ['packed', 'expand'], default: 'packed', desc: 'glTF shared meshes and EXT_mesh_gpu_instancing: keep instances as packed prims, or expand them into geometry' },
+    missing: { type: 'enum', options: ['error', 'empty'], default: 'error', desc: 'a file that is not there: error stops the cook; empty gives no geometry and a warning, for an input a person may not have made yet, such as inputs/markers.json before the first guide is drawn (the cook runs again when it appears)', aliases: ['if_missing', 'optional'] },
   },
   // relative paths read the scope's folder
   signatureExtra: (p, scope) => {
@@ -483,7 +484,16 @@ defineNode({
       }
       return g;
     };
-    if (files === null) return read(p.path, p.format === 'auto' ? importFormatFromPath(p.path) : p.format);
+    if (files === null) {
+      const optional = p.missing === 'empty', absent = () => { warn(`no file "${p.path}" yet: an empty result (missing: "empty")`); return new Geometry(); };
+      if (optional && host.fileStamp(p.path) === 'missing') return absent();
+      try { return await read(p.path, p.format === 'auto' ? importFormatFromPath(p.path) : p.format); }
+      catch (e: any) {
+        // Importers also read dependent buffers/textures. Their ENOENT is an error, not an absent primary file.
+        if (optional && host.fileStamp(p.path) === 'missing') return absent();
+        throw e;
+      }
+    }
     const parts: Geometry[] = [];
     for (const file of files) {
       const fmt = importFormatFromPath(file);

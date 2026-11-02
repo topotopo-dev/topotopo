@@ -507,10 +507,12 @@ function gitOf(project: string): { top: string; lfs: boolean; filter: (abs: stri
   const run = (args: string[]) => spawnSync('git', args, { cwd: project, encoding: 'utf8', windowsHide: true });
   const top = run(['rev-parse', '--show-toplevel']);
   if (top.status !== 0 || !top.stdout.trim()) return null;
-  const root = path.resolve(top.stdout.trim());
+  // Git expands junctions and Windows short paths. Walk and query the same physical paths it reports.
+  const root = fs.realpathSync.native(top.stdout.trim());
+  const dir = fs.realpathSync.native(project);
   // a repository uses LFS when a .gitattributes on the way to the project names filter=lfs
   let lfs = false;
-  for (let d = path.resolve(project); within(d, root); d = path.dirname(d)) {
+  for (let d = dir; within(d, root); d = path.dirname(d)) {
     try { if (/filter=lfs/.test(fs.readFileSync(path.join(d, '.gitattributes'), 'utf8'))) { lfs = true; break; } } catch { /* none here */ }
     if (path.resolve(d) === root) break;
   }
@@ -519,7 +521,8 @@ function gitOf(project: string): { top: string; lfs: boolean; filter: (abs: stri
     filter: (abs) => {
       const out = new Map<string, string>();
       if (!abs.length) return out;
-      const rels = abs.map((a) => posix(path.relative(root, a)));
+      // Probe files need not exist, so resolve their project prefix rather than realpathing each file.
+      const rels = abs.map((a) => posix(path.relative(root, path.join(dir, path.relative(project, a)))));
       const r = spawnSync('git', ['check-attr', 'filter', '--', ...rels], { cwd: root, encoding: 'utf8', windowsHide: true });
       for (const line of (r.stdout ?? '').split(/\r?\n/)) {
         const m = /^(.*): filter: (.*)$/.exec(line);

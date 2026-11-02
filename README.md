@@ -153,6 +153,19 @@ next node (long nodes such as erosion stop between their iterations; others fini
 view keeps the last finished result. Changing a value while a cook runs starts over with the newest value. The status
 bar also says what the view shows and its size; other messages appear over the view and clear themselves. **edge
 check** in the top bar draws open, non-manifold and flipped edges as the render tool does.
+**Guides** lay a scene out by hand where sliders are not enough: the **guides** tools in the top bar (or Shift+1–4)
+place nulls, draw curves and areas and drag volumes, on your reference layers or the ground. In select mode, drag a
+guide to move it and a point (a CV, a null, a volume's corner) to move that point; double-click a curve's line to add
+a CV and a CV to remove it; every change is one undo step. Guides are saved as `inputs/markers.json`, curves and areas
+as polylines and nulls as points, each with its `name` and `role`, and a graph reads them like any input
+(`{"type": "file", "params": {"path": "inputs/markers.json", "missing": "empty"}}`, which cooks before the first guide
+exists). The scene cooks again after a guide edit, and an agent reads the same file. Try it on the example village:
+`topotopo edit examples/guided_town`. There, curves named `road…` become roads with lamp posts, `fence…` fences, areas
+named `house…` houses on that footprint, `forest…` woods; volumes clear the woods, and nulls named `bench…`, `lamp…`
+or `tree…` place one.
+
+![guides: before and after](docs/guides-before-after.png)
+
 With `topotopo view graph.json` the graph file stays as you wrote it: the values you tune are kept by the viewer,
 through exports, output switches and saves of the file (a value goes back to the file's only when its declaration in
 `params` changes or the var is removed). A mark shows each value that differs from the file; ↺ takes one back,
@@ -340,6 +353,9 @@ nodes and the props package's crate with baked AO and curvature turned into worn
 rendered with `textures: true` next to the texture view. `texture_lab` is worn painted metal from texture nodes only:
 SDF plates and rivets, edge wear from curvature, chipped by grunge and slope blur, brushed steel under the paint, a paint
 tint per plate from flood fill, rust running from the rivets, AO and an ORM map.
+`guided_town` ([examples/guided_town](examples/guided_town), a package of its own) is a village laid out with the
+viewer's guides: a road, house footprints, a fence, woods and a clearing in its `inputs/markers.json`, built from
+TopoTopo's own packages; open it with `topotopo edit examples/guided_town` and drag them.
 `house_city` spawns the architecture package's `house` on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
 straight-skeleton roofs (an L-shaped house, a courtyard roof around a hole, nested offsets). `deformers` (lattice,
 path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert) and `remesh_lod` (isotropic remesh,
@@ -791,6 +807,21 @@ directory and uses it from there: the `topotopo` bin (help, cooking an example w
 its types, the built-in library of TopoTopo's own packages (a package's first use copies a built-in package from it), the bundled font,
 the worker pool, the WASM kernels and the MCP server over stdio. It takes about a minute and is not part of
 `npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## TopoTopo Bench
+
+[bench/llm](bench/llm/README.md) runs language models on a suite of 3D tasks (a stone bridge, a lighthouse, a Windsor
+chair, a game-ready crate, an oak, an eroded valley, a village from a level designer's guides, …) through TopoTopo's own
+MCP server, with the same tools, prompt and budget for each, and builds a comparison page: a leaderboard, every
+result side by side from one camera, the checks each passed, the tool calls, tokens and time, and a 3D view whose
+cameras orbit together. Each comparison uses one exact engine revision, task suite and set of run settings; saved
+attempts are preserved. Provider tests use local API stand-ins; live model compatibility and visual quality need
+separate evaluation.
+
+```bash
+npm run bench:llm -- --model anthropic:claude-opus-5-5     # or openai:, google:, openrouter:, ollama:, compat: …
+npm run bench:llm:report                                   # bench/llm/report/index.html
+```
 
 ## Layout
 

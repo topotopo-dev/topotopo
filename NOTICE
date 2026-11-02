@@ -27,7 +27,7 @@ accepts@2.0.0: MIT (jshttp/accepts)
 ajv@8.20.0: MIT (https://ajv.js.org)
 ajv-formats@3.0.1: MIT (https://github.com/ajv-validator/ajv-formats#readme)
 anynum@1.0.1: MIT (https://github.com/NaturalIntelligence/anynum)
-body-parser@2.3.0: MIT (expressjs/body-parser)
+body-parser@2.4.0: MIT (expressjs/body-parser)
 bytes@3.1.2: MIT (visionmedia/bytes.js)
 call-bind-apply-helpers@1.0.2: MIT (https://github.com/ljharb/call-bind-apply-helpers#readme)
 call-bound@1.0.4: MIT (https://github.com/ljharb/call-bound#readme)
@@ -61,7 +61,7 @@ eventsource-parser@3.1.1: MIT (https://github.com/rexxars/eventsource-parser#rea
 express@5.2.1: MIT (https://expressjs.com/)
 express-rate-limit@8.7.0: MIT (https://github.com/express-rate-limit/express-rate-limit)
 fast-deep-equal@3.1.3: MIT (https://github.com/epoberezkin/fast-deep-equal#readme)
-fast-uri@3.1.8: BSD-3-Clause (https://github.com/fastify/fast-uri)
+fast-uri@3.1.9: BSD-3-Clause (https://github.com/fastify/fast-uri)
 fast-xml-builder@1.3.1: MIT (git+https://github.com/NaturalIntelligence/fast-xml-builder.git)
 fast-xml-parser@5.11.2: MIT (git+https://github.com/NaturalIntelligence/fast-xml-parser.git)
 fflate@0.8.3: MIT (https://101arrowz.github.io/fflate)
@@ -79,7 +79,7 @@ http-errors@2.0.1: MIT (jshttp/http-errors)
 iconv-lite@0.7.3: MIT (https://github.com/pillarjs/iconv-lite)
 inherits@2.0.4: ISC (git://github.com/isaacs/inherits)
 iota-array@1.0.0: MIT (git://github.com/mikolalysenko/iota-array.git)
-ip-address@10.7.3: MIT (https://github.com/beaugunderson/ip-address.git)
+ip-address@10.7.5: MIT (https://github.com/beaugunderson/ip-address.git)
 ipaddr.js@1.9.1: MIT (git://github.com/whitequark/ipaddr.js)
 is-buffer@1.1.6: MIT (git://github.com/feross/is-buffer.git)
 is-promise@4.0.0: MIT (https://github.com/then/is-promise.git)
@@ -115,7 +115,7 @@ path-to-regexp@8.4.2: MIT (https://github.com/pillarjs/path-to-regexp.git)
 pkce-challenge@5.0.1: MIT (https://github.com/crouchcd/pkce-challenge#readme)
 property-graph@4.1.0: MIT (github:donmccurdy/property-graph)
 proxy-addr@2.0.8: MIT (jshttp/proxy-addr)
-qs@6.16.0: BSD-3-Clause (https://github.com/ljharb/qs)
+qs@6.17.1: BSD-3-Clause (https://github.com/ljharb/qs)
 range-parser@1.3.0: MIT (jshttp/range-parser)
 raw-body@3.0.2: MIT (stream-utils/raw-body)
 require-from-string@2.0.2: MIT (floatdrop/require-from-string)
@@ -146,7 +146,7 @@ which@2.0.2: ISC (git://github.com/isaacs/node-which.git)
 wrappy@1.0.2: ISC (https://github.com/npm/wrappy)
 xatlas-wasm@0.1.3: MIT (https://github.com/jpcy/xatlas)
 xml-naming@0.3.0: MIT (https://github.com/NaturalIntelligence/xml-naming)
-zod@4.6.5: MIT (https://zod.dev)
+zod@4.6.7: MIT (https://zod.dev)
 zod-to-json-schema@3.25.2: ISC (https://github.com/StefanTerdell/zod-to-json-schema)
 
 Optional npm packages: npm installs only those matching the platform (os, cpu, libc in brackets). They are
@@ -975,7 +975,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-body-parser@2.3.0
+body-parser@2.4.0
 Licence: MIT
 Source: expressjs/body-parser
 
@@ -2076,7 +2076,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-fast-uri@3.1.8
+fast-uri@3.1.9
 Licence: BSD-3-Clause
 Source: https://github.com/fastify/fast-uri
 
@@ -2567,7 +2567,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-ip-address@10.7.3
+ip-address@10.7.5
 Licence: MIT
 Source: https://github.com/beaugunderson/ip-address.git
 
@@ -3713,7 +3713,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-qs@6.16.0
+qs@6.17.1
 Licence: BSD-3-Clause
 Source: https://github.com/ljharb/qs
 
@@ -4700,7 +4700,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-zod@4.6.5
+zod@4.6.7
 Licence: MIT
 Source: https://zod.dev
 

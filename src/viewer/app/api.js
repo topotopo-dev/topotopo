@@ -20,6 +20,16 @@ async function glb(url) {
 }
 const post = (body) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
+/** At most one run at a time; calls during a run request one more run afterwards and wait for it. */
+export function coalesce(fn) {
+  let busy = null, again = false;
+  return () => {
+    if (busy) { again = true; return busy; }
+    busy = (async () => { try { do { again = false; await fn(); } while (again); } finally { busy = null; } })();
+    return busy;
+  };
+}
+
 export const api = {
   /**
    * [{name, output, version, vars, graphVars, overrides, params, mode, file, cook, nodes: [{name, type, in, error, ms}]}]

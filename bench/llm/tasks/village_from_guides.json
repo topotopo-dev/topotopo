@@ -1,0 +1,14 @@
+{
+  "id": "village_from_guides",
+  "title": "Village from guides",
+  "category": "level design",
+  "prompt": "A level designer drew guides for a village in this package's inputs/ folder. Read them and build the village they describe: roads along the road curves, a house on every house area that follows its footprint, the fence along the fence curve, woods in the forest areas but not inside the clearing volume, and something fitting at each named null. Keep everything where the guides put it.",
+  "inputs": "village_from_guides",
+  "checks": [
+    { "kind": "cooks" },
+    { "kind": "covers_inputs", "file": "inputs/markers.json", "min": 0.8, "label": "covers 80%+ of the guides' area" },
+    { "kind": "near_points", "file": "inputs/markers.json", "group": "@name=house*", "class": "prim", "within": 2, "label": "geometry at every house footprint" },
+    { "kind": "pieces", "min": 30, "label": "30+ pieces" },
+    { "kind": "triangles", "min": 5000, "max": 3000000 }
+  ]
+}
