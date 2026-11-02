@@ -28,7 +28,7 @@ and records where TopoTopo and node are, so Godot finds them; the demo has the r
 Open Godot 4.7, **Import** the demo's `project.godot`, and open it.
 
 - A **TopoTopo** tab is in the bottom panel. Its first line names the TopoTopo it found, for example
-  `TopoTopo 0.4.0 at <TopoTopo folder>/src/cli.ts (the install record …), node v24…`.
+  `TopoTopo 0.5.0 at <TopoTopo folder>/src/cli.ts (the install record …), node v24…`.
 - The three packages cook in the background while the editor stays usable: the panel shows each one cooking, then
   `ok`. The outputs appear in the FileSystem dock under `assets/*/outputs/`.
 - **Project > Tools > TopoTopo** has Cook Stale Packages, Recook All and Show TopoTopo Panel.

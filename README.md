@@ -159,7 +159,7 @@ guide to move it and a point (a CV, a null, a volume's corner) to move that poin
 a CV and a CV to remove it; every change is one undo step. Guides are saved as `inputs/markers.json`, curves and areas
 as polylines and nulls as points, each with its `name` and `role`, and a graph reads them like any input
 (`{"type": "file", "params": {"path": "inputs/markers.json", "missing": "empty"}}`, which cooks before the first guide
-exists). The scene cooks again as you drag, and an agent reads the same file. Try it on the example village:
+exists). The scene cooks again after a guide edit, and an agent reads the same file. Try it on the example village:
 `topotopo edit examples/guided_town`. There, curves named `road…` become roads with lamp posts, `fence…` fences, areas
 named `house…` houses on that footprint, `forest…` woods; volumes clear the woods, and nulls named `bench…`, `lamp…`
 or `tree…` place one.
