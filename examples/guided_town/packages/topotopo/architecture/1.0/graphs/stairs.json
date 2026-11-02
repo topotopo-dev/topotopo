@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "description": "Straight stairs climbing along +Z: a solid concrete flight (one watertight sawtooth solid) or open wooden treads between two stringers, with optional handrails on both sides. Pivot at the bottom of the first step, centred in width. Pieces: stairs_flight (concrete) or stairs_treads (wood) + stairs_stringers (wood_dark), stairs_railing (metal_dark).",
+  "params": {
+    "steps": { "type": "int", "default": 12, "min": 1, "max": 40, "desc": "number of steps" },
+    "rise": { "type": "float", "default": 0.18, "min": 0.08, "max": 0.3, "desc": "height of one step (m)" },
+    "run": { "type": "float", "default": 0.28, "min": 0.15, "max": 0.5, "desc": "depth of one step (m)" },
+    "width": { "type": "float", "default": 1.2, "min": 0.5, "max": 5, "desc": "width along X (m)" },
+    "style": {
+      "type": "enum",
+      "default": "solid",
+      "options": ["solid", "open"],
+      "desc": "solid concrete flight or open treads on stringers"
+    },
+    "railing": { "type": "bool", "default": true, "desc": "handrails with posts on both sides" }
+  },
+  "vars": { "steps": 12, "rise": 0.18, "run": 0.28, "width": 1.2, "style": "solid", "railing": true },
+  "nodes": {
+    "none": { "type": "points", "params": { "positions": [] } },
+    "profile": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "sawtooth side profile in the ZY plane (x = 0)",
+      "params": {
+        "run_over": "detail",
+        "code": "const n = Math.round(steps), r = rise, d = run, pts = [addpoint(0, [0, 0, 0])];\nfor (let i = 0; i < n; i++) { pts.push(addpoint(0, [0, (i + 1) * r, i * d])); pts.push(addpoint(0, [0, (i + 1) * r, (i + 1) * d])); }\npts.push(addpoint(0, [0, 0, n * d]));\naddprim(0, 'poly', pts);"
+      }
+    },
+    "flight": {
+      "type": "extrude",
+      "in": ["profile"],
+      "params": { "height": "=width", "center": true, "plane": "yz" }
+    },
+    "flight_name": {
+      "type": "attrib_create",
+      "in": ["flight"],
+      "params": { "name": "name", "class": "prim", "value": "stairs_flight" }
+    },
+    "flight_mat": {
+      "type": "material",
+      "in": ["flight_name"],
+      "params": { "name": "concrete", "base_color": "#aaa59c", "roughness": 0.9 }
+    },
+    "tread_pts": {
+      "type": "wrangle",
+      "in": ["none"],
+      "params": {
+        "run_over": "detail",
+        "code": "const n = Math.round(steps), r = rise, d = run;\nfor (let i = 0; i < n; i++) { const q = addpoint(0, [0, (i + 1) * r - 0.025, i * d + d / 2]); setpointattrib(0, 'scale', q, [width - 0.1, 0.05, d + 0.02]); setpointattrib(0, 'tint', q, 0.85 + 0.25 * rand(i, 3)); }"
+      }
+    },
+    "unit": { "type": "box" },
+    "treads": { "type": "copy_to_points", "in": ["unit", "tread_pts"] },
+    "treads_name": {
+      "type": "attrib_create",
+      "in": ["treads"],
+      "params": { "name": "name", "class": "prim", "value": "stairs_treads" }
+    },
+    "treads_mat": {
+      "type": "material",
+      "in": ["treads_name"],
+      "params": { "name": "wood", "base_color": "#9a7148", "roughness": 0.8 }
+    },
+    "stringer_profile": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "board under the tread ends: top edge through the tread noses, 0.3 m deep, cut at the ground",
+      "params": {
+        "run_over": "detail",
+        "code": "const n = Math.round(steps), r = rise, d = run, L = n * d, k = r / d;\nconst z0 = Math.max(0, L - (n * r - 0.3) / k);\nconst P = [[0, 0, 0], [0, r, 0], [0, n * r, Math.max(0, L - d)], [0, n * r, L], [0, Math.max(0, n * r - 0.3), L], [0, 0, z0]];\nconst out = [];\nfor (const p of P) if (!out.length || distance(out[out.length - 1], p) > 1e-6) out.push(p);\nif (out.length > 3 && distance(out[0], out[out.length - 1]) <= 1e-6) out.pop();\naddprim(0, 'poly', out.map((p) => addpoint(0, p)));"
+      }
+    },
+    "stringer": {
+      "type": "extrude",
+      "in": ["stringer_profile"],
+      "params": { "height": 0.05, "center": true, "plane": "yz" }
+    },
+    "stringer_pts": {
+      "type": "points",
+      "params": { "positions": [["=-(width / 2 - 0.025)", 0, 0], ["=width / 2 - 0.025", 0, 0]] }
+    },
+    "stringers": { "type": "copy_to_points", "in": ["stringer", "stringer_pts"] },
+    "stringers_clean": { "type": "clean", "in": ["stringers"] },
+    "stringers_name": {
+      "type": "attrib_create",
+      "in": ["stringers_clean"],
+      "params": { "name": "name", "class": "prim", "value": "stairs_stringers" }
+    },
+    "stringers_mat": {
+      "type": "material",
+      "in": ["stringers_name"],
+      "params": { "name": "wood_dark", "base_color": "#5e4129", "roughness": 0.85 }
+    },
+    "open": { "type": "merge", "in": ["treads_mat", "stringers_mat"] },
+    "body": {
+      "type": "switch",
+      "in": ["flight_mat", "open"],
+      "params": { "index": "=style == 'open' ? 1 : 0" }
+    },
+    "post_pts": {
+      "type": "wrangle",
+      "in": ["none"],
+      "note": "posts every third step and at the top, on both sides; the rail runs through their tops",
+      "params": {
+        "run_over": "detail",
+        "code": "const n = Math.round(steps), r = rise, d = run, x = width / 2 - 0.04;\nconst idx = []; for (let i = 0; i < n; i += 3) idx.push(i); if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);\nfor (const sx of [-1, 1]) for (const i of idx) { const q = addpoint(0, [sx * x, (i + 1) * r, i * d + d / 2]); setpointattrib(0, 'scale', q, [0.04, 0.9, 0.04]); }"
+      }
+    },
+    "post_unit": { "type": "box", "params": { "center": [0, 0.5, 0] } },
+    "posts": { "type": "copy_to_points", "in": ["post_unit", "post_pts"] },
+    "rail_path": {
+      "type": "wrangle",
+      "in": ["none"],
+      "params": {
+        "run_over": "detail",
+        "code": "const n = Math.round(steps), r = rise, d = run, x = width / 2 - 0.04, h = 0.9 + 0.02;\nfor (const sx of [-1, 1]) {\n  const a = addpoint(0, [sx * x, r + h - 0.15 * r / d, d / 2 - 0.15]), b = addpoint(0, [sx * x, n * r + h + 0.15 * r / d, (n - 1) * d + d / 2 + 0.15]);\n  addprim(0, 'polyline', [a, b]);\n}"
+      }
+    },
+    "rails": { "type": "sweep", "in": ["rail_path"], "params": { "radius": 0.025, "divisions": 10 } },
+    "railing_geo": { "type": "merge", "in": ["posts", "rails"] },
+    "railing_name": {
+      "type": "attrib_create",
+      "in": ["railing_geo"],
+      "params": { "name": "name", "class": "prim", "value": "stairs_railing" }
+    },
+    "railing_mat": {
+      "type": "material",
+      "in": ["railing_name"],
+      "params": { "name": "metal_dark", "base_color": "#3a3d42", "metallic": 0.8, "roughness": 0.45 }
+    },
+    "railing_on": { "type": "switch", "in": ["none", "railing_mat"], "params": { "index": "=railing ? 1 : 0" } },
+    "all": { "type": "merge", "in": ["body", "railing_on"] },
+    "paint": {
+      "type": "wrangle",
+      "in": ["all"],
+      "params": {
+        "run_over": "prims",
+        "code": "const m = JSON.parse(detail(0, 'materials') || '{}')[s@material]; if (!m) return; const k = haspointattrib(0, 'tint') ? point(0, 'tint', primpoints(0, @primnum)[0]) || 1 : 1; @Cd = mul(m.baseColor, k);"
+      }
+    },
+    "out": { "type": "attrib_delete", "in": ["paint"], "params": { "names": "tint copynum", "groups": "*" } }
+  },
+  "output": "out",
+  "outputs": { "stairs": { "node": "out", "label": "Stairs", "kind": "mesh", "tags": ["stairs", "staircase", "concrete", "wooden"] } },
+  "meta": {
+    "watertight": true,
+    "thumbnail_render": { "azimuth": -120, "elevation": 25 }
+  }
+}

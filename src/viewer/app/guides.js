@@ -402,7 +402,7 @@ export function createGuides(ctx) {
 
   // ------------------------------------------------------------------ dragging (select mode)
   // A plain left press on a guide grabs what is under it: a null's point, a CV of a curve or an area or a volume's
-  // ground corner moves that point (onto the geometry under the pointer, else in the plane through it facing the
+  // ground corner moves that point (onto a reference layer under the pointer, else in the plane through it facing the
   // view); a press on a line or a volume's edge moves the whole guide in that plane. The guide follows the pointer
   // and is saved once, on release, as one undo step. Double-click a CV to remove it, a line to add one there.
   /** The plane a drag moves in: horizontal in persp, top and bottom; the view's own axis plane in front, right… */
@@ -466,8 +466,9 @@ export function createGuides(ctx) {
       if (!p || !d.from) return;
       next = M.translateMarker(d.start, [p.x - d.from.x, p.y - d.from.y, p.z - d.from.z]);
     } else {
-      // onto the geometry under the pointer, as placing does; off it, in the plane through the point
-      const hit = ctx.surfacePoint(d.slot, x, y);
+      // onto a reference layer under the pointer (an imported terrain or blockout), else in the plane through the
+      // point: never onto the output, which the graph builds from these guides (a CV would climb the house it makes)
+      const hit = ctx.surfacePoint(d.slot, x, y, { layersOnly: true });
       const p = hit?.surface ? hit.point : onPlane(d.slot, x, y, d.plane);
       if (!p) return;
       next = d.h.part === 'corner' ? M.resizeVolume(d.start, d.h.k, [p.x, p.y, p.z]) : M.movePoint(d.start, d.h.k, [p.x, p.y, p.z]);

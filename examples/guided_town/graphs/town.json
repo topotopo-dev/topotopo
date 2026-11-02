@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "description": "A village laid out with guides: draw it in the viewer and the graph builds it. Curves named road… become roads with lamp posts on both sides, curves named fence… picket fences; areas named house… become houses on that footprint (any shape: the hip roof follows it), areas named forest… fill with trees and bushes; volumes keep the woods out (a clearing); nulls named bench…, lamp… or tree… place one of those, scaled by the null's radius for trees. Everything comes from TopoTopo's own packages. Open it with `topotopo edit examples/guided_town`, drag a CV or draw a new area named house_x, and the village cooks again.",
+  "params": {
+    "road_width": { "type": "float", "default": 7, "min": 3, "max": 14, "step": 0.5, "label": "road width", "desc": "asphalt width of every road (m)" },
+    "lamp_spacing": { "type": "float", "default": 18, "min": 6, "max": 60, "step": 1, "label": "lamp spacing", "desc": "distance between lamp posts along a road (m), on both sides" },
+    "floors": { "type": "int", "default": 2, "min": 1, "max": 4, "label": "floors", "desc": "floors of every house" },
+    "roof_pitch": { "type": "float", "default": 32, "min": 10, "max": 60, "step": 1, "label": "roof pitch", "desc": "roof slope (degrees)" },
+    "tree_density": { "type": "float", "default": 0.02, "min": 0, "max": 0.08, "step": 0.002, "label": "tree density", "desc": "trees and bushes per square metre of a forest area" },
+    "keep_clear": { "type": "float", "default": 4, "min": 0, "max": 20, "step": 0.5, "label": "keep clear", "desc": "how far trees stay from roads, houses and fences (m)" },
+    "seed": { "type": "int", "default": 1, "min": 0, "max": 1000, "label": "seed", "desc": "random seed of the woods" }
+  },
+  "vars": { "road_width": 7, "lamp_spacing": 18, "floors": 2, "roof_pitch": 32, "tree_density": 0.02, "keep_clear": 4, "seed": 1 },
+  "meta": { "render": { "views": ["persp"], "azimuth": 20, "elevation": 42, "size": "1600x900", "grid": false } },
+  "nodes": {
+    "guides": { "type": "file", "params": { "path": "inputs/markers.json", "missing": "empty" } },
+
+    "ground": { "type": "grid", "params": { "size": [170, 150], "divisions": [34, 30], "center": [0, -0.05, 0] } },
+    "ground_mat": { "type": "material", "in": ["ground"], "params": { "name": "meadow", "base_color": [0.33, 0.45, 0.22], "roughness": 0.95 } },
+
+    "roads": { "type": "delete", "in": ["guides"], "params": { "group": "@name=road*", "keep": true } },
+    "roads_smooth": { "type": "resample", "in": ["roads"], "params": { "length": 1, "smooth": true } },
+    "road_each": {
+      "type": "foreach", "in": ["roads_smooth"],
+      "params": { "mode": "prims", "body": { "nodes": {
+        "centre": { "type": "input", "params": { "index": 0 } },
+        "strip": { "type": "topotopo/street/road_strip", "in": ["centre"], "params": { "width": "=road_width" } }
+      }, "output": "strip" } }
+    },
+    "lamp_pts": { "type": "points_along_curve", "in": ["roads_smooth"], "params": { "spacing": "=lamp_spacing", "start_offset": 4, "end_offset": 4, "side_offset": "=road_width / 2 + 1.2", "both_sides": true } },
+    "lamp_face_road": { "type": "wrangle", "in": ["lamp_pts"], "params": { "run_over": "points", "code": "f@yaw = @side < 0 ? 180 : 0;" } },
+    "lamp": { "type": "topotopo/street/lamp_post", "params": { "height": 5 } },
+    "lamps": { "type": "copy_to_points", "in": ["lamp", "lamp_face_road"], "params": { "pack": true, "rotate_attrib": "yaw" } },
+
+    "lots": { "type": "delete", "in": ["guides"], "params": { "group": "@name=house*", "keep": true } },
+    "houses": {
+      "type": "foreach", "in": ["lots"],
+      "params": { "mode": "prims", "body": { "nodes": {
+        "footprint": { "type": "input", "params": { "index": 0 } },
+        "house": { "type": "topotopo/architecture/house", "in": ["footprint"], "params": { "floors": "=floors", "pitch": "=roof_pitch" } }
+      }, "output": "house" } }
+    },
+
+    "fence_lines": { "type": "delete", "in": ["guides"], "params": { "group": "@name=fence*", "keep": true } },
+    "fences": {
+      "type": "foreach", "in": ["fence_lines"],
+      "params": { "mode": "prims", "body": { "nodes": {
+        "line": { "type": "input", "params": { "index": 0 } },
+        "fence": { "type": "topotopo/street/fence", "in": ["line"], "params": { "style": "picket" } }
+      }, "output": "fence" } }
+    },
+
+    "forest_areas": { "type": "delete", "in": ["guides"], "params": { "group": "@name=forest*", "keep": true } },
+    "forest_tris": { "type": "triangulate", "in": ["forest_areas"] },
+    "forest_pts": { "type": "scatter", "in": ["forest_tris"], "params": { "generate_by": "density", "density": "=tree_density", "min_distance": 2.2, "seed": "=seed" } },
+    "clearings": { "type": "delete", "in": ["guides"], "params": { "group": "@role=volume", "keep": true } },
+    "out_of_clearings": { "type": "prune", "in": ["forest_pts", "clearings"], "params": { "mode": "near_geometry", "distance": 0, "inside": true } },
+    "built": { "type": "merge", "in": ["road_each", "houses", "fences"] },
+    "out_of_town": { "type": "prune", "in": ["out_of_clearings", "built"], "params": { "mode": "near_geometry", "distance": "=keep_clear", "inside": false } },
+    "forest_orient": { "type": "orient", "in": ["out_of_town"], "params": { "mode": "random", "upright": true, "random_yaw": [0, 360], "scale_min": 0.75, "scale_max": 1.3, "seed": "=seed" } },
+    "tree_round": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "round", "height": 7, "canopy_radius": 2.2, "seed": 3 } },
+    "tree_conifer": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "conifer", "height": 9, "canopy_radius": 2, "seed": 5 } },
+    "bush": { "type": "topotopo/nature/bush", "params": { "size": 1.8, "height": 1.1 } },
+    "named_round": { "type": "attrib_create", "in": ["tree_round"], "params": { "name": "variant_name", "class": "prim", "value": "round" } },
+    "named_conifer": { "type": "attrib_create", "in": ["tree_conifer"], "params": { "name": "variant_name", "class": "prim", "value": "conifer" } },
+    "named_bush": { "type": "attrib_create", "in": ["bush"], "params": { "name": "variant_name", "class": "prim", "value": "bush" } },
+    "woods_kit": { "type": "merge", "in": ["named_round", "named_conifer", "named_bush"] },
+    "woods": { "type": "copy_to_points", "in": ["woods_kit", "forest_orient"], "params": { "pack": true, "piece_attrib": "variant_name", "variant_weights": { "round": 3, "conifer": 4, "bush": 2 }, "seed": "=seed" } },
+
+    "sites": { "type": "delete", "in": ["guides"], "params": { "group": "@role=site", "class": "point", "keep": true } },
+    "site_kind": { "type": "wrangle", "in": ["sites"], "params": { "run_over": "points", "code": "const k = @name.split('_')[0]; s@kind = k === 'bench' || k === 'lamp' ? k : 'tree'; f@size = s@kind === 'tree' ? @pscale / 5 : 1; @pscale = 1;" } },
+    "props_bench": { "type": "topotopo/street/bench", "params": {} },
+    "props_lamp": { "type": "topotopo/street/lamp_post", "params": { "arms": 0, "height": 3.2 } },
+    "props_tree": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "round", "height": 9, "canopy_radius": 3.2, "seed": 11 } },
+    "kind_bench": { "type": "attrib_create", "in": ["props_bench"], "params": { "name": "kind", "class": "prim", "value": "bench" } },
+    "kind_lamp": { "type": "attrib_create", "in": ["props_lamp"], "params": { "name": "kind", "class": "prim", "value": "lamp" } },
+    "kind_tree": { "type": "attrib_create", "in": ["props_tree"], "params": { "name": "kind", "class": "prim", "value": "tree" } },
+    "props_kit": { "type": "merge", "in": ["kind_bench", "kind_lamp", "kind_tree"] },
+    "landmarks": { "type": "copy_to_points", "in": ["props_kit", "site_kind"], "params": { "pack": true, "piece_attrib": "kind", "variant_attrib": "kind", "scale_attrib": "size" } },
+
+    "village": { "type": "merge", "in": ["ground_mat", "road_each", "lamps", "houses", "fences", "woods", "landmarks"] }
+  },
+  "output": "village",
+  "outputs": { "village": { "node": "village", "label": "Village", "kind": "scene", "tags": ["village", "guides", "level-design"] } }
+}

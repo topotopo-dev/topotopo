@@ -283,7 +283,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
     }, { maxTests });
     rep.overlap.candidatePairs = scan.candidatePairs;
     rep.overlap.testedPairs = scan.testedPairs;
-    if (scan.stopped) { rep.complete = false; rep.reasons.push(`overlap test stopped after ${scan.testedPairs.toLocaleString('en-US')} exact pair tests (maxPairTests) of ${scan.candidatePairs.toLocaleString('en-US')} candidate pairs`); }
+    if (scan.stopped) { rep.complete = false; rep.reasons.push(scan.reason ? `overlap test skipped: ${scan.reason}` : `overlap test stopped after ${scan.testedPairs.toLocaleString('en-US')} exact pair tests (maxPairTests) of ${scan.candidatePairs.toLocaleString('en-US')} candidate pairs`); }
     const rank = (e: UVOverlap) => (e.kind === 'inTile' ? 0 : 1);
     rep.overlap.examples.sort((x, y) => rank(x) - rank(y) || y.area - x.area || x.triangles[0] - y.triangles[0] || x.triangles[1] - y.triangles[1]);
     for (const e of rep.overlap.examples) e.where = [triWhere(e.triangles[0]), triWhere(e.triangles[1])];

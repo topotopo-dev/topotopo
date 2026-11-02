@@ -14,6 +14,7 @@ import { renderGeometry } from '../src/render/raster.ts';
 import { renderArgs } from '../src/render/options.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
+import { examplePackageGraphs } from './fixtures.ts';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 // an empty config of its own: the libraries registered on this machine play no part in the renders
@@ -28,10 +29,19 @@ const packages = openPackages(engine, dir);
 for (const p of packages.check()) console.log(`warning: ${p}`);
 const filter = process.argv[2];
 let failed = 0;
-for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && (!filter || x.includes(filter)))) {
-  const name = path.basename(f, '.json');
-  const graph = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-  const r = await engine.cook(graph, { frame: graph.meta?.frame }); // animated examples name their display frame
+// the example graphs, then the graphs of the example packages (examples/<name>/, with their own inputs/), each cooked
+// in its own package
+const jobs: { name: string; file: string; engine: Engine }[] = fs.readdirSync(dir).filter((x) => x.endsWith('.json')).map((f) => ({ name: path.basename(f, '.json'), file: path.join(dir, f), engine }));
+for (const ex of examplePackageGraphs()) {
+  const e = new Engine(createNodeHost({ baseDir: ex.dir }));
+  await e.init();
+  for (const p of openPackages(e, ex.dir).check()) console.log(`warning: ${ex.name}: ${p}`);
+  jobs.push({ name: ex.name.replace(/\./g, '_'), file: ex.file, engine: e });
+}
+for (const job of jobs.filter((j) => !filter || j.name.includes(filter))) {
+  const name = job.name;
+  const graph = JSON.parse(fs.readFileSync(job.file, 'utf8'));
+  const r = await job.engine.cook(graph, { frame: graph.meta?.frame }); // animated examples name their display frame
   if (!r.ok || !r.geo) {
     failed++;
     console.log(`FAIL ${name}: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);

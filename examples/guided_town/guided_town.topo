@@ -1,0 +1,18 @@
+{
+  "graph": "town",
+  "title": "Guided town",
+  "description": "A village laid out with the viewer's guides (inputs/markers.json): drag them, draw more, and the graph builds roads, houses, fences, woods and props from TopoTopo's own packages.",
+  "tags": [
+    "guides",
+    "level-design",
+    "village"
+  ],
+  "links": [],
+  "created": "2026-11-02",
+  "bake": {},
+  "uses": {
+    "topotopo/architecture": "1.0",
+    "topotopo/nature": "1.0",
+    "topotopo/street": "1.0"
+  }
+}

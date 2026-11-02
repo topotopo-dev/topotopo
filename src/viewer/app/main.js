@@ -758,7 +758,9 @@ const es = api.events({
   async message(ev) {
     if (ev.cook !== undefined) { setCook(ev.cook.graph, ev.cook); if (ev.cook.graph === ctx.graph.name) updateCook(); return; }
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
-    if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); return; }
+    // the scene's result too: a graph that reads inputs/ (the guides in markers.json) cooks again; one that does not
+    // answers from its cache
+    if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); if (!ctx.isolated) loadGeo(); return; }
     if (ev.compare !== undefined) { await ctx.packages.onCompare(ev.compare); renderCook(); return; }
     if (ev.packages !== undefined) { ctx.packages.onEvent(ev); return; }
     await refreshGraphs();

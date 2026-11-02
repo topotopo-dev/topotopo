@@ -1,0 +1,93 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": [
+        "P:float:3",
+        "curve_id:int:1",
+        "curveu:float:1",
+        "kind:string:1",
+        "name:string:1",
+        "orient:float:4",
+        "pscale:float:1",
+        "role:string:1",
+        "side:int:1",
+        "size:float:1",
+        "tangent:float:3",
+        "yaw:float:1"
+      ],
+      "prim": [
+        "N:float:3",
+        "copynum:int:1",
+        "edge:int:1",
+        "material:string:1",
+        "name:string:1",
+        "role:string:1"
+      ],
+      "vertex": ["Cd:float:3", "N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [85, 11.9338, 75],
+      "min": [-85, -0.05, -75]
+    },
+    "counts": {
+      "points": 34068,
+      "prims": 26702,
+      "vertices": 109153,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["front", "side"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "8753a71e13e4e1a4",
+      "attributes": {
+        "detail.materials": "1d81253ca9b50bfa",
+        "group.prim.front": "f40674b7a6f17f7d",
+        "group.prim.side": "1c04fb87701c00cd",
+        "point.curve_id": "20489e45e742171f",
+        "point.curveu": "5b0ef8c958d8355b",
+        "point.kind": "0a7f8649c110131b",
+        "point.name": "3c692653e5a34399",
+        "point.orient": "fe0ab4c5ff7a3b1f",
+        "point.pscale": "1355886561031cdf",
+        "point.role": "386c7519823a5fcf",
+        "point.side": "92e06c5c27a74896",
+        "point.size": "890d9e409115e1be",
+        "point.tangent": "fc604c5180e7edeb",
+        "point.yaw": "c65dab7be26372dd",
+        "prim.N": "c6b5beacc7fd328e",
+        "prim.copynum": "2ecafb20006e09da",
+        "prim.edge": "528e505567be9cef",
+        "prim.material": "1f0f5b87fe537bc5",
+        "prim.name": "1d6980100610e45e",
+        "prim.role": "99505de920c38c0b",
+        "vertex.Cd": "70373e94a8270c92",
+        "vertex.N": "f3329f01c5d255cb",
+        "vertex.uv": "d65e6f1fc51e31b9"
+      },
+      "topology": "2f0ac04bea6adf91"
+    },
+    "packed": {
+      "hash": "a171a148d316103e",
+      "instances": 203,
+      "sources": [
+        "fe09480cafc5de2a",
+        "4cc7938734cca539",
+        "e23d1208272e7702",
+        "5220696aee263e90",
+        "5bb0f46d6924cc83",
+        "6492fe3235ffe0ac",
+        "63288acfcc207b79"
+      ]
+    }
+  },
+  "name": "example.guided_town",
+  "ok": true,
+  "source": "examples/guided_town/graphs/town.json",
+  "warnings": []
+}
