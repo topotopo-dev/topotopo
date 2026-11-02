@@ -808,6 +808,19 @@ its types, the built-in library of TopoTopo's own packages (a package's first us
 the worker pool, the WASM kernels and the MCP server over stdio. It takes about a minute and is not part of
 `npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
+## TopoTopo Bench
+
+[bench/llm](bench/llm/README.md) runs language models on a suite of 3D tasks (a stone bridge, a lighthouse, a Windsor
+chair, a game-ready crate, an oak, an eroded valley, a village from a level designer's guides, …) through TopoTopo's own
+MCP server, with the same tools, prompt and budget for each, and builds a comparison page: a leaderboard, every
+result side by side from one camera, the checks each passed, the tool calls, tokens and time, and a 3D view whose
+cameras orbit together. Results are filed by the TopoTopo version they ran on, and versions are never ranked together.
+
+```bash
+npm run bench:llm -- --model anthropic:claude-opus-5-5     # or openai:, google:, openrouter:, ollama:, compat: …
+npm run bench:llm:report                                   # bench/llm/report/index.html
+```
+
 ## Layout
 
 `src/core` holds the geometry model and algorithms. `src/graph` holds the node system and cooking engine, and `src/nodes`

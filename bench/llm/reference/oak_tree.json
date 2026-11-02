@@ -1,0 +1,137 @@
+{
+ "description": "Hand-written reference solution for task oak_tree: one build call, the same path a model's calls take. An L-system skeleton swept with polywire and leaf clusters at its leaf points.",
+ "turns": [
+  {
+   "calls": [
+    {
+     "name": "build",
+     "input": {
+      "name": "main",
+      "graph": {
+       "nodes": {
+        "skeleton": {
+         "type": "lsystem",
+         "params": {
+          "axiom": "FFFFFA",
+          "rules": {
+           "A": "!\"[&&FFA]/////[&&FFA]/////[&&FFA]////[&FJ]",
+           "F": "F"
+          },
+          "generations": 4,
+          "angle": 28,
+          "step": 1.45,
+          "width": 1.0,
+          "width_scale": 0.72,
+          "angle_variance": 12,
+          "step_variance": 0.25,
+          "tropism_strength": 0.06,
+          "seed": 5
+         }
+        },
+        "wood": {
+         "type": "polywire",
+         "in": [
+          "skeleton"
+         ],
+         "params": {
+          "divisions": 8
+         }
+        },
+        "bark": {
+         "type": "material",
+         "in": [
+          "wood"
+         ],
+         "params": {
+          "name": "bark",
+          "base_color": [
+           0.33,
+           0.24,
+           0.17
+          ],
+          "roughness": 0.9
+         }
+        },
+        "leaf_pts": {
+         "type": "delete",
+         "in": [
+          "skeleton"
+         ],
+         "params": {
+          "group": "leaves",
+          "class": "point",
+          "keep": true
+         }
+        },
+        "leaf_size": {
+         "type": "attrib_randomize",
+         "in": [
+          "leaf_pts"
+         ],
+         "params": {
+          "name": "pscale",
+          "min": 0.65,
+          "max": 1.15,
+          "seed": 3
+         }
+        },
+        "blob": {
+         "type": "sphere",
+         "params": {
+          "type": "ico",
+          "level": 1,
+          "radius": 1
+         }
+        },
+        "blob_rough": {
+         "type": "noise_displace",
+         "in": [
+          "blob"
+         ],
+         "params": {
+          "amplitude": 0.25,
+          "frequency": 1.5,
+          "seed": 2
+         }
+        },
+        "clusters": {
+         "type": "copy_to_points",
+         "in": [
+          "blob_rough",
+          "leaf_size"
+         ]
+        },
+        "leaves": {
+         "type": "material",
+         "in": [
+          "clusters"
+         ],
+         "params": {
+          "name": "leaves",
+          "base_color": [
+           0.24,
+           0.42,
+           0.16
+          ],
+          "roughness": 0.8
+         }
+        },
+        "out": {
+         "type": "merge",
+         "in": [
+          "bark",
+          "leaves"
+         ]
+        }
+       },
+       "output": "out"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "text": "An L-system skeleton swept with polywire and leaf clusters at its leaf points."
+  }
+ ]
+}

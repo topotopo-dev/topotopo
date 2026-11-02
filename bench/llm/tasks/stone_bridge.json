@@ -1,0 +1,14 @@
+{
+  "id": "stone_bridge",
+  "title": "Stone arch bridge",
+  "category": "architecture",
+  "prompt": "Build a stone arch bridge with three arches that spans about 30 m between its abutments. The deck is about 4 m wide with a low parapet wall on both sides. It should read as masonry: give it a stone material.",
+  "checks": [
+    { "kind": "cooks" },
+    { "kind": "extent", "axis": "longest_horizontal", "min": 24, "max": 45, "label": "spans 24–45 m" },
+    { "kind": "extent", "axis": "shortest_horizontal", "min": 3, "max": 10, "label": "3–10 m wide" },
+    { "kind": "extent", "axis": "y", "min": 3, "max": 25, "label": "3–25 m tall" },
+    { "kind": "triangles", "min": 200, "max": 400000 },
+    { "kind": "materials", "min": 1, "label": "has a material" }
+  ]
+}
