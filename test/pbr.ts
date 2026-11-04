@@ -194,6 +194,33 @@ const RED = [0.8, 0.25, 0.2];
   check(dist(px(dflt, 228, 80), px(renderGeometry(build(GRATE, { ...GLASS, alphaMode: 'opaque' }), { ...o, shading: undefined }), 228, 80)) === 0, 'default shading draws blend materials as before (opaque surface)');
 }
 
+// ---------------------------------------------------------------- grey: a value check without colour
+{
+  const box = (await engine.cook({ nodes: { b: { type: 'box', params: { size: 1 } } }, output: 'b' })).geo!;
+  const coloured = withMaterial({ baseColor: [0.9, 0.2, 0.1], roughness: 0.4 }, [], box);
+  const go: RenderOptions = { views: ['persp'], size: 160, grid: false, viewLabels: false, footer: false, grey: true };
+  const greyR = await renderGeometryAsync(coloured, go), empty = await renderGeometryAsync(new Geometry(), go);
+  const W = greyR.width, isBg = (x: number, y: number) => { const i = (y * W + x) * 4; return greyR.rgba[i] === empty.rgba[i] && greyR.rgba[i + 1] === empty.rgba[i + 1] && greyR.rgba[i + 2] === empty.rgba[i + 2]; };
+  let lit = 0, unequal = 0;
+  for (let y = 1; y < greyR.height - 1; y++) for (let x = 1; x < W - 1; x++) {
+    // inside the silhouette (no pixel around it is background, so no edge blends with the backdrop)
+    if ([-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => isBg(x + dx, y + dy)))) continue;
+    const i = (y * W + x) * 4, [r, g2, b] = [greyR.rgba[i], greyR.rgba[i + 1], greyR.rgba[i + 2]];
+    if (Math.max(r, g2, b) < 60) continue; // the lit area
+    lit++;
+    if (Math.max(r, g2, b) - Math.min(r, g2, b) > 1) unequal++;
+  }
+  check(lit > 1000 && unequal === 0, `grey: a red box renders with equal R, G, B over its lit area (${lit} lit pixels, ${unequal} with a hue)`);
+  const mapped = withMaterial({ baseColor: [1, 1, 1], textures: { baseColor: 'image:bc' } }, [constImage('bc', [0.9, 0.2, 0.1, 1])]);
+  check(maxDiff(await shot(mapped, { grey: true }), await shot(withMaterial({ baseColor: [0.2, 0.9, 0.3] }), { grey: true })) === 0, 'grey: a base colour map gives no colour (same pixels as any other base colour)');
+  const rough = await shot(withMaterial({ roughness: 0.9, textures: { roughness: 'image:r' } }, [new Image(8, 8, 'r').set('C', new Float32Array(64).fill(0.2))]), { grey: true });
+  check(maxDiff(rough, await shot(withMaterial({ roughness: 0.9 }), { grey: true })) > 20, 'grey: a roughness map still applies');
+  check(renderArgs({ grey: 'true' }).grey === true, 'render args: grey');
+  let threw = '';
+  try { renderGeometry(coloured, { grey: true, shading: 'matcap' }); } catch (e: any) { threw = e.message; }
+  check(/grey is a value check of shading "pbr"/.test(threw), 'grey with another shading is refused');
+}
+
 // ---------------------------------------------------------------- emissive, unlit, exposure
 {
   const lit = await shot(withMaterial({ baseColor: [0.2, 0.2, 0.2] })), glow = await shot(withMaterial({ baseColor: [0.2, 0.2, 0.2], emissive: [1, 0, 0] }));

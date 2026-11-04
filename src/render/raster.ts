@@ -171,6 +171,12 @@ export interface RenderOptions {
    * used; 'multiply': Cd also multiplies a named material's base colour (vertex paint as a tint)
    */
   vertexColors?: VertexColorMode;
+  /**
+   * value check: shading 'pbr' (implied when shading is not given) with every base colour replaced by a neutral 18%
+   * grey (linear 0.18); base colour maps and Cd give no colour, while alpha, roughness, metallic, normal and orm maps,
+   * emissive and unlit still apply
+   */
+  grey?: boolean;
   /** ao sample radius in output pixels (default 10) */
   aoRadius?: number;
   /** ortho and section views: world width in metres visible across a view (default: fit the bounds) */
@@ -355,6 +361,7 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
  * Host.readFile); every other mode renders exactly as renderGeometry does.
  */
 export async function renderGeometryAsync(g: Geometry, o: RenderOptions = {}, readFile?: (path: string) => Promise<Uint8Array>): Promise<RenderResult> {
+  o = greyShading(o);
   if (o.shading === 'pbr' && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
   if (o.underlay && !o.underlayImage) o = { ...o, underlayImage: await readUnderlay(o.underlay, readFile) };
   // last, so no other task replaces the MikkTSpace instance between this and the synchronous render
@@ -382,8 +389,16 @@ export async function readUnderlay(p: string, readFile?: (path: string) => Promi
   return { width: img.width, height: img.height, rgba };
 }
 
+/** grey is a pbr value check: it implies shading 'pbr' and refuses another shading. */
+function greyShading(o: RenderOptions): RenderOptions {
+  if (!o.grey || o.shading === 'pbr') return o;
+  if (o.shading && o.shading !== 'default') throw new Error(`render: grey is a value check of shading "pbr" (given shading "${o.shading}"); leave shading out or set it to "pbr"`);
+  return { ...o, shading: 'pbr' };
+}
+
 /** Render the geometry; returns RGBA pixels. Shading 'pbr' needs renderGeometryAsync first (or MikkTSpace loaded). */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
+  o = greyShading(o);
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
   if (g.hasPacked() || g.hasSplines()) {
     const budget = o.maxTriangles !== undefined && o.maxTriangles > 0 ? Math.min(o.maxTriangles, 50_000_000) : undefined;
@@ -664,11 +679,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   if (shadingMode === 'pbr' && nTri) {
     const ev = o.exposure ?? 0;
     if (!Number.isFinite(ev)) throw new Error(`render: exposure expects a number of stops, got ${o.exposure}`);
-    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes, { vertexColors: o.vertexColors });
+    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes, { vertexColors: o.vertexColors, grey: !!o.grey });
     // color_by and highlight tint the shaded material (their colour, lit by its brightness); the checker is not shown
     if (o.checker) notes.push('pbr: checker is not shown under shading "pbr" (color_by and highlight tint the material)');
     const cdMode = o.vertexColors && o.vertexColors !== 'auto' ? ` CD ${o.vertexColors.toUpperCase()}` : '';
-    ovDesc.push(`SHADING PBR STUDIO EV ${fmtNum(ev)}${cdMode} (${pbrS.summary.toUpperCase()})`);
+    ovDesc.push(`SHADING PBR${o.grey ? ' GREY 18%' : ''} STUDIO EV ${fmtNum(ev)}${cdMode} (${pbrS.summary.toUpperCase()})`);
     // blend triangles grouped by prim, for the back-to-front pass of each view
     const byPrim = new Map<number, number[]>();
     for (let t = 0; t < nTri; t++) if (pbrS.triAlpha[t] === ALPHA_BLEND) { const p = triPrim[t]; let l = byPrim.get(p); if (!l) byPrim.set(p, (l = [])); l.push(t); }

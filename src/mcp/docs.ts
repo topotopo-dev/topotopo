@@ -1345,6 +1345,10 @@ QUESTION → OPTION
                    Vertex colour, as in glTF export: a named material wins (its base colour factor or map; the prims'
                    Cd is not shown, a note says so), Cd colours prims without a material. cd:"multiply" also tints a
                    named material with Cd (vertex paint), cd:"ignore" never shows Cd; cd:"auto" is the default.
+  Are the values right (light and dark, without colour)?  grey:true: shading "pbr" with every base colour a neutral
+                   18% grey lit by the studio rig at its luminance (base colour maps and Cd give no colour); roughness,
+                   metallic, normal and orm maps, alpha
+                   and emissive still apply.
 POLYGON EDGES: wireframe "auto" (the default) draws polygon edges on meshes under 6,000 polygons, never under shading
   "pbr" or textures:true (they would read as marks in the material); the footer says EDGES AUTO when it draws them.
   wireframe:false hides them, true draws them always.

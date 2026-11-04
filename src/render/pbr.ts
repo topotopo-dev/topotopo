@@ -8,7 +8,9 @@
 //                 named material show their Cd (unless it is all white there), else the default material. Option
 //                 vertexColors: 'ignore' never uses Cd, 'multiply' also multiplies a named material's base colour by
 //                 Cd (vertex paint as a tint). Display values: maps, factors and Cd are decoded from sRGB to linear
-//                 before lighting (maps before filtering).
+//                 before lighting (maps before filtering). Option grey (a value check) replaces every base colour by
+//                 a neutral 18% grey (the base colour map then gives only alpha) and lights the scene with the rig and
+//                 environment at their luminance, so nothing carries a hue.
 //   normal        tangent-space map (OpenGL, green up) in the MikkTSpace frame of core/tangents.ts, the frame glTF
 //                 export writes as TANGENT and bake_normal bakes in.
 //   orm           occlusion R (indirect light only), roughness G, metallic B; a map replaces the roughness and metallic
@@ -53,7 +55,14 @@ export type VertexColorMode = 'auto' | 'ignore' | 'multiply';
 export const VERTEX_COLOR_MODES: VertexColorMode[] = ['auto', 'ignore', 'multiply'];
 
 /** Options of the PBR preview beyond exposure. */
-export interface PBRSceneOptions { vertexColors?: VertexColorMode }
+export interface PBRSceneOptions {
+  vertexColors?: VertexColorMode;
+  /** value check: every base colour is a neutral 18% grey (base colour maps give alpha only, Cd nothing) */
+  grey?: boolean;
+}
+
+/** The base colour of grey renders: 18% reflectance (linear). */
+export const GREY_ALBEDO = 0.18;
 
 /** The normals the exporter writes by default (60° cusp): the frame the normal map and TANGENT belong to. */
 export const PBR_CUSP = 60;
@@ -178,12 +187,17 @@ const RIG = [
 ];
 // world-up environment for indirect light
 const SKY = [0.34, 0.37, 0.42], HORIZON = [0.27, 0.27, 0.27], GROUND = [0.08, 0.075, 0.07];
+const ENV = { sky: SKY, horizon: HORIZON, ground: GROUND };
+/** The same light at its luminance (Rec. 709): the neutral rig of grey renders. */
+const neutral = (c: number[]) => { const y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return [y, y, y]; };
+const GREY_RIG = RIG.map((l) => ({ d: l.d, c: neutral(l.c) }));
+const GREY_ENV = { sky: neutral(SKY), horizon: neutral(HORIZON), ground: neutral(GROUND) };
 
 /** Environment radiance along world direction d, widened by roughness (a cheap stand-in for a prefiltered map). */
-function env(dy: number, rough: number, out: number[]) {
+function env(dy: number, rough: number, out: number[], { sky, horizon, ground } = ENV) {
   const w = 0.25 + rough * 0.9;
   const t = Math.max(-1, Math.min(1, dy / w));
-  for (let c = 0; c < 3; c++) out[c] = t >= 0 ? HORIZON[c] + (SKY[c] - HORIZON[c]) * t : HORIZON[c] + (GROUND[c] - HORIZON[c]) * -t;
+  for (let c = 0; c < 3; c++) out[c] = t >= 0 ? horizon[c] + (sky[c] - horizon[c]) * t : horizon[c] + (ground[c] - horizon[c]) * -t;
 }
 
 /** ACES filmic curve (Narkowicz fit). */
@@ -205,7 +219,7 @@ function tone(c: number[]) {
  */
 export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, files: PBRTextures | undefined, exposure: number, notes: string[], opts: PBRSceneOptions = {}): PBRScene {
   if (!mikkTSpaceReady()) throw new Error('shading "pbr" needs the asynchronous render entry (renderGeometryAsync): MikkTSpace is not loaded');
-  const vcMode = opts.vertexColors ?? 'auto';
+  const vcMode = opts.vertexColors ?? 'auto', grey = !!opts.grey;
   if (!VERTEX_COLOR_MODES.includes(vcMode)) throw new Error(`render: cd (vertex colours) expects ${VERTEX_COLOR_MODES.join(', ')}, got ${JSON.stringify(vcMode)}`);
   const nTri = tris.length / 3;
   const table = readMaterials(g), pm = primMaterials(g), imgs = referenceableImages(g);
@@ -325,7 +339,9 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
 
   for (const pr of new Set(problems)) notes.push(`pbr: ${pr}`);
 
-  let camL = RIG.map((l) => ({ d: l.d, c: l.c }));
+  // grey: the rig and environment at their luminance, so a value check carries no hue from the lights either
+  const rig = grey ? GREY_RIG : RIG, envC = grey ? GREY_ENV : ENV;
+  let camL = rig.map((l) => ({ d: l.d, c: l.c }));
   const gain = 2 ** exposure;
   const n = [0, 0, 0], f = new Float64Array(9), tx = [0, 0, 0, 0], base = [0, 0, 0], e = [0, 0, 0], c3 = [0, 0, 0], vcRGB = [0, 0, 0];
   const uvAt = (t: number, w0: number, w1: number, w2: number, out: number[]) => {
@@ -343,7 +359,7 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
   return {
     summary, hasUV: !!uv, uvAt, triAlpha,
     cutoff: (t) => triMat[t].cutoff,
-    camera(r, u, fw) { camL = RIG.map((l) => ({ d: [0, 1, 2].map((k) => r[k] * l.d[0] + u[k] * l.d[1] - fw[k] * l.d[2]), c: l.c })); },
+    camera(r, u, fw) { camL = rig.map((l) => ({ d: [0, 1, 2].map((k) => r[k] * l.d[0] + u[k] * l.d[1] - fw[k] * l.d[2]), c: l.c })); },
     shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, view, back, out) {
       const m = triMat[t], a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
       if (uv) uvAt(t, w0, w1, w2, uvp);
@@ -366,6 +382,7 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       if (triVA[t]) cov *= alphaAt(a, triPrim[t]) * w0 + alphaAt(b, triPrim[t]) * w1 + alphaAt(c, triPrim[t]) * w2;
       out[3] = Math.max(0, Math.min(1, cov));
       if (vc === 2) { base[0] *= vcRGB[0]; base[1] *= vcRGB[1]; base[2] *= vcRGB[2]; }
+      if (grey) base[0] = base[1] = base[2] = GREY_ALBEDO;
       if (m.unlit) {
         out[0] = linearToSrgb(Math.min(1, base[0])); out[1] = linearToSrgb(Math.min(1, base[1])); out[2] = linearToSrgb(Math.min(1, base[2]));
         return;
@@ -411,10 +428,10 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
         }
       }
       // indirect: sky/ground irradiance (diffuse) and the environment along the reflection (specular), both occluded
-      env(n[1], 1, e);
+      env(n[1], 1, e, envC);
       const ir = [e[0], e[1], e[2]];
       const RdotN = 2 * NoV, ry = RdotN * n[1] - view[1];
-      env(ry, rough, e);
+      env(ry, rough, e, envC);
       // Karis' analytic environment BRDF
       const c0 = [-1, -0.0275, -0.572, 0.022], c1 = [1, 0.0425, 1.04, -0.04];
       const q = [rough * c0[0] + c1[0], rough * c0[1] + c1[1], rough * c0[2] + c1[2], rough * c0[3] + c1[3]];
