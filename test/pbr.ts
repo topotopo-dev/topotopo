@@ -130,6 +130,70 @@ const RED = [0.8, 0.25, 0.2];
   check(/cd expects auto, ignore, multiply/.test(threw), `an unknown cd mode is refused (${threw})`);
 }
 
+// ---------------------------------------------------------------- alpha: a cutout grate and a blend glass pane in front of an opaque box
+{
+  const scene = (await engine.cook({
+    nodes: {
+      wall: { type: 'box', params: { size: [4, 2, 0.5], center: [0, 0, -1] } },
+      grate: { type: 'grid', params: { plane: 'xy', size: [1.6, 1.6], divisions: [1, 1], center: [-1, 0, 0.5] } },
+      glass: { type: 'grid', params: { plane: 'xy', size: [1.6, 1.6], divisions: [1, 1], center: [1, 0, 0.5] } },
+      all: { type: 'merge', in: ['wall', 'grate', 'glass'] },
+    },
+    output: 'all',
+  })).geo!;
+  // 16 × 16 grate map: dark bars 4 texels wide, transparent gaps between them
+  const grateMap = new Image(16, 16, 'grate').set('C', Float32Array.from({ length: 16 * 16 * 4 }, (_, i) => (i % 4 === 3 ? (Math.floor(((i >> 2) % 16) / 4) % 2 === 0 ? 1 : 0) : 0.15)));
+  const WALL = { baseColor: [0.9, 0.7, 0.25] };
+  const build = (grate: Record<string, any> | null, glass: Record<string, any> | null, wall = true) => {
+    const g = scene.clone(), a = g.prims.add('material', 'string', 1);
+    const keep = new Uint8Array(g.numPrims);
+    for (let p = 0; p < g.numPrims; p++) {
+      let x = 0, z = 0;
+      const s = g.primStart[p], e = g.primStart[p + 1];
+      for (let v = s; v < e; v++) { x += g.P[g.vertexPoint[v] * 3]; z += g.P[g.vertexPoint[v] * 3 + 2]; }
+      x /= e - s; z /= e - s;
+      const m = z < 0 ? 'wall' : x < 0 ? 'grate' : 'glass';
+      a.set(p, m);
+      keep[p] = (m === 'wall' ? wall : m === 'grate' ? !!grate : !!glass) ? 1 : 0;
+    }
+    const table: Record<string, any> = { wall: normalizeMaterial(WALL) };
+    if (grate) table.grate = normalizeMaterial(grate);
+    if (glass) table.glass = normalizeMaterial(glass);
+    writeMaterials(g, table);
+    g.volumes = [...g.volumes, grateMap];
+    return keep.every((k) => k) ? g : g.subsetPrims(keep);
+  };
+  const GRATE = { baseColor: [1, 1, 1], alphaMode: 'mask', alphaCutoff: 0.5, doubleSided: true, textures: { baseColor: 'image:grate' } };
+  const GLASS = { baseColor: [0.1, 0.4, 0.95], alphaMode: 'blend', alpha: 0.4, roughness: 0.1, doubleSided: true };
+  const o: RenderOptions = { views: ['front'], size: [320, 160], bounds: [[-2, -1, -1.25], [2, 1, 0.5]], footer: false };
+  const full = await shot(build(GRATE, GLASS), o), wallOnly = await shot(build(null, null), o);
+  const opaqueGlass = await shot(build(GRATE, { ...GLASS, alphaMode: 'opaque' }), o), opaqueGrate = await shot(build({ ...GRATE, alphaMode: 'opaque' }, GLASS), o);
+  const px = (r: RenderResult, x: number, y: number) => { const i = (y * r.width + x) * 4; return [r.rgba[i], r.rgba[i + 1], r.rgba[i + 2]]; };
+  const dist = (p: number[], q: number[]) => Math.max(...p.map((v, k) => Math.abs(v - q[k])));
+  // the grate (screen x 50..135): the wall shows through the gaps exactly, the bars cover it
+  let holes = 0, bars = 0, n = 0;
+  for (let y = 40; y <= 120; y += 2) for (let x = 50; x <= 135; x++) {
+    n++;
+    const d = dist(px(full, x, y), px(wallOnly, x, y));
+    if (d <= 2) holes++; else if (d > 30) bars++;
+  }
+  check(holes > n * 0.3 && bars > n * 0.3, `cutout grate: the box is visible through the holes (${holes} of ${n} pixels equal the box alone) and hidden by the bars (${bars})`);
+  check(maxDiff(opaqueGrate, full) > 30, 'the same grate rendered opaque hides the box (the cutout is what shows it)');
+  // the glass (screen x 185..270): the box seen through it, tinted blue
+  const mean = (r: RenderResult) => { const s = [0, 0, 0]; let k = 0; for (let y = 50; y <= 110; y += 2) for (let x = 190; x <= 265; x += 2) { const c = px(r, x, y); s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; k++; } return s.map((v) => v / k); };
+  const gl = mean(full), wl = mean(wallOnly), og = mean(opaqueGlass);
+  check(gl[2] / gl[0] > wl[2] / wl[0] + 0.15, `blend glass tints the box behind it blue (B/R ${(wl[2] / wl[0]).toFixed(2)} → ${(gl[2] / gl[0]).toFixed(2)})`);
+  check(gl[0] > og[0] + 25 && gl[0] < wl[0] - 10, `blend glass shows the box through it (R: opaque glass ${og[0].toFixed(0)} < glass ${gl[0].toFixed(0)} < box alone ${wl[0].toFixed(0)})`);
+  check(full.notes.every((n) => !/transparency/.test(n)), 'no note that transparency is not evaluated');
+  // on a transparent background the glass alone covers 40%
+  const alone = await shot(build(null, GLASS, false), { ...o, transparent: true });
+  const ai = (80 * alone.width + 228) * 4;
+  check(Math.abs(alone.rgba[ai + 3] - 102) <= 3, `transparent background: blend glass alone has alpha ${alone.rgba[ai + 3]} (40% of 255 = 102)`);
+  // the inspection views keep drawing the glass as a surface
+  const dflt = renderGeometry(build(GRATE, GLASS), { ...o, shading: undefined });
+  check(dist(px(dflt, 228, 80), px(renderGeometry(build(GRATE, { ...GLASS, alphaMode: 'opaque' }), { ...o, shading: undefined }), 228, 80)) === 0, 'default shading draws blend materials as before (opaque surface)');
+}
+
 // ---------------------------------------------------------------- emissive, unlit, exposure
 {
   const lit = await shot(withMaterial({ baseColor: [0.2, 0.2, 0.2] })), glow = await shot(withMaterial({ baseColor: [0.2, 0.2, 0.2], emissive: [1, 0, 0] }));
@@ -143,8 +207,11 @@ const RED = [0.8, 0.25, 0.2];
 
 // ---------------------------------------------------------------- notes for what is not evaluated; external PNGs
 {
-  const t = await shot(withMaterial({ alpha: 0.5 }));
-  check(t.notes.some((n) => /pbr: transparency is not evaluated, shaded opaque \(material "m" alpha 0.5\)/.test(n)), 'material alpha < 1: a note says transparency is not evaluated');
+  const t = await shot(withMaterial({ alpha: 0.5 })), t1 = await shot(withMaterial({ alpha: 1 }));
+  check(maxDiff(t, t1) > 20 && !t.notes.some((n) => /transparency/.test(n)), 'material alpha < 1 (alpha_mode auto) is blended, as exported (BLEND), not shaded opaque');
+  const om = await shot(withMaterial({ textures: { baseColor: 'image:bc' } }, [constImage('bc', [0.5, 0.5, 0.5, 0.2])]));
+  check(maxDiff(om, await shot(withMaterial({ textures: { baseColor: 'image:bc' } }, [constImage('bc', [0.5, 0.5, 0.5, 1])]))) === 0
+    && om.notes.some((n) => /material "m" has a base colour map with alpha below 1 but is opaque/.test(n)), 'an opaque material ignores its map\'s alpha (as glTF OPAQUE) and a note says alpha_mode uses it');
   const missing = await shot(withMaterial({ textures: { normal: 'tex/missing.png' } }));
   check(missing.notes.some((n) => /material "m" normal "tex\/missing.png" no file access in this render/.test(n)), 'external map without readFile: named in the notes');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-pbr-'));
