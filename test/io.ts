@@ -328,4 +328,24 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   const txt = sceneReportText(rep).join('\n');
   check(/^scene \(the glb export, read back\): 2 nodes, 1 meshes, 12 triangles, 1 materials/.test(txt) && /\n {4}hook: empty \(socket\); at \(0\.500, 0\.250, 0\.000\)/.test(txt) && /paint: base colour factor \(linear\) \(0\.60, 0\.01, 0\.01\), metallic 0\.00, roughness 0\.40; no maps/.test(txt), 'scene report text: nodes as a tree, materials');
 }
+
+// ---------------------------------------------------------------- vertex alpha is data: it never changes the material's alpha mode
+{
+  const gj = (bytes: Uint8Array) => { const n = new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true); return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + n))); };
+  const cook = async (matParams: Record<string, unknown>) => { const r = await engine.cook({
+    nodes: {
+      b: { type: 'box' },
+      m: { type: 'material', in: ['b'], params: { name: 'leaf', ...matParams } },
+      cd: { type: 'attrib_create', in: ['m'], params: { name: 'Cd', class: 'point', value: [0.2, 0.6, 0.3] } },
+      al: { type: 'attrib_create', in: ['cd'], params: { name: 'Alpha', class: 'point', value: 0.3 } },
+    },
+    output: 'al',
+  }); if (!r.geo) throw new Error(r.errors.map((e) => e.message).join('; ')); return r.geo; };
+  const j = gj(await exportGeometryAsync(await cook({}), 'glb', { vertexColors: true }) as Uint8Array);
+  const prim = j.meshes[0].primitives[0], mat = j.materials[prim.material];
+  const colorAcc = j.accessors[prim.attributes.COLOR_0];
+  check(colorAcc?.type === 'VEC4' && (mat.alphaMode ?? 'OPAQUE') === 'OPAQUE', `an opaque material keeps its alpha mode under vertex alpha 0.3 (${mat.alphaMode ?? 'OPAQUE'}, COLOR_0 ${colorAcc?.type})`);
+  const jb = gj(await exportGeometryAsync(await cook({ alpha_mode: 'blend' }), 'glb', { vertexColors: true }) as Uint8Array);
+  check(jb.materials[jb.meshes[0].primitives[0].material].alphaMode === 'BLEND', 'a material with alpha_mode blend still exports BLEND');
+}
 process.exit(fail ? 1 : 0);

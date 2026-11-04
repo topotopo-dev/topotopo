@@ -518,6 +518,31 @@ let tg: Geometry;
   check(json.images.length === 3 && json.images.every((i: any) => i.mimeType === 'image/png') && json.textures.length === 3, `glTF embeds 3 PNG images (${json.images.map((i: any) => i.name).join(', ')})`);
   check(m0.pbrMetallicRoughness.baseColorTexture && m0.normalTexture && m0.occlusionTexture && m0.pbrMetallicRoughness.metallicRoughnessTexture.index === m0.occlusionTexture.index && (m0.pbrMetallicRoughness.metallicFactor ?? 1) === 1, 'ORM is both the occlusion and the metallicRoughness texture');
   check(!warns.length, `no export warnings${warns.length ? ': ' + warns.join('; ') : ''}`);
+  // an orm map with a material on input 0: the glTF factors are 1 (or roughness_value / metallic_value), never the input material's scalars
+  for (const [extra, wantM, wantR] of [[{}, 1, 1], [{ roughness_value: 0.8 }, 1, 0.8], [{ roughness_value: 0.6, metallic_value: 0.5 }, 0.5, 0.6]] as const) {
+    const ormG = await geo({
+      ...UVBOX, pat: { type: 'tex_pattern', params: { resolution: 16, name: 'packed' } },
+      m0: { type: 'material', in: ['uv'], params: { name: 'wall', metallic: 0, roughness: 0.5 } },
+      mm: { type: 'texture_to_material', in: ['m0', 'pat'], params: { material: 'wall', orm: 'packed', ...extra } },
+    }, 'mm');
+    const gl = await exportGeometryAsync(ormG, 'glb', {});
+    const pj = JSON.parse(new TextDecoder().decode(gl.subarray(20, 20 + new DataView(gl.buffer, gl.byteOffset).getUint32(12, true)))).materials[0].pbrMetallicRoughness;
+    const mj = JSON.parse(new TextDecoder().decode((await exportFilesAsync(ormG, 'textures', path.join(tmp, 'orm'), {})).files.find((f) => f.path.endsWith('materials.json'))!.bytes)).materials.wall;
+    check((pj.metallicFactor ?? 1) === wantM && (pj.roughnessFactor ?? 1) === wantR && mj.metallic === wantM && mj.roughness === wantR,
+      `orm + input material ${JSON.stringify(extra)}: glTF factors ${pj.metallicFactor ?? 1} / ${pj.roughnessFactor ?? 1} = materials.json ${mj.metallic} / ${mj.roughness}`);
+  }
+  // thin triangles (the sides and back of a card with planar uvs) are not collapsed uvs; a genuinely collapsed uv still warns
+  {
+    const maps = { pat: { type: 'tex_pattern', params: { resolution: 16, name: 'h' } }, nm: { type: 'tex_normal_from_height', in: ['pat'], params: { name: 'n' } } };
+    const tm = (src: string) => ({ ...maps, mm: { type: 'texture_to_material', in: [src, 'nm'], params: { material: 'card', normal: 'n' } } });
+    const exportWarns = async (g: Geometry) => { const w: string[] = []; await exportGeometryAsync(g, 'glb', { warn: (m) => w.push(m) }); return w.filter((m) => /collapsed uvs/.test(m)); };
+    const card = await geo({ ...tm('uv'), b: { type: 'box', params: { size: [1, 0.001, 1], divisions: [6, 1, 6] } }, uv: { type: 'uv_project', in: ['b'], params: { method: 'planar', axis: 'y' } } }, 'mm');
+    const cw = await exportWarns(card);
+    check(cw.length === 0, `a 1 m × 1 m × 1 mm card with planar uvs exports without the collapsed-uv warning${cw.length ? ': ' + cw[0] : ''}`);
+    const flat = await geo({ ...tm('z'), b: { type: 'box', params: { divisions: [2, 2, 2] } }, z: { type: 'attrib_create', in: ['b'], params: { name: 'uv', class: 'vertex', value: [0, 0] } } }, 'mm');
+    const fw = await exportWarns(flat);
+    check(fw.length === 1 && /have collapsed uvs/.test(fw[0]), `a mesh whose uvs are genuinely collapsed still warns (${fw[0]?.slice(0, 80)})`);
+  }
   // the embedded base colour PNG holds the image's bytes
   const bufView = json.bufferViews[json.images.find((i: any) => i.name === 'brick_color').bufferView];
   const binStart = 20 + dv.getUint32(12, true) + 8;

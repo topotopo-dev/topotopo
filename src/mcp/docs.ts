@@ -753,7 +753,7 @@ CUTOUTS: tex_crop extracts a top-left pixel rectangle (all layers), optionally r
   tex_dilate pads nearest valid pixels; alpha stays unchanged by default. For grey/data maps supply an explicit
   validity mask (same size). Pack padding reserves empty gutters; dilate supplies the edge values.
   material {alpha_mode:"mask",alpha_cutoff:0.5,double_sided:true} BEFORE texture_to_material enables cutouts.
-  Omitted/auto alpha mode retains legacy behaviour; explicit opaque/mask/blend overrides scalar/vertex auto mode.
+  Omitted/auto alpha mode blends only for scalar alpha < 1; vertex Alpha (COLOR_0.A) is data and never changes it.
   Complete example: examples/image_cutouts.json; workflow and layout contract: docs/image-cutouts.md.
 SEE IT: render of a geometry holding only images shows the "texture" view; render {texture:"<image>"|"image/layer"|
   "<material>"} adds the view (a material shows its maps as a labelled strip); render {textures:true} samples base
@@ -1427,7 +1427,7 @@ MATERIALS: the material node writes prim "material" + the detail table. A named 
   material as it is and their Cd / Alpha are dropped (Cd left from colouring parts does not become COLOR_0 or a second,
   white or tinted copy of the material). Prims without a material, and every prim with vertex_colors:true, keep their
   Cd: not all white → baseColor white × COLOR_0 with the material's metallic/roughness/emissive (one constant Cd is
-  folded into the factor). alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
+  folded into the factor). a material's own alpha < 1 (or alpha_mode blend) → alphaMode BLEND; vertex Alpha is data: it stays COLOR_0.A and never changes the mode; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
 TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the package folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
   map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
