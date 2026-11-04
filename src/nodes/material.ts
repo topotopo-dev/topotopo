@@ -39,7 +39,7 @@ defineNode({
     roughness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'roughness 0..1', aliases: ['rough'] },
     emissive: { type: 'color', default: [0, 0, 0], desc: 'emitted colour; components above 1 export with KHR_materials_emissive_strength', aliases: ['emission', 'emit'] },
     alpha: { type: 'float', default: 1, min: 0, max: 1, desc: 'opacity; below 1 exports with alphaMode BLEND', aliases: ['opacity', 'opac'] },
-    alpha_mode: { type: 'enum', options: ['auto', 'opaque', 'mask', 'blend'], default: 'auto', desc: 'auto preserves legacy scalar/vertex opacity; mask cuts out pixels below alpha_cutoff; explicit modes override auto' },
+    alpha_mode: { type: 'enum', options: ['auto', 'opaque', 'mask', 'blend'], default: 'auto', desc: 'auto blends only when alpha is below 1 (vertex alpha never changes the mode); mask cuts out pixels below alpha_cutoff; explicit modes override auto' },
     alpha_cutoff: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'mask: discard where material alpha × texture alpha × vertex Alpha is below this value' },
     double_sided: { type: 'bool', default: false, desc: 'render both faces', aliases: ['doublesided', 'two_sided'] },
     unlit: { type: 'bool', default: false, desc: 'unlit shading (KHR_materials_unlit)', aliases: ['emissive_only', 'flat'] },

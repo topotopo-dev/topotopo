@@ -363,7 +363,7 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
     const ext = st.doc.createExtension(KHRMaterialsEmissiveStrength);
     m.setExtension('KHR_materials_emissive_strength', ext.createEmissiveStrength().setEmissiveStrength(emax));
   } else m.setEmissiveFactor([toLinear(mat.emissive[0]), toLinear(mat.emissive[1]), toLinear(mat.emissive[2])]);
-  m.setAlphaMode(materialAlphaMode(mat, blend));
+  m.setAlphaMode(materialAlphaMode(mat));
   if (mat.alphaMode === 'MASK') m.setAlphaCutoff(mat.alphaCutoff ?? 0.5);
   if (mat.unlit) m.setExtension('KHR_materials_unlit', st.doc.createExtension(KHRMaterialsUnlit).createUnlit());
   m.setExtras({ topotopo: isDefault ? { default: true } : { material: mat } });
