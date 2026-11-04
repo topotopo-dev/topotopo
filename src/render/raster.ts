@@ -30,6 +30,7 @@ import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler, withMaterialPreview } from './texview.ts';
 import { EMPTY_ATTRIB } from '../core/scene.ts';
 import { pbrScene, preparePBR } from './pbr.ts';
+import { loadMikkTSpace } from '../core/tangents.ts';
 import { decodePNG } from '../io/png-decode.ts';
 import type { PBRScene, PBRTextures } from './pbr.ts';
 
@@ -348,6 +349,8 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
 export async function renderGeometryAsync(g: Geometry, o: RenderOptions = {}, readFile?: (path: string) => Promise<Uint8Array>): Promise<RenderResult> {
   if (o.shading === 'pbr' && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
   if (o.underlay && !o.underlayImage) o = { ...o, underlayImage: await readUnderlay(o.underlay, readFile) };
+  // last, so no other task replaces the MikkTSpace instance between this and the synchronous render
+  if (o.shading === 'pbr') await loadMikkTSpace();
   return renderGeometry(g, o);
 }
 
