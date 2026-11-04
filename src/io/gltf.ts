@@ -47,7 +47,8 @@
 //   embedded (PNG / JPEG) as baseColorTexture, normalTexture and metallicRoughnessTexture (roughness = green channel);
 //   a map replaces its factor (baseColorFactor white, roughnessFactor 1). Without readFile the maps are skipped.
 //   "image:<name>" paths are image volumes of the geometry (texture nodes), encoded to PNG in memory; an "orm" map is
-//   both the metallicRoughness and the occlusion texture (metallicFactor 1).
+//   both the metallicRoughness and the occlusion texture; the material's metallic / roughness are then the factors that multiply it
+//   (texture_to_material sets them to 1, or to the values it was given).
 //   options.source (how the export was made, io/source.ts) → asset.extras.source.
 //
 // Import
@@ -344,14 +345,14 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   // occlusion texture, and replaces a separate roughness map
   const roughTex = ormTex ?? tex('roughness');
   if (ormTex && mat.textures?.roughness) st.warn?.(`glTF: material "${name}" has an orm and a roughness map; the orm map's green channel is used`);
-  // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map,
-  // metallic 1 under an ORM map
+  // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map; an ORM
+  // map's factors are the material's own metallic / roughness (1 unless set)
   // a folded constant vertex colour multiplies a base colour map exactly as COLOR_0 would have
   const rgb = tint ?? (vertexColors || baseTex ? [1, 1, 1] : mat.baseColor);
   m = st.doc.createMaterial(isDefault ? 'default' : name)
     .setBaseColorFactor([toLinear(rgb[0]), toLinear(rgb[1]), toLinear(rgb[2]), mat.alpha]) // glTF factors are linear
-    .setMetallicFactor(ormTex ? 1 : mat.metallic)
-    .setRoughnessFactor(roughTex ? 1 : mat.roughness)
+    .setMetallicFactor(mat.metallic)
+    .setRoughnessFactor(roughTex && !ormTex ? 1 : mat.roughness)
     .setDoubleSided(mat.doubleSided);
   if (baseTex) m.setBaseColorTexture(baseTex);
   if (normalTex) m.setNormalTexture(normalTex);

@@ -3692,11 +3692,11 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `from` | string | `""` |  |  | `source_material`, `use` | input 1: which of its materials ("" = its only one) |
 | `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
 | `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
-| `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 |
-| `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 |
+| `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 (the glTF metallicFactor; texture_to_material with an orm map sets its own factors and ignores this) |
+| `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 (the glTF roughnessFactor, 1 under a roughness map; texture_to_material with an orm map sets its own factors and ignores this) |
 | `emissive` | color | `[0,0,0]` |  |  | `emission`, `emit` | emitted colour; components above 1 export with KHR_materials_emissive_strength |
 | `alpha` | float | `1` | 0..1 |  | `opacity`, `opac` | opacity; below 1 exports with alphaMode BLEND |
-| `alpha_mode` | enum | `"auto"` |  | `auto`, `opaque`, `mask`, `blend` |  | auto preserves legacy scalar/vertex opacity; mask cuts out pixels below alpha_cutoff; explicit modes override auto |
+| `alpha_mode` | enum | `"auto"` |  | `auto`, `opaque`, `mask`, `blend` |  | auto blends only when alpha is below 1 (vertex alpha never changes the mode); mask cuts out pixels below alpha_cutoff; explicit modes override auto |
 | `alpha_cutoff` | float | `0.5` | 0..1 |  |  | mask: discard where material alpha × texture alpha × vertex Alpha is below this value |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
@@ -15796,8 +15796,8 @@ Input 0 is the mesh (with uv), input 1 the images (merge several texture branche
 | `orm` | string | `""` |  |  | `orm_map`, `packed` | packed occlusion / roughness / metallic image (R, G, B) |
 | `group` | group (prim) | `""` |  |  |  | prims that get the material ("" = all prims when the material is new, else none) |
 | `base_color_tint` | color | `[1,1,1]` |  |  | `tint` | base colour factor of a new material (glTF writes white under a base colour map) |
-| `roughness_value` | float | `0.8` | 0..1 |  |  | roughness of a new material (the ORM green channel when no roughness image is given) |
-| `metallic_value` | float | `0` | 0..1 |  |  | metallic of a new material (the ORM blue channel when no metallic image is given) |
+| `roughness_value` | float | `-1` | -1..1 |  |  | roughness. -1 = unset: 0.8 for a new material; with an orm map the glTF roughnessFactor is 1 (a material on input 0 does not set it). A value is the roughnessFactor that multiplies the ORM green channel; for occlusion / metallic images packed here it fills the green channel when no roughness image is given |
+| `metallic_value` | float | `-1` | -1..1 |  |  | metallic. -1 = unset: 0 for a new material; with an orm map the glTF metallicFactor is 1 (a material on input 0 does not set it). A value is the metallicFactor that multiplies the ORM blue channel; for occlusion / metallic images packed here it fills the blue channel when no metallic image is given |
 
 **Writes:** prim "material", detail "materials" with image:<name> texture slots, the referenced images as image volumes
 

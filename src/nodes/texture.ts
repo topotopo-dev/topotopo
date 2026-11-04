@@ -2105,8 +2105,8 @@ defineNode({
     orm: { type: 'string', default: '', desc: 'packed occlusion / roughness / metallic image (R, G, B)', aliases: ['orm_map', 'packed'] },
     group: P.group('prim', 'prims that get the material ("" = all prims when the material is new, else none)'),
     base_color_tint: { type: 'color', default: [1, 1, 1], desc: 'base colour factor of a new material (glTF writes white under a base colour map)', aliases: ['tint'] },
-    roughness_value: { type: 'float', default: 0.8, min: 0, max: 1, desc: 'roughness of a new material (the ORM green channel when no roughness image is given)' },
-    metallic_value: { type: 'float', default: 0, min: 0, max: 1, desc: 'metallic of a new material (the ORM blue channel when no metallic image is given)' },
+    roughness_value: { type: 'float', default: -1, min: -1, max: 1, desc: 'roughness. -1 = unset: 0.8 for a new material; with an orm map the glTF roughnessFactor is 1 (a material on input 0 does not set it). A value is the roughnessFactor that multiplies the ORM green channel; for occlusion / metallic images packed here it fills the green channel when no roughness image is given' },
+    metallic_value: { type: 'float', default: -1, min: -1, max: 1, desc: 'metallic. -1 = unset: 0 for a new material; with an orm map the glTF metallicFactor is 1 (a material on input 0 does not set it). A value is the metallicFactor that multiplies the ORM blue channel; for occlusion / metallic images packed here it fills the blue channel when no metallic image is given' },
   },
   outputs: 'prim "material", detail "materials" with image:<name> texture slots, the referenced images as image volumes',
   example: {
@@ -2145,7 +2145,8 @@ defineNode({
     };
     const table = readMaterials(g);
     const isNew = !table[mat];
-    const entry = normalizeMaterial(table[mat] ?? { baseColor: p.base_color_tint, roughness: p.roughness_value, metallic: p.metallic_value });
+    const rv = Number(p.roughness_value) >= 0 ? Number(p.roughness_value) : null, mv = Number(p.metallic_value) >= 0 ? Number(p.metallic_value) : null;
+    let entry = normalizeMaterial(table[mat] ?? { baseColor: p.base_color_tint, roughness: rv ?? 0.8, metallic: mv ?? 0 });
     const tex: Record<string, string> = { ...(entry.textures ?? {}) };
     const used: Image[] = [];
     for (const [param, slot] of SLOTS) {
@@ -2165,11 +2166,16 @@ defineNode({
       };
       const O = grey(occ), R = grey(rough), M = grey(met);
       const out = new Float32Array(n * 4);
-      for (let i = 0; i < n; i++) { out[i * 4] = O ? O[i] : 1; out[i * 4 + 1] = R ? R[i] : entry.roughness; out[i * 4 + 2] = M ? M[i] : entry.metallic; out[i * 4 + 3] = 1; }
+      for (let i = 0; i < n; i++) { out[i * 4] = O ? O[i] : 1; out[i * 4 + 1] = R ? R[i] : rv ?? entry.roughness; out[i * 4 + 2] = M ? M[i] : mv ?? entry.metallic; out[i * 4 + 3] = 1; }
       const orm = new Image(w, h, `${mat}_orm`).set(MAIN_LAYER, out);
       used.push(orm);
       tex.orm = `image:${orm.name}`;
       delete tex.roughness;
+      // the values are baked into the map: the factors that multiply it stay 1
+      entry = { ...entry, roughness: 1, metallic: 1 };
+    } else if (tex.orm) {
+      // glTF semantics: the factors multiply the ORM map, so they default to 1; the input material's scalars do not apply
+      entry = { ...entry, roughness: rv ?? 1, metallic: mv ?? 1 };
     }
     if (!used.length) ctx.warn(`${type}: no image named in any slot (base_color, normal, roughness, metallic, occlusion, orm)`);
     table[mat] = normalizeMaterial({ ...entry, textures: tex });
