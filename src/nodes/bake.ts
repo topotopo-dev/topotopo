@@ -10,7 +10,7 @@ import { Image, MAIN_LAYER } from '../core/image.ts';
 import {
   averagedVertexNormals, bakeSamples, curvatureEdges, dilate, edgeGrid, idColor, interpolate, interpolateCorners, normalize3, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
-import { cornerTangents, loadMikkTSpace, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
+import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
 import { RayScene, bboxDiagonal } from '../core/analysis.ts';
 import type { RaySampleOptions } from '../core/analysis.ts';
@@ -554,7 +554,7 @@ defineBake({
         return finish(b, out, 4, [0.5, 0.5, 1, 1]);
       });
     };
-    return mikkTSpaceReady() ? bakeWith() : loadMikkTSpace().then(bakeWith);
+    return mikkTSpaceReady() && mikkTSpaceHeapBytes() <= MIKK_RESET_BYTES ? bakeWith() : loadMikkTSpace().then(bakeWith);
   },
 });
 

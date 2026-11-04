@@ -16,28 +16,80 @@
 // diagnostics so callers can report them instead of exporting silent garbage.
 import type { Geometry } from './geometry.ts';
 
-interface MikkModule { generateTangents(position: Float32Array, normal: Float32Array, texcoord: Float32Array): Float32Array; ready: PromiseLike<void> }
+// The module's raw exports (wasm-bindgen ABI). Two flaws of the module are handled here rather than in its glue:
+// its heap grows with every call and never shrinks (about 450 bytes per triangle, so a long-running process that
+// exports again and again exhausts it), and its glue reads heap pointers as signed numbers, so every call fails with
+// "offset is out of bounds" once the heap passes 2 GiB. loadMikkTSpace() therefore starts a fresh instance once the heap
+// has grown past MIKK_RESET_BYTES, and generate() passes pointers unsigned, so one synchronous run can use the full
+// 4 GiB of wasm32 memory.
+interface MikkExports {
+  memory: { buffer: ArrayBuffer };
+  generateTangents(ret: number, p: number, np: number, n: number, nn: number, t: number, nt: number): void;
+  __wbindgen_add_to_stack_pointer(d: number): number;
+  __wbindgen_malloc(bytes: number): number;
+  __wbindgen_free(ptr: number, bytes: number): void;
+}
+interface MikkModule { wasm: MikkExports | null; ready: PromiseLike<void>; dispose(): void }
+
+/** loadMikkTSpace() starts a fresh MikkTSpace instance when the heap of the current one is larger than this. */
+export const MIKK_RESET_BYTES = 256 * 2 ** 20;
 
 let mod: MikkModule | null = null;
-let loading: Promise<MikkModule> | null = null;
+let loading: Promise<void> | null = null;
+let spent = false; // the instance aborted (out of memory): replace it on the next load
 
-/** Load (once) and initialise the MikkTSpace WebAssembly module. */
+/**
+ * Load and initialise the MikkTSpace WebAssembly module; when the loaded instance's heap has grown past
+ * MIKK_RESET_BYTES (or it aborted), replace it with a fresh one. Callers await this before each synchronous run of
+ * tangent work (an export, a render, a bake). While a replacement loads, mikkTSpaceReady() is false.
+ */
 export async function loadMikkTSpace(): Promise<void> {
-  if (mod) return;
+  if (mod && !spent && mikkTSpaceHeapBytes() <= MIKK_RESET_BYTES) return;
   if (!loading) {
+    const old = mod;
+    mod = null;
     loading = (async () => {
-      const spec = 'three/examples/jsm/libs/mikktspace.module.js';
-      const m: any = await import(spec);
-      await m.ready;
-      return m as MikkModule;
+      try {
+        let m: MikkModule;
+        if (old) { m = old; m.dispose(); } else {
+          const spec = 'three/examples/jsm/libs/mikktspace.module.js';
+          m = await import(spec) as MikkModule;
+        }
+        await m.ready;
+        spent = false;
+        mod = m;
+      } finally { loading = null; }
     })();
-    loading.catch(() => { loading = null; });
   }
-  mod = await loading;
+  await loading;
+}
+
+/** Bytes of WebAssembly memory the loaded MikkTSpace instance holds (0 when none is loaded). */
+export const mikkTSpaceHeapBytes = () => mod?.wasm?.memory.buffer.byteLength ?? 0;
+
+/** One generateTangents call on the raw exports: 4 floats (xyz, w) per corner. */
+function generate(w: MikkExports, P: Float32Array, N: Float32Array, T: Float32Array): Float32Array {
+  const pass = (a: Float32Array) => {
+    const p = w.__wbindgen_malloc(a.length * 4) >>> 0;
+    new Float32Array(w.memory.buffer, p, a.length).set(a);
+    return p;
+  };
+  const ret = w.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+  try {
+    try { w.generateTangents(ret, pass(P), P.length, pass(N), N.length, pass(T), T.length); } catch (e) {
+      if (!(e instanceof (globalThis as any).WebAssembly.RuntimeError)) throw e; // a trap: in practice memory.grow failed at 4 GiB
+      spent = true;
+      throw new Error(`MikkTSpace ran out of WebAssembly memory (${w.memory.buffer.byteLength / 2 ** 20 | 0} MiB) on ${P.length / 9} triangles`);
+    }
+    const [ptr, len] = new Uint32Array(w.memory.buffer, ret, 2);
+    const out = new Float32Array(w.memory.buffer, ptr, len).slice();
+    w.__wbindgen_free(ptr, len * 4);
+    return out;
+  } finally { w.__wbindgen_add_to_stack_pointer(16); }
 }
 
 /** True once loadMikkTSpace() has finished. */
-export const mikkTSpaceReady = () => mod !== null;
+export const mikkTSpaceReady = () => mod?.wasm != null;
 
 /** uv triangles whose doubled area is below this fraction of their squared edge lengths are collapsed. */
 const UV_DEGENERATE = 1e-9;
@@ -60,7 +112,7 @@ export interface TangentDiagnostics {
  * loaded.
  */
 export function mikkTangents(pos: ArrayLike<number>, nrm: ArrayLike<number>, uv: ArrayLike<number>): { tangents: Float32Array; diag: TangentDiagnostics } {
-  if (!mod) throw new Error('MikkTSpace is not loaded: await loadMikkTSpace() first (exportGLB, renderPBR and bake_normal do)');
+  if (!mod?.wasm) throw new Error('MikkTSpace is not loaded: await loadMikkTSpace() first (exportGLB, renderPBR and bake_normal do)');
   const nt = Math.floor(pos.length / 9);
   const diag: TangentDiagnostics = { triangles: nt, uvNonFinite: 0, uvDegenerate: 0, fallbackCorners: 0, firstBad: -1 };
   const bad = new Uint8Array(nt);
@@ -77,7 +129,7 @@ export function mikkTangents(pos: ArrayLike<number>, nrm: ArrayLike<number>, uv:
     const l = Math.hypot(N[i], N[i + 1], N[i + 2]);
     if (l > 0 && Number.isFinite(l)) { N[i] /= l; N[i + 1] /= l; N[i + 2] /= l; } else { N[i] = 0; N[i + 1] = 0; N[i + 2] = 1; }
   }
-  const out = nt ? mod.generateTangents(P, N, T) : new Float32Array(0);
+  const out = nt ? generate(mod.wasm, P, N, T) : new Float32Array(0);
   for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
     const c = t * 3 + k, o = c * 4, n = c * 3;
     let x = out[o], y = out[o + 1], z = out[o + 2];

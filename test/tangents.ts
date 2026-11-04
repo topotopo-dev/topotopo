@@ -11,7 +11,7 @@ import { HostIO, exportGLB, importGLTFAsync } from '../src/io/gltf.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 import type { ExportOptions } from '../src/io/common.ts';
-import { loadMikkTSpace, mikkTangents, shadingFrame } from '../src/core/tangents.ts';
+import { MIKK_RESET_BYTES, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTangents, shadingFrame } from '../src/core/tangents.ts';
 import { bakeSamples, interpolate } from '../src/core/bake.ts';
 import { triangulate } from '../src/core/topology.ts';
 import { referenceableImages } from '../src/core/image.ts';
@@ -239,6 +239,29 @@ await loadMikkTSpace();
   // grey: a zero normal encodes as (0.5, 0.5, 0.5); a texel on a corner of a face may tilt far (the bevel) but keeps a direction
   for (let px = 0; px < R * R; px++) if (mask[px] >= 1) { n++; if (Math.hypot(c[px * 4] - 0.5, c[px * 4 + 1] - 0.5, c[px * 4 + 2] - 0.5) < 0.2) grey++; }
   check(n > 0 && grey === 0, `bake_normal: a merged high mesh whose N is partly zero bakes no grey texels (${grey} of ${n})`);
+}
+
+// ---------------------------------------------------------------- a long-running process: the MikkTSpace heap past 2 GiB
+// The module's heap never shrinks and its own glue reads pointers as signed numbers, so once a process had computed
+// enough tangents (a viewer exporting a large scene again and again) every later call failed with "offset is out of
+// bounds".
+{
+  await loadMikkTSpace();
+  const nt = 20000, P = new Float32Array(nt * 9), N = new Float32Array(nt * 9), T = new Float32Array(nt * 6);
+  for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+    const x = (t % 200) + (k === 1 ? 1 : 0), z = Math.floor(t / 200) + (k === 2 ? 1 : 0);
+    P.set([x, 0, z], t * 9 + k * 3); N.set([0, 1, 0], t * 9 + k * 3); T.set([x / 200, z / 100], t * 6 + k * 2);
+  }
+  const first = mikkTangents(P, N, T).tangents;
+  let calls = 0, error = '';
+  while (mikkTSpaceHeapBytes() <= 2 ** 31 + 2 ** 28 && calls < 2000) {
+    try { mikkTangents(P, N, T); calls++; } catch (e: any) { error = e.message; break; }
+  }
+  const mib = () => `${(mikkTSpaceHeapBytes() / 2 ** 20) | 0} MiB`;
+  check(!error && mikkTSpaceHeapBytes() > 2 ** 31, `tangents keep working with the MikkTSpace heap past 2 GiB (${calls} calls, ${mib()}${error ? `: ${error}` : ''})`);
+  await loadMikkTSpace();
+  const again = mikkTangents(P, N, T).tangents;
+  check(mikkTSpaceHeapBytes() <= MIKK_RESET_BYTES && again.every((v, i) => v === first[i]), `loadMikkTSpace starts a fresh instance once the heap is large, with the same tangents (${mib()})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
