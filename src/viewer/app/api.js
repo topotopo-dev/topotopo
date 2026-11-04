@@ -11,11 +11,14 @@ async function json(url, init) {
   const j = await res.json().catch(() => ({ ok: false, error: `${res.status} ${res.statusText}` }));
   return { status: res.status, j };
 }
-/** A GLB route: {ok, buf} or {ok: false, error, stopped?} (stopped: the node its cook was stopped at). */
+/**
+ * A GLB route: {ok, buf} or {ok: false, error, stopped?, preview?} (stopped: the node its cook was stopped at; preview:
+ * the result cooked but its GLB could not be written).
+ */
 async function glb(url) {
   let res;
   try { res = await fetch(url); } catch { return fail(offline); }
-  if (!res.ok) { const j = await res.json().catch(() => ({})); return { ...fail(j.error ?? `${res.status} ${res.statusText}`), ...(j.stopped ? { stopped: j.stopped } : {}) }; }
+  if (!res.ok) { const j = await res.json().catch(() => ({})); return { ...fail(j.error ?? `${res.status} ${res.statusText}`), ...(j.stopped ? { stopped: j.stopped } : {}), ...(j.preview ? { preview: true } : {}) }; }
   return { ok: true, buf: await res.arrayBuffer() };
 }
 const post = (body) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });

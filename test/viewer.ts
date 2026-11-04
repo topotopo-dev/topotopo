@@ -3,7 +3,9 @@
 // /api/report, tuned values over a graph file (`topotopo view`: session values that survive exports and reloads, Save
 // values as minimal edits of the file), cook progress events, Stop and the latest value winning, the inputs/ drop
 // target (under `topotopo view`, beside the graph file), reference-layer GLBs (a PNG as a textured quad), markers
-// (POST /api/markers → inputs/markers.json, read back through a file node), and the Host/Origin checks. The page's
+// (POST /api/markers → inputs/markers.json, read back through a file node), the preview GLB of many packed sources and
+// their edge cases (its layout checked byte for byte, loaded by the page's parseGLB and the importer; a GLB that cannot
+// be written says "preview failed"), and the Host/Origin checks. The page's
 // browser-free logic is tested in test/viewer-logic.ts.
 //   node test/viewer.ts
 import fs from 'node:fs';
@@ -16,7 +18,6 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { defineNode } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { GeoBuilder } from '../src/core/geometry.ts';
 import { primNormals } from '../src/core/topology.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
@@ -24,6 +25,11 @@ import { Session, graphFiles, varDeclaration } from '../src/session.ts';
 import type { EditOp } from '../src/session.ts';
 import { inputFileName, startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
+import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
+import { packedFromMatrices } from '../src/core/packed.ts';
+import { previewGLB } from '../src/render/preview.ts';
+import { importGeometryAsync } from '../src/io/import.ts';
+import { MeshObject, parseGLB } from '../src/viewer/app/scene.js';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-viewer-'));
@@ -558,6 +564,122 @@ section('a dropped PNG and an image-only graph show as textured quads');
     const info = await (await fetch(v.url + 'api/input_info?path=albedo.png')).json() as any;
     check(/images \(1\): "albedo" 4×2/.test(info.summary), `GET /api/input_info summarises the image (${info.summary?.split('\n')[1]})`);
     check(quad(await glbJSON('api/geo?graph=tex'), 'noise'), 'a graph whose output is only an image shows it the same way (GET /api/geo)');
+  } finally { v.close(); }
+}
+
+section('GET /api/geo: the preview GLB of many packed sources and their edge cases, byte for byte');
+{
+  // the problems of a GLB's layout: chunks, every buffer view inside its buffer (the BIN chunk), every accessor inside
+  // its view and aligned, EXT_meshopt_compression views inside the BIN chunk and as long as count × stride
+  const glbProblems = (b: Uint8Array): string[] => {
+    const out: string[] = [], dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    if (b.byteLength < 28 || dv.getUint32(0, true) !== 0x46546c67) return ['not a GLB'];
+    if (dv.getUint32(8, true) !== b.byteLength) out.push(`header length ${dv.getUint32(8, true)} != ${b.byteLength} bytes`);
+    const jsonLen = dv.getUint32(12, true), binAt = 20 + jsonLen;
+    const json = JSON.parse(new TextDecoder().decode(b.subarray(20, binAt)));
+    const binLen = binAt + 8 <= b.byteLength ? dv.getUint32(binAt, true) : 0;
+    if (jsonLen % 4 || binLen % 4) out.push('chunk lengths not 4-byte aligned');
+    if (binAt + 8 + binLen > b.byteLength) out.push(`BIN chunk (${binLen} bytes) runs past the file`);
+    const buffers: any[] = json.buffers ?? [];
+    if ((buffers[0]?.byteLength ?? 0) > binLen) out.push(`buffer 0 (${buffers[0].byteLength} bytes) is longer than the BIN chunk (${binLen})`);
+    // the bytes a buffer holds: the BIN chunk for the GLB's own buffer, none for a meshopt fallback
+    const held = (i: number) => (buffers[i]?.extensions?.EXT_meshopt_compression?.fallback ? 0 : i === 0 && !buffers[0]?.uri ? binLen : 0);
+    (json.bufferViews ?? []).forEach((v: any, i: number) => {
+      if ((v.byteOffset ?? 0) + v.byteLength > (buffers[v.buffer]?.byteLength ?? 0)) out.push(`bufferView ${i} ends past buffer ${v.buffer}`);
+      if (v.byteStride !== undefined && v.byteStride % 4) out.push(`bufferView ${i}: stride ${v.byteStride}`);
+      const m = v.extensions?.EXT_meshopt_compression;
+      if (m) {
+        if ((m.byteOffset ?? 0) + m.byteLength > held(m.buffer)) out.push(`bufferView ${i}: compressed data ends past the BIN chunk`);
+        if (m.count * m.byteStride !== v.byteLength) out.push(`bufferView ${i}: decodes to ${m.count} × ${m.byteStride} bytes, not ${v.byteLength}`);
+      } else if ((v.byteOffset ?? 0) + v.byteLength > held(v.buffer)) out.push(`bufferView ${i} ends past the BIN chunk`);
+    });
+    const CS: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+    const NC: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+    (json.accessors ?? []).forEach((a: any, i: number) => {
+      const v = json.bufferViews?.[a.bufferView];
+      if (!v) { out.push(`accessor ${i} has no bufferView`); return; }
+      const cs = CS[a.componentType], es = cs * NC[a.type], stride = v.byteStride ?? es, at = a.byteOffset ?? 0;
+      if (!(a.count >= 1)) out.push(`accessor ${i}: count ${a.count}`);
+      else if (at + (a.count - 1) * stride + es > v.byteLength) out.push(`accessor ${i} ends past bufferView ${a.bufferView}`);
+      if (((v.byteOffset ?? 0) + at) % cs) out.push(`accessor ${i} is not aligned to its ${cs}-byte components`);
+    });
+    return out;
+  };
+  const instancesIn = (root: any) => { let n = 0; root.traverse((o: any) => { if (o.isInstancedMesh) n += o.count; }); return n; };
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 3, 1];
+  // test only: instances of an empty source and of a source with points but no prims, as an edit can leave them
+  defineNode({
+    type: 'test_view_odd_instances', category: 'copy', summary: 'test only: instances of an empty source and of points without prims', inputs: [], params: {},
+    cook: () => Geometry.merge([packedFromMatrices(new Geometry(), [I, I]), packedFromMatrices(new Geometry({ positions: [0, 0, 0, 1, 1, 1] }), [I])]),
+  });
+  // test only: a packed prim whose source is missing, which no GLB can be written for
+  defineNode({
+    type: 'test_view_bad_source', category: 'copy', summary: 'test only: a packed prim without its source', inputs: [], params: {},
+    cook: () => { const g = packedFromMatrices(new GeoBuilder().build(), [I]); g.packedSource![0] = 7; return g; },
+  });
+  const engine = new Engine(createNodeHost({ baseDir: path.join(tmp, 'wsglb') }));
+  await engine.init();
+  const ws = new Session(path.join(tmp, 'wsglb'), engine);
+  ws.load();
+  const named = (src: string, prefix: string) => ({ type: 'wrangle', in: [src], params: { run_over: 'prims', code: `s@name = '${prefix}' + i@copynum;` } });
+  ws.setGraph('dress', {
+    nodes: {
+      terrain: { type: 'heightfield', params: { size: [60, 60] } },
+      hills: { type: 'heightfield_noise', in: ['terrain'], params: { amplitude: 3 } },
+      lots: { type: 'grid', params: { size: [15, 10], rows: 10, cols: 15 } },
+      box: { type: 'box', params: { size: [0.5, 1, 0.5] } },
+      tube: { type: 'tube', params: { radius: 0.3, height: 2 } },
+      boxes: { type: 'copy_to_points', in: ['box', 'lots'] },
+      tubes: { type: 'copy_to_points', in: ['tube', 'lots'] },
+      box_names: named('boxes', 'b'),
+      tube_names: named('tubes', 't'),
+      rail: { type: 'line', params: { length: 2, points: 5 } },
+      rail_name: { type: 'attrib_create', in: ['rail'], params: { name: 'name', class: 'prim', value: 'rail' } },
+      parts: { type: 'merge', in: ['box_names', 'tube_names', 'rail_name'] },
+      wood: { type: 'material', in: ['parts'], params: { name: 'wood', group: '@copynum<50', base_color: '#884422' } },
+      // a material group that matches no prim, on the sources and on the instances
+      library: { type: 'material', in: ['wood'], params: { name: 'unused', group: '@copynum<0' } },
+      ground: { type: 'grid', params: { size: [50, 50] } },
+      spots: { type: 'scatter', in: ['ground'], params: { count: 1000 } },
+      tinted: { type: 'color', in: ['spots'], params: { mode: 'random' } },
+      dressing: { type: 'copy_to_points', in: ['library', 'tinted'], params: { pack: true, variants: 'name' } },
+      leaves: { type: 'material', in: ['dressing'], params: { name: 'leaf', group: '@P.x>10' } },
+      nowhere: { type: 'material', in: ['leaves'], params: { name: 'nowhere', group: '@P.x>1000' } },
+      // instances of a points-only source (scattered points copied as they are)
+      dots: { type: 'scatter', in: ['ground'], params: { count: 20 } },
+      dot_spots: { type: 'scatter', in: ['ground'], params: { count: 5 } },
+      dot_instances: { type: 'copy_to_points', in: ['dots', 'dot_spots'], params: { pack: true } },
+      odd: { type: 'test_view_odd_instances' },
+      dressed: { type: 'merge', in: ['hills', 'nowhere', 'dot_instances', 'odd'] },
+    },
+    output: 'dressed',
+  });
+  ws.setGraph('broken', { nodes: { bad: { type: 'test_view_bad_source' } } });
+  const v = await startViewer(ws, 0);
+  try {
+    const info = await (await fetch(`${v.url}api/info?graph=dress&node=dressed`)).json() as any;
+    const res = await fetch(`${v.url}api/geo?graph=dress&node=dressed`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const sources = Number(/instances of ([\d,]+) sources/.exec(info.summary ?? '')?.[1].replace(/,/g, '') ?? 0);
+    check(res.status === 200 && sources > 300 && /1 heightfield/.test(info.summary ?? ''), `the edge-case dressing cooks and serves a GLB (${String(info.summary).split('\n')[1]})`);
+    const problems = glbProblems(bytes);
+    check(!problems.length, `its chunks, buffer views and accessors are in bounds and aligned (${problems.slice(0, 3).join('; ') || `${bytes.byteLength} bytes`})`);
+    const root = await parseGLB(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const instances = instancesIn(root), pieces = new MeshObject('out', root).pieceCount();
+    // three.js instances triangle meshes only: the rail's few copies (lines) load as one plain line
+    check(instances >= 990 && pieces > instances, `the page's parseGLB loads it: ${instances} instances, ${pieces} pieces`);
+    const back = await importGeometryAsync(bytes, 'glb');
+    check(back.numPacked >= 1000 && back.volumes.length === 0, `the glTF importer reads it back (${back.numPacked} instances)`);
+    // the web app's baked preview.glb: the same result with EXT_meshopt_compression
+    const r = await ws.cook('dress', 'dressed');
+    const mo = await previewGLB(r.geo!, { compress: 'meshopt' }), moProblems = glbProblems(mo);
+    const moInstances = instancesIn(await parseGLB(mo.buffer.slice(mo.byteOffset, mo.byteOffset + mo.byteLength)));
+    check(!moProblems.length && moInstances === instances,
+      `with meshopt: compressed views in the BIN chunk, decoded sizes consistent, ${moInstances} instances (${moProblems.slice(0, 3).join('; ') || `${mo.byteLength} bytes`})`);
+    // a result whose GLB cannot be written: the cook is good, the route says the preview failed
+    const binfo = await fetch(`${v.url}api/info?graph=broken`);
+    const bres = await fetch(`${v.url}api/geo?graph=broken`), bj = await bres.json() as any;
+    check(binfo.status === 200 && bres.status === 500 && bj.preview === true && /^preview failed: /.test(bj.error ?? ''), `a GLB that cannot be written answers 500 "preview failed: …" (${bj.error})`);
   } finally { v.close(); }
 }
 

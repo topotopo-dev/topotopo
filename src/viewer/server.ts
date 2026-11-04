@@ -74,8 +74,22 @@ function outputsLine(v: VersionInfo, most = 6): string {
   return `${names.length} output${names.length === 1 ? '' : 's'}${names.length ? `: ${names.slice(0, most).join(', ')}${names.length > most ? ' …' : ''}` : ''}`;
 }
 
+/** The preview GLB could not be written: the result cooked, the page cannot be shown it (500, {preview: true}). */
+class PreviewError extends HttpError {
+  constructor(msg: string) { super(500, `preview failed: ${msg}`); }
+}
+/**
+ * The GLB a geometry route serves (previewGLB). Writing it fails as the preview's error, not the cook's, and the stack
+ * goes to the server's log (stderr) so the step that failed is named.
+ */
+async function previewOf(g: Geometry, o: Parameters<typeof previewGLB>[1] = {}): Promise<Uint8Array> {
+  try { return await previewGLB(g, o); } catch (e: any) {
+    console.error(`preview failed: ${e?.stack ?? e}`);
+    throw new PreviewError(String(e?.message ?? e));
+  }
+}
 /** The shape every geometry route serves: the same GLB options as /api/geo; images alone show as textured quads. */
-const toGLB = (g: Geometry) => previewGLB(g);
+const toGLB = (g: Geometry) => previewOf(g);
 const issueText = (e: { node: string; message: string }) => `[${e.node}] ${e.message}`;
 
 /**
@@ -671,7 +685,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
         // info: what it is (io/kinds.ts), for the properties and their heightfield layer picker
         if (u.pathname === '/api/info') return send(200, JSON.stringify({ target: r.target, summary: summarize(r.geo), ms: r.ms, about: outputKind(r.geo) }), MIME['.json']);
         // heightfields: the layer drawn in red (the page's layer picker; the mask by default)
-        return send(200, await previewGLB(r.geo, { heightfieldLayer: u.searchParams.get('heightfield_layer') || undefined }), MIME['.glb']);
+        return send(200, await previewOf(r.geo, { heightfieldLayer: u.searchParams.get('heightfield_layer') || undefined }), MIME['.glb']);
       }
       send(404, 'not found');
     } catch (e: any) {
@@ -679,7 +693,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
       const status = e instanceof HttpError ? e.status : 500;
       const msg = String(e?.message ?? e);
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...(status === 413 ? { connection: 'close' } : {}) });
-      res.end(JSON.stringify(route === '/api/vars' ? { ok: false, ms: 0, errors: [msg] } : { ok: false, error: msg }));
+      res.end(JSON.stringify(route === '/api/vars' ? { ok: false, ms: 0, errors: [msg] } : { ok: false, error: msg, ...(e instanceof PreviewError ? { preview: true } : {}) }));
     }
   });
 

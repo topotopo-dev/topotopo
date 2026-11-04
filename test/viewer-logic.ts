@@ -393,6 +393,14 @@ section('cook state line');
   const stopped = cooking.cookLine({ running: null, last: { ok: false, ms: 30, stopped: 'eroded' } });
   check(stopped.kind === 'stopped' && /stopped at eroded · the view shows the last finished cook/.test(stopped.text) && cooking.cookLine(null).kind === 'none',
     'a stop: where, and that the view shows the last finished cook');
+  // a result that cooked but could not be shown: a failure line; a failed or stopped cook, or one running, says more
+  const ok = { running: null, last: { ok: true, ms: 30 } };
+  const pv = cooking.cookLine(ok, 0, 'preview failed: offset is out of bounds\nat line 2');
+  check(pv.kind === 'failed' && pv.text === 'preview failed: offset is out of bounds' && /keeps the last result/.test(pv.title) && cooking.cookLine(null, 0, 'preview failed: x').kind === 'failed',
+    `a preview that failed after a good cook shows as a failure (${pv.text})`);
+  check(cooking.cookLine({ running: null, last: { ok: false, ms: 30, error: { node: 'scatter', message: 'no points' } } }, 0, 'preview failed: x').text === 'failed at scatter: no points'
+    && cooking.cookLine({ running: null, last: { ok: false, ms: 30, stopped: 'eroded' } }, 0, 'preview failed: x').kind === 'stopped' && cooking.cookLine(run({}), 0, 'preview failed: x').kind === 'running',
+    'a failed cook, a stop and a running cook keep their own lines over a failed preview');
   const cmp = { package: 'studio/trees', from: '1.1', to: '1.3', done: 2, total: 8, what: 'graphs/main.json pine with studio/trees 1.3', elapsed: 1500, stopping: false };
   const c1 = cooking.compareLine(cmp, 500);
   check(c1.kind === 'running' && c1.text === 'before/after studio/trees 1.1 → 1.3 · 3/8 graphs/main.json pine with studio/trees 1.3 · 2.00 s' && /Stop ends it at the next node/.test(c1.title),
