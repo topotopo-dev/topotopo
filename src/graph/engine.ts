@@ -162,7 +162,17 @@ export interface FrameRange { start: number; end: number; step?: number }
 
 // ---------------------------------------------------------------- cache
 
-function geoBytes(g: Geometry): number {
+/** The large typed-array buffers the volumes of a geometry hold (image and heightfield layers, SDF grid samples), each once. */
+function volumeBuffers(g: Geometry): ArrayBuffer[] {
+  const out = new Set<ArrayBuffer>();
+  for (const v of g.volumes) {
+    if (v.kind === 'grid') out.add(v.values.buffer as ArrayBuffer);
+    else if (v.kind === 'image' || v.kind === 'heightfield') for (const l of v.layers.values()) out.add(l.buffer as ArrayBuffer);
+  }
+  return [...out];
+}
+
+function baseBytes(g: Geometry): number {
   let b = g.primStart.byteLength + g.vertexPoint.byteLength + g.primClosed.byteLength + 256;
   // packed: the per-prim arrays (sources are shared with the nodes that made them)
   if (g.primKind) b += g.primKind.byteLength + g.packedSource!.byteLength + g.packedXform!.byteLength;
@@ -173,8 +183,23 @@ function geoBytes(g: Geometry): number {
   return b;
 }
 
+/**
+ * Approximate memory of a geometry for the cache budget: topology, attributes, groups and volume buffers. With `seen`,
+ * a buffer already in the set is not counted again (shared between geometries); the buffers counted are added to it.
+ */
+export function geoBytes(g: Geometry, seen?: Set<ArrayBuffer>): number {
+  let b = baseBytes(g);
+  for (const buf of volumeBuffers(g)) {
+    if (seen) { if (seen.has(buf)) continue; seen.add(buf); }
+    b += buf.byteLength;
+  }
+  return b;
+}
+
 class GeoCache {
   private map = new Map<string, { geo: Geometry; bytes: number }>();
+  /** volume buffer → entries holding it: a shared buffer is charged once */
+  private owners = new Map<ArrayBuffer, number>();
   private bytes = 0;
   maxBytes: number;
   constructor(maxBytes = 1.5e9) { this.maxBytes = maxBytes; }
@@ -187,17 +212,27 @@ class GeoCache {
   }
   set(k: string, geo: Geometry) {
     if (this.map.has(k)) return;
-    const bytes = geoBytes(geo);
-    if (bytes > this.maxBytes / 2) return;
-    this.map.set(k, { geo, bytes });
-    this.bytes += bytes;
+    const own = baseBytes(geo), bufs = volumeBuffers(geo);
+    let add = own;
+    for (const buf of bufs) if (!this.owners.has(buf)) add += buf.byteLength;
+    if (add > this.maxBytes / 2) return;
+    for (const buf of bufs) {
+      if (!this.owners.has(buf)) this.bytes += buf.byteLength;
+      this.owners.set(buf, (this.owners.get(buf) ?? 0) + 1);
+    }
+    this.map.set(k, { geo, bytes: own });
+    this.bytes += own;
     for (const [key, e] of this.map) {
       if (this.bytes <= this.maxBytes) break;
       this.map.delete(key);
       this.bytes -= e.bytes;
+      for (const buf of volumeBuffers(e.geo)) {
+        const n = (this.owners.get(buf) ?? 1) - 1;
+        if (n > 0) this.owners.set(buf, n); else { this.owners.delete(buf); this.bytes -= buf.byteLength; }
+      }
     }
   }
-  clear() { this.map.clear(); this.bytes = 0; }
+  clear() { this.map.clear(); this.owners.clear(); this.bytes = 0; }
   get stats() { return { entries: this.map.size, mb: +(this.bytes / 1e6).toFixed(1) }; }
 }
 

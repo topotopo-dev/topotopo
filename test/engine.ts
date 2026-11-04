@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
-import { Engine, resolveTime, STOPPED } from '../src/graph/engine.ts';
+import { Engine, geoBytes, resolveTime, STOPPED } from '../src/graph/engine.ts';
 import type { CookOptions, CookReport } from '../src/graph/engine.ts';
 import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
 import { createNodeHost, packageBaseDir } from '../src/host/node.ts';
@@ -26,6 +26,7 @@ import { renderNodeReference } from '../scripts/gen-docs.ts';
 import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
+import { Image } from '../src/core/image.ts';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 /** The graphs TopoTopo ships: examples/*.json and the graphs of its own packages (library/<name>/graphs/), by path. */
@@ -73,6 +74,33 @@ defineNode({
 });
 
 // ------------------------------------------------------------------ time
+section('the CLI: --version');
+{
+  const cli = (args: string[]) => { const r = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'src', 'cli.ts'), ...args], { cwd: tmp, encoding: 'utf8' }); return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }; };
+  const v = cli(['--version']), v2 = cli(['-v']);
+  check(v.code === 0 && /^topotopo \d+\.\d+\.\d+/.test(v.out) && v2.out === v.out, `a leading --version or -v prints the version: ${v.out.trim()}`);
+  const use = cli(['use', 'studio/none', '--version', '1.0']);
+  check(use.code === 1 && /is in no package/.test(use.out) && !/^topotopo \d/.test(use.out), `use <package> --version reaches the command: ${use.out.trim()}`);
+}
+
+section('cache accounting counts volume buffers once');
+{
+  const plain = new Geometry({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], prims: [[0, 1, 2]] });
+  const tex = new Image(1024, 1024, 'tex').set('C', new Float32Array(1024 * 1024 * 4));
+  const withTex = plain.clone();
+  withTex.volumes = [tex];
+  const withTex2 = plain.clone();
+  withTex2.volumes = [tex];
+  check(geoBytes(withTex) - geoBytes(plain) >= 4e6, `a 1024² RGBA image adds its buffer (${((geoBytes(withTex) - geoBytes(plain)) / 1e6).toFixed(1)} MB)`);
+  const seen = new Set<ArrayBuffer>();
+  const first = geoBytes(withTex, seen), second = geoBytes(withTex2, seen);
+  check(first - second >= 4e6 && second === geoBytes(plain), `a buffer shared by two geometries is counted once (${first} then ${second})`);
+  const e = await newEngine();
+  e.cache.set('a', withTex);
+  e.cache.set('b', withTex2);
+  check(e.cache.stats.mb < 20 && e.cache.stats.mb > 16, `the cache charges the shared buffer once (${e.cache.stats.mb} MB)`);
+}
+
 section('time resolution');
 {
   const a = resolveTime({});
