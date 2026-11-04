@@ -20,9 +20,11 @@ export const SHOW_AFTER = 150;
 /**
  * The line for a graph's cook state: {kind, text, title}. kind: "running", "stopping", "ok", "failed", "stopped" or
  * "none". `state`: {running: {cooks, kinds, elapsed, node, nodeElapsed, inner, stopping} | null, last: {ok, ms,
- * stopped?, error?: {node, message}} | null}; `since`: ms since it arrived, added to the running times.
+ * stopped?, error?: {node, message}} | null}; `since`: ms since it arrived, added to the running times. `preview`: why the
+ * cooked result could not be shown ("preview failed: …", the GLB route's or the page's), a failure the view keeps the
+ * last shown result through.
  */
-export function cookLine(state, since = 0) {
+export function cookLine(state, since = 0, preview = null) {
   const r = state?.running;
   if (r && (r.elapsed + since >= SHOW_AFTER || r.stopping)) {
     const where = r.node ? `${r.node}${r.inner ? ` › ${r.inner}` : ''}` : '';
@@ -44,12 +46,16 @@ export function cookLine(state, since = 0) {
     return { kind: 'running', text: `${verb}${where ? ` ${where}` : ''} · ${total}`, title: `${node}${r.cooks > 1 ? ` (${r.cooks} cooks of this graph)` : ''}. Stop ends it at the next node; changing a value starts over with the new value.` };
   }
   const l = state?.last;
-  if (!l) return { kind: 'none', text: '', title: '' };
+  // the cook ended well but its result cannot be shown: said like a failed cook (a failed or stopped one says more)
+  const shown = preview && !l?.stopped && l?.ok !== false
+    ? { kind: 'failed', text: firstLine(preview), title: `${preview} (the cook finished; the view keeps the last result it could show)` } : null;
+  if (!l) return shown ?? { kind: 'none', text: '', title: '' };
   if (l.stopped) return { kind: 'stopped', text: `stopped at ${l.stopped} · the view shows the last finished cook`, title: 'change a value (or save the graph file) to cook again' };
   if (!l.ok) {
     const msg = l.error?.message ?? 'failed';
     return { kind: 'failed', text: `failed at ${l.error?.node ?? 'the graph'}: ${firstLine(msg)}`, title: `${l.error?.node ?? ''}: ${msg}` };
   }
+  if (shown) return shown;
   return { kind: 'ok', text: `cooked in ${fmtDuration(l.ms)}`, title: `the last cook of the whole graph took ${fmtDuration(l.ms)}` };
 }
 

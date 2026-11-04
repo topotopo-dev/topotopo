@@ -72,7 +72,8 @@ ctx.cookState = (graph) => cooks.get(graph)?.state ?? null;
 function setCook(graph, state) { cooks.set(graph, { state, at: performance.now() }); renderCook(); }
 function renderCook() {
   const c = cooks.get(ctx.graph?.name), compare = ctx.packages?.running;
-  const line = compare ? compareLine(compare, performance.now() - compare.at) : cookLine(c?.state, c ? performance.now() - c.at : 0);
+  const pe = ctx.output?.previewError, preview = pe && pe.at === `${ctx.graph?.name}/${ctx.graph?.node ?? ''}` ? pe.message : null;
+  const line = compare ? compareLine(compare, performance.now() - compare.at) : cookLine(c?.state, c ? performance.now() - c.at : 0, preview);
   for (const el of cookLines) {
     el.className = `cookline ${line.kind}`;
     const t = el.querySelector('.ctext');
@@ -164,6 +165,8 @@ ctx.setHover = (id) => { if (ctx.hover === id) return; ctx.hover = id; ctx.emit(
 // the output: the node being shown, its display mode and visibility remembered
 ctx.output = {
   mesh: null, summary: '', error: null, report: null, loading: false,
+  /** {at: "graph/node", message: "preview failed: …"} when that node's result cooked but could not be shown */
+  previewError: null,
   visible: local.get('output.visible', true), display: local.get('output.display', 'view'),
   setVisible(v) { this.visible = v; local.set('output.visible', v); outEntry(); ctx.emit('output'); ctx.requestRender(); },
   setDisplay(m) { this.display = m; local.set('output.display', m); outEntry(); ctx.emit('output'); ctx.requestRender(); },
@@ -259,19 +262,30 @@ const loadGeo = ctx.coalesce(async () => {
   const r = await api.geo(graph, node, ctx.sceneLayer.get());
   o.loading = false;
   if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) { ctx.emit('output'); return; }
+  // the result cooked but cannot be shown (its GLB was not written, or does not load here): the cook line says so and
+  // the view keeps the last result it showed
+  const previewFailed = (e) => {
+    const msg = String(e?.message ?? e);
+    o.previewError = { at: `${graph}/${node}`, message: msg.startsWith('preview failed') ? msg : `preview failed: ${msg}` };
+    if (e?.stack) console.error(e);
+    ctx.emit('output'); updateCook(); renderCook();
+  };
   if (!r.ok) {
     // the last good geometry stays; a stopped cook is no error (the cook line says where it stopped)
+    if (r.preview) return previewFailed(r.error);
     if (!r.stopped) o.error = r.error;
     ctx.emit('output'); updateCook();
     return;
   }
-  let src;
-  try { src = await parseGLB(r.buf); } catch (e) { o.error = String(e?.message ?? e); ctx.emit('output'); updateCook(); return; }
+  let src, mesh;
+  try { src = await parseGLB(r.buf); } catch (e) { return previewFailed(e); }
   if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) { new MeshObject('', src).dispose(); return; }
+  try { mesh = new MeshObject('out', src); } catch (e) { return previewFailed(e); }
   const prev = o.mesh;
-  o.mesh = new MeshObject('out', src);
+  o.mesh = mesh;
   o.mesh.onReady = () => { ctx.requestRender(); ctx.emit('output'); };
   o.error = null;
+  if (o.previewError) { o.previewError = null; renderCook(); }
   ctx.outputRoot.add(o.mesh.root);
   if (prev) prev.dispose();
   outEntry();
