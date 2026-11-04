@@ -84,9 +84,15 @@ const RED = [0.8, 0.25, 0.2];
   const ao1 = stats(await shot(withMaterial({ baseColor: RED, textures: { orm: 'image:orm' } }, [constImage('orm', [1, 0.5, 0, 1])])));
   const ao0 = stats(await shot(withMaterial({ baseColor: RED, textures: { orm: 'image:orm' } }, [constImage('orm', [0.1, 0.5, 0, 1])])));
   check(ao0.mean < ao1.mean - 3 && ao0.max > ao1.max - 8, `orm occlusion 1 → 0.1 darkens the indirect light only (mean ${ao1.mean.toFixed(1)} → ${ao0.mean.toFixed(1)}, key-lit peak ${ao1.max.toFixed(0)} → ${ao0.max.toFixed(0)})`);
-  const ormRough = await shot(withMaterial({ baseColor: RED, roughness: 0.9, metallic: 0.7, textures: { orm: 'image:orm' } }, [constImage('orm', [1, 0.3, 0, 1])]));
+  const ormRough = await shot(withMaterial({ baseColor: RED, roughness: 1, metallic: 1, textures: { orm: 'image:orm' } }, [constImage('orm', [1, 0.3, 0, 1])]));
   const factorRough = await shot(withMaterial({ baseColor: RED, roughness: 0.3, metallic: 0 }));
-  check(maxDiff(ormRough, factorRough) <= 1, 'an orm map replaces the roughness and metallic factors (G 0.3 / B 0 = factors 0.3 / 0)');
+  check(maxDiff(ormRough, factorRough) <= 1, 'an orm map under factors 1 gives its own roughness and metallic (G 0.3 / B 0 = factors 0.3 / 0)');
+  // the material's roughness / metallic multiply the orm map, as the exported factors do (texture_to_material roughness_value)
+  const ormHalf = await shot(withMaterial({ baseColor: RED, roughness: 0.5, metallic: 0.5, textures: { orm: 'image:orm' } }, [constImage('orm', [1, 0.6, 1, 1])]));
+  check(maxDiff(ormHalf, await shot(withMaterial({ baseColor: RED, roughness: 0.3, metallic: 0.5 }))) <= 1, 'orm G 0.6 / B 1 × factors 0.5 shades like factors 0.3 / 0.5 (map × factor, as in the GLB)');
+  const rf = async (f: number) => stats(await shot(withMaterial({ baseColor: RED, roughness: f, metallic: 0, textures: { orm: 'image:orm' } }, [constImage('orm', [1, 0.7, 0, 1])])));
+  const r1 = await rf(1), r05 = await rf(0.5);
+  check(r05.max > r1.max + 15, `the same orm material with roughness factor 1 → 0.5 sharpens the specular (peak ${r1.max.toFixed(0)} → ${r05.max.toFixed(0)})`);
   const flatN = await shot(withMaterial({ baseColor: RED, textures: { normal: 'image:n' } }, [constImage('n', [0.5, 0.5, 1, 1])]));
   const noN = await shot(withMaterial({ baseColor: RED }));
   check(maxDiff(flatN, noN) <= 1, `a flat normal map (0.5, 0.5, 1) shades like no normal map (max difference ${maxDiff(flatN, noN)})`);

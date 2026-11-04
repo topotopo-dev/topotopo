@@ -13,8 +13,9 @@
 //                 environment at their luminance, so nothing carries a hue.
 //   normal        tangent-space map (OpenGL, green up) in the MikkTSpace frame of core/tangents.ts, the frame glTF
 //                 export writes as TANGENT and bake_normal bakes in.
-//   orm           occlusion R (indirect light only), roughness G, metallic B; a map replaces the roughness and metallic
-//                 factors (exported roughnessFactor = metallicFactor = 1).
+//   orm           occlusion R (indirect light only), roughness G, metallic B; the material's roughness and metallic
+//                 multiply the map's, as the exported roughnessFactor / metallicFactor do (texture_to_material sets
+//                 them to 1 unless roughness_value / metallic_value are given).
 //   roughness     a standalone map (grey, or green of RGBA) replaces the factor, as exported; ignored under an orm map.
 //   emissive      added after lighting (values above 1 are KHR_materials_emissive_strength).
 //   unlit         base colour, no lighting and no tone curve (KHR_materials_unlit).
@@ -26,8 +27,9 @@
 // (Karis' analytic environment BRDF). Linear radiance × 2^exposure, the ACES curve (Narkowicz fit) on the brightest
 // channel with the hue kept, sRGB encoding.
 //
-// Transparency follows the exported alphaMode (core/materials.ts materialAlphaMode): coverage = the material's alpha ×
-// the base colour map's alpha × vertex Alpha (where vertex colours are used, as in export). MASK (alpha_mode "mask")
+// Transparency follows the exported alphaMode (core/materials.ts materialAlphaMode; vertex Alpha never changes it):
+// coverage = the material's alpha × the base colour map's alpha × vertex Alpha (where vertex colours are used, as
+// export writes COLOR_0). MASK (alpha_mode "mask")
 // discards pixels below the cutoff; BLEND (alpha_mode "blend", or alpha below 1 under "auto") is composited over what is
 // behind after the opaque surfaces, prim by prim from back to front (centroid depth), without writing depth. Unlit
 // materials keep their colour path and take the same coverage.
@@ -316,9 +318,11 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       if (painted && named && vcMode === 'auto') cdHidden = true;
       vcol.set(name, v);
       const vtx = vcMode !== 'ignore' && (!named || vcMode === 'multiply'), lowA = !!alLow.get(name);
-      if (lowA && !vtx) alphaHidden = true;
-      const mode = materialAlphaMode((named && table[name]) || (DEFAULT_MATERIAL as Material), vtx && lowA);
-      na = [mode === 'MASK' ? ALPHA_MASK : mode === 'BLEND' ? ALPHA_BLEND : ALPHA_OPAQUE, vtx && lowA ? 1 : 0];
+      // the mode is the material's own (vertex Alpha is data, as in export); vertex Alpha multiplies the coverage of
+      // mask and blend materials where vertex colours are used
+      const mode = materialAlphaMode((named && table[name]) || (DEFAULT_MATERIAL as Material));
+      if (lowA && !vtx && mode !== 'OPAQUE') alphaHidden = true;
+      na = [mode === 'MASK' ? ALPHA_MASK : mode === 'BLEND' ? ALPHA_BLEND : ALPHA_OPAQUE, vtx && lowA && mode !== 'OPAQUE' ? 1 : 0];
       nameAlpha.set(name, na);
     }
     triVcol[t] = v; triAlpha[t] = na[0]; triVA[t] = na[1];
@@ -388,7 +392,7 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
         return;
       }
       let rough = m.roughness, metal = m.metallic, ao = 1;
-      if (m.ormMap && uv) { sampleTri(m.ormMap, uvp[0], uvp[1], lod(m.ormMap), tx); ao = tx[0]; rough = tx[1]; metal = tx[2]; }
+      if (m.ormMap && uv) { sampleTri(m.ormMap, uvp[0], uvp[1], lod(m.ormMap), tx); ao = tx[0]; rough = tx[1] * m.roughness; metal = tx[2] * m.metallic; }
       else if (m.roughMap && uv) { sampleTri(m.roughMap, uvp[0], uvp[1], lod(m.roughMap), tx); rough = m.roughMap[0].ch === 4 ? tx[1] : tx[0]; }
       rough = Math.max(0.045, Math.min(1, rough)); metal = Math.max(0, Math.min(1, metal)); ao = Math.max(0, Math.min(1, ao));
       // normal: interpolated vertex normal, then the tangent-space map in the MikkTSpace frame
