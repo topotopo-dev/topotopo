@@ -26,6 +26,9 @@ export const SRC: Record<string, NodeSpec> = {
   SMALLSPHERE: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.1 } },
   // boolean cutter: bites the +x+y+z corner off BOX (the unit MESH sphere would enclose the box and leave nothing)
   CUTTER: { type: 'sphere', params: { type: 'ico', level: 2, radius: 0.6, center: [0.5, 0.5, 0.5] } },
+  // a cutter of two overlapping pieces (the sphere and a bar through it): boolean unions them before cutting
+  CUTTERBAR: { type: 'box', params: { size: [0.3, 0.3, 1.6], center: [0.5, 0.5, 0] } },
+  CUTTERS: { type: 'merge', in: ['CUTTER', 'CUTTERBAR'] },
   // remove_interior: the small sphere sits inside the box, so all of it is hidden
   OVERLAP: { type: 'merge', in: ['BOX', 'SMALLSPHERE'] },
   GRID: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
@@ -131,7 +134,7 @@ export const INPUTS: Record<string, string[]> = {
   resample: ['CURVE'], carve: ['CURVE'], ends: ['CIRCLE'], sweep: ['CURVE', 'PROFILEXY'], polywire: ['CURVE'], revolve: ['PROFILE'],
   extrude: ['SHAPE'], offset_curve: ['SHAPE'], boolean2d: ['SHAPE', 'CIRCLE'], fill: ['SHAPE'], loft: ['LOFT'],
   copy_to_points: ['MESH', 'PTS'], ray: ['PTS_ABOVE', 'MESH'], attrib_copy: ['MESH', 'COLORED'], attrib_transfer: ['MESH', 'COLORED'],
-  boolean: ['BOX', 'CUTTER'], remove_interior: ['OVERLAP'], material: ['MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
+  boolean: ['BOX', 'CUTTERS'], remove_interior: ['OVERLAP'], material: ['MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],
   sdf_grid: ['SDF'], grid_combine: ['SDFGRID', 'SDFGRID2'], grid_offset: ['SDFGRID'], grid_blur: ['SDFGRID'],
   grid_dilate: ['SDFGRID'], grid_erode: ['SDFGRID'], grid_resample: ['SDFGRID'], grid_to_mesh: ['SDFGRID'],

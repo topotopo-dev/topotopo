@@ -218,6 +218,66 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
     `boolean fixture cuts B out of A (${g?.numPrims} prims, from_a ${count('from_a')}, from_b ${count('from_b')})`, errs(r));
 }
 
+// ------------------------------------------------------------------ 5b. boolean with overlapping pieces in B
+// A cutter made of overlapping pieces used to go to the kernel as one multi-piece solid: where the pieces overlap the
+// region counted twice and stayed solid, with no warning. B's pieces are now unioned first (cavities kept).
+
+{
+  const { signedVolume } = await import('../src/core/topology.ts');
+  const { solidReport } = await import('../src/core/report.ts');
+  const nodes = (op: string, extra: Record<string, NodeSpec> = {}, a = 'a'): Record<string, NodeSpec> => ({
+    a: { type: 'box', params: { size: [4, 4, 4] } },
+    ma: { type: 'material', in: ['a'], params: { name: 'stone' } },
+    b1: { type: 'box', params: { size: [2, 2, 6] } },
+    b2: { type: 'box', params: { size: [3, 3, 2] } },
+    b: { type: 'merge', in: ['b1', 'b2'] },
+    mb: { type: 'material', in: ['b'], params: { name: 'cut' } },
+    ...extra,
+    c: { type: 'boolean', in: [a, 'mb'], params: { operation: op } },
+  });
+  // inside A, B1 takes 2×2×4 = 16, B2 3×3×2 = 18, their overlap 2×2×2 = 8: the union of B's pieces in A is 26
+  for (const [op, want, graph] of [
+    ['subtract', 64 - 26, nodes('subtract', {}, 'ma')],
+    ['intersect', 26, nodes('intersect', {}, 'ma')],
+    ['union', 72, nodes('union', {}, 'ma')],
+    // a hollow cutter: the inner shell (a cavity in B1, outside B2) stays with its piece, so a core is left standing
+    ['subtract hollow', 64 - 26 + 0.125, nodes('subtract', {
+      h0: { type: 'box', params: { size: [0.5, 0.5, 0.5], center: [0, 0, 1.5] } }, h: { type: 'reverse', in: ['h0'] },
+      b: { type: 'merge', in: ['b1', 'b2', 'h'] },
+    }, 'ma')],
+  ] as [string, number, GraphSpec['nodes']][]) {
+    const r = await engine.cook({ nodes: graph, output: 'c' });
+    const g = r.geo;
+    const vol = g ? signedVolume(g) : NaN;
+    check(r.ok && Math.abs(vol - want) < 1e-4 && solidReport(g!).closedAfterWeld,
+      `boolean ${op} with overlapping pieces in B has volume ${want} and is closed (${vol.toFixed(4)})`, errs(r));
+    if (op !== 'subtract' || !g) continue;
+    const mat = g.prims.get('material'), fromB = g.primGroups.get('from_b')!, fromA = g.primGroups.get('from_a')!;
+    let bad = 0, cut = 0;
+    for (let pr = 0; pr < g.numPrims; pr++) {
+      const m = mat?.get(pr);
+      if (fromB[pr]) cut++;
+      if (fromB[pr] ? m !== 'cut' : !fromA[pr] || m !== 'stone') bad++;
+    }
+    check(cut > 0 && bad === 0, `boolean subtract: the cut faces carry B's material, the rest A's (${cut} cut faces, ${bad} wrong)`);
+  }
+  // A's own overlapping pieces are unioned too, with or without B
+  const two = { a1: { type: 'box', params: { size: [4, 4, 4] } }, a2: { type: 'box', params: { size: [1, 1, 1], center: [1.5, 1.5, 1.5] } }, aa: { type: 'merge', in: ['a1', 'a2'] } };
+  const ra = await engine.cook({ nodes: nodes('subtract', two, 'aa'), output: 'c' });
+  check(ra.ok && Math.abs(signedVolume(ra.geo!) - 38) < 1e-4, `boolean subtract with overlapping pieces in A and B (${ra.geo && signedVolume(ra.geo).toFixed(4)})`, errs(ra));
+  // without B a hollow A keeps its cavity
+  const rh = await engine.cook({ nodes: {
+    o: { type: 'box', params: { size: [4, 4, 4] } }, i0: { type: 'box', params: { size: [2, 2, 2] } }, i: { type: 'reverse', in: ['i0'] },
+    a: { type: 'merge', in: ['o', 'i'] }, c: { type: 'boolean', in: ['a'] },
+  }, output: 'c' });
+  check(rh.ok && Math.abs(signedVolume(rh.geo!) - 56) < 1e-4, `boolean without B keeps a cavity in A (${rh.geo && signedVolume(rh.geo).toFixed(4)})`, errs(rh));
+  // touching pieces fuse into one
+  const rt = await engine.cook({ nodes: {
+    t1: { type: 'box' }, t2: { type: 'box', params: { center: [1, 0, 0] } }, a: { type: 'merge', in: ['t1', 't2'] }, c: { type: 'boolean', in: ['a'] },
+  }, output: 'c' });
+  check(rt.ok && solidReport(rt.geo!).pieces === 1 && Math.abs(signedVolume(rt.geo!) - 2) < 1e-6, `boolean without B fuses touching pieces (${rt.geo && solidReport(rt.geo).pieces} pieces)`, errs(rt));
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.

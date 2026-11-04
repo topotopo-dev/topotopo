@@ -6154,16 +6154,16 @@ Instances are expanded in prim order after the other prims; source attributes an
 
 category: `solid` · aliases: `csg`, `bool`, `difference`, `union`, `intersect`
 
-Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, unions A’s overlapping pieces.
+Robust mesh boolean (union / subtract / intersect) of closed solids. Each input’s overlapping pieces are unioned first; without B, the result is that union of A.
 
-The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.
+Either input may be a merge of pieces that overlap: each input is first made one solid, the union of its pieces (the inner wall of a hollow piece stays with it, so the hollow is kept), and the operation runs on those two solids, so subtracting a merge of cutters removes everything any of them covers. The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `a` | no | no | solid A |
-| 1 | `b` | yes | no | solid B (optional) |
+| 0 | `a` | no | no | solid A: closed pieces, which may overlap (unioned first) |
+| 1 | `b` | yes | no | solid B (optional): closed pieces, which may overlap (unioned first, so a merge of cutters cuts as one); its faces become the cut faces when subtracting |
 
 **Parameters**
 
@@ -6173,7 +6173,7 @@ The result is a closed solid made of polygons: each input face that survives the
 | `output` | enum | `"polygons"` |  | `polygons`, `triangles` |  | polygons = each surviving input face as one polygon (or a few around a hole); triangles = the kernel triangles as they come |
 | `tolerance` | float | `0.00001` | 0.. |  | `simplify`, `sliver` | after the cut, collapse edges shorter than this and flatten slivers thinner than it, keeping the solid closed (0 = rounding only) |
 
-**Writes:** prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated
+**Writes:** prim groups from_a, from_b (cut faces come from B when subtracting); each face keeps the prim attributes of the input face it comes from (a cut face B’s material); float point/vertex attributes interpolated
 
 **Example**
 
