@@ -94,12 +94,20 @@ export const mikkTSpaceReady = () => mod?.wasm != null;
 /** uv triangles whose doubled area is below this fraction of their squared edge lengths are collapsed. */
 const UV_DEGENERATE = 1e-9;
 
+/**
+ * A triangle whose world area is below this fraction of the mean triangle area is thin (the sides and back of a card
+ * a millimetre thick): planar uvs collapse on it by construction, so it is not reported as a collapsed uv.
+ */
+const THIN_AREA = 1e-2;
+
 export interface TangentDiagnostics {
   triangles: number;
   /** triangles with a non-finite uv corner */
   uvNonFinite: number;
   /** triangles whose uvs are collinear or coincide (zero uv area) */
   uvDegenerate: number;
+  /** collapsed-uv triangles skipped because their world-space area is tiny next to the mean (not counted in uvDegenerate or fallbackCorners) */
+  uvThin: number;
   /** corners that received the fallback tangent */
   fallbackCorners: number;
   /** the first triangle with a non-finite or collapsed uv, or -1 (warnings say where it is) */
@@ -114,16 +122,28 @@ export interface TangentDiagnostics {
 export function mikkTangents(pos: ArrayLike<number>, nrm: ArrayLike<number>, uv: ArrayLike<number>): { tangents: Float32Array; diag: TangentDiagnostics } {
   if (!mod?.wasm) throw new Error('MikkTSpace is not loaded: await loadMikkTSpace() first (exportGLB, renderPBR and bake_normal do)');
   const nt = Math.floor(pos.length / 9);
-  const diag: TangentDiagnostics = { triangles: nt, uvNonFinite: 0, uvDegenerate: 0, fallbackCorners: 0, firstBad: -1 };
-  const bad = new Uint8Array(nt);
+  const diag: TangentDiagnostics = { triangles: nt, uvNonFinite: 0, uvDegenerate: 0, uvThin: 0, fallbackCorners: 0, firstBad: -1 };
+  const bad = new Uint8Array(nt); // 1 = reported, 2 = thin (fallback tangent, not reported)
   const P = Float32Array.from(pos), N = Float32Array.from(nrm), T = Float32Array.from(uv);
+  // world-space area of each triangle, and their mean
+  const area = new Float64Array(nt);
+  let areaSum = 0;
+  for (let t = 0; t < nt; t++) {
+    const o = t * 9, ax = P[o + 3] - P[o], ay = P[o + 4] - P[o + 1], az = P[o + 5] - P[o + 2], bx = P[o + 6] - P[o], by = P[o + 7] - P[o + 1], bz = P[o + 8] - P[o + 2];
+    const a = 0.5 * Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
+    if (Number.isFinite(a)) { area[t] = a; areaSum += a; }
+  }
+  const thinBelow = nt ? (areaSum / nt) * THIN_AREA : 0;
   for (let t = 0; t < nt; t++) {
     let finite = true;
     for (let k = 0; k < 6; k++) if (!Number.isFinite(T[t * 6 + k])) { finite = false; T[t * 6 + k] = 0; }
     if (!finite) { diag.uvNonFinite++; bad[t] = 1; if (diag.firstBad < 0) diag.firstBad = t; continue; }
     const u0 = T[t * 6], v0 = T[t * 6 + 1], du1 = T[t * 6 + 2] - u0, dv1 = T[t * 6 + 3] - v0, du2 = T[t * 6 + 4] - u0, dv2 = T[t * 6 + 5] - v0;
     const e2 = du1 * du1 + dv1 * dv1 + du2 * du2 + dv2 * dv2 + (du2 - du1) ** 2 + (dv2 - dv1) ** 2;
-    if (!(Math.abs(du1 * dv2 - du2 * dv1) > UV_DEGENERATE * e2)) { diag.uvDegenerate++; bad[t] = 1; if (diag.firstBad < 0) diag.firstBad = t; }
+    if (!(Math.abs(du1 * dv2 - du2 * dv1) > UV_DEGENERATE * e2)) {
+      if (area[t] < thinBelow) { diag.uvThin++; bad[t] = 2; continue; }
+      diag.uvDegenerate++; bad[t] = 1; if (diag.firstBad < 0) diag.firstBad = t;
+    }
   }
   for (let i = 0; i < N.length; i += 3) {
     const l = Math.hypot(N[i], N[i + 1], N[i + 2]);
@@ -139,7 +159,7 @@ export function mikkTangents(pos: ArrayLike<number>, nrm: ArrayLike<number>, uv:
     x -= nx * d; y -= ny * d; z -= nz * d;
     const l = Math.hypot(x, y, z), w = out[o + 3];
     if (!bad[t] && l > 1e-6 && Number.isFinite(l) && (w === 1 || w === -1)) { out[o] = x / l; out[o + 1] = y / l; out[o + 2] = z / l; continue; }
-    diag.fallbackCorners++;
+    if (bad[t] !== 2) diag.fallbackCorners++;
     // the world axis least aligned with N, made perpendicular to it
     const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
     const a = ax <= ay && ax <= az ? [1, 0, 0] : ay <= az ? [0, 1, 0] : [0, 0, 1];

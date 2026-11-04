@@ -1034,12 +1034,12 @@ Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon cap
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `height` | float | `1` |  |  | `depth`, `distance`, `h` | extrusion distance along the plane normal |
+| `height` | float | `1` |  |  | `depth`, `distance`, `h` | extrusion distance along the plane normal: plane xz extrudes along +Y, xy along +Z, yz along +X |
 | `divisions` | int | `1` | 1..10000 |  |  | segments along the extrusion |
 | `twist` | float | `0` |  |  |  | twist in degrees (about each shape centroid) |
 | `scale_top` | vec2 | `[1,1]` |  |  |  | scale of the top cap (taper); [0,0] = pyramid |
 | `center` | bool | `false` |  |  |  | extrude symmetrically about the shape plane |
-| `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane (auto = flattest axis) |
+| `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis) |
 | `caps` | bool | `true` |  |  |  | add top/bottom caps |
 
 **Writes:** prim groups top, bottom, side
@@ -1646,7 +1646,7 @@ category: `curve` · aliases: `lathe`
 
 Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.
 
-Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. Closed results face outward.
+Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. angle is measured from where the profile is drawn, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed results face outward. Caps (caps on, partial angle) are only made for closed profiles, and then the result is a closed solid that is always oriented outward (flip has no effect on it). An open profile gives an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.
 
 **Inputs**
 
@@ -1661,9 +1661,9 @@ Each profile point turns around the axis line (through origin, along axis) at it
 | `axis` | vec3 | `[0,1,0]` |  |  | `direction`, `dir` | direction of the axis to turn around |
 | `origin` | vec3 | `[0,0,0]` |  |  | `center`, `pivot` | a point on the axis |
 | `segments` | int | `32` | 3..4096 |  | `divisions`, `cols` | segments around |
-| `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees |
-| `caps` | bool | `false` |  |  |  | cap partial revolves (closed profiles) |
-| `flip` | bool | `false` |  |  |  | reverse face orientation |
+| `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees, counter-clockwise seen from the axis tip (right-handed): 0..90 about Y runs from +X towards -Z |
+| `caps` | bool | `false` |  |  |  | cap partial revolves of closed profiles (open profiles have no cap; the result is oriented outward) |
+| `flip` | bool | `false` |  |  |  | reverse face orientation (open profiles; a closed solid is always re-oriented outward) |
 
 **Writes:** vertex uv
 
@@ -1952,7 +1952,7 @@ category: `curve`
 
 Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).
 
-The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
+The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. The end caps lie in the profile plane, perpendicular to the curve at its last point: where the last segment is tilted, the cap is tilted with it and its rim pokes above or below a horizontal plane the tube was meant to end on (a ground or snap plane). End the path with a short horizontal run, or cut the result with clip. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
 
 **Inputs**
 
@@ -3692,11 +3692,11 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `from` | string | `""` |  |  | `source_material`, `use` | input 1: which of its materials ("" = its only one) |
 | `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
 | `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
-| `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 |
-| `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 |
+| `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 (the glTF metallicFactor; texture_to_material with an orm map sets its own factors and ignores this) |
+| `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 (the glTF roughnessFactor, 1 under a roughness map; texture_to_material with an orm map sets its own factors and ignores this) |
 | `emissive` | color | `[0,0,0]` |  |  | `emission`, `emit` | emitted colour; components above 1 export with KHR_materials_emissive_strength |
 | `alpha` | float | `1` | 0..1 |  | `opacity`, `opac` | opacity; below 1 exports with alphaMode BLEND |
-| `alpha_mode` | enum | `"auto"` |  | `auto`, `opaque`, `mask`, `blend` |  | auto preserves legacy scalar/vertex opacity; mask cuts out pixels below alpha_cutoff; explicit modes override auto |
+| `alpha_mode` | enum | `"auto"` |  | `auto`, `opaque`, `mask`, `blend` |  | auto blends only when alpha is below 1 (vertex alpha never changes the mode); mask cuts out pixels below alpha_cutoff; explicit modes override auto |
 | `alpha_cutoff` | float | `0.5` | 0..1 |  |  | mask: discard where material alpha × texture alpha × vertex Alpha is below this value |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
@@ -4878,13 +4878,15 @@ Weld points closer than a distance; collapsed prims are removed.
 
 category: `topology` · aliases: `divide_quads`, `facade_split`, `quad_split`, `split_faces`
 
-Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded.
+Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded. Only quads are split: cut first, then split.
+
+Only 4-sided polygons are divided; triangles and n-gons pass through unsplit. After a boolean the faces around the cut are often n-gons, so they stay whole: run grid_split on the quads BEFORE the cut (or triangulate the n-gons first), not after it.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | polygon mesh (quads are split; other polygons pass through) |
+| 0 | `geo` | no | no | polygon mesh (quads are split; triangles and n-gons pass through unsplit) |
 
 **Parameters**
 
@@ -9000,7 +9002,7 @@ category: `uv` · aliases: `uvproject`, `texture`, `uv_texture`
 
 Project UVs: planar, box (tri-planar per face), cylindrical or spherical.
 
-uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps.
+uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps. For cylindrical and spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four repeats); scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.
 
 **Inputs**
 
@@ -9012,9 +9014,10 @@ uv = world position / scale + offset (no packing: the uv runs over many tiles, f
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
+| `group` | group (prim) | `""` |  |  |  | prims to project ("" = all); the other prims keep their uv |
 | `method` | enum | `"box"` |  | `box`, `planar`, `cylindrical`, `spherical` |  | projection type |
 | `axis` | enum | `"y"` |  | `y`, `x`, `z` |  | projection axis (planar normal / cylinder axis) |
-| `scale` | vec2 | `[1,1]` |  |  |  | world units per UV tile (box/planar); tiles around (cyl/sph) |
+| `scale` | vec2 | `[1,1]` |  |  |  | box/planar: world units per UV tile; cylindrical/spherical: scale[0] is the number of tiles around the axis (a count, not a length), scale[1] is metres per tile along the axis (cylindrical) or the number of tiles pole to pole (spherical) |
 | `offset` | vec2 | `[0,0]` |  |  |  | uv offset |
 | `center` | vec3 | `[0,0,0]` |  |  |  | projection center (cyl/sph) |
 
@@ -13915,7 +13918,7 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `style` | enum | `"dirt"` |  | `dirt`, `leaks`, `spots` | `type`, `mode` | dirt patches, vertical leaks or round spots |
-| `scale` | float | `4` | 0.1..256 |  | `frequency` | features across the image width |
+| `scale` | float | `4` | 0.1..256 |  | `frequency` | features across the image width (1 to 256: larger values are clamped to 256) |
 | `coverage` | float | `0.35` | 0..1 |  | `amount`, `density` | fraction of the image that turns white |
 | `contrast` | float | `0.6` | 0..1 |  | `hardness` | edge hardness (1 = hard) |
 | `detail` | float | `0.4` | 0..1 |  | `breakup` | fine breakup mixed in (0 = smooth shapes) |
@@ -14798,7 +14801,7 @@ category: `texture` · aliases: `tile_generator`, `bricks`, `brick`, `checker`, 
 
 Tiling pattern image: bricks, tiles, checker, stripes, hex, dots, or a grid line mask, with gap (mortar), bevel and per-cell random id.
 
-Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.
+Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); stripes are vertical (u count), and with a u count of 1 the v count makes horizontal stripes; bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.
 
 **Inputs**
 
@@ -15650,7 +15653,7 @@ category: `texture` · aliases: `transform_texture`, `transformation_2d`, `offse
 
 Offset, rotate, scale and tile an image (2D transform with wrap).
 
-Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv). With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.
+Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv); tiling is about the lower-left corner, so cell 0 starts at uv (0, 0) and offset 0 keeps the cells aligned with the image edges. With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.
 
 **Inputs**
 
@@ -15665,7 +15668,7 @@ Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `t
 | `offset` | vec2 | `[0,0]` |  |  | `translate`, `t` | shift in uv (0.5 = half the image) |
 | `rotate` | float | `0` |  |  | `rotation`, `r`, `angle` | rotation in degrees (counter-clockwise) |
 | `scale` | vec2 | `[1,1]` |  |  | `s`, `zoom` | zoom (> 1 enlarges the content) |
-| `tile` | vec2 | `[1,1]` | 0.001.. |  | `tiling`, `repeat` | repeats of the content along u and v |
+| `tile` | vec2 | `[1,1]` | 0.001.. |  | `tiling`, `repeat` | repeats of the content along u and v; cells start at the lower-left corner (uv 0, 0), so [1, 2] gives two stacked cells, each the whole image |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | repeat the source outside 0..1 (else black) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -15796,8 +15799,8 @@ Input 0 is the mesh (with uv), input 1 the images (merge several texture branche
 | `orm` | string | `""` |  |  | `orm_map`, `packed` | packed occlusion / roughness / metallic image (R, G, B) |
 | `group` | group (prim) | `""` |  |  |  | prims that get the material ("" = all prims when the material is new, else none) |
 | `base_color_tint` | color | `[1,1,1]` |  |  | `tint` | base colour factor of a new material (glTF writes white under a base colour map) |
-| `roughness_value` | float | `0.8` | 0..1 |  |  | roughness of a new material (the ORM green channel when no roughness image is given) |
-| `metallic_value` | float | `0` | 0..1 |  |  | metallic of a new material (the ORM blue channel when no metallic image is given) |
+| `roughness_value` | float | `-1` | -1..1 |  |  | roughness. -1 = unset: 0.8 for a new material; with an orm map the glTF roughnessFactor is 1 (a material on input 0 does not set it). A value is the roughnessFactor that multiplies the ORM green channel; for occlusion / metallic images packed here it fills the green channel when no roughness image is given |
+| `metallic_value` | float | `-1` | -1..1 |  |  | metallic. -1 = unset: 0 for a new material; with an orm map the glTF metallicFactor is 1 (a material on input 0 does not set it). A value is the metallicFactor that multiplies the ORM blue channel; for occlusion / metallic images packed here it fills the blue channel when no metallic image is given |
 
 **Writes:** prim "material", detail "materials" with image:<name> texture slots, the referenced images as image volumes
 

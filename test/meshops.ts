@@ -283,6 +283,23 @@ const SLIDE: Record<string, NodeSpec> = {
 }
 {
   const nodes: Record<string, NodeSpec> = {
+    b: { type: 'box' },
+    cyl: { type: 'uv_project', in: ['b'], params: { method: 'cylindrical' } },
+    part: { type: 'uv_project', in: ['cyl'], params: { method: 'planar', axis: 'y', scale: [2, 2], group: '0' } },
+  };
+  const before = (await cook(nodes, 'cyl')).geo, after = (await cook(nodes, 'part')).geo;
+  const ub = before.vertices.get('uv')!, ua = after.vertices.get('uv')!;
+  let changed = 0, kept = 0;
+  for (let v = 0; v < after.numVertices; v++) {
+    const same = ub.get(v)[0] === ua.get(v)[0] && ub.get(v)[1] === ua.get(v)[1];
+    const inGroup = after.vertexPrims()[v] === 0;
+    if (inGroup && !same) changed++;
+    if (!inGroup && same) kept++;
+  }
+  check(changed > 0 && kept === after.numVertices - 4, 'uv_project group: only the grouped prims are re-projected, the others keep their uv');
+}
+{
+  const nodes: Record<string, NodeSpec> = {
     path: { type: 'line', params: { direction: [1, 0, 0], length: 2, points: 3 } },
     sw: { type: 'sweep', in: ['path'], params: { shape: 'rect', size: [0.3, 0.1] } },
     pw: { type: 'polywire', in: ['path'], params: { radius: 0.1, divisions: 12 } },

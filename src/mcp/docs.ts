@@ -753,7 +753,7 @@ CUTOUTS: tex_crop extracts a top-left pixel rectangle (all layers), optionally r
   tex_dilate pads nearest valid pixels; alpha stays unchanged by default. For grey/data maps supply an explicit
   validity mask (same size). Pack padding reserves empty gutters; dilate supplies the edge values.
   material {alpha_mode:"mask",alpha_cutoff:0.5,double_sided:true} BEFORE texture_to_material enables cutouts.
-  Omitted/auto alpha mode retains legacy behaviour; explicit opaque/mask/blend overrides scalar/vertex auto mode.
+  Omitted/auto alpha mode blends only for scalar alpha < 1; vertex Alpha (COLOR_0.A) is data and never changes it.
   Complete example: examples/image_cutouts.json; workflow and layout contract: docs/image-cutouts.md.
 SEE IT: render of a geometry holding only images shows the "texture" view; render {texture:"<image>"|"image/layer"|
   "<material>"} adds the view (a material shows its maps as a labelled strip); render {textures:true} samples base
@@ -947,6 +947,10 @@ Nodes:
       profile placed by sections [{offset, scale, rotate}, ...]; sections with the same point count join point to point
       (insets keep their corners), closed sections are turned to the first one's winding; closed results face outward.
   revolve {axis, origin, angle}   lathe about any axis line; draw the profile in a plane that holds the axis.
+      angle [a0, a1] turns right-handed about the axis (plan angle of the result = -a); caps only for closed profiles and
+      then always outward; an open profile gives an open surface, flip reverses it. extrude plane: xz along +Y, xy along +Z,
+      yz along +X. sweep end caps are perpendicular to the path (a tilted last segment tilts the cap). grid_split splits
+      quads only: cut first (boolean leaves n-gons), then split.
   shape2d capsule | slot   a stadium (rect with half-circle ends) in size; extrude for a slot cutter.
   project_curve (curves, surface | heightfield) {mode direction|closest, direction, spacing, lift, misses}   drapes a
       curve onto terrain; spacing resamples first so it follows the bumps; writes point hit and N (smooth normals).
@@ -1234,6 +1238,8 @@ Which node:
                tiling textures, boxes. box: each polygon along the axis its normal is closest to (X faces u = z, v = y;
                Y faces u = x, v = z; Z faces u = x, v = y); both sides of an axis share it, so faces looking along +X,
                +Y and -Z are MIRRORED (text reads backwards; inspect uv counts them) and -X, -Y, +Z read right.
+               cylindrical scale[0] = tile count around the axis; its top and bottom annuli collapse, so give them a prim
+               group and project them again with method box / planar and group.
   uv_unwrap    automatic (xatlas): cuts charts by angle/cost, flattens and packs into 0..1. Default for props and
                hard-surface. Keeps polygons; writes prim chart. Each connected piece is charted on its own; polygons
                xatlas cuts across charts become triangles (exact uv); faces with no area collapse onto a neighbour's
@@ -1431,7 +1437,7 @@ MATERIALS: the material node writes prim "material" + the detail table. A named 
   material as it is and their Cd / Alpha are dropped (Cd left from colouring parts does not become COLOR_0 or a second,
   white or tinted copy of the material). Prims without a material, and every prim with vertex_colors:true, keep their
   Cd: not all white → baseColor white × COLOR_0 with the material's metallic/roughness/emissive (one constant Cd is
-  folded into the factor). alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
+  folded into the factor). a material's own alpha < 1 (or alpha_mode blend) → alphaMode BLEND; vertex Alpha is data: it stays COLOR_0.A and never changes the mode; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
 TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the package folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
   map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json

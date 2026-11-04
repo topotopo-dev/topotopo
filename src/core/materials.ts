@@ -21,7 +21,7 @@ export interface Material {
   roughness: number;
   emissive: [number, number, number];
   alpha: number;
-  /** Absent = legacy auto (blend only for scalar / vertex opacity). */
+  /** Absent = auto: blend only when the material's own alpha is below 1 (vertex alpha never changes it). */
   alphaMode?: 'OPAQUE' | 'MASK' | 'BLEND';
   alphaCutoff?: number;
   doubleSided: boolean;
@@ -80,8 +80,9 @@ function alphaFields(m: any): Pick<Material, 'alphaMode' | 'alphaCutoff'> {
   return { alphaMode: mode, ...(mode === 'MASK' ? { alphaCutoff: Math.max(0, Math.min(1, num(m?.alphaCutoff, 0.5))) } : {}) };
 }
 
-export function materialAlphaMode(m: Material, vertexAlpha = false): 'OPAQUE' | 'MASK' | 'BLEND' {
-  return m.alphaMode ?? (m.alpha < 1 || vertexAlpha ? 'BLEND' : 'OPAQUE');
+/** The glTF alpha mode of a material: its own alpha_mode, else BLEND when its scalar alpha is below 1. Vertex alpha is data and never promotes it. */
+export function materialAlphaMode(m: Material): 'OPAQUE' | 'MASK' | 'BLEND' {
+  return m.alphaMode ?? (m.alpha < 1 ? 'BLEND' : 'OPAQUE');
 }
 
 /** { textures } with the non-empty string slots, or {} when there is none (keeps texture-free tables unchanged). */

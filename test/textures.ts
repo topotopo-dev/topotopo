@@ -274,6 +274,18 @@ section('filters: blend modes, levels, blur, normals');
   const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { offset: [0.5, 0] } } }, 't');
   const p0 = genPattern({ pattern: 'checker', count: [2, 2], offset: 0.5, gap: 0, bevel: 0, variation: 0, seed: 0 }, 64, 64).C;
   check(maxDiff(tr.layer('C')!, p0.map((x) => 1 - x)) < 1e-6, 'tex_transform: half an image offset of a 2 × 2 checker inverts it');
+  const grad = { g: { type: 'tex_gradient', params: { resolution: 32 } } };
+  const g1 = (await image({ ...grad, t: { type: 'tex_transform', in: ['g'] } }, 't')).layer('C')!;
+  const gt = (await image({ ...grad, t: { type: 'tex_transform', in: ['g'], params: { tile: [1, 2] } } }, 't')).layer('C')!;
+  // tile [1, 2] stacks two whole copies: the top half and the bottom half each equal the image squeezed to half height
+  let tileOk = true;
+  for (let j = 0; j < 32; j++) for (let i = 0; i < 32; i++) if (Math.abs(gt[j * 32 + i] - g1[((2 * j) % 32) * 32 + i]) > 0.05) tileOk = false;
+  check(tileOk, 'tex_transform tile [1, 2] repeats from the lower-left corner (no offset needed)');
+  const st = (await image({ n: { type: 'tex_pattern', params: { resolution: 64, pattern: 'stripes', count: [1, 8], gap: 0.5, bevel: 0 } } })).layer('C')!;
+  let rowConst = true, colVaries = false;
+  for (let j = 0; j < 64; j++) for (let i = 1; i < 64; i++) if (st[j * 64 + i] !== st[j * 64]) rowConst = false;
+  for (let j = 1; j < 64; j++) if (Math.abs(st[j * 64] - st[0]) > 0.5) colVaries = true;
+  check(rowConst && colVaries, 'tex_pattern stripes with count [1, 8] make horizontal stripes');
   const ts = await image({ s: { type: 'tex_shape', params: { resolution: 32, falloff: 0.5 } }, t: { type: 'tex_tile_sampler', in: ['s'], params: { resolution: 64, count: [4, 4] } } }, 't');
   check(mean(ts.layer('C')!) > 0.05, 'tex_tile_sampler stamps the source');
   const out = await geo({ p: { type: 'tex_pattern', params: { resolution: 16 } }, o: { type: 'tex_output', in: ['p'], params: { name: 'brick_ids', layer: 'id' } } }, 'o');
@@ -506,6 +518,31 @@ let tg: Geometry;
   check(json.images.length === 3 && json.images.every((i: any) => i.mimeType === 'image/png') && json.textures.length === 3, `glTF embeds 3 PNG images (${json.images.map((i: any) => i.name).join(', ')})`);
   check(m0.pbrMetallicRoughness.baseColorTexture && m0.normalTexture && m0.occlusionTexture && m0.pbrMetallicRoughness.metallicRoughnessTexture.index === m0.occlusionTexture.index && (m0.pbrMetallicRoughness.metallicFactor ?? 1) === 1, 'ORM is both the occlusion and the metallicRoughness texture');
   check(!warns.length, `no export warnings${warns.length ? ': ' + warns.join('; ') : ''}`);
+  // an orm map with a material on input 0: the glTF factors are 1 (or roughness_value / metallic_value), never the input material's scalars
+  for (const [extra, wantM, wantR] of [[{}, 1, 1], [{ roughness_value: 0.8 }, 1, 0.8], [{ roughness_value: 0.6, metallic_value: 0.5 }, 0.5, 0.6]] as const) {
+    const ormG = await geo({
+      ...UVBOX, pat: { type: 'tex_pattern', params: { resolution: 16, name: 'packed' } },
+      m0: { type: 'material', in: ['uv'], params: { name: 'wall', metallic: 0, roughness: 0.5 } },
+      mm: { type: 'texture_to_material', in: ['m0', 'pat'], params: { material: 'wall', orm: 'packed', ...extra } },
+    }, 'mm');
+    const gl = await exportGeometryAsync(ormG, 'glb', {});
+    const pj = JSON.parse(new TextDecoder().decode(gl.subarray(20, 20 + new DataView(gl.buffer, gl.byteOffset).getUint32(12, true)))).materials[0].pbrMetallicRoughness;
+    const mj = JSON.parse(new TextDecoder().decode((await exportFilesAsync(ormG, 'textures', path.join(tmp, 'orm'), {})).files.find((f) => f.path.endsWith('materials.json'))!.bytes)).materials.wall;
+    check((pj.metallicFactor ?? 1) === wantM && (pj.roughnessFactor ?? 1) === wantR && mj.metallic === wantM && mj.roughness === wantR,
+      `orm + input material ${JSON.stringify(extra)}: glTF factors ${pj.metallicFactor ?? 1} / ${pj.roughnessFactor ?? 1} = materials.json ${mj.metallic} / ${mj.roughness}`);
+  }
+  // thin triangles (the sides and back of a card with planar uvs) are not collapsed uvs; a genuinely collapsed uv still warns
+  {
+    const maps = { pat: { type: 'tex_pattern', params: { resolution: 16, name: 'h' } }, nm: { type: 'tex_normal_from_height', in: ['pat'], params: { name: 'n' } } };
+    const tm = (src: string) => ({ ...maps, mm: { type: 'texture_to_material', in: [src, 'nm'], params: { material: 'card', normal: 'n' } } });
+    const exportWarns = async (g: Geometry) => { const w: string[] = []; await exportGeometryAsync(g, 'glb', { warn: (m) => w.push(m) }); return w.filter((m) => /collapsed uvs/.test(m)); };
+    const card = await geo({ ...tm('uv'), b: { type: 'box', params: { size: [1, 0.001, 1], divisions: [6, 1, 6] } }, uv: { type: 'uv_project', in: ['b'], params: { method: 'planar', axis: 'y' } } }, 'mm');
+    const cw = await exportWarns(card);
+    check(cw.length === 0, `a 1 m × 1 m × 1 mm card with planar uvs exports without the collapsed-uv warning${cw.length ? ': ' + cw[0] : ''}`);
+    const flat = await geo({ ...tm('z'), b: { type: 'box', params: { divisions: [2, 2, 2] } }, z: { type: 'attrib_create', in: ['b'], params: { name: 'uv', class: 'vertex', value: [0, 0] } } }, 'mm');
+    const fw = await exportWarns(flat);
+    check(fw.length === 1 && /have collapsed uvs/.test(fw[0]), `a mesh whose uvs are genuinely collapsed still warns (${fw[0]?.slice(0, 80)})`);
+  }
   // the embedded base colour PNG holds the image's bytes
   const bufView = json.bufferViews[json.images.find((i: any) => i.name === 'brick_color').bufferView];
   const binStart = 20 + dv.getUint32(12, true) + 8;
