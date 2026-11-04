@@ -98,7 +98,8 @@ const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo';
 // the hints of every command name it so
 setProgram(prog);
 
-if (argv.includes('-v') || argv.includes('-V') || argv.includes('--version')) {
+// the global version flag is the first argument (or the only one); later ones belong to the command (use <package> --version 1.0)
+if (['-v', '-V', '--version'].includes(argv[0] ?? '')) {
   console.log(`topotopo ${TOPOTOPO_VERSION}`);
   process.exit(0);
 }
