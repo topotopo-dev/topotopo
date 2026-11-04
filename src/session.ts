@@ -725,8 +725,10 @@ export class Session {
     }
   }
 
-  private watchers: fs.FSWatcher[] = [];
+  /** the folder each watcher follows; a folder that is missing has none until it is made again */
+  private watchers = new Map<string, fs.FSWatcher>();
   private watchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private watching = false;
 
   /**
    * Follow what other processes write into graphs/ and assets/, and in a package the graph files beside its manifest (a
@@ -734,32 +736,63 @@ export class Session {
    * graph file whose content differs from the stored graph replaces it and notifies the listeners; a removed file
    * removes the graph. Our own writes read back equal, so they change nothing. An asset whose content changed is
    * registered again and every graph is notified (any may use it); a removed asset stays registered until the next
-   * load(). Two writers to one graph: the last write wins.
+   * load(). Two writers to one graph: the last write wins. graphs/ and assets/ may be removed and made again (a git
+   * checkout, stash or branch switch): the package folder is followed too, and a folder made again is followed again
+   * and read again whole, as if each of its files had changed.
    */
   watch() {
-    if (this.watchers.length) return;
-    const on = (dir: string, apply: (name: string, file: string) => void) => {
+    if (this.watching) return;
+    this.watching = true;
+    const later = (key: string, ms: number, fn: () => void) => {
+      clearTimeout(this.watchTimers.get(key));
+      this.watchTimers.set(key, setTimeout(() => { this.watchTimers.delete(key); if (this.watching) fn(); }, ms).unref());
+    };
+    // persist() is not atomic: let the writer finish, and read again if the JSON is still half written
+    const settle = (dir: string, name: string, apply: (name: string, file: string) => void) => {
+      let tries = 0;
+      const run = () => {
+        try { apply(name, path.join(dir, name + '.json')); }
+        catch (e) { if (e instanceof SyntaxError && ++tries < 5) later(dir + '|' + name, 100, run); }
+      };
+      later(dir + '|' + name, 150, run);
+    };
+    const attach = (dir: string, onFile: (name: string) => void, onGone: () => void, onEntry?: (rel: string) => void) => {
+      const old = this.watchers.get(dir);
+      this.watchers.delete(dir);
+      old?.close();
+      let w: fs.FSWatcher;
       try {
-        const w = fs.watch(dir, (_ev, f) => {
+        w = fs.watch(dir, (ev, f) => {
           const rel = f ? String(f) : '';
-          // Windows names a removed folder by its absolute path: stop rather than follow a folder that is gone
-          if (path.isAbsolute(rel)) { w.close(); return; }
+          // the folder itself was removed: Windows names it by its absolute path, Linux by its own name
+          if (path.isAbsolute(rel) || (rel === path.basename(dir) && !fs.existsSync(dir))) { gone(); return; }
+          if (ev === 'rename' && onEntry) onEntry(rel);
           if (!rel.endsWith('.json') || rel.includes(path.sep) || rel.startsWith('.')) return;
-          const name = rel.slice(0, -'.json'.length), key = dir + '|' + name;
-          clearTimeout(this.watchTimers.get(key));
-          // persist() is not atomic: let the writer finish, and read again if the JSON is still half written
-          let tries = 0;
-          const run = () => {
-            this.watchTimers.delete(key);
-            try { apply(name, path.join(dir, rel)); }
-            catch (e) { if (e instanceof SyntaxError && ++tries < 5) this.watchTimers.set(key, setTimeout(run, 100).unref()); }
-          };
-          this.watchTimers.set(key, setTimeout(run, 150).unref());
+          onFile(rel.slice(0, -'.json'.length));
         });
-        w.on('error', () => w.close());
-        w.unref();
-        this.watchers.push(w);
-      } catch { /* no folder: nothing to follow */ }
+      } catch { return; /* no folder: the package folder's watcher hears when it is made */ }
+      // a removed folder: close at once (Windows keeps a watched folder from going while its handle is open)
+      const gone = () => {
+        if (this.watchers.get(dir) !== w) return;
+        this.watchers.delete(dir);
+        w.close();
+        onGone();
+      };
+      w.on('error', gone);
+      w.on('close', gone);
+      w.unref();
+      this.watchers.set(dir, w);
+    };
+    // graphs/ or assets/: follow its files; when it goes or comes back, follow the folder now there and read it again
+    const child = (dir: string, apply: (name: string, file: string) => void, known: () => string[]) => {
+      const reopen = () => {
+        attach(dir, (name) => settle(dir, name, apply), () => later(dir, 150, reopen));
+        let files: string[] = [];
+        try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('.')).map((f) => f.slice(0, -'.json'.length)); } catch { /* gone */ }
+        for (const name of new Set([...known(), ...files])) settle(dir, name, apply);
+      };
+      attach(dir, (name) => settle(dir, name, apply), () => later(dir, 150, reopen));
+      return () => later(dir, 150, reopen);
     };
     const graphChanged = (name: string, file: string) => {
       if (!NAME_RE.test(name) || this.graphFile(name) !== file) return;
@@ -778,28 +811,37 @@ export class Session {
       this.lastReport.delete(name);
       this.bump(name);
     };
-    on(this.graphDir, graphChanged);
-    // a package's graph files beside its manifest, when graphs/ has no graph of that name
-    if (topoFiles(this.dir).length) on(this.dir, (name, file) => {
-      if (fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
-      if (!this.graphs.has(name) && fs.existsSync(file)) this.besidePackage.set(name, file);
-      graphChanged(name, file);
-    });
-    on(this.assetDir, (name, file) => {
+    const graphsBack = child(this.graphDir, graphChanged, () => [...this.graphs.keys()].filter((n) => this.graphFile(n) === path.join(this.graphDir, n + '.json')));
+    const assetsBack = child(this.assetDir, (name, file) => {
       if (!fs.existsSync(file)) return;
       const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
       const before = this.engine.asset(name)?.hash;
       this.engine.registerAsset(name, spec);
       if (this.engine.asset(name)?.hash === before) return;
       for (const g of this.graphs.keys()) { this.lastReport.delete(g); this.bump(g); }
+    }, () => []);
+    // the package folder: graphs/ and assets/ removed or made again, and a package's graph files beside its manifest,
+    // when graphs/ has no graph of that name
+    const beside = (name: string, file: string) => {
+      if (fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
+      if (!this.graphs.has(name) && fs.existsSync(file)) this.besidePackage.set(name, file);
+      graphChanged(name, file);
+    };
+    const isPackage = topoFiles(this.dir).length > 0;
+    const top = path.basename(this.graphDir), assets = path.basename(this.assetDir);
+    attach(this.dir, (name) => { if (isPackage) settle(this.dir, name, beside); }, () => {}, (rel) => {
+      if (rel === top) graphsBack();
+      else if (rel === assets) assetsBack();
     });
   }
 
   /** Stop following the folders (watch()). */
   unwatch() {
-    for (const w of this.watchers) w.close();
+    this.watching = false;
+    const ws = [...this.watchers.values()];
+    this.watchers.clear();
+    for (const w of ws) w.close();
     for (const t of this.watchTimers.values()) clearTimeout(t);
-    this.watchers = [];
     this.watchTimers.clear();
   }
 }
