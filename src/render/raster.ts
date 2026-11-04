@@ -65,6 +65,14 @@ export interface ClipOptions {
 
 export interface RenderOptions {
   views?: ViewName[];
+  /**
+   * world-space min and max corners (metres, Y up) every view frames instead of the geometry's own bounding box, so
+   * renders of different geometries (the frames of a timelapse, the azimuths of a turntable) share one camera. An empty
+   * geometry renders the empty frame at that camera. Default: the geometry's bounding box
+   */
+  bounds?: [Vec3, Vec3];
+  /** false: no footer strip (the output is exactly the tiles; annotate is then ignored). Default true */
+  footer?: boolean;
   /** pixels per view: n (square) or [width, height]; the views fit the bounds to that aspect (default 800 single, 512 several) */
   size?: number | [number, number];
   /** background pixels (no surface, line or point) get alpha 0; the ground grid is off; the footer stays opaque */
@@ -262,9 +270,16 @@ const SECTION_CAM = [ORTHO.right, ORTHO.top, ORTHO.front];
 /**
  * The points a view fits: the geometry's points (evenly subsampled above 200,000), or the bbox corners when there are
  * none (volumes only). Fitting the points rather than the bbox keeps rotated content (a square turned 20°) as large as
- * it can be; nothing outside the bbox exists, so the fit never crops.
+ * it can be; nothing outside the bbox exists, so the fit never crops. With fixed (RenderOptions.bounds) it is the 8
+ * corners of the given bounds.
  */
-function fitPoints(g: Geometry, bmin: Vec3, bmax: Vec3): Float64Array {
+function fitPoints(g: Geometry, bmin: Vec3, bmax: Vec3, fixed = false): Float64Array {
+  if (fixed) {
+    // explicit bounds: the view frames their 8 corners, whatever the geometry holds
+    const out = new Float64Array(24);
+    for (let k = 0; k < 8; k++) { out[k * 3] = k & 1 ? bmax[0] : bmin[0]; out[k * 3 + 1] = k & 2 ? bmax[1] : bmin[1]; out[k * 3 + 2] = k & 4 ? bmax[2] : bmin[2]; }
+    return out;
+  }
   const np = g.numPoints, n = Math.min(np, 200_000);
   // volumes drawn in 3D (SDFs as their bounds) count with their bbox corners
   const corners = !np || g.volumes.some((v) => v.kind !== 'image') ? 8 : 0;
@@ -423,7 +438,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // a heightfield drawn at fewer samples than it has: said on the second footer line (unless annotate is false)
   const hfLine = hfShown.map((x) => `HEIGHTFIELD ${hfShown.length > 1 ? x.v.name.toUpperCase() + ' ' : ''}SHOWN AT ${x.shown[0]}×${x.shown[1]} OF ${x.v.width}×${x.v.height}`).join('  ·  ');
   const hfFooter = !!hfLine && o.annotate !== false;
-  const footerH = 22 * ui + (annotate || hfFooter ? 16 * ui : 0);
+  const showFooter = o.footer !== false;
+  const footerH = showFooter ? 22 * ui + (annotate || hfFooter ? 16 * ui : 0) : 0;
   const viewLabels = o.viewLabels ?? true;
   const outW = cols * TW + (cols - 1) * 2, outH = rows * TH + (rows - 1) * 2 + footerH;
   const notes: string[] = hfShown.map((x) =>
@@ -435,8 +451,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // --- scene data shared by all views
   const Pd = g.P, np = g.numPoints;
   const bb = g.bbox(true);
-  const bmin = bb.min, bmax = bb.max;
-  const fitPts = fitPoints(g, bmin, bmax);
+  const fixedBounds = !!o.bounds;
+  const bmin: Vec3 = o.bounds ? [...o.bounds[0]] : bb.min, bmax: Vec3 = o.bounds ? [...o.bounds[1]] : bb.max;
+  const fitPts = fitPoints(g, bmin, bmax, fixedBounds);
   const { tris, triPrim } = triangulate(g);
   const nTri = tris.length / 3;
   if (nTri > 4e6) notes.push(`large mesh (${nTri} triangles) — render may be slow`);
@@ -1468,11 +1485,12 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
 
   // footer
   const fy = outH - footerH + 4 * ui;
-  const ext = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
+  // the geometry's own box (not o.bounds, which only frames the views)
+  const ext = [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]];
   // EDGES AUTO early on the line, so a long title cannot push it off the image
-  const stats = `${np} PTS  ${g.numPrims} PRIMS${autoEdgesShown ? '  EDGES AUTO' : ''}  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bmin[0] + bmax[0]) / 2)},${fmtNum((bmin[1] + bmax[1]) / 2)},${fmtNum((bmin[2] + bmax[2]) / 2)}`;
-  drawText(out, outW, outH, 6 * ui, fy, (o.title ? o.title.toUpperCase() + '  ' : '') + stats, [0.85, 0.85, 0.85], 2 * ui, false);
-  if (legend) {
+  const stats = `${np} PTS  ${g.numPrims} PRIMS${autoEdgesShown ? '  EDGES AUTO' : ''}  BBOX ${fmtNum(ext[0])}×${fmtNum(ext[1])}×${fmtNum(ext[2])}  CENTER ${fmtNum((bb.min[0] + bb.max[0]) / 2)},${fmtNum((bb.min[1] + bb.max[1]) / 2)},${fmtNum((bb.min[2] + bb.max[2]) / 2)}`;
+  if (showFooter) drawText(out, outW, outH, 6 * ui, fy, (o.title ? o.title.toUpperCase() + '  ' : '') + stats, [0.85, 0.85, 0.85], 2 * ui, false);
+  if (legend && showFooter) {
     const lx = outW - textWidth(legend, 2 * ui) - 8 * ui;
     // drawn when it fits; the note below reports it either way (once)
     if (lx > textWidth(stats, 2 * ui) + 30 * ui) drawText(out, outW, outH, lx, fy, legend, [1, 0.85, 0.4], 2 * ui, false);
@@ -1510,7 +1528,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     let fs2 = 2 * ui, txt = line;
     if (textWidth(txt, fs2) > maxW) fs2 = ui;
     while (txt.length > 4 && textWidth(txt, fs2) > maxW) txt = txt.slice(0, -4) + '..';
-    drawText(out, outW, outH, 6 * ui, fy + 18 * ui + (fs2 < 2 * ui ? 3 * ui : 0), txt, [0.62, 0.84, 1], fs2, false);
+    if (showFooter) drawText(out, outW, outH, 6 * ui, fy + 18 * ui + (fs2 < 2 * ui ? 3 * ui : 0), txt, [0.62, 0.84, 1], fs2, false);
     if (annotate) notes.push('overlays: ' + overlays.toLowerCase());
   }
   const rgba = new Uint8Array(outW * outH * 4);
