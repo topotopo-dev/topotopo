@@ -173,6 +173,8 @@ const RENDER_PROPS = {
   exposure: { type: 'number', description: 'shading "pbr": exposure in stops (default 0)' },
   ao_radius: { type: 'number', description: 'shading "ao": sample radius in pixels (default 10)' },
   look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x, y, z] in world metres (x right, y up, z towards the front; default the bbox centre): the view centres on it and still fits the bounds; with zoom > 1 it zooms into that point' },
+  bounds: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'world-space [[x0, y0, z0], [x1, y1, z1]] (min then max, metres, Y up): every 3D view frames these bounds instead of the box of the geometry, so renders of different geometries share one camera (timelapse frames, turntable azimuths)' },
+  footer: { type: 'boolean', description: 'false leaves out the footer strip (the image is exactly the tiles; annotate is then ignored); default true' },
   ortho_scale: { type: 'number', description: 'ortho and section views: the world width in metres across a view (default: fit the bounds), e.g. 0.5 shows 50 cm across' },
   scale: { type: 'number', description: '2 (up to 4) for a 2× image: tiles, text, lines and markers scaled' },
   annotate: { type: 'boolean', description: 'second footer line naming the active overlays plus geometry notes (pieces, open edges, back-facing %); default on whenever an overlay option is used' },

@@ -126,13 +126,14 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          framing: every 3D view fits the bounds; [--zoom 1] is relative to that fit (above 1 only with --look-at or --ortho-scale)',
     '                          [--azimuth 35] (degrees around +Y: 0 = camera on +Z at the front, 90 = on +X, the right side) [--elevation 25] (degrees above the horizon)',
     '                          [--look-at x,y,z] (world metres, Y up, +Z front) [--ortho-scale 0.5] (metres across an ortho view)',
+    '                          [--bounds x0,y0,z0,x1,y1,z1] (world metres: every 3D view frames these corners instead of the own box of the geometry, so a sequence shares one camera)',
     '                          [--transparent] (PNG with alpha) [--no-grid] [--sockets] (scene empties as labelled dots with orient axes)',
     '                          [--underlay ref.png] (a reference PNG behind the 3D views) [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]',
     '                          [--textures] (base colour maps on meshes) [--texture name|image/layer|material] (adds the texture view)',
     '                          [--max-triangles 600000] (packed instances drawn; above it an evenly spread subset)',
     '                          [--heightfield-res 256|full] (heightfields: quads drawn per side, default 256, said in the footer when a field has more; full = every sample)',
     '                          [--heightfield-layer flow] (heightfields: the layer drawn in red, default mask; none draws none)',
-    '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails)',
+    '                          [--no-view-labels] (no view name labels or axis gizmo, e.g. for thumbnails) [--no-footer] (no footer strip: the image is the tiles only)',
     '         several renders per cook: repeat --render; the options after a --render apply to that render (up to the next --render),',
     '           options before the first --render apply to every render. Example (both 1200x600):',
     '             --size 1200x600 --render side.png --views front --underlay ref.png --render beauty.png --views front_left --shading pbr',
@@ -354,9 +355,9 @@ async function cook() {
 
   /** Every render flag (renderFlags reads them, plus --views, --color-by, --checker). */
   const RENDER_FLAGS = ['--wireframe', '--hard-angle', '--section', '--clip', '--glyphs', '--glyph-attrib', '--glyph-scale', '--max-glyphs', '--labels', '--max-labels',
-    '--shading', '--ao-radius', '--size', '--render-scale', '--azimuth', '--elevation', '--zoom', '--look-at', '--ortho-scale', '--texture', '--max-triangles', '--exposure',
+    '--shading', '--ao-radius', '--size', '--render-scale', '--azimuth', '--elevation', '--zoom', '--look-at', '--bounds', '--ortho-scale', '--texture', '--max-triangles', '--exposure',
     '--heightfield-res', '--heightfield-layer', '--underlay', '--underlay-opacity', '--underlay-fit', '--legend', '--points', '--annotate', '--textures', '--transparent',
-    '--sockets', '--no-view-labels', '--no-grid', '--views', '--color-by', '--checker'];
+    '--sockets', '--no-view-labels', '--no-footer', '--no-grid', '--views', '--color-by', '--checker'];
 
   /** Render overlay flags → render tool arguments → RenderOptions (src/render/options.ts). */
   function renderFlags(get: (f: string) => string | undefined, has: (f: string) => boolean): RenderOptions {
@@ -364,11 +365,12 @@ async function cook() {
     for (const [f, k] of [['--wireframe', 'wireframe'], ['--hard-angle', 'hard_angle'], ['--section', 'section'], ['--clip', 'clip'], ['--glyphs', 'glyphs'],
       ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
       ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
-      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'],
+      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--bounds', 'bounds'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'],
       ['--heightfield-res', 'heightfield_res'], ['--heightfield-layer', 'heightfield_layer'], ['--underlay-opacity', 'underlay_opacity'], ['--underlay-fit', 'underlay_fit']]) if (get(f) !== undefined) a[k] = get(f);
     for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures'], ['--transparent', 'transparent'], ['--sockets', 'sockets']]) if (has(f)) a[k] = true;
     if (has('--no-view-labels')) a.view_labels = false;
     if (has('--no-grid')) a.grid = false;
+    if (has('--no-footer')) a.footer = false;
     // a reference image path is relative to the current folder, as the output paths are
     if (get('--underlay') !== undefined) a.underlay = path.resolve(get('--underlay')!);
     try { return renderArgs(a); } catch (e: any) { return fail(e.message); }

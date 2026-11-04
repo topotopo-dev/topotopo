@@ -58,7 +58,7 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   if (pts !== undefined) o.points = pts === 'auto' ? 'auto' : bool(pts);
   for (const [s, c] of [['point_numbers', 'pointNumbers'], ['prim_numbers', 'primNumbers'], ['label_groups', 'labelGroups'], ['label_pieces', 'labelPieces'],
     ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute'], ['textures', 'textures'], ['view_labels', 'viewLabels'],
-    ['transparent', 'transparent'], ['sockets', 'sockets']] as const) {
+    ['transparent', 'transparent'], ['sockets', 'sockets'], ['footer', 'footer']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = bool(v);
   }
@@ -110,6 +110,16 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
     const v = typeof look === 'string' ? look.split(',').map(Number) : look;
     if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => Number.isFinite(+x))) throw new Error(`render: look_at expects [x, y, z], got ${JSON.stringify(look)}`);
     o.target = [+v[0], +v[1], +v[2]];
+  }
+  // bounds: [[x0, y0, z0], [x1, y1, z1]] (or "x0,y0,z0,x1,y1,z1") in world metres, min then max
+  const bd = pick('bounds');
+  if (bd !== undefined) {
+    const v = typeof bd === 'string' ? bd.split(',').map((x) => (x.trim() === '' ? NaN : Number(x))) : bd;
+    const flat = Array.isArray(v) && v.length === 6 && !v.some(Array.isArray) ? v : Array.isArray(v) && v.length === 2 && v.every((t) => Array.isArray(t) && t.length === 3) ? [...v[0], ...v[1]] : null;
+    const msg = `render: bounds expects [[x0, y0, z0], [x1, y1, z1]] (world metres, min then max, each min <= max), got ${JSON.stringify(bd)}`;
+    if (!flat || !flat.every((x) => typeof x === 'number' && Number.isFinite(x))) throw new Error(msg);
+    for (let k = 0; k < 3; k++) if (flat[k] > flat[k + 3]) throw new Error(msg);
+    o.bounds = [[flat[0], flat[1], flat[2]], [flat[3], flat[4], flat[5]]];
   }
   // shorthand labels: "groups,pieces,points,prims,attrib:name"
   if (typeof a.labels === 'string') {

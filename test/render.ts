@@ -275,6 +275,23 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
     'view_labels:false hides the axis gizmo and leaves the rest of the tile unchanged');
   const quadNl = render(box, { size: 160, viewLabels: false });
   check(quadNl.width === 2 * 160 + 2 && quadNl.height === 2 * 160 + 2 + FOOT && count(quadNl, white, 162, 0, 322, 20) === 0, 'view_labels:false on the quad view: same size, no ortho view labels');
+  // bounds + footer:false: a sequence shares one camera and the image is exactly the tile
+  const fixed: RenderOptions = { size: T, bounds: [[-2, -2, -2], [2, 2, 2]], footer: false, viewLabels: false, grid: false };
+  const fa = render(box, { ...fixed, views: ['persp@0'] }), fb = render(box, { ...fixed, views: ['persp@90'] });
+  check(fa.width === fb.width && fa.height === fb.height && fa.height === T && fa.width === T, `bounds + footer:false: both azimuths ${fa.width}×${fa.height}, no footer`);
+  // the background is a gradient: covered pixels are those that differ from the empty frame at the same camera
+  const emptyFrame = render(new Geometry(), { ...fixed, views: ['persp@0'] });
+  const inked = (r: RenderResult) => { let n = 0; for (let i = 0; i < r.rgba.length; i += 4) if (r.rgba[i] !== emptyFrame.rgba[i] || r.rgba[i + 1] !== emptyFrame.rgba[i + 1] || r.rgba[i + 2] !== emptyFrame.rgba[i + 2]) n++; return n; };
+  const tight = render(box, { ...fixed, bounds: [[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]], views: ['persp@0'] });
+  const wide = render(box, { ...fixed, bounds: [[-1, -1, -1], [1, 1, 1]], views: ['persp@0'] });
+  check(inked(wide) > 0 && inked(wide) < inked(tight), `bounds twice as large: the box covers fewer pixels (${inked(tight)} → ${inked(wide)})`);
+  check(emptyFrame.width === T && emptyFrame.height === T && inked(fa) > 0, 'bounds: an empty geometry renders the empty frame at the same size, and the box differs from it');
+  let eb = '';
+  try { renderArgs({ bounds: [[0, 0, 0], [1, 1]] }); } catch (e: any) { eb = e.message; }
+  let eb2 = '';
+  try { renderArgs({ bounds: [[0, 0, 0], [-1, 1, 1]] }); } catch (e: any) { eb2 = e.message; }
+  const rb = renderArgs({ bounds: '0,0,0,1,2,3', footer: 'false' });
+  check(/bounds expects/.test(eb) && /bounds expects/.test(eb2) && JSON.stringify(rb.bounds) === '[[0,0,0],[1,2,3]]' && rb.footer === false, 'renderArgs: bounds and footer map; a malformed or inverted bounds throws');
 }
 
 // ---------------------------------------------------------------- heightfields: the layer drawn in red
