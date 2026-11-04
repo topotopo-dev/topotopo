@@ -947,6 +947,10 @@ Nodes:
       profile placed by sections [{offset, scale, rotate}, ...]; sections with the same point count join point to point
       (insets keep their corners), closed sections are turned to the first one's winding; closed results face outward.
   revolve {axis, origin, angle}   lathe about any axis line; draw the profile in a plane that holds the axis.
+      angle [a0, a1] turns right-handed about the axis (plan angle of the result = -a); caps only for closed profiles and
+      then always outward; an open profile gives an open surface, flip reverses it. extrude plane: xz along +Y, xy along +Z,
+      yz along +X. sweep end caps are perpendicular to the path (a tilted last segment tilts the cap). grid_split splits
+      quads only: cut first (boolean leaves n-gons), then split.
   shape2d capsule | slot   a stadium (rect with half-circle ends) in size; extrude for a slot cutter.
   project_curve (curves, surface | heightfield) {mode direction|closest, direction, spacing, lift, misses}   drapes a
       curve onto terrain; spacing resamples first so it follows the bumps; writes point hit and N (smooth normals).
@@ -1234,6 +1238,8 @@ Which node:
                tiling textures, boxes. box: each polygon along the axis its normal is closest to (X faces u = z, v = y;
                Y faces u = x, v = z; Z faces u = x, v = y); both sides of an axis share it, so faces looking along +X,
                +Y and -Z are MIRRORED (text reads backwards; inspect uv counts them) and -X, -Y, +Z read right.
+               cylindrical scale[0] = tile count around the axis; its top and bottom annuli collapse, so give them a prim
+               group and project them again with method box / planar and group.
   uv_unwrap    automatic (xatlas): cuts charts by angle/cost, flattens and packs into 0..1. Default for props and
                hard-surface. Keeps polygons; writes prim chart. Each connected piece is charted on its own; polygons
                xatlas cuts across charts become triangles (exact uv); faces with no area collapse onto a neighbour's

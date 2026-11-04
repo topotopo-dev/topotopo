@@ -1154,13 +1154,18 @@ defineNode({
     'its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a ' +
     'texture reads backwards there, and their uv winding is opposite to the polygon\'s: inspect uv counts them as mirrored), while -X, -Y and ' +
     '+Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u ' +
-    '= angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps.',
+    '= angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps. For cylindrical and ' +
+    'spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four ' +
+    'repeats); scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ' +
+    'ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project ' +
+    'with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.',
   aliases: ['uvproject', 'texture', 'uv_texture'],
   inputs: [{ name: 'geo', desc: 'geometry' }],
   params: {
+    group: P.group('prim', 'prims to project ("" = all); the other prims keep their uv'),
     method: { type: 'enum', options: ['box', 'planar', 'cylindrical', 'spherical'], default: 'box', desc: 'projection type' },
     axis: { type: 'enum', options: ['y', 'x', 'z'], default: 'y', desc: 'projection axis (planar normal / cylinder axis)' },
-    scale: { type: 'vec2', default: [1, 1], desc: 'world units per UV tile (box/planar); tiles around (cyl/sph)' },
+    scale: { type: 'vec2', default: [1, 1], desc: 'box/planar: world units per UV tile; cylindrical/spherical: scale[0] is the number of tiles around the axis (a count, not a length), scale[1] is metres per tile along the axis (cylindrical) or the number of tiles pole to pole (spherical)' },
     offset: { type: 'vec2', default: [0, 0], desc: 'uv offset' },
     center: { type: 'vec3', default: [0, 0, 0], desc: 'projection center (cyl/sph)' },
   },
@@ -1168,12 +1173,14 @@ defineNode({
   example: { type: 'uv_project', params: { method: 'cylindrical', axis: 'y' } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
-    g.points.delete('uv');
+    const sel = mask(g, 'prim', p.group);
+    if (!sel) g.points.delete('uv');
     const uv = g.vertices.add('uv', 'float', 3).data as Float64Array;
     const pn = primNormals(g), vprim = g.vertexPrims();
     const Pd = g.P;
     const ax = 'xyz'.indexOf(p.axis);
     for (let v = 0; v < g.numVertices; v++) {
+      if (sel && !sel[vprim[v]]) continue;
       const pt = g.vertexPoint[v];
       const x = Pd[pt * 3], y = Pd[pt * 3 + 1], z = Pd[pt * 3 + 2];
       let u = 0, w = 0;
