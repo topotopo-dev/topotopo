@@ -535,7 +535,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
       if (diag.uvNonFinite || diag.uvDegenerate) {
         // where the first one is: its prim's part and position (core/report.ts)
         const first = diag.firstBad >= 0 ? `, first ${primWhere(geo, geo.vertexPrims()[tris[diag.firstBad * 3]])}` : '';
-        o.warn?.(`glTF: ${where}: ${diag.uvDegenerate} of ${diag.triangles} triangles have collapsed uvs${diag.uvNonFinite ? ` and ${diag.uvNonFinite} non-finite uvs` : ''}${first}; their ${diag.fallbackCorners} corners get a fallback tangent (the normal map has no orientation there): unwrap them (uv_unwrap) or give them uv area`);
+        o.warn?.(`glTF: ${where}: ${diag.uvDegenerate} of ${diag.triangles} triangles have collapsed uvs${diag.uvNonFinite ? ` and ${diag.uvNonFinite} non-finite uvs` : ''}${first}; their ${diag.fallbackCorners} corners get a fallback tangent (the normal map has no orientation there): unwrap them (uv_unwrap) or give them uv area${diag.uvThin ? `; ${diag.uvThin} thin triangles skipped` : ''}`);
       } else if (diag.fallbackCorners) o.warn?.(`glTF: ${where}: MikkTSpace left ${diag.fallbackCorners} corners without a tangent; a fallback was written`);
       return {
         semantic: 'TANGENT', size: 4, int: false, perPoint: false,
