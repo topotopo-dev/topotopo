@@ -274,6 +274,18 @@ section('filters: blend modes, levels, blur, normals');
   const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { offset: [0.5, 0] } } }, 't');
   const p0 = genPattern({ pattern: 'checker', count: [2, 2], offset: 0.5, gap: 0, bevel: 0, variation: 0, seed: 0 }, 64, 64).C;
   check(maxDiff(tr.layer('C')!, p0.map((x) => 1 - x)) < 1e-6, 'tex_transform: half an image offset of a 2 × 2 checker inverts it');
+  const grad = { g: { type: 'tex_gradient', params: { resolution: 32 } } };
+  const g1 = (await image({ ...grad, t: { type: 'tex_transform', in: ['g'] } }, 't')).layer('C')!;
+  const gt = (await image({ ...grad, t: { type: 'tex_transform', in: ['g'], params: { tile: [1, 2] } } }, 't')).layer('C')!;
+  // tile [1, 2] stacks two whole copies: the top half and the bottom half each equal the image squeezed to half height
+  let tileOk = true;
+  for (let j = 0; j < 32; j++) for (let i = 0; i < 32; i++) if (Math.abs(gt[j * 32 + i] - g1[((2 * j) % 32) * 32 + i]) > 0.05) tileOk = false;
+  check(tileOk, 'tex_transform tile [1, 2] repeats from the lower-left corner (no offset needed)');
+  const st = (await image({ n: { type: 'tex_pattern', params: { resolution: 64, pattern: 'stripes', count: [1, 8], gap: 0.5, bevel: 0 } } })).layer('C')!;
+  let rowConst = true, colVaries = false;
+  for (let j = 0; j < 64; j++) for (let i = 1; i < 64; i++) if (st[j * 64 + i] !== st[j * 64]) rowConst = false;
+  for (let j = 1; j < 64; j++) if (Math.abs(st[j * 64] - st[0]) > 0.5) colVaries = true;
+  check(rowConst && colVaries, 'tex_pattern stripes with count [1, 8] make horizontal stripes');
   const ts = await image({ s: { type: 'tex_shape', params: { resolution: 32, falloff: 0.5 } }, t: { type: 'tex_tile_sampler', in: ['s'], params: { resolution: 64, count: [4, 4] } } }, 't');
   check(mean(ts.layer('C')!) > 0.05, 'tex_tile_sampler stamps the source');
   const out = await geo({ p: { type: 'tex_pattern', params: { resolution: 16 } }, o: { type: 'tex_output', in: ['p'], params: { name: 'brick_ids', layer: 'id' } } }, 'o');

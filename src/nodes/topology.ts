@@ -1017,9 +1017,10 @@ defineNode({
 defineNode({
   type: 'grid_split',
   category: 'topology',
-  summary: 'Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded.',
+  summary: 'Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded. Only quads are split: cut first, then split.',
+  description: 'Only 4-sided polygons are divided; triangles and n-gons pass through unsplit. After a boolean the faces around the cut are often n-gons, so they stay whole: run grid_split on the quads BEFORE the cut (or triangulate the n-gons first), not after it.',
   aliases: ['divide_quads', 'facade_split', 'quad_split', 'split_faces'],
-  inputs: [{ name: 'geo', desc: 'polygon mesh (quads are split; other polygons pass through)' }],
+  inputs: [{ name: 'geo', desc: 'polygon mesh (quads are split; triangles and n-gons pass through unsplit)' }],
   params: {
     group: P.group('prim', 'quads to split ("" = all)'),
     mode: { type: 'enum', options: ['size', 'count'], default: 'size', desc: 'size = divide each edge by length / target size; count = fixed divisions' },
