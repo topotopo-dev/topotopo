@@ -208,7 +208,7 @@ defineNode({
     'bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so ' +
     'multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles ' +
     'without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer ' +
-    '"id" for per-brick colour). count = cells along u (columns) and v (rows); bricks and dots shift every other row by ' +
+    '"id" for per-brick colour). count = cells along u (columns) and v (rows); stripes are vertical (u count), and with a u count of 1 the v count makes horizontal stripes; bricks and dots shift every other row by ' +
     'offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are ' +
     'fractions of the smaller cell side; variation darkens cells randomly.',
   aliases: ['tile_generator', 'bricks', 'brick', 'checker', 'tiles_pattern', 'cop_pattern'],
@@ -564,7 +564,7 @@ defineNode({
   params: {
     resolution: resolutionParam(),
     style: { type: 'enum', options: GRUNGE_STYLES, default: 'dirt', desc: 'dirt patches, vertical leaks or round spots', aliases: ['type', 'mode'] },
-    scale: { type: 'float', default: 4, min: 0.1, max: 256, desc: 'features across the image width', aliases: ['frequency'] },
+    scale: { type: 'float', default: 4, min: 0.1, max: 256, desc: 'features across the image width (1 to 256: larger values are clamped to 256)', aliases: ['frequency'] },
     coverage: { type: 'float', default: 0.35, min: 0, max: 1, desc: 'fraction of the image that turns white', aliases: ['amount', 'density'] },
     contrast: { type: 'float', default: 0.6, min: 0, max: 1, desc: 'edge hardness (1 = hard)', aliases: ['hardness'] },
     detail: { type: 'float', default: 0.4, min: 0, max: 1, desc: 'fine breakup mixed in (0 = smooth shapes)', aliases: ['breakup'] },
@@ -911,14 +911,14 @@ defineNode({
   usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Offset, rotate, scale and tile an image (2D transform with wrap).',
-  description: 'Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv). With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.',
+  description: 'Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv); tiling is about the lower-left corner, so cell 0 starts at uv (0, 0) and offset 0 keeps the cells aligned with the image edges. With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.',
   aliases: ['transform_texture', 'transformation_2d', 'offset_texture', 'tile_texture', 'cop_transform'],
   inputs: FILTER_INPUT,
   params: {
     offset: { type: 'vec2', default: [0, 0], desc: 'shift in uv (0.5 = half the image)', aliases: ['translate', 't'] },
     rotate: { type: 'float', default: 0, desc: 'rotation in degrees (counter-clockwise)', aliases: ['rotation', 'r', 'angle'] },
     scale: { type: 'vec2', default: [1, 1], desc: 'zoom (> 1 enlarges the content)', aliases: ['s', 'zoom'] },
-    tile: { type: 'vec2', default: [1, 1], min: 0.001, desc: 'repeats of the content along u and v', aliases: ['tiling', 'repeat'] },
+    tile: { type: 'vec2', default: [1, 1], min: 0.001, desc: 'repeats of the content along u and v; cells start at the lower-left corner (uv 0, 0), so [1, 2] gives two stacked cells, each the whole image', aliases: ['tiling', 'repeat'] },
     tileable: tileParam('repeat the source outside 0..1 (else black)'),
     image: imageParam(), layer: layerParam(), name: renameParam(),
   },
