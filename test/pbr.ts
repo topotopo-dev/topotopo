@@ -15,6 +15,7 @@ import { encodePNG } from '../src/render/png.ts';
 import { Image } from '../src/core/image.ts';
 import { normalizeMaterial, writeMaterials } from '../src/core/materials.ts';
 import { Geometry } from '../src/core/geometry.ts';
+import { renderArgs } from '../src/render/options.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -104,7 +105,29 @@ const RED = [0.8, 0.25, 0.2];
   const cd = withMaterial({ baseColor: [0.1, 0.1, 0.9], textures: { baseColor: 'image:bc' } }, [constImage('bc', [1, 1, 1, 1])]);
   const cda = cd.points.add('Cd', 'float', 3);
   for (let i = 0; i < cd.numPoints; i++) cda.set(i, [0.5, 0.5, 0.5]);
-  check(maxDiff(await shot(cd), factor) <= 1, 'vertex colour × a white base colour map = the same colour as a factor (glTF COLOR_0 × map)');
+  check(maxDiff(await shot(cd, { vertexColors: 'multiply' }), factor) <= 1, 'cd "multiply": vertex colour × a white base colour map = the same colour as a factor (glTF COLOR_0 × map)');
+}
+
+// ---------------------------------------------------------------- vertex colour: a named material wins (glTF export rule)
+{
+  const GREEN = [0.2, 0.7, 0.3];
+  const paint = (g: Geometry, c: number[]) => { const out = g.clone(), a = out.points.add('Cd', 'float', 3); for (let i = 0; i < out.numPoints; i++) a.set(i, c); return out; };
+  const red = await shot(withMaterial({ baseColor: RED }));
+  const redCd = await shot(paint(withMaterial({ baseColor: RED }), GREEN));
+  check(maxDiff(redCd, red) === 0, `a named material wins over Cd: the prims show the material's base colour (max difference ${maxDiff(redCd, red)})`);
+  check(redCd.notes.some((n) => /pbr: Cd on prims with a named material is not shown/.test(n)), 'a note says the Cd of material prims is not shown');
+  const mapped = withMaterial({ baseColor: [1, 1, 1], textures: { baseColor: 'image:bc' } }, [constImage('bc', [0.8, 0.25, 0.2, 1])]);
+  check(maxDiff(await shot(paint(mapped, GREEN)), await shot(mapped)) === 0, 'a named material\'s base colour map wins over Cd as well');
+  const bare = await shot(paint(sphere, GREEN)), asFactor = await shot(withMaterial({ baseColor: GREEN }));
+  check(maxDiff(bare, asFactor) <= 1 && !bare.notes.some((n) => /Cd on prims/.test(n)), 'prims without a material show their Cd (like a factor of that colour)');
+  const ign = await shot(paint(sphere, GREEN), { vertexColors: 'ignore' }), plain = await shot(sphere);
+  check(maxDiff(ign, plain) === 0, 'cd "ignore": Cd is never shown (the default material)');
+  const mul = stats(await shot(paint(withMaterial({ baseColor: [1, 1, 1] }), GREEN), { vertexColors: 'multiply' })), green = stats(asFactor);
+  check(Math.abs(mul.tint - green.tint) < 0.02, `cd "multiply": a white material × Cd reads as the Cd colour (G/R ${mul.tint.toFixed(2)} vs ${green.tint.toFixed(2)})`);
+  check(renderArgs({ cd: 'multiply' }).vertexColors === 'multiply' && renderArgs({ vertexColors: 'ignore' }).vertexColors === 'ignore', 'render args: cd maps to vertexColors');
+  let threw = '';
+  try { renderArgs({ cd: 'tint' }); } catch (e: any) { threw = e.message; }
+  check(/cd expects auto, ignore, multiply/.test(threw), `an unknown cd mode is refused (${threw})`);
 }
 
 // ---------------------------------------------------------------- emissive, unlit, exposure

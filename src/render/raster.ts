@@ -32,7 +32,7 @@ import { EMPTY_ATTRIB } from '../core/scene.ts';
 import { pbrScene, preparePBR } from './pbr.ts';
 import { loadMikkTSpace } from '../core/tangents.ts';
 import { decodePNG } from '../io/png-decode.ts';
-import type { PBRScene, PBRTextures } from './pbr.ts';
+import type { PBRScene, PBRTextures, VertexColorMode } from './pbr.ts';
 
 /**
  * 3D views, 'persp@<azimuth>' (a persp view at that azimuth), 'section' (the cut through the section plane,
@@ -165,6 +165,12 @@ export interface RenderOptions {
   exposure?: number;
   /** shading 'pbr': texture files read by renderGeometryAsync (preparePBR); image volumes need none */
   pbrTextures?: PBRTextures;
+  /**
+   * shading 'pbr': how vertex colour Cd enters the base colour. 'auto' (default, the glTF export rule): a named
+   * material's base colour (factor or map) wins and Cd colours only prims without a material; 'ignore': Cd is never
+   * used; 'multiply': Cd also multiplies a named material's base colour (vertex paint as a tint)
+   */
+  vertexColors?: VertexColorMode;
   /** ao sample radius in output pixels (default 10) */
   aoRadius?: number;
   /** ortho and section views: world width in metres visible across a view (default: fit the bounds) */
@@ -528,7 +534,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       colorOf = (v) => get(elemIndex(f.cls, v));
       if (f.cls === 'point') pointColorOf = (p) => get(p);
     }
-    // material base colours where there is no colour (no Cd, or Houdini's default white), as glTF export does
+    // material base colours where there is no colour (no Cd, or Houdini's default white); an inspection view, so Cd
+    // stays visible here (shading 'pbr' follows the export rule: a named material wins)
     const pm = primMaterials(g), table = pm ? readMaterials(g) : null;
     if (pm && table && Object.keys(table).length) {
       const cd = colorOf, hasCd = !!(f && f.attr.type === 'float');
@@ -654,10 +661,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   if (shadingMode === 'pbr' && nTri) {
     const ev = o.exposure ?? 0;
     if (!Number.isFinite(ev)) throw new Error(`render: exposure expects a number of stops, got ${o.exposure}`);
-    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes);
+    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes, { vertexColors: o.vertexColors });
     // color_by and highlight tint the shaded material (their colour, lit by its brightness); the checker is not shown
     if (o.checker) notes.push('pbr: checker is not shown under shading "pbr" (color_by and highlight tint the material)');
-    ovDesc.push(`SHADING PBR STUDIO EV ${fmtNum(ev)} (${pbrS.summary.toUpperCase()})`);
+    const cdMode = o.vertexColors && o.vertexColors !== 'auto' ? ` CD ${o.vertexColors.toUpperCase()}` : '';
+    ovDesc.push(`SHADING PBR STUDIO EV ${fmtNum(ev)}${cdMode} (${pbrS.summary.toUpperCase()})`);
   } else if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
   // section / clip planes
   const planeAt = (k: number, off: number | undefined, abs: boolean | undefined) => (abs ? off ?? 0 : bmin[k] + (bmax[k] - bmin[k]) * (off ?? 0.5));
