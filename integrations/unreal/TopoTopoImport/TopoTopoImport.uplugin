@@ -1,0 +1,22 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "TopoTopo Import",
+  "Description": "Imports TopoTopo packages (.topo) as source assets: static meshes, instances, PCG points and terrain bundles, kept current by Auto Reimport.",
+  "Category": "Importers",
+  "CreatedBy": "faxcorp",
+  "CreatedByURL": "https://topotopo.dev",
+  "EngineVersion": "5.8.0",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "Modules": [
+    { "Name": "TopoTopoImport", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "TopoTopoImportEditor", "Type": "Editor", "LoadingPhase": "Default" }
+  ],
+  "Plugins": [
+    { "Name": "PCG", "Enabled": true },
+    { "Name": "Interchange", "Enabled": true }
+  ]
+}

@@ -131,6 +131,13 @@ export interface Flavour {
   ownerOf(abs: string): string | null;
   /** the package's TopoTopo folders the engine imports (no .gdignore): "graphs/" … */
   exposed(dir: string): string[];
+  /**
+   * The output files are the plugin's intermediate files, not what a repository commits (Unreal: Saved/TopoTopo/): a
+   * file that is missing makes nothing stale in freshness; a cook still writes it again.
+   */
+  localOutputs?: boolean;
+  /** What the engine's plugin does with an output's files; a report's outputs carry it as `import`. */
+  plan?(o: { id: string; kind: string; files: string[] }, options: EngineOptions): unknown;
 }
 
 /** One package to cook. */
@@ -171,6 +178,8 @@ export interface OutputReport {
   ms: number;
   errors: CookIssue[];
   warnings: string[];
+  /** what the engine's plugin does with its files (Flavour.plan) */
+  import?: unknown;
 }
 
 export interface PackageReport {
@@ -310,13 +319,13 @@ export interface Freshness { state: FreshState; why: string; path: string; note:
  *   3. the options differ from the import options: stale;
  *   4. a source missing or its contentSha differs: stale, naming it;
  *   5. a folder's listing differs: stale, naming it;
- *   6. an output file missing or its SHA-256 differs: stale, naming it;
+ *   6. an output file missing (unless the files are local: `localOutputs`) or its SHA-256 differs: stale, naming it;
  *   7. the installed TopoTopo (`installed`, when it is known) is newer than the record's: stale; older: a note only;
  *   8. an output failed: failed;
  *   9. ok.
  * `absolutePath`: an output file as the record names it, as a path.
  */
-export function freshness(dir: string, record: CookRecord | null, options: EngineOptions, o: { for: string; absolutePath: (p: string) => string; installed: string | null; shas?: Shas }): Freshness {
+export function freshness(dir: string, record: CookRecord | null, options: EngineOptions, o: { for: string; absolutePath: (p: string) => string; installed: string | null; shas?: Shas; localOutputs?: boolean }): Freshness {
   const shas = o.shas ?? new Shas();
   const f = (state: FreshState, why: string, p: string, text: string, note = ''): Freshness => ({ state, why, path: p, note, text });
   if (!record) return f('never_cooked', 'record', '', 'never cooked');
@@ -334,7 +343,7 @@ export function freshness(dir: string, record: CookRecord | null, options: Engin
   for (const id of Object.keys(record.outputs ?? {}).sort(byCode)) {
     for (const [file, s] of Object.entries(record.outputs[id].files ?? {}).sort(([a], [b]) => byCode(a, b))) {
       const now = rawSha(o.absolutePath(file));
-      if (now === null) return f('stale', 'output', file, `${file} is missing`);
+      if (now === null) { if (o.localOutputs) continue; return f('stale', 'output', file, `${file} is missing`); }
       if (now !== s) return f('stale', 'output', file, `${file} was changed after the last cook`);
     }
   }
@@ -564,6 +573,7 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
 
     const report = (o: OutputReport) => {
       o.ms = Math.round(o.ms);
+      if (flavour.plan && o.state !== 'skipped') o.import = flavour.plan({ id: o.id, kind: o.kind, files: o.files }, options);
       rep.outputs.push(o);
       say({ event: 'output', package: slash(job.topo), output: o.id, state: o.state, ms: Math.round(o.ms) });
     };

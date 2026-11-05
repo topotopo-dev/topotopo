@@ -53,6 +53,10 @@
 //   node src/cli.ts cook --jobs <jobs.json> [--force] [--no-cache] [--progress json]
 //   node src/cli.ts godot setup <godot project folder> [--no-enable]
 //   node src/cli.ts godot status <godot project folder> [--strict] [--json]
+// A package's published outputs cooked for an Unreal project, and the Unreal plugin (src/host/unreal.ts, integrations/unreal/PROTOCOL.md):
+//   node src/cli.ts cook <.topo | package folder | folder>... --for unreal [--into </Game/folder>] [--flat] [--skip a,b] [--instancing packed|expand] [--force] [--no-cache] [--timeout <s>] [--report <file>] [--progress json] [--quiet]
+//   node src/cli.ts unreal setup <unreal project folder or .uproject> [--no-enable] [--with-pcg]
+//   node src/cli.ts unreal status <unreal project folder or .uproject> [--strict] [--json]
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -74,6 +78,7 @@ import { exportSource } from './io/source.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { PACKAGE_COMMANDS } from './packages/commands.ts';
 import { GODOT_COMMANDS } from './host/godot-commands.ts';
+import { UNREAL_COMMANDS } from './host/unreal-commands.ts';
 import { setProgram } from './package.ts';
 import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
@@ -164,6 +169,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     ...PACKAGE_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
     '       Godot (exit 0 ok, 1 an output or package failed, 2 usage or setup; --help-topic godot):',
     ...GODOT_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
+    '       Unreal (the same exit codes; --help-topic unreal):',
+    ...UNREAL_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
   ].join('\n'));
   process.exit(0);
 }
@@ -219,12 +226,14 @@ if (argv[0] === 'view') {
   const { commands } = await import('./packages/commands.ts');
   const code = await commands[argv[0]](argv.slice(1), prog);
   if (typeof code === 'number') process.exit(code);
-} else if (argv[0] === 'cook' || argv[0] === 'godot') {
-  // a package's published outputs cooked into a Godot project, and the Godot plugin's setup and status
-  // (src/host/godot.ts, src/host/cook.ts): exit 0, 1 (an output or package failed), 2 (usage, setup or protocol)
-  const { cookCommand, godotCommand } = await import('./host/godot.ts');
+} else if (argv[0] === 'cook' || argv[0] === 'godot' || argv[0] === 'unreal') {
+  // a package's published outputs cooked into an engine project, and the engine plugins' setup and status
+  // (src/host/cook-command.ts, godot.ts, unreal.ts, cook.ts): exit 0, 1 (an output or package failed), 2 (usage, setup or protocol)
+  const { cookCommand } = await import('./host/cook-command.ts');
+  const { godotCommand } = await import('./host/godot.ts');
+  const { unrealCommand } = await import('./host/unreal.ts');
   const { consoleIo } = await import('./packages/commands.ts');
-  process.exit(await (argv[0] === 'cook' ? cookCommand : godotCommand)(argv.slice(1), consoleIo));
+  process.exit(await (argv[0] === 'cook' ? cookCommand : argv[0] === 'godot' ? godotCommand : unrealCommand)(argv.slice(1), consoleIo));
 } else if (argv[0] === 'mcp') {
   // `topotopo mcp [--package dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin

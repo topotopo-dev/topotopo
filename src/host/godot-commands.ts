@@ -8,7 +8,7 @@ export const GODOT_COMMANDS: { usage: string; what: string }[] = [
   },
   {
     usage: 'cook --jobs <jobs.json> [--force] [--no-cache] [--progress json]',
-    what: 'the Godot plugin\'s form: many packages in one process, each with its options and report (integrations/godot/PROTOCOL.md)',
+    what: 'an engine plugin\'s form: many packages in one process, each with its options and report (integrations/godot/PROTOCOL.md, integrations/unreal/PROTOCOL.md)',
   },
   {
     usage: 'godot setup <godot project folder> [--no-enable]',

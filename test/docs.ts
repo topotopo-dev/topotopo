@@ -9,6 +9,7 @@ import { readNodesMd, referenceMarkdown } from '../scripts/gen-docs.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
 import { topicText } from '../src/mcp/docs.ts';
 import { GODOT_COMMANDS } from '../src/host/godot-commands.ts';
+import { UNREAL_COMMANDS } from '../src/host/unreal-commands.ts';
 import { ROOT } from './fixtures.ts';
 
 let fail = 0;
@@ -48,5 +49,11 @@ const topic = topicText('godot') ?? '';
 const unsaid = GODOT_COMMANDS.filter((c) => !topic.includes(`topotopo ${c.usage}`) || !readme.includes(`topotopo ${c.usage}`)).map((c) => c.usage.split(' ').slice(0, 2).join(' '));
 if (!topic || unsaid.length) { fail++; console.log(`FAIL the help topic "godot" or README.md misses ${unsaid.join(', ') || 'the topic itself'}`); }
 else console.log(`docs: the help topic "godot" and README.md list all ${GODOT_COMMANDS.length} Godot commands`);
+
+// the same for the cook for Unreal
+const unrealTopic = topicText('unreal') ?? '';
+const unsaidUnreal = UNREAL_COMMANDS.filter((c) => !unrealTopic.includes(`topotopo ${c.usage}`) || !readme.includes(`topotopo ${c.usage}`)).map((c) => c.usage.split(' ').slice(0, 2).join(' '));
+if (!unrealTopic || unsaidUnreal.length) { fail++; console.log(`FAIL the help topic "unreal" or README.md misses ${unsaidUnreal.join(', ') || 'the topic itself'}`); }
+else console.log(`docs: the help topic "unreal" and README.md list all ${UNREAL_COMMANDS.length} Unreal commands`);
 
 process.exit(fail ? 1 : 0);

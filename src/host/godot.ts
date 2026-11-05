@@ -1,4 +1,5 @@
-// The Godot flavour of the engine cook (src/host/cook.ts) and the Godot plugin's commands:
+// The Godot flavour of the engine cook (src/host/cook.ts) and the Godot plugin's commands (the cook commands themselves
+// are src/host/cook-command.ts):
 //   topotopo cook <.topo | package folder | folder>... --for godot [options]     cook packages into their Godot project
 //   topotopo cook --jobs <jobs.json> [--force] [--no-cache] [--progress json]    the plugin's form (integrations/godot/PROTOCOL.md)
 //   topotopo godot setup <project> [--no-enable]                                  install the plugin into a project
@@ -27,8 +28,8 @@ import { setInstall } from '../config.ts';
 import { forgetScans } from '../scan.ts';
 import { MANIFEST_EXT } from '../session.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
-import { COOK_PROTOCOL, cachePrune, closeCookPools, cookPackage, freshness, readRecord } from './cook.ts';
-import type { CookJob, CookRecord, EngineOptions, Flavour, Freshness, PackageReport } from './cook.ts';
+import { freshness, readRecord } from './cook.ts';
+import type { CookJob, CookRecord, EngineOptions, Flavour, Freshness } from './cook.ts';
 import { GODOT_COMMANDS } from './godot-commands.ts';
 import type { Io } from '../packages/commands.ts';
 
@@ -349,11 +350,8 @@ export function godotJob(topo: string, given: GivenOptions & { adopt?: boolean; 
 
 // ---------------------------------------------------------------------------------------------------- the commands
 
-/** The cook command's usage. */
-const cookUsage = () => GODOT_COMMANDS.filter((c) => c.usage.startsWith('cook')).map((c) => `usage: ${program()} ${c.usage}`).join('\n');
-
 /** A command's arguments: valued options, flags, and the rest; an unknown option is a SetupError. */
-function parseArgs(argv: string[], valued: string[], flags: string[], usage: () => string) {
+export function parseArgs(argv: string[], valued: string[], flags: string[], usage: () => string) {
   const opts: Record<string, string> = {}, set = new Set<string>(), rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -366,109 +364,6 @@ function parseArgs(argv: string[], valued: string[], flags: string[], usage: () 
     else rest.push(a);
   }
   return { opts, set, rest };
-}
-
-const PER_PACKAGE = ['--into', '--skip', '--instancing', '--timeout', '--report'];
-
-/** A list option ("a,b") as a list. */
-const list = (v: string) => v.split(',').map((s) => s.trim()).filter(Boolean);
-
-/**
- * topotopo cook … --for godot, and cook --jobs <file>: every package checked first (a usage, setup or protocol error
- * exits 2 and writes nothing), then cooked one after the other in this process; exit 1 when an output or a package
- * failed (records and reports are still written), else 0.
- */
-export async function cookCommand(argv: string[], io: Io): Promise<number> {
-  let jobs: (CookJob & { project: string })[];
-  let flags: { force: boolean; noCache: boolean; json: boolean; quiet: boolean };
-  try {
-    const { opts, set, rest } = parseArgs(argv, ['--for', '--into', '--skip', '--instancing', '--timeout', '--report', '--progress', '--jobs'], ['--flat', '--adopt', '--force', '--no-cache', '--quiet'], cookUsage);
-    const progress = opts['--progress'];
-    if (progress !== undefined && progress !== 'json') throw new SetupError(`--progress takes json, got "${progress}"`);
-    flags = { force: set.has('--force'), noCache: set.has('--no-cache'), json: progress === 'json', quiet: set.has('--quiet') };
-    if (opts['--jobs'] !== undefined) {
-      const extra = [...PER_PACKAGE.filter((f) => opts[f] !== undefined), ...['--flat', '--adopt'].filter((f) => set.has(f)), ...(rest.length ? [rest[0]] : [])];
-      if (extra.length) throw new SetupError(`--jobs names the packages and their options itself: leave out ${extra.join(', ')}\n${cookUsage()}`);
-      if (opts['--for'] !== undefined && opts['--for'] !== 'godot') throw new SetupError(`--for ${opts['--for']}: only godot is supported`);
-      jobs = readJobs(opts['--jobs']);
-    } else {
-      if (opts['--for'] === undefined) throw new SetupError(`cook needs --for godot (the engine to cook into)\n${cookUsage()}`);
-      if (opts['--for'] !== 'godot') throw new SetupError(`--for ${opts['--for']}: only godot is supported`);
-      if (!rest.length) throw new SetupError(`cook needs a .topo, a package folder or a folder\n${cookUsage()}`);
-      const instancing = opts['--instancing'];
-      if (instancing !== undefined && instancing !== 'packed' && instancing !== 'expand') throw new SetupError(`--instancing takes packed or expand, got "${instancing}"`);
-      const timeout = opts['--timeout'] !== undefined ? Number(opts['--timeout']) : undefined;
-      if (timeout !== undefined && !(timeout > 0)) throw new SetupError(`--timeout takes seconds above 0, got "${opts['--timeout']}"`);
-      const topos = [...new Set(rest.flatMap(cookTargets))];
-      if (opts['--report'] !== undefined && topos.length !== 1) throw new SetupError(`--report names one report file, and the targets hold ${topos.length} packages: cook them one at a time, or use --jobs`);
-      const into = opts['--into'] === undefined ? undefined : /^res:\/\//.test(opts['--into']) ? opts['--into'] : path.resolve(opts['--into']);
-      jobs = topos.map((t) => godotJob(t, {
-        into, per_output_folders: set.has('--flat') ? false : undefined, skip: opts['--skip'] !== undefined ? list(opts['--skip']) : undefined,
-        instancing: instancing as 'packed' | 'expand' | undefined, adopt: set.has('--adopt'), report: opts['--report'] !== undefined ? path.resolve(opts['--report']) : undefined, timeout,
-      }));
-      if (!jobs.length) { io.out(`no package below ${rest.join(', ')}: nothing to cook`); return 0; }
-    }
-  } catch (e: any) {
-    io.err(e instanceof SetupError ? e.message : String(e?.message ?? e));
-    return 2;
-  }
-  const human = (s: string) => { if (!flags.quiet) (flags.json ? io.err : io.out)(s); };
-  let ok = true;
-  try {
-    for (const job of jobs) {
-      const rep = await cookPackage(job, godotFlavour(job.project), { force: flags.force, noCache: flags.noCache, progress: flags.json ? (l) => io.out(l) : undefined });
-      ok &&= rep.ok;
-      human(summary(rep, job.project));
-      for (const line of failures(rep)) io.err(line);
-    }
-  } finally {
-    await closeCookPools();
-    cachePrune();
-  }
-  return ok ? 0 : 1;
-}
-
-/** A package's cook in a line. */
-function summary(rep: PackageReport, project: string): string {
-  const where = (() => { try { return resPath(project, rep.package.dir); } catch { return rep.package.dir; } })();
-  if (!rep.outputs.length && rep.errors.length) return `${rep.package.id} (${where}): did not cook`;
-  const by = (s: string) => rep.outputs.filter((o) => o.state === s).map((o) => o.id);
-  const parts = ['written', 'cached', 'unchanged', 'failed', 'skipped'].map((s) => [s, by(s)] as const).filter(([, l]) => l.length).map(([s, l]) => `${s} ${l.join(', ')}`);
-  return `${rep.package.id} (${where}): ${rep.outputs.length} output${rep.outputs.length === 1 ? '' : 's'}${parts.length ? `: ${parts.join('; ')}` : ''}; record ${rep.record}${rep.orphans.length ? `; ${rep.orphans.length} orphan file${rep.orphans.length === 1 ? '' : 's'} kept (no longer cooked): ${rep.orphans.join(', ')}` : ''} (${(rep.ms / 1000).toFixed(1)} s)`;
-}
-
-/** A package's failures and warnings, a line each, as the plugin's Output says them. */
-function failures(rep: PackageReport): string[] {
-  const out: string[] = [];
-  for (const e of rep.errors) out.push(`TopoTopo: ${rep.package.id}: ${e}`);
-  for (const o of rep.outputs) for (const e of o.errors) out.push(`TopoTopo: ${rep.package.id} > ${o.id}: ${e.node ? `[${e.node}] ` : ''}${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`);
-  for (const w of rep.warnings) out.push(`TopoTopo: ${rep.package.id}: warning: ${w}`);
-  return out;
-}
-
-/** A jobs file read and checked (protocol, flavour, each job's package and options); throws a SetupError. */
-export function readJobs(file: string): (CookJob & { project: string })[] {
-  let raw: any;
-  try { raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch (e: any) { throw new SetupError(`the jobs file ${file} cannot be read: ${e.message}`); }
-  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.jobs)) throw new SetupError(`${file} is no jobs file: {"for": "godot", "protocol": ${COOK_PROTOCOL}, "jobs": [...]}`);
-  const projectOf = () => { const p = raw.jobs.find((j: any) => typeof j?.package === 'string')?.package; const g = p ? godotProjectOf(path.dirname(path.resolve(p))) : null; return g ?? '<project>'; };
-  if (raw.protocol !== COOK_PROTOCOL) throw new SetupError(`the jobs file speaks protocol ${JSON.stringify(raw.protocol)} and this TopoTopo ${TOPOTOPO_VERSION} speaks ${COOK_PROTOCOL}: update the Godot addon: ${program()} godot setup ${projectOf()}`);
-  if (raw.for !== undefined && raw.for !== 'godot') throw new SetupError(`the jobs file is for ${JSON.stringify(raw.for)}: only godot is supported`);
-  return raw.jobs.map((j: any, i: number) => {
-    const at = `${file}: job ${i + 1}`;
-    if (!j || typeof j.package !== 'string') throw new SetupError(`${at} names no "package" (the .topo's absolute path)`);
-    const topo = isDir(j.package) ? cookTargets(j.package)[0] : j.package;
-    if (!topo || !isFile(topo)) throw new SetupError(`${at}: no package at ${j.package}`);
-    if (j.instancing !== undefined && j.instancing !== 'packed' && j.instancing !== 'expand') throw new SetupError(`${at}: "instancing" is packed or expand`);
-    if (j.skip !== undefined && (!Array.isArray(j.skip) || j.skip.some((s: unknown) => typeof s !== 'string'))) throw new SetupError(`${at}: "skip" is a list of output ids`);
-    if (j.timeout !== undefined && !(typeof j.timeout === 'number' && j.timeout > 0)) throw new SetupError(`${at}: "timeout" is seconds above 0`);
-    if (j.into !== undefined && typeof j.into !== 'string') throw new SetupError(`${at}: "into" is a folder`);
-    return godotJob(topo, {
-      into: j.into === undefined ? undefined : /^res:\/\//.test(j.into) ? j.into : path.resolve(j.into),
-      per_output_folders: typeof j.per_output_folders === 'boolean' ? j.per_output_folders : undefined, skip: j.skip, instancing: j.instancing,
-      adopt: j.adopt === true, report: typeof j.report === 'string' ? path.resolve(j.report) : undefined, timeout: j.timeout,
-    });
-  });
 }
 
 // ------------------------------------------------------------------------------------------------------ status
@@ -503,7 +398,7 @@ export interface StatusResult {
 }
 
 /** Git in the project's repository: its root and a check-attr runner; null when it is no repository or git is missing. */
-function gitOf(project: string): { top: string; lfs: boolean; filter: (abs: string[]) => Map<string, string> } | null {
+export function gitOf(project: string): { top: string; lfs: boolean; filter: (abs: string[]) => Map<string, string> } | null {
   const run = (args: string[]) => spawnSync('git', args, { cwd: project, encoding: 'utf8', windowsHide: true });
   const top = run(['rev-parse', '--show-toplevel']);
   if (top.status !== 0 || !top.stdout.trim()) return null;
@@ -612,7 +507,7 @@ export function statusText(r: StatusResult): string {
 // ------------------------------------------------------------------------------------------------------- setup
 
 /** Add lines a text file lacks, at its end. Returns the lines added. */
-function addLines(file: string, lines: string[]): string[] {
+export function addLines(file: string, lines: string[]): string[] {
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* new */ }
   const have = new Set(text.split(/\r?\n/).map((l) => l.trim()));

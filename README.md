@@ -415,6 +415,27 @@ node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{
 
 ## Unreal Engine 5.8
 
+A package inside `Content/` imports as a source asset through the
+[TopoTopoImport plugin](integrations/unreal/TopoTopoImport/README.md): each published output becomes ordinary Unreal
+assets. A mesh becomes a Static Mesh with its materials, textures, LODs and sockets; instances become meshes, a
+**TopoTopo Instances** asset you drag into a level (hierarchical instanced static meshes) and a PCG Data Asset; points
+become a PCG Data Asset; textures become Textures; terrain becomes a landscape bundle that TopoTopoPCG places. Auto
+Reimport redoes it when the `.topo` changes, and the plugin cooks in the background when a graph, input or asset does.
+Only what changed cooks and imports again, assets update where they are, and a failed output keeps its last good assets.
+The `.uasset` files and the record `<package>/.topotopo/unreal.json` are committed; cooked files stay in `Saved/TopoTopo/`.
+
+```text
+topotopo unreal setup <unreal project folder or .uproject> [--no-enable] [--with-pcg]
+topotopo unreal status <unreal project folder or .uproject> [--strict] [--json]
+topotopo cook <.topo | package folder | folder>... --for unreal [--into </Game/folder>] [--flat] [--skip a,b] [--instancing packed|expand] [--force] [--no-cache] [--timeout <s>] [--report <file>] [--progress json] [--quiet]
+```
+
+`unreal setup` copies the plugin to `Plugins/TopoTopoImport/`, records where TopoTopo is, enables the plugin, excludes
+TopoTopo's working folders from Auto Reimport and adds the cooked files to `.gitignore`. The plugin is C++ source, so Unreal
+builds it when the project opens (`--with-pcg` also installs TopoTopoPCG). `unreal status --strict` exits 1 when a
+package is stale, failed, never cooked or still seen by Auto Reimport. `--help-topic unreal` has the details; the plugin's
+contract is [integrations/unreal/PROTOCOL.md](integrations/unreal/PROTOCOL.md).
+
 The optional [TopoTopoPCG plugin](integrations/unreal/TopoTopoPCG/README.md) reads CSV or `points.json`
 directly into PCG, resolves mesh names through the instance sidecar and editable asset mappings, and provides a
 **TopoTopo Instance Spawner** backed by Unreal's Static Mesh Spawner. **Tools > Import TopoTopo scene** imports
@@ -555,8 +576,9 @@ its working folders, so Godot imports none of them; `topotopo check` adds one th
 `*.translation`) never count as TopoTopo's: a package publishes the same version with or without them.
 
 **Unreal.** Auto Reimport (Editor Preferences, Loading and Saving) watches `Content/` and imports a new or changed
-source file. Keep TopoTopo's working folders out of it with these exclude wildcards: `*/versions/*`, `*/packages/*`,
-`*/inputs/*`, `*/topotopo-packages/*`. The `*.uasset` files Unreal writes beside an export never count as TopoTopo's.
+source file. `topotopo unreal setup` keeps TopoTopo's working folders out of it (see [Unreal Engine 5.8](#unreal-engine-58)):
+`graphs/`, `assets/`, `inputs/`, `exports/`, `versions/`, `packages/`, `attachments/`, `.topotopo/` and `topotopo-packages/`.
+The `*.uasset` files Unreal writes beside an export never count as TopoTopo's.
 
 ## Packages
 

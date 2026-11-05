@@ -3,6 +3,7 @@ import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
 import { PACKAGE_COMMANDS } from '../packages/commands.ts';
 import { GODOT_COMMANDS } from '../host/godot-commands.ts';
+import { UNREAL_COMMANDS } from '../host/unreal-commands.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
@@ -1228,6 +1229,49 @@ The plugin's contract (jobs file, progress lines, record schema, freshness): int
 
 THE CLI COMMANDS:
 ${GODOT_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
+  unreal: `UNREAL (packages inside an Unreal project's Content/, imported by the TopoTopoImport plugin)
+A package in a folder of its own under Content/ imports as <id>.topo, a source asset: the plugin (topotopo unreal setup puts it in
+Plugins/TopoTopoImport/; Unreal 5.8; C++ source, which Unreal builds on opening) cooks each published output and brings it in as
+Unreal assets, kept current by Auto Reimport. Levels use those assets, never the package asset, which stays in the editor.
+
+WHAT IS COOKED: the package's published outputs, by the rule of the cook for Godot (help topic "godot"), at frame 1 with var defaults,
+from the working folder. The cooked files are the plugin's intermediate files: Saved/TopoTopo/<the folder's content path>/<id>/, out of
+Auto Reimport's sight.
+WHAT EACH KIND BECOMES (a report's outputs carry the steps as "import"):
+  mesh        a Static Mesh <folder>/<id>/<id> with materials and textures in Materials/ and Textures/, _lod<n> pieces as its LODs,
+              scene_null points as sockets tagged TopoTopo
+  instances   one Static Mesh per packed source in Meshes/; <id>_Instances, a TopoTopo Instances asset: drag it into a level for
+              hierarchical instanced static meshes; <id>_Points, a PCG Data Asset whose attribute MeshPath names each mesh
+  points      <id>_Points, a PCG Data Asset; every extra column an attribute
+  textures    one Texture per image
+  terrain     the unreal_landscape bundle on disk; Place Terrain in Level on the package asset brings it in (needs TopoTopoPCG: --with-pcg)
+  scene       with a heightfield as terrain, else as mesh and instances
+  curves, material, volume   not imported yet: listed as skipped, with why
+Axes: Unreal X = x, Y = z, Z = y, in centimetres, for meshes (Interchange converts the GLB), rows and sockets.
+
+OPTIONS come from <id>.topo.import [params] (the package asset's Import Options), and the flags override them:
+  outputs/folder "outputs" (relative to the package, or /Game/...)      --into </Game/folder>
+  outputs/per_output_folders true                                        --flat
+  outputs/skip "" (comma-separated output ids)                           --skip a,b
+  instances/mode 0 Instanced (packed) | 1 Expand (real copies)           --instancing packed|expand
+
+REIMPORT: the .topo changing reimports through Auto Reimport (Editor Preferences > Loading & Saving). A change under graphs/, assets/,
+inputs/ or topotopo-packages/ (the viewer, an agent over MCP, by hand), and whatever changed while the editor was closed, cooks in the
+background and imports when the editor is free (Editor Preferences > Plugins > TopoTopo > Live Cook). Only outputs whose deps changed
+cook, only steps whose files' hashes changed import, assets update where they are, instance actors in open levels rebuild. A failed
+output keeps its last good assets; the error is on the package asset and in Message Log > TopoTopo. An output no longer published
+leaves its assets; they are listed as orphans. Right-click the package asset: Reimport, Recook (everything again), Open in TopoTopo
+(the live viewer), Show Cook Report, Place Terrain in Level. The console command TopoTopo.CookAll [force] does every package.
+
+THE RECORD <package>/.topotopo/unreal.json (commit it with the .uasset files) is the same record as Godot's; a checkout without
+Saved/TopoTopo/ is still current.
+EXIT CODES: 0 every output ok; 1 an output or package failed or timed out (records and reports still written);
+2 usage, setup or protocol error, a published copy, a package outside Content/ or directly in it (nothing written).
+CI: topotopo unreal status <project> --strict exits 1 when a package is stale, failed or never cooked or Auto Reimport still sees its folders.
+The plugin's contract (import steps, what differs from the cook for Godot): integrations/unreal/PROTOCOL.md.
+
+THE CLI COMMANDS:
+${UNREAL_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):
