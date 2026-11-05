@@ -3,13 +3,19 @@
 // headlessly and the same graph always gives the same PNG bytes.
 //
 // Material evaluation follows the exporter (io/gltf.ts) slot by slot:
-//   base colour   a base colour map replaces the factor; vertex colour Cd (unless it is all white over the material's
-//                 prims) multiplies it as glTF's COLOR_0 does, else the material's baseColor. Display values: maps and
-//                 factors are decoded from sRGB to linear before lighting (maps before filtering).
+//   base colour   a base colour map replaces the factor. A named material wins over vertex colour, as glTF export does
+//                 by default: its prims show its base colour (factor or map) and their Cd is not used. Prims without a
+//                 named material show their Cd (unless it is all white there), else the default material. Option
+//                 vertexColors: 'ignore' never uses Cd, 'multiply' also multiplies a named material's base colour by
+//                 Cd (vertex paint as a tint). Display values: maps, factors and Cd are decoded from sRGB to linear
+//                 before lighting (maps before filtering). Option grey (a value check) replaces every base colour by
+//                 a neutral 18% grey (the base colour map then gives only alpha) and lights the scene with the rig and
+//                 environment at their luminance, so nothing carries a hue.
 //   normal        tangent-space map (OpenGL, green up) in the MikkTSpace frame of core/tangents.ts, the frame glTF
 //                 export writes as TANGENT and bake_normal bakes in.
-//   orm           occlusion R (indirect light only), roughness G, metallic B; a map replaces the roughness and metallic
-//                 factors (exported roughnessFactor = metallicFactor = 1).
+//   orm           occlusion R (indirect light only), roughness G, metallic B; the material's roughness and metallic
+//                 multiply the map's, as the exported roughnessFactor / metallicFactor do (texture_to_material sets
+//                 them to 1 unless roughness_value / metallic_value are given).
 //   roughness     a standalone map (grey, or green of RGBA) replaces the factor, as exported; ignored under an orm map.
 //   emissive      added after lighting (values above 1 are KHR_materials_emissive_strength).
 //   unlit         base colour, no lighting and no tone curve (KHR_materials_unlit).
@@ -21,12 +27,18 @@
 // (Karis' analytic environment BRDF). Linear radiance × 2^exposure, the ACES curve (Narkowicz fit) on the brightest
 // channel with the hue kept, sRGB encoding.
 //
-// Not evaluated, and reported in the render notes instead of being shown as if verified: transparency (alpha < 1 in a
-// material, an Alpha attribute or a base colour map's alpha: shaded opaque), textures that are missing, unreadable or
-// not PNG (shaded without them).
+// Transparency follows the exported alphaMode (core/materials.ts materialAlphaMode; vertex Alpha never changes it):
+// coverage = the material's alpha × the base colour map's alpha × vertex Alpha (where vertex colours are used, as
+// export writes COLOR_0). MASK (alpha_mode "mask")
+// discards pixels below the cutoff; BLEND (alpha_mode "blend", or alpha below 1 under "auto") is composited over what is
+// behind after the opaque surfaces, prim by prim from back to front (centroid depth), without writing depth. Unlit
+// materials keep their colour path and take the same coverage.
+//
+// Not evaluated, and reported in the render notes instead of being shown as if verified: textures that are missing,
+// unreadable or not PNG (shaded without them).
 import type { Geometry } from '../core/geometry.ts';
 import { Image, channelsOf, imageRef, referenceableImages, resizeLayer } from '../core/image.ts';
-import { DEFAULT_MATERIAL, mergeMaterialTables, primMaterials, readMaterials } from '../core/materials.ts';
+import { DEFAULT_MATERIAL, materialAlphaMode, mergeMaterialTables, primMaterials, readMaterials } from '../core/materials.ts';
 import type { Material } from '../core/materials.ts';
 import { cornerTangents, loadMikkTSpace, mikkTSpaceReady, shadingFrame, vertexUV } from '../core/tangents.ts';
 import { imageRowOfV } from '../core/texcoord.ts';
@@ -36,6 +48,23 @@ import { imageFromPNG } from '../io/textures.ts';
 
 /** External texture files read for a PBR render: path → image, or the reason it is not available. */
 export type PBRTextures = Map<string, Image | string>;
+
+/**
+ * How vertex colour Cd enters the base colour (RenderOptions.vertexColors): 'auto' = the export rule (a named material
+ * wins, Cd colours prims without one), 'ignore' = never, 'multiply' = also multiplies a named material's base colour.
+ */
+export type VertexColorMode = 'auto' | 'ignore' | 'multiply';
+export const VERTEX_COLOR_MODES: VertexColorMode[] = ['auto', 'ignore', 'multiply'];
+
+/** Options of the PBR preview beyond exposure. */
+export interface PBRSceneOptions {
+  vertexColors?: VertexColorMode;
+  /** value check: every base colour is a neutral 18% grey (base colour maps give alpha only, Cd nothing) */
+  grey?: boolean;
+}
+
+/** The base colour of grey renders: 18% reflectance (linear). */
+export const GREY_ALBEDO = 0.18;
 
 /** The normals the exporter writes by default (60° cusp): the frame the normal map and TANGENT belong to. */
 export const PBR_CUSP = 60;
@@ -123,7 +152,13 @@ interface PBRMat {
   roughMap: Mip[] | null;
   /** largest map (texels per uv unit, along one axis) for the level of detail */
   size: number[];
+  /** base alpha and the MASK cutoff */
+  alpha: number;
+  cutoff: number;
 }
+
+/** Per-triangle alpha handling (PBRScene.triAlpha). */
+export const ALPHA_OPAQUE = 0, ALPHA_MASK = 1, ALPHA_BLEND = 2;
 
 // ---------------------------------------------------------------- the scene
 
@@ -131,8 +166,12 @@ interface PBRMat {
 export interface PBRScene {
   /** materials evaluated, maps used, problems: footer and notes */
   summary: string;
-  /** shade a pixel; writes display RGB (0..1) into out */
+  /** shade a pixel; writes display RGB (0..1) into out[0..2] and the coverage (alpha, 1 on opaque triangles) into out[3] */
   shade(t: number, w0: number, w1: number, w2: number, dudx: number, dvdx: number, dudy: number, dvdy: number, view: number[], back: boolean, out: number[]): void;
+  /** per triangle: ALPHA_OPAQUE, ALPHA_MASK (discard below cutoff(t)) or ALPHA_BLEND (composited after the opaque pass) */
+  triAlpha: Uint8Array;
+  /** the MASK cutoff of triangle t's material */
+  cutoff(t: number): number;
   /** uv of triangle t at (perspective-correct) weights, for the derivatives */
   uvAt(t: number, w0: number, w1: number, w2: number, out: number[]): void;
   hasUV: boolean;
@@ -150,12 +189,17 @@ const RIG = [
 ];
 // world-up environment for indirect light
 const SKY = [0.34, 0.37, 0.42], HORIZON = [0.27, 0.27, 0.27], GROUND = [0.08, 0.075, 0.07];
+const ENV = { sky: SKY, horizon: HORIZON, ground: GROUND };
+/** The same light at its luminance (Rec. 709): the neutral rig of grey renders. */
+const neutral = (c: number[]) => { const y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return [y, y, y]; };
+const GREY_RIG = RIG.map((l) => ({ d: l.d, c: neutral(l.c) }));
+const GREY_ENV = { sky: neutral(SKY), horizon: neutral(HORIZON), ground: neutral(GROUND) };
 
 /** Environment radiance along world direction d, widened by roughness (a cheap stand-in for a prefiltered map). */
-function env(dy: number, rough: number, out: number[]) {
+function env(dy: number, rough: number, out: number[], { sky, horizon, ground } = ENV) {
   const w = 0.25 + rough * 0.9;
   const t = Math.max(-1, Math.min(1, dy / w));
-  for (let c = 0; c < 3; c++) out[c] = t >= 0 ? HORIZON[c] + (SKY[c] - HORIZON[c]) * t : HORIZON[c] + (GROUND[c] - HORIZON[c]) * -t;
+  for (let c = 0; c < 3; c++) out[c] = t >= 0 ? horizon[c] + (sky[c] - horizon[c]) * t : horizon[c] + (ground[c] - horizon[c]) * -t;
 }
 
 /** ACES filmic curve (Narkowicz fit). */
@@ -175,8 +219,10 @@ function tone(c: number[]) {
  * Build the shading data for g's triangles (tris / triPrim from topology.triangulate). Synchronous: MikkTSpace must be
  * loaded (preparePBR or loadMikkTSpace) and external textures read into `files`; notes receive what is not evaluated.
  */
-export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, files: PBRTextures | undefined, exposure: number, notes: string[]): PBRScene {
+export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, files: PBRTextures | undefined, exposure: number, notes: string[], opts: PBRSceneOptions = {}): PBRScene {
   if (!mikkTSpaceReady()) throw new Error('shading "pbr" needs the asynchronous render entry (renderGeometryAsync): MikkTSpace is not loaded');
+  const vcMode = opts.vertexColors ?? 'auto', grey = !!opts.grey;
+  if (!VERTEX_COLOR_MODES.includes(vcMode)) throw new Error(`render: cd (vertex colours) expects ${VERTEX_COLOR_MODES.join(', ')}, got ${JSON.stringify(vcMode)}`);
   const nTri = tris.length / 3;
   const table = readMaterials(g), pm = primMaterials(g), imgs = referenceableImages(g);
   const uv = vertexUV(g, 'uv');
@@ -202,7 +248,8 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
     mipCache.set(key, chain);
     return chain;
   };
-  // vertex colour as glTF COLOR_0: per material, only when Cd is not all white over its prims
+  // vertex colour per material name, only when Cd is not all white over its prims: replacing the base colour factor on
+  // prims without a named material (glTF COLOR_0), multiplying a named material's base colour with vertexColors 'multiply'
   const cdF = g.findAttrib('Cd', ['vertex', 'point', 'prim', 'detail']);
   const cdA = cdF && cdF.attr.type === 'float' ? cdF.attr : null;
   const cdIndex = (v: number, p: number) => (cdF!.cls === 'vertex' ? v : cdF!.cls === 'point' ? vp[v] : cdF!.cls === 'prim' ? p : 0);
@@ -210,8 +257,8 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
     const d = cdA!.data as Float64Array, s = cdA!.size, i = cdIndex(v, p) * s;
     out[0] = d[i]; out[1] = s > 1 ? d[i + 1] : d[i]; out[2] = s > 2 ? d[i + 2] : d[i];
   };
-  const mats = new Map<string, PBRMat>(), vcol = new Map<string, boolean>();
-  const transparent: string[] = [];
+  const mats = new Map<string, PBRMat>(), vcol = new Map<string, number>(); // 0 none, 1 replaces the factor, 2 multiplies
+  const opaqueMapAlpha: string[] = [];
   const matOf = (name: string): PBRMat => {
     let m = mats.get(name);
     if (m) return m;
@@ -225,10 +272,10 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       emissive: src.emissive.map((e) => srgbToLinear(Math.max(0, Math.min(1, e / emax))) * emax), unlit: src.unlit,
       baseMap: mapOf(label, 'base colour', t.baseColor, true), normalMap: mapOf(label, 'normal', t.normal, false),
       ormMap: mapOf(label, 'orm', t.orm, false), roughMap: t.orm ? null : mapOf(label, 'roughness', t.roughness, false), size: [1, 1],
+      alpha: Math.max(0, Math.min(1, src.alpha)), cutoff: src.alphaCutoff ?? 0.5,
     };
     for (const c of [m.baseMap, m.normalMap, m.ormMap, m.roughMap]) if (c) { m.size[0] = Math.max(m.size[0], c[0].w); m.size[1] = Math.max(m.size[1], c[0].h); }
-    if (src.alpha < 1) transparent.push(`material "${label}" alpha ${src.alpha}`);
-    else if (m.baseMap && m.baseMap[0].ch === 4 && m.baseMap[0].data.some((x, i) => i % 4 === 3 && x < 1)) transparent.push(`material "${label}" base colour map alpha`);
+    if (materialAlphaMode(src) === 'OPAQUE' && m.baseMap && m.baseMap[0].ch === 4 && m.baseMap[0].data.some((x, i) => i % 4 === 3 && x < 1)) opaqueMapAlpha.push(label);
     mats.set(name, m);
     return m;
   };
@@ -244,13 +291,45 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       cdWhite.set(name, white);
     }
   }
+  // vertex Alpha (glTF COLOR_0 alpha): where vertex colours may be used, per material name when it is below 1 there
+  const alF = g.findAttrib('Alpha', ['vertex', 'point', 'prim', 'detail']);
+  const alA = alF && alF.attr.type === 'float' && alF.attr.size === 1 ? alF.attr : null;
+  const alphaAt = (v: number, p: number) => (alA!.data as Float64Array)[alF!.cls === 'vertex' ? v : alF!.cls === 'point' ? vp[v] : alF!.cls === 'prim' ? p : 0];
+  const alLow = new Map<string, boolean>();
+  if (alA) {
+    for (let t = 0; t < nTri; t++) {
+      const p = triPrim[t], name = pm ? pm[p] : '';
+      if (alLow.get(name)) continue;
+      let low = false;
+      for (let k = 0; k < 3 && !low; k++) if (alphaAt(tris[t * 3 + k], p) < 1) low = true;
+      if (low || !alLow.has(name)) alLow.set(name, low);
+    }
+  }
+  const triVcol = new Uint8Array(nTri), triAlpha = new Uint8Array(nTri), triVA = new Uint8Array(nTri);
+  const nameAlpha = new Map<string, number[]>(); // [mode, vertex alpha used]
+  let cdHidden = false, alphaHidden = false;
   for (let t = 0; t < nTri; t++) {
     const name = pm ? pm[triPrim[t]] : '';
     triMat[t] = matOf(name);
-    if (!vcol.has(name)) vcol.set(name, !!cdA && cdWhite.get(name) === false);
+    let v = vcol.get(name), na = nameAlpha.get(name);
+    if (v === undefined || na === undefined) {
+      const painted = !!cdA && cdWhite.get(name) === false, named = !!(name && table[name]);
+      v = !painted || vcMode === 'ignore' ? 0 : !named ? 1 : vcMode === 'multiply' ? 2 : 0;
+      if (painted && named && vcMode === 'auto') cdHidden = true;
+      vcol.set(name, v);
+      const vtx = vcMode !== 'ignore' && (!named || vcMode === 'multiply'), lowA = !!alLow.get(name);
+      // the mode is the material's own (vertex Alpha is data, as in export); vertex Alpha multiplies the coverage of
+      // mask and blend materials where vertex colours are used
+      const mode = materialAlphaMode((named && table[name]) || (DEFAULT_MATERIAL as Material));
+      if (lowA && !vtx && mode !== 'OPAQUE') alphaHidden = true;
+      na = [mode === 'MASK' ? ALPHA_MASK : mode === 'BLEND' ? ALPHA_BLEND : ALPHA_OPAQUE, vtx && lowA && mode !== 'OPAQUE' ? 1 : 0];
+      nameAlpha.set(name, na);
+    }
+    triVcol[t] = v; triAlpha[t] = na[0]; triVA[t] = na[1];
   }
-  const al = g.findAttrib('Alpha', ['vertex', 'point', 'prim', 'detail']);
-  if (al && al.attr.type === 'float' && (al.attr.data as Float64Array).some((x) => x < 1)) transparent.push('Alpha attribute below 1');
+  if (cdHidden) notes.push('pbr: Cd on prims with a named material is not shown: the material decides their colour, as in glTF export (cd "multiply" tints the material with it)');
+  if (alphaHidden) notes.push('pbr: the Alpha attribute is not used on prims with a named material: the material\'s alpha decides, as in glTF export (cd "multiply" uses it)');
+  for (const label of new Set(opaqueMapAlpha)) notes.push(`pbr: material "${label}" has a base colour map with alpha below 1 but is opaque (alpha_mode "mask" or "blend" uses that alpha)`);
   // MikkTSpace frames for normal-mapped triangles (computed once over every triangle: the frames do not depend on the
   // material, and one call keeps the soup contiguous)
   const anyNormal = [...mats.values()].some((m) => m.normalMap);
@@ -261,12 +340,14 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
     if (r.diag.uvDegenerate || r.diag.uvNonFinite) problems.push(`${r.diag.uvDegenerate + r.diag.uvNonFinite} triangles have collapsed or non-finite uvs: their normal map has no orientation (fallback frame)`);
   }
   if (!uv && [...mats.values()].some((m) => m.baseMap || m.normalMap || m.ormMap || m.roughMap)) problems.push('the geometry has no uv attribute: texture maps are not shown');
-  if (transparent.length) notes.push(`pbr: transparency is not evaluated, shaded opaque (${[...new Set(transparent)].join('; ')})`);
+
   for (const pr of new Set(problems)) notes.push(`pbr: ${pr}`);
 
-  let camL = RIG.map((l) => ({ d: l.d, c: l.c }));
+  // grey: the rig and environment at their luminance, so a value check carries no hue from the lights either
+  const rig = grey ? GREY_RIG : RIG, envC = grey ? GREY_ENV : ENV;
+  let camL = rig.map((l) => ({ d: l.d, c: l.c }));
   const gain = 2 ** exposure;
-  const n = [0, 0, 0], f = new Float64Array(9), tx = [0, 0, 0, 0], base = [0, 0, 0], e = [0, 0, 0], c3 = [0, 0, 0];
+  const n = [0, 0, 0], f = new Float64Array(9), tx = [0, 0, 0, 0], base = [0, 0, 0], e = [0, 0, 0], c3 = [0, 0, 0], vcRGB = [0, 0, 0];
   const uvAt = (t: number, w0: number, w1: number, w2: number, out: number[]) => {
     const a = tris[t * 3] * 2, b = tris[t * 3 + 1] * 2, c = tris[t * 3 + 2] * 2;
     out[0] = uv![a] * w0 + uv![b] * w1 + uv![c] * w2; out[1] = uv![a + 1] * w0 + uv![b + 1] * w1 + uv![c + 1] * w2;
@@ -277,28 +358,41 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
     if (m.baseMap) mapsUsed.add('base colour'); if (m.normalMap) mapsUsed.add('normal');
     if (m.ormMap) mapsUsed.add('orm'); if (m.roughMap) mapsUsed.add('roughness');
   }
-  const summary = `${mats.size} material${mats.size === 1 ? '' : 's'}${mapsUsed.size ? `, maps ${[...mapsUsed].join('/')}` : ''}`;
+  const alphaUsed = [...new Set(triAlpha)].filter((x) => x !== ALPHA_OPAQUE).sort().map((x) => (x === ALPHA_MASK ? 'cutout' : 'blend'));
+  const summary = `${mats.size} material${mats.size === 1 ? '' : 's'}${mapsUsed.size ? `, maps ${[...mapsUsed].join('/')}` : ''}${alphaUsed.length ? `, alpha ${alphaUsed.join('/')}` : ''}`;
   return {
-    summary, hasUV: !!uv, uvAt,
-    camera(r, u, fw) { camL = RIG.map((l) => ({ d: [0, 1, 2].map((k) => r[k] * l.d[0] + u[k] * l.d[1] - fw[k] * l.d[2]), c: l.c })); },
+    summary, hasUV: !!uv, uvAt, triAlpha,
+    cutoff: (t) => triMat[t].cutoff,
+    camera(r, u, fw) { camL = rig.map((l) => ({ d: [0, 1, 2].map((k) => r[k] * l.d[0] + u[k] * l.d[1] - fw[k] * l.d[2]), c: l.c })); },
     shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, view, back, out) {
       const m = triMat[t], a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
       if (uv) uvAt(t, w0, w1, w2, uvp);
       const lod = (sz: Mip[]) => 0.5 * Math.log2(Math.max(1e-30, Math.max((dudx * sz[0].w) ** 2 + (dvdx * sz[0].h) ** 2, (dudy * sz[0].w) ** 2 + (dvdy * sz[0].h) ** 2)));
       // base colour
-      if (vcol.get(pm ? pm[triPrim[t]] : '')) {
-        cdOf(a, triPrim[t], c3); base[0] = c3[0] * w0; base[1] = c3[1] * w0; base[2] = c3[2] * w0;
-        cdOf(b, triPrim[t], c3); base[0] += c3[0] * w1; base[1] += c3[1] * w1; base[2] += c3[2] * w1;
-        cdOf(c, triPrim[t], c3); base[0] += c3[0] * w2; base[1] += c3[1] * w2; base[2] += c3[2] * w2;
-        for (let k = 0; k < 3; k++) base[k] = srgbToLinear(Math.max(0, Math.min(1, base[k])));
-      } else if (m.baseMap && uv) { base[0] = base[1] = base[2] = 1; } else { base[0] = m.base[0]; base[1] = m.base[1]; base[2] = m.base[2]; }
-      if (m.baseMap && uv) { sampleTri(m.baseMap, uvp[0], uvp[1], lod(m.baseMap), tx); base[0] *= tx[0]; base[1] *= tx[1]; base[2] *= tx[2]; }
+      const vc = triVcol[t];
+      if (vc) {
+        cdOf(a, triPrim[t], c3); vcRGB[0] = c3[0] * w0; vcRGB[1] = c3[1] * w0; vcRGB[2] = c3[2] * w0;
+        cdOf(b, triPrim[t], c3); vcRGB[0] += c3[0] * w1; vcRGB[1] += c3[1] * w1; vcRGB[2] += c3[2] * w1;
+        cdOf(c, triPrim[t], c3); vcRGB[0] += c3[0] * w2; vcRGB[1] += c3[1] * w2; vcRGB[2] += c3[2] * w2;
+        for (let k = 0; k < 3; k++) vcRGB[k] = srgbToLinear(Math.max(0, Math.min(1, vcRGB[k])));
+      }
+      if (vc === 1) { base[0] = vcRGB[0]; base[1] = vcRGB[1]; base[2] = vcRGB[2]; }
+      else if (m.baseMap && uv) { base[0] = base[1] = base[2] = 1; } else { base[0] = m.base[0]; base[1] = m.base[1]; base[2] = m.base[2]; }
+      let cov = triAlpha[t] === ALPHA_OPAQUE ? 1 : m.alpha;
+      if (m.baseMap && uv) {
+        sampleTri(m.baseMap, uvp[0], uvp[1], lod(m.baseMap), tx); base[0] *= tx[0]; base[1] *= tx[1]; base[2] *= tx[2];
+        if (triAlpha[t] !== ALPHA_OPAQUE) cov *= tx[3];
+      }
+      if (triVA[t]) cov *= alphaAt(a, triPrim[t]) * w0 + alphaAt(b, triPrim[t]) * w1 + alphaAt(c, triPrim[t]) * w2;
+      out[3] = Math.max(0, Math.min(1, cov));
+      if (vc === 2) { base[0] *= vcRGB[0]; base[1] *= vcRGB[1]; base[2] *= vcRGB[2]; }
+      if (grey) base[0] = base[1] = base[2] = GREY_ALBEDO;
       if (m.unlit) {
         out[0] = linearToSrgb(Math.min(1, base[0])); out[1] = linearToSrgb(Math.min(1, base[1])); out[2] = linearToSrgb(Math.min(1, base[2]));
         return;
       }
       let rough = m.roughness, metal = m.metallic, ao = 1;
-      if (m.ormMap && uv) { sampleTri(m.ormMap, uvp[0], uvp[1], lod(m.ormMap), tx); ao = tx[0]; rough = tx[1]; metal = tx[2]; }
+      if (m.ormMap && uv) { sampleTri(m.ormMap, uvp[0], uvp[1], lod(m.ormMap), tx); ao = tx[0]; rough = tx[1] * m.roughness; metal = tx[2] * m.metallic; }
       else if (m.roughMap && uv) { sampleTri(m.roughMap, uvp[0], uvp[1], lod(m.roughMap), tx); rough = m.roughMap[0].ch === 4 ? tx[1] : tx[0]; }
       rough = Math.max(0.045, Math.min(1, rough)); metal = Math.max(0, Math.min(1, metal)); ao = Math.max(0, Math.min(1, ao));
       // normal: interpolated vertex normal, then the tangent-space map in the MikkTSpace frame
@@ -338,10 +432,10 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
         }
       }
       // indirect: sky/ground irradiance (diffuse) and the environment along the reflection (specular), both occluded
-      env(n[1], 1, e);
+      env(n[1], 1, e, envC);
       const ir = [e[0], e[1], e[2]];
       const RdotN = 2 * NoV, ry = RdotN * n[1] - view[1];
-      env(ry, rough, e);
+      env(ry, rough, e, envC);
       // Karis' analytic environment BRDF
       const c0 = [-1, -0.0275, -0.572, 0.022], c1 = [1, 0.0425, 1.04, -0.04];
       const q = [rough * c0[0] + c1[0], rough * c0[1] + c1[1], rough * c0[2] + c1[2], rough * c0[3] + c1[3]];

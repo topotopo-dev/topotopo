@@ -3,6 +3,8 @@
 // Only keys that are present are set (renderGeometry's defaults apply to the rest).
 import { UNDERLAY_FITS, parseViews } from './raster.ts';
 import type { Axis, ClipOptions, RenderOptions, UnderlayFit } from './raster.ts';
+import { VERTEX_COLOR_MODES } from './pbr.ts';
+import type { VertexColorMode } from './pbr.ts';
 
 const num = (v: unknown, key: string): number => {
   const n = typeof v === 'string' ? Number(v) : v;
@@ -58,7 +60,7 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   if (pts !== undefined) o.points = pts === 'auto' ? 'auto' : bool(pts);
   for (const [s, c] of [['point_numbers', 'pointNumbers'], ['prim_numbers', 'primNumbers'], ['label_groups', 'labelGroups'], ['label_pieces', 'labelPieces'],
     ['legend', 'legend'], ['checker', 'checker'], ['grid', 'grid'], ['annotate', 'annotate'], ['section_absolute', 'sectionAbsolute'], ['textures', 'textures'], ['view_labels', 'viewLabels'],
-    ['transparent', 'transparent'], ['sockets', 'sockets'], ['footer', 'footer']] as const) {
+    ['transparent', 'transparent'], ['sockets', 'sockets'], ['footer', 'footer'], ['grey', 'grey']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = bool(v);
   }
@@ -80,6 +82,12 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
     o.underlayFit = uf as UnderlayFit;
   }
   if (o.underlayOpacity !== undefined && !(o.underlayOpacity >= 0 && o.underlayOpacity <= 1)) throw new Error(`render: underlay_opacity expects 0..1, got ${o.underlayOpacity}`);
+  // shading pbr: how Cd enters the base colour (cd, or vertexColors in RenderOptions terms)
+  const cd = pick('cd', 'vertexColors');
+  if (cd !== undefined) {
+    if (!VERTEX_COLOR_MODES.includes(cd)) throw new Error(`render: cd expects ${VERTEX_COLOR_MODES.join(', ')}, got ${JSON.stringify(cd)}`);
+    o.vertexColors = cd as VertexColorMode;
+  }
   const sa = pick('section_axis', 'sectionAxis');
   if (sa !== undefined) o.sectionAxis = axis(sa, 'section_axis');
   const so = pick('section_offset', 'sectionOffset');

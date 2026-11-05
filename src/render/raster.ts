@@ -29,10 +29,10 @@ import { heightfieldPreviewStep, isHeightfield, layerStats, withHeightfieldPrevi
 import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler, withMaterialPreview } from './texview.ts';
 import { EMPTY_ATTRIB } from '../core/scene.ts';
-import { pbrScene, preparePBR } from './pbr.ts';
+import { ALPHA_BLEND, ALPHA_MASK, pbrScene, preparePBR } from './pbr.ts';
 import { loadMikkTSpace } from '../core/tangents.ts';
 import { decodePNG } from '../io/png-decode.ts';
-import type { PBRScene, PBRTextures } from './pbr.ts';
+import type { PBRScene, PBRTextures, VertexColorMode } from './pbr.ts';
 
 /**
  * 3D views, 'persp@<azimuth>' (a persp view at that azimuth), 'section' (the cut through the section plane,
@@ -165,6 +165,18 @@ export interface RenderOptions {
   exposure?: number;
   /** shading 'pbr': texture files read by renderGeometryAsync (preparePBR); image volumes need none */
   pbrTextures?: PBRTextures;
+  /**
+   * shading 'pbr': how vertex colour Cd enters the base colour. 'auto' (default, the glTF export rule): a named
+   * material's base colour (factor or map) wins and Cd colours only prims without a material; 'ignore': Cd is never
+   * used; 'multiply': Cd also multiplies a named material's base colour (vertex paint as a tint)
+   */
+  vertexColors?: VertexColorMode;
+  /**
+   * value check: shading 'pbr' (implied when shading is not given) with every base colour replaced by a neutral 18%
+   * grey (linear 0.18); base colour maps and Cd give no colour, while alpha, roughness, metallic, normal and orm maps,
+   * emissive and unlit still apply
+   */
+  grey?: boolean;
   /** ao sample radius in output pixels (default 10) */
   aoRadius?: number;
   /** ortho and section views: world width in metres visible across a view (default: fit the bounds) */
@@ -214,6 +226,8 @@ const SHADING_MODES = ['default', 'flat', 'matcap', 'ao', 'pbr'];
 /** The automatic wireframe draws polygon edges up to this many polygons. */
 export const AUTO_WIRE_MAX = 6000;
 const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9], SOCKET_C = [0.35, 1, 0.72];
+/** Barycentric tolerance of the blend pass's shared-edge rule. */
+const EDGE_EPS = 1e-9;
 
 export interface RenderResult { width: number; height: number; rgba: Uint8Array; notes: string[] }
 
@@ -347,6 +361,7 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
  * Host.readFile); every other mode renders exactly as renderGeometry does.
  */
 export async function renderGeometryAsync(g: Geometry, o: RenderOptions = {}, readFile?: (path: string) => Promise<Uint8Array>): Promise<RenderResult> {
+  o = greyShading(o);
   if (o.shading === 'pbr' && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
   if (o.underlay && !o.underlayImage) o = { ...o, underlayImage: await readUnderlay(o.underlay, readFile) };
   // last, so no other task replaces the MikkTSpace instance between this and the synchronous render
@@ -374,8 +389,16 @@ export async function readUnderlay(p: string, readFile?: (path: string) => Promi
   return { width: img.width, height: img.height, rgba };
 }
 
+/** grey is a pbr value check: it implies shading 'pbr' and refuses another shading. */
+function greyShading(o: RenderOptions): RenderOptions {
+  if (!o.grey || o.shading === 'pbr') return o;
+  if (o.shading && o.shading !== 'default') throw new Error(`render: grey is a value check of shading "pbr" (given shading "${o.shading}"); leave shading out or set it to "pbr"`);
+  return { ...o, shading: 'pbr' };
+}
+
 /** Render the geometry; returns RGBA pixels. Shading 'pbr' needs renderGeometryAsync first (or MikkTSpace loaded). */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
+  o = greyShading(o);
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
   if (g.hasPacked() || g.hasSplines()) {
     const budget = o.maxTriangles !== undefined && o.maxTriangles > 0 ? Math.min(o.maxTriangles, 50_000_000) : undefined;
@@ -528,7 +551,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       colorOf = (v) => get(elemIndex(f.cls, v));
       if (f.cls === 'point') pointColorOf = (p) => get(p);
     }
-    // material base colours where there is no colour (no Cd, or Houdini's default white), as glTF export does
+    // material base colours where there is no colour (no Cd, or Houdini's default white); an inspection view, so Cd
+    // stays visible here (shading 'pbr' follows the export rule: a named material wins)
     const pm = primMaterials(g), table = pm ? readMaterials(g) : null;
     if (pm && table && Object.keys(table).length) {
       const cd = colorOf, hasCd = !!(f && f.attr.type === 'float');
@@ -651,13 +675,19 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const flatN = shadingMode === 'flat' && nTri ? primNormals(g) : null;
   const matcap = shadingMode === 'matcap';
   let pbrS: PBRScene | null = null;
+  const pbrBlend: { prim: number; tris: number[] }[] = [];
   if (shadingMode === 'pbr' && nTri) {
     const ev = o.exposure ?? 0;
     if (!Number.isFinite(ev)) throw new Error(`render: exposure expects a number of stops, got ${o.exposure}`);
-    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes);
+    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes, { vertexColors: o.vertexColors, grey: !!o.grey });
     // color_by and highlight tint the shaded material (their colour, lit by its brightness); the checker is not shown
     if (o.checker) notes.push('pbr: checker is not shown under shading "pbr" (color_by and highlight tint the material)');
-    ovDesc.push(`SHADING PBR STUDIO EV ${fmtNum(ev)} (${pbrS.summary.toUpperCase()})`);
+    const cdMode = o.vertexColors && o.vertexColors !== 'auto' ? ` CD ${o.vertexColors.toUpperCase()}` : '';
+    ovDesc.push(`SHADING PBR${o.grey ? ' GREY 18%' : ''} STUDIO EV ${fmtNum(ev)}${cdMode} (${pbrS.summary.toUpperCase()})`);
+    // blend triangles grouped by prim, for the back-to-front pass of each view
+    const byPrim = new Map<number, number[]>();
+    for (let t = 0; t < nTri; t++) if (pbrS.triAlpha[t] === ALPHA_BLEND) { const p = triPrim[t]; let l = byPrim.get(p); if (!l) byPrim.set(p, (l = [])); l.push(t); }
+    for (const [prim, ts] of byPrim) pbrBlend.push({ prim, tris: ts });
   } else if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
   // section / clip planes
   const planeAt = (k: number, off: number | undefined, abs: boolean | undefined) => (abs ? off ?? 0 : bmin[k] + (bmax[k] - bmin[k]) * (off ?? 0.5));
@@ -930,7 +960,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     // downsample a finished tile into the output, draw the output-resolution overlays (post), label it. Transparent
     // 3D views (zb given): alpha = the covered fraction of each pixel's samples and the colour of those samples alone;
     // whatever post and the label draw is opaque
-    const blit = (label: string, post?: () => void, zb?: Float32Array) => {
+    const blit = (label: string, post?: () => void, zb?: Float32Array, bA?: Float32Array | null) => {
       const inv = 1 / (ss * ss);
       const cover = !!(outA && zb);
       for (let y = 0; y < TH; y++)
@@ -940,6 +970,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             const zi = (y * ss + j) * W + x * ss + i, k = zi * 3;
             r += col[k]; gg += col[k + 1]; b += col[k + 2];
             if (cover && zb![zi] > -Infinity) { n++; cr += col[k]; cg += col[k + 1]; cb += col[k + 2]; }
+            else if (cover && bA && bA[zi] > 0) { n += bA[zi]; cr += col[k]; cg += col[k + 1]; cb += col[k + 2]; } // premultiplied
           }
           const o1 = (ty + y) * outW + tx + x, k = o1 * 3;
           if (!cover) { out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv; if (outA) outA[o1] = 1; continue; }
@@ -1052,25 +1083,30 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const na = [0, 0, 0], nb = [0, 0, 0], nc = [0, 0, 0];
     const tn = [0, 0, 0];
     const chk = [0, 0, 0];
-    const pbrUV0 = [0, 0], pbrUV1 = [0, 0], pbrUV2 = [0, 0], pbrV = [0, 0, 0], pbrRGB = [0, 0, 0];
+    const pbrUV0 = [0, 0], pbrUV1 = [0, 0], pbrUV2 = [0, 0], pbrV = [0, 0, 0], pbrRGB = [0, 0, 0, 1];
     const bf = vi === backView ? new Uint8Array(W * H) : null, bfPrim = bf ? new Int32Array(W * H) : null;
-    for (let t = 0; t < nTri; t++) {
+    // shading 'pbr' blend materials: drawn after the opaque pass (blendPass), depth-tested without writing depth and
+    // composited over what is behind; on a transparent background, bA holds their coverage of empty samples (col
+    // premultiplied there)
+    const bA = pbrBlend.length && transparent ? new Float32Array(W * H) : null;
+    const drawTri = (t: number, blendPass: boolean) => {
+      if (pbrS && (pbrS.triAlpha[t] === ALPHA_BLEND) !== blendPass) return;
       const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2];
       const a = g.vertexPoint[va], b = g.vertexPoint[vb], c = g.vertexPoint[vc];
-      if (cam.persp && (vz[a] < 1e-4 || vz[b] < 1e-4 || vz[c] < 1e-4)) continue;
+      if (cam.persp && (vz[a] < 1e-4 || vz[b] < 1e-4 || vz[c] < 1e-4)) return;
       let partial = false, qa = 0, qb = 0, qc = 0;
       if (clipOn) {
         qa = Pd[a * 3 + cK]; qb = Pd[b * 3 + cK]; qc = Pd[c * 3 + cK];
         const ra = (qa - cC) * cS > 0, rb = (qb - cC) * cS > 0, rc = (qc - cC) * cS > 0;
-        if (ra && rb && rc) continue;
+        if (ra && rb && rc) return;
         partial = ra || rb || rc;
       }
       const ax = sx[a], ay = sy[a], bx = sx[b], by = sy[b], cx = sx[c], cy = sy[c];
       const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-      if (Math.abs(area) < 1e-12) continue;
+      if (Math.abs(area) < 1e-12) return;
       let minX = Math.max(0, Math.floor(Math.min(ax, bx, cx))), maxX = Math.min(W - 1, Math.ceil(Math.max(ax, bx, cx)));
       let minY = Math.max(0, Math.floor(Math.min(ay, by, cy))), maxY = Math.min(H - 1, Math.ceil(Math.max(ay, by, cy)));
-      if (minX > maxX || minY > maxY) continue;
+      if (minX > maxX || minY > maxY) return;
       // facing (world space)
       const e1 = [Pd[b * 3] - Pd[a * 3], Pd[b * 3 + 1] - Pd[a * 3 + 1], Pd[b * 3 + 2] - Pd[a * 3 + 2]];
       const e2 = [Pd[c * 3] - Pd[a * 3], Pd[c * 3 + 1] - Pd[a * 3 + 1], Pd[c * 3 + 2] - Pd[a * 3 + 2]];
@@ -1078,7 +1114,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const toCam = cam.persp ? [cam.eye[0] - Pd[a * 3], cam.eye[1] - Pd[a * 3 + 1], cam.eye[2] - Pd[a * 3 + 2]] : [-cam.f[0], -cam.f[1], -cam.f[2]];
       const back = dot3(fnw, toCam) < 0;
       const material = materialNames ? materialTable[materialNames[triPrim[t]]] : undefined;
-      const alphaMask = material?.alphaMode === 'MASK';
+      // shading 'pbr' evaluates its own coverage (base colour maps of any source, vertex Alpha as exported)
+      const alphaMask = !pbrS && material?.alphaMode === 'MASK';
+      const pbrMask = !!pbrS && pbrS.triAlpha[t] === ALPHA_MASK, pbrCut = pbrMask ? pbrS!.cutoff(t) : 0;
       const suspicious = back && !material?.doubleSided && solid !== null && closedPiece[pieceOf[triPrim[t]]] === 1;
       if (flatN) {
         const p = triPrim[t] * 3;
@@ -1095,6 +1133,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         colA = tint(colA); colB = tint(colB); colC = tint(colC);
       }
       const za = cz[a], zb2 = cz[b], zc = cz[c];
+      // blend pass: a pixel centre on an edge shared by two triangles is drawn by exactly one of them (the one whose
+      // opposite vertex lies on a fixed side of the edge), so shared edges are not composited twice
+      const owns = (p0x: number, p0y: number, p1x: number, p1y: number, rx: number, ry: number) => {
+        let nx = p0y - p1y, ny = p1x - p0x;
+        if (nx < 0 || (nx === 0 && ny < 0)) { nx = -nx; ny = -ny; }
+        return nx * (rx - p0x) + ny * (ry - p0y) > 0;
+      };
+      const own0 = blendPass && owns(bx, by, cx, cy, ax, ay), own1 = blendPass && owns(cx, cy, ax, ay, bx, by), own2 = blendPass && owns(ax, ay, bx, by, cx, cy);
       const inv = 1 / area;
       // shading 'pbr': screen-space gradients of the affine weights (uv derivatives for the texture level of detail)
       const g0x = (by - cy) * inv, g0y = (cx - bx) * inv, g1x = (cy - ay) * inv, g1y = (ax - cx) * inv;
@@ -1112,7 +1158,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           let w0 = ((bx - xx) * (cy - yy) - (by - yy) * (cx - xx)) * inv;
           let w1 = ((cx - xx) * (ay - yy) - (cy - yy) * (ax - xx)) * inv;
           let w2 = 1 - w0 - w1;
-          if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+          if (blendPass) {
+            if (w0 < -EDGE_EPS || w1 < -EDGE_EPS || w2 < -EDGE_EPS) continue;
+            if ((w0 < EDGE_EPS && !own0) || (w1 < EDGE_EPS && !own1) || (w2 < EDGE_EPS && !own2)) continue;
+          } else if (w0 < 0 || w1 < 0 || w2 < 0) continue;
           const depth = w0 * za + w1 * zb2 + w2 * zc;
           const zi = py * W + px;
           if (depth <= zb[zi]) continue;
@@ -1132,8 +1181,6 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             }
             if (alpha < (material!.alphaCutoff ?? 0.5)) continue;
           }
-          zb[zi] = depth;
-          if (bf) { bf[zi] = suspicious ? 1 : 0; bfPrim![zi] = triPrim[t]; }
           if (pbrS) {
             let dudx = 0, dvdx = 0, dudy = 0, dvdy = 0;
             if (pbrS.hasUV) {
@@ -1151,6 +1198,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
               pbrV[0] = vx / vl; pbrV[1] = vy / vl; pbrV[2] = vz2 / vl;
             } else { pbrV[0] = -cam.f[0]; pbrV[1] = -cam.f[1]; pbrV[2] = -cam.f[2]; }
             pbrS.shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, pbrV, back, pbrRGB);
+            if (pbrMask && pbrRGB[3] < pbrCut) continue;
+            if (!blendPass) {
+              zb[zi] = depth;
+              if (bf) { bf[zi] = suspicious ? 1 : 0; bfPrim![zi] = triPrim[t]; }
+            }
             const ci = zi * 3;
             if (pbrTint) {
               // the attribute colour lit by the material's brightness, over a third of the material itself
@@ -1158,9 +1210,20 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
               for (let k = 0; k < 3; k++) pbrRGB[k] = pbrRGB[k] * 0.35 + (tA[k] * w0 + tB[k] * w1 + tC[k] * w2) * lum * 0.65;
             }
             if (suspicious) { pbrRGB[0] = pbrRGB[0] * 0.35 + 0.12; pbrRGB[1] = pbrRGB[1] * 0.35 + 0.22; pbrRGB[2] = pbrRGB[2] * 0.35 + 0.6; }
+            if (blendPass) {
+              const al = pbrRGB[3];
+              if (bA && zb[zi] === -Infinity) {
+                if (bA[zi] === 0) col[ci] = col[ci + 1] = col[ci + 2] = 0;
+                bA[zi] = al + bA[zi] * (1 - al);
+              }
+              for (let k = 0; k < 3; k++) col[ci + k] = pbrRGB[k] * al + col[ci + k] * (1 - al);
+              continue;
+            }
             col[ci] = pbrRGB[0]; col[ci + 1] = pbrRGB[1]; col[ci + 2] = pbrRGB[2];
             continue;
           }
+          zb[zi] = depth;
+          if (bf) { bf[zi] = suspicious ? 1 : 0; bfPrim![zi] = triPrim[t]; }
           tn[0] = ca[0] * w0 + cb[0] * w1 + cc[0] * w2;
           tn[1] = ca[1] * w0 + cb[1] * w1 + cc[1] * w2;
           tn[2] = ca[2] * w0 + cb[2] * w1 + cc[2] * w2;
@@ -1199,6 +1262,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           col[ci + 2] = aces(fb * k + spec + rim);
         }
       }
+    };
+    for (let t = 0; t < nTri; t++) drawTri(t, false);
+    if (pbrBlend.length) {
+      // blend prims from back to front by their centroid's depth along the view axis
+      const pc = centroids();
+      const depthOf = (p: number) => (pc[p * 3] - cam.eye[0]) * cam.f[0] + (pc[p * 3 + 1] - cam.eye[1]) * cam.f[1] + (pc[p * 3 + 2] - cam.eye[2]) * cam.f[2];
+      const order = pbrBlend.map((b) => ({ b, d: depthOf(b.prim) })).sort((x, y) => y.d - x.d || x.b.prim - y.b.prim);
+      for (const { b } of order) for (const t of b.tris) drawTri(t, true);
     }
     if (bf) for (let i = 0; i < W * H; i++) if (zb[i] > -Infinity) {
       shadedPix++; backPix += bf[i];
@@ -1483,7 +1554,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       }
       for (let y = 0; y < TH; y++) out.set(tb.subarray(y * TW * 3, (y + 1) * TW * 3), ((ty + y) * outW + tx) * 3);
     };
-    blit(viewLabel, post, zb);
+    blit(viewLabel, post, zb, bA);
   });
 
   // footer

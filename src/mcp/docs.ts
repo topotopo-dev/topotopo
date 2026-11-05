@@ -1339,12 +1339,22 @@ QUESTION → OPTION
   What shape is it?                                shading:"matcap" (clay, reads form) · "ao" (ambient occlusion: creases and
                    cavities darken; ao_radius px) · "flat" (facets, ignores N)
   How do the materials read? Roughness, metal, maps?  shading:"pbr": the metallic-roughness material glTF export writes
-                   (base colour map × vertex colour, tangent-space normal map in the exported MikkTSpace frame, orm or
+                   (base colour factor or map, tangent-space normal map in the exported MikkTSpace frame, orm or
                    roughness map, metallic, emissive, unlit) under a fixed camera-relative studio rig (key, fill, rim and a
                    sky/ground environment), GGX specular, ACES, exposure (stops, default 0). Deterministic: the same graph
-                   gives the same PNG. Texture files are read from disk; transparency is not evaluated (shaded opaque,
-                   with a note), nor are missing or non-PNG maps (named in the notes). color_by and highlight tint
+                   gives the same PNG. Texture files are read from disk; missing or non-PNG maps are not evaluated
+                   (named in the notes). Transparency follows the exported alpha mode: alpha_mode "mask" cuts out
+                   pixels below alpha_cutoff (alpha × base colour map alpha), "blend" (or alpha below 1 under "auto")
+                   is composited over what is behind, prim by prim from back to front; the inspection shadings
+                   (default, flat, matcap, ao) keep drawing blend materials as surfaces. color_by and highlight tint
                    the shaded material (the attribute colour lit by the material's brightness); checker is not shown.
+                   Vertex colour, as in glTF export: a named material wins (its base colour factor or map; the prims'
+                   Cd is not shown, a note says so), Cd colours prims without a material. cd:"multiply" also tints a
+                   named material with Cd (vertex paint), cd:"ignore" never shows Cd; cd:"auto" is the default.
+  Are the values right (light and dark, without colour)?  grey:true: shading "pbr" with every base colour a neutral
+                   18% grey lit by the studio rig at its luminance (base colour maps and Cd give no colour); roughness,
+                   metallic, normal and orm maps, alpha
+                   and emissive still apply.
 POLYGON EDGES: wireframe "auto" (the default) draws polygon edges on meshes under 6,000 polygons, never under shading
   "pbr" or textures:true (they would read as marks in the material); the footer says EDGES AUTO when it draws them.
   wireframe:false hides them, true draws them always.
