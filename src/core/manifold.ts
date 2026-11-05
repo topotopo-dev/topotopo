@@ -56,10 +56,13 @@ export class NotManifoldError extends Error {
   hint?: string;
 }
 
-/** Convert closed polygon geometry to a Manifold. Throws a descriptive error when not solid. */
-export function toManifold(g: Geometry, L: PropLayout = propLayout([g])): any {
+/**
+ * Convert closed polygon geometry to a Manifold. Throws a descriptive error when not solid. `part` builds it from some of
+ * the triangles only (`tri`, a subset of g's triangulation) under a shared original ID, for a solid split into parts.
+ */
+export function toManifold(g: Geometry, L: PropLayout = propLayout([g]), part?: { tri: { tris: ArrayLike<number>; triPrim: ArrayLike<number> }; id: number }): any {
   const W = M();
-  const { tris, triPrim } = triangulate(g);
+  const { tris, triPrim } = part?.tri ?? triangulate(g);
   if (tris.length === 0) return new W.Manifold(new W.Mesh({ numProp: 3, vertProperties: new Float32Array(0), triVerts: new Uint32Array(0) }));
   const P = g.P;
   const hasVtx = L.cls.includes('vertex');
@@ -98,7 +101,7 @@ export function toManifold(g: Geometry, L: PropLayout = propLayout([g])): any {
   const triVerts = new Uint32Array(tris.length);
   for (let i = 0; i < tris.length; i++) triVerts[i] = vertOf[tris[i]];
   // reserve an explicit original ID so results can be traced back to this input
-  const id = W.Manifold.reserveIDs(1);
+  const id = part?.id ?? W.Manifold.reserveIDs(1);
   const mesh = new W.Mesh({
     numProp: L.numProp,
     vertProperties: Float32Array.from(props),

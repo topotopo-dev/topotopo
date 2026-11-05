@@ -560,11 +560,12 @@ export function orientOutward(g: Geometry): Geometry {
  * Turn inside-out pieces outward: a connected piece with negative signed volume flips, unless it lies inside another
  * piece's bounds (the inner wall of a hollow solid faces inward on purpose). A mirror without a winding flip, or a
  * hand-built cutter, gives such pieces; booleans would make inverted walls from them. Returns the first prim of each
- * flipped piece.
+ * flipped piece, and the solids the pieces make: each outward piece with the inward pieces (cavity walls) it holds,
+ * as a solid index per prim (-1 for empty prims), and whether the bounds of two solids overlap.
  */
-export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[] } {
+export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[]; solid: Int32Array; solids: number; overlap: boolean } {
   const { primClass, count } = connectivity(g);
-  if (!count) return { geo: g, flipped: [] };
+  if (!count) return { geo: g, flipped: [], solid: new Int32Array(g.numPrims).fill(-1), solids: 0, overlap: false };
   const { tris, triPrim } = triangulate(g);
   const vol = new Float64Array(count), first = new Int32Array(count).fill(-1);
   const lo = new Float64Array(count * 3).fill(Infinity), hi = new Float64Array(count * 3).fill(-Infinity);
@@ -590,8 +591,30 @@ export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[] }
     flip[c] = 1;
     flipped.push(first[c]);
   }
-  if (!flipped.length) return { geo: g, flipped };
-  return { geo: reversePrims(g, Uint8Array.from(primClass, (c) => (c >= 0 ? flip[c] : 0))), flipped };
+  // a cavity wall joins the smallest outward piece around it
+  const size = (c: number) => (flip[c] ? -vol[c] : vol[c]);
+  const owner = new Int32Array(count), index = new Int32Array(count).fill(-1);
+  let solids = 0;
+  for (let c = 0; c < count; c++) {
+    owner[c] = c;
+    if (!(size(c) < 0)) continue;
+    let best = -1;
+    for (let o = 0; o < count; o++) if (size(o) > -size(c) && inside(c, o) && (best < 0 || size(o) < size(best))) best = o;
+    if (best >= 0) owner[c] = best;
+  }
+  const roots: number[] = [];
+  for (let c = 0; c < count; c++) if (owner[c] === c) { index[c] = solids++; roots.push(c); }
+  const solid = Int32Array.from(primClass, (c) => (c >= 0 ? index[owner[c]] : -1));
+  // bounds that overlap or touch (touching pieces fuse in a union), swept along x
+  roots.sort((a, b) => lo[a * 3] - lo[b * 3]);
+  let overlap = false;
+  for (let i = 0; i < roots.length && !overlap; i++)
+    for (let j = i + 1; j < roots.length && lo[roots[j] * 3] <= hi[roots[i] * 3] && !overlap; j++) {
+      const a = roots[i], b = roots[j];
+      overlap = lo[a * 3 + 1] <= hi[b * 3 + 1] && lo[b * 3 + 1] <= hi[a * 3 + 1] && lo[a * 3 + 2] <= hi[b * 3 + 2] && lo[b * 3 + 2] <= hi[a * 3 + 2];
+    }
+  if (!flipped.length) return { geo: g, flipped, solid, solids, overlap };
+  return { geo: reversePrims(g, Uint8Array.from(primClass, (c) => (c >= 0 ? flip[c] : 0))), flipped, solid, solids, overlap };
 }
 
 /** Quick topology health report used by inspect and by solid ops. */
