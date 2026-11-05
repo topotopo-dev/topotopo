@@ -1017,8 +1017,8 @@ section('following a working folder for one session');
     && new RegExp(`shows studio/trees live from its working folder, for looking; the export used the published studio/trees ${inUse}`).test(o.pk.publishedNote(graph) ?? ''),
     `an export cooks with the published copies while following (width ${size(cookedPub, 0)}; ${Object.keys(usedPub)}; ${o.pk.publishedNote(graph)})`);
   const src = exportSource({ graph: 'main', spec: graph, node: 'out', format: 'glb', packages: used, version: '0' });
-  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'packages', 'export', 'topotopo']) && src.packages!['studio/trees@working'] === used['studio/trees@working'],
-    'exportSource writes them as "packages"');
+  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'packages', 'followed', 'export', 'topotopo']) && src.packages!['studio/trees@working'] === used['studio/trees@working']
+    && JSON.stringify(src.followed) === '["studio/trees"]', 'exportSource writes them as "packages", a working folder under "followed" too');
   const plain = exportSource({ graph: 'main', spec: { nodes: { b: { type: 'box' } } }, node: 'b', format: 'glb', packages: {}, version: '0' });
   check(!('packages' in plain), 'a graph without packages has no "packages" (records stay as they were)');
   // publishing while following: checked with the published copies, said
@@ -1357,15 +1357,21 @@ section('the CLI as a person runs it: a graph-file cook (first use, --follow, --
   check(locked.length === 1 && /^the graph names studio\/rules, which forest\.topo does not use: topotopo use studio\/rules adds it/.test(locked[0]) && fs.readFileSync(manifestFile(dirs.forest), 'utf8') === was,
     `--locked fails for a package it does not use, and writes nothing: ${locked.join(' | ')}`);
   check(!f.pk.locked({ nodes: { t: { type: 'studio/trees/pine' } } }).length, 'and lets one that uses what the package holds cook');
-  // a graph-file cook adds on first use, follows a working folder and records the packages it used
+  // a graph-file cook adds on first use, follows a working folder and records the packages it used: with --follow
+  // its export uses the working folder (recorded under "followed"), with --locked the published copy
   setGraph(TREES, 'crown', crown(2));
   const fexp = path.join(dirs.forest, 'exports', 'scene.glb');
   const followed = spawnCli([FILE, '--follow', 'studio/trees', '--export', fexp]);
   const frec = fs.existsSync(fexp + '.source.json') ? readJSON(fexp + '.source.json').source : {};
-  check(followed.code === 0 && /added studio\/rules 7\.1 to package forest/.test(followed.out) && /following studio\/trees: its working folder/.test(followed.out)
-    && !Object.keys(frec.packages ?? {}).some((k: string) => k.endsWith('@working')) && Object.keys(frec.packages ?? {}).some((k: string) => k.startsWith('studio/trees@')) && frec.packages?.['studio/rules@7.1']
-    && /the export used the published studio\/trees \d+\.\d+/.test(followed.out),
-    `a cook adds on first use and shows a working folder; its export uses the published copy: ${followed.out.split('\n').slice(0, 3).join(' | ')} ${JSON.stringify(frec.packages)}`);
+  check(followed.code === 0 && /added studio\/rules 7\.1 to package forest/.test(followed.out) && /following studio\/trees: its working folder .* for renders, inspect and exports/.test(followed.out)
+    && typeof frec.packages?.['studio/trees@working'] === 'string' && JSON.stringify(frec.followed) === '["studio/trees"]' && frec.packages?.['studio/rules@7.1']
+    && /the export used the working folder of studio\/trees, not a published version/.test(followed.out),
+    `a cook adds on first use and shows a working folder; with --follow its export uses it too, and says so: ${followed.out.split('\n').slice(0, 3).join(' | ')} ${JSON.stringify(frec.packages)}`);
+  const lockedRun = spawnCli([FILE, '--follow', 'studio/trees', '--locked', '--export', fexp]);
+  const lrec = fs.existsSync(fexp + '.source.json') ? readJSON(fexp + '.source.json').source : {};
+  check(lockedRun.code === 0 && !Object.keys(lrec.packages ?? {}).some((k: string) => k.endsWith('@working')) && Object.keys(lrec.packages ?? {}).some((k: string) => k.startsWith('studio/trees@')) && !('followed' in lrec)
+    && /the export used the published studio\/trees \d+\.\d+/.test(lockedRun.out),
+    `with --locked the export uses the published copy whatever --follow shows: ${lockedRun.out.split('\n').filter((l) => /export/.test(l)).join(' | ')} ${JSON.stringify(lrec.packages)}`);
   const hn = spawnCli(['--help-node', 'studio/trees/pine'], dirs.forest);
   check(hn.code === 0 && /## studio\/trees\/pine \(package\)/.test(hn.out) && /studio\/trees 1\.1: bigger crown/.test(hn.out) && /height float = 4 \[1\.\.20\]/.test(hn.out), '--help-node gives a package output\'s params, version and note');
   // the catalog of the current folder's package; an output of a package it does not use yet, read from its library
@@ -2139,6 +2145,56 @@ section('a registered library the workspace does not list: named only when listi
   check(hits.join() === 'outer-libs:listed:nest/crate/block' && !/workspace library add outer-sub/.test(searchText(nested)), `a package found through a listed library is not shown again under a registered library inside it (${hits.join(' ')})`);
   removeLibrary('outer-libs');
   removeLibrary('outer-sub');
+}
+
+section('exporting from a followed working folder: a sibling package with no published version yet');
+{
+  // a workspace with two packages: kit uses the material output of mat, which has published no version
+  const WS = path.join(tmp, 'follow-export'), MAT = path.join(WS, 'mat'), KIT = path.join(WS, 'kit');
+  json(path.join(WS, 'topotopo-workspace.json'), { name: 'follow-export', libraries: [], engine: 'none' });
+  writePackage(MAT, { name: 'fx/mat' }, { main: { nodes: { m: { type: 'material', params: { name: 'stone', base_color: [0.5, 0.4, 0.3] } } }, output: 'm', outputs: { stone: { node: 'm', kind: 'material' } } } });
+  writePackage(KIT, { name: 'fx/kit' }, { main: { nodes: { b: { type: 'box' }, m: { type: 'fx/mat/stone' }, x: { type: 'merge', in: ['b', 'm'] } }, output: 'x' } });
+  const FILE = path.join(KIT, 'graphs', 'main.json'), glb = path.join(KIT, 'exports', 'kit.glb'), rec = glb + '.source.json';
+  const lines = (s: string, re: RegExp) => s.split('\n').filter((l) => re.test(l)).join(' | ').slice(0, 300);
+
+  // without --follow: refused, saying to publish it or to pass --follow
+  const plain = spawnCli([FILE, '--export', glb]);
+  check(plain.code === 1 && !fs.existsSync(glb) && /fx\/mat .*has no published version yet: publish one in its folder \(.* publish .*mat --note "\.\.\."\), or pass --follow fx\/mat to cook and export from its working folder/.test(plain.out),
+    `without --follow the export is refused, saying to publish fx/mat or pass --follow fx/mat (${lines(plain.out, /fx\/mat/)})`);
+  // --follow: the export uses the working folder, and its source record says so
+  const followed = spawnCli([FILE, '--follow', 'fx/mat', '--export', glb]);
+  const src = fs.existsSync(rec) ? readJSON(rec).source : {};
+  check(followed.code === 0 && fs.existsSync(glb) && JSON.stringify(src.followed) === '["fx/mat"]' && typeof src.packages?.['fx/mat@working'] === 'string'
+    && /following fx\/mat: its working folder .* for renders, inspect and exports/.test(followed.out) && /the export used the working folder of fx\/mat, not a published version: its source record lists it under "followed"/.test(followed.out)
+    && !Object.keys(readManifest(KIT).uses).length && !readWorkspace(WS).uses?.['fx/mat'],
+    `with --follow the GLB is written from the working folder and the record lists fx/mat under "followed" (${followed.code}: ${lines(followed.out, /export|follow/)}; ${JSON.stringify(src.followed)})`);
+  // --locked: refused, --follow or not
+  fs.rmSync(path.join(KIT, 'exports'), { recursive: true, force: true });
+  const locked = spawnCli([FILE, '--follow', 'fx/mat', '--locked', '--export', glb]), lockedPlain = spawnCli([FILE, '--locked', '--export', glb]);
+  check(locked.code === 1 && lockedPlain.code === 1 && !fs.existsSync(glb)
+    && /--locked: the graph names fx\/mat, which kit\.topo does not use, and its working folder \(followed\) is no published version: publish fx\/mat/.test(locked.out),
+    `--locked refuses it with --follow (${lines(locked.out, /locked/)}) and without (${lines(lockedPlain.out, /fx\/mat/).slice(0, 120)})`);
+
+  // MCP: a session that follows fx/mat renders it; export refuses without follow, and exports from the folder with it
+  const m = await open(KIT, ['fx/mat']), exportTool = makeTools(m.ws).find((t) => t.name === 'export')!;
+  const exportSaid = async (a: any) => { try { const r = await exportTool.run(a); return `${r.isError ? 'ERR ' : ''}${r.content.map((c: any) => c.text ?? '').join('\n')}`; } catch (e: any) { return `ERR ${e.message}`; } };
+  const shown = await m.ws.cook('main');
+  const refused = await exportSaid({ graph: 'main', path: 'exports/mcp.glb' });
+  check(shown.ok && /^ERR export: fx\/mat has no published version in use \(this session shows its working folder, for looking\): publish fx\/mat \(.* publish .*mat --note "\.\.\."\) or pass follow:\["fx\/mat"\] to export from its working folder; nothing was written/.test(refused)
+    && !exists(KIT, 'exports', 'mcp.glb'), `MCP export without follow is refused, saying to publish or pass follow (${refused.slice(0, 220)})`);
+  const unknown = await exportSaid({ graph: 'main', path: 'exports/mcp.glb', follow: ['fx/other'] });
+  check(/^ERR follow: this session does not follow fx\/other: workspace \{action:"follow", package:"fx\/other", on:true\}/.test(unknown), `follow names a package the session follows (${unknown.slice(0, 120)})`);
+  const made = await exportSaid({ graph: 'main', path: 'exports/mcp.glb', follow: ['fx/mat'] });
+  const mrec = exists(KIT, 'exports', 'mcp.glb.source.json') ? readJSON(path.join(KIT, 'exports', 'mcp.glb.source.json')).source : {};
+  check(!/^ERR/.test(made) && exists(KIT, 'exports', 'mcp.glb') && JSON.stringify(mrec.followed) === '["fx/mat"]' && typeof mrec.packages?.['fx/mat@working'] === 'string'
+    && /the export used the working folder of fx\/mat, not a published version/.test(made),
+    `MCP export {follow} writes the GLB from the working folder and records it (${made.split('\n').slice(-1)[0]}; ${JSON.stringify(mrec.followed)})`);
+  // export targets (no path) take follow too
+  setGraph(KIT, 'main', { nodes: { b: { type: 'box' }, m: { type: 'fx/mat/stone' }, x: { type: 'merge', in: ['b', 'm'] } }, output: 'x', export: 'glb' });
+  m.ws.load();
+  const targetRefused = await exportSaid({ graph: 'main' }), target = await exportSaid({ graph: 'main', follow: ['fx/mat'] });
+  check(/^ERR export: fx\/mat has no published version in use/.test(targetRefused) && !/^ERR/.test(target) && /the export used the working folder of fx\/mat/.test(target),
+    `an export target without follow is refused, with it written (${target.split('\n')[0].slice(0, 160)})`);
 }
 
 await engines[0]?.host.pool?.close();

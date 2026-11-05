@@ -680,8 +680,11 @@ interface Context {
   uses: Record<string, string>;
   packages: string;
   lock: Lock;
-  /** followed packages resolve to their working folders (in the package and in followed folders, never in a version) */
-  follows: boolean;
+  /**
+   * followed packages resolve to their working folders (in the package and in followed folders, never in a version);
+   * a set: only the followed packages in it (an export that names the working folders it uses, the others' published copies)
+   */
+  follows: boolean | ReadonlySet<string>;
   /** the package the scope is (a version, a working folder, the package that publishes versions): its own outputs by full name */
   self?: { package: string; get: () => Loaded | PackageIssue };
   /**
@@ -696,6 +699,9 @@ interface Context {
    */
   unavailable?: Map<string, string>;
 }
+
+/** Whether a context resolves `pkg` to its working folder, when the session follows it. */
+const followsIn = (ctx: Context, pkg: string) => ctx.follows === true || (ctx.follows !== false && ctx.follows.has(pkg));
 
 /** A package version (or a followed working folder) loaded into the engine: its scope and its output node types. */
 export interface Loaded {
@@ -998,39 +1004,69 @@ export class PackageUses implements SessionPackages {
 
   /**
    * What exports and publishing resolve package names with: the published copies, whatever this session follows
-   * (following a working folder is for looking: the viewer, renders). The package's own resolver while nothing is
-   * followed.
+   * (following a working folder is for looking: the viewer, renders), but for the followed packages in `follow` (an
+   * export told to use their working folders). The package's own resolver while every followed package is in it.
    */
-  publishedResolver(): PackageResolver {
-    if (!this.followed.size) return this.resolver;
-    return { resolve: (name) => this.resolveIn({ ...this.root, follows: false }, name), names: () => this.namesIn({ ...this.root, follows: false }) };
+  publishedResolver(follow: readonly string[] = []): PackageResolver {
+    const kept = this.kept(follow);
+    if (kept.length === this.followed.size) return this.resolver;
+    // the root as it is when asked (its uses change with use and update)
+    const follows = kept.length ? new Set(kept) : false, ctx = (): Context => ({ ...this.root, follows });
+    return { resolve: (name) => this.resolveIn(ctx(), name), names: () => this.namesIn(ctx()) };
   }
 
-  private publishedAt: Scope | null = null;
+  /** The followed packages among `follow`, sorted. */
+  private kept(follow: readonly string[]): string[] { return [...new Set(follow)].filter((p) => this.followed.has(p)).sort(); }
+
+  private publishedAt = new Map<string, Scope>();
   /**
    * SessionPackages.published: while this session follows working folders, the scope exports cook in, like the root
-   * (its assets, graphs and folder) but resolving packages to their published copies; null while nothing is followed
-   * (exports cook in the root, as everything else).
+   * (its assets, graphs and folder) but resolving packages to their published copies, the followed packages in `follow`
+   * to their working folders; null while every followed package is in `follow` (or nothing is followed): exports then
+   * cook in the root, as everything else.
    */
-  published(): Scope | null {
-    if (!this.followed.size) return null;
+  published(follow: readonly string[] = []): Scope | null {
+    const kept = this.kept(follow);
+    if (kept.length === this.followed.size) return null;
+    const key = kept.join(','), have = this.publishedAt.get(key);
+    if (have) return have;
     const root = this.engine.root;
-    this.publishedAt ??= this.engine.createScope(`published copies ${sha(this.dir ?? '').slice(0, 12)}`, {
-      folder: root.files.resolvePath('.'), assets: root.assets, graphs: (n) => root.graphs?.(n), packages: this.publishedResolver(),
+    const scope = this.engine.createScope(`published copies ${sha(`${this.dir ?? ''}|${key}`).slice(0, 12)}`, {
+      folder: root.files.resolvePath('.'), assets: root.assets, graphs: (n) => root.graphs?.(n), packages: this.publishedResolver(kept),
     });
-    return this.publishedAt;
+    this.publishedAt.set(key, scope);
+    return scope;
+  }
+
+  /**
+   * SessionPackages.unpublished: the followed packages `graph` names that an export would cook from published copies
+   * (those not in `follow`) while the package uses no published version of them: such an export cannot cook, and is
+   * refused, saying to publish them or to export from their working folders.
+   */
+  unpublished(graph: GraphSpec, follow: readonly string[] = []): { package: string; dir: string }[] {
+    const named = new Set(packagesNamedIn(graph)), kept = new Set(follow);
+    return [...this.followed.values()].filter((f) => named.has(f.package) && !kept.has(f.package) && this.root.uses[f.package] === undefined)
+      .map((f) => ({ package: f.package, dir: f.dir }));
   }
 
   /**
    * What an export of `graph` made while following says (null when the graph names no followed package): the
-   * published versions it used, the working folders being for looking only.
+   * working folders it used (those in `follow`: no published version, which its source record states under
+   * "followed"), and the published versions it used for the others, their working folders being for looking only.
    */
-  publishedNote(graph: GraphSpec): string | null {
-    const named = new Set(packagesNamedIn(graph));
+  publishedNote(graph: GraphSpec, follow: readonly string[] = []): string | null {
+    const named = new Set(packagesNamedIn(graph)), kept = new Set(this.kept(follow));
     const live = [...this.followed.values()].filter((f) => named.has(f.package));
     if (!live.length) return null;
-    const used = live.map((f) => (this.root.uses[f.package] ? `${f.package} ${this.root.uses[f.package]}` : `${f.package} (no published version in use: publish one, and use it)`));
-    return `this session shows ${live.map((f) => f.package).join(', ')} live from ${live.length === 1 ? 'its working folder' : 'their working folders'}, for looking; the export used the published ${used.join(', ')}`;
+    const working = live.filter((f) => kept.has(f.package)), shown = live.filter((f) => !kept.has(f.package));
+    const notes: string[] = [];
+    if (working.length)
+      notes.push(`the export used the working folder of ${working.map((f) => f.package).join(', ')}, not a published version: its source record lists ${working.length === 1 ? 'it' : 'them'} under "followed"`);
+    if (shown.length) {
+      const used = shown.map((f) => (this.root.uses[f.package] ? `${f.package} ${this.root.uses[f.package]}` : `${f.package} (no published version in use: publish one, and use it)`));
+      notes.push(`this session shows ${shown.map((f) => f.package).join(', ')} live from ${shown.length === 1 ? 'its working folder' : 'their working folders'}, for looking; the export used the published ${used.join(', ')}`);
+    }
+    return notes.join('\n');
   }
 
   /** SessionPackages: why the graphs cannot use packages (a folder in no package, a manifest that is not valid). */
@@ -1150,7 +1186,7 @@ export class PackageUses implements SessionPackages {
 
   private namesIn(ctx: Context): string[] {
     const pkgs = new Set(Object.keys(ctx.uses));
-    if (ctx.follows) for (const k of this.followed.keys()) pkgs.add(k);
+    for (const k of this.followed.keys()) if (followsIn(ctx, k)) pkgs.add(k);
     if (ctx.self) pkgs.add(ctx.self.package);
     const out: string[] = [];
     for (const pkg of pkgs) {
@@ -1165,7 +1201,7 @@ export class PackageUses implements SessionPackages {
   private packageIn(ctx: Context, pkg: string): Loaded | PackageIssue {
     // the package's own outputs: the same version (or working folder), with no entry in its uses
     if (ctx.self?.package === pkg) return ctx.self.get();
-    if (ctx.follows && this.followed.has(pkg)) return this.loadFollowed(pkg);
+    if (this.followed.has(pkg) && followsIn(ctx, pkg)) return this.loadFollowed(pkg);
     const v = ctx.uses[pkg];
     if (v !== undefined) return this.loadCopy(ctx, pkg, v);
     if (ctx !== this.root && !ctx.unavailable) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
@@ -1405,7 +1441,9 @@ export class PackageUses implements SessionPackages {
    */
   locked(graph: GraphSpec): string[] {
     const adds = this.dryRun(graph).adds.map((a) => `the graph names ${a.package}, which ${this.usesFileName} does not use: ${program()} use ${a.package} adds it (a cook without --locked adds it)`);
-    return [...adds, ...(this.dir && this.manifest ? this.verifyCopies() : [])];
+    // a working folder followed for this run is no version: a build machine cooks published versions alone
+    const working = this.unpublished(graph).map((u) => `the graph names ${u.package}, which ${this.usesFileName} does not use, and its working folder (followed) is no published version: publish ${u.package} (${program()} publish ${u.dir} --note "...") and use it`);
+    return [...adds, ...working, ...(this.dir && this.manifest ? this.verifyCopies() : [])];
   }
 
   /** The packages a graph names that the package does not use yet (nor follows, nor is). */
@@ -1479,7 +1517,7 @@ export class PackageUses implements SessionPackages {
   private versionToAdd(pkg: string, v?: string, scanned?: Scanned): { version: string; place: Place } {
     const found = this.find(pkg, scanned);
     if (!found.versions.size)
-      throw new Error(`${pkg} is in ${found.place} (${found.dir}) but has no published version yet: publish one in its folder (${program()} publish ${found.working ? `${found.dir} ` : ''}--note "...")`);
+      throw new Error(`${pkg} is in ${found.place} (${found.dir}) but has no published version yet: publish one in its folder (${program()} publish ${found.working ? `${found.dir} ` : ''}--note "...")${found.working ? `, or pass --follow ${pkg} to cook and export from its working folder, unpublished (MCP: workspace {action:"follow", package:"${pkg}", on:true}, then export {follow:["${pkg}"]})` : ''}`);
     const version = v ?? newestOf(found.versions.keys())!;
     const place = found.versions.get(version);
     if (!place) throw new Error(`${found.place} has no ${pkg} ${version}: it has ${[...found.versions.keys()].sort(compareVersions).join(', ')}`);
@@ -1657,7 +1695,7 @@ export class PackageUses implements SessionPackages {
     this.restamp();
     this.rewatch();
     const v = this.root.uses[pkg];
-    return `following ${pkg} for this session: its working folder ${found.dir} (${found.place}) instead of ${v ? `the copy of ${v}` : 'a copy (the package does not use it yet)'}; its edits re-cook, for looking: exports and publishing use the published copy`;
+    return `following ${pkg} for this session: its working folder ${found.dir} (${found.place}) instead of ${v ? `the copy of ${v}` : 'a copy (the package does not use it yet)'}; its edits re-cook, for looking: exports and publishing use the published copy, but an export told to follow it (CLI --follow ${pkg}, MCP export {follow:["${pkg}"]}) exports from the working folder`;
   }
 
   /**
