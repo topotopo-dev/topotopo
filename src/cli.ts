@@ -45,8 +45,9 @@
 //   node src/cli.ts update owner/name [folder] [--to 1.4] [--render <folder>]
 //   node src/cli.ts update owner/name [folder] --from 1.3 --to 1.4 --apply
 //   A graph-file cook adds a package its graph names for the first time (and says so); --locked fails instead, for a
-//   build machine. --follow owner/name on a cook or view uses a package's working folder instead of its copy, for
-//   looking: exports use the published copy.
+//   build machine. --follow owner/name on a cook or view uses a package's working folder instead of its copy; a
+//   graph-file cook's exports use it too (their source record says so under "followed"), but with --locked, which
+//   exports published versions alone. The viewer's exports use the published copy.
 // A package's published outputs cooked into a Godot project, and the Godot plugin (src/host/godot.ts, src/host/cook.ts;
 // integrations/godot/PROTOCOL.md):
 //   node src/cli.ts cook <.topo | package folder | folder>... --for godot [--into <folder>] [--flat] [--skip a,b] [--instancing packed|expand] [--adopt] [--force] [--no-cache] [--timeout <s>] [--report <file>] [--progress json] [--quiet]
@@ -118,8 +119,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
-    '         [--follow owner/name] (show that package\'s working folder, where the package finds it, instead of its copy, for this run: renders and inspect use it, exports the published copy; repeat it)',
-    '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added)',
+    '         [--follow owner/name] (use that package\'s working folder, where the package finds it, instead of its copy, for this run: renders, inspect and exports use it, unpublished (the export\'s source record lists it under "followed"); repeat it)',
+    '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added; exports use the published copies, whatever --follow shows)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
@@ -306,15 +307,33 @@ async function cook() {
     if (unlocked.length) fail(unlocked.map((x) => `--locked: ${x}`).join('\n'));
   } else for (const n of pk!.addFor(graph)) console.log(n);
   for (const p of pk!.check()) console.error(`warning: ${p}`);
-  for (const f of pk!.following()) console.log(`following ${f.package}: its working folder ${f.dir} instead of its copy, for renders and inspect (exports use the published copy)`);
-  // the packages shown live (--follow, a workspace that follows its own) are for looking: an export cooks with their
-  // published copies (a cook of its own when the graph names one) and says so
-  const exportNote = pk!.publishedNote(graph);
-  const exportScope = exportNote ? pk!.published() : null;
+  // --follow names the working folders exports use too (their source record lists them under "followed"); --locked
+  // exports published versions alone. Other packages shown live (a workspace that follows its own) are for looking:
+  // an export cooks with their published copies (a cook of its own when the graph names one) and says so
+  const locked = argv.includes('--locked'), exportFollow = locked ? [] : followArgs;
+  for (const f of pk!.following()) {
+    console.log(`following ${f.package}: its working folder ${f.dir} instead of its copy, ${exportFollow.includes(f.package) ? 'for renders, inspect and exports (unpublished: the export\'s source record says so)' : 'for renders and inspect (exports use the published copy)'}`);
+  }
+  const exportNote = pk!.publishedNote(graph, exportFollow);
+  const exportScope = exportNote ? pk!.published(exportFollow) : null;
+  /** What to do about followed packages an export would cook from published copies: publish them, or follow them. */
+  const publishOrFollow = (pkgs: { package: string; dir: string }[]) => pkgs.map((u) => (locked
+    ? `publish ${u.package} (${prog} publish ${u.dir} --note "...") and use it: --locked exports published versions alone`
+    : `publish ${u.package} (${prog} publish ${u.dir} --note "...") or pass --follow ${u.package} to export from its working folder`)).join('; ');
+  /** Why an export cannot cook with the published copies: followed packages it names that have none in use. */
+  const exportBlocked = () => {
+    const missing = pk!.unpublished(graph, exportFollow);
+    return missing.length ? `${missing.map((u) => u.package).join(', ')} ${missing.length === 1 ? 'has' : 'have'} no published version in use (this run shows ${missing.length === 1 ? 'its working folder' : 'their working folders'}, for looking): ${publishOrFollow(missing)}` : null;
+  };
   const forExport = async (r: CookReport, node = r.target): Promise<CookReport> => {
     if (!exportScope) return r;
+    const blocked = exportBlocked();
+    if (blocked) fail(`export: ${blocked}; nothing was written`);
     const e = await engine.cook(graph, { target: node, frame: r.frame, fps: r.fps, scope: exportScope });
-    if (!e.ok || !e.geo) fail(`export: with the published copies, ${node} does not cook (${e.errors.map((x) => `${x.node}: ${x.message}`).join('; ') || 'no geometry'}); nothing was written`);
+    if (!e.ok || !e.geo) {
+      const shown = pk!.following().filter((f) => !exportFollow.includes(f.package)).map((f) => ({ package: f.package, dir: f.dir }));
+      fail(`export: with the published copies, ${node} does not cook (${e.errors.map((x) => `${x.node}: ${x.message}`).join('; ') || 'no geometry'})${shown.length ? `: ${publishOrFollow(shown)}` : ''}; nothing was written`);
+    }
     return e;
   };
   const fps = opt('--fps') !== undefined ? Number(opt('--fps')) : undefined;
@@ -479,6 +498,8 @@ async function cook() {
     // a target the export refuses (its path written with a prefix that is gone) fails the run before anything cooks
     const refused = published.find((p) => p.target?.refused);
     if (refused) fail(`--export-all: "${refused.label}": ${prefixGone(refused.target!.refused!)}; nothing was written`);
+    const blocked = exportScope ? exportBlocked() : null;
+    if (blocked) fail(`--export-all: ${blocked}; nothing was written`);
     for (const p of published) {
       if (!p.target) continue;
       const r = await engine.cook(graph, { target: p.node, frame: single, fps, ...(exportScope ? { scope: exportScope } : {}) });

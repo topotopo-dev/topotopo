@@ -143,8 +143,8 @@ says what the open package's workspace holds: its packages as the scan finds the
   all. A package that publishes versions keeps its own uses and copies (they are published with it). workspace init
   moves the copies of the packages inside that kept their own.
 - FOLLOWING: "follow": true shows the workspace's own packages live from their working folders, for looking (the
-  viewer, renders, inspect); exports and publishing always use the published versions, and an export made while
-  following says which it used.
+  viewer, renders, inspect); exports and publishing use the published versions (but an export told to follow one,
+  help topic "packages", FOLLOWING), and an export made while following says which it used.
 - THE ENGINE: "engine" names the engine project ({"type", "project"}, the path written from the workspace and leading
   upward when the workspace is inside it) or "none" (kept). workspace init finds it: the nearest at or above the
   folder, else one below. It says when Unreal will not see the workspace (outside the project's Content/ or a plugin's),
@@ -1148,6 +1148,13 @@ on:false or the end of the session; nothing about it is saved. Every edit there 
 (the viewer, renders, inspect): exports and publishing use the published copy, and an export made while following
 says which published version it used. A workspace with "follow": true (topotopo workspace init --follow) follows its
 own packages this way, those whose working folder is inside it. Other packages' versions keep the copies they hold.
+EXPORTING FROM A WORKING FOLDER: an export told to follow a package uses its working folder too: the CLI's --follow
+studio/trees on a graph-file cook (its --export and --export-all), MCP export {follow:["studio/trees"]} for a package
+this session follows. It is for a package with no published version yet (an unpublished sibling in the workspace) or
+for edits not published yet. Such an export is no published version: its source record lists the package under "followed" (and
+the folder's hash under packages, "studio/trees@working"), and the export says so. An export not told to follow a
+followed package with no published version in use is refused, saying to publish it or to pass --follow / follow.
+--locked (a build machine) exports published versions alone: a followed package it does not use fails the run.
 
 OUT OF DATE AND UPDATE: what a package uses changes only by an update, after a before/after.
 - workspace {action:"outdated"} (CLI: topotopo outdated) lists the packages in use that have newer versions:
@@ -1404,6 +1411,10 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
   --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
   cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
   (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
+  packages (only when the graph uses packages: "owner/name@version" → the version's hash, every version it uses, and
+  "owner/name@working" → the hash of a working folder the export followed), followed (only when it followed one: those
+  packages, no published version; the export is made again only from those folders as they were, and replay passes
+  --follow for each; help topic "packages", EXPORTING FROM A WORKING FOLDER),
   export: {format, options: every option the format reads, the given ones and the defaults of the rest}, topotopo (the
   version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
   instance rows in <name>.meshes.json, unreal_landscape in landscape.json; every other export writes <file>.source.json
@@ -1411,7 +1422,7 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
   it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
   graph, values and options give the same bytes, and a later version changing a default does not change what the
   record replays. Replay on the command line: topotopo <graph>.json --output <output> (or --node <node>) --frame <frame>
-  --fps <fps>, one --var <name>=<value as JSON> per var, --format <format>, every option as its flag (up_axis "z" →
+  --fps <fps>, one --follow <package> per followed package, one --var <name>=<value as JSON> per var, --format <format>, every option as its flag (up_axis "z" →
   --up-axis z, custom_attribs false → --no-custom-attribs, layers ["a","b"] → --layers a,b) and --export <path>. e.g.
     topotopo graphs/crate.json --node h --frame 1 --fps 24 --format glb --compress none --custom-attribs
       --instancing packed --materials --no-quantize --scale 100 --split-by-name --tangents auto --up-axis z --export crate.glb

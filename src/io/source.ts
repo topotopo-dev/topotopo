@@ -10,7 +10,12 @@
 //   seeds          the seed params the graph sets, by node ("loop/pts" inside a nested graph), as written
 //   packages       only when the graph uses packages (src/graph/packages.ts packagesUsed): "owner/name@version" → the
 //                  version's hash for every package version it uses, directly or through other packages (an export
-//                  made while following a working folder cooks with the published copies, so it names those)
+//                  made while following a working folder cooks with the published copies, so it names those), and
+//                  "owner/name@working" → the hash of a working folder an export was told to follow (CLI --follow,
+//                  MCP export follow)
+//   followed       only when it used working folders ("owner/name@working" under packages): those packages, sorted.
+//                  They are no published version: the export is made again only from those folders as they were
+//                  (their hash says whether they still are), replay passes --follow for each
 //   export         {format, options}: the export options given (the export tool's names)
 //   package        only on a package's outputs cooked for an engine (topotopo cook --for godot, src/host/cook.ts): the
 //                  package's publish name, else its id; the cook replaces a file at an output path only when it names
@@ -37,6 +42,8 @@ export interface ExportSource {
   seeds: Record<string, unknown>;
   /** the package versions the graph uses (absent when it uses none) */
   packages?: Record<string, string>;
+  /** the packages exported from their working folders, no published version (absent when none) */
+  followed?: string[];
   export: { format: string; options: Record<string, unknown> };
   /** the package an engine cook made it for: its publish name, else its id (absent elsewhere) */
   package?: string;
@@ -105,6 +112,10 @@ export function graphSeeds(spec: GraphSpec): Record<string, unknown> {
   return sorted(out);
 }
 
+/** The packages a packagesUsed record names by working folder ("owner/name@working"), sorted. */
+const followedIn = (packages: Record<string, string> | undefined) =>
+  Object.keys(packages ?? {}).filter((k) => k.endsWith('@working')).map((k) => k.slice(0, -'@working'.length)).sort();
+
 /** The source block of an export. */
 export function exportSource(i: SourceInput): ExportSource {
   const spec = i.spec;
@@ -118,6 +129,7 @@ export function exportSource(i: SourceInput): ExportSource {
     vars: sorted(spec.vars ?? {}),
     seeds: graphSeeds(spec),
     ...(i.packages && Object.keys(i.packages).length ? { packages: sorted(i.packages) } : {}),
+    ...(followedIn(i.packages).length ? { followed: followedIn(i.packages) } : {}),
     export: { format: i.format, options: sorted(i.options ?? {}) },
     ...(i.package ? { package: i.package } : {}),
     topotopo: i.version,
@@ -138,6 +150,7 @@ export function replayArgs(s: ExportSource, exportPath: string, flags: (o: Recor
   return [
     ...(s.output ? ['--output', s.output] : ['--node', s.node]),
     '--frame', String(s.frame), '--fps', String(s.fps),
+    ...(s.followed ?? []).flatMap((p) => ['--follow', p]),
     ...Object.entries(s.vars).flatMap(([k, v]) => ['--var', `${k}=${JSON.stringify(v)}`]),
     '--format', s.export.format, ...flags(s.export.options), '--export', exportPath,
   ];

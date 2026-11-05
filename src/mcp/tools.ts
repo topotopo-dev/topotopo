@@ -27,6 +27,7 @@ import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '
 import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Host, StopSignal } from '../host/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
+import { program } from '../package.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 import { verifyTools } from './verify.ts';
@@ -231,22 +232,43 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     return reportResult(name, r, a, extraNotes);
   };
 
+  /**
+   * export {follow}: the packages whose working folders the export uses (each followed this session), checked; an
+   * export that would cook a followed package with no published version in use from published copies is refused.
+   */
+  const exportFollow = (a: any, spec: GraphSpec): string[] => {
+    const follow: string[] = a.follow === undefined ? [] : (Array.isArray(a.follow) ? a.follow : [a.follow]).map(String);
+    const followed = new Set((ws.packages?.following?.() ?? []).map((f) => f.package));
+    for (const p of follow) {
+      if (!followed.has(p)) throw new Error(`follow: this session does not follow ${p}: workspace {action:"follow", package:"${p}", on:true} follows its working folder (renders show it too), then export {follow:["${p}"]} exports from it`);
+    }
+    const missing = ws.packages?.unpublished?.(spec, follow) ?? [];
+    if (missing.length) {
+      throw new Error(`export: ${missing.map((u) => u.package).join(', ')} ${missing.length === 1 ? 'has' : 'have'} no published version in use (this session shows ${missing.length === 1 ? 'its working folder' : 'their working folders'}, for looking): `
+        + `${missing.map((u) => `publish ${u.package} (${program()} publish ${u.dir} --note "...") or pass follow:["${u.package}"] to export from its working folder`).join('; ')}; nothing was written`);
+    }
+    return follow;
+  };
+
   const resolveNodeGeo = async (a: any, forExport = false) => {
     const name = a.graph ?? a.name ?? 'main'; // `name` is what build/edit call it; accept both
     const g = ws.getGraph(name);
     const target = a.node || undefined;
-    // an export uses the published copies of the packages the session shows live (following is for looking)
-    const scope = forExport && ws.packages?.publishedNote?.(g) ? ws.packages.published?.() : null;
+    // an export uses the published copies of the packages the session shows live (following is for looking), but
+    // the working folders of those export {follow} names
+    const follow = forExport ? exportFollow(a, g) : [];
+    const scope = forExport && ws.packages?.publishedNote?.(g, follow) ? ws.packages.published?.(follow) : null;
     const r = await engine.cook(g, { target, frame: a.frame, ...(scope ? { scope } : {}) });
     if (!r.ok || !r.geo) throw new Error(reportText(name, r));
-    return { r, name, geo: r.geo, scope };
+    return { r, name, geo: r.geo, scope, follow };
   };
-  /** What an export of a graph made while following says (the published versions it used), on a line of its own. */
-  const publishedLine = (spec: GraphSpec) => { const n = ws.packages?.publishedNote?.(spec); return n ? `\n${n}` : ''; };
+  /** What an export of a graph made while following says (the working folders and published versions it used), on a line of its own. */
+  const publishedLine = (spec: GraphSpec, follow: string[]) => { const n = ws.packages?.publishedNote?.(spec, follow); return n ? `\n${n}` : ''; };
 
   /** export without a path: the graph's targets (the default output's, a named one's, or all), inside exports/ */
   const exportTargets = async (a: any): Promise<ToolResult> => {
     const name = a.graph ?? a.name ?? 'main', spec = ws.getGraph(name);
+    const follow = exportFollow(a, spec);
     const published = publishedOutputs(name, spec, engine.findOutput(spec).name);
     const hint = (o: string | undefined) => `edit {ops:[{op:"export"${o === undefined ? '' : `, output:"${o}"`}, export:"glb"}]}`;
     let chosen = published;
@@ -260,14 +282,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     if (!targets.length) return text(`no output of "${name}" has an export target: set one with ${hint(undefined)}, or pass path`, true);
     const prepared: PreparedTarget[] = [];
     for (const p of targets) {
-      const r = await ws.cook(name, p.node, a.frame, { kind: 'export' });
+      const r = await ws.cook(name, p.node, a.frame, { kind: 'export', follow });
       if (!r.ok || !r.geo) return text(reportText(name, r), true);
-      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.() ?? engine.root) }));
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root) }));
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
     return text(prepared.map((p) => exportReport(p.files, p.root, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
-      + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : '') + publishedLine(spec));
+      + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : '') + publishedLine(spec, follow));
   };
 
   const tools: ToolDef[] = [
@@ -473,12 +495,13 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           instancing: { type: 'string', enum: ['packed', 'expand'], description: 'packed prims: glb/gltf (EXT_mesh_gpu_instancing), usda (PointInstancer) and geo (PackedGeometry) keep instances by default; expand writes real copies' },
           instances: { type: 'string', enum: ['rows', 'expand'], description: 'csv / points.json of packed prims: rows (default) = one row per instance (full transform, Mesh column, anchor attributes) + <name>.meshes.json + <name>_meshes/<Mesh>.glb; expand = the points of the expanded geometry' },
           meshes: { type: 'boolean', description: 'instance rows: also write one GLB per packed source (default true)' },
+          follow: { type: 'array', items: { type: 'string' }, description: 'packages ("owner/name") this session follows (workspace {action:"follow"}) whose working folders the export uses instead of their published copies: for a package with no published version yet, or edits not yet published. The source record lists them under "followed". Without it an export uses the published copies' },
           ...FRAME_PROP,
         },
       },
       run: async (a) => {
         if (a.path === undefined) return exportTargets(a);
-        const { geo, name, r, scope } = await resolveNodeGeo(a, true);
+        const { geo, name, r, scope, follow } = await resolveNodeGeo(a, true);
         const p = path.resolve(ws.dir, a.path);
         const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
         const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt0] ?? fmt0) as ExportFormat;
@@ -488,7 +511,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), version: TOPOTOPO_VERSION,
         });
         const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
-        return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name))}`);
+        return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name), follow)}`);
       },
     },
     {
