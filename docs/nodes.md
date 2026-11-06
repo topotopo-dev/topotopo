@@ -3691,7 +3691,7 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 |---|---|---|---|---|---|---|
 | `name` | string | `""` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name, also the glTF material name ("" = "material", or the source material's own name with input 1) |
 | `from` | string | `""` |  |  | `source_material`, `use` | input 1: which of its materials ("" = its only one) |
-| `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
+| `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9"; "?trim" for a group some variants lack (nothing assigned where it is absent) |
 | `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
 | `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 (the glTF metallicFactor; texture_to_material with an orm map sets its own factors and ignores this) |
 | `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 (the glTF roughnessFactor, 1 under a roughness map; texture_to_material with an orm map sets its own factors and ignores this) |

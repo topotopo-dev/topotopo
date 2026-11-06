@@ -429,10 +429,13 @@ SDF helpers are also available (see topic sdf).`,
   ""  or  *          all elements
   top                named group (wildcards: side*)
   !top               everything not in top     ^top  removes top from the selection so far
+  ?top               top when the geometry has it, nothing when it does not (a bare name that matches no group is
+                     an error); with ^ and !: "^?top" "!?top". For groups a variant may lack (help topic "materials")
   0-10  5  0-100:2   element index ranges (:2 = every 2nd)
   @P.y>0.5           attribute test, ops = == != > < >= <= ; components .x .y .z .w .r .g .b
   @class==3   @name=piece*   @Cd.r<0.2   @ptnum<100
-Tokens are space-separated and applied left to right (union unless prefixed ! or ^).
+Tokens are space-separated and applied left to right (union unless prefixed ! or ^). A wildcard (side*) or an
+attribute test (@name=x) that matches nothing selects nothing; only a bare group name must exist (or be "?name").
 STRING ATTRIBUTES (name, path, a material or part label):
   @name=barrel        exactly "barrel" (= and == are the same)
   @name=bar*  @name=*rel  @name=b?rrel   wildcards: * any run, ? one character; case-sensitive
@@ -512,6 +515,16 @@ NAME THE PIECES FIRST when they have no names (one node each):
   clean up          attrib_string {"find":"_LOD","replace":"_lod"} · {"find":"\\\\.\\\\d+$","regex":true} · {"case":"lower"}
   prefix            attrib_string {"format":"gun_{value}"} keeps each name behind a prefix
   Then material {group:"@name=hull_*"} and export split_by_name write one mesh per name.
+CONDITIONAL BINDING (variants that may lack a part): a bare group name that a variant does not have fails the material
+  node ("unknown group"); write "?trim" to bind trim where it exists and nothing elsewhere. Chain the optional ones
+  after the base material:
+    {"wall": {"type":"material","in":["building"],"params":{"name":"brick"}},
+     "trim": {"type":"material","in":["wall"],"params":{"name":"metal","metallic":1,"group":"?trim"}},
+     "glass":{"type":"material","in":["trim"],"params":{"name":"glass","alpha":0.3,"group":"?windows @name=Glass*"}}}
+  A material whose group is empty only adds its table entry: glb writes the materials prims use, so a variant without
+  trim exports no "metal". Keep plain names (no ?) for parts every variant must have, so a missing one stays an error.
+  By a prim attribute instead of a group: "@part=trim" (a string test that matches nothing selects nothing; the
+  attribute itself must exist).
 EXPORT: glTF writes one material per table entry; a named material decides the colour of its prims (their Cd is
   dropped unless vertex_colors:true). Merging pieces whose materials or images share a name but differ (two package
   outputs that both call their map "basecolor") renames the later one ("paint_2", "<material>_basecolor"), so every
@@ -853,6 +866,23 @@ Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named 
   instancing:"expand" (export option) always writes real geometry (instances:"expand" for csv/points.json only).
   Unreal: instances.csv + meshes for PCG / ISM, or glb instances where the importer supports EXT_mesh_gpu_instancing;
   USD PointInstancer → HISM.
+IDENTITY THROUGH INSTANCES AND EXPORT (which lot, edge or source layer an instance came from): plain attributes carry it.
+  Use ints for ids engines read (a wrangle's "@lot_id = …" makes a float: write "i@lot_id"); strings read as text in
+  csv, points.json and usda.
+  source layer  tag each layer before the merge: wrangle {run_over:"prims", code:'s@source = "parcels"; i@lot_id = @primnum + 1;'}
+                (merge gives "" or 0 to the inputs that lack the attribute)
+  lot → points  scatter copies the lot's prim attributes onto its points (with sourceprim); points_along_curve copies
+                a curve's onto its points (one polyline per edge with "i@edge_id"); resample and ends keep them
+  → instances   copy_to_points {pack:true} puts every template point attribute on the anchors (lot_id, edge_id, source);
+                pack carries only its "carry" list (default "name Cd material"): pack {carry:"name Cd material lot_id edge_id source"}
+  ← unpack      copies the anchor attributes in its transfer_attributes (default "name Cd material piece") onto the
+                unpacked points where the source has no attribute of that name: unpack {transfer_attributes:"name Cd
+                material piece lot_id edge_id source"} (or "*"); the others are not on the result
+  export        csv / points.json: one column per anchor attribute (the attributes option can pick). glb/gltf with custom_attribs:true: _LOT_ID,
+                _EDGE_ID … per-instance accessors of EXT_mesh_gpu_instancing (a string is an index into the node's
+                extras.topotopo.instanceAttributes._SOURCE.strings). usda with custom_attribs:true: primvars:lot_id per
+                instance (strings as string[]). geo and json keep every attribute. Check: inspect lists the anchors'
+                attributes; a csv export shows the values.
 Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
   with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
 
@@ -1467,7 +1497,8 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors).
   Custom attributes (custom_attribs true): every other numeric point/vertex attribute of size 1-4 → _NAME (upper-cased,
   float or the smallest int type), mesh extras keep the original names and types, and packed instances carry their
-  anchor attributes as per-instance accessors. The attributes only scene empties use (scene_empty, parent, orient, scale,
+  anchor attributes as per-instance accessors (carrying lot / edge / source ids there: help topic "instancing",
+  IDENTITY). The attributes only scene empties use (scene_empty, parent, orient, scale,
   their extras) never become mesh channels.
 MATERIALS: the material node writes prim "material" + the detail table. A named material wins: its prims export in that
   material as it is and their Cd / Alpha are dropped (Cd left from colouring parts does not become COLOR_0 or a second,

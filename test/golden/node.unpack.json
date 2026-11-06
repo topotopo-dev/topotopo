@@ -3,8 +3,8 @@
   "fingerprint": {
     "attributes": {
       "detail": [],
-      "point": ["Cd:float:3", "N:float:3", "P:float:3", "uv:float:3"],
-      "prim": ["copynum:int:1"],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3"],
+      "prim": [],
       "vertex": []
     },
     "bbox": {
@@ -27,9 +27,7 @@
       "P": "a8a8ff88c48f4e5a",
       "attributes": {
         "point.Cd": "8b79f2a583a5adff",
-        "point.N": "7c07b8a5ad8dc47f",
-        "point.uv": "539e76c544b5b11f",
-        "prim.copynum": "c18e7dc58d45dd1f"
+        "point.N": "7c07b8a5ad8dc47f"
       },
       "topology": "3279e083d40a3e65"
     }

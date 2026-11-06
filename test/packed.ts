@@ -548,5 +548,50 @@ const SRC: Record<string, NodeSpec> = {
   check(!bad.length, `every node type with packed input: ${n} types cooked, ${keptOk} kept instances, ${warnedOk} unpacked with a warning`);
 }
 
+{
+  // identity through instances and export (help topic "instancing", IDENTITY): a lot's id and source layer, and an
+  // edge's id, reach the anchors, survive pack and unpack, and arrive in csv, glb and usda
+  const nodes: Record<string, NodeSpec> = {
+    lots: { type: 'grid', params: { size: [20, 20], divisions: [2, 2] } },
+    tagged: { type: 'wrangle', in: ['lots'], params: { run_over: 'prims', code: 's@source = "parcels"; i@lot_id = @primnum + 1;' } },
+    trees: { type: 'scatter', in: ['tagged'], params: { count: 12, seed: 3 } },
+    edge: { type: 'line', params: { origin: [-10, 0, 10], dir: [1, 0, 0], dist: 20 } },
+    edged: { type: 'wrangle', in: ['edge'], params: { run_over: 'prims', code: 'i@edge_id = 42;' } },
+    posts: { type: 'points_along_curve', in: ['edged'], params: { spacing: 5 } },
+    spots: { type: 'merge', in: ['trees', 'posts'] },
+    bx: { type: 'box', params: { size: 0.5 } },
+    named: { type: 'attrib_string', in: ['bx'], params: { format: 'prop' } },
+    inst: { type: 'copy_to_points', in: ['named', 'spots'], params: { pack: true } },
+    un: { type: 'unpack', in: ['inst'] },
+    unIds: { type: 'unpack', in: ['inst'], params: { transfer_attributes: 'name lot_id edge_id source' } },
+    copies: { type: 'copy_to_points', in: ['named', 'trees'] },
+    byprim: { type: 'attrib_promote', in: ['copies'], params: { name: 'lot_id', from: 'point', to: 'prim' } },
+    repacked: { type: 'pack', in: ['byprim'], params: { by: 'connectivity', carry: 'name lot_id' } },
+    dropped: { type: 'pack', in: ['byprim'], params: { by: 'connectivity' } },
+  };
+  const cookOut = async (o: string) => { const r = await engine.cook({ nodes, output: o }); if (!r.ok) throw new Error(r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')); return r.geo!; };
+  const ids = (g: Geometry, cls: 'point' | 'prim', k: string) => { const a = cls === 'point' ? g.points.get(k) : g.prims.get(k); return a ? Array.from({ length: cls === 'point' ? g.numPoints : g.numPrims }, (_, i) => a.get(i)) : null; };
+  const inst = await cookOut('inst');
+  const lot = ids(inst, 'point', 'lot_id')!, src = ids(inst, 'point', 'source')!, edge = ids(inst, 'point', 'edge_id')!;
+  check(inst.points.get('lot_id')?.type === 'int' && lot.slice(0, 12).every((v) => (v as number) >= 1 && (v as number) <= 4) && src.slice(0, 12).every((v) => v === 'parcels') && edge.slice(12).every((v) => v === 42) && lot.slice(12).every((v) => v === 0),
+    `identity: scatter and points_along_curve carry lot_id/source/edge_id onto the anchors (merge fills 0 / "") (${lot.join(',')})`);
+  const [un, unIds] = [await cookOut('un'), await cookOut('unIds')];
+  check(!un.points.get('lot_id') && !un.points.get('uv') && !un.prims.get('copynum'), `identity: unpack leaves out the anchor attributes it does not transfer, rather than zeros (${un.points.names().join(' ')} | ${un.prims.names().join(' ')})`);
+  check(unIds.points.get('lot_id')?.type === 'int' && ids(unIds, 'point', 'lot_id')!.slice(0, 8).every((v) => v === lot[0]) && ids(unIds, 'point', 'source')![0] === 'parcels' && ids(unIds, 'point', 'edge_id')!.at(-1) === 42, 'identity: unpack transfer_attributes copies the anchor ids onto the unpacked points');
+  const [kept, gone] = [await cookOut('repacked'), await cookOut('dropped')];
+  check(kept.numPrims === 12 && !!(kept.points.get('lot_id') ?? kept.prims.get('lot_id')) && !gone.points.get('lot_id') && !gone.prims.get('lot_id'), 'identity: pack keeps lot_id only when "carry" lists it');
+  const csv = new TextDecoder().decode(exportGeometry(inst, 'csv'));
+  const head = csv.split('\n')[0].split(','), row = csv.split('\n')[1].split(',');
+  check(['lot_id', 'edge_id', 'source'].every((k) => head.includes(k)) && row[head.indexOf('source')] === '"parcels"' && Number(row[head.indexOf('lot_id')]) === lot[0], `identity: csv has a column per id (${head.join(',')})`);
+  const glb = await exportGeometryAsync(inst, 'glb', { custom: true });
+  const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const gj = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + dv.getUint32(12, true))));
+  const node = gj.nodes.find((n: any) => n.extensions?.EXT_mesh_gpu_instancing);
+  const at = node?.extensions.EXT_mesh_gpu_instancing.attributes ?? {};
+  check(['_LOT_ID', '_EDGE_ID', '_SOURCE'].every((k) => at[k] !== undefined) && node.extras?.topotopo?.instanceAttributes?._SOURCE?.strings?.includes('parcels'), `identity: glb custom_attribs writes per-instance _LOT_ID/_EDGE_ID/_SOURCE (${Object.keys(at).join(',')})`);
+  const usda = new TextDecoder().decode(await exportGeometryAsync(inst, 'usda', { custom: true }));
+  check(/int\[\] primvars:lot_id = \[/.test(usda) && /string\[\] primvars:source = \["parcels"/.test(usda) && /primvars:edge_id/.test(usda), 'identity: usda custom_attribs writes per-instance primvars');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

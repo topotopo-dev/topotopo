@@ -7,6 +7,8 @@
 //   @name=piece*        string attribute glob
 //   !top                everything except "top" (unioned)
 //   ^top                remove "top" from the selection so far
+//   ?top                the group "top" when the geometry has it, nothing when it does not (a bare name that matches
+//                       no group is an error); combines with ^ and !: "^?top", "!?top"
 // Tokens are separated by spaces and applied left to right.
 //
 // Four classes: point, prim, vertex, edge.
@@ -46,6 +48,12 @@ function globToRe(glob: string) {
 
 export class GroupError extends Error {}
 
+/** A bare group name that matches no group: an error, unless the token is optional ("?name"). */
+export class UnknownGroupError extends GroupError {}
+
+/** The end of an unknown-group message: how to allow a group that a variant of the geometry may not have. */
+const optionalHint = (t: string) => ` (write "?${t}" for a group that may be absent: it then selects nothing)`;
+
 interface Ctx { list: EdgeList | null }
 
 function elemCount(g: Geometry, cls: GroupClass, ctx: Ctx): number {
@@ -66,9 +74,15 @@ export function evalGroup(g: Geometry, cls: GroupClass, pattern: string | null |
   for (const tok of tokens) {
     let op: 'add' | 'sub' | 'not' = 'add';
     let t = tok;
+    // "?name": a group that may be absent ("?^name" and "^?name" both work)
+    let optional = t.length > 1 && t.startsWith('?');
+    if (optional) t = t.slice(1);
     if (t.startsWith('^')) { op = 'sub'; t = t.slice(1); }
     else if (t.startsWith('!')) { op = 'not'; t = t.slice(1); }
-    const m = cls === 'point' || cls === 'prim' ? tokenMask(g, cls, t, n) : cls === 'vertex' ? vertexTokenMask(g, t, n) : edgeTokenMask(g, t, ctx.list!);
+    if (!optional && t.length > 1 && t.startsWith('?')) { optional = true; t = t.slice(1); }
+    let m: Uint8Array;
+    try { m = cls === 'point' || cls === 'prim' ? tokenMask(g, cls, t, n) : cls === 'vertex' ? vertexTokenMask(g, t, n) : edgeTokenMask(g, t, ctx.list!); }
+    catch (e) { if (optional && e instanceof UnknownGroupError) m = new Uint8Array(n); else throw e; }
     for (let i = 0; i < n; i++) {
       if (op === 'add') { if (m[i]) sel[i] = 1; }
       else if (op === 'sub') { if (m[i]) sel[i] = 0; }
@@ -138,7 +152,7 @@ function orInto(m: Uint8Array, sel: Uint8Array | EdgeSet, list: EdgeList | null)
 
 function unknownGroup(g: Geometry, cls: GroupClass, t: string): GroupError {
   const avail = [cls, ...OTHER[cls]].flatMap((c) => g.groupNames(c).map((k) => `${c}:${k}`));
-  return new GroupError(`unknown group "${t}". Available groups: ${avail.length ? avail.join(', ') : '(none)'}`);
+  return new UnknownGroupError(`unknown group "${t}". Available groups: ${avail.length ? avail.join(', ') : '(none)'}${optionalHint(t)}`);
 }
 
 function tokenMask(g: Geometry, cls: 'point' | 'prim', t: string, n: number): Uint8Array {
@@ -165,7 +179,7 @@ function tokenMask(g: Geometry, cls: 'point' | 'prim', t: string, n: number): Ui
   if (!hit && !/[*?]/.test(t)) {
     const avail = [...own.keys()].map((k) => `${cls}:${k}`).concat([...other.keys()].map((k) => `${cls === 'point' ? 'prim' : 'point'}:${k}`))
       .concat(g.groupNames('vertex').map((k) => `vertex:${k}`), g.groupNames('edge').map((k) => `edge:${k}`));
-    throw new GroupError(`unknown group "${t}". Available groups: ${avail.length ? avail.join(', ') : '(none)'}`);
+    throw new UnknownGroupError(`unknown group "${t}". Available groups: ${avail.length ? avail.join(', ') : '(none)'}${optionalHint(t)}`);
   }
   return m;
 }

@@ -169,6 +169,34 @@ const MAPS: Record<string, NodeSpec> = {
     `another package wears studio/mats/brick (${r.ok ? 'ok' : r.errors.map((x) => x.message).join('; ')})`);
 }
 
+{
+  // a group that one variant of the geometry lacks: "?trim" binds it where the group exists and selects nothing elsewhere
+  const variant = (withTrim: boolean, group: string): Record<string, NodeSpec> => ({
+    box: { type: 'box' },
+    shaped: withTrim ? { type: 'group', in: ['box'], params: { name: 'trim', class: 'prim', expr: '@P.y > 0.4' } } : { type: 'null', in: ['box'] },
+    wall: { type: 'material', in: ['shaped'], params: { name: 'wall', base_color: '#a5462e' } },
+    metal: { type: 'material', in: ['wall'], params: { name: 'metal', metallic: 1, group } },
+  });
+  const uses = (g: Geometry, name: string) => { const a = g.prims.get('material')!; let n = 0; for (let i = 0; i < g.numPrims; i++) if (a.get(i) === name) n++; return n; };
+  const withTrim = await cook(variant(true, '?trim'), 'metal');
+  check(uses(withTrim, 'metal') === 1 && uses(withTrim, 'wall') === 5, `"?trim" binds the trim group where it exists (${uses(withTrim, 'metal')} metal, ${uses(withTrim, 'wall')} wall)`);
+  const without = await engine.cook({ nodes: variant(false, '?trim'), output: 'metal' });
+  check(without.ok && !without.warnings.length && uses(without.geo!, 'metal') === 0 && uses(without.geo!, 'wall') === 6, `"?trim" selects nothing, silently, on a variant without the group (${without.ok ? 'ok' : without.errors.map((e) => e.message).join('; ')})`);
+  const glbMaterials = async (g: Geometry) => {
+    const f = (await exportFilesAsync(g, 'glb', path.join(tmp, 'optional.glb'), {})).files.find((x) => x.path.endsWith('.glb'))!;
+    const dv = new DataView(f.bytes.buffer, f.bytes.byteOffset, f.bytes.byteLength);
+    return (JSON.parse(new TextDecoder().decode(f.bytes.subarray(20, 20 + dv.getUint32(12, true)))).materials ?? []).map((m: any) => m.name).sort().join(',');
+  };
+  const [mWith, mWithout] = [await glbMaterials(withTrim), await glbMaterials(without.geo!)];
+  check(mWith === 'metal,wall' && mWithout === 'wall', `glb writes only the materials prims use: no empty "metal" on the variant without trim (${mWith} | ${mWithout})`);
+  const strictName = await cookError(variant(false, 'trim'), 'metal');
+  check(/unknown group "trim".*write "\?trim" for a group that may be absent/.test(strictName), `a bare name that matches no group is an error that says how to allow it (${strictName})`);
+  const notTrim = await cook(variant(false, '!?trim'), 'metal'), minus = await cook(variant(true, '* ^?trim'), 'metal'), minusAbsent = await cook(variant(false, '* ?^trim'), 'metal');
+  check(uses(notTrim, 'metal') === 6 && uses(minus, 'metal') === 5 && uses(minusAbsent, 'metal') === 6, '"!?trim" and "^?trim" (or "?^trim") combine with an absent or present group');
+  const badAttr = await cookError(variant(false, '?@P.q>0'), 'metal');
+  check(badAttr !== '', `"?" allows only a missing group: other selection errors still fail (${badAttr})`);
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
