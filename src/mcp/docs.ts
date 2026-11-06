@@ -222,6 +222,11 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
+- A value outside a param's range (help gives min/max; a package output's "params" declarations) is clamped with a
+  warning. "strict": true on the graph makes it the node's error instead, for every node of the graph; "strict" on a
+  node (true or false) overrides the graph's for that node. Use it where a clamp would hide a mistake (an asset whose
+  range is narrower than the values its caller passes). Nested graphs (loop bodies, assets, package outputs) follow
+  their own "strict"; dry_run reports the same errors.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
 - build mode "merge" upserts nodes into the existing graph; edit ops: set, add, remove (auto-rewires), connect, rename, output, vars, bypass, replace, insert (after a node, rewiring its consumers).
 - Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the package.
@@ -354,7 +359,8 @@ PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_f
   cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).
 LIMITS: one cook of rbd_settle, rbd_stack, drape, inflate, particles, heightfield_erode or remesh_quad stops with an error
   naming the node after TOPOTOPO_SIM_TIMEOUT_MS (default 10 min; lower steps/duration/iterations, not the limit). Params that
-  count something have a max (help shows it); larger values are clamped.`,
+  count something have a max (help shows it); larger values are clamped (with a warning; a graph with "strict": true
+  fails instead, see help topic "graph").`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}
@@ -1011,8 +1017,8 @@ A published package has a full name and versions. Its author names it once in it
 Publishing is permanent: run the dry run, show it to the person, and publish when they say so.
 A graph uses an output of a package as a node type; "owner/name" alone is the package's default output:
   {"type": "studio/trees/pine", "in": ["ground"], "params": {"height": 6}}      {"type": "studio/trees"}
-Its params are the vars of the output's graph that its node reads, with their "params" declarations (ranges clamp,
-options are checked), and its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the
+Its params are the vars of the output's graph that its node reads, with their "params" declarations (ranges clamp
+with a warning, or fail in a "strict" graph; options are checked), and its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the
 version and its note, also for an output search found in a place the package looks in but does not use yet (read there,
 nothing copied); catalog {category:"package"} lists the outputs of the packages in use and TopoTopo's own.
 

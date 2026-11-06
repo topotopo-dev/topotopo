@@ -771,6 +771,26 @@ section('param ranges');
   check(engine.dryRun(g).warnings.some((w) => w.node === 's' && /clamped to 7/.test(w.message)), 'dryRun reports the clamp');
   const vec = await engine.cook({ nodes: { b: { type: 'box', params: { divisions: [1, 600, 1] } } } });
   check(vec.ok && vec.warnings.some((w) => /^param "divisions"\[1\] 600 clamped to 512/.test(w.message)), 'vector components clamp with the index');
+
+  // strict: a value outside the range fails the node instead (graph-wide, or per node; the node's own strict wins)
+  const sg = { strict: true, nodes: { s: { type: 'sphere', params: { type: 'ico', level: 9 } } } };
+  const sr = await engine.cook(sg);
+  const se = sr.errors.find((e) => e.node === 's');
+  check(!sr.ok && !!se && /^param "level" 9 is above its range 0\.\.7 \(strict: not clamped\)$/.test(se.message) && /strict/.test(se.hint ?? ''), `strict graph: the out-of-range value is the node's error (${se?.message})`);
+  check(engine.dryRun(sg).errors.some((e) => e.node === 's' && /above its range/.test(e.message)) && !engine.dryRun(sg).warnings.some((w) => w.node === 's'), 'strict: dryRun reports it as an error, not a warning');
+  const loose = await engine.cook({ strict: true, nodes: { s: { type: 'sphere', strict: false, params: { type: 'ico', level: 9 } } } });
+  check(loose.ok && loose.warnings.some((w) => /clamped to 7/.test(w.message)), 'strict: false on a node clamps it with a warning in a strict graph');
+  const one = await engine.cook({ nodes: { b: { type: 'box', strict: true, params: { divisions: [1, 600, 1] } }, s: { type: 'sphere', params: { level: 9 } }, m: { type: 'merge', in: ['b', 's'] } }, output: 'm' });
+  check(!one.ok && one.errors.some((e) => e.node === 'b' && /^param "divisions"\[1\] 600 is above its range/.test(e.message)) && !one.errors.some((e) => e.node === 's'), 'strict on one node: that node fails, the others clamp');
+  const inRange = await engine.cook({ strict: true, nodes: { s: { type: 'sphere', params: { level: 3 } } } });
+  check(inRange.ok && !inRange.warnings.length, 'strict: values inside the range cook as usual');
+  // an asset whose var range is narrower than what its caller passes: the caller's strict catches it
+  const narrow = { vars: { floors: 2 }, params: { floors: { type: 'int', min: 1, max: 4 } }, nodes: { b: { type: 'box', params: { size: [1, '=floors', 1] } } } };
+  engine.registerAsset('test_strict_floors', narrow);
+  const caller = await engine.cook({ strict: true, nodes: { h: { type: 'test_strict_floors', params: { floors: 6 } } } });
+  check(!caller.ok && caller.errors.some((e) => e.node === 'h' && /"floors" 6 is above its range 1\.\.4/.test(e.message)), 'strict: an asset range narrower than its caller fails the caller');
+  check(engine.validate({ strict: 'yes' as any, nodes: { s: { type: 'sphere' } } }).errors.some((e) => /"strict" must be true or false/.test(e.message))
+    && engine.validate({ nodes: { s: { type: 'sphere', strict: 1 as any } } }).errors.some((e) => e.node === 's' && /"strict" must be true or false/.test(e.message)), 'strict must be a boolean (graph and node)');
 }
 
 // ------------------------------------------------------------------ CLI

@@ -342,6 +342,15 @@ export function graphInterface(graph: GraphSpec): { params: Record<string, Param
   return { params, inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })) };
 }
 
+/** A strict node's param values outside their range (GraphSpec.strict, NodeSpec.strict) as its error. */
+function strictIssue(node: string, outOfRange: string[]): Issue {
+  return {
+    node,
+    message: `${outOfRange.join('; ')} (strict: not clamped)`,
+    hint: 'give a value inside the range, or set "strict": false on this node to clamp it with a warning',
+  };
+}
+
 type ChParams = Map<string, { def: NodeDef; values: Record<string, any> }>;
 
 /** Implementations of the expression reference functions, bound to the referenced results of one node. */
@@ -669,6 +678,8 @@ export class Engine {
       errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });
     if (graph.version !== undefined && !(Number.isInteger(graph.version) && graph.version >= 0))
       errors.push({ node: path || '(graph)', message: `"version" must be a non-negative integer, got ${JSON.stringify(graph.version)}` });
+    if (graph.strict !== undefined && typeof graph.strict !== 'boolean')
+      errors.push({ node: path || '(graph)', message: `"strict" must be true or false, got ${JSON.stringify(graph.strict)?.slice(0, 40)}` });
     if (graph.vars && typeof graph.vars === 'object') {
       for (const [k, v] of Object.entries(graph.vars)) {
         const r = scanValue(v);
@@ -715,6 +726,8 @@ export class Engine {
         errors.push({ node: nm, message: `unknown node type "${spec.type}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`, hint: 'use the catalog tool to list node types' });
         continue;
       }
+      if (spec.strict !== undefined && typeof spec.strict !== 'boolean')
+        errors.push({ node: nm, message: `"strict" must be true or false, got ${JSON.stringify(spec.strict)?.slice(0, 40)}` });
       const w = wiringOf(spec, def);
       for (const e of w.errors) errors.push({ node: nm, message: e });
       const multi = def.inputs.some((i) => i.multi);
@@ -836,7 +849,8 @@ export class Engine {
         const def = this.resolveDef(spec.type, scope)!;
         const r = resolveParams(def, spec.params, allVars, { fns: deferred, host: this.host, timeoutMs: this.scriptTimeoutMs });
         for (const e of r.errors) if (!e.startsWith('unknown param')) v.errors.push({ node: name, message: e });
-        for (const w of r.warnings) v.warnings.push({ node: name, message: w });
+        if (r.outOfRange.length && (spec.strict ?? graph.strict)) v.errors.push(strictIssue(name, r.outOfRange));
+        else for (const w of r.warnings) v.warnings.push({ node: name, message: w });
         for (const n of r.notes) notes.push(`${name}: ${n}`);
         if (r.deferred.length) notes.push(`${name}: ${r.deferred.join(', ')} read other nodes (evaluated when cooked)`);
         if (def.deprecated) notes.push(`${name}: "${def.type}" is deprecated — ${def.deprecated}`);
@@ -967,7 +981,7 @@ export class Engine {
       return { rp, refSig: '', usesTime: rp.usesTime, depsTimeDependent: false };
     }
     const fail = (error: string, upstream = false): NodeParams => ({
-      rp: { values: {}, errors: [], notes: [], warnings: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
+      rp: { values: {}, errors: [], notes: [], warnings: [], outOfRange: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
     });
     const geo = new Map<string, Geometry>();
     const parts: string[] = [];
@@ -1058,7 +1072,12 @@ export class Engine {
       result.error = { node: name, message: rp.errors.join('; ') };
       return result;
     }
-    result.warnings.push(...rp.warnings); // values clamped to a param range: said every cook, cache hits included
+    // values clamped to a param range: said every cook, cache hits included; a strict node fails on them instead
+    if (rp.outOfRange.length && (spec.strict ?? graph.strict)) {
+      result.error = strictIssue(name, rp.outOfRange);
+      return result;
+    }
+    result.warnings.push(...rp.warnings);
     depTime ||= np.depsTimeDependent;
 
     if (spec.bypass) {
