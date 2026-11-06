@@ -5,6 +5,7 @@ import zlib from 'node:zlib';
 import { Session, EditRejected } from '../session.ts';
 import type { EditOp } from '../session.ts';
 import type { CookReport } from '../graph/engine.ts';
+import { timingLines } from '../graph/timing.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
@@ -54,7 +55,7 @@ export interface ToolDef {
 /** " at frame N" when the cook was not at frame 1. */
 const atFrame = (r: { frame: number }) => (r.frame !== 1 ? ` at frame ${r.frame}` : '');
 
-function reportText(name: string, r: CookReport, extraNotes: string[] = [], extraWarnings: string[] = []): string {
+function reportText(name: string, r: CookReport, scriptLimitMs: number, extraNotes: string[] = [], extraWarnings: string[] = []): string {
   const lines: string[] = [];
   const nodes = [...r.results.values()];
   const cooked = nodes.filter((n) => !n.cached && !n.error).length;
@@ -69,8 +70,7 @@ function reportText(name: string, r: CookReport, extraNotes: string[] = [], extr
     if (r.warnings.length > 15) lines.push(`  … ${r.warnings.length - 15} more`);
   }
   if (r.geo) lines.push(summarize(r.geo));
-  const slow = nodes.filter((n) => n.ms > 50).sort((a, b) => b.ms - a.ms).slice(0, 4);
-  if (slow.length) lines.push(`slowest: ${slow.map((n) => `${n.node} ${n.ms.toFixed(0)}ms`).join(', ')}`);
+  lines.push(...timingLines(r, scriptLimitMs));
   const stats = nodes.filter((n) => n.stats);
   if (stats.length) lines.push(`stats: ${stats.slice(0, 6).map((n) => `${n.node} ${Object.entries(n.stats!).map(([k, v]) => `${k}=${v}`).join(' ')}`).join('; ')}`);
   const timed = nodes.filter((n) => n.timeDependent).map((n) => n.node);
@@ -213,7 +213,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
 
   /** The text (+ optional render) of a cook report. */
   const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
-    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes, await kindWarnings(name, r, a.frame)) }];
+    const content: Content[] = [{ type: 'text', text: reportText(name, r, engine.scriptTimeoutMs, extraNotes, await kindWarnings(name, r, a.frame)) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`, ws.dir);
       const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
@@ -259,7 +259,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     const follow = forExport ? exportFollow(a, g) : [];
     const scope = forExport && ws.packages?.publishedNote?.(g, follow) ? ws.packages.published?.(follow) : null;
     const r = await engine.cook(g, { target, frame: a.frame, ...(scope ? { scope } : {}) });
-    if (!r.ok || !r.geo) throw new Error(reportText(name, r));
+    if (!r.ok || !r.geo) throw new Error(reportText(name, r, engine.scriptTimeoutMs));
     return { r, name, geo: r.geo, scope, follow };
   };
   /** What an export of a graph made while following says (the working folders and published versions it used), on a line of its own. */
@@ -283,7 +283,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     const prepared: PreparedTarget[] = [];
     for (const p of targets) {
       const r = await ws.cook(name, p.node, a.frame, { kind: 'export', follow });
-      if (!r.ok || !r.geo) return text(reportText(name, r), true);
+      if (!r.ok || !r.geo) return text(reportText(name, r, engine.scriptTimeoutMs), true);
       prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root) }));
     }
     writeTargets(prepared, ws.exportDir);

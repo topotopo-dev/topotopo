@@ -58,8 +58,6 @@ const ensureViewer = async () => {
 const workspaceTools = workspaceTool({ session: () => ws, packages: () => packages, open: (dir) => openSession(dir) });
 async function openSession(dir: string) {
   const e = new Engine(createNodeHost({ baseDir: dir }));
-  if (process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS) e.scriptTimeoutMs = Number(process.env.TOPOTOPO_SCRIPT_TIMEOUT_MS);
-  if (process.env.TOPOTOPO_SIM_TIMEOUT_MS) e.simTimeoutMs = Number(process.env.TOPOTOPO_SIM_TIMEOUT_MS);
   await e.init();
   const { session: w, packages: pk, loaded } = openPackage(e, dir, { watch: true });
   log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; package ${pk.dir}, ${Object.keys(pk.uses()).length} packages used` : '; in no package'}`);

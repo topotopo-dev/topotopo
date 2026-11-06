@@ -143,6 +143,12 @@ export interface Host {
    * concurrently. Absent (TOPOTOPO_WORKERS=0, or a host without threads): everything runs on the calling thread.
    */
   pool?: WorkerPool;
+  /**
+   * Time limits this host was set up with: an engine on it starts with them (Engine.scriptTimeoutMs, simTimeoutMs). The
+   * Node host reads TOPOTOPO_SCRIPT_TIMEOUT_MS and TOPOTOPO_SIM_TIMEOUT_MS, so the CLI, the MCP server, the live viewer
+   * and package cooks all honour them. Absent: the engine's defaults.
+   */
+  limits?: { scriptMs?: number; simMs?: number };
 }
 
 /** What nodes read files with (a cook scope's files, src/graph/scope.ts): relative paths resolve against one folder. */

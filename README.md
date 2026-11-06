@@ -298,7 +298,10 @@ instead of hanging the process. The same timeout covers `script`, `heightfield_l
 whatever such code throws. Params that count something have upper bounds (larger values are clamped), and the
 long-running nodes (`rbd_settle`, `rbd_stack`, `drape`, `inflate`, `particles`, `heightfield_erode`, `remesh_quad`) stop
 with an error after `TOPOTOPO_SIM_TIMEOUT_MS` (default 10 minutes; the WASM calls of the last two only when the worker
-pool is on). That contains mistakes, not attackers: sandboxed code can still allocate memory and burn CPU until the
+pool is on). Both limits are environment variables in milliseconds that the CLI, the MCP server, the live viewer and
+package cooks all read; a node stopped by the script limit says so and names it, and a cook report lists the slowest
+nodes and, for a `script`, the time of its `lib.run` calls by node type (the CLI with `--timing` lists every node).
+That contains mistakes, not attackers: sandboxed code can still allocate memory and burn CPU until the
 timeout, combinations of large params and inputs can still exhaust memory, and a `vm` realm is not a hard security
 boundary. Do not cook graphs from untrusted sources in a privileged process.
 

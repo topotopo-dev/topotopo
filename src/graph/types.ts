@@ -221,6 +221,11 @@ export interface CookContext {
   /** record a numeric statistic on the node result (e.g. solver steps) */
   stat(name: string, value: number): void;
   /**
+   * Add the time of one step of the cook to a named stage of it (a script's lib.run calls by node type): the cook
+   * report lists the node's stages with its time (NodeResult.stages), so a slow node says where its time went.
+   */
+  stage(name: string, ms: number): void;
+  /**
    * Run a registered per-element kernel (src/core/kernels.ts) over job.count elements: in chunks on the host's worker
    * pool when there is one and the job is large enough, else in one piece on this thread, synchronously (the result is
    * then not a promise, so a node stays synchronous). Outputs are written in place; the result is the same bit for bit.

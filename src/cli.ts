@@ -63,7 +63,8 @@ import { Engine } from './graph/engine.ts';
 import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { KINDS } from './graph/outputs.ts';
-import { createNodeHost } from './host/node.ts';
+import { createNodeHost, limitsFromEnv } from './host/node.ts';
+import { timingLines } from './graph/timing.ts';
 import { renderGeometryAsync } from './render/raster.ts';
 import { parseViews } from './render/raster.ts';
 import type { RenderOptions } from './render/raster.ts';
@@ -92,6 +93,8 @@ import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
 const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
 const fail = (msg: string): never => { console.error(msg); process.exit(1); };
+// the time limits every engine of this process takes from the environment: a value that is not a number fails here
+try { limitsFromEnv(); } catch (e) { fail((e as Error).message); }
 /** A graph file's name as a graph (view mode) and in receipts and default export file names. */
 const graphName = (file: string) => path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
 // the command as the user typed it: the sources from a clone, or the package's bin (dist/cli.js)
@@ -117,6 +120,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
+    '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
+    '         time limits (environment, milliseconds; also for the MCP server and the viewer): TOPOTOPO_SCRIPT_TIMEOUT_MS (user code: expressions, wrangles, a whole script; default 30000), TOPOTOPO_SIM_TIMEOUT_MS (one cook of a simulation node; default 600000)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
     '         [--follow owner/name] (use that package\'s working folder, where the package finds it, instead of its copy, for this run: renders, inspect and exports use it, unpublished (the export\'s source record lists it under "followed"); repeat it)',
@@ -374,6 +379,12 @@ async function cook() {
     for (const e of r.errors) console.error(`error [${e.node}] ${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`);
     for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
   }
+  /** Where the cook's time went: with --timing every cooked node, else the slowest when the cook took a second or more. */
+  const timingFlag = argv.includes('--timing');
+  function timing(r: CookReport) {
+    if (!timingFlag && r.ms < 1000) return;
+    for (const l of timingLines(r, engine.scriptTimeoutMs, timingFlag ? { minMs: 0, nodes: Infinity } : {})) console.log(l);
+  }
 
   /** Every render flag (renderFlags reads them, plus --views, --color-by, --checker). */
   const RENDER_FLAGS = ['--wireframe', '--hard-angle', '--section', '--clip', '--glyphs', '--glyph-attrib', '--glyph-scale', '--max-glyphs', '--labels', '--max-labels',
@@ -480,9 +491,10 @@ async function cook() {
   } else {
     const r = await engine.cook(graph, { target, frame: single, fps });
     report(r);
-    if (!r.ok || !r.geo) process.exit(1);
+    if (!r.ok || !r.geo) { timing(r); process.exit(1); }
     const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
     console.log(`cooked ${file} → ${outputName !== undefined ? `output "${outputName}" (${r.target})` : r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''}${vars} in ${r.ms.toFixed(0)} ms`);
+    timing(r);
     // without --inspect the short summary; --inspect <detail> the report (src/inspect.ts, io/inspect-scene.ts)
     console.log(inspectDetail ? await inspectText(r) : summarize(r.geo));
     await writeOutputs(r);

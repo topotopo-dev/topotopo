@@ -360,7 +360,16 @@ PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_f
 LIMITS: one cook of rbd_settle, rbd_stack, drape, inflate, particles, heightfield_erode or remesh_quad stops with an error
   naming the node after TOPOTOPO_SIM_TIMEOUT_MS (default 10 min; lower steps/duration/iterations, not the limit). Params that
   count something have a max (help shows it); larger values are clamped (with a warning; a graph with "strict": true
-  fails instead, see help topic "graph").`,
+  fails instead, see help topic "graph").
+  User code (expressions, wrangles, a whole script with its lib.run calls, parametric curves and surfaces, sdf_expr
+  sampling) stops after TOPOTOPO_SCRIPT_TIMEOUT_MS (default 30 s): the node fails with "exceeded N ms" and a hint naming
+  the limit. Both limits are environment variables in milliseconds, read by every host the same way: the CLI, the MCP
+  server, the live viewer and package cooks (a value that is not a positive number fails at start). Keep the guard: raise
+  it for a cook that needs longer (a whole city in one script: 120000), not to hide an endless loop.
+TIMING: a cook report (build, edit, the CLI for cooks of 1 s or more, CLI --timing for every node) says where the time
+  went: "timing (41.0 s in all): city 40.1 s, roads 0.8 s", each node's own cook (its inputs count at their own nodes),
+  and under a script the time of its lib.run calls by node type ("city: lib.run boolean 30× 22.0 s, lib.run
+  copy_to_points 12× 9.5 s"). When the slowest node took half the script limit or more, the line says the limit.`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}

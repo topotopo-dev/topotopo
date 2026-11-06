@@ -1107,5 +1107,56 @@ section('CLI view');
   } finally { proc.kill(); }
 }
 
+section('time limits from the environment in every host, and where the time went');
+{
+  const { limitsFromEnv } = await import('../src/host/node.ts');
+  const { timingLines } = await import('../src/graph/timing.ts');
+  check(JSON.stringify(limitsFromEnv({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '120000', TOPOTOPO_SIM_TIMEOUT_MS: '5000' })) === '{"scriptMs":120000,"simMs":5000}'
+    && JSON.stringify(limitsFromEnv({})) === '{}' && JSON.stringify(limitsFromEnv({ TOPOTOPO_SCRIPT_TIMEOUT_MS: ' ' })) === '{}', 'limits: read from the environment, unset ones absent');
+  let bad = '';
+  try { limitsFromEnv({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '2min' }); } catch (e: any) { bad = e.message; }
+  check(/TOPOTOPO_SCRIPT_TIMEOUT_MS must be a positive number of milliseconds .*got "2min"/.test(bad), `limits: a value that is not a positive number fails (${bad})`);
+  const limited = new Engine({ ...createNodeHost({ baseDir: tmp }), limits: { scriptMs: 1234, simMs: 5678 } });
+  check(limited.scriptTimeoutMs === 1234 && limited.simTimeoutMs === 5678 && new Engine(createNodeHost({ baseDir: tmp })).scriptTimeoutMs === 30000, 'an engine starts with its host\'s limits (default 30 s without)');
+
+  // a script whose lib.run calls take time: the report keeps their time by node type, the timing text names them
+  const busy = (ms: number) => `const parts = [];\nfor (let i = 0; i < 3; i++) parts.push(await lib.run('box', { size: i + 1 }));\nparts.push(await lib.run('sphere', { type: 'ico', level: 3 }));\nconst t0 = Date.now(); while (Date.now() - t0 < ${ms}) {}\nreturn lib.merge(parts);`;
+  const e = new Engine(createNodeHost({ baseDir: tmp }));
+  await e.init();
+  const r = await e.cook({ nodes: { s: { type: 'script', params: { code: busy(80) } }, n: { type: 'noise', in: ['s'] } }, output: 'n' });
+  const st = res(r, 's').stages;
+  check(r.ok && st?.['lib.run box']?.calls === 3 && st?.['lib.run sphere']?.calls === 1 && st['lib.run box'].ms >= 0, `a script's lib.run time is kept by node type (${JSON.stringify(st)})`);
+  const lines = timingLines(r, e.scriptTimeoutMs, { minMs: 0, nodes: Infinity });
+  check(/^timing \(\d+ ms in all\): s \d+ ms, n \d+ ms/.test(lines[0] ?? '') && /^  s: lib\.run (box 3×|sphere) /.test(lines[1] ?? '') && !/script time limit/.test(lines[0]), `timing lines: nodes slowest first, the script's stages under it (${lines.join(' | ')})`);
+  check(/the script time limit is 100 ms \(TOPOTOPO_SCRIPT_TIMEOUT_MS\)/.test(timingLines(r, 100)[0] ?? ''), 'timing lines say the script limit when the slowest node took half of it or more');
+  const again = await e.cook({ nodes: { s: { type: 'script', params: { code: busy(80) } }, n: { type: 'noise', in: ['s'] } }, output: 'n' });
+  check(!timingLines(again, e.scriptTimeoutMs, { minMs: 0 }).length, 'a cook from the cache has no timing lines');
+
+  // the CLI: the limit from the environment, its hint, and --timing
+  const gfile = path.join(tmp, 'busy_script.json');
+  fs.writeFileSync(gfile, JSON.stringify({ nodes: { s: { type: 'script', params: { code: busy(600) } } } }));
+  const cli = (env: Record<string, string>, ...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), gfile, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ...env } });
+  const short = cli({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '250' });
+  check(short.status === 1 && /error \[s\] script exceeded 250 ms \(infinite loop\?\) \(hint: the script time limit is 250 ms: .*TOPOTOPO_SCRIPT_TIMEOUT_MS/.test(short.stderr), `CLI: TOPOTOPO_SCRIPT_TIMEOUT_MS stops the script, and the error says how to raise it (${short.stderr.trim().split('\n')[0]})`);
+  const timed = cli({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '20000' }, '--timing');
+  check(timed.status === 0 && /^timing \(.* in all\): s /m.test(timed.stdout) && /^  s: lib\.run box 3× .*lib\.run sphere|^  s: lib\.run sphere .*lib\.run box 3×/m.test(timed.stdout), `CLI --timing lists the nodes and the script's lib.run time (${timed.stdout.split('\n').filter((l) => /timing|lib\.run/.test(l)).join(' | ')})`);
+  const nonsense = cli({ TOPOTOPO_SCRIPT_TIMEOUT_MS: 'abc' });
+  check(nonsense.status === 1 && /TOPOTOPO_SCRIPT_TIMEOUT_MS must be a positive number/.test(nonsense.stderr) && !/at .*\.ts:\d+/.test(nonsense.stderr), 'CLI: a timeout that is not a number fails with a plain message');
+
+  // the live viewer (topotopo view) honours the same variable
+  const { spawn } = await import('node:child_process');
+  const proc = spawn(process.execPath, [path.join(root, 'src', 'cli.ts'), 'view', gfile, '--port', '0'], { cwd: root, env: { ...process.env, TOPOTOPO_SCRIPT_TIMEOUT_MS: '250' } });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += d; });
+  proc.stderr.on('data', (d) => { out += d; });
+  const until = async (pred: () => boolean, ms: number) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 100)); return pred(); };
+  try {
+    const up = await until(() => /view: http:\/\/127\.0\.0\.1:\d+\//.test(out), 30000);
+    const url = up ? /view: (http:\/\/127\.0\.0\.1:\d+)\//.exec(out)![1] : '';
+    const info = up ? await (await fetch(`${url}/api/info?graph=busy_script`)).json() as any : null;
+    check(up && /script exceeded 250 ms/.test(String(info?.error)), `the viewer cooks under TOPOTOPO_SCRIPT_TIMEOUT_MS (${String(info?.error).split('\n')[0]})`);
+  } finally { proc.kill(); }
+}
+
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);
