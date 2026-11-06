@@ -1481,7 +1481,9 @@ None (generator).
 
 category: `curve` · aliases: `wire`, `tubes`
 
-Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Great for branches, cables, wireframes.
+Turn curves into tubes. Per-point radius from "width" (diameter) or radius × pscale. Great for branches, cables, wireframes.
+
+The tube radius at each point is half its "width" attribute when the curves carry width and use_width is on; pscale is then ignored, so particle trails with a small pscale keep the width they were given. Without width (or with use_width off) the radius is the radius param times point pscale (1 when there is none).
 
 **Inputs**
 
@@ -1493,10 +1495,10 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `radius` | float | `0.05` |  |  | `rad`, `wire_radius` | tube radius (used when no width attribute) |
+| `radius` | float | `0.05` |  |  | `rad`, `wire_radius` | tube radius when there is no width attribute (or use_width is off), multiplied by point pscale |
 | `divisions` | int | `8` | 3..1024 |  | `sides`, `cols` | sides around the tube |
 | `caps` | bool | `true` |  |  |  | cap the tube ends |
-| `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present |
+| `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present; pscale is then ignored |
 
 **Writes:** vertex uv; prim groups caps, sides
 

@@ -344,6 +344,36 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(bad.length === 0, `capped partial revolves are consistent, closed and outward for every angle, profile direction and flip (${cases} cooks)`, bad.slice(0, 6).join('\n'));
 }
 
+// ------------------------------------------------------------------ 5e. polywire width is not scaled by pscale
+// polywire multiplied width by pscale, so particle trails (pscale 0.05, width 0.2) came out 20 times too thin.
+
+{
+  const tubeRadius = async (code: string, params: Record<string, any> = {}) => {
+    const r = await engine.cook({ nodes: {
+      l: { type: 'line', params: { origin: [0, 0, 0], direction: [1, 0, 0], length: 2, points: 3 } },
+      w: { type: 'wrangle', in: ['l'], params: { code } },
+      t: { type: 'polywire', in: ['w'], params: { divisions: 16, ...params } },
+    }, output: 't' });
+    if (!r.ok || !r.geo) return NaN;
+    const b = r.geo.bbox();
+    return (b.max[1] - b.min[1]) / 2;
+  };
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  const w = await tubeRadius('@pscale = 0.05; @width = 0.2;');
+  check(near(w, 0.1), `polywire takes the radius from width alone when pscale is small (radius ${w}, want 0.1)`);
+  const wOff = await tubeRadius('@pscale = 0.05; @width = 0.2;', { use_width: false, radius: 0.5 });
+  check(near(wOff, 0.025), `polywire with use_width off keeps radius × pscale (radius ${wOff}, want 0.025)`);
+  const ps = await tubeRadius('@pscale = 2;', { radius: 0.1 });
+  check(near(ps, 0.2), `polywire without width keeps radius × pscale (radius ${ps}, want 0.2)`);
+  const sw = await engine.cook({ nodes: {
+    l: { type: 'line', params: { origin: [0, 0, 0], direction: [1, 0, 0], length: 2, points: 3 } },
+    w: { type: 'wrangle', in: ['l'], params: { code: '@pscale = 0.5; @width = 4;' } },
+    s: { type: 'sweep', in: ['w'], params: { radius: 0.2, divisions: 16, caps: false } },
+  }, output: 's' });
+  const sb = sw.geo?.bbox();
+  check(sb && near((sb.max[1] - sb.min[1]) / 2, 0.1), `sweep still scales its profile by pscale and ignores width (${sb ? (sb.max[1] - sb.min[1]) / 2 : errs(sw)})`);
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.
