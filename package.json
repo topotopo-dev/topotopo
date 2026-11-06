@@ -30,6 +30,7 @@
     "launcher/win32-x64/topotopo-open.exe",
     "!kernels/README.md",
     "!kernels/LICENSE",
+    "!launcher/README.md",
     "README.md",
     "LICENSE",
     "NOTICE"
