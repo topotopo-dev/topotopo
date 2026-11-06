@@ -9005,7 +9005,7 @@ category: `uv` · aliases: `uvproject`, `texture`, `uv_texture`
 
 Project UVs: planar, box (tri-planar per face), cylindrical or spherical.
 
-uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps. For cylindrical and spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four repeats); scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.
+uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center. u starts at the seam (the seam param, an angle around the axis) and grows turning right-handed about the axis. A face that the seam runs through keeps its own short stretch of u (its corners stay one turn apart from the neighbour on the far side), so the seam falls on the edges between faces and a whole number of tiles per turn wraps without a visible seam; a point on the axis (a pole, a cone tip) takes the u of its face. For cylindrical and spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four repeats), so one count gives surfaces of different radii different tile sizes (a 0.4 m post and a 3.6 m drum both get scale[0] tiles around): to keep tiles the same size, give each radius its own count, about 2π · radius / tile width. scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.
 
 **Inputs**
 
@@ -9023,6 +9023,7 @@ uv = world position / scale + offset (no packing: the uv runs over many tiles, f
 | `scale` | vec2 | `[1,1]` |  |  |  | box/planar: world units per UV tile; cylindrical/spherical: scale[0] is the number of tiles around the axis (a count, not a length), scale[1] is metres per tile along the axis (cylindrical) or the number of tiles pole to pole (spherical) |
 | `offset` | vec2 | `[0,0]` |  |  |  | uv offset |
 | `center` | vec3 | `[0,0,0]` |  |  |  | projection center (cyl/sph) |
+| `seam` | float | `0` |  |  | `seam_angle` | cylindrical/spherical: where the seam (u = 0) lies, in degrees around the axis, turning right-handed about it (counter-clockwise seen from +axis). 0 = towards -Z for axis y (-Y for axis x, -X for axis z); axis y: 90 = -X, 180 = +Z, 270 = +X. Put it where nobody looks |
 
 **Writes:** vertex uv
 
@@ -9033,7 +9034,8 @@ uv = world position / scale + offset (no packing: the uv runs over many tiles, f
   "type": "uv_project",
   "params": {
     "method": "cylindrical",
-    "axis": "y"
+    "axis": "y",
+    "seam": 90
   }
 }
 ```

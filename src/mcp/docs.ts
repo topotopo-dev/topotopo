@@ -1301,8 +1301,11 @@ Which node:
                tiling textures, boxes. box: each polygon along the axis its normal is closest to (X faces u = z, v = y;
                Y faces u = x, v = z; Z faces u = x, v = y); both sides of an axis share it, so faces looking along +X,
                +Y and -Z are MIRRORED (text reads backwards; inspect uv counts them) and -X, -Y, +Z read right.
-               cylindrical scale[0] = tile count around the axis; its top and bottom annuli collapse, so give them a prim
-               group and project them again with method box / planar and group.
+               cylindrical scale[0] = tile count around the axis (a count per turn, so nested radii get different tile
+               sizes: a 0.4 m post and a 3.6 m drum at the same count; give each radius about 2π · r / tile width);
+               seam = the angle where u wraps (0 = -Z for axis y, 90 = -X, 180 = +Z, 270 = +X), and a face the seam
+               runs through keeps its own short uv (the seam lies on edges); its top and bottom annuli collapse, so
+               give them a prim group and project them again with method box / planar and group.
   uv_unwrap    automatic (xatlas): cuts charts by angle/cost, flattens and packs into 0..1. Default for props and
                hard-surface. Keeps polygons; writes prim chart. Each connected piece is charted on its own; polygons
                xatlas cuts across charts become triangles (exact uv); faces with no area collapse onto a neighbour's
@@ -1347,7 +1350,10 @@ position of each, and their areas; folds inside one chart included; shared edges
 overlap.inTile (between atlas charts, each inside one tile: what a bake suffers), overlap.tiling (a chart runs across
 tile borders, as uv_project over many tiles does: a repeating texture, flagged tiling:true; expected) and
 overlap.acrossLods (prims named _lod0 / _lod1 … share the uv space on purpose); collapsed / non-finite / out-of-tile
-triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, utilization (exact for a
+triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, wrapSeam (faces a wrap seam
+runs through: uv from an angle, cylindrical or spherical, with corners at both ends of the turn, so one face takes the
+whole turn's tiles mirrored; named with their position and kept out of mirrored and overlap; uv_project keeps its seam
+on edges, and its seam param turns where), utilization (exact for a
 clean atlas in 0..1, else a labelled raster ESTIMATE; tileUtilization per UDIM tile), texel density (density: overall,
 per chart 5 % / median / 95 %, the lowest and highest chart and where; texels/m with a resolution) and per-piece
 (prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
