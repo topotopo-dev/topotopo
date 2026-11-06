@@ -226,9 +226,13 @@ export function listing(dir: string): string[] {
 
 const sameList = (a: string[] | undefined, b: string[]) => !!a && a.length === b.length && [...a].sort(byCode).every((x, i) => x === b[i]);
 
-/** A record's path for a file: relative to the package (posix) inside the engine project, else absolute (posix). */
-function relOf(dir: string, project: string, abs: string): string {
-  if (!within(abs, project)) return posix(path.resolve(abs));
+/**
+ * A record's path for a file: relative to the package (posix) inside the engine project or the workspace around it
+ * (its topotopo-workspace.json, shared copies and libraries: every checkout has them at the same place relative to the
+ * package), else absolute (posix).
+ */
+function relOf(dir: string, roots: (string | null | undefined)[], abs: string): string {
+  if (!roots.some((r) => r && within(abs, r))) return posix(path.resolve(abs));
   return posix(path.relative(dir, abs)) || '.';
 }
 
@@ -392,7 +396,7 @@ function recordingHost(host: Host, rec: Recorder): Host {
 const MAX_CANDIDATES = 8;
 /** The cache's size cap: the oldest blobs go first. */
 export const CACHE_MAX_BYTES = 2 * 2 ** 30;
-const CACHE_FORMAT = 1;
+const CACHE_FORMAT = 2;
 
 /** The cook cache, shared by every checkout and worktree: $TOPOTOPO_CACHE/cook, else ~/.topotopo/cache/cook. */
 export function cacheRoot(): string {
@@ -520,10 +524,10 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
 
     const shas = new Shas();
     const abs = (rel: string) => absOf(job.dir, rel);
-    const rel = (p: string) => relOf(job.dir, flavour.project, p);
     const store = copiesFor(job.dir);
     const ws = locate(job.dir).workspace;
-    const fixed = [manifestRel(job), ...(fs.existsSync(path.join(store.packages, 'lock.json')) ? [rel(path.join(store.packages, 'lock.json'))] : []), ...(ws ? [rel(path.join(ws, WORKSPACE_FILE))] : [])];
+    const rel = (p: string) => relOf(job.dir, [flavour.project, ws], p);
+    const fixed =[manifestRel(job), ...(fs.existsSync(path.join(store.packages, 'lock.json')) ? [rel(path.join(store.packages, 'lock.json'))] : []), ...(ws ? [rel(path.join(ws, WORKSPACE_FILE))] : [])];
     const listings = new Map<string, string[]>();
     const listingOf = (folder: string) => { let l = listings.get(folder); if (!l) { l = listing(abs(folder)); listings.set(folder, l); } return l; };
 
@@ -617,10 +621,11 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
       };
       if (signal.aborted) { fail([issue(`the cook timed out after ${job.timeout} s before this output`, 'raise the timeout (cook_timeout in the editor settings, --timeout)')], [rel(x.file), ...fixed].sort(byCode), []); continue; }
 
-      // 1. the cache: a result whose deps and folders match the package as it is now
+      // 1. the cache: a result whose deps and folders match the package as it is now, cooked with the same manifest,
+      // lock and workspace file (one cooked outside this workspace resolved its packages another way)
       const key = cacheKey(flavour.for, options.instancing, pkgName, x.id);
       const hit = flags.force || flags.noCache ? null : cacheLookup(key, (c) =>
-        Object.entries(c.deps).every(([d, s]) => shas.of(abs(d)) === s) && Object.entries(c.folders).every(([f, l]) => sameList(l, listingOf(f))));
+        fixed.every((d) => d in c.deps) && Object.entries(c.deps).every(([d, s]) => shas.of(abs(d)) === s) && Object.entries(c.folders).every(([f, l]) => sameList(l, listingOf(f))));
       let result: { deps: string[]; folders: string[]; kind: Kind; instances: Record<string, number>; warnings: string[]; files: { name: string; bytes: Uint8Array }[] } | null = null;
       let state: OutputState = 'written';
       if (hit) {
@@ -665,7 +670,7 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
         const folders = [...rec.dirs.values()].map(rel).filter((f) => !isUrl(f)).sort(byCode);
         for (const u of rec.urls) if (!notes.includes(`${x.id} reads ${u}: a URL's changes are not tracked (put the file in inputs/)`)) notes.push(`${x.id} reads ${u}: a URL's changes are not tracked (put the file in inputs/)`);
         for (const d of deps) if (path.isAbsolute(d) || /^[A-Za-z]:\//.test(d)) {
-          const said = `${x.id} reads ${d}, outside the engine project: a checkout elsewhere does not have it (put the file in inputs/)`;
+          const said = `${x.id} reads ${d}, outside the engine project and its workspace: a checkout elsewhere does not have it (put the file in inputs/)`;
           if (!notes.includes(said)) notes.push(said);
         }
         if (errors.length || !cooked) { fail(errors, deps, folders); continue; }
@@ -744,11 +749,11 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
 
   /** The files an output read, as the record names them: its reads, its graph, the package's assets, manifest, lock and workspace file, the version records of the copies it uses. */
   function depsOf(x: PackageOutput, spec: GraphSpec, e: Engine, uses: PackageUses, shas: Shas, rec: Recorder): string[] {
-    const rel = (p: string) => relOf(job.dir, flavour.project, p);
+    const ws = locate(job.dir).workspace;
+    const rel = (p: string) => relOf(job.dir, [flavour.project, ws], p);
     const set = new Set<string>([rel(x.file), manifestRel(job), ...listing(path.join(job.dir, 'assets')).map((f) => `assets/${f}`)]);
     const store = copiesFor(job.dir);
     if (fs.existsSync(path.join(store.packages, 'lock.json'))) set.add(rel(path.join(store.packages, 'lock.json')));
-    const ws = locate(job.dir).workspace;
     if (ws) set.add(rel(path.join(ws, WORKSPACE_FILE)));
     for (const { abs, sha } of rec.files.values()) {
       if (OWN.some((d) => within(abs, d)) && !within(abs, job.dir)) continue;

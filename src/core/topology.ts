@@ -405,6 +405,7 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
     }
     const flip = poly2 * tri2 < 0;
     if (n > 4 && planarPoly(P, vp, s, n, nrm)) delaunayFlips(flat, idx);
+    keepDroppedCorners(idx, n);
     for (let k = 0; k < idx.length; k += 3) {
       const a = s + idx[k], b = s + idx[k + 1], c = s + idx[k + 2];
       if (flip) tris.push(a, c, b); else tris.push(a, b, c);
@@ -412,6 +413,38 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
     }
   }
   return { tris: Uint32Array.from(tris), triPrim: Uint32Array.from(tp) };
+}
+
+/**
+ * earcut leaves out corners that repeat or lie on a straight run between their neighbours, so the polygon's edges
+ * through them are missing from its triangles: a crack (T-junction) against the neighbouring face in an export, and
+ * open edges for the mesh kernel. Each run of left-out corners goes back into the triangle on the edge that skips it,
+ * as a fan from that triangle's third corner, in the triangle's own winding. `idx` holds local corner indices 0..n-1.
+ */
+function keepDroppedCorners(idx: number[], n: number) {
+  const used = new Uint8Array(n);
+  for (const i of idx) used[i] = 1;
+  const first = used.indexOf(1);
+  if (first < 0 || used.indexOf(0) < 0) return;
+  for (let k = 0; k < n; k++) {
+    const a = (first + k) % n;
+    if (!used[a]) continue;
+    const run: number[] = [];
+    let b = (a + 1) % n;
+    while (!used[b] && run.length < n) { run.push(b); b = (b + 1) % n; }
+    if (!run.length) continue;
+    for (let t = 0; t < idx.length; t += 3) {
+      const tri = [idx[t], idx[t + 1], idx[t + 2]];
+      let fan: number[] | null = null;
+      for (let r = 0; r < 3 && !fan; r++) {
+        const x = tri[r], y = tri[(r + 1) % 3], c = tri[(r + 2) % 3];
+        // the triangle runs a → b: a, run…, b around c; it runs b → a: b, run reversed…, a around c
+        const chain = x === a && y === b ? [a, ...run, b] : x === b && y === a ? [b, ...run.slice().reverse(), a] : null;
+        if (chain) { fan = []; for (let i = 0; i + 1 < chain.length; i++) fan.push(chain[i], chain[i + 1], c); }
+      }
+      if (fan) { idx.splice(t, 3, ...fan); break; }
+    }
+  }
 }
 
 /** Is polygon s..s+n flat (every corner within a millionth of its size of the plane through its centroid)? */
