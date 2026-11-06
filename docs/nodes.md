@@ -1025,6 +1025,8 @@ category: `curve` · aliases: `linear_extrude`, `extrude2d`
 
 Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.
 
+A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -1481,7 +1483,9 @@ None (generator).
 
 category: `curve` · aliases: `wire`, `tubes`
 
-Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Great for branches, cables, wireframes.
+Turn curves into tubes. Per-point radius from "width" (diameter) or radius × pscale. Great for branches, cables, wireframes.
+
+The tube radius at each point is half its "width" attribute when the curves carry width and use_width is on; pscale is then ignored, so particle trails with a small pscale keep the width they were given. Without width (or with use_width off) the radius is the radius param times point pscale (1 when there is none).
 
 **Inputs**
 
@@ -1493,10 +1497,10 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `radius` | float | `0.05` |  |  | `rad`, `wire_radius` | tube radius (used when no width attribute) |
+| `radius` | float | `0.05` |  |  | `rad`, `wire_radius` | tube radius when there is no width attribute (or use_width is off), multiplied by point pscale |
 | `divisions` | int | `8` | 3..1024 |  | `sides`, `cols` | sides around the tube |
 | `caps` | bool | `true` |  |  |  | cap the tube ends |
-| `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present |
+| `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present; pscale is then ignored |
 
 **Writes:** vertex uv; prim groups caps, sides
 
@@ -2326,13 +2330,13 @@ Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, or
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `translate` | vec3 | `[0,0,0]` |  |  | `t`, `move`, `offset`, `position` | translation |
-| `rotate` | vec3 | `[0,0,0]` |  |  | `r`, `rot`, `rotation` | rotation in degrees about X, Y, Z |
+| `rotate` | vec3 | `[0,0,0]` |  |  | `r`, `rot`, `rotation` | rotation in degrees about the world X, Y and Z axes, right-handed (counter-clockwise seen from the + end of the axis), X first, then Y, then Z (rotate_order xyz): [0, 0, 40] turns +Y to (-0.64, 0.77, 0), [0, 90, 0] turns +X to -Z |
 | `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale (a single number = uniform) |
 | `uniform_scale` | float | `1` |  |  | `uniformscale`, `scale_uniform` | extra uniform scale multiplier |
 | `pivot` | vec3 | `[0,0,0]` |  |  | `p` | pivot for rotation and scale |
 | `pivot_mode` | enum | `"param"` |  | `param`, `centroid`, `bbox_min`, `bbox_center_bottom` |  | where the pivot comes from |
 | `order` | enum | `"srt"` |  | `srt`, `str`, `rst`, `rts`, `tsr`, `trs` | `xord` | transform order (srt = scale, then rotate, then translate) |
-| `rotate_order` | enum | `"xyz"` |  | `xyz`, `xzy`, `yxz`, `yzx`, `zxy`, `zyx` | `rord` | rotation order |
+| `rotate_order` | enum | `"xyz"` |  | `xyz`, `xzy`, `yxz`, `yzx`, `zxy`, `zyx` | `rord` | order the three rotations apply in, each about a world axis: xyz = X first, then Y, then Z |
 | `group` | group (point) | `""` |  |  |  | point group to transform ("" = all) |
 
 **Example**
@@ -4582,7 +4586,7 @@ For holes, non-manifold edges, inconsistent winding and self-intersections use m
 | `remove_degenerate` | bool | `true` |  |  |  | remove prims with repeated/too few points |
 | `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side |
 | `remove_unused_points` | bool | `true` |  |  |  | remove points not used by prims (only when the geometry has prims) |
-| `fix_winding` | bool | `false` |  |  |  | make closed meshes face outward |
+| `fix_winding` | bool | `false` |  |  |  | make the winding consistent in each connected piece (most of its area decides, so a few flipped faces turn back), then turn closed pieces outward; a closed piece inside another one (the inner wall of a hollow solid) stays inward |
 
 **Example**
 
@@ -9003,7 +9007,7 @@ category: `uv` · aliases: `uvproject`, `texture`, `uv_texture`
 
 Project UVs: planar, box (tri-planar per face), cylindrical or spherical.
 
-uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps. For cylindrical and spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four repeats); scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.
+uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center. u starts at the seam (the seam param, an angle around the axis) and grows turning right-handed about the axis. A face that the seam runs through keeps its own short stretch of u (its corners stay one turn apart from the neighbour on the far side), so the seam falls on the edges between faces and a whole number of tiles per turn wraps without a visible seam; a point on the axis (a pole, a cone tip) takes the u of its face. For cylindrical and spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four repeats), so one count gives surfaces of different radii different tile sizes (a 0.4 m post and a 3.6 m drum both get scale[0] tiles around): to keep tiles the same size, give each radius its own count, about 2π · radius / tile width. scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.
 
 **Inputs**
 
@@ -9021,6 +9025,7 @@ uv = world position / scale + offset (no packing: the uv runs over many tiles, f
 | `scale` | vec2 | `[1,1]` |  |  |  | box/planar: world units per UV tile; cylindrical/spherical: scale[0] is the number of tiles around the axis (a count, not a length), scale[1] is metres per tile along the axis (cylindrical) or the number of tiles pole to pole (spherical) |
 | `offset` | vec2 | `[0,0]` |  |  |  | uv offset |
 | `center` | vec3 | `[0,0,0]` |  |  |  | projection center (cyl/sph) |
+| `seam` | float | `0` |  |  | `seam_angle` | cylindrical/spherical: where the seam (u = 0) lies, in degrees around the axis, turning right-handed about it (counter-clockwise seen from +axis). 0 = towards -Z for axis y (-Y for axis x, -X for axis z); axis y: 90 = -X, 180 = +Z, 270 = +X. Put it where nobody looks |
 
 **Writes:** vertex uv
 
@@ -9031,7 +9036,8 @@ uv = world position / scale + offset (no packing: the uv runs over many tiles, f
   "type": "uv_project",
   "params": {
     "method": "cylindrical",
-    "axis": "y"
+    "axis": "y",
+    "seam": 90
   }
 }
 ```
@@ -15779,7 +15785,7 @@ category: `texture` · aliases: `texture_material`, `material_textures`, `attach
 
 Attach images as texture maps (base colour, normal, roughness, ORM) to a named material and assign it; the images travel with the geometry and exporters embed them.
 
-Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other packages assign through input 1 of the material node.
+Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other packages assign through input 1 of the material node. It sets no alpha mode: for a blended or cut-out material put a material node {name, alpha_mode: "blend" or "mask"} in input 0 (with no input of its own for a material output); this node adds the maps to it and keeps the mode.
 
 **Inputs**
 

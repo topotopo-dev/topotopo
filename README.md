@@ -398,7 +398,10 @@ node src/cli.ts --help-topic export   # a help topic; --catalog ends with the li
 `--var name=value` sets a graph var for one run without editing the file (repeat it; numbers, `true`/`false` and JSON
 values are parsed, other text is a string; an unknown name lists the graph's vars). `--output <name>` renders, exports
 and inspects a named output (the graph's `"outputs"`) instead of the default one; `--output` naming a node (or `--node`
-naming an output) says which flag to use. Relative paths inside a graph (file nodes, texture maps) read from its package
+naming an output) says which flag to use. Repeat `--output` to export several outputs in one run: each takes the
+options after it up to the next `--output` (its `--export`, `--render`, `--inspect`, export options), the options before
+the first apply to every output, and the graph, its packages and the nodes the outputs share (a material's maps) load
+and cook once (`graph.json --output wall --export wall.glb --output gate --export gate.glb`). Relative paths inside a graph (file nodes, texture maps) read from its package
 folder: the nearest folder with a `.topo` file at or above the graph file, else the graph file's folder (the MCP server
 and the viewer use the same rule), and `--export-all` writes into that folder's `exports/`. Several `--render` flags
 share one cook: the options after a `--render` apply to that render, those before the first to every render (a warning

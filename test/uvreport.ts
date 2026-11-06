@@ -69,7 +69,7 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   check(stacked.overlap.pairs > 0 && near(stacked.overlap.area, 0.25, 1e-12), `a mirrored copy stacked on its twin overlaps it fully (area ${stacked.overlap.area})`);
   // one connected strip whose third quad folds back over the first in uv
   const fold = uvReport(mesh([quad(0, 0, 0, 0, 0.3, 0.3), quad(1, 0, 0.3, 0, 0.6, 0.3), { P: [[2, 0, 0], [3, 0, 0], [3, 0, 1], [2, 0, 1]], uv: [[0.6, 0], [0.1, 0.02], [0.1, 0.28], [0.6, 0.3]] }]));
-  check(fold.charts === 1 && fold.overlap.sameChartPairs > 0 && fold.overlap.sameChartPairs === fold.overlap.pairs, `a fold inside one chart is reported as same-chart overlap (${fold.overlap.sameChartPairs} pairs)`);
+  check(fold.charts === 1 && fold.overlap.sameChartPairs > 0 && fold.overlap.sameChartPairs === fold.overlap.pairs && fold.wrapSeam.prims === 0, `a fold inside one chart is reported as same-chart overlap, not as a wrap seam (${fold.overlap.sameChartPairs} pairs)`);
 }
 
 // ---------------------------------------------------------------- collapsed, missing, non-finite, out of tile

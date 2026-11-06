@@ -1154,9 +1154,14 @@ defineNode({
     'its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a ' +
     'texture reads backwards there, and their uv winding is opposite to the polygon\'s: inspect uv counts them as mirrored), while -X, -Y and ' +
     '+Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u ' +
-    '= angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps. For cylindrical and ' +
+    '= angle, v = polar angle (0..1 times scale[1]); both measured from center. u starts at the seam (the seam param, an angle around the ' +
+    'axis) and grows turning right-handed about the axis. A face that the seam runs through keeps its own short stretch of u (its corners ' +
+    'stay one turn apart from the neighbour on the far side), so the seam falls on the edges between faces and a whole number of tiles per ' +
+    'turn wraps without a visible seam; a point on the axis (a pole, a cone tip) takes the u of its face. For cylindrical and ' +
     'spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four ' +
-    'repeats); scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ' +
+    'repeats), so one count gives surfaces of different radii different tile sizes (a 0.4 m post and a 3.6 m drum both get scale[0] tiles ' +
+    'around): to keep tiles the same size, give each radius its own count, about 2π · radius / tile width. scale[1] is metres per v tile for ' +
+    'cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ' +
     'ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project ' +
     'with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.',
   aliases: ['uvproject', 'texture', 'uv_texture'],
@@ -1168,40 +1173,72 @@ defineNode({
     scale: { type: 'vec2', default: [1, 1], desc: 'box/planar: world units per UV tile; cylindrical/spherical: scale[0] is the number of tiles around the axis (a count, not a length), scale[1] is metres per tile along the axis (cylindrical) or the number of tiles pole to pole (spherical)' },
     offset: { type: 'vec2', default: [0, 0], desc: 'uv offset' },
     center: { type: 'vec3', default: [0, 0, 0], desc: 'projection center (cyl/sph)' },
+    seam: { type: 'float', default: 0, desc: 'cylindrical/spherical: where the seam (u = 0) lies, in degrees around the axis, turning right-handed about it (counter-clockwise seen from +axis). 0 = towards -Z for axis y (-Y for axis x, -X for axis z); axis y: 90 = -X, 180 = +Z, 270 = +X. Put it where nobody looks', aliases: ['seam_angle'] },
   },
   outputs: 'vertex uv',
-  example: { type: 'uv_project', params: { method: 'cylindrical', axis: 'y' } },
+  example: { type: 'uv_project', params: { method: 'cylindrical', axis: 'y', seam: 90 } },
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const sel = mask(g, 'prim', p.group);
     if (!sel) g.points.delete('uv');
     const uv = g.vertices.add('uv', 'float', 3).data as Float64Array;
-    const pn = primNormals(g), vprim = g.vertexPrims();
+    const pn = primNormals(g);
     const Pd = g.P;
     const ax = 'xyz'.indexOf(p.axis);
-    for (let v = 0; v < g.numVertices; v++) {
-      if (sel && !sel[vprim[v]]) continue;
-      const pt = g.vertexPoint[v];
-      const x = Pd[pt * 3], y = Pd[pt * 3 + 1], z = Pd[pt * 3 + 2];
-      let u = 0, w = 0;
-      if (p.method === 'planar' || p.method === 'box') {
+    const i0 = (ax + 1) % 3, i1 = (ax + 2) % 3;
+    const round = p.method === 'cylindrical' || p.method === 'spherical';
+    const seam = p.seam / 360;
+    for (let pr = 0; pr < g.numPrims; pr++) {
+      if (sel && !sel[pr]) continue;
+      const v0 = g.primStart[pr], v1 = g.primStart[pr + 1];
+      if (!round) {
         let a = ax;
         if (p.method === 'box') {
-          const pr = vprim[v];
           const n = [Math.abs(pn[pr * 3]), Math.abs(pn[pr * 3 + 1]), Math.abs(pn[pr * 3 + 2])];
           a = n[0] >= n[1] && n[0] >= n[2] ? 0 : n[1] >= n[2] ? 1 : 2;
         }
-        const q = [x, y, z];
-        const [i0, i1] = a === 0 ? [2, 1] : a === 1 ? [0, 2] : [0, 1];
-        u = q[i0] / p.scale[0]; w = q[i1] / p.scale[1];
-      } else {
-        const d = [x - p.center[0], y - p.center[1], z - p.center[2]];
-        const i0 = (ax + 1) % 3, i1 = (ax + 2) % 3;
-        const ang = Math.atan2(d[i1], d[i0]) / (2 * Math.PI) + 0.5;
-        if (p.method === 'cylindrical') { u = ang * p.scale[0]; w = d[ax] / p.scale[1]; }
-        else { const r = Math.hypot(d[0], d[1], d[2]) || 1; u = ang * p.scale[0]; w = (Math.acos(Math.max(-1, Math.min(1, d[ax] / r))) / Math.PI) * p.scale[1]; }
+        const [j0, j1] = a === 0 ? [2, 1] : a === 1 ? [0, 2] : [0, 1];
+        for (let v = v0; v < v1; v++) {
+          const pt = g.vertexPoint[v];
+          uv[v * 3] = Pd[pt * 3 + j0] / p.scale[0] + p.offset[0]; uv[v * 3 + 1] = Pd[pt * 3 + j1] / p.scale[1] + p.offset[1]; uv[v * 3 + 2] = 0;
+        }
+        continue;
       }
-      uv[v * 3] = u + p.offset[0]; uv[v * 3 + 1] = w + p.offset[1]; uv[v * 3 + 2] = 0;
+      // angle per corner in turns from the seam (0..1), then unwrapped along the face so a face the seam runs through
+      // keeps its short span; corners on the axis have no angle and take the face's mean
+      const n = v1 - v0, A = new Float64Array(n), onAxis = new Uint8Array(n);
+      let prev = NaN, first = NaN, sum = 0, cnt = 0;
+      for (let k = 0; k < n; k++) {
+        const pt = g.vertexPoint[v0 + k];
+        const d0 = Pd[pt * 3 + i0] - p.center[i0], d1 = Pd[pt * 3 + i1] - p.center[i1];
+        if (Math.hypot(d0, d1) < 1e-9) { onAxis[k] = 1; continue; }
+        let a = Math.atan2(d1, d0) / (2 * Math.PI) + 0.5 - seam;
+        a -= Math.floor(a);
+        if (Number.isNaN(prev)) first = a;
+        else { let dl = a - prev; dl -= Math.round(dl); a = prev + dl; }
+        A[k] = prev = a; sum += a; cnt++;
+      }
+      if (cnt) {
+        // a face around the axis (a cap) winds a whole turn: unwrapping cannot help it, keep its plain angles
+        let close = first - prev; close -= Math.round(close);
+        const around = Math.abs(prev + close - first) > 0.5;
+        const shift = around ? 0 : Math.floor(sum / cnt);
+        let mean = 0;
+        for (let k = 0; k < n; k++) if (!onAxis[k]) { if (around) A[k] -= Math.floor(A[k]); else A[k] -= shift; mean += A[k]; }
+        mean /= cnt;
+        for (let k = 0; k < n; k++) if (onAxis[k]) A[k] = mean;
+      } else A.fill(0.5);
+      for (let k = 0; k < n; k++) {
+        const v = v0 + k, pt = g.vertexPoint[v];
+        const dA = Pd[pt * 3 + ax] - p.center[ax];
+        let w: number;
+        if (p.method === 'cylindrical') w = dA / p.scale[1];
+        else {
+          const r = Math.hypot(Pd[pt * 3] - p.center[0], Pd[pt * 3 + 1] - p.center[1], Pd[pt * 3 + 2] - p.center[2]) || 1;
+          w = (Math.acos(Math.max(-1, Math.min(1, dA / r))) / Math.PI) * p.scale[1];
+        }
+        uv[v * 3] = A[k] * p.scale[0] + p.offset[0]; uv[v * 3 + 1] = w + p.offset[1]; uv[v * 3 + 2] = 0;
+      }
     }
     return g;
   },

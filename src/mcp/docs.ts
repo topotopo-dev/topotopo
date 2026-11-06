@@ -21,7 +21,7 @@ PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pa
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
 CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the floor, from pins (pin_group / input 2) and in wind; inflate {pressure} puffs a closed mesh into a cushion or balloon. See help topic "cloth".
 
-CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
+CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
 HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
@@ -201,6 +201,9 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   JSON values are parsed, other text is a string; an unknown name lists the graph's vars), and --output <id> renders,
   exports and inspects a named output instead of the default: topotopo terrain.json --output land --var relief=8
   --render r.png --export land.glb. Exports record the vars they were made with (help topic "export", SOURCE).
+  Several outputs in one run (the graph and the maps they share load and cook once): repeat --output, each taking the
+  options after it up to the next one; options before the first apply to all: topotopo kit.json --scale 100
+  --output wall --export wall.glb --output gate --export gate.glb --render gate.png
 - The viewer shows each cook as it runs (the node, the time) and has a Stop button: a cook a person stopped fails with
   "cook stopped" at the node it stopped at. That is their decision, not an error to retry: ask before cooking it again.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
@@ -535,6 +538,11 @@ MATERIAL OUTPUTS (a material as a package output, kind "material": materials and
           roughness} with no input for a plain one.
           Each map keeps its texture node's resolution (a 4k normal beside a 512 mask); expose one as a param (a var
           such as "normal_resolution" read by that node) to let a use change it.
+  alpha   texture_to_material sets no alpha mode, so on its own the material is opaque. Blended (glass, stains) or
+          cut-out (grates) takes two nodes: material {name:"glass", alpha_mode:"blend"} with no input (the values:
+          roughness, metallic, alpha), then texture_to_material {material:"glass", base_color:"glass_color"} with that
+          node in input 0 and the images in input 1 ("in": ["glass_mat", "maps"]) → the output. It adds the maps and
+          keeps the mode; the base colour image's alpha is the transparency. Cut-outs: alpha_mode "mask", alpha_cutoff.
   use     {"type":"owner/materials/steel", "params":{...}} → input 1 of material {group:"@name=body*"} on the mesh: the
           material and its maps are copied in and assigned (from names one when the source holds several; name
           renames it). The material node's own colour and map params are not used then.
@@ -1301,8 +1309,11 @@ Which node:
                tiling textures, boxes. box: each polygon along the axis its normal is closest to (X faces u = z, v = y;
                Y faces u = x, v = z; Z faces u = x, v = y); both sides of an axis share it, so faces looking along +X,
                +Y and -Z are MIRRORED (text reads backwards; inspect uv counts them) and -X, -Y, +Z read right.
-               cylindrical scale[0] = tile count around the axis; its top and bottom annuli collapse, so give them a prim
-               group and project them again with method box / planar and group.
+               cylindrical scale[0] = tile count around the axis (a count per turn, so nested radii get different tile
+               sizes: a 0.4 m post and a 3.6 m drum at the same count; give each radius about 2π · r / tile width);
+               seam = the angle where u wraps (0 = -Z for axis y, 90 = -X, 180 = +Z, 270 = +X), and a face the seam
+               runs through keeps its own short uv (the seam lies on edges); its top and bottom annuli collapse, so
+               give them a prim group and project them again with method box / planar and group.
   uv_unwrap    automatic (xatlas): cuts charts by angle/cost, flattens and packs into 0..1. Default for props and
                hard-surface. Keeps polygons; writes prim chart. Each connected piece is charted on its own; polygons
                xatlas cuts across charts become triangles (exact uv); faces with no area collapse onto a neighbour's
@@ -1347,7 +1358,10 @@ position of each, and their areas; folds inside one chart included; shared edges
 overlap.inTile (between atlas charts, each inside one tile: what a bake suffers), overlap.tiling (a chart runs across
 tile borders, as uv_project over many tiles does: a repeating texture, flagged tiling:true; expected) and
 overlap.acrossLods (prims named _lod0 / _lod1 … share the uv space on purpose); collapsed / non-finite / out-of-tile
-triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, utilization (exact for a
+triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, wrapSeam (faces a wrap seam
+runs through: uv from an angle, cylindrical or spherical, with corners at both ends of the turn, so one face takes the
+whole turn's tiles mirrored; named with their position and kept out of mirrored and overlap; uv_project keeps its seam
+on edges, and its seam param turns where), utilization (exact for a
 clean atlas in 0..1, else a labelled raster ESTIMATE; tileUtilization per UDIM tile), texel density (density: overall,
 per chart 5 % / median / 95 %, the lowest and highest chart and where; texels/m with a resolution) and per-piece
 (prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
@@ -1374,6 +1388,16 @@ FRAMING: every 3D view fits the bounds: the bbox corners fill the view with a sm
     e.g. render {views:"front", ortho_scale:0.5} shows 50 cm across the front view, at any size.
   size: pixels per view, n or "WxH": size:"1600x600" gives wide views a long prop fills (the fit follows the aspect);
     scale 2 makes a 2× image.
+CAMERA BY POSITION (match a concept or game camera; the fit can hide a piece that is 15 % too narrow):
+  camera: {from: [x, y, z], to: [x, y, z], fov: 40}: the persp view's eye at from, looking at to, world +Y up, fov in
+    degrees across the view's WIDTH (horizontal, as Unreal and Houdini give it; default 40, about a 50 mm lens). A
+    vertical fov v at a W×H view is 2·atan(tan(v/2)·W/H). Nothing is fitted: what the lens sees is drawn, cut at the
+    view's edges. Give size the concept's aspect ("1920x1080") and the concept as underlay: with a camera the underlay
+    fills the view (underlay_fit "view"). azimuth, elevation, look_at, zoom and bounds do not move it (a note says
+    so). Without views the render is the one camera view; ortho views in views still fit. A camera standing among the
+    geometry loses the triangles that reach behind it (a note counts them).
+    e.g. render {camera:{from:[6, 1.7, 9], to:[0, 2, 0], fov:60}, size:"1600x900", underlay:"inputs/concept.png"}
+    CLI: --from 6,1.7,9 --to 0,2,0 --fov 60 --size 1600x900 --underlay concept.png
 BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no ground grid or axis gizmo; the footer
   stays). grid:false drops the persp ground grid. underlay:"inputs/side.png" draws a reference image (PNG, relative to
   the package) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
@@ -1436,6 +1460,7 @@ CLI: several renders per cook: the options after a --render apply to that render
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
   --shading pbr --exposure 0.5 --views front_left --size 1600x600 --transparent --no-grid --sockets
   --azimuth -90 --elevation 10 --look-at 0.6,0.15,0 --zoom 4 --ortho-scale 0.5
+  --from 6,1.7,9 --to 0,2,0 --fov 60 (a camera by position)
   --underlay ref.png --underlay-opacity 0.6 --underlay-fit width (CLI paths are relative to the current folder)
   --no-view-labels --heightfield-res full --heightfield-layer flow`,
 

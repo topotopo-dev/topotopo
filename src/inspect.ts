@@ -293,7 +293,7 @@ export function summaryLines(g: Geometry): string[] {
   if (uvA && g.numPrims) {
     const r = uvReport(g, { maxPairTests: 500_000, maxExamples: 1 });
     const ov = r.overlap;
-    out.push(`uv: ${n(r.charts)} charts${r.tiling ? `, TILING (${n(r.tilingCharts)} charts run across tile borders)` : ''}; in-tile overlap ${n(ov.inTile.pairs)} pairs${ov.inTile.pairs && ov.examples[0] ? ` (first ${ov.examples[0].where[0]})` : ''}${ov.acrossLods.pairs ? `, across LODs ${n(ov.acrossLods.pairs)}` : ''}; ${n(r.outOfTile)} triangles outside 0..1; ${n(r.collapsed)} collapsed; utilization ${(r.utilization.value * 100).toFixed(1)}%${r.utilization.method === 'raster-estimate' ? ' (estimate)' : ''}${r.complete ? '' : ' (INCOMPLETE: inspect detail "uv")'}`);
+    out.push(`uv: ${n(r.charts)} charts${r.tiling ? `, TILING (${n(r.tilingCharts)} charts run across tile borders)` : ''}; in-tile overlap ${n(ov.inTile.pairs)} pairs${ov.inTile.pairs && ov.examples[0] ? ` (first ${ov.examples[0].where[0]})` : ''}${ov.acrossLods.pairs ? `, across LODs ${n(ov.acrossLods.pairs)}` : ''}; ${n(r.outOfTile)} triangles outside 0..1; ${n(r.collapsed)} collapsed${r.wrapSeam.prims ? `; ${n(r.wrapSeam.prims)} faces span a wrap seam (first ${r.wrapSeam.examples[0]})` : ''}; utilization ${(r.utilization.value * 100).toFixed(1)}%${r.utilization.method === 'raster-estimate' ? ' (estimate)' : ''}${r.complete ? '' : ' (INCOMPLETE: inspect detail "uv")'}`);
   } else if (g.numPrims) out.push('uv: none');
   if (g.numPrims && g.primClosed.some((c) => c === 1)) {
     const sr = solidReport(g, { flips: false });

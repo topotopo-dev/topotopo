@@ -43,7 +43,7 @@ import type { Material } from '../core/materials.ts';
 import { cornerTangents, loadMikkTSpace, mikkTSpaceReady, shadingFrame, vertexUV } from '../core/tangents.ts';
 import { imageRowOfV } from '../core/texcoord.ts';
 import { resolveVertexNormals } from '../core/topology.ts';
-import { decodePNG } from '../io/png-decode.ts';
+import { decodePNG, lfsPointerNote } from '../io/png-decode.ts';
 import { imageFromPNG } from '../io/textures.ts';
 
 /** External texture files read for a PBR render: path → image, or the reason it is not available. */
@@ -82,6 +82,8 @@ export async function preparePBR(g: Geometry, readFile?: (path: string) => Promi
     if (!readFile) { files.set(path, 'no file access in this render'); continue; }
     let bytes: Uint8Array;
     try { bytes = await readFile(path); } catch (e: any) { files.set(path, `cannot be read (${e?.message ?? e})`); continue; }
+    const lfs = lfsPointerNote(bytes);
+    if (lfs) { files.set(path, `is not a PNG: ${lfs}`); continue; }
     if (!(bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50)) { files.set(path, 'is not a PNG (only PNG textures are decoded for the preview)'); continue; }
     try { files.set(path, imageFromPNG(decodePNG(bytes), path)); } catch (e: any) { files.set(path, `is not a readable PNG (${e?.message ?? e})`); }
   }

@@ -31,7 +31,7 @@ import { drawTextureView, textureSampler, withMaterialPreview } from './texview.
 import { EMPTY_ATTRIB } from '../core/scene.ts';
 import { ALPHA_BLEND, ALPHA_MASK, pbrScene, preparePBR } from './pbr.ts';
 import { loadMikkTSpace } from '../core/tangents.ts';
-import { decodePNG } from '../io/png-decode.ts';
+import { decodePNG, lfsPointerNote } from '../io/png-decode.ts';
 import type { PBRScene, PBRTextures, VertexColorMode } from './pbr.ts';
 
 /**
@@ -115,6 +115,13 @@ export interface RenderOptions {
   zoom?: number;
   /** look-at point in world coordinates (x right, y up, z towards the front; default the bbox centre); the views still fit the bounds around it */
   target?: Vec3 | null;
+  /**
+   * a camera by position for the persp views instead of the fit: the eye at from (world metres), looking at to, with
+   * world +Y up, fov degrees across the view's width (default 40). Nothing is fitted: what the lens sees is what is
+   * drawn, so it matches a concept or game camera. azimuth, elevation, look_at, zoom and bounds do not move it; ortho
+   * and section views still fit. Without views the render is the one persp view; an underlay fills that view
+   */
+  camera?: RenderCamera | null;
   ssaa?: number;
   /** packed instances: triangles to draw at most (default RENDER_TRIANGLE_BUDGET, 600k; up to 50M); above it an evenly spread subset */
   maxTriangles?: number;
@@ -191,6 +198,20 @@ export interface RenderOptions {
   textures?: boolean;
   /** 'texture' view: "" = every image, an image name, "image/layer", or a material name (its maps as a strip) */
   texture?: string;
+}
+
+/** A camera by position (RenderOptions.camera): eye, look-at point, horizontal field of view in degrees. */
+export interface RenderCamera { from: Vec3; to: Vec3; fov?: number }
+/** The horizontal field of view of a camera by position when none is given (degrees; about a 50 mm lens on 36 mm film). */
+export const CAMERA_FOV = 40;
+
+/** Throws when a camera by position cannot be used: from and to equal or not finite, fov outside 0..180 (exclusive). */
+export function checkCamera(c: RenderCamera): void {
+  const ok3 = (v: unknown) => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+  if (!ok3(c.from) || !ok3(c.to)) throw new Error(`render: camera expects from [x, y, z] and to [x, y, z] in world metres, got ${JSON.stringify(c)}`);
+  if (Math.hypot(c.to[0] - c.from[0], c.to[1] - c.from[1], c.to[2] - c.from[2]) < 1e-9) throw new Error('render: camera from and to are the same point; to is where the camera looks');
+  const fov = c.fov ?? CAMERA_FOV;
+  if (!(fov > 0 && fov < 180)) throw new Error(`render: camera fov is degrees across the view's width, above 0 and below 180, got ${c.fov}`);
 }
 
 /** The most quads per side a heightfield is drawn with by default (RenderOptions.heightfieldRes). */
@@ -331,6 +352,16 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
       ? { hx: Math.max(Math.abs(x0), Math.abs(x1)), hy: Math.max(Math.abs(y0), Math.abs(y1)), cx: 0, cy: 0 }
       : { hx: (x1 - x0) / 2, hy: (y1 - y0) / 2, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
   };
+  if (kind === 'persp' && o.camera) {
+    // a camera by position: the eye where it was put, a lens of fov across the width, nothing fitted
+    const { from, to } = o.camera, fov = ((o.camera.fov ?? CAMERA_FOV) * Math.PI) / 180;
+    const f = norm3([to[0] - from[0], to[1] - from[1], to[2] - from[2]]);
+    let r = cross3(f, [0, 1, 0]);
+    if (Math.hypot(...r) < 1e-6) r = cross3(f, [0, 0, f[1] > 0 ? 1 : -1]); // straight down: screen up is -Z, up: +Z
+    r = norm3(r);
+    const u = cross3(r, f);
+    return { name, persp: true, eye: [from[0], from[1], from[2]], f, r, u, c: [to[0], to[1], to[2]], focal: W / 2 / Math.tan(fov / 2), scale: 1, ox: W / 2, oy: H / 2 };
+  }
   if (kind === 'persp') {
     const az = ((azDeg ?? o.azimuth ?? 35) * Math.PI) / 180, el = ((o.elevation ?? 25) * Math.PI) / 180;
     const fov = (32 * Math.PI) / 180;
@@ -374,6 +405,8 @@ export async function readUnderlay(p: string, readFile?: (path: string) => Promi
   if (!readFile) throw new Error(`render: underlay "${p}": no file access in this render`);
   let bytes: Uint8Array;
   try { bytes = await readFile(p); } catch (e: any) { throw new Error(`render: underlay "${p}" cannot be read (${e?.message ?? e})`); }
+  const lfs = lfsPointerNote(bytes);
+  if (lfs) throw new Error(`render: underlay "${p}" is not a PNG: ${lfs}`);
   if (!(bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47)) throw new Error(`render: underlay "${p}" is not a PNG (only PNG reference images are read; convert it to PNG)`);
   let img: ReturnType<typeof decodePNG>;
   try { img = decodePNG(bytes); } catch (e: any) { throw new Error(`render: underlay "${p}" is not a readable PNG (${e?.message ?? e})`); }
@@ -428,7 +461,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   // images and nothing else to draw in 3D: the texture view (render/texview.ts)
   const onlyImages = !g.numPoints && g.volumes.length > 0 && g.volumes.every((v) => v.kind === 'image');
-  const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : materialOnly ? ['persp'] : ['persp', 'front', 'right', 'top'];
+  if (o.camera) checkCamera(o.camera);
+  const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : materialOnly || o.camera ? ['persp'] : ['persp', 'front', 'right', 'top'];
   const ui = Math.max(1, Math.min(4, Math.round(o.scale ?? 1)));
   // tile size: n (square) or [width, height] pixels per view, before scale
   const sz0 = o.size ?? (views.length === 1 ? 800 : 512);
@@ -449,7 +483,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   if (o.shading && !SHADING_MODES.includes(o.shading)) throw new Error(`unknown shading "${o.shading}" (use ${SHADING_MODES.join(', ')})`);
   const shadingMode = o.shading && o.shading !== 'default' ? o.shading : null;
   // reference image behind the 3D views
-  const ulFit: UnderlayFit = o.underlayFit ?? 'bounds';
+  const ulFit: UnderlayFit = o.underlayFit ?? (o.camera ? 'view' : 'bounds');
   if (!UNDERLAY_FITS.includes(ulFit)) throw new Error(`unknown underlay_fit "${o.underlayFit}" (use ${UNDERLAY_FITS.join(', ')})`);
   const ulOpacity = Math.max(0, Math.min(1, o.underlayOpacity ?? 0.5));
   if (o.underlayOpacity !== undefined && !Number.isFinite(o.underlayOpacity)) throw new Error(`render: underlay_opacity expects 0..1, got ${o.underlayOpacity}`);
@@ -471,7 +505,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const notes: string[] = hfShown.map((x) =>
     `heightfield "${x.v.name}" shown at ${x.shown[0]}×${x.shown[1]} of ${x.v.width}×${x.v.height} samples (1 in ${x.step} per side); heightfield_res "full" (CLI --heightfield-res full) draws every sample`);
   notes.push(...hfNotes);
-  if ((o.zoom ?? 1) > 1 && !zoomFramed(o)) notes.push(`zoom ${fmtNum(o.zoom!)}: held at 1, the fit (the views fit the bounds; a zoom above 1 would crop them): add look_at [x, y, z] to zoom into a point`);
+  if (o.camera && views.some(isPerspView)) {
+    const unused = [o.azimuth !== undefined && 'azimuth', o.elevation !== undefined && 'elevation', o.target && 'look_at', o.zoom !== undefined && 'zoom', o.bounds && 'bounds'].filter(Boolean);
+    if (unused.length) notes.push(`camera: ${unused.join(', ')} ${unused.length === 1 ? 'does' : 'do'} not move a camera by position (from, to, fov); the persp view stands where the camera puts it`);
+  }
+  if ((o.zoom ?? 1) > 1 && !zoomFramed(o) && !o.camera) notes.push(`zoom ${fmtNum(o.zoom!)}: held at 1, the fit (the views fit the bounds; a zoom above 1 would crop them): add look_at [x, y, z] to zoom into a point`);
   if (o.underlayImage && o.transparent) notes.push('underlay: not drawn on a transparent background');
 
   // --- scene data shared by all views
@@ -1089,11 +1127,16 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     // composited over what is behind; on a transparent background, bA holds their coverage of empty samples (col
     // premultiplied there)
     const bA = pbrBlend.length && transparent ? new Float32Array(W * H) : null;
+    let behindCam = 0;
     const drawTri = (t: number, blendPass: boolean) => {
       if (pbrS && (pbrS.triAlpha[t] === ALPHA_BLEND) !== blendPass) return;
       const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2];
       const a = g.vertexPoint[va], b = g.vertexPoint[vb], c = g.vertexPoint[vc];
-      if (cam.persp && (vz[a] < 1e-4 || vz[b] < 1e-4 || vz[c] < 1e-4)) return;
+      if (cam.persp && (vz[a] < 1e-4 || vz[b] < 1e-4 || vz[c] < 1e-4)) {
+        // a camera by position can stand among the geometry: a triangle partly in front of it is lost, say so
+        if (!blendPass && o.camera && (vz[a] >= 1e-4 || vz[b] >= 1e-4 || vz[c] >= 1e-4)) behindCam++;
+        return;
+      }
       let partial = false, qa = 0, qb = 0, qc = 0;
       if (clipOn) {
         qa = Pd[a * 3 + cK]; qb = Pd[b * 3 + cK]; qc = Pd[c * 3 + cK];
@@ -1439,7 +1482,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         drawText(col, W, H, Math.round(ex + 2 * ss * ui), Math.round(ey - 4 * ss * ui), lab, colr, ss * ui, true);
       }
     }
-    const viewLabel = (kind === 'persp' ? `${NAMED_VIEWS[vname] !== undefined ? vname.toUpperCase().replace('_', ' ') : 'PERSP'}  AZ ${Math.round(azDeg ?? o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}`
+    if (behindCam) notes.push(`camera: ${behindCam} triangles reach behind the camera and are not drawn (the camera stands among the geometry); move from further out`);
+    const camLabel = o.camera ? `CAMERA  FROM ${o.camera.from.map(fmtNum).join(' ')}  FOV ${fmtNum(o.camera.fov ?? CAMERA_FOV)}` : '';
+    const viewLabel = (kind === 'persp' ? camLabel || `${NAMED_VIEWS[vname] !== undefined ? vname.toUpperCase().replace('_', ' ') : 'PERSP'}  AZ ${Math.round(azDeg ?? o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}`
       : kind === 'section' ? `SECTION ${planeDesc(secK, secC)}  ${SECTION_CAM[secK].label.split('  ')[1]}`
       : ORTHO[vname].label) + (checkerOn ? '  CHECKER' : '') + (clipOn && kind === 'persp' ? `  CLIP ${planeDesc(cK, cC)}` : '');
 

@@ -344,6 +344,67 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(bad.length === 0, `capped partial revolves are consistent, closed and outward for every angle, profile direction and flip (${cases} cooks)`, bad.slice(0, 6).join('\n'));
 }
 
+// ------------------------------------------------------------------ 5e. polywire width is not scaled by pscale
+// polywire multiplied width by pscale, so particle trails (pscale 0.05, width 0.2) came out 20 times too thin.
+
+{
+  const tubeRadius = async (code: string, params: Record<string, any> = {}) => {
+    const r = await engine.cook({ nodes: {
+      l: { type: 'line', params: { origin: [0, 0, 0], direction: [1, 0, 0], length: 2, points: 3 } },
+      w: { type: 'wrangle', in: ['l'], params: { code } },
+      t: { type: 'polywire', in: ['w'], params: { divisions: 16, ...params } },
+    }, output: 't' });
+    if (!r.ok || !r.geo) return NaN;
+    const b = r.geo.bbox();
+    return (b.max[1] - b.min[1]) / 2;
+  };
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  const w = await tubeRadius('@pscale = 0.05; @width = 0.2;');
+  check(near(w, 0.1), `polywire takes the radius from width alone when pscale is small (radius ${w}, want 0.1)`);
+  const wOff = await tubeRadius('@pscale = 0.05; @width = 0.2;', { use_width: false, radius: 0.5 });
+  check(near(wOff, 0.025), `polywire with use_width off keeps radius × pscale (radius ${wOff}, want 0.025)`);
+  const ps = await tubeRadius('@pscale = 2;', { radius: 0.1 });
+  check(near(ps, 0.2), `polywire without width keeps radius × pscale (radius ${ps}, want 0.2)`);
+  const sw = await engine.cook({ nodes: {
+    l: { type: 'line', params: { origin: [0, 0, 0], direction: [1, 0, 0], length: 2, points: 3 } },
+    w: { type: 'wrangle', in: ['l'], params: { code: '@pscale = 0.5; @width = 4;' } },
+    s: { type: 'sweep', in: ['w'], params: { radius: 0.2, divisions: 16, caps: false } },
+  }, output: 's' });
+  const sb = sw.geo?.bbox();
+  check(sb && near((sb.max[1] - sb.min[1]) / 2, 0.1), `sweep still scales its profile by pscale and ignores width (${sb ? (sb.max[1] - sb.min[1]) / 2 : errs(sw)})`);
+}
+
+// ------------------------------------------------------------------ 5f. what the docs promise about rotate and holes
+// transform rotate: degrees, right-handed, world X then Y then Z; extrude: a shape inside a merged plate is a hole.
+
+{
+  const turned = async (rotate: number[], at: number[]) => {
+    const r = await engine.cook({ nodes: {
+      a: { type: 'add', params: { points: [at] } },
+      t: { type: 'transform', in: ['a'], params: { rotate } },
+    }, output: 't' });
+    return r.geo ? [0, 1, 2].map((k) => Math.round(r.geo!.P[k] * 1000) / 1000) : errs(r);
+  };
+  const same = (a: any, b: number[]) => Array.isArray(a) && a.every((x: number, k: number) => Math.abs(x - b[k]) < 1e-3);
+  const z40 = await turned([0, 0, 40], [0, 1, 0]), y90 = await turned([0, 90, 0], [1, 0, 0]), xy = await turned([90, 90, 0], [0, 0, 1]);
+  check(same(z40, [-0.643, 0.766, 0]), `transform rotate [0, 0, 40] turns +Y to (-0.64, 0.77, 0), right-handed (${z40})`);
+  check(same(y90, [0, 0, -1]), `transform rotate [0, 90, 0] turns +X to -Z (${y90})`);
+  check(same(xy, [0, -1, 0]), `transform rotate [90, 90, 0] turns X first, then Y, about world axes: +Z to -Y (${xy})`);
+
+  const { pieceReport } = await import('../src/core/analysis.ts');
+  const wall = await engine.cook({ nodes: {
+    plate: { type: 'shape2d', params: { shape: 'rect', size: [3, 2] } },
+    w1: { type: 'circle', params: { radius: 0.3, center: [-0.7, 0, 0] } },
+    w2: { type: 'circle', params: { radius: 0.3, center: [0.7, 0, 0] } },
+    m: { type: 'merge', in: ['plate', 'w1', 'w2'] },
+    e: { type: 'extrude', in: ['m'], params: { height: 0.25 } },
+  }, output: 'e' });
+  const pr = wall.geo ? pieceReport(wall.geo) : null;
+  const p0 = pr?.pieces[0];
+  check(pr && pr.pieces.length === 1 && p0!.closed && p0!.genus === 2 && pr.flippedEdges === 0 && p0!.volume > 0,
+    `extrude of a merged plate and two circles is one closed solid with two holes (${pr ? `${pr.pieces.length} piece(s), genus ${p0?.genus}, closed ${p0?.closed}` : errs(wall)})`);
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.

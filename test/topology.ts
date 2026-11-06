@@ -561,6 +561,26 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   // flipped faces and an inward piece are named with where they are
   const flip = await cook({ ...named, r: { type: 'reverse', in: ['n'], params: { group: '0' } }, out: { type: 'null', in: ['r'] } }, 'out');
   check(/inconsistent winding .* first edge .* of "crate" .* at \(.*\): clean with fix_winding/.test(inspect(flip, { detail: 'topology' })), 'flipped faces: count, part, position and fix');
+  // ... and that fix works on partly flipped faces: winding made consistent per piece, then outward
+  {
+    const { pieceReport } = await import('../src/core/analysis.ts');
+    const fixed = async (nodes: Record<string, NodeSpec>) => pieceReport(await cook({ ...nodes, fx: { type: 'clean', in: [Object.keys(nodes).at(-1)!], params: { fix_winding: true } } }, 'fx'));
+    const vols = (r: ReturnType<typeof pieceReport>) => r.pieces.map((p) => p.volume.toFixed(2)).join(' ');
+    const one = await fixed({ ...named, r: { type: 'reverse', in: ['n'], params: { group: '0' } } });
+    check(one.flippedEdges === 0 && vols(one) === '1.00', `clean fix_winding turns one flipped face of a box back (${one.flippedEdges} flipped edges, volume ${vols(one)})`);
+    const most = await fixed({ ...named, r: { type: 'reverse', in: ['n'], params: { group: '0-3' } } });
+    check(most.flippedEdges === 0 && vols(most) === '1.00', `clean fix_winding: four of six faces flipped, the box comes out consistent and outward (${most.flippedEdges}, ${vols(most)})`);
+    const hollow = await fixed({
+      outer: { type: 'box', params: { size: [2, 2, 2] } }, inner: { type: 'box' }, cav: { type: 'reverse', in: ['inner'] },
+      m: { type: 'merge', in: ['outer', 'cav'] }, r: { type: 'reverse', in: ['m'], params: { group: '1' } },
+    });
+    check(hollow.flippedEdges === 0 && vols(hollow) === '8.00 -1.00', `clean fix_winding keeps the inner wall of a hollow box inward (${hollow.flippedEdges}, ${vols(hollow)})`);
+    const down = await cook({ g: { type: 'grid' }, r: { type: 'reverse', in: ['g'] }, t: { type: 'transform', in: ['r'], params: { translate: [0, -1, 0] } }, fx: { type: 'clean', in: ['t'], params: { fix_winding: true } } }, 'fx');
+    check(primNormals(down)[1] < -0.99, 'clean fix_winding leaves an open grid facing down as it is');
+    const g1 = await cook({ g: { type: 'grid' }, r: { type: 'reverse', in: ['g'], params: { group: '0 5' } }, fx: { type: 'clean', in: ['r'], params: { fix_winding: true } } }, 'fx');
+    const nY = primNormals(g1);
+    check(Array.from({ length: g1.numPrims }, (_, p) => nY[p * 3 + 1]).every((y) => y > 0.99), 'clean fix_winding turns two flipped faces of an open grid back to the rest');
+  }
   const inward = await cook({ ...named, out: { type: 'reverse', in: ['n'] } }, 'out');
   check(/1 closed piece facing inward, first prim \d+ of "crate" at .*: reverse it/.test(inspect(inward, { detail: 'topology' })), 'an inward-facing closed piece is named');
   // where helpers

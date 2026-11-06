@@ -1,7 +1,7 @@
 // Render options from tool arguments: the snake_case keys of the MCP render tool, an example's
 // meta.render and the CLI flags all map to RenderOptions here, so the three stay in sync.
 // Only keys that are present are set (renderGeometry's defaults apply to the rest).
-import { UNDERLAY_FITS, parseViews } from './raster.ts';
+import { UNDERLAY_FITS, checkCamera, parseViews } from './raster.ts';
 import type { Axis, ClipOptions, RenderOptions, UnderlayFit } from './raster.ts';
 import { VERTEX_COLOR_MODES } from './pbr.ts';
 import type { VertexColorMode } from './pbr.ts';
@@ -118,6 +118,19 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
     const v = typeof look === 'string' ? look.split(',').map(Number) : look;
     if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => Number.isFinite(+x))) throw new Error(`render: look_at expects [x, y, z], got ${JSON.stringify(look)}`);
     o.target = [+v[0], +v[1], +v[2]];
+  }
+  // camera by position: {from: [x, y, z], to: [x, y, z], fov?: degrees across the width}; "x,y,z" strings also read
+  const cam = pick('camera');
+  if (cam !== undefined) {
+    const need = `render: camera expects {from: [x, y, z], to: [x, y, z], fov?: degrees across the view's width (default 40)} in world metres, got ${JSON.stringify(cam)}`;
+    if (typeof cam !== 'object' || Array.isArray(cam)) throw new Error(need);
+    const v3 = (v: unknown) => {
+      const x = typeof v === 'string' ? v.split(',').map((t) => (t.trim() === '' ? NaN : Number(t))) : v;
+      if (!Array.isArray(x) || x.length !== 3 || !x.every((t) => Number.isFinite(+t))) throw new Error(need);
+      return [+x[0], +x[1], +x[2]] as [number, number, number];
+    };
+    o.camera = { from: v3(cam.from), to: v3(cam.to), ...(cam.fov !== undefined && cam.fov !== null ? { fov: num(cam.fov, 'camera.fov') } : {}) };
+    checkCamera(o.camera);
   }
   // bounds: [[x0, y0, z0], [x1, y1, z1]] (or "x0,y0,z0,x1,y1,z1") in world metres, min then max
   const bd = pick('bounds');

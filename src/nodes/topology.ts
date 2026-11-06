@@ -4,7 +4,7 @@ import type { Src } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import {
-  boundaryLoops, buildEdges, connectivity, orientOutward, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, signedVolume, topologyReport, triangulate,
+  boundaryLoops, buildEdges, connectivity, orientPieces, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, signedVolume, topologyReport, triangulate,
 } from '../core/topology.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
@@ -46,7 +46,7 @@ defineNode({
     remove_degenerate: { type: 'bool', default: true, desc: 'remove prims with repeated/too few points' },
     min_area: { type: 'float', default: 1e-12, min: 0, desc: 'remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side' },
     remove_unused_points: { type: 'bool', default: true, desc: 'remove points not used by prims (only when the geometry has prims)' },
-    fix_winding: { type: 'bool', default: false, desc: 'make closed meshes face outward' },
+    fix_winding: { type: 'bool', default: false, desc: 'make the winding consistent in each connected piece (most of its area decides, so a few flipped faces turn back), then turn closed pieces outward; a closed piece inside another one (the inner wall of a hollow solid) stays inward' },
   },
   example: { type: 'clean', params: { fuse_distance: 0.0001, fix_winding: true } },
   cook: ({ input, p }) => {
@@ -55,7 +55,7 @@ defineNode({
     if (p.remove_degenerate) g = removeDegenerate(g);
     if (p.min_area > 0) g = removeSmallFaces(g, p.min_area);
     if (p.remove_unused_points && g.numPrims > 0) g = g.removeUnusedPoints();
-    if (p.fix_winding) g = orientOutward(g);
+    if (p.fix_winding) g = orientPieces(g).geo;
     return g === input(0) ? g.clone() : g;
   },
 });

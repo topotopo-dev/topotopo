@@ -527,8 +527,8 @@ function sweepCurves(
     const rings: number[][] = [], scales: number[] = [];
     for (let k = 0; k < pts.length; k++) {
       const u = L[k] / total;
-      let s = psA ? (psA.get(idx[k]) as number) : 1;
-      if (o.radiusOf) s *= o.radiusOf(idx[k]);
+      // radiusOf (polywire) is the whole radius; otherwise point pscale scales the profile
+      let s = o.radiusOf ? o.radiusOf(idx[k]) : psA ? (psA.get(idx[k]) as number) : 1;
       if (o.scaleRamp) s *= evalRamp(o.scaleRamp, u) as number;
       scales.push(s);
       const tw = ((o.twist * u) * Math.PI) / 180, c = Math.cos(tw), sn = Math.sin(tw);
@@ -628,15 +628,16 @@ defineNode({
 defineNode({
   type: 'polywire',
   category: 'curve',
-  summary: 'Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Great for branches, cables, wireframes.',
+  summary: 'Turn curves into tubes. Per-point radius from "width" (diameter) or radius × pscale. Great for branches, cables, wireframes.',
+  description: 'The tube radius at each point is half its "width" attribute when the curves carry width and use_width is on; pscale is then ignored, so particle trails with a small pscale keep the width they were given. Without width (or with use_width off) the radius is the radius param times point pscale (1 when there is none).',
   aliases: ['wire', 'tubes'],
   inputs: [{ name: 'curves', desc: 'polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively' }],
   splines: 'keep',
   params: {
-    radius: { type: 'float', default: 0.05, desc: 'tube radius (used when no width attribute)', aliases: ['rad', 'wire_radius'] },
+    radius: { type: 'float', default: 0.05, desc: 'tube radius when there is no width attribute (or use_width is off), multiplied by point pscale', aliases: ['rad', 'wire_radius'] },
     divisions: { type: 'int', default: 8, min: 3, max: 1024, desc: 'sides around the tube', aliases: ['sides', 'cols'] },
     caps: { type: 'bool', default: true, desc: 'cap the tube ends' },
-    use_width: { type: 'bool', default: true, desc: 'use point "width" attribute (diameter) when present' },
+    use_width: { type: 'bool', default: true, desc: 'use point "width" attribute (diameter) when present; pscale is then ignored' },
   },
   outputs: 'vertex uv; prim groups caps, sides',
   example: {
@@ -649,9 +650,10 @@ defineNode({
   cook: ({ input, p }) => {
     const g = evaluateSplines(input(0));
     const wA = p.use_width ? g.points.get('width') : undefined;
+    const psA = g.points.get('pscale');
     return sweepCurves(g, [circleProfile(1, p.divisions)], {
       caps: p.caps, twist: 0, up: [0, 1, 0], scaleRamp: null, uvLength: false,
-      radiusOf: (pt) => (wA ? Math.max(1e-6, (wA.get(pt) as number) / 2) : p.radius),
+      radiusOf: (pt) => (wA ? Math.max(1e-6, (wA.get(pt) as number) / 2) : p.radius * (psA ? (psA.get(pt) as number) : 1)),
     });
   },
 });
@@ -775,6 +777,11 @@ defineNode({
   type: 'extrude',
   category: 'curve',
   summary: 'Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.',
+  description:
+    'A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; ' +
+    'which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect ' +
+    'and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes ' +
+    'through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids.',
   aliases: ['linear_extrude', 'extrude2d'],
   inputs: [{ name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' }],
   params: {

@@ -13,6 +13,10 @@
 // are classified: inTile (two atlas charts: the overlap a bake suffers), tiling (a tiling chart is involved: expected
 // for a repeating texture) and acrossLods (prims whose names carry different LOD suffixes, "_lod0" / "_LOD1": LODs share
 // the uv space on purpose). tiling says whether the uv set has tiling charts.
+// Wrap seams: a face whose uv comes from an angle (cylindrical or spherical uv) with the seam running through it, and
+// the seam not moved onto its edges, has corners at both ends of the turn: it is mirrored against the rest of its chart
+// and stretched over (nearly) the chart's whole range. Such faces are named as seam-spanning faces and left out of the
+// mirrored count and the overlap test (they would show as folds overlapping the whole turn).
 // Utilization: with no overlaps and every triangle inside the unit tile, the exact covered fraction of the tile (the
 // sum of uv areas). Otherwise summed areas would double count, so the report gives a deterministic raster estimate
 // (coverage of an N × N grid of sample points) and says so.
@@ -93,8 +97,13 @@ export interface UVReport {
   firstCollapsed: string | null;
   /** where the first triangle outside the unit tile is, or null */
   firstOutOfTile: string | null;
-  /** triangles with uv winding opposite to the majority (mirrored islands are legal; listed for review) */
+  /** triangles with uv winding opposite to the majority (mirrored islands are legal; listed for review); wrap-seam triangles are not counted */
   mirrored: number;
+  /**
+   * faces a wrap seam runs through (uv from an angle whose seam cuts across them): triangles, prims, and where the
+   * first prims are; they are left out of mirrored and the overlap test
+   */
+  wrapSeam: { triangles: number; prims: number; examples: string[] };
   outOfTile: number;
   /** UDIM-style tiles touched: "u,v" integer pairs (0,0 is the unit tile) */
   tiles: string[];
@@ -191,7 +200,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
   const res: [number, number] | undefined = o.resolution === undefined ? undefined : Array.isArray(o.resolution) ? [o.resolution[0], o.resolution[1]] : [o.resolution, o.resolution];
   const { tris, triPrim } = tri, nt = tris.length / 3;
   const rep: UVReport = {
-    attribute: name, tiling: false, tilingCharts: 0, complete: true, reasons: [], missing: false, triangles: nt, nonFinite: 0, collapsed: 0, collapsedTriangles: [], firstCollapsed: null, firstOutOfTile: null, mirrored: 0,
+    attribute: name, tiling: false, tilingCharts: 0, complete: true, reasons: [], missing: false, triangles: nt, nonFinite: 0, collapsed: 0, collapsedTriangles: [], firstCollapsed: null, firstOutOfTile: null, mirrored: 0, wrapSeam: { triangles: 0, prims: 0, examples: [] },
     outOfTile: 0, tiles: [], charts: 0, uvArea: 0,
     overlap: { pairs: 0, sameChartPairs: 0, area: 0, candidatePairs: 0, testedPairs: 0, inTile: { pairs: 0, area: 0 }, tiling: { pairs: 0, area: 0 }, acrossLods: { pairs: 0, area: 0 }, examples: [] },
     utilization: { method: 'none', value: 0, note: '' }, tileUtilization: [], density: null, pieces: [], ...(res ? { resolution: res } : {}),
@@ -216,7 +225,6 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
   }
   // per triangle: validity, signed area, tiles
   const ok = new Uint8Array(nt), signed = new Float64Array(nt), tiles = new Set<string>();
-  let pos = 0, neg = 0;
   for (let t = 0; t < nt; t++) {
     const o6 = t * 6;
     let finite = true;
@@ -239,9 +247,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
       continue;
     }
     ok[t] = 1; signed[t] = cr / 2; rep.uvArea += Math.abs(cr) / 2;
-    if (cr > 0) pos++; else neg++;
   }
-  rep.mirrored = Math.min(pos, neg);
   rep.tiles = [...tiles].sort((x, y) => { const [a0, a1] = x.split(',').map(Number), [b0, b1] = y.split(',').map(Number); return a1 - b1 || a0 - b0; });
 
   // charts: union triangles across uv-continuous edges (same two points, same uv at both)
@@ -249,6 +255,48 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
   const roots = new Set<number>();
   for (let t = 0; t < nt; t++) if (Number.isFinite(U[t * 6]) && Number.isFinite(U[t * 6 + 2]) && Number.isFinite(U[t * 6 + 4])) roots.add(find(t));
   rep.charts = roots.size;
+  // wrap seams: mirrored against a chart of 4 or more triangles and spanning (nearly) its whole u or v range, along an
+  // axis where the chart's other triangles are narrow (a fold that turns back over part of its chart stays a fold)
+  const wrap = new Uint8Array(nt);
+  {
+    const ext = (t: number, k: number) => { const o6 = t * 6 + k; return Math.max(U[o6], U[o6 + 2], U[o6 + 4]) - Math.min(U[o6], U[o6 + 2], U[o6 + 4]); };
+    // per chart: [pos, neg, umin, umax, vmin, vmax, summed u extent of the majority, summed v extent of the majority]
+    const st = new Map<number, number[]>();
+    for (let t = 0; t < nt; t++) {
+      if (!ok[t]) continue;
+      const r = find(t);
+      let s = st.get(r);
+      if (!s) st.set(r, (s = [0, 0, Infinity, -Infinity, Infinity, -Infinity, 0, 0]));
+      s[signed[t] > 0 ? 0 : 1]++;
+      for (let k = 0; k < 3; k++) {
+        const u = U[t * 6 + k * 2], v = U[t * 6 + k * 2 + 1];
+        s[2] = Math.min(s[2], u); s[3] = Math.max(s[3], u); s[4] = Math.min(s[4], v); s[5] = Math.max(s[5], v);
+      }
+    }
+    const minority = (t: number, s: number[]) => (signed[t] > 0 ? s[0] < s[1] : s[1] < s[0]);
+    for (let t = 0; t < nt; t++) if (ok[t]) { const s = st.get(find(t))!; if (!minority(t, s)) { s[6] += ext(t, 0); s[7] += ext(t, 1); } }
+    const prims = new Set<number>();
+    for (let t = 0; t < nt; t++) {
+      if (!ok[t]) continue;
+      const s = st.get(find(t))!;
+      if (s[0] + s[1] < 4 || !minority(t, s)) continue;
+      const major = Math.max(s[0], s[1]);
+      const spans = (k: number) => {
+        const E = s[3 + 2 * k] - s[2 + 2 * k];
+        return E > 0 && ext(t, k) > 0.9 * E && s[6 + k] / major < 0.6 * E;
+      };
+      if (spans(0) || spans(1)) {
+        wrap[t] = 1; rep.wrapSeam.triangles++;
+        if (!prims.has(triPrim[t])) { prims.add(triPrim[t]); if (rep.wrapSeam.examples.length < Math.min(4, maxEx)) rep.wrapSeam.examples.push(triWhere(t)); }
+      }
+    }
+    rep.wrapSeam.prims = prims.size;
+  }
+  {
+    let pos = 0, neg = 0;
+    for (let t = 0; t < nt; t++) if (ok[t] && !wrap[t]) { if (signed[t] > 0) pos++; else neg++; }
+    rep.mirrored = Math.min(pos, neg);
+  }
   // tiling charts (across tile borders) and the LOD of each prim, to classify the overlaps below
   const kind = chartKinds(U, nt, find);
   const tilingRoots = new Set<number>();
@@ -260,7 +308,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
 
   // overlaps: grid candidates, exact clipping (core/uvoverlap.ts)
   const valid: number[] = [];
-  for (let t = 0; t < nt; t++) if (ok[t]) valid.push(t);
+  for (let t = 0; t < nt; t++) if (ok[t] && !wrap[t]) valid.push(t);
   const ccw = new Float64Array(nt * 6);
   for (const t of valid) {
     const o6 = t * 6;
@@ -365,6 +413,8 @@ export function uvReportText(r: UVReport): string[] {
   if (r.missing) return out;
   out.push(`  ${r.charts} charts; tiles ${r.tiles.join(' ') || 'none'}; ${r.outOfTile} triangles outside 0..1; ${r.nonFinite} non-finite; ${r.collapsed} collapsed; ${r.mirrored} mirrored`);
   if (r.collapsed && r.firstCollapsed) out.push(`    collapsed (no uv area: bakes and normal maps have no direction there), first ${r.firstCollapsed}`);
+  const ws = r.wrapSeam;
+  if (ws.prims) out.push(`  WRAP SEAM: ${ws.prims} face${ws.prims === 1 ? '' : 's'} (${ws.triangles} triangles) span${ws.prims === 1 ? 's' : ''} the seam of an angle-based uv: corners at both ends of the turn, so the face gets the whole turn's tiles, mirrored (not counted as overlap or mirrored). uv_project cylindrical and spherical keep the seam on edges and turn it with seam; ${ws.examples.join('; ')}`);
   const ov = r.overlap;
   if (r.tiling) out.push(`  TILING: ${r.tilingCharts} chart${r.tilingCharts === 1 ? ' runs' : 's run'} across tile borders: uv for a repeating texture, not an atlas; overlap there is expected`);
   out.push(`  overlaps in tiles (atlas, what a bake suffers): ${ov.inTile.pairs} triangle pairs, area ${f(ov.inTile.area)}; ${ov.testedPairs} of ${ov.candidatePairs} candidate pairs tested exactly`);
