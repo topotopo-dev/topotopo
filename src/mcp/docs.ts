@@ -680,7 +680,8 @@ GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/
   RGBA colour with channels:"rgba"; input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star,
   ring; falloff; tile) · tex_sdf_shape (the signed distance in metres to a disc, box, polygon, star, capsule or cross;
   corner rounding; tile; see SHAPES below) · tex_grunge (dirt / leaks / spots with a coverage fraction and edge
-  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text.
+  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text (font, weight: 100 thin … 400 regular … 900
+  black on the wght axis of a variable font, e.g. a Noto Sans TC variable file; a static font keeps its own weight).
 FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
   (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
   (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).

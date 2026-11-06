@@ -469,6 +469,7 @@ defineNode({
     resolution: resolutionParam(),
     text: { type: 'string', default: 'TOPOTOPO', desc: 'text (use \\n for new lines)' },
     font: { type: 'string', default: '', desc: 'font file or family ("" = the bundled DejaVu Sans)' },
+    weight: { type: 'float', default: 400, min: 1, max: 1000, desc: 'font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold (see the text node; a font without a wght axis is drawn at its own weight)', aliases: ['wght', 'font_weight'] },
     size: { type: 'float', default: 0.2, min: 0.001, desc: 'height of the text block as a fraction of the image height (shrunk to fit the width)', aliases: ['height', 'font_size'] },
     position: { type: 'vec2', default: [0.5, 0.5], desc: 'centre of the text in uv', aliases: ['center'] },
     align: { type: 'enum', options: ['left', 'center', 'right'], default: 'center', desc: 'horizontal alignment of lines' },
@@ -481,8 +482,9 @@ defineNode({
   async cook(ctx) {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
-    const r = await ctx.subcook({ nodes: { t: { type: 'text', params: { text: p.text, font: p.font, size: 1, align: p.align, valign: 'center', output: 'outlines' } } }, output: 't' });
+    const r = await ctx.subcook({ nodes: { t: { type: 'text', params: { text: p.text, font: p.font, weight: p.weight, size: 1, align: p.align, valign: 'center', output: 'outlines' } } }, output: 't' });
     if (!r.ok || !r.geo) throw new NodeError(`${type}: ${r.errors.map((e) => e.message).join('; ') || 'text failed'}`);
+    for (const w of r.warnings) ctx.warn(w.message);
     const g = r.geo;
     const img = new Image(w, h, outName(ctx));
     if (!g.numPrims) return imageGeo(img.set(MAIN_LAYER, new Float32Array(w * h)));

@@ -175,10 +175,13 @@ const fontFailed = new Map<string, string>();
  * parses lazily and rejects for some fonts (DejaVu: "lookupType 6 substFormat 2 is not yet supported"), so when
  * shaping throws we lay the glyphs out ourselves: character → glyph, advance widths, kerning when available.
  */
-function layoutLine(font: any, line: string, y: number, size: number): { commands: any[]; width: number } {
+function layoutLine(font: any, line: string, y: number, size: number, variation?: Record<string, number>): { commands: any[]; width: number } {
+  // a variable font's outlines and advances follow the variation; opentype.js sets a glyph's varied advance while it
+  // makes the glyph's path, so the width is read after the path
+  const opts = variation ? { kerning: true, variation } : { kerning: true };
   try {
-    const path = font.getPath(line, 0, y, size, { kerning: true });
-    return { commands: path.commands, width: font.getAdvanceWidth(line, size, { kerning: true }) };
+    const path = font.getPath(line, 0, y, size, opts);
+    return { commands: path.commands, width: font.getAdvanceWidth(line, size, opts) };
   } catch {
     const scale = size / font.unitsPerEm;
     const commands: any[] = [];
@@ -186,12 +189,36 @@ function layoutLine(font: any, line: string, y: number, size: number): { command
     for (const ch of line) {
       const glyph = font.charToGlyph(ch);
       if (prev) { try { x += font.getKerningValue(prev, glyph) * scale; } catch { /* no kerning */ } }
-      commands.push(...glyph.getPath(x, y, size).commands);
+      commands.push(...(variation ? glyph.getPath(x, y, size, { variation, drawLayers: false, drawSVG: false }, font) : glyph.getPath(x, y, size)).commands);
       x += (glyph.advanceWidth ?? 0) * scale;
       prev = glyph;
     }
     return { commands, width: x };
   }
+}
+
+/** Regular in CSS and OpenType terms: the weight a static font is taken to have, so it warns at no other. */
+const REGULAR_WEIGHT = 400;
+
+/**
+ * The variation a weight asks of a font: its axes at their defaults with wght at the weight (clamped to the font's wght
+ * range, with a warning), or undefined for a font without a wght axis (it is drawn as it is; a weight other than
+ * regular warns).
+ */
+function fontVariation(font: any, weight: number, warn: (msg: string) => void): Record<string, number> | undefined {
+  const axes: { tag: string; minValue: number; maxValue: number; defaultValue: number }[] = font.tables?.fvar?.axes ?? [];
+  const wght = axes.find((a) => a.tag === 'wght');
+  if (!font.variation || !wght) {
+    if (weight !== REGULAR_WEIGHT) warn(`the font has no weight axis (wght), so it is drawn at its own weight, not ${weight}: use a variable font, or the font file of that weight (e.g. NotoSans-Bold.ttf)`);
+    return undefined;
+  }
+  let w = weight;
+  if (w < wght.minValue || w > wght.maxValue) {
+    const c = Math.min(Math.max(w, wght.minValue), wght.maxValue);
+    warn(`weight ${w} is outside the font's wght range ${wght.minValue}..${wght.maxValue}: drawn at ${c}`);
+    w = c;
+  }
+  return { ...Object.fromEntries(axes.map((a) => [a.tag, a.defaultValue])), wght: w };
 }
 const fontCache = new Map<string, any>();
 
@@ -231,6 +258,7 @@ defineNode({
     text: { type: 'string', default: 'TopoTopo', desc: 'text (use \\n for new lines)' },
     font: { type: 'string', default: '', desc: 'font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine)' },
     size: { type: 'float', default: 1, desc: 'font size (em height in units)' },
+    weight: { type: 'float', default: 400, min: 1, max: 1000, desc: 'font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold, 900 black (clamped to the range the font has, with a warning). A font without a wght axis (the bundled DejaVu Sans, a static file) is drawn at its own weight; any weight but 400 then warns', aliases: ['wght', 'font_weight'] },
     align: { type: 'enum', options: ['left', 'center', 'right'], default: 'center', desc: 'horizontal alignment' },
     valign: { type: 'enum', options: ['baseline', 'center', 'bottom', 'top'], default: 'bottom', desc: 'vertical alignment' },
     depth: { type: 'float', default: 0, min: 0, desc: 'extrusion depth (> 0 makes a solid)' },
@@ -262,11 +290,12 @@ defineNode({
     }
     if (!font) throw new NodeError(`cannot parse any font for "${p.font || '(default)'}"`, failures.join('; '));
     if (failures.length && !name) warn(`skipped unparsable font(s): ${failures.map((f) => f.split(':')[0]).join(', ')}`);
+    const variation = fontVariation(font, p.weight, warn);
     const lines = String(p.text).split(/\\n|\n/);
     let polys: number[][][] = [];
     const lineH = p.size * p.line_spacing;
     lines.forEach((line, li) => {
-      const { commands, width } = layoutLine(font, line, li * lineH, p.size);
+      const { commands, width } = layoutLine(font, line, li * lineH, p.size, variation);
       let cs = flattenPath(commands, p.curve_segments);
       if (p.align !== 'left' && cs.length) {
         const dx = p.align === 'center' ? -width / 2 : -width;

@@ -522,6 +522,7 @@ None (generator).
 | `text` | string | `"TopoTopo"` |  |  |  | text (use \\n for new lines) |
 | `font` | string | `""` |  |  |  | font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine) |
 | `size` | float | `1` |  |  |  | font size (em height in units) |
+| `weight` | float | `400` | 1..1000 |  | `wght`, `font_weight` | font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold, 900 black (clamped to the range the font has, with a warning). A font without a wght axis (the bundled DejaVu Sans, a static file) is drawn at its own weight; any weight but 400 then warns |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment |
 | `valign` | enum | `"bottom"` |  | `baseline`, `center`, `bottom`, `top` |  | vertical alignment |
 | `depth` | float | `0` | 0.. |  |  | extrusion depth (> 0 makes a solid) |
@@ -15442,6 +15443,7 @@ None (generator).
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `text` | string | `"TOPOTOPO"` |  |  |  | text (use \\n for new lines) |
 | `font` | string | `""` |  |  |  | font file or family ("" = the bundled DejaVu Sans) |
+| `weight` | float | `400` | 1..1000 |  | `wght`, `font_weight` | font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold (see the text node; a font without a wght axis is drawn at its own weight) |
 | `size` | float | `0.2` | 0.001.. |  | `height`, `font_size` | height of the text block as a fraction of the image height (shrunk to fit the width) |
 | `position` | vec2 | `[0.5,0.5]` |  |  | `center` | centre of the text in uv |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment of lines |
