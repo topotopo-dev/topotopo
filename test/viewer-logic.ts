@@ -325,9 +325,10 @@ section('selection model (section 5, G-4): what a left press does');
   check(pt.clickChange('none', 'out') === null && !!throws(() => pt.clickChange('toggle', 'out')), 'no click change for "none"; unknown clicks are refused');
   check(pt.boxTakes('add', 'edit') && !pt.boxTakes('add', 'result') && pt.boxTakes('remove', 'result') && pt.boxTakes('remove', 'edit'),
     'a Shift box takes things you edit, never results; a Ctrl box takes out results too');
-  const g = { id: 'guide:a' }, l = { id: 'layer:t.obj' }, r = { id: 'out' };
-  check(pt.pickWinner(g, l, r) === g && pt.pickWinner(null, l, r) === l && pt.pickWinner(null, null, r) === r && pt.pickWinner(null, null, null) === null,
-    'picking: a guide within its pixels beats an input and a result in front; an input the ray meets beats a result in front of it');
+  const g = { id: 'guide:a' }, l = { id: 'layer:t.obj', dist: 20 }, r = { id: 'out', dist: 12 }, far = { id: 'out', dist: 30 };
+  check(pt.pickWinner(g, l, r) === g && pt.pickWinner(null, l, r) === r && pt.pickWinner(null, l, far) === l && pt.pickWinner(null, l, { id: 'out', dist: 20 }) === l
+    && pt.pickWinner(null, null, r) === r && pt.pickWinner(null, l, null) === l && pt.pickWinner(null, null, null) === null,
+    'picking: a guide or CV within its pixels beats an input and a result in front of it; between an input and a result the nearer wins (the input on a tie)');
   check(!pt.isDrag(3, 2) && pt.isDrag(4, 3) && pt.DRAG_PX === 4, 'a press is a click until it travels more than 4 px');
   check(pt.dragSelects(['out'], 'guide:a') && !pt.dragSelects(['guide:a', 'out'], 'guide:a') && !pt.dragSelects(['guide:a'], 'guide:a#2') && pt.dragSelects(['guide:a#1'], 'guide:a#2'),
     'a drag selects what it moves, unless it is selected already or its guide is selected whole');
@@ -351,6 +352,9 @@ section('selection model: Houdini navigation is the default');
   check(info.resultName({ output: 'Rotor', node: 'rotor_final' }) === 'Rotor' && info.resultName({ node: 'house', part: 'roof' }) === 'house › roof'
     && info.resultName({ output: 'house', part: 'house' }) === 'house' && info.resultName({}) === 'result',
     'a hovered result shows its output\'s name, else its node\'s, and a part\'s own name after it');
+  check(info.partName('mesh_3', 'mesh') === null && info.partName('source_0_1', 'source_0') === null && info.partName('bush', 'scene') === 'bush'
+    && info.partName('house_2', 'house') === 'house' && info.partName('roof.v2_1', 'roof.v2') === 'roof.v2' && info.partName('', 'x') === null,
+    'a part\'s own name: a numbered primitive goes by its mesh, the preview\'s names for unnamed parts are none');
   check(info.countsLine('1,234 points, 56 prims: 56 polygons\nattributes …') === '1,234 points, 56 prims: 56 polygons' && info.countsLine(undefined) === '',
     'a result\'s counts are its summary\'s first line');
 }

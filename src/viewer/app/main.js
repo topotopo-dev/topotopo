@@ -649,6 +649,8 @@ function navDrag(nav, slot, x, y, id) {
   if (surface) pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
   else { const sel = ctx.select.selectionBounds(); if (!sel.isEmpty()) pivot = sel.getCenter(new THREE.Vector3()); }
   viewport.classList.add('nav');
+  // no hover while the camera moves: it is picked again where the drag ends
+  ctx.select.hover(-1);
   return { kind: 'nav', nav: surface && nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id, pivot, surface };
 }
 canvas.addEventListener('pointerdown', (e) => {
@@ -716,7 +718,8 @@ const endDrag = (e, cancel = false) => {
   drag = null;
   viewport.classList.remove('nav');
   const { x, y } = at(e);
-  if (d.kind === 'nav') saveViews();
+  // what is under the cursor now that the camera has moved
+  if (d.kind === 'nav') { saveViews(); if (!cancel) ctx.select.hover(views.slotAt(x, y), x, y); }
   else if (d.kind === 'place') { if (!cancel) ctx.guides.pointerUp(d.slot, x, y); }
   else if (d.kind === 'guide') ctx.guides.dragEnd(cancel);
   else if (d.kind === 'box') { if (cancel) ctx.select.cancel(); else ctx.select.up(x, y); }
@@ -749,6 +752,7 @@ canvas.addEventListener('wheel', (e) => {
     views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
   } else views.dolly(slot, factor, views.targetPlanePoint(slot, x, y));
   clearTimeout(canvas.wheelTimer); canvas.wheelTimer = setTimeout(saveViews, 300);
+  ctx.select.hover(slot, x, y);
   ctx.requestRender();
 }, { passive: false });
 

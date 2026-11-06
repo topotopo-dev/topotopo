@@ -1,6 +1,6 @@
 // Picking and selecting in the viewport, for the selection model of pointer.js (main.js decides what a press does):
-// what is under the cursor (a guide or one of its CVs within a few pixels, else an input layer the ray meets, else the
-// nearest piece of the cooked result), the box a Shift or Ctrl drag pulls, and the hover, a dimmer highlight with the
+// what is under the cursor (a guide or one of its CVs within a few pixels, else the nearest piece of an input layer or
+// of the cooked result), the box a Shift or Ctrl drag pulls, and the hover, a dimmer highlight with the
 // name of a result beside the cursor. All positions are viewport pixels.
 import * as THREE from 'three';
 import { parseId, pieceId } from './selection.js';
@@ -13,8 +13,8 @@ export function createSelect(ctx) {
 
   /**
    * What is under a viewport point in a slot: {id, kind, handle?, point?} or null; `kind` is pointer.js's target
-   * kind, `handle` what a drag would move (guides.js handleAt). Things you edit win (pointer.js pickWinner): a guide or
-   * a CV within its few pixels, drawn on top of everything, then an input layer the ray meets even behind a result.
+   * kind, `handle` what a drag would move (guides.js handleAt). A guide or a CV within its few pixels wins, drawn on
+   * top of everything; else the nearer of an input layer and the result (pointer.js pickWinner).
    */
   S.pick = (slot, x, y) => {
     const h = ctx.isolated ? null : ctx.guides.handleAt(slot, x, y);
@@ -31,7 +31,7 @@ export function createSelect(ctx) {
     const asHit = (b) => {
       if (!b) return null;
       const n = b.entry.mesh.pieceCount();
-      return { id: b.piece === null || n <= 1 ? b.entry.id : pieceId(b.entry.id, b.piece), point: b.point };
+      return { id: b.piece === null || n <= 1 ? b.entry.id : pieceId(b.entry.id, b.piece), point: b.point, dist: b.dist };
     };
     const win = pickWinner(guide, asHit(near.layer), asHit(near.result));
     return win ? { ...win, kind: targetKind(win.id) } : null;

@@ -9,6 +9,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { weld, pieces, pieceBounds, edgeClasses, subsetIndex, edgePairs, EDGE_COLORS } from './mesh.js';
+import { partName } from './output-info.js';
 
 export const COLORS = { sel: '#f0a030', wire: '#a9aeb5', wireOver: '#101113', box: '#a9aeb5', points: '#c9cdd2', line: '#c9cdd2', guide: '#7fb4c1' };
 export const DISPLAY_MODES = [
@@ -511,11 +512,11 @@ export class MeshObject {
     for (const p of parts) for (const m of [p.orig].flat()) if (m?.name) names.add(m.name);
     return [...names];
   }
-  /** The name the file gives the drawable a piece is in (a glTF node or mesh name), or null. */
+  /** The name the file gives the drawable a piece is in (a glTF node or mesh name), or null when it has none of its own. */
   pieceName(piece) {
     let o = this.partOf(piece)?.part.obj;
     while (o && o !== this.src && !o.name) o = o.parent;
-    return o && o !== this.src ? o.name : null;
+    return o && o !== this.src ? partName(o.name, o.parent?.name) : null;
   }
   /** Counts for the properties panel: {meshes, triangles, vertices, lines, points, instances}. */
   stats() {

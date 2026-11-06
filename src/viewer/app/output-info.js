@@ -36,6 +36,16 @@ export function resultName({ output = null, node = null, part = null } = {}) {
   return part && part !== base ? `${base} › ${part}` : base;
 }
 
+/**
+ * The own name of a drawable in a loaded glTF, or null: a primitive the loader numbered after its mesh ("house_1"
+ * under "house") goes by the mesh's name; the names the preview gives unnamed parts ("mesh", "source_0", "scene")
+ * are no names.
+ */
+export function partName(name, parent = '') {
+  const own = parent && new RegExp(`^${parent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_\\d+$`).test(name) ? parent : name;
+  return !own || /^(mesh|source|scene|points|curves|lines)(_\d+)*$/.test(own) ? null : own;
+}
+
 /** The counts of a geometry summary (src/inspect.ts summarize): its first line, "1,234 points, 567 prims …". */
 export const countsLine = (summary) => String(summary ?? '').split('\n')[0].trim();
 

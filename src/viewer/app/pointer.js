@@ -50,10 +50,16 @@ export const boxTakes = (op, kind) => kind === 'edit' || (op === 'remove' && kin
 export const isDrag = (dx, dy, px = DRAG_PX) => Math.hypot(dx, dy) > px;
 
 /**
- * What wins a pick: a guide or CV within its few pixels, even with cooked geometry in front (they draw on top); then an
- * input layer the ray meets, behind a result or not; then the nearest result. Each argument is a hit or null.
+ * What wins a pick: a guide or CV within its few pixels, even with cooked geometry in front (they draw on top); else
+ * the nearer of an input layer and a result along the ray (`dist`), the input on a tie. An input does not win through
+ * a result in front of it: an input under the whole scene (a terrain the graph builds on) would hide every result from
+ * hover and Shift-click. Each argument is a hit or null.
  */
-export const pickWinner = (guide, layer, result) => guide ?? layer ?? result ?? null;
+export function pickWinner(guide, layer, result) {
+  if (guide) return guide;
+  if (layer && result) return layer.dist <= result.dist ? layer : result;
+  return layer ?? result ?? null;
+}
 
 /**
  * Whether a drag that moves `id` changes the selection to it first: yes unless the selection already holds it, or
