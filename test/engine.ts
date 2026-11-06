@@ -937,6 +937,28 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   check(/not valid JSON/.test(cli(g, '--var', 'relief=[1,').stderr) && /name=value/.test(cli(g, '--var', 'relief').stderr) && /name=value/.test(cli(g, '--var').stderr),
     '--var: malformed values fail with a plain message');
   check(/either --node or --output/.test(cli(g, '--node', 'ground', '--output', 'mesh').stderr), '--node and --output together are refused');
+
+  // several outputs in one run: each --output takes the options after it; options before the first apply to all; the
+  // graph loads once and the nodes the outputs share cook once
+  const m = (f: string) => path.join(dir, 'm', f);
+  const many = cli(g, '--var', 'relief=5', '--var', 'seed=3', '--output', 'mesh', '--export', m('land.glb'), '--output', 'field', '--export', m('field.png'), '--views', 'top', '--size', '128', '--render', m('field_top.png'));
+  check(many.status === 0 && sha(m('land.glb')) === sha(path.join(dir, 'a', 'land.glb')) && JSON.parse(fs.readFileSync(m('field.json'), 'utf8')).source.output === 'field'
+    && fs.existsSync(m('field_top.png')) && /2 of 2 outputs in one run/.test(many.stdout),
+    `several --output: each output exported as its own run would (the same land.glb bytes), the field exported and rendered (${many.status ? many.stderr.trim() : many.stdout.split('\n').filter((l) => /outputs in one run/.test(l)).join('')})`);
+  check(/output "field" \(hills\) with relief=5, seed=3 in \d+ ms \(2 nodes reused from the outputs before\)/.test(many.stdout), `several --output: the second output reuses the nodes the first cooked (${many.stdout.split('\n').find((l) => /output "field"/.test(l))})`);
+  const scaled = cli(g, '--scale', '100', '--output', 'mesh', '--export', m('x100.glb'), '--output', 'mesh', '--scale', '1', '--export', m('x1.glb'));
+  const recScale = (f: string) => JSON.parse(fs.readFileSync(m(f + '.source.json'), 'utf8')).source.export.options.scale;
+  check(scaled.status === 0 && recScale('x100.glb') === 100 && recScale('x1.glb') === 1 && sha(m('x1.glb')) === sha(path.join(dir, 'c', 'land.glb')),
+    'several --output: an option before the first --output applies to every output, an output\'s own option wins');
+  check(/--export before the first --output would write every output to one file/.test(cli(g, '--export', m('one.glb'), '--output', 'mesh', '--output', 'field').stderr)
+    && /--var applies to the whole run: put it before the first --output/.test(cli(g, '--output', 'mesh', '--var', 'relief=3', '--output', 'field').stderr)
+    && /use --frame N, not --frames/.test(cli(g, '--frames', '1-2', '--output', 'mesh', '--output', 'field').stderr),
+    'several --output: options that cannot be split per output are refused with what to do');
+  const mixed = path.join(dir, 'mixed.json');
+  fs.writeFileSync(mixed, JSON.stringify({ nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P = ;' } } }, output: 'b', outputs: { good: { node: 'b' }, bad: { node: 'w' } } }));
+  const part = cli(mixed, '--output', 'bad', '--export', m('bad.glb'), '--output', 'good', '--export', m('good.glb'));
+  check(part.status === 1 && fs.existsSync(m('good.glb')) && !fs.existsSync(m('bad.glb')) && /1 of 2 outputs in one run, [\d.]+ s; did not cook: bad/.test(part.stdout),
+    `several --output: an output that does not cook is named, the others are still written, and the run fails (${part.stdout.split('\n').filter((l) => /outputs in one run/.test(l)).join('')})`);
 }
 
 section('CLI heightfield render resolution');

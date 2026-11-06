@@ -201,6 +201,9 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   JSON values are parsed, other text is a string; an unknown name lists the graph's vars), and --output <id> renders,
   exports and inspects a named output instead of the default: topotopo terrain.json --output land --var relief=8
   --render r.png --export land.glb. Exports record the vars they were made with (help topic "export", SOURCE).
+  Several outputs in one run (the graph and the maps they share load and cook once): repeat --output, each taking the
+  options after it up to the next one; options before the first apply to all: topotopo kit.json --scale 100
+  --output wall --export wall.glb --output gate --export gate.glb --render gate.png
 - The viewer shows each cook as it runs (the node, the time) and has a Stop button: a cook a person stopped fails with
   "cook stopped" at the node it stopped at. That is their decision, not an error to retry: ask before cooking it again.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).

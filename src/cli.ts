@@ -95,6 +95,11 @@ import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
 
 const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
+/** One output of a cook run: its own options (args) and those for every output (base: before the first --output). */
+interface Unit { args: string[]; base: string[]; outputName?: string; target?: string }
+/** An option's value for an output: its own before the one for every output. */
+const uopt = (u: Unit, f: string) => { for (const l of [u.args, u.base]) { const i = l.indexOf(f); if (i >= 0) return l[i + 1]; } return undefined; };
+const uhas = (u: Unit, f: string) => u.args.includes(f) || u.base.includes(f);
 const fail = (msg: string): never => { console.error(msg); process.exit(1); };
 // the time limits every engine of this process takes from the environment: a value that is not a number fails here
 try { limitsFromEnv(); } catch (e) { fail((e as Error).message); }
@@ -121,6 +126,10 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           scene: the glb export read back (nodes and parents, meshes, materials, maps, images; takes the export options)',
     '           --json: the uv, budget or scene report as JSON',
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
+    '         several outputs in one run: repeat --output; each takes the options after it up to the next --output (its --export,',
+    '           --format, --render, --inspect, export options); options before the first --output apply to every output. The graph,',
+    '           its packages and shared nodes (a material package\'s maps) load and cook once:',
+    '           --scale 100 --output wall --export wall.glb --output gate --export gate.glb --render gate.png',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
     '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
@@ -304,22 +313,39 @@ async function cook() {
   const varArgs = argv.flatMap((x, i) => (x === '--var' ? [argv[i + 1]] : []));
   if (varArgs.some((v) => v === undefined || v.startsWith('--'))) fail('--var needs name=value (e.g. --var relief=8)');
   try { graph = withVars(graph, varArgs.map(parseVarArg)); } catch (e) { fail(`--var: ${(e as Error).message}`); }
-  // --output name: a named output (graph.outputs) instead of the default output
-  const outputName = opt('--output');
-  if (argv.includes('--output') && (outputName === undefined || outputName.startsWith('--'))) fail('--output needs the name of one of the graph\'s outputs');
-  if (outputName !== undefined && opt('--node') !== undefined) fail('use either --node or --output, not both');
-  let target = opt('--node');
-  if (target !== undefined && graph?.nodes && !Object.hasOwn(graph.nodes, target) && graph?.outputs && Object.hasOwn(graph.outputs, target))
-    fail(`--node: ${file} has no node "${target}", but an output of that name: --output ${target}`);
-  if (outputName !== undefined) {
-    const outs: Record<string, any> = graph?.outputs && typeof graph.outputs === 'object' ? graph.outputs : {};
-    const o = Object.hasOwn(outs, outputName) ? outs[outputName] : undefined;
-    if (!o || typeof o.node !== 'string') {
-      const names = Object.keys(outs), s = didYouMean(outputName, names);
-      const isNode = !!graph?.nodes && typeof graph.nodes === 'object' && Object.hasOwn(graph.nodes, outputName);
-      fail(`--output: ${file} has no output "${outputName}"${isNode ? `, but a node of that name: --node ${outputName}` : s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; ${names.length ? `its outputs: ${names.join(', ')}` : 'it publishes no "outputs" (--node picks any node)'}`);
+  // --output name: a named output (graph.outputs) instead of the default output. Several outputs in one run: repeat
+  // --output; each takes the options that follow it, up to the next --output (its --export, --format, --render,
+  // --inspect and export options), and options before the first --output apply to every output. The graph, its
+  // packages and the engine load once, so the nodes the outputs share (a material package's maps) cook once. With one
+  // --output (or none) options are read from anywhere, as always.
+  const outputAt = argv.flatMap((x, i) => (x === '--output' ? [i] : []));
+  const multi = outputAt.length > 1;
+  const units: Unit[] = multi ? outputAt.map((s, n) => ({ args: argv.slice(s, outputAt[n + 1] ?? argv.length), base: argv.slice(0, outputAt[0]) })) : [{ args: argv, base: [] }];
+  if (multi) {
+    for (const f of ['--var', '--follow', '--locked', '--frame', '--frames', '--fps', '--timing', '--node', '--export-all'])
+      if (units.some((u) => u.args.includes(f))) fail(`${f} applies to the whole run: put it before the first --output`);
+    for (const f of ['--export', '--render']) if (units[0].base.includes(f)) fail(`${f} before the first --output would write every output to one file: give each --output its own ${f}`);
+    if (argv.includes('--frames')) fail('several outputs in one run cook one frame: use --frame N, not --frames');
+    if (argv.includes('--export-all')) fail('--export-all already exports every output with an export target: leave out --output, or give each --output its own --export');
+  }
+  for (const u of units) {
+    const outputName = uopt(u, '--output');
+    if (uhas(u, '--output') && (outputName === undefined || outputName.startsWith('--'))) fail('--output needs the name of one of the graph\'s outputs');
+    if (outputName !== undefined && uopt(u, '--node') !== undefined) fail('use either --node or --output, not both');
+    let target = uopt(u, '--node');
+    if (target !== undefined && graph?.nodes && !Object.hasOwn(graph.nodes, target) && graph?.outputs && Object.hasOwn(graph.outputs, target))
+      fail(`--node: ${file} has no node "${target}", but an output of that name: --output ${target}`);
+    if (outputName !== undefined) {
+      const outs: Record<string, any> = graph?.outputs && typeof graph.outputs === 'object' ? graph.outputs : {};
+      const o = Object.hasOwn(outs, outputName) ? outs[outputName] : undefined;
+      if (!o || typeof o.node !== 'string') {
+        const names = Object.keys(outs), s = didYouMean(outputName, names);
+        const isNode = !!graph?.nodes && typeof graph.nodes === 'object' && Object.hasOwn(graph.nodes, outputName);
+        fail(`--output: ${file} has no output "${outputName}"${isNode ? `, but a node of that name: --node ${outputName}` : s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; ${names.length ? `its outputs: ${names.join(', ')}` : 'it publishes no "outputs" (--node picks any node)'}`);
+      }
+      target = o.node;
     }
-    target = o.node;
+    u.outputName = outputName; u.target = target;
   }
   const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
   await engine.init();
@@ -376,19 +402,24 @@ async function cook() {
 
   // --inspect <detail>: checked before cooking
   const INSPECT_DETAILS = ['summary', 'attributes', 'topology', 'all', 'uv', 'budget', 'scene'];
-  const inspectDetail = opt('--inspect');
-  if (argv.includes('--inspect') && (inspectDetail === undefined || !INSPECT_DETAILS.includes(inspectDetail))) {
-    const s = inspectDetail ? didYouMean(inspectDetail, INSPECT_DETAILS) : [];
-    fail(`--inspect needs one of ${INSPECT_DETAILS.join(', ')}${inspectDetail ? `, got "${inspectDetail}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}` : ''}`);
-  }
-  const uvRes = opt('--uv-resolution') !== undefined ? Number(opt('--uv-resolution')) : undefined;
+  /** The --inspect detail of an output (undefined: the short summary). */
+  const inspectOf = (u: Unit) => {
+    const d = uopt(u, '--inspect');
+    if (uhas(u, '--inspect') && (d === undefined || !INSPECT_DETAILS.includes(d))) {
+      const s = d ? didYouMean(d, INSPECT_DETAILS) : [];
+      fail(`--inspect needs one of ${INSPECT_DETAILS.join(', ')}${d ? `, got "${d}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}` : ''}`);
+    }
+    return d;
+  };
+  for (const u of units) inspectOf(u);
 
   /** The --inspect report of a cook: text, or the uv / budget / scene report as JSON with --json. */
-  async function inspectText(r: CookReport): Promise<string> {
-    const geo = r.geo!, json = argv.includes('--json');
+  async function inspectText(r: CookReport, u: Unit): Promise<string> {
+    const inspectDetail = inspectOf(u), uvRes = uopt(u, '--uv-resolution') !== undefined ? Number(uopt(u, '--uv-resolution')) : undefined;
+    const geo = r.geo!, json = uhas(u, '--json');
     if (inspectDetail === 'scene') {
       // the glb export with the export options given, read back
-      const res = await serializeExport(geo, 'glb', 'scene.glb', exportArgs(), engine.host);
+      const res = await serializeExport(geo, 'glb', 'scene.glb', exportArgs(u), engine.host);
       const glb = res.files.find((f) => /\.glb$/i.test(f.path));
       if (!glb) return 'scene: the glb export wrote no file';
       const rep = glbSceneReport(glb.bytes);
@@ -439,24 +470,29 @@ async function cook() {
     try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
   }
 
-  // Several renders per run (one cook): every --render takes the render options that follow it, up to the next
-  // --render; options before the first --render apply to all of them. With one --render this is the old behaviour.
-  const renderAt = argv.flatMap((x, i) => (x === '--render' ? [i] : []));
-  const sharedArgs = argv.slice(0, renderAt.length ? renderAt[0] : argv.length);
-  // with several renders, options after the last --render belong to that render only: say so (a person who meant them
-  // for every render puts them before the first --render)
-  if (renderAt.length > 1) {
-    const last = argv.slice(renderAt[renderAt.length - 1] + 2).filter((x) => RENDER_FLAGS.includes(x));
-    if (last.length) console.error(`warning: ${last.join(' ')} after the last --render apply to ${argv[renderAt[renderAt.length - 1] + 1]} only; options before the first --render apply to every render`);
+  // Several renders per cook: every --render takes the render options that follow it, up to the next --render;
+  // options before the first --render apply to all of them (and, with several outputs, the options before the first
+  // --output to every output's renders). With one --render this is the old behaviour.
+  function rendersOf(u: Unit) {
+    const av = u.args;
+    const renderAt = av.flatMap((x, i) => (x === '--render' ? [i] : []));
+    const sharedArgs = av.slice(0, renderAt.length ? renderAt[0] : av.length);
+    // with several renders, options after the last --render belong to that render only: say so (a person who meant
+    // them for every render puts them before the first --render)
+    if (renderAt.length > 1) {
+      const last = av.slice(renderAt[renderAt.length - 1] + 2).filter((x) => RENDER_FLAGS.includes(x));
+      if (last.length) console.error(`warning: ${last.join(' ')} after the last --render apply to ${av[renderAt[renderAt.length - 1] + 1]} only; options before the first --render apply to every render`);
+    }
+    return renderAt.map((start, n) => {
+      const seg = av.slice(start, n + 1 < renderAt.length ? renderAt[n + 1] : av.length);
+      if (!seg[1] || seg[1].startsWith('--')) fail('--render needs an output path (e.g. --render out.png)');
+      const from = (args: string[], f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
+      return { out: seg[1], get: (f: string) => from(seg, f) ?? from(sharedArgs, f) ?? from(u.base, f), has: (f: string) => seg.includes(f) || sharedArgs.includes(f) || u.base.includes(f) };
+    });
   }
-  const renders = renderAt.map((start, n) => {
-    const seg = argv.slice(start, n + 1 < renderAt.length ? renderAt[n + 1] : argv.length);
-    if (!seg[1] || seg[1].startsWith('--')) fail('--render needs an output path (e.g. --render out.png)');
-    const from = (args: string[], f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
-    return { out: seg[1], get: (f: string) => from(seg, f) ?? from(sharedArgs, f), has: (f: string) => seg.includes(f) || sharedArgs.includes(f) };
-  });
+  const rendersByUnit = new Map(units.map((u) => [u, rendersOf(u)]));
 
-  async function writeOutputs(r: CookReport, frame?: number) {
+  async function writeOutputs(r: CookReport, u: Unit, frame?: number) {
     const geo = r.geo!;
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
     // Receipts for the viewer's saved files, only for files inside the package's exports/ (exportsFolderFor): a run whose
@@ -466,13 +502,13 @@ async function cook() {
       const inside = paths.every((p) => { const rel = path.relative(exportsDir, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); });
       if (inside) new ArtifactStore(exportsDir).record(paths, { graph: graphName(file), node: r.target, format });
     };
-    for (const { out, get, has } of renders) {
+    for (const { out, get, has } of rendersByUnit.get(u)!) {
       const ro = renderFlags(get, has);
       const v = get('--views');
       let views = v === undefined || v === 'quad' ? undefined : parseViews(v);
       if (get('--section') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('section') ? views : [...(views ?? parseViews('quad')!), 'section'];
       if (get('--texture') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('texture') ? views : [...(views ?? parseViews('quad')!), 'texture'];
-      const title = path.basename(file, '.json') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
+      const title = path.basename(file, '.json') + (multi ? ` · ${u.outputName}` : '') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
       const img = await renderGeometryAsync(geo, { ...ro, views, colorBy: get('--color-by') ?? null, checker: has('--checker'), title }, (t) => engine.host.readFile(t));
       const p = at(out);
       fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
@@ -480,16 +516,16 @@ async function cook() {
       record([p], 'png');
       console.log(`rendered ${p} (${img.width}x${img.height})${img.notes.length ? ' — ' + img.notes.join('; ') : ''}`);
     }
-    const ex = opt('--export');
+    const ex = uopt(u, '--export');
     if (ex) {
       const p = at(ex);
-      const raw = (opt('--format') ?? exportFormatFromPath(ex)).toLowerCase();
+      const raw = (uopt(u, '--format') ?? exportFormatFromPath(ex)).toLowerCase();
       const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
       if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
       // the export tool's options (the MCP export tool and export targets use the same names and code)
-      const a = exportArgs();
+      const a = exportArgs(u);
       const x = await forExport(r);
-      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), version: TOPOTOPO_VERSION });
+      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), version: TOPOTOPO_VERSION });
       const res = await serializeExport(x.geo!, fmt, p, a, engine.host, source);
       for (const w of res.warnings) console.warn(`warning: ${w}`);
       writeExportFiles(res.files);
@@ -500,10 +536,13 @@ async function cook() {
     }
   }
 
-  /** The export flags given, as the export tool's options (snake_case, as export targets and the MCP export tool name them). */
-  function exportArgs(): Record<string, unknown> {
+  /**
+   * The export flags given for an output, as the export tool's options (snake_case, as export targets and the MCP
+   * export tool name them): its own over those for every output.
+   */
+  function exportArgs(u: Unit): Record<string, unknown> {
     // every option of the export tool has a flag: --name value, booleans --name / --no-name (io/targets.ts)
-    try { return exportOptionsFromFlags(argv); } catch (e) { return fail(`export: ${(e as Error).message}`); }
+    try { return { ...exportOptionsFromFlags(u.base), ...exportOptionsFromFlags(u.args) }; } catch (e) { return fail(`export: ${(e as Error).message}`); }
   }
 
   if (framesArg) {
@@ -513,22 +552,34 @@ async function cook() {
       if (!r.ok || !r.geo) return;
       const cooked = [...r.results.values()].filter((n) => !n.cached && !n.error).length;
       console.log(`frame ${f}: ${r.target} in ${r.ms.toFixed(0)} ms (${cooked} node(s) cooked) — ${r.geo.numPoints} points, ${r.geo.numPrims} prims`);
-      if (inspectDetail) console.log(await inspectText(r));
-      await writeOutputs(r, f);
-    }, { target, fps });
+      if (inspectOf(units[0])) console.log(await inspectText(r, units[0]));
+      await writeOutputs(r, units[0], f);
+    }, { target: units[0].target, fps });
     console.log(`cooked ${file} frames ${range.start}-${range.end}${range.step !== 1 ? `:${range.step}` : ''}: ${res.frames - res.failed.length}/${res.frames} ok`);
     if (res.failed.length) fail(`failed frames: ${res.failed.join(', ')}`);
   } else {
-    const r = await engine.cook(graph, { target, frame: single, fps });
-    report(r);
-    if (!r.ok || !r.geo) { timing(r); process.exit(1); }
-    const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
-    console.log(`cooked ${file} → ${outputName !== undefined ? `output "${outputName}" (${r.target})` : r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''}${vars} in ${r.ms.toFixed(0)} ms`);
-    timing(r);
-    // without --inspect the short summary; --inspect <detail> the report (src/inspect.ts, io/inspect-scene.ts)
-    console.log(inspectDetail ? await inspectText(r) : summarize(r.geo));
-    await writeOutputs(r);
+    const failed: string[] = [], t0 = performance.now();
+    for (const u of units) {
+      const r = await engine.cook(graph, { target: u.target, frame: single, fps });
+      report(r);
+      if (!r.ok || !r.geo) {
+        timing(r);
+        if (!multi) process.exit(1);
+        console.error(`output "${u.outputName}" did not cook: nothing was written for it`);
+        failed.push(u.outputName!);
+        continue;
+      }
+      const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
+      const reused = multi && u !== units[0] ? [...r.results.values()].filter((n) => n.cached).length : 0;
+      console.log(`cooked ${file} → ${u.outputName !== undefined ? `output "${u.outputName}" (${r.target})` : r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''}${vars} in ${r.ms.toFixed(0)} ms${reused ? ` (${reused} node${reused === 1 ? '' : 's'} reused from the outputs before)` : ''}`);
+      timing(r);
+      // without --inspect the short summary; --inspect <detail> the report (src/inspect.ts, io/inspect-scene.ts)
+      console.log(inspectOf(u) ? await inspectText(r, u) : summarize(r.geo));
+      await writeOutputs(r, u);
+    }
     if (argv.includes('--export-all')) await exportAll();
+    if (multi) console.log(`${units.length - failed.length} of ${units.length} outputs in one run, ${((performance.now() - t0) / 1000).toFixed(1)} s${failed.length ? `; did not cook: ${failed.join(', ')}` : ''}`);
+    if (failed.length) { await engine.host.pool?.close(); process.exit(1); }
   }
 
   /** --export-all: every published output with an export target (io/targets.ts), into the package's exports/ (exportsFolderFor). */
