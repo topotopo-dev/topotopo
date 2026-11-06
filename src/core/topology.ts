@@ -650,6 +650,98 @@ export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[]; 
   return { geo: reversePrims(g, Uint8Array.from(primClass, (c) => (c >= 0 ? flip[c] : 0))), flipped, solid, solids, overlap };
 }
 
+/**
+ * Consistent winding per connected piece, then outward (clean fix_winding). Across every edge exactly two polygons
+ * share, the second is turned to run the edge the opposite way to the first, piece by piece from its first polygon;
+ * each piece then keeps the orientation most of its area already had, so a few flipped faces turn back to their
+ * neighbours. Closed pieces that face inward are then turned outward, unless they lie inside the bounds of a closed
+ * piece that faces outward (the inner wall of a hollow solid faces inward on purpose). Open pieces keep their
+ * majority side. Polylines and points are left alone.
+ */
+export function orientPieces(g: Geometry): { geo: Geometry; faces: number; pieces: number } {
+  const np = g.numPrims, P = g.P, vp = g.vertexPoint;
+  const poly = (p: number) => g.primClosed[p] && g.primStart[p + 1] - g.primStart[p] >= 3;
+  // the edges of polygons: undirected key → [prim, runs from the lower point to the higher] for each side using it
+  const n = g.numPoints, sides = new Map<number, number[]>();
+  for (let p = 0; p < np; p++) {
+    if (!poly(p)) continue;
+    const s = g.primStart[p], e = g.primStart[p + 1];
+    for (let v = s; v < e; v++) {
+      const a = vp[v], b = vp[v + 1 < e ? v + 1 : s];
+      if (a === b) continue;
+      const k = a < b ? a * n + b : b * n + a;
+      let l = sides.get(k);
+      if (!l) { l = []; sides.set(k, l); }
+      l.push(p, a < b ? 1 : 0);
+    }
+  }
+  const adj: number[][] = Array.from({ length: np }, () => []);
+  const open = new Uint8Array(np);
+  for (const l of sides.values()) {
+    if (l.length === 4 && l[0] !== l[2]) {
+      // same direction in both: one of them must turn
+      const turn = l[1] === l[3] ? 1 : 0;
+      adj[l[0]].push(l[2], turn); adj[l[2]].push(l[0], turn);
+    } else if (l.length === 2) open[l[0]] = 1;
+    else for (let i = 0; i < l.length; i += 2) open[l[i]] = 1;
+  }
+  // fan volume and area per polygon
+  const vol = new Float64Array(np), area = new Float64Array(np);
+  for (let p = 0; p < np; p++) {
+    if (!poly(p)) continue;
+    area[p] = primArea(g, p);
+    const s = g.primStart[p], e = g.primStart[p + 1], a = vp[s] * 3;
+    for (let v = s + 1; v + 1 < e; v++) {
+      const b = vp[v] * 3, d = vp[v + 1] * 3;
+      vol[p] += P[a] * (P[b + 1] * P[d + 2] - P[b + 2] * P[d + 1]) - P[a + 1] * (P[b] * P[d + 2] - P[b + 2] * P[d]) + P[a + 2] * (P[b] * P[d + 1] - P[b + 1] * P[d]);
+    }
+  }
+  const flip = new Int8Array(np).fill(-1), piece = new Int32Array(np).fill(-1);
+  const pieces: { members: number[]; closed: boolean; vol: number; lo: number[]; hi: number[] }[] = [];
+  for (let f = 0; f < np; f++) {
+    if (!poly(f) || flip[f] >= 0) continue;
+    const members = [f];
+    flip[f] = 0; piece[f] = pieces.length;
+    for (let i = 0; i < members.length; i++) {
+      const x = members[i], a = adj[x];
+      for (let j = 0; j < a.length; j += 2) {
+        const y = a[j];
+        if (flip[y] >= 0) continue;
+        flip[y] = flip[x] ^ a[j + 1]; piece[y] = pieces.length;
+        members.push(y);
+      }
+    }
+    let keep = 0, turn = 0;
+    for (const x of members) if (flip[x]) turn += area[x]; else keep += area[x];
+    if (turn > keep) for (const x of members) flip[x] ^= 1;
+    let closed = true, v = 0;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const x of members) {
+      if (open[x]) closed = false;
+      v += flip[x] ? -vol[x] : vol[x];
+      for (let k = g.primStart[x]; k < g.primStart[x + 1]; k++) for (let c = 0; c < 3; c++) {
+        const q = P[vp[k] * 3 + c];
+        if (q < lo[c]) lo[c] = q;
+        if (q > hi[c]) hi[c] = q;
+      }
+    }
+    pieces.push({ members, closed, vol: v, lo, hi });
+  }
+  const inside = (c: number, o: number) => [0, 1, 2].every((k) => pieces[c].lo[k] >= pieces[o].lo[k] && pieces[c].hi[k] <= pieces[o].hi[k]);
+  let turned = 0;
+  for (let c = 0; c < pieces.length; c++) {
+    const pc = pieces[c];
+    if (!pc.closed || !(pc.vol < 0)) continue;
+    if (pieces.some((o, i) => i !== c && o.closed && o.vol > 0 && inside(c, i))) continue;
+    for (const x of pc.members) flip[x] ^= 1;
+    turned++;
+  }
+  let faces = 0;
+  const mask = new Uint8Array(np);
+  for (let p = 0; p < np; p++) if (flip[p] === 1) { mask[p] = 1; faces++; }
+  return { geo: faces ? reversePrims(g, mask) : g, faces, pieces: turned };
+}
+
 /** Quick topology health report used by inspect and by solid ops. */
 export function topologyReport(g: Geometry) {
   const E = buildEdges(g);

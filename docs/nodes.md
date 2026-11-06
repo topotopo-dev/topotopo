@@ -4586,7 +4586,7 @@ For holes, non-manifold edges, inconsistent winding and self-intersections use m
 | `remove_degenerate` | bool | `true` |  |  |  | remove prims with repeated/too few points |
 | `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side |
 | `remove_unused_points` | bool | `true` |  |  |  | remove points not used by prims (only when the geometry has prims) |
-| `fix_winding` | bool | `false` |  |  |  | make closed meshes face outward |
+| `fix_winding` | bool | `false` |  |  |  | make the winding consistent in each connected piece (most of its area decides, so a few flipped faces turn back), then turn closed pieces outward; a closed piece inside another one (the inner wall of a hollow solid) stays inward |
 
 **Example**
 
