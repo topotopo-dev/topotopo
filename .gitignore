@@ -18,3 +18,4 @@ bench/last.json
 .cache/
 **/packages/.cache.json
 **/packages/.lock
+launcher/target/

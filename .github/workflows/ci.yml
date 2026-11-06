@@ -2,7 +2,9 @@
 # tarball installed into an empty project, its CLI, library and MCP server) and the documentation site's link check.
 # Standard GitHub-hosted runners only (free for public repositories). The text node uses the bundled font
 # (assets/fonts), so the runners need no system fonts; kernels/pkg* are committed, so no Rust toolchain either
-# (NOTICE --check keeps the committed Rust section while kernels/Cargo.lock is unchanged).
+# (NOTICE --check keeps the committed Rust section while kernels/Cargo.lock is unchanged). The Windows job also builds
+# the Windows launcher from launcher/ (Rust and the MSVC tools come with the Windows runners) and checks that build the
+# way npm test checks the committed launcher/win32-x64/topotopo-open.exe.
 name: CI
 
 on:
@@ -42,6 +44,13 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Build the Windows launcher from source
+        if: runner.os == 'Windows'
+        working-directory: launcher
+        run: cargo build --release --locked
+      - name: Check the Windows launcher built from source
+        if: runner.os == 'Windows'
+        run: node test/launcher.ts --exe launcher/target/release/topotopo-open.exe
       - run: npm run build
       - run: npm run pack:test
       - run: npm run site

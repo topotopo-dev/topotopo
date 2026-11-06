@@ -1,0 +1,5 @@
+# Read when cargo runs in launcher/ (npm run launcher:build and CI do).
+# crt-static: no Visual C++ runtime DLL needed on the user's machine. /Brepro: no link timestamp, so the same sources
+# and toolchain give the same bytes.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/Brepro"]
