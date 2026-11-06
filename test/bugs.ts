@@ -278,6 +278,36 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(rt.ok && solidReport(rt.geo!).pieces === 1 && Math.abs(signedVolume(rt.geo!) - 2) < 1e-6, `boolean without B fuses touching pieces (${rt.geo && solidReport(rt.geo).pieces} pieces)`, errs(rt));
 }
 
+// ------------------------------------------------------------------ 5c. triangulation keeps every corner of a polygon
+// earcut leaves out corners that repeat or lie on a straight run, so a polygon's edges through them were missing from
+// its triangles: cracks in exports, and a boolean's own polygons (three slots unioned into a star leave three corners
+// 1e-11 m apart) rejected as "not a closed solid" by the next boolean.
+
+{
+  const { Geometry } = await import('../src/core/geometry.ts');
+  const { triangulate } = await import('../src/core/topology.ts');
+  const { solidReport } = await import('../src/core/report.ts');
+  // an L with a corner on its long edge, a repeated corner and two corners on a straight run of the short arm
+  const ring: [number, number][] = [[0, 0], [1, 0], [2, 0], [2, 0], [2, 1], [1, 1], [1, 2], [1, 3], [0, 3]];
+  const g = new Geometry({ positions: ring.flatMap(([x, z]) => [x, 0, z]), prims: [ring.map((_, i) => i)] });
+  const { tris } = triangulate(g);
+  const vp = g.vertexPoint, uses = new Map<string, number>();
+  for (let t = 0; t < tris.length; t += 3) for (let k = 0; k < 3; k++) { const key = `${vp[tris[t + k]]}>${vp[tris[t + (k + 1) % 3]]}`; uses.set(key, (uses.get(key) ?? 0) + 1); }
+  const missing = ring.map((_, i) => `${i}>${(i + 1) % ring.length}`).filter((e) => uses.get(e) !== 1 && uses.get(e.split('>').reverse().join('>')) !== 1);
+  check(missing.length === 0, `triangulate keeps every edge of a polygon with repeated and collinear corners (${missing.length ? 'missing ' + missing.join(', ') : `${tris.length / 3} triangles`})`);
+  const star = await engine.cook({ nodes: {
+    profile: { type: 'curve', params: { points: [[0, 0.2125, 0], [0.0275, 0.2125, 0], [0.0275, 0.2335, 0], [0.0225, 0.2335, 0], [0.0225, 0.24, 0], [0.0185, 0.24, 0], [0.0185, 0.2905, 0], [0.0092, 0.2905, 0], [0.0092, 0.262, 0], [0, 0.262, 0]] } },
+    turned: { type: 'revolve', in: ['profile'], params: { segments: 18 } },
+    laid: { type: 'transform', in: ['turned'], params: { rotate: [-90, 0, 0], translate: [0, 0.046, 0] } },
+    welded: { type: 'fuse', in: ['laid'], params: { distance: 0.0001 } },
+    slot: { type: 'box', params: { size: [0.005, 0.05, 0.0245], center: [0, 0.046, -0.2802] } },
+    slots: { type: 'copy_xform', in: ['slot'], params: { count: 3, rotate: [0, 0, 60], pivot: [0, 0.046, 0] } },
+    star: { type: 'boolean', in: ['slots'], params: { operation: 'union' } },
+    cut: { type: 'boolean', in: ['welded', 'star'], params: { operation: 'subtract' } },
+  }, output: 'cut' });
+  check(star.ok && solidReport(star.geo!).closed, `a star of three slots, unioned, cuts a turned part (${star.geo ? `${star.geo.numPrims} prims` : 'no result'})`, errs(star));
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.
