@@ -2091,7 +2091,9 @@ defineNode({
     'assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render ' +
     '{textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the ' +
     'result is the material alone with the maps it uses: a material output (kind material), which other packages ' +
-    'assign through input 1 of the material node.',
+    'assign through input 1 of the material node. It sets no alpha mode: for a blended or cut-out material put a ' +
+    'material node {name, alpha_mode: "blend" or "mask"} in input 0 (with no input of its own for a material output); ' +
+    'this node adds the maps to it and keeps the mode.',
   aliases: ['texture_material', 'material_textures', 'attach_textures', 'apply_textures'],
   inputs: [
     { name: 'geo', desc: 'mesh to texture (needs uv); none: the material alone, for a material output', optional: true },

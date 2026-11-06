@@ -31,7 +31,7 @@ import { drawTextureView, textureSampler, withMaterialPreview } from './texview.
 import { EMPTY_ATTRIB } from '../core/scene.ts';
 import { ALPHA_BLEND, ALPHA_MASK, pbrScene, preparePBR } from './pbr.ts';
 import { loadMikkTSpace } from '../core/tangents.ts';
-import { decodePNG } from '../io/png-decode.ts';
+import { decodePNG, lfsPointerNote } from '../io/png-decode.ts';
 import type { PBRScene, PBRTextures, VertexColorMode } from './pbr.ts';
 
 /**
@@ -405,6 +405,8 @@ export async function readUnderlay(p: string, readFile?: (path: string) => Promi
   if (!readFile) throw new Error(`render: underlay "${p}": no file access in this render`);
   let bytes: Uint8Array;
   try { bytes = await readFile(p); } catch (e: any) { throw new Error(`render: underlay "${p}" cannot be read (${e?.message ?? e})`); }
+  const lfs = lfsPointerNote(bytes);
+  if (lfs) throw new Error(`render: underlay "${p}" is not a PNG: ${lfs}`);
   if (!(bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47)) throw new Error(`render: underlay "${p}" is not a PNG (only PNG reference images are read; convert it to PNG)`);
   let img: ReturnType<typeof decodePNG>;
   try { img = decodePNG(bytes); } catch (e: any) { throw new Error(`render: underlay "${p}" is not a readable PNG (${e?.message ?? e})`); }

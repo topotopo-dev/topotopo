@@ -86,7 +86,7 @@ import type { AnchorAttrib, ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked, xform3 } from '../core/packed.ts';
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
 import { imageFromPNG, imageTextureData } from './textures.ts';
-import { decodePNG } from './png-decode.ts';
+import { decodePNG, lfsPointerNote } from './png-decode.ts';
 import { encodePNG } from '../render/png.ts';
 import { zlibStored } from './heightmap.ts';
 import { imageRef } from '../core/image.ts';
@@ -318,7 +318,7 @@ function textureFor(st: MatState, path: string, made?: { name: string; bytes: Ui
   t = null;
   const bytes = made ? made.bytes : st.data.get(path);
   const mime = bytes ? imageMime(bytes) : null;
-  if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image; material exported without it`);
+  if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image${lfsPointerNote(bytes) ? ` (${lfsPointerNote(bytes)})` : ''}; material exported without it`);
   if (bytes && mime) {
     const same = st.byLength.get(bytes.length)?.find((c) => sameBytes(c.bytes, bytes));
     if (same) t = same.tex;

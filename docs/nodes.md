@@ -1025,6 +1025,8 @@ category: `curve` · aliases: `linear_extrude`, `extrude2d`
 
 Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.
 
+A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -2328,13 +2330,13 @@ Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, or
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `translate` | vec3 | `[0,0,0]` |  |  | `t`, `move`, `offset`, `position` | translation |
-| `rotate` | vec3 | `[0,0,0]` |  |  | `r`, `rot`, `rotation` | rotation in degrees about X, Y, Z |
+| `rotate` | vec3 | `[0,0,0]` |  |  | `r`, `rot`, `rotation` | rotation in degrees about the world X, Y and Z axes, right-handed (counter-clockwise seen from the + end of the axis), X first, then Y, then Z (rotate_order xyz): [0, 0, 40] turns +Y to (-0.64, 0.77, 0), [0, 90, 0] turns +X to -Z |
 | `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale (a single number = uniform) |
 | `uniform_scale` | float | `1` |  |  | `uniformscale`, `scale_uniform` | extra uniform scale multiplier |
 | `pivot` | vec3 | `[0,0,0]` |  |  | `p` | pivot for rotation and scale |
 | `pivot_mode` | enum | `"param"` |  | `param`, `centroid`, `bbox_min`, `bbox_center_bottom` |  | where the pivot comes from |
 | `order` | enum | `"srt"` |  | `srt`, `str`, `rst`, `rts`, `tsr`, `trs` | `xord` | transform order (srt = scale, then rotate, then translate) |
-| `rotate_order` | enum | `"xyz"` |  | `xyz`, `xzy`, `yxz`, `yzx`, `zxy`, `zyx` | `rord` | rotation order |
+| `rotate_order` | enum | `"xyz"` |  | `xyz`, `xzy`, `yxz`, `yzx`, `zxy`, `zyx` | `rord` | order the three rotations apply in, each about a world axis: xyz = X first, then Y, then Z |
 | `group` | group (point) | `""` |  |  |  | point group to transform ("" = all) |
 
 **Example**
@@ -15783,7 +15785,7 @@ category: `texture` · aliases: `texture_material`, `material_textures`, `attach
 
 Attach images as texture maps (base colour, normal, roughness, ORM) to a named material and assign it; the images travel with the geometry and exporters embed them.
 
-Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other packages assign through input 1 of the material node.
+Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other packages assign through input 1 of the material node. It sets no alpha mode: for a blended or cut-out material put a material node {name, alpha_mode: "blend" or "mask"} in input 0 (with no input of its own for a material output); this node adds the maps to it and keeps the mode.
 
 **Inputs**
 

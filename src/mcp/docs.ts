@@ -21,7 +21,7 @@ PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pa
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
 CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the floor, from pins (pin_group / input 2) and in wind; inflate {pressure} puffs a closed mesh into a cushion or balloon. See help topic "cloth".
 
-CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
+CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
 HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
@@ -538,6 +538,11 @@ MATERIAL OUTPUTS (a material as a package output, kind "material": materials and
           roughness} with no input for a plain one.
           Each map keeps its texture node's resolution (a 4k normal beside a 512 mask); expose one as a param (a var
           such as "normal_resolution" read by that node) to let a use change it.
+  alpha   texture_to_material sets no alpha mode, so on its own the material is opaque. Blended (glass, stains) or
+          cut-out (grates) takes two nodes: material {name:"glass", alpha_mode:"blend"} with no input (the values:
+          roughness, metallic, alpha), then texture_to_material {material:"glass", base_color:"glass_color"} with that
+          node in input 0 and the images in input 1 ("in": ["glass_mat", "maps"]) → the output. It adds the maps and
+          keeps the mode; the base colour image's alpha is the transparency. Cut-outs: alpha_mode "mask", alpha_cutoff.
   use     {"type":"owner/materials/steel", "params":{...}} → input 1 of material {group:"@name=body*"} on the mesh: the
           material and its maps are copied in and assigned (from names one when the source holds several; name
           renames it). The material node's own colour and map params are not used then.

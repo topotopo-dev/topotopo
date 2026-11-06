@@ -760,6 +760,16 @@ section('image_file and the file node: PNG files as images');
   const tHuge = performance.now() - t0;
   check(missing.includes('cannot read "inputs/missing.png"'), `a missing file: ${missing.slice(0, 100)}…`);
   check(fake.includes('"inputs/fake.png"') && fake.includes('bad signature'), `not a PNG: ${fake}`);
+  // a large file Git LFS never fetched is a short text pointer: say that, not "bad signature"
+  const pointer = 'version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 1254331\n';
+  put('inputs/lfs.png', pointer);
+  const lfs = await errOf({ path: 'inputs/lfs.png' });
+  check(lfs.includes('"inputs/lfs.png"') && lfs.includes('Git LFS pointer') && lfs.includes('git lfs pull') && !lfs.includes('bad signature'), `a Git LFS pointer says so: ${lfs}`);
+  {
+    const { readUnderlay } = await import('../src/render/raster.ts');
+    const ul = await readUnderlay('ref/lfs.png', async () => new TextEncoder().encode(pointer)).then(() => 'read', (e) => String(e?.message ?? e));
+    check(ul.includes('Git LFS pointer'), `a render underlay that is a Git LFS pointer says so: ${ul}`);
+  }
   check(cut.includes('"inputs/cut.png"') && cut.includes('truncated'), `a truncated PNG: ${cut}`);
   check(huge.includes('"inputs/huge.png"') && huge.includes('5000 × 5000') && tHuge < 1000, `an image over 4096 × 4096 pixels is refused before decoding (${tHuge.toFixed(0)} ms): ${huge}`);
   check((await errOf({ path: '' })).includes('path is empty'), 'an empty path says so');

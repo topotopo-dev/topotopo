@@ -777,6 +777,11 @@ defineNode({
   type: 'extrude',
   category: 'curve',
   summary: 'Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.',
+  description:
+    'A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; ' +
+    'which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect ' +
+    'and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes ' +
+    'through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids.',
   aliases: ['linear_extrude', 'extrude2d'],
   inputs: [{ name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' }],
   params: {
