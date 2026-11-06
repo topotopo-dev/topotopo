@@ -1646,7 +1646,7 @@ category: `curve` · aliases: `lathe`
 
 Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.
 
-Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. angle is measured from where the profile is drawn, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed results face outward. Caps (caps on, partial angle) are only made for closed profiles, and then the result is a closed solid that is always oriented outward (flip has no effect on it). An open profile gives an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.
+Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed solids always face outward and flip has no effect on them: a closed profile turned a full 360, a closed profile over a partial angle with caps on (the caps are wound with the sides, for any angle and either profile direction), and a profile whose open ends both lie on the axis turned a full 360. Caps are only made for closed profiles. Every other result is an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.
 
 **Inputs**
 
@@ -1662,8 +1662,8 @@ Each profile point turns around the axis line (through origin, along axis) at it
 | `origin` | vec3 | `[0,0,0]` |  |  | `center`, `pivot` | a point on the axis |
 | `segments` | int | `32` | 3..4096 |  | `divisions`, `cols` | segments around |
 | `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees, counter-clockwise seen from the axis tip (right-handed): 0..90 about Y runs from +X towards -Z |
-| `caps` | bool | `false` |  |  |  | cap partial revolves of closed profiles (open profiles have no cap; the result is oriented outward) |
-| `flip` | bool | `false` |  |  |  | reverse face orientation (open profiles; a closed solid is always re-oriented outward) |
+| `caps` | bool | `false` |  |  |  | cap partial revolves of closed profiles, making a closed solid that faces outward (open profiles get no caps) |
+| `flip` | bool | `false` |  |  |  | reverse face orientation of an open result; no effect on a closed solid (always faces outward) |
 
 **Writes:** vertex uv
 

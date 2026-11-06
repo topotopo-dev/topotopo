@@ -308,6 +308,42 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(star.ok && solidReport(star.geo!).closed, `a star of three slots, unioned, cuts a turned part (${star.geo ? `${star.geo.numPrims} prims` : 'no result'})`, errs(star));
 }
 
+// ------------------------------------------------------------------ 5d. revolve caps wind with its sides
+// The caps of a partial revolve were wound against the sides they share edges with (8 inconsistent edges for a square
+// profile), so the closed solid was inside-out at its caps and orienting it outward could not fix it; flip hid it.
+
+{
+  const { solidReport } = await import('../src/core/report.ts');
+  const { signedVolume } = await import('../src/core/topology.ts');
+  const ccw = [[3, 0, 0], [3.6, 0, 0], [3.6, 4, 0], [3, 4, 0]];
+  const profiles: [string, number[][], number[]][] = [
+    ['square', ccw, [0, 1, 0]],
+    ['square drawn clockwise', ccw.slice().reverse(), [0, 1, 0]],
+    ['profile touching the axis', [[0, 0, 0], [1, 0, 0], [0.6, 1, 0], [0, 1.4, 0]], [0, 1, 0]],
+    ['square about X', [[0, 3, 0], [0, 3.6, 0], [1, 3.6, 0], [1, 3, 0]], [1, 0, 0]],
+  ];
+  const angles = [[-30, 30], [0, 300], [-360, -60], [0, 90], [90, 0], [0, -120], [45, 46]];
+  const bad: string[] = [];
+  let cases = 0;
+  for (const [name, points, axis] of profiles) for (const angle of angles) {
+    const vols: number[] = [];
+    for (const flip of [false, true]) {
+      const r = await engine.cook({ nodes: {
+        p: { type: 'curve', params: { points, closed: true } },
+        a: { type: 'revolve', in: ['p'], params: { segments: 10, angle, axis, caps: true, flip } },
+      }, output: 'a' });
+      cases++;
+      const rep = r.geo && solidReport(r.geo);
+      const vol = r.geo ? signedVolume(r.geo) : NaN;
+      vols.push(vol);
+      if (!r.ok || !rep!.closed || rep!.flippedEdges || rep!.inwardPieces || !(vol > 0))
+        bad.push(`${name} angle [${angle}] flip ${flip}: ${r.ok ? `closed ${rep!.closed}, ${rep!.flippedEdges} inconsistent edges, ${rep!.inwardPieces} inward, volume ${vol.toFixed(3)}` : errs(r)}`);
+    }
+    if (Math.abs(vols[0] - vols[1]) > 1e-9) bad.push(`${name} angle [${angle}]: flip changes the volume (${vols[0]} vs ${vols[1]})`);
+  }
+  check(bad.length === 0, `capped partial revolves are consistent, closed and outward for every angle, profile direction and flip (${cases} cooks)`, bad.slice(0, 6).join('\n'));
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.
