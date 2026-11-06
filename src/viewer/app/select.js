@@ -1,32 +1,40 @@
-// Picking and selecting in the viewport: click selects what is under the cursor
-// (a guide, else the nearest piece of the output or of a reference layer), Shift adds, Ctrl removes, a drag pulls a
-// box that selects what lies wholly inside it, a click on nothing clears. Hover draws a dimmer highlight. All
-// positions are viewport pixels.
+// Picking and selecting in the viewport, for the selection model of pointer.js (main.js decides what a press does):
+// what is under the cursor (a guide or one of its CVs within a few pixels, else an input layer the ray meets, else the
+// nearest piece of the cooked result), the box a Shift or Ctrl drag pulls, and the hover, a dimmer highlight with the
+// name of a result beside the cursor. All positions are viewport pixels.
 import * as THREE from 'three';
-import { opOf, parseId, pieceId } from './selection.js';
+import { parseId, pieceId } from './selection.js';
 import { AXIS_VIEWS } from './camera.js';
-
-const DRAG_PX = 4;
+import { pickWinner, boxTakes, targetKind } from './pointer.js';
 
 export function createSelect(ctx) {
   const S = { press: null, boxEl: document.getElementById('boxsel'), hoverAt: null, hoverQueued: false };
   const meshEntries = () => [...ctx.objects.values()].filter((e) => e.mesh && (ctx.isolated ? e.id === 'out' && !ctx.previewEmpty : e.visible) && e.mesh.root.visible);
 
-  /** What is under a viewport point in a slot: {id, point?} or null. Guides first (they draw on top). */
+  /**
+   * What is under a viewport point in a slot: {id, kind, handle?, point?} or null; `kind` is pointer.js's target
+   * kind, `handle` what a drag would move (guides.js handleAt). Things you edit win (pointer.js pickWinner): a guide or
+   * a CV within its few pixels, drawn on top of everything, then an input layer the ray meets even behind a result.
+   */
   S.pick = (slot, x, y) => {
-    const g = ctx.isolated ? null : ctx.guides.pick(slot, x, y);
-    if (g) return { id: g.id };
-    const rc = ctx.views.ray(slot, x, y);
-    const linePx = ctx.views.worldPerPixel(slot) * 5;
-    let best = null;
-    for (const e of meshEntries()) {
-      if (e.pickable === false) continue;
-      const h = e.mesh.pick(rc, linePx);
-      if (h && h.dist < (best?.dist ?? Infinity)) best = { ...h, entry: e };
+    const h = ctx.isolated ? null : ctx.guides.handleAt(slot, x, y);
+    const guide = h ? { id: ctx.guides.idOf(h), handle: h } : null;
+    const near = { layer: null, result: null };
+    if (!guide) {
+      const rc = ctx.views.ray(slot, x, y), linePx = ctx.views.worldPerPixel(slot) * 5;
+      for (const e of meshEntries()) {
+        if (e.pickable === false) continue;
+        const hit = e.mesh.pick(rc, linePx), k = e.kind === 'layer' ? 'layer' : 'result';
+        if (hit && hit.dist < (near[k]?.dist ?? Infinity)) near[k] = { ...hit, entry: e };
+      }
     }
-    if (!best) return null;
-    const n = best.entry.mesh.pieceCount();
-    return { id: best.piece === null || n <= 1 ? best.entry.id : pieceId(best.entry.id, best.piece), point: best.point };
+    const asHit = (b) => {
+      if (!b) return null;
+      const n = b.entry.mesh.pieceCount();
+      return { id: b.piece === null || n <= 1 ? b.entry.id : pieceId(b.entry.id, b.piece), point: b.point };
+    };
+    const win = pickWinner(guide, asHit(near.layer), asHit(near.result));
+    return win ? { ...win, kind: targetKind(win.id) } : null;
   };
 
   /** The construction plane of a slot's camera: y = 0 for persp, top and bottom; the view's own axis plane else. */
@@ -65,51 +73,46 @@ export function createSelect(ctx) {
   /** A viewport point on the horizontal plane at height `level`, through slot's camera. */
   S.planePoint = (slot, x, y, level) => ctx.views.ray(slot, x, y).ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -level), new THREE.Vector3());
 
-  // ------------------------------------------------------------------ click, box
-  S.down = (slot, x, y, e) => { S.press = { slot, x, y, op: opOf(e), box: false }; };
+  // ------------------------------------------------------------------ the box of a Shift or Ctrl drag
+  /** A box from (x, y) in a slot, adding ('add') or taking out ('remove') what lies wholly inside it on release. */
+  S.boxStart = (slot, x, y, op) => { S.press = { slot, x, y, op }; };
   S.move = (x, y) => {
     const p = S.press;
     if (!p) return;
-    // as Maya's select tool: a left drag pulls a box wherever it starts (nothing moves by dragging in phase 1)
-    if (!p.box && Math.hypot(x - p.x, y - p.y) > DRAG_PX) p.box = true;
-    if (p.box) {
-      const r = ctx.views.slots[p.slot].rect;
-      const cx = Math.max(r.x, Math.min(r.x + r.w, x)), cy = Math.max(r.y, Math.min(r.y + r.h, y));
-      Object.assign(S.boxEl.style, { left: `${Math.min(p.x, cx)}px`, top: `${Math.min(p.y, cy)}px`, width: `${Math.abs(cx - p.x)}px`, height: `${Math.abs(cy - p.y)}px` });
-      S.boxEl.hidden = false;
-      p.end = { x: cx, y: cy };
-    }
+    const r = ctx.views.slots[p.slot].rect;
+    const cx = Math.max(r.x, Math.min(r.x + r.w, x)), cy = Math.max(r.y, Math.min(r.y + r.h, y));
+    Object.assign(S.boxEl.style, { left: `${Math.min(p.x, cx)}px`, top: `${Math.min(p.y, cy)}px`, width: `${Math.abs(cx - p.x)}px`, height: `${Math.abs(cy - p.y)}px` });
+    S.boxEl.hidden = false;
+    p.end = { x: cx, y: cy };
   };
   S.up = (x, y) => {
     const p = S.press;
     S.press = null;
     S.boxEl.hidden = true;
     if (!p) return;
-    if (p.box) {
-      const e = p.end ?? { x, y };
-      return S.boxSelect(p.slot, { x0: Math.min(p.x, e.x), y0: Math.min(p.y, e.y), x1: Math.max(p.x, e.x), y1: Math.max(p.y, e.y) }, p.op);
-    }
-    const hit = S.pick(p.slot, x, y);
-    if (hit) ctx.selection.apply([hit.id], p.op);
-    else if (p.op === 'replace') ctx.selection.clear();
+    const e = p.end ?? { x, y };
+    S.boxSelect(p.slot, { x0: Math.min(p.x, e.x), y0: Math.min(p.y, e.y), x1: Math.max(p.x, e.x), y1: Math.max(p.y, e.y) }, p.op);
   };
   S.cancel = () => { S.press = null; S.boxEl.hidden = true; };
-  /** Everything wholly inside a viewport rect of a slot. */
-  S.boxSelect = (slot, rect, op = 'replace') => {
+  /**
+   * What lies wholly inside a viewport rect of a slot, added to or taken out of the selection (op 'add' | 'remove'):
+   * guides, their CVs and input layers; results only to be taken out (pointer.js boxTakes).
+   */
+  S.boxSelect = (slot, rect, op = 'add') => {
     const cam = ctx.views.camera(slot);
     const inside = (pts) => pts.every((w) => {
       const q = ctx.views.project(slot, w, cam);
       return q && q.x >= rect.x0 && q.x <= rect.x1 && q.y >= rect.y0 && q.y <= rect.y1;
     });
-    const ids = [...ctx.guides.boxSelect(inside)];
+    const ids = ctx.isolated ? [] : [...ctx.guides.boxSelect(inside)];
     for (const e of meshEntries()) {
-      if (e.pickable === false) continue;
+      if (e.pickable === false || !boxTakes(op, targetKind(e.id))) continue;
       const ks = e.mesh.boxPieces(inside);
       const n = e.mesh.bboxMode ? 1 : e.mesh.pieceCount();
       if (ks.length && (ks.includes(null) || n <= 1 || ks.length === n)) ids.push(e.id);
       else for (const k of ks) ids.push(pieceId(e.id, k));
     }
-    if (ids.length || op === 'replace') ctx.selection.apply(ids, op);
+    if (ids.length) ctx.selection.apply(ids, op);
   };
 
   // ------------------------------------------------------------------ hover
@@ -121,7 +124,11 @@ export function createSelect(ctx) {
     setTimeout(() => {
       S.hoverQueued = false;
       const h = S.hoverAt && !S.press && !ctx.guides.mode ? S.pick(S.hoverAt.slot, S.hoverAt.x, S.hoverAt.y) : null;
-      ctx.setHover(h?.id ?? null);
+      // where the cursor is while it is over a result, for the result's name beside it (main.js drawOverlays)
+      const spot = h?.kind === 'result' ? { ...S.hoverAt } : null;
+      const moved = JSON.stringify(spot) !== JSON.stringify(S.hoverSpot);
+      S.hoverSpot = spot;
+      if (!ctx.setHover(h?.id ?? null) && moved) ctx.requestOverlays?.();
     }, 16);
   };
 
@@ -140,7 +147,7 @@ export function createSelect(ctx) {
   S.boundsOf = (id) => {
     const { obj, piece } = parseId(id), e = ctx.objects.get(obj);
     if (!e) return null;
-    if (e.kind === 'guide') return ctx.guides.bounds(e.marker);
+    if (e.kind === 'guide') return piece === null ? ctx.guides.bounds(e.marker) : ctx.guides.cvBounds(e.marker, piece);
     if (!e.mesh) return null;
     const b = e.mesh.bounds(piece);
     return b.isEmpty() ? null : b;

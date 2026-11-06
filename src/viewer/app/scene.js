@@ -504,6 +504,19 @@ export class MeshObject {
     return new Float32Array(out);
   }
 
+  /** The names of the materials of the object, or of one piece (unnamed ones left out). */
+  materials(piece = null) {
+    const parts = piece === null ? this.parts : [this.partOf(piece)?.part].filter(Boolean);
+    const names = new Set();
+    for (const p of parts) for (const m of [p.orig].flat()) if (m?.name) names.add(m.name);
+    return [...names];
+  }
+  /** The name the file gives the drawable a piece is in (a glTF node or mesh name), or null. */
+  pieceName(piece) {
+    let o = this.partOf(piece)?.part.obj;
+    while (o && o !== this.src && !o.name) o = o.parent;
+    return o && o !== this.src ? o.name : null;
+  }
   /** Counts for the properties panel: {meshes, triangles, vertices, lines, points, instances}. */
   stats() {
     const s = { triangles: 0, vertices: 0, segments: 0, points: 0, instances: 0 };

@@ -3,7 +3,8 @@
 // cyan, on top of the scene: a null is an axis cross (its radius circle only while hovered or selected), a curve a
 // polyline with CV squares and a direction tick, an area a closed curve with a light diagonal hatch, a volume a wire
 // box (its size printed on an edge while selected). Placement modes add them; every change saves the whole list
-// (POST /api/markers) and is one undo step. Saving never moves the camera or reloads the output.
+// (POST /api/markers) and is one undo step. Saving never moves the camera or reloads the output. The CVs of a curve
+// or an area are selectable on their own: "guide:<id>#<k>" (selection.js piece ids), drawn as orange squares.
 import * as THREE from 'three';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
@@ -12,8 +13,11 @@ import * as M from './markers.js';
 import { COLORS, fatSegments, lineMaterial, disposeTree } from './scene.js';
 import { fmtLen } from './units.js';
 import { AXIS_VIEWS } from './camera.js';
+import { parseId, pieceId } from './selection.js';
 
 export const guideId = (id) => `guide:${id}`;
+/** Whether a guide's CVs are selected one by one (curves and areas); a null and a volume select whole. */
+export const hasCVs = (m) => m.kind === 'path' || m.kind === 'zone';
 export const PLACE_KINDS = { placeNull: 'site', placeCurve: 'path', placeArea: 'zone', placeVolume: 'volume' };
 const V3 = (p) => new THREE.Vector3(p[0], p[1], p[2]);
 const CROSS_PX = 11, CV_PX = 6, TICK_PX = 12, PICK_PX = 7;
@@ -74,8 +78,8 @@ function hatchSpacing(pts) {
   return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * e;
 }
 
-/** The objects of one guide in one state ('normal' | 'hover' | 'sel'). */
-function guideObject(m, state, wpp) {
+/** The objects of one guide in one state ('normal' | 'hover' | 'sel'); `cvs` are the CVs selected on their own. */
+function guideObject(m, state, wpp, cvs = []) {
   const st = STYLE[state], g = new THREE.Group(), P = m.points.map(V3);
   g.name = `guide ${m.name}`;
   if (m.kind === 'site') {
@@ -115,6 +119,8 @@ function guideObject(m, state, wpp) {
       }
     }
     g.add(squares(P, st.color, zone ? CV_PX - 1 : CV_PX));
+    const picked = cvs.filter((k) => k < P.length).map((k) => P[k]);
+    if (picked.length) g.add(squares(picked, COLORS.sel, CV_PX + 2));
   }
   return g;
 }
@@ -130,6 +136,14 @@ export function createGuides(ctx) {
   ctx.guidesRoot.add(G.draftRoot);
   const byId = (id) => G.list.find((m) => m.id === id) ?? null;
   G.byId = byId;
+  /** Whether a selection id still names something: not a guide, or a guide there is (and of it a CV it has). */
+  const alive = (id) => {
+    if (!id.startsWith('guide:')) return true;
+    const { obj, piece } = parseId(id), m = byId(obj.slice(6));
+    return !!m && (piece === null || (hasCVs(m) && piece < m.points.length));
+  };
+  /** CVs renumber when one is added or removed: those of the guide leave the selection, the guide stays. */
+  const dropCVs = (id) => ctx.selection.prune((x) => { const { obj, piece } = parseId(x); return piece === null || obj !== guideId(id); });
   const rememberHidden = () => ctx.store.set('guides.hidden', [...G.hidden]);
   const entries = () => {
     for (const id of [...ctx.objects.keys()]) if (id.startsWith('guide:') && !byId(id.slice(6))) ctx.objects.delete(id);
@@ -140,18 +154,22 @@ export function createGuides(ctx) {
     }
   };
 
+  /** The CVs of a guide selected on their own (piece ids of its selection id). */
+  const selectedCVs = (id) => ctx.selection.items.map(parseId).filter((p) => p.obj === id && p.piece !== null).map((p) => p.piece);
   /** Redraw the guides whose marker or state changed (state from the selection and the hover). */
   G.draw = () => {
     const seen = new Set();
+    const hovered = ctx.hover ? parseId(ctx.hover).obj : null;
     for (const m of G.list) {
       const id = guideId(m.id), visible = !G.hidden.has(m.id);
-      const state = ctx.selection.has(id) ? 'sel' : ctx.hover === id ? 'hover' : 'normal';
-      const sig = JSON.stringify([m.kind, m.points, m.radius, m.height, state]);
+      const state = ctx.selection.has(id) ? 'sel' : hovered === id ? 'hover' : 'normal';
+      const cvs = state === 'sel' ? [] : selectedCVs(id);
+      const sig = JSON.stringify([m.kind, m.points, m.radius, m.height, state, cvs]);
       seen.add(m.id);
       let d = G.drawn.get(m.id);
       if (!d || d.sig !== sig) {
         if (d) { ctx.guidesRoot.remove(d.obj); disposeTree(d.obj); }
-        d = { sig, obj: guideObject(m, state, ctx.pxWorld) };
+        d = { sig, obj: guideObject(m, state, ctx.pxWorld, cvs) };
         G.drawn.set(m.id, d);
         ctx.guidesRoot.add(d.obj);
       }
@@ -195,7 +213,7 @@ export function createGuides(ctx) {
   const setList = (list) => {
     G.list = M.cloneMarkers(list);
     entries();
-    ctx.selection.prune((id) => !id.startsWith('guide:') || !!byId(id.slice(6)));
+    ctx.selection.prune(alive);
     G.draw(); save(); ctx.emit('guides');
   };
   /** One undoable change of the list: `edit(list)` changes a copy in place. */
@@ -217,7 +235,7 @@ export function createGuides(ctx) {
     rememberHidden();
     if (j.error) ctx.message(j.error, 'err');
     entries();
-    ctx.selection.prune((id) => !id.startsWith('guide:') || !!byId(id.slice(6)));
+    ctx.selection.prune(alive);
     G.draw(); ctx.emit('guides');
   };
 
@@ -235,6 +253,27 @@ export function createGuides(ctx) {
     if (!gone.length) return 0;
     G.change(`delete ${gone.length === 1 ? gone[0].name : `${gone.length} guides`}`, (list) => { for (let i = list.length - 1; i >= 0; i--) if (drop.has(list[i].id)) list.splice(i, 1); });
     return gone.length;
+  };
+  /**
+   * Remove CVs selected on their own: `cvs` maps a guide id to CV numbers. A curve keeps 2 and an area 3: the CVs
+   * that would take it below are kept. One undo step; returns {removed, kept}.
+   */
+  G.removeCVs = (cvs) => {
+    let removed = 0, kept = 0;
+    const plan = [];
+    for (const [id, ks] of cvs) {
+      const m = byId(id);
+      if (!m || !hasCVs(m)) continue;
+      let next = m;
+      for (const k of [...new Set(ks)].sort((a, b) => b - a)) { const n = M.removePoint(next, k); if (n) { next = n; removed++; } else kept++; }
+      if (next !== m) plan.push(next);
+    }
+    if (plan.length) {
+      const one = plan.length === 1 && removed === 1;
+      G.change(one ? `remove a CV of ${plan[0].name}` : `remove ${removed} CVs`, (list) => { for (const n of plan) list[list.findIndex((o) => o.id === n.id)] = n; });
+      for (const n of plan) dropCVs(n.id);
+    }
+    return { removed, kept };
   };
   G.rename = (id, raw) => {
     const m = byId(id);
@@ -264,39 +303,35 @@ export function createGuides(ctx) {
     const t = l2 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / l2)) : 0;
     return Math.hypot(a.x + t * dx - px, a.y + t * dy - py);
   };
-  /** Outline points of a guide as segments (world), for picking. */
-  const outline = (m) => {
-    if (m.kind === 'volume') { const { lo, hi } = M.boxOf(m); return boxEdges(lo, hi); }
-    if (m.kind === 'site') return [];
-    const P = m.points.map(V3);
-    if (m.kind === 'zone') P.push(P[0]);
-    return P.slice(1).map((p, k) => [P[k], p]);
-  };
-  /** The guide nearest a viewport pixel as slot `slot` shows it, within PICK_PX: {id, d} or null. */
-  G.pick = (slot, x, y) => {
-    const cam = ctx.views.camera(slot);
-    let best = null;
-    for (const m of G.list) {
-      if (G.hidden.has(m.id)) continue;
-      let d = Infinity;
-      if (m.kind === 'site') { const c = ctx.views.project(slot, V3(m.points[0]), cam); if (c) d = Math.max(0, Math.hypot(c.x - x, c.y - y) - CROSS_PX * 0.5); }
-      for (const [a, b] of outline(m)) { const A = ctx.views.project(slot, a, cam), B = ctx.views.project(slot, b, cam); if (A && B) d = Math.min(d, segDist(x, y, A, B)); }
-      if (m.kind !== 'site' && m.kind !== 'volume') for (const p of m.points) { const c = ctx.views.project(slot, V3(p), cam); if (c) d = Math.min(d, Math.hypot(c.x - x, c.y - y)); }
-      if (d <= PICK_PX && d < (best?.d ?? Infinity)) best = { id: guideId(m.id), d };
-    }
-    return best;
-  };
   /** The points that must lie inside a box for a guide to be box-selected. */
   G.points = (m) => (m.kind === 'volume' ? boxEdges(M.boxOf(m).lo, M.boxOf(m).hi).flat() : m.points.map(V3));
-  G.boxSelect = (inside) => G.list.filter((m) => !G.hidden.has(m.id) && inside(G.points(m))).map((m) => guideId(m.id));
+  /**
+   * The ids a box takes: a guide wholly inside it whole; of a curve or an area partly inside, the CVs inside it.
+   * `inside(points)` tests world points.
+   */
+  G.boxSelect = (inside) => {
+    const out = [];
+    for (const m of G.list) {
+      if (G.hidden.has(m.id)) continue;
+      if (inside(G.points(m))) { out.push(guideId(m.id)); continue; }
+      if (hasCVs(m)) m.points.forEach((p, k) => { if (inside([V3(p)])) out.push(pieceId(guideId(m.id), k)); });
+    }
+    return out;
+  };
   G.bounds = (m) => { const { lo, hi } = M.boundsOf(m); return new THREE.Box3(V3(lo), V3(hi)); };
+  /** Bounds of one CV (a point), or null when the guide has no such CV. */
+  G.cvBounds = (m, k) => (hasCVs(m) && m.points[k] ? new THREE.Box3(V3(m.points[k]), V3(m.points[k])) : null);
+  /** How many pieces a guide's selection id has: its CVs for a curve or an area, else 1 (selection.js normalize). */
+  G.pieceCount = (id) => { const m = byId(id); return m && hasCVs(m) ? m.points.length : 1; };
+  /** The selection id a press on a handle selects: a CV of a curve or an area on its own, else the whole guide. */
+  G.idOf = (h) => { const m = byId(h.id); return m && hasCVs(m) && h.part === 'point' ? pieceId(guideId(h.id), h.k) : guideId(h.id); };
   /** Labels of hovered and selected guides: [{key, at: Vector3, text, cls}] (main.js places them in every view). */
   G.labels = () => {
     const out = [];
     for (const m of G.list) {
       if (G.hidden.has(m.id)) continue;
       const id = guideId(m.id), sel = ctx.selection.has(id);
-      if (!sel && ctx.hover !== id) continue;
+      if (!sel && !ctx.selection.touches(id) && (ctx.hover ? parseId(ctx.hover).obj : null) !== id) continue;
       const at = m.kind === 'site' ? V3(m.points[0]) : m.kind === 'zone' ? V3(M.centroid(m.points)) : m.kind === 'path' ? V3(M.halfway(m.points)) : (() => { const { lo, hi } = M.boxOf(m); return new THREE.Vector3((lo[0] + hi[0]) / 2, hi[1], (lo[2] + hi[2]) / 2); })();
       out.push({ key: `n:${m.id}`, at, text: m.name, cls: sel ? 'lbl sel' : 'lbl' });
       if (sel && m.kind === 'volume') {
@@ -401,7 +436,7 @@ export function createGuides(ctx) {
   G.leave = () => { if (G.cursor) { G.cursor = null; G.drawDraft(); } };
 
   // ------------------------------------------------------------------ dragging (select mode)
-  // A plain left press on a guide grabs what is under it: a null's point, a CV of a curve or an area or a volume's
+  // A plain left drag on a guide (pointer.js) moves what is under it: a null's point, a CV of a curve or an area or a volume's
   // ground corner moves that point (onto a reference layer under the pointer, else in the plane through it facing the
   // view); a press on a line or a volume's edge moves the whole guide in that plane. The guide follows the pointer
   // and is saved once, on release, as one undo step. Double-click a CV to remove it, a line to add one there.
@@ -450,7 +485,7 @@ export function createGuides(ctx) {
     }
     return best;
   };
-  /** A left press on a handle starts a drag (nothing moves until the pointer does). */
+  /** A drag on a handle starts from the press at (x, y) (nothing moves until the pointer does). */
   G.dragStart = (slot, x, y, h) => {
     const m = byId(h.id);
     if (!m) return;
@@ -510,12 +545,14 @@ export function createGuides(ctx) {
     if (h.part === 'point') {
       const next = M.removePoint(m, h.k);
       if (!next) { ctx.message(`${m.name} keeps its CV: a${m.kind === 'zone' ? 'n area needs 3' : ' curve needs 2'}`, '', 2000); return true; }
+      dropCVs(m.id);
       G.change(`remove CV ${h.k} of ${m.name}`, (list) => { list[list.findIndex((o) => o.id === m.id)] = next; });
       ctx.message(`removed CV ${h.k} of ${m.name}`, 'ok', 1500);
       return true;
     }
     const next = M.insertPoint(m, h.seg, h.at);
     if (!next) return false;
+    dropCVs(m.id);
     G.change(`add a CV to ${m.name}`, (list) => { list[list.findIndex((o) => o.id === m.id)] = next; });
     ctx.message(`added a CV to ${m.name} · drag it, double-click it to remove it`, 'ok', 2000);
     return true;

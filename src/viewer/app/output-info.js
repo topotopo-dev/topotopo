@@ -27,6 +27,18 @@ export function kindLine(item) {
   return line || (item.view === 'image' ? 'image' : item.view === 'file' ? 'file' : '');
 }
 
+/**
+ * A result's name as hover shows it beside the cursor: its published output, else its node; of a piece, the name its
+ * file gives it after that, when it is not the same ("house › roof").
+ */
+export function resultName({ output = null, node = null, part = null } = {}) {
+  const base = output || node || 'result';
+  return part && part !== base ? `${base} › ${part}` : base;
+}
+
+/** The counts of a geometry summary (src/inspect.ts summarize): its first line, "1,234 points, 567 prims …". */
+export const countsLine = (summary) => String(summary ?? '').split('\n')[0].trim();
+
 /** A heightfield's layers a person can see in red (not the height itself): the mask first, then the others, then none. */
 export function layerChoices(hf) {
   if (!hf) return [];

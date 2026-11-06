@@ -306,6 +306,8 @@ export function createOutputPanel(ctx) {
    * `update`: the same result again (another side of it), which keeps its camera.
    */
   P.isolate = (item, update = false) => { other = item; return P.select(item.id, update); };
+  /** The outputs and saved files as last read (/api/outputs items). */
+  P.list = () => list;
   P.scene = () => {
     sequence++; initial = false; ctx.rememberOutputView?.(selected); selected = null; P.active = null;
     image.hide(); ctx.isolated = false; showDetails(null); render(); ctx.restoreScene(); ctx.emit('output');

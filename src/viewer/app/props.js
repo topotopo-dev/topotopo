@@ -1,6 +1,7 @@
 // The properties column: what the selection is (a guide's name, kind,
 // translate / rotate / scale, radius or height and the attributes the LLM reads; a layer's file, counts, bbox and
-// display mode; the output's summary; a piece's size), and below it the Controls: the graph's exposed vars as
+// display mode; a result's output, node, counts and material; a piece's size; a CV's point), and below it the
+// Controls: the graph's exposed vars as
 // sliders, fields, checkboxes, menus and colour pickers. Drags post at most every 100 ms; each control resets to its
 // default; undeclared vars are listed under "other vars". Transform fields are read-only until phase 2.
 import { api } from './api.js';
@@ -10,7 +11,7 @@ import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
 import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, autoStep, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
 import { fmtDuration } from './cooking.js';
-import { kindLine, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, layerChoices, shownLayer, countsLine } from './output-info.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const $ = (id) => document.getElementById(id);
@@ -102,6 +103,21 @@ export function createProps(ctx) {
     out.push(a);
     return out;
   }
+  /** A CV of a curve or an area selected on its own, above its guide. */
+  function cv(m, k) {
+    const g = group(`CV ${k} of ${m.name}`);
+    if (m.points[k]) g.append(row('point', xyz(m.points[k])));
+    g.append(el('div', 'hint', 'drag it to move it · double-click it to remove it · Delete removes the selected CVs'));
+    return [g, ...guide(m)];
+  }
+  /** The rows a result has whole or as a piece: its published output, graph and node, and its materials. */
+  const resultRows = (g, id) => {
+    const r = ctx.resultInfo(id);
+    g.append(row('output', r.output ?? 'not a published output', r.output ? '' : 'graph.outputs names the results a graph delivers'));
+    g.append(row('graph', r.graph ?? ''), row('node', r.node ?? ''));
+    if (r.part) g.append(row('name', r.part, 'the name the preview file gives this part'));
+    g.append(row('material', r.materials.length ? r.materials.join(', ') : 'none'));
+  };
   function layer(e) {
     const L = ctx.layers, f = e.file, out = [];
     const g = group('reference layer');
@@ -124,11 +140,12 @@ export function createProps(ctx) {
   }
   function output() {
     const o = ctx.output, out = [];
-    const g = group('output');
-    const graph = ctx.graph.current();
-    g.append(row('graph', graph?.name ?? ''), row('node', ctx.graph.shownNode() ?? ''), displayRow(DISPLAY_MODES, o.display, (m) => o.setDisplay(m)));
-    // what it is (the server's decision from the cooked geometry), and a heightfield's layer drawn in red
+    const g = group('result');
+    resultRows(g, 'out');
+    g.append(displayRow(DISPLAY_MODES, o.display, (m) => o.setDisplay(m)));
+    // what it is (the server's decision from the cooked geometry), its counts, and a heightfield's layer drawn in red
     if (o.about) g.append(row('is', kindLine({ kind: o.about.published ?? 'empty', about: o.about.text, size: o.about.size })));
+    if (countsLine(o.summary)) g.append(row('counts', countsLine(o.summary)));
     if (o.about?.heightfield && !ctx.isolated) {
       const s = el('select');
       for (const c of layerChoices(o.about.heightfield)) s.append(new Option(c.label, c.value));
@@ -146,7 +163,8 @@ export function createProps(ctx) {
     return out;
   }
   function piece(e, k) {
-    const out = [], g = group(`piece ${k} of ${e.kind === 'output' ? 'the output' : `inputs/${e.path}`}`);
+    const out = [], g = group(`piece ${k} of ${e.kind === 'output' ? 'the result' : `inputs/${e.path}`}`);
+    if (e.kind === 'output') resultRows(g, `out#${k}`);
     const at = e.mesh?.partOf(k);
     if (at?.part.a?.start) g.append(row('triangles', fmtCount(at.part.a.start[at.local + 1] - at.part.a.start[at.local])));
     else if (at?.part.type === 'inst') g.append(row('instance', `${at.local} of ${at.part.count}`));
@@ -159,7 +177,7 @@ export function createProps(ctx) {
     const kinds = {};
     for (const id of ids) {
       const { obj, piece: p } = parseId(id), e = ctx.objects.get(obj);
-      const k = p !== null ? 'piece' : e?.kind === 'guide' ? M.EDITOR_NAMES[e.marker.kind] : e?.kind === 'layer' ? 'layer' : 'output';
+      const k = e?.kind === 'guide' ? (p !== null ? 'CV' : M.EDITOR_NAMES[e.marker.kind]) : p !== null ? 'piece' : e?.kind === 'layer' ? 'layer' : 'result';
       kinds[k] = (kinds[k] ?? 0) + 1;
     }
     const g = group(`${ids.length} selected`);
@@ -176,20 +194,21 @@ export function createProps(ctx) {
     if (!force && key === shownKey) return;
     if (body.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) { dirty = true; return; }
     shownKey = key; dirty = false;
+    // one selected: what it is; more: how many, then the lead (the last one added) in full
+    const one = (id) => {
+      const { obj, piece: p } = parseId(id), e = ctx.objects.get(obj);
+      if (!e) return [group('gone')];
+      if (e.kind === 'guide') return p !== null ? cv(e.marker, p) : guide(e.marker);
+      if (p !== null) return piece(e, p);
+      return e.kind === 'layer' ? layer(e) : output();
+    };
     let parts;
     if (!lead) {
       const g = group('nothing selected');
-      g.append(el('div', 'hint', 'click in the view or in the outliner; Shift adds, Ctrl removes, drag a box. F frames the selection, A everything.'));
+      g.append(el('div', 'hint', 'click a guide, a CV or an input to select it, or its row in the outliner; Shift-click a result (cooked geometry) to read it here; Shift adds, Ctrl takes out, Shift-drag boxes guides and CVs. ? shows the keys.'));
       parts = [g];
-    } else if (ids.length > 1) parts = many(ids);
-    else {
-      const { obj, piece: p } = parseId(lead), e = ctx.objects.get(obj);
-      if (!e) parts = [group('gone')];
-      else if (p !== null) parts = piece(e, p);
-      else if (e.kind === 'guide') parts = guide(e.marker);
-      else if (e.kind === 'layer') parts = layer(e);
-      else parts = output();
-    }
+    } else if (ids.length > 1) parts = [...many(ids), ...one(lead)];
+    else parts = one(lead);
     body.replaceChildren(...parts);
   }
   body.addEventListener('focusout', () => setTimeout(() => { if (dirty && !body.contains(document.activeElement)) render(true); }));
