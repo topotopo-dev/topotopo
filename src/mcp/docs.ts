@@ -222,8 +222,22 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
+- A value outside a param's range (help gives min/max; a package output's "params" declarations) is clamped with a
+  warning. "strict": true on the graph makes it the node's error instead, for every node of the graph; "strict" on a
+  node (true or false) overrides the graph's for that node. Use it where a clamp would hide a mistake (an asset whose
+  range is narrower than the values its caller passes). Nested graphs (loop bodies, assets, package outputs) follow
+  their own "strict"; dry_run reports the same errors.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
 - build mode "merge" upserts nodes into the existing graph; edit ops: set, add, remove (auto-rewires), connect, rename, output, vars, bypass, replace, insert (after a node, rewiring its consumers).
+- REGENERATING a graph a person works on: build mode "refresh" (or "topotopo refresh graph.json generated.json", for a
+  generator outside TopoTopo; - reads stdin). The new graph's nodes, wiring, outputs and var declarations (type, range,
+  options, default) win. Kept from the graph it replaces: each var value the person changed, while it still fits the
+  new declaration (same kind of value, inside min/max, a whole number for an int, one of the options; one that no
+  longer fits takes the new value and is reported); a control's label and step when the new graph gives none; a
+  control the person added for a var the new graph has; each node's "ui" when the new node has none; meta keys the new
+  graph does not set. A value counts as the person's when it differs from what the last refresh gave: each refresh
+  records the generated values in meta.generated_vars, so a value nobody touched follows the generator. Vars the new
+  graph lacks are dropped. The report lists what was kept, reset and dropped.
 - Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the package.
 - "fragment": true marks a graph that is a piece another graph or a script completes (merging in nodes it names but
   does not hold): it is never cooked on its own, and topotopo check skips it.`,
@@ -354,7 +368,17 @@ PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_f
   cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).
 LIMITS: one cook of rbd_settle, rbd_stack, drape, inflate, particles, heightfield_erode or remesh_quad stops with an error
   naming the node after TOPOTOPO_SIM_TIMEOUT_MS (default 10 min; lower steps/duration/iterations, not the limit). Params that
-  count something have a max (help shows it); larger values are clamped.`,
+  count something have a max (help shows it); larger values are clamped (with a warning; a graph with "strict": true
+  fails instead, see help topic "graph").
+  User code (expressions, wrangles, a whole script with its lib.run calls, parametric curves and surfaces, sdf_expr
+  sampling) stops after TOPOTOPO_SCRIPT_TIMEOUT_MS (default 30 s): the node fails with "exceeded N ms" and a hint naming
+  the limit. Both limits are environment variables in milliseconds, read by every host the same way: the CLI, the MCP
+  server, the live viewer and package cooks (a value that is not a positive number fails at start). Keep the guard: raise
+  it for a cook that needs longer (a whole city in one script: 120000), not to hide an endless loop.
+TIMING: a cook report (build, edit, the CLI for cooks of 1 s or more, CLI --timing for every node) says where the time
+  went: "timing (41.0 s in all): city 40.1 s, roads 0.8 s", each node's own cook (its inputs count at their own nodes),
+  and under a script the time of its lib.run calls by node type ("city: lib.run boolean 30× 22.0 s, lib.run
+  copy_to_points 12× 9.5 s"). When the slowest node took half the script limit or more, the line says the limit.`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}
@@ -405,10 +429,13 @@ SDF helpers are also available (see topic sdf).`,
   ""  or  *          all elements
   top                named group (wildcards: side*)
   !top               everything not in top     ^top  removes top from the selection so far
+  ?top               top when the geometry has it, nothing when it does not (a bare name that matches no group is
+                     an error); with ^ and !: "^?top" "!?top". For groups a variant may lack (help topic "materials")
   0-10  5  0-100:2   element index ranges (:2 = every 2nd)
   @P.y>0.5           attribute test, ops = == != > < >= <= ; components .x .y .z .w .r .g .b
   @class==3   @name=piece*   @Cd.r<0.2   @ptnum<100
-Tokens are space-separated and applied left to right (union unless prefixed ! or ^).
+Tokens are space-separated and applied left to right (union unless prefixed ! or ^). A wildcard (side*) or an
+attribute test (@name=x) that matches nothing selects nothing; only a bare group name must exist (or be "?name").
 STRING ATTRIBUTES (name, path, a material or part label):
   @name=barrel        exactly "barrel" (= and == are the same)
   @name=bar*  @name=*rel  @name=b?rrel   wildcards: * any run, ? one character; case-sensitive
@@ -488,6 +515,16 @@ NAME THE PIECES FIRST when they have no names (one node each):
   clean up          attrib_string {"find":"_LOD","replace":"_lod"} · {"find":"\\\\.\\\\d+$","regex":true} · {"case":"lower"}
   prefix            attrib_string {"format":"gun_{value}"} keeps each name behind a prefix
   Then material {group:"@name=hull_*"} and export split_by_name write one mesh per name.
+CONDITIONAL BINDING (variants that may lack a part): a bare group name that a variant does not have fails the material
+  node ("unknown group"); write "?trim" to bind trim where it exists and nothing elsewhere. Chain the optional ones
+  after the base material:
+    {"wall": {"type":"material","in":["building"],"params":{"name":"brick"}},
+     "trim": {"type":"material","in":["wall"],"params":{"name":"metal","metallic":1,"group":"?trim"}},
+     "glass":{"type":"material","in":["trim"],"params":{"name":"glass","alpha":0.3,"group":"?windows @name=Glass*"}}}
+  A material whose group is empty only adds its table entry: glb writes the materials prims use, so a variant without
+  trim exports no "metal". Keep plain names (no ?) for parts every variant must have, so a missing one stays an error.
+  By a prim attribute instead of a group: "@part=trim" (a string test that matches nothing selects nothing; the
+  attribute itself must exist).
 EXPORT: glTF writes one material per table entry; a named material decides the colour of its prims (their Cd is
   dropped unless vertex_colors:true). Merging pieces whose materials or images share a name but differ (two package
   outputs that both call their map "basecolor") renames the later one ("paint_2", "<material>_basecolor"), so every
@@ -503,7 +540,8 @@ MATERIAL OUTPUTS (a material as a package output, kind "material": materials and
           renames it). The material node's own colour and map params are not used then.
   see     renders, the viewer and the web app show it on spheres (one per material) with its base colour maps;
           publishing records each map's size (packages lists "maps baseColor 2048, normal 4096").
-  export  format "textures": one PNG per map + materials.json (each material's values and the files of its maps), for
+  export  format "textures": one PNG per map + materials.json (each material's values, with the factors glb writes: white
+          base colour under a base colour map, roughness 1 under a roughness map; and the files of its maps), for
           engines to rebuild it; glb and usda need a mesh: export the mesh that uses it.`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
@@ -674,7 +712,8 @@ GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/
   RGBA colour with channels:"rgba"; input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star,
   ring; falloff; tile) · tex_sdf_shape (the signed distance in metres to a disc, box, polygon, star, capsule or cross;
   corner rounding; tile; see SHAPES below) · tex_grunge (dirt / leaks / spots with a coverage fraction and edge
-  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text.
+  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text (font, weight: 100 thin … 400 regular … 900
+  black on the wght axis of a variable font, e.g. a Noto Sans TC variable file; a static font keeps its own weight).
 FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
   (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
   (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).
@@ -828,6 +867,23 @@ Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named 
   instancing:"expand" (export option) always writes real geometry (instances:"expand" for csv/points.json only).
   Unreal: instances.csv + meshes for PCG / ISM, or glb instances where the importer supports EXT_mesh_gpu_instancing;
   USD PointInstancer → HISM.
+IDENTITY THROUGH INSTANCES AND EXPORT (which lot, edge or source layer an instance came from): plain attributes carry it.
+  Use ints for ids engines read (a wrangle's "@lot_id = …" makes a float: write "i@lot_id"); strings read as text in
+  csv, points.json and usda.
+  source layer  tag each layer before the merge: wrangle {run_over:"prims", code:'s@source = "parcels"; i@lot_id = @primnum + 1;'}
+                (merge gives "" or 0 to the inputs that lack the attribute)
+  lot → points  scatter copies the lot's prim attributes onto its points (with sourceprim); points_along_curve copies
+                a curve's onto its points (one polyline per edge with "i@edge_id"); resample and ends keep them
+  → instances   copy_to_points {pack:true} puts every template point attribute on the anchors (lot_id, edge_id, source);
+                pack carries only its "carry" list (default "name Cd material"): pack {carry:"name Cd material lot_id edge_id source"}
+  ← unpack      copies the anchor attributes in its transfer_attributes (default "name Cd material piece") onto the
+                unpacked points where the source has no attribute of that name: unpack {transfer_attributes:"name Cd
+                material piece lot_id edge_id source"} (or "*"); the others are not on the result
+  export        csv / points.json: one column per anchor attribute (the attributes option can pick). glb/gltf with custom_attribs:true: _LOT_ID,
+                _EDGE_ID … per-instance accessors of EXT_mesh_gpu_instancing (a string is an index into the node's
+                extras.topotopo.instanceAttributes._SOURCE.strings). usda with custom_attribs:true: primvars:lot_id per
+                instance (strings as string[]). geo and json keep every attribute. Check: inspect lists the anchors'
+                attributes; a csv export shows the values.
 Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
   with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
 
@@ -1011,8 +1067,8 @@ A published package has a full name and versions. Its author names it once in it
 Publishing is permanent: run the dry run, show it to the person, and publish when they say so.
 A graph uses an output of a package as a node type; "owner/name" alone is the package's default output:
   {"type": "studio/trees/pine", "in": ["ground"], "params": {"height": 6}}      {"type": "studio/trees"}
-Its params are the vars of the output's graph that its node reads, with their "params" declarations (ranges clamp,
-options are checked), and its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the
+Its params are the vars of the output's graph that its node reads, with their "params" declarations (ranges clamp
+with a warning, or fail in a "strict" graph; options are checked), and its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the
 version and its note, also for an output search found in a place the package looks in but does not use yet (read there,
 nothing copied); catalog {category:"package"} lists the outputs of the packages in use and TopoTopo's own.
 
@@ -1442,7 +1498,8 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors).
   Custom attributes (custom_attribs true): every other numeric point/vertex attribute of size 1-4 → _NAME (upper-cased,
   float or the smallest int type), mesh extras keep the original names and types, and packed instances carry their
-  anchor attributes as per-instance accessors. The attributes only scene empties use (scene_empty, parent, orient, scale,
+  anchor attributes as per-instance accessors (carrying lot / edge / source ids there: help topic "instancing",
+  IDENTITY). The attributes only scene empties use (scene_empty, parent, orient, scale,
   their extras) never become mesh channels.
 MATERIALS: the material node writes prim "material" + the detail table. A named material wins: its prims export in that
   material as it is and their Cd / Alpha are dropped (Cd left from colouring parts does not become COLOR_0 or a second,
@@ -1451,7 +1508,8 @@ MATERIALS: the material node writes prim "material" + the detail table. A named 
   folded into the factor). a material's own alpha < 1 (or alpha_mode blend) → alphaMode BLEND; vertex Alpha is data: it stays COLOR_0.A and never changes the mode; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
 TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the package folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
-  map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
+  map replaces its factor; beside a metallic above 0 a separate roughness map is written repacked, blue 1, so the
+  metallic stays the material's value). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
   keep the paths in the material table. glTF import records texture paths (or "embedded:<name>") without decoding.
   "image:<name>" textures (texture_to_material, texture nodes) are image volumes of the geometry: glb/gltf encode them
   to PNG in memory, usda writes <name>_textures/<image>.png next to the .usda, format "textures" writes every image as

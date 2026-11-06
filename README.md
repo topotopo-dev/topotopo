@@ -81,6 +81,7 @@ npx topotopo --help-topic export                            # a help topic (the 
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
 npx topotopo graph.json --export-all                        # every output's export target, into its package's exports/
 npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
+npx topotopo refresh graph.json generated.json             # a regenerated graph over graph.json, keeping the values a person tuned
 npx topotopo mcp --package /absolute/path/to/package    # the MCP server over stdio
 ```
 
@@ -172,6 +173,12 @@ through exports, output switches and saves of the file (a value goes back to the
 **Reset all** takes all of them back, and **Save values** writes them into the file's `vars`. The viewer's writes to
 the file (saved values, export targets) change only those values: formatting, key order and number spellings stay.
 
+When a generator rewrites a graph a person has been tuning, `topotopo refresh graph.json generated.json` (or `-` to read
+the generated graph from stdin; the MCP `build` tool's `mode: "refresh"`) writes the new graph but keeps the values the
+person changed (while they still fit the new ranges and options), their control labels and steps, node `ui` and `meta`.
+Each refresh records the values it took from the generator in `meta.generated_vars`, so a value nobody touched follows
+the generator. It prints what it kept, reset and dropped.
+
 The default **TopoTopo** keymap uses right-drag orbit around the surface beneath the cursor, middle-drag pan and
 wheel zoom toward the cursor. F/A frame, 1–4 select cameras, 5–7 change shading, O toggles orthographic and Space
 toggles quad view. Maya, Houdini and Blender presets, including previously saved choices, remain available.
@@ -233,7 +240,7 @@ works in that package's folder. The first reply the agent gets says which of the
 |---|---|
 | `catalog` | node types by category (filter/search), with the outputs of the packages the open package uses and of TopoTopo's own packages |
 | `help` | exact node docs (params, defaults, ranges, aliases, examples) and topics: graph, inputs, expressions, time, wrangle, groups, attributes, sdf, heightfield, textures, loops, instancing, rbd, pcg, curves, particles, assets, packages, uv, render, export, verify, cloth, workspace, recipes; a package output's params, inputs, version and note, also one search found that the package does not use yet |
-| `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"`, optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
+| `build` | create/replace a graph and cook it; `dry_run`, `mode: "merge"` or `"refresh"` (a regenerated graph that keeps what a person tuned), optional `render`, `frame` (also on edit, inspect, render, export); `params` declare the vars a person tunes (type, desc, min, max, options, label, step), shown as controls in the viewer |
 | `edit` | incremental ops: set, add, insert-after, remove (auto-rewire), connect, rename, replace, output, vars, bypass |
 | `inputs` | `list` the files in the package `inputs/` folder (kind, size, date, counts, bbox, object names; PNG size and bit depth) and `describe` one: polygons vs open polylines vs loose points vs packed prims, bbox, attributes, groups, every `name` / `role` value, materials |
 | `inspect` | one-screen summary (counts, triangles, bbox to the millimetre, parts, materials, images, uv state, open edges), `detail: "budget"` (triangles per part, per LOD and per node), `detail: "scene"` (the glb export read back: nodes, sockets, parents, meshes, materials, images), attribute stats, topology health (a closed solid or why not: open edges counted after welding uv/normal seam splits, non-manifold edges, flipped faces, inward pieces, degenerate faces, each with the part and world position of the first one and the fix; pieces, volume, genus, render/export triangle slivers), element listings, images (size and per-layer ranges), `detail: "uv"` (exact uv overlaps split into in-tile, tiling and across-LOD overlap with parts and positions, collapsed and out-of-tile triangles, charts, utilization, per-piece texel density; `json: true`) |
@@ -298,7 +305,10 @@ instead of hanging the process. The same timeout covers `script`, `heightfield_l
 whatever such code throws. Params that count something have upper bounds (larger values are clamped), and the
 long-running nodes (`rbd_settle`, `rbd_stack`, `drape`, `inflate`, `particles`, `heightfield_erode`, `remesh_quad`) stop
 with an error after `TOPOTOPO_SIM_TIMEOUT_MS` (default 10 minutes; the WASM calls of the last two only when the worker
-pool is on). That contains mistakes, not attackers: sandboxed code can still allocate memory and burn CPU until the
+pool is on). Both limits are environment variables in milliseconds that the CLI, the MCP server, the live viewer and
+package cooks all read; a node stopped by the script limit says so and names it, and a cook report lists the slowest
+nodes and, for a `script`, the time of its `lib.run` calls by node type (the CLI with `--timing` lists every node).
+That contains mistakes, not attackers: sandboxed code can still allocate memory and burn CPU until the
 timeout, combinations of large params and inputs can still exhaust memory, and a `vm` realm is not a hard security
 boundary. Do not cook graphs from untrusted sources in a privileged process.
 

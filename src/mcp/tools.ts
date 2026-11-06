@@ -5,6 +5,8 @@ import zlib from 'node:zlib';
 import { Session, EditRejected } from '../session.ts';
 import type { EditOp } from '../session.ts';
 import type { CookReport } from '../graph/engine.ts';
+import { timingLines } from '../graph/timing.ts';
+import { refreshGraph, refreshNotes } from '../graph/refresh.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
@@ -54,7 +56,7 @@ export interface ToolDef {
 /** " at frame N" when the cook was not at frame 1. */
 const atFrame = (r: { frame: number }) => (r.frame !== 1 ? ` at frame ${r.frame}` : '');
 
-function reportText(name: string, r: CookReport, extraNotes: string[] = [], extraWarnings: string[] = []): string {
+function reportText(name: string, r: CookReport, scriptLimitMs: number, extraNotes: string[] = [], extraWarnings: string[] = []): string {
   const lines: string[] = [];
   const nodes = [...r.results.values()];
   const cooked = nodes.filter((n) => !n.cached && !n.error).length;
@@ -69,8 +71,7 @@ function reportText(name: string, r: CookReport, extraNotes: string[] = [], extr
     if (r.warnings.length > 15) lines.push(`  … ${r.warnings.length - 15} more`);
   }
   if (r.geo) lines.push(summarize(r.geo));
-  const slow = nodes.filter((n) => n.ms > 50).sort((a, b) => b.ms - a.ms).slice(0, 4);
-  if (slow.length) lines.push(`slowest: ${slow.map((n) => `${n.node} ${n.ms.toFixed(0)}ms`).join(', ')}`);
+  lines.push(...timingLines(r, scriptLimitMs));
   const stats = nodes.filter((n) => n.stats);
   if (stats.length) lines.push(`stats: ${stats.slice(0, 6).map((n) => `${n.node} ${Object.entries(n.stats!).map(([k, v]) => `${k}=${v}`).join(' ')}`).join('; ')}`);
   const timed = nodes.filter((n) => n.timeDependent).map((n) => n.node);
@@ -213,7 +214,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
 
   /** The text (+ optional render) of a cook report. */
   const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
-    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes, await kindWarnings(name, r, a.frame)) }];
+    const content: Content[] = [{ type: 'text', text: reportText(name, r, engine.scriptTimeoutMs, extraNotes, await kindWarnings(name, r, a.frame)) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`, ws.dir);
       const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
@@ -259,7 +260,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     const follow = forExport ? exportFollow(a, g) : [];
     const scope = forExport && ws.packages?.publishedNote?.(g, follow) ? ws.packages.published?.(follow) : null;
     const r = await engine.cook(g, { target, frame: a.frame, ...(scope ? { scope } : {}) });
-    if (!r.ok || !r.geo) throw new Error(reportText(name, r));
+    if (!r.ok || !r.geo) throw new Error(reportText(name, r, engine.scriptTimeoutMs));
     return { r, name, geo: r.geo, scope, follow };
   };
   /** What an export of a graph made while following says (the working folders and published versions it used), on a line of its own. */
@@ -283,7 +284,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     const prepared: PreparedTarget[] = [];
     for (const p of targets) {
       const r = await ws.cook(name, p.node, a.frame, { kind: 'export', follow });
-      if (!r.ok || !r.geo) return text(reportText(name, r), true);
+      if (!r.ok || !r.geo) return text(reportText(name, r, engine.scriptTimeoutMs), true);
       prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root) }));
     }
     writeTargets(prepared, ws.exportDir);
@@ -338,14 +339,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'build',
-      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph. dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value.',
+      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph; mode "refresh" replaces it with a regenerated graph but keeps what a person tuned on it (the var values they changed, when they still fit; control labels and steps; node ui; meta): use it when regenerating a graph a person works on (help topic "graph"). dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value.',
       inputSchema: {
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not published), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not published), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}, "strict": true (a value outside a param range fails the node instead of clamping with a warning; "strict" on a node overrides it)}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
           name: { type: 'string', description: 'graph name (default "main")' },
-          mode: { type: 'string', enum: ['replace', 'merge'] },
+          mode: { type: 'string', enum: ['replace', 'merge', 'refresh'] },
           dry_run: { type: 'boolean' },
           render: { description: 'true or render options (views, color_by, …)', anyOf: [{ type: 'boolean' }, { type: 'object' }] },
           ...FRAME_PROP,
@@ -357,11 +358,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         if (typeof spec === 'string') spec = JSON.parse(spec);
         spec = spec;
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
+        // a regenerated graph over the one a person tuned (src/graph/refresh.ts)
+        let refreshed: string[] = [];
+        if (a.mode === 'refresh') { const rf = refreshGraph(ws.graphs.get(name) ?? { nodes: {} }, spec); spec = rf.graph; refreshed = refreshNotes(rf); }
         if (a.dry_run) {
           // a package the graph names for the first time: checked against the version a build adds, nothing copied
           const dry = ws.dryScope(spec);
           const d = engine.dryRun(spec, undefined, dry.scope);
-          const first = dry.notes.map((n) => `\nnote: ${n}`).join('');
+          const first = [...dry.notes, ...refreshed].map((n) => `\nnote: ${n}`).join('');
           return text(d.errors.length
             ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + first
             : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : '') + first, d.errors.length > 0);
@@ -372,7 +376,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         // packages the graph names for the first time join the package
         const added = ws.packages?.addFor(spec) ?? [];
         ws.setGraph(name, spec);
-        return cookAndReport(name, a, added);
+        return cookAndReport(name, a, [...added, ...refreshed]);
       },
     },
     {

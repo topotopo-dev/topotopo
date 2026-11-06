@@ -522,6 +522,7 @@ None (generator).
 | `text` | string | `"TopoTopo"` |  |  |  | text (use \\n for new lines) |
 | `font` | string | `""` |  |  |  | font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine) |
 | `size` | float | `1` |  |  |  | font size (em height in units) |
+| `weight` | float | `400` | 1..1000 |  | `wght`, `font_weight` | font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold, 900 black (clamped to the range the font has, with a warning). A font without a wght axis (the bundled DejaVu Sans, a static file) is drawn at its own weight; any weight but 400 then warns |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment |
 | `valign` | enum | `"bottom"` |  | `baseline`, `center`, `bottom`, `top` |  | vertical alignment |
 | `depth` | float | `0` | 0.. |  |  | extrusion depth (> 0 makes a solid) |
@@ -1646,7 +1647,7 @@ category: `curve` · aliases: `lathe`
 
 Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.
 
-Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. angle is measured from where the profile is drawn, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed results face outward. Caps (caps on, partial angle) are only made for closed profiles, and then the result is a closed solid that is always oriented outward (flip has no effect on it). An open profile gives an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.
+Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed solids always face outward and flip has no effect on them: a closed profile turned a full 360, a closed profile over a partial angle with caps on (the caps are wound with the sides, for any angle and either profile direction), and a profile whose open ends both lie on the axis turned a full 360. Caps are only made for closed profiles. Every other result is an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.
 
 **Inputs**
 
@@ -1662,8 +1663,8 @@ Each profile point turns around the axis line (through origin, along axis) at it
 | `origin` | vec3 | `[0,0,0]` |  |  | `center`, `pivot` | a point on the axis |
 | `segments` | int | `32` | 3..4096 |  | `divisions`, `cols` | segments around |
 | `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees, counter-clockwise seen from the axis tip (right-handed): 0..90 about Y runs from +X towards -Z |
-| `caps` | bool | `false` |  |  |  | cap partial revolves of closed profiles (open profiles have no cap; the result is oriented outward) |
-| `flip` | bool | `false` |  |  |  | reverse face orientation (open profiles; a closed solid is always re-oriented outward) |
+| `caps` | bool | `false` |  |  |  | cap partial revolves of closed profiles, making a closed solid that faces outward (open profiles get no caps) |
+| `flip` | bool | `false` |  |  |  | reverse face orientation of an open result; no effect on a closed solid (always faces outward) |
 
 **Writes:** vertex uv
 
@@ -3690,7 +3691,7 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 |---|---|---|---|---|---|---|
 | `name` | string | `""` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name, also the glTF material name ("" = "material", or the source material's own name with input 1) |
 | `from` | string | `""` |  |  | `source_material`, `use` | input 1: which of its materials ("" = its only one) |
-| `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
+| `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9"; "?trim" for a group some variants lack (nothing assigned where it is absent) |
 | `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
 | `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 (the glTF metallicFactor; texture_to_material with an orm map sets its own factors and ignores this) |
 | `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 (the glTF roughnessFactor, 1 under a roughness map; texture_to_material with an orm map sets its own factors and ignores this) |
@@ -15442,6 +15443,7 @@ None (generator).
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `text` | string | `"TOPOTOPO"` |  |  |  | text (use \\n for new lines) |
 | `font` | string | `""` |  |  |  | font file or family ("" = the bundled DejaVu Sans) |
+| `weight` | float | `400` | 1..1000 |  | `wght`, `font_weight` | font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold (see the text node; a font without a wght axis is drawn at its own weight) |
 | `size` | float | `0.2` | 0.001.. |  | `height`, `font_size` | height of the text block as a fraction of the image height (shrunk to fit the width) |
 | `position` | vec2 | `[0.5,0.5]` |  |  | `center` | centre of the text in uv |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment of lines |

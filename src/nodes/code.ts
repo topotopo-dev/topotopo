@@ -85,6 +85,8 @@ defineNode({
  * `run.stopped` turns lib.run into an error once the script has finished or timed out (a stray continuation must
  * not keep cooking nodes).
  */
+const clock = () => (globalThis.performance ?? Date).now();
+
 function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }) {
   const engine = ctx.engine;
   // compiled in the script realm: a synchronous node's result resolves a realm promise, so `await lib.run(...)`
@@ -137,6 +139,8 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
       // stop, and `outcome` never rejects. A synchronous node returns (or throws) here, as before.
       let started: any, thrownNow: { error: unknown } | null = null;
       const isAsync = () => !!started && typeof started.then === 'function';
+      // the time of each call counts towards the script's stage for the node type (the cook report's timing)
+      const t0 = clock();
       const outcome = (async () => {
         try {
           started = def.cook(sub);
@@ -146,7 +150,11 @@ function scriptLib(ctx: CookContext, wake: () => void, run: { stopped: boolean }
         } catch (error) {
           if (!isAsync()) { thrownNow = { error }; return null; }
           return { failed: true, error };
-        } finally { if (isAsync()) wake(); }
+        } finally {
+          const ms = clock() - t0;
+          if (isAsync()) wake();
+          ctx.stage(`lib.run ${def.type}`, ms);
+        }
       })();
       if (thrownNow) throw (thrownNow as { error: unknown }).error;
       return isAsync() ? { libRunOutcome: outcome } : started;

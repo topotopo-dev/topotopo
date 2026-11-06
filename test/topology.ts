@@ -183,6 +183,7 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   check(es('0-3').size === 4 && es('p0-1 ^p0-1').size === 0, 'edge index ranges and ^');
   check(es('@P.y>0.4').size === 4 && es('length>0.99').size === 12, '@P on edge midpoints, length selector');
   check(throws(() => evalGroup(box, 'edge', 'nosuchgroup')), 'unknown edge group throws');
+  check(es('?nosuchgroup').size === 0 && es('0-3 ?nosuchgroup').size === 4 && evalGroup(box, 'vertex', '?nosuchgroup')!.every((x) => !x) && evalGroup(box, 'point', '!?nosuchgroup')!.every((x) => x === 1), 'an optional group ("?name") that is absent selects nothing, in every class');
   const bg = box.clone();
   bg.addEdgeGroup('rim', es('@P.y>0.4'));
   check(es('rim', bg).size === 4 && es('group:rim', bg).size === 4 && es('rim ^p0-1', bg).size === 4, 'named edge group');

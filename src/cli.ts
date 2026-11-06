@@ -63,7 +63,8 @@ import { Engine } from './graph/engine.ts';
 import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { KINDS } from './graph/outputs.ts';
-import { createNodeHost } from './host/node.ts';
+import { createNodeHost, limitsFromEnv } from './host/node.ts';
+import { timingLines } from './graph/timing.ts';
 import { renderGeometryAsync } from './render/raster.ts';
 import { parseViews } from './render/raster.ts';
 import type { RenderOptions } from './render/raster.ts';
@@ -75,7 +76,10 @@ import { exportSource } from './io/source.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { PACKAGE_COMMANDS } from './packages/commands.ts';
 import { GODOT_COMMANDS } from './host/godot-commands.ts';
-import { setProgram } from './package.ts';
+import { setProgram, writeAtomic } from './package.ts';
+import { refreshGraph, refreshNotes } from './graph/refresh.ts';
+import { isGraph } from './graph/types.ts';
+import type { GraphSpec } from './graph/types.ts';
 import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
 import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
@@ -92,6 +96,8 @@ import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
 const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
 const fail = (msg: string): never => { console.error(msg); process.exit(1); };
+// the time limits every engine of this process takes from the environment: a value that is not a number fails here
+try { limitsFromEnv(); } catch (e) { fail((e as Error).message); }
 /** A graph file's name as a graph (view mode) and in receipts and default export file names. */
 const graphName = (file: string) => path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
 // the command as the user typed it: the sources from a clone, or the package's bin (dist/cli.js)
@@ -117,6 +123,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--output name] (a named output, the graph\'s "outputs", instead of the default; render, export and inspect it)',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
+    '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
+    '         time limits (environment, milliseconds; also for the MCP server and the viewer): TOPOTOPO_SCRIPT_TIMEOUT_MS (user code: expressions, wrangles, a whole script; default 30000), TOPOTOPO_SIM_TIMEOUT_MS (one cook of a simulation node; default 600000)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
     '         [--follow owner/name] (use that package\'s working folder, where the package finds it, instead of its copy, for this run: renders, inspect and exports use it, unpublished (the export\'s source record lists it under "followed"); repeat it)',
@@ -160,6 +168,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output)`,
     `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
+    `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
     `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: the registered workspaces and every library's packages, stable links for a board)`,
     `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
@@ -206,6 +215,25 @@ if (argv.includes('--catalog') || opt('--help-node')) {
 /** --follow owner/name (repeatable): packages whose working folders a cook uses instead of their copies. */
 const followArgs = argv.flatMap((x, i) => (x === '--follow' ? [argv[i + 1]] : []));
 if (followArgs.some((f) => f === undefined || f.startsWith('--'))) fail('--follow needs a package: --follow owner/name');
+
+if (argv[0] === 'refresh') {
+  // `topotopo refresh <graph.json> <generated.json | ->`: a generator's new graph written over graph.json, keeping what
+  // a person tuned on it (src/graph/refresh.ts); a viewer following graph.json cooks the result
+  const [file, from] = [argv[1], argv[2]];
+  if (!file || file.startsWith('-') || !from || (from.startsWith('-') && from !== '-')) fail(`usage: ${prog} refresh <graph.json> <generated.json | - (read from stdin)>`);
+  const read = (f: string, what: string): GraphSpec => {
+    let g: unknown;
+    try { g = JSON.parse(fs.readFileSync(f === '-' ? 0 : f, 'utf8')); } catch (e) { return fail(`${prog} refresh: ${what} ${f === '-' ? '(stdin)' : `"${f}"`}: ${(e as Error).message}`); }
+    return isGraph(g) ? g : fail(`${prog} refresh: ${what} ${f === '-' ? '(stdin)' : `"${f}"`} is not a graph (an object with "nodes")`);
+  };
+  const generated = read(from, 'the generated graph');
+  const existed = fs.existsSync(file);
+  const r = refreshGraph(existed ? read(file, 'the graph') : { nodes: {} }, generated);
+  writeAtomic(file, JSON.stringify(r.graph, null, 2));
+  console.log(`${existed ? 'refreshed' : 'wrote'} ${file}`);
+  for (const n of refreshNotes(r)) console.log(n);
+  process.exit(0);
+}
 
 if (argv[0] === 'view') {
   // `topotopo view <graph.json> [--port 7341]`: cook the file, serve the live 3D viewer and follow its saves; the values
@@ -374,6 +402,12 @@ async function cook() {
     for (const e of r.errors) console.error(`error [${e.node}] ${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`);
     for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
   }
+  /** Where the cook's time went: with --timing every cooked node, else the slowest when the cook took a second or more. */
+  const timingFlag = argv.includes('--timing');
+  function timing(r: CookReport) {
+    if (!timingFlag && r.ms < 1000) return;
+    for (const l of timingLines(r, engine.scriptTimeoutMs, timingFlag ? { minMs: 0, nodes: Infinity } : {})) console.log(l);
+  }
 
   /** Every render flag (renderFlags reads them, plus --views, --color-by, --checker). */
   const RENDER_FLAGS = ['--wireframe', '--hard-angle', '--section', '--clip', '--glyphs', '--glyph-attrib', '--glyph-scale', '--max-glyphs', '--labels', '--max-labels',
@@ -480,9 +514,10 @@ async function cook() {
   } else {
     const r = await engine.cook(graph, { target, frame: single, fps });
     report(r);
-    if (!r.ok || !r.geo) process.exit(1);
+    if (!r.ok || !r.geo) { timing(r); process.exit(1); }
     const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
     console.log(`cooked ${file} → ${outputName !== undefined ? `output "${outputName}" (${r.target})` : r.target}${r.frame !== 1 ? ` at frame ${r.frame}` : ''}${vars} in ${r.ms.toFixed(0)} ms`);
+    timing(r);
     // without --inspect the short summary; --inspect <detail> the report (src/inspect.ts, io/inspect-scene.ts)
     console.log(inspectDetail ? await inspectText(r) : summarize(r.geo));
     await writeOutputs(r);

@@ -662,7 +662,7 @@ defineNode({
   type: 'revolve',
   category: 'curve',
   summary: 'Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.',
-  description: 'Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. angle is measured from where the profile is drawn, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed results face outward. Caps (caps on, partial angle) are only made for closed profiles, and then the result is a closed solid that is always oriented outward (flip has no effect on it). An open profile gives an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.',
+  description: 'Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed solids always face outward and flip has no effect on them: a closed profile turned a full 360, a closed profile over a partial angle with caps on (the caps are wound with the sides, for any angle and either profile direction), and a profile whose open ends both lie on the axis turned a full 360. Caps are only made for closed profiles. Every other result is an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.',
   aliases: ['lathe'],
   inputs: [{ name: 'profile', desc: 'curves in a plane holding the axis (default: the XY plane, x = distance from the Y axis)' }],
   params: {
@@ -670,8 +670,8 @@ defineNode({
     origin: { type: 'vec3', default: [0, 0, 0], desc: 'a point on the axis', aliases: ['center', 'pivot'] },
     segments: { type: 'int', default: 32, min: 3, max: 4096, desc: 'segments around', aliases: ['divisions', 'cols'] },
     angle: { type: 'vec2', default: [0, 360], desc: 'start/end angle in degrees, counter-clockwise seen from the axis tip (right-handed): 0..90 about Y runs from +X towards -Z' },
-    caps: { type: 'bool', default: false, desc: 'cap partial revolves of closed profiles (open profiles have no cap; the result is oriented outward)' },
-    flip: { type: 'bool', default: false, desc: 'reverse face orientation (open profiles; a closed solid is always re-oriented outward)' },
+    caps: { type: 'bool', default: false, desc: 'cap partial revolves of closed profiles, making a closed solid that faces outward (open profiles get no caps)' },
+    flip: { type: 'bool', default: false, desc: 'reverse face orientation of an open result; no effect on a closed solid (always faces outward)' },
   },
   outputs: 'vertex uv',
   example: {
@@ -730,8 +730,11 @@ defineNode({
         }
       }
       if (p.caps && !full && closed) {
-        b.addPrim(grid.map((r) => r[0]).reverse(), true, pr);
-        b.addPrim(grid.map((r) => r[cols - 1]), true, pr);
+        // wound against the side edges they share: a side quad runs grid[i1][0] → grid[i][0] along the start column and
+        // grid[i][n] → grid[i1][n] along the end column, so the start cap runs down the profile and the end cap up it
+        const start = grid.map((r) => r[0]), end = grid.map((r) => r[cols - 1]).reverse();
+        b.addPrim(p.flip ? start.reverse() : start, true, pr);
+        b.addPrim(p.flip ? end.reverse() : end, true, pr);
       }
     }
     let out = b.build();

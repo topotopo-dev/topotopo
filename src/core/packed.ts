@@ -275,6 +275,10 @@ export function expandPacked(g: Geometry, o: ExpandOptions = {}): ExpandResult {
   for (const p of sel) removed[p] = 1;
   const dropped = dropPrims(g, removed);
   let base = dropped.geo;
+  // a class the base has no element of left holds only the unpacked anchors' attributes: they do not become columns of
+  // zeros on the result (transfer copies the ones asked for, with their values)
+  for (const [t, n] of [[base.points, base.numPoints], [base.vertices, base.numVertices], [base.prims, base.numPrims]] as const)
+    if (!n) for (const k of t.names()) if (k !== 'P') t.delete(k);
   const { keepPrim, keepPt } = dropped;
   // sources: flattened, display attribute classes unified with the base
   const noteSet = new Set<string>();

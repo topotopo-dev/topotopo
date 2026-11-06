@@ -73,6 +73,23 @@ function blenderScript(): string {
   throw new Error('Blender conversion script export_scene.py is missing from this TopoTopo installation');
 }
 
+/**
+ * The time limits set in the environment (Host.limits): TOPOTOPO_SCRIPT_TIMEOUT_MS for user code, TOPOTOPO_SIM_TIMEOUT_MS
+ * for the long-running nodes, in milliseconds. A value that is not a positive number fails the host, saying so, rather
+ * than cooking with no limit or a guessed one.
+ */
+export function limitsFromEnv(env: Record<string, string | undefined> = process.env): { scriptMs?: number; simMs?: number } {
+  const read = (name: string) => {
+    const raw = env[name];
+    if (raw === undefined || raw.trim() === '') return undefined;
+    const ms = Number(raw);
+    if (!(Number.isFinite(ms) && ms > 0)) throw new Error(`${name} must be a positive number of milliseconds (e.g. 120000 for 2 minutes), got "${raw}"`);
+    return ms;
+  };
+  const scriptMs = read('TOPOTOPO_SCRIPT_TIMEOUT_MS'), simMs = read('TOPOTOPO_SIM_TIMEOUT_MS');
+  return { ...(scriptMs ? { scriptMs } : {}), ...(simMs ? { simMs } : {}) };
+}
+
 /** The process-wide pool of hosts created with the environment's settings (created lazily: no thread until used). */
 let envPool: WorkerPool | undefined | null = null;
 
@@ -227,6 +244,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
   return {
     name: 'node',
     pool,
+    limits: limitsFromEnv(),
     resolvePath: resolveIn(baseDir),
     async readFile(p) {
       const rp = this.resolvePath(p);

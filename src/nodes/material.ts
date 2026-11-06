@@ -33,7 +33,7 @@ defineNode({
   params: {
     name: { type: 'string', default: '', desc: 'material name, also the glTF material name ("" = "material", or the source material\'s own name with input 1)', aliases: ['shop_materialpath', 'material', 'path', 'materialpath'] },
     from: { type: 'string', default: '', desc: 'input 1: which of its materials ("" = its only one)', aliases: ['source_material', 'use'] },
-    group: P.group('prim', 'prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9"'),
+    group: P.group('prim', 'prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9"; "?trim" for a group some variants lack (nothing assigned where it is absent)'),
     base_color: { type: 'color', default: [0.8, 0.8, 0.8], desc: 'base colour [r,g,b] 0..1, "#rrggbb" or a name', aliases: ['basecolor', 'color', 'cd', 'albedo', 'diffuse'] },
     metallic: { type: 'float', default: 0, min: 0, max: 1, desc: 'metalness 0..1 (the glTF metallicFactor; texture_to_material with an orm map sets its own factors and ignores this)', aliases: ['metal', 'metalness'] },
     roughness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'roughness 0..1 (the glTF roughnessFactor, 1 under a roughness map; texture_to_material with an orm map sets its own factors and ignores this)', aliases: ['rough'] },

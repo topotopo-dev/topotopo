@@ -38,6 +38,19 @@ export interface MaterialTextures { baseColor?: string; normal?: string; roughne
 /** Texture slots in table order. */
 export const TEXTURE_SLOTS = ['baseColor', 'normal', 'roughness', 'orm'] as const;
 
+/**
+ * The factors a material exports with, as glTF writes them (and materials.json of a textures export): a map replaces
+ * its factor (a white base colour under a base colour map, roughness 1 under a separate roughness map); metallic, and
+ * both factors beside an orm map, are the material's own. `has` says which maps are there (default: the ones it names).
+ */
+export function exportFactors(m: Material, has: (slot: keyof MaterialTextures) => boolean = (s) => !!m.textures?.[s]): { baseColor: [number, number, number]; roughness: number; metallic: number } {
+  return {
+    baseColor: has('baseColor') ? [1, 1, 1] : m.baseColor,
+    roughness: has('roughness') && !has('orm') ? 1 : m.roughness,
+    metallic: m.metallic,
+  };
+}
+
 export type MaterialTable = Record<string, Material>;
 
 export const MATERIAL_ATTRIB = 'material';

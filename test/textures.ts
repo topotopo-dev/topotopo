@@ -177,6 +177,36 @@ section('generators: deterministic, seeded, tileable');
   check(maxDiff(sp1.layer('C')!, sp2.layer('C')!) === 0 && mean(sp1.layer('C')!) > 0.01, 'tex_splatter deterministic and non-empty');
   const txt = await image({ n: { type: 'tex_text', params: { resolution: [128, 32], text: 'AB', size: 0.8 } } });
   check(mean(txt.layer('C')!) > 0.03 && mean(txt.layer('C')!) < 0.6, `tex_text fills glyphs (coverage ${f3(mean(txt.layer('C')!))})`);
+
+  // weight: the wght axis of a variable font (a generated test font whose bar is 20, 100 and 300 units wide at 100,
+  // 400 and 900); a static font is drawn as it is and warns at any weight but regular
+  const { variableTestFont, varFontBarWidth } = await import('./varfont.ts');
+  const vf = path.join(tmp, 'testvar.ttf');
+  fs.writeFileSync(vf, variableTestFont());
+  const bar = async (weight: number) => {
+    const r = await cookOn(engine, { t: { type: 'text', params: { text: 'I', font: vf, weight } } });
+    const b = r.geo.bbox();
+    return { w: b.max[0] - b.min[0], warnings: r.warnings };
+  };
+  const widths: string[] = [];
+  let weightsOk = true;
+  for (const w of [100, 250, 400, 650, 900]) {
+    const r = await bar(w);
+    widths.push(`${w}: ${f3(r.w)}`);
+    weightsOk &&= Math.abs(r.w - varFontBarWidth(w) / 1000) < 1e-6 && !r.warnings.length;
+  }
+  check(weightsOk, `text weight sets the wght axis of a variable font (bar width ${widths.join(', ')})`);
+  const over = await bar(1000);
+  check(Math.abs(over.w - 0.3) < 1e-6 && over.warnings.some((w) => /weight 1000 is outside the font's wght range 100\.\.900: drawn at 900/.test(w)), 'text weight outside the font\'s wght range is clamped to it, with a warning');
+  const plain = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab', weight: 700 } } });
+  const plain400 = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab' } } });
+  check(plain.warnings.some((w) => /no weight axis \(wght\)/.test(w)) && !plain400.warnings.length && JSON.stringify(fingerprint(plain.geo)) === JSON.stringify(fingerprint(plain400.geo)), 'a static font is drawn at its own weight: weight 700 warns, 400 does not');
+  const cover = async (weight: number) => {
+    const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, size: 0.8 } } });
+    return { c: mean(findImage(r.geo, '')!.layer('C')!), warnings: r.warnings };
+  };
+  const thin = await cover(100), heavy = await cover(900), clampedTex = await cover(950);
+  check(heavy.c > thin.c * 5 && clampedTex.warnings.some((w) => /outside the font's wght range/.test(w)), `tex_text weight reaches the font (coverage ${f3(thin.c)} at 100, ${f3(heavy.c)} at 900; its warnings are passed on)`);
   const grad = await image({ n: { type: 'tex_gradient', params: { resolution: [64, 8] } } });
   check(grad.layer('C')![0] < 0.05 && grad.layer('C')![63] > 0.95, 'tex_gradient linear runs 0 → 1 left to right');
   const k = await image({ k: { type: 'tex_constant', params: { resolution: [8, 4], value: 0.65 } } });
