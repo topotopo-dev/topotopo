@@ -229,6 +229,15 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   their own "strict"; dry_run reports the same errors.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
 - build mode "merge" upserts nodes into the existing graph; edit ops: set, add, remove (auto-rewires), connect, rename, output, vars, bypass, replace, insert (after a node, rewiring its consumers).
+- REGENERATING a graph a person works on: build mode "refresh" (or "topotopo refresh graph.json generated.json", for a
+  generator outside TopoTopo; - reads stdin). The new graph's nodes, wiring, outputs and var declarations (type, range,
+  options, default) win. Kept from the graph it replaces: each var value the person changed, while it still fits the
+  new declaration (same kind of value, inside min/max, a whole number for an int, one of the options; one that no
+  longer fits takes the new value and is reported); a control's label and step when the new graph gives none; a
+  control the person added for a var the new graph has; each node's "ui" when the new node has none; meta keys the new
+  graph does not set. A value counts as the person's when it differs from what the last refresh gave: each refresh
+  records the generated values in meta.generated_vars, so a value nobody touched follows the generator. Vars the new
+  graph lacks are dropped. The report lists what was kept, reset and dropped.
 - Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the package.
 - "fragment": true marks a graph that is a piece another graph or a script completes (merging in nodes it names but
   does not hold): it is never cooked on its own, and topotopo check skips it.`,

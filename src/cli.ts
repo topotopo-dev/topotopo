@@ -76,7 +76,10 @@ import { exportSource } from './io/source.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { PACKAGE_COMMANDS } from './packages/commands.ts';
 import { GODOT_COMMANDS } from './host/godot-commands.ts';
-import { setProgram } from './package.ts';
+import { setProgram, writeAtomic } from './package.ts';
+import { refreshGraph, refreshNotes } from './graph/refresh.ts';
+import { isGraph } from './graph/types.ts';
+import type { GraphSpec } from './graph/types.ts';
 import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
 import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
@@ -165,6 +168,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output)`,
     `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
+    `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
     `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: the registered workspaces and every library's packages, stable links for a board)`,
     `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
@@ -211,6 +215,25 @@ if (argv.includes('--catalog') || opt('--help-node')) {
 /** --follow owner/name (repeatable): packages whose working folders a cook uses instead of their copies. */
 const followArgs = argv.flatMap((x, i) => (x === '--follow' ? [argv[i + 1]] : []));
 if (followArgs.some((f) => f === undefined || f.startsWith('--'))) fail('--follow needs a package: --follow owner/name');
+
+if (argv[0] === 'refresh') {
+  // `topotopo refresh <graph.json> <generated.json | ->`: a generator's new graph written over graph.json, keeping what
+  // a person tuned on it (src/graph/refresh.ts); a viewer following graph.json cooks the result
+  const [file, from] = [argv[1], argv[2]];
+  if (!file || file.startsWith('-') || !from || (from.startsWith('-') && from !== '-')) fail(`usage: ${prog} refresh <graph.json> <generated.json | - (read from stdin)>`);
+  const read = (f: string, what: string): GraphSpec => {
+    let g: unknown;
+    try { g = JSON.parse(fs.readFileSync(f === '-' ? 0 : f, 'utf8')); } catch (e) { return fail(`${prog} refresh: ${what} ${f === '-' ? '(stdin)' : `"${f}"`}: ${(e as Error).message}`); }
+    return isGraph(g) ? g : fail(`${prog} refresh: ${what} ${f === '-' ? '(stdin)' : `"${f}"`} is not a graph (an object with "nodes")`);
+  };
+  const generated = read(from, 'the generated graph');
+  const existed = fs.existsSync(file);
+  const r = refreshGraph(existed ? read(file, 'the graph') : { nodes: {} }, generated);
+  writeAtomic(file, JSON.stringify(r.graph, null, 2));
+  console.log(`${existed ? 'refreshed' : 'wrote'} ${file}`);
+  for (const n of refreshNotes(r)) console.log(n);
+  process.exit(0);
+}
 
 if (argv[0] === 'view') {
   // `topotopo view <graph.json> [--port 7341]`: cook the file, serve the live 3D viewer and follow its saves; the values

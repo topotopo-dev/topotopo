@@ -24,6 +24,7 @@ import { SNIPPET_LIB_NAMES } from '../src/core/snippet-lib.ts';
 import { JS_GLOBALS } from '../src/core/usercode.ts';
 import { renderNodeReference } from '../scripts/gen-docs.ts';
 import { Session } from '../src/session.ts';
+import { refreshGraph, refreshNotes } from '../src/graph/refresh.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Image } from '../src/core/image.ts';
@@ -1156,6 +1157,100 @@ section('time limits from the environment in every host, and where the time went
     const info = up ? await (await fetch(`${url}/api/info?graph=busy_script`)).json() as any : null;
     check(up && /script exceeded 250 ms/.test(String(info?.error)), `the viewer cooks under TOPOTOPO_SCRIPT_TIMEOUT_MS (${String(info?.error).split('\n')[0]})`);
   } finally { proc.kill(); }
+}
+
+section('refresh: a regenerated graph keeps what a person tuned on it');
+{
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  // a generator's graph: three controls, an enum, a var without a control
+  const gen = (o: { height?: number; hmax?: number; style?: string[]; floors?: 'int' | 'float' } = {}): GraphSpec => ({
+    nodes: { b: { type: 'box', params: { size: ['=width', '=height', 1] } }, out: { type: 'transform', in: ['b'], params: { t: [0, 0, 0] } } },
+    output: 'out',
+    vars: { width: 2, height: o.height ?? 3, floors: 4, style: 'flat', seed: 1 },
+    params: {
+      width: { type: 'float', min: 0.5, max: 10, desc: 'width' },
+      height: { type: 'float', min: 1, max: o.hmax ?? 20, desc: 'height' },
+      floors: { type: o.floors ?? 'int', min: 1, max: 9 },
+      style: { type: 'enum', options: o.style ?? ['flat', 'gable', 'hip'] },
+    },
+    meta: { render: { views: 'persp' } },
+  });
+  const first = refreshGraph({ nodes: {} }, gen());
+  check(same(first.graph.meta?.generated_vars, { width: 2, height: 3, floors: 4, style: 'flat', seed: 1 }) && !first.kept.length && !first.reset.length, 'refresh: the first write records the generated values');
+
+  // the person tunes it: values, a label and step, a control for seed, node ui, an editor meta key
+  const tuned: GraphSpec = structuredClone(first.graph);
+  Object.assign(tuned.vars!, { width: 4.5, floors: 7, style: 'hip', seed: 9 });
+  tuned.params!.width = { ...tuned.params!.width, label: 'Width (m)', step: 0.25 };
+  tuned.params!.seed = { type: 'int', min: 0, max: 99, label: 'Seed' };
+  tuned.nodes.b.ui = { x: 120, y: 40 };
+  tuned.meta!.layout = { zoom: 2 };
+
+  // the generator runs again: height's value changed, nothing else
+  const r = refreshGraph(tuned, gen({ height: 5 }));
+  const g = r.graph;
+  check(g.vars!.width === 4.5 && g.vars!.floors === 7 && g.vars!.style === 'hip' && g.vars!.seed === 9, `refresh keeps the values the person changed (${JSON.stringify(g.vars)})`);
+  check(g.vars!.height === 5, 'refresh: a value nobody touched follows the generator');
+  check(g.params!.width.label === 'Width (m)' && g.params!.width.step === 0.25 && g.params!.width.desc === 'width' && g.params!.seed?.label === 'Seed', 'refresh keeps control labels, steps and a control the person added');
+  check(same(g.nodes.b.ui, { x: 120, y: 40 }) && same(g.meta?.layout, { zoom: 2 }) && same(g.meta?.render, { views: 'persp' }), 'refresh keeps node ui and the meta keys the generator does not set');
+  check(r.kept.length === 4 && r.kept.includes('width=4.5 (generator: 2)') && !r.reset.length && !r.dropped.length, `refresh reports what it kept (${r.kept.join('; ')})`);
+  check(same(g.meta?.generated_vars, { width: 2, height: 5, floors: 4, style: 'flat', seed: 1 }), 'refresh records what the generator gave this time');
+  check(refreshNotes(r).some((n) => /^refresh kept 4 value\(s\) the person changed: /.test(n)) && refreshNotes(r).some((n) => /^refresh carried over: .*width label.*b ui.*meta\.layout/.test(n)), 'refresh notes say what was kept and carried over');
+
+  // a kept value that no longer fits takes the generator's value; untouched values follow the generator either way
+  const r2 = refreshGraph(g, { ...gen({ style: ['flat', 'gable'] }), vars: { ...gen().vars, width: 'wide' } });
+  check(r2.graph.vars!.style === 'flat' && r2.reset.some((x) => /^style="hip" → "flat": not one of the options/.test(x)), `refresh resets a value that is no longer an option (${r2.reset.join('; ')})`);
+  check(r2.graph.vars!.width === 'wide' && r2.reset.some((x) => /^width=4\.5 → "wide": a number where the generator gives a string/.test(x)), 'refresh resets a value of another kind');
+  const r3 = refreshGraph(g, gen({ hmax: 4 }));
+  check(r3.graph.vars!.floors === 7 && r3.graph.vars!.height === 3, 'refresh: an untouched value follows the generator back');
+  const tall = structuredClone(g); tall.vars!.height = 8;
+  const r4 = refreshGraph(tall, gen({ hmax: 6 }));
+  check(r4.graph.vars!.height === 3 && r4.reset.some((x) => /^height=8 → 3: above the new range 1\.\.6/.test(x)), `refresh resets a value above the new range (${r4.reset.join('; ')})`);
+  const frac = structuredClone(g); frac.params!.floors.type = 'float'; frac.vars!.floors = 6.5;
+  const r5 = refreshGraph(frac, gen());
+  check(r5.graph.vars!.floors === 4 && r5.reset.some((x) => /^floors=6\.5 → 4: not a whole number/.test(x)), `refresh resets a fraction for an int var (${r5.reset.join('; ')})`);
+  const noSeed = gen(); delete noSeed.vars!.seed;
+  const lr = refreshGraph(g, noSeed);
+  check(!('seed' in lr.graph.vars!) && !lr.graph.params!.seed && same(lr.dropped, ['seed']), `refresh drops the vars the generator no longer has (${lr.dropped.join(', ')})`);
+
+  // MCP build mode "refresh": the person's values stay, the report says so, and the graph cooks
+  const rdir = path.join(tmp, 'refresh_ws');
+  fs.mkdirSync(path.join(rdir, 'graphs'), { recursive: true });
+  const rws = new Session(rdir, await newEngine());
+  rws.load();
+  const rtools = makeTools(rws);
+  const rcall = async (name: string, a: any) => {
+    const res = await rtools.find((t) => t.name === name)!.run(a);
+    return { txt: res.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'), isError: !!res.isError };
+  };
+  const rb0 = await rcall('build', { name: 'lot', graph: gen(), mode: 'refresh' });
+  const saved = structuredClone(rws.getGraph('lot'));
+  saved.vars!.width = 6;
+  rws.setGraph('lot', saved);
+  const rb = await rcall('build', { name: 'lot', graph: gen({ height: 5 }), mode: 'refresh' });
+  const after = rws.getGraph('lot');
+  check(!rb0.isError && !rb.isError && after.vars!.width === 6 && after.vars!.height === 5 && /note: refresh kept 1 value\(s\) the person changed: width=6 \(generator: 2\)/.test(rb.txt), `MCP build mode "refresh" keeps the person's values and says so (${rb.txt.split('\n').find((l) => /refresh|✗/.test(l))})`);
+  const rd = await rcall('build', { name: 'lot', graph: gen({ hmax: 4 }), mode: 'refresh', dry_run: true });
+  check(!rd.isError && /✓ valid/.test(rd.txt) && /note: refresh kept 1 value/.test(rd.txt) && rws.getGraph('lot').vars!.height === 5, 'a refresh dry run reports what it would keep and saves nothing');
+  const plain = await rcall('build', { name: 'lot', graph: gen() });
+  check(!plain.isError && rws.getGraph('lot').vars!.width === 2, 'build without mode "refresh" still replaces the values');
+
+  // CLI: topotopo refresh graph.json generated.json | -
+  const gfile = path.join(tmp, 'refresh_lot.json'), genFile = path.join(tmp, 'refresh_gen.json');
+  const cli = (args: string[], input?: string) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), 'refresh', ...args], { cwd: root, encoding: 'utf8', input });
+  fs.writeFileSync(genFile, JSON.stringify(gen()));
+  const w = cli([gfile, genFile]);
+  check(w.status === 0 && /^wrote /.test(w.stdout) && JSON.parse(fs.readFileSync(gfile, 'utf8')).meta.generated_vars.height === 3, `CLI refresh writes a new graph file (${w.stdout.trim() || w.stderr.trim()})`);
+  const onDisk = JSON.parse(fs.readFileSync(gfile, 'utf8'));
+  onDisk.vars.style = 'gable';
+  fs.writeFileSync(gfile, JSON.stringify(onDisk));
+  const piped = cli([gfile, '-'], JSON.stringify(gen({ height: 5 })));
+  const back = JSON.parse(fs.readFileSync(gfile, 'utf8'));
+  check(piped.status === 0 && back.vars.style === 'gable' && back.vars.height === 5 && /refresh kept 1 value\(s\) the person changed: style="gable"/.test(piped.stdout), `CLI refresh from stdin keeps the person's values (${piped.stdout.trim().split('\n').join(' | ') || piped.stderr.trim()})`);
+  const cooked = await (await newEngine()).cook(back);
+  check(cooked.ok, 'the refreshed graph file cooks');
+  const notGraph = cli([gfile, '-'], '{"vars": {}}');
+  check(notGraph.status === 1 && /is not a graph/.test(notGraph.stderr) && JSON.parse(fs.readFileSync(gfile, 'utf8')).vars.style === 'gable', 'CLI refresh refuses input that is not a graph and leaves the file');
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);

@@ -6,6 +6,7 @@ import { Session, EditRejected } from '../session.ts';
 import type { EditOp } from '../session.ts';
 import type { CookReport } from '../graph/engine.ts';
 import { timingLines } from '../graph/timing.ts';
+import { refreshGraph, refreshNotes } from '../graph/refresh.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
@@ -338,14 +339,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'build',
-      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph. dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value.',
+      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph; mode "refresh" replaces it with a regenerated graph but keeps what a person tuned on it (the var values they changed, when they still fit; control labels and steps; node ui; meta): use it when regenerating a graph a person works on (help topic "graph"). dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value.',
       inputSchema: {
         type: 'object',
         required: ['graph'],
         properties: {
           graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not published), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}, "strict": true (a value outside a param range fails the node instead of clamping with a warning; "strict" on a node overrides it)}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
           name: { type: 'string', description: 'graph name (default "main")' },
-          mode: { type: 'string', enum: ['replace', 'merge'] },
+          mode: { type: 'string', enum: ['replace', 'merge', 'refresh'] },
           dry_run: { type: 'boolean' },
           render: { description: 'true or render options (views, color_by, …)', anyOf: [{ type: 'boolean' }, { type: 'object' }] },
           ...FRAME_PROP,
@@ -357,11 +358,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         if (typeof spec === 'string') spec = JSON.parse(spec);
         spec = spec;
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
+        // a regenerated graph over the one a person tuned (src/graph/refresh.ts)
+        let refreshed: string[] = [];
+        if (a.mode === 'refresh') { const rf = refreshGraph(ws.graphs.get(name) ?? { nodes: {} }, spec); spec = rf.graph; refreshed = refreshNotes(rf); }
         if (a.dry_run) {
           // a package the graph names for the first time: checked against the version a build adds, nothing copied
           const dry = ws.dryScope(spec);
           const d = engine.dryRun(spec, undefined, dry.scope);
-          const first = dry.notes.map((n) => `\nnote: ${n}`).join('');
+          const first = [...dry.notes, ...refreshed].map((n) => `\nnote: ${n}`).join('');
           return text(d.errors.length
             ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + first
             : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : '') + first, d.errors.length > 0);
@@ -372,7 +376,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         // packages the graph names for the first time join the package
         const added = ws.packages?.addFor(spec) ?? [];
         ws.setGraph(name, spec);
-        return cookAndReport(name, a, added);
+        return cookAndReport(name, a, [...added, ...refreshed]);
       },
     },
     {
