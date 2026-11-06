@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+<!-- TopoTopo workspace (.topows), drawn for 16 px: a folder with the terraces mark. -->
+  <path d="M1 2H6L7.5 3.5H15V14H1Z" fill="#3b4149"/>
+  <rect x="1" y="5" width="14" height="9" fill="#59616c"/>
+  <rect x="1" y="5" width="14" height="1" fill="#8f99a5"/>
+  <polygon points="8,6 12,8 8,10 4,8" fill="#f4a26c"/><polygon points="4,8 8,10 8,12 4,10" fill="#d9622b"/><polygon points="12,8 8,10 8,12 12,10" fill="#a8461a"/>
+</svg>

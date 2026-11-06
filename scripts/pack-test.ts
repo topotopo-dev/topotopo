@@ -82,7 +82,7 @@ try {
     ...fs.readdirSync(path.join(ROOT, 'library')).map((k) => `library/${k}/versions/${newestOf(k)}/version.json`), 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
     'kernels/pkg/topotopo_kernels.js', 'kernels/pkg/topotopo_kernels_bg.wasm', 'kernels/pkg/LICENSE',
     'kernels/pkg-simd/topotopo_kernels.js', 'kernels/pkg-simd/topotopo_kernels_bg.wasm', 'kernels/pkg-simd/LICENSE',
-    'launcher/win32-x64/topotopo-open.exe',
+    'launcher/win32-x64/topotopo-open.exe', 'assets/icons/topotopo-package.ico', 'assets/icons/topotopo-workspace.ico',
   ];
   const missing = required.filter((f) => !files.includes(f));
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
@@ -96,7 +96,7 @@ try {
   const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
   check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
   const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
-    (/^launcher\//.test(f) && f !== 'launcher/win32-x64/topotopo-open.exe') ||
+    (/^launcher\//.test(f) && f !== 'launcher/win32-x64/topotopo-open.exe') || /^assets\/icons\/src\//.test(f) ||
     (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
   check(!stray.length, `tarball has no sources, tests, examples, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
   // every file of every version of TopoTopo's own packages: a version has the same files wherever it is
