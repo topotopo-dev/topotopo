@@ -431,5 +431,60 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(rects.length >= 20 && rects.length < 60 && overlaps === 0, `LabelPlacer: ${rects.length} of 60 labels around one anchor placed without overlap`);
 }
 
+// ---------------------------------------------------------------- camera by position (from, to, fov)
+// A concept's camera decides proportions: the persp view stands exactly where it is put, with fov across the width,
+// nothing fitted.
+{
+  const S = 400;
+  const alphaOf = (r: RenderResult, x: number, y: number) => r.rgba[(y * r.width + x) * 4 + 3];
+  /** columns and rows holding covered pixels (alpha above half) in a transparent render without footer */
+  const cover = (r: RenderResult) => {
+    let x0 = Infinity, x1 = -1, y0 = Infinity, y1 = -1;
+    for (let y = 0; y < r.height; y++) for (let x = 0; x < r.width; x++) if (alphaOf(r, x, y) > 127) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return { w: x1 - x0 + 1, h: y1 - y0 + 1, cx: (x0 + x1 + 1) / 2, cy: (y0 + y1 + 1) / 2 };
+  };
+  const clean: RenderOptions = { transparent: true, footer: false, wireframe: 'none', viewLabels: false };
+  const shot = (camera: RenderOptions['camera'], o: RenderOptions = {}) => render(box, { camera, size: S, ...clean, ...o });
+  // a unit box seen straight on from 5 m: its front face (0.5 m half width at 4.5 m) spans 2 · 0.5 / 4.5 · focal
+  // pixels, focal = (S / 2) / tan(fov / 2)
+  const faceW = (fov: number, w = S) => ((2 * 0.5) / 4.5) * (w / 2) / Math.tan((fov * Math.PI) / 360);
+  for (const fov of [90, 45]) {
+    const r = shot({ from: [0, 0, 5], to: [0, 0, 0], fov }), c = cover(r);
+    check(r.width === S && r.height === S && Math.abs(c.w - faceW(fov)) <= 2 && Math.abs(c.h - faceW(fov)) <= 2 && Math.abs(c.cx - S / 2) <= 1 && Math.abs(c.cy - S / 2) <= 1,
+      `camera fov ${fov}: the front face is ${c.w}×${c.h} px, centred, as a pinhole of that fov gives (${faceW(fov).toFixed(1)}); one view, no fit`);
+  }
+  const cw = cover(render(box, { camera: { from: [0, 0, 5], to: [0, 0, 0], fov: 90 }, size: [800, 400], ...clean }));
+  check(Math.abs(cw.w - faceW(90, 800)) <= 2, `camera fov is across the width: an 800×400 view at fov 90 draws the face ${cw.w} px wide (${faceW(90, 800).toFixed(1)})`);
+  const def = cover(shot({ from: [0, 0, 5], to: [0, 0, 0] }));
+  check(Math.abs(def.w - faceW(40)) <= 2, `camera without fov uses 40 degrees (${def.w} px, ${faceW(40).toFixed(1)})`);
+  // looking at a point beside the box puts the box off centre, to the left
+  const aside = cover(shot({ from: [0, 0, 5], to: [1, 0, 0] }));
+  check(aside.cx < S / 2 - 40, `camera to [1, 0, 0]: the box sits left of centre (${aside.cx.toFixed(0)} px of ${S})`);
+  // straight down: screen up is -Z, as in the top view
+  const pair = await cook({ a: { type: 'box', params: { size: [0.5, 0.3, 0.5], center: [0, 0, -1] } }, b: { type: 'box', params: { size: [0.3, 0.3, 0.3] } }, out: { type: 'merge', in: ['a', 'b'] } });
+  const down = render(pair, { camera: { from: [0, 6, -0.5], to: [0, 0, -0.5], fov: 50 }, size: S, ...clean });
+  let top = 0, bottom = 0;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (alphaOf(down, x, y) > 127) { if (y < S / 2) top++; else bottom++; }
+  check(bottom > 100 && top > bottom * 2, `camera looking straight down: both boxes drawn, the big one at -Z in the upper half (${top} / ${bottom} px)`);
+  // the label names it; other framing options do not move it and a note says so
+  const plain = render(box, { camera: { from: [0, 0, 5], to: [0, 0, 0] }, size: S });
+  const moved = render(box, { camera: { from: [0, 0, 5], to: [0, 0, 0] }, size: S, azimuth: 90, zoom: 2 });
+  check(note(moved, /camera: azimuth, zoom do not move a camera by position/) && diff(plain, moved, 0, 0, 0, S, S) === 0, 'camera: azimuth and zoom leave the camera view as it is, and a note says so');
+  // standing inside a big box: the walls that reach behind the camera are lost, a note counts them
+  const room = await cook({ out: { type: 'box', params: { size: [10, 4, 10] } } });
+  const inside = render(room, { camera: { from: [0, 0, 3], to: [0, 0, 0], fov: 90 }, size: S });
+  check(note(inside, /camera: \d+ triangles reach behind the camera/), `a camera among the geometry says what it cannot draw (${inside.notes.find((n) => /camera/.test(n))})`);
+  // ortho views beside it still fit
+  const both = render(box, { camera: { from: [0, 0, 5], to: [0, 0, 0] }, views: ['persp', 'front'], size: T });
+  check(both.width === 2 * T + 2, `camera with views [persp, front]: two views (${both.width} px wide)`);
+  // arguments: tool keys, CLI strings, errors
+  const ra = renderArgs({ camera: { from: '1,2,3', to: [0, 1, 0], fov: '55' } });
+  check(JSON.stringify(ra.camera) === '{"from":[1,2,3],"to":[0,1,0],"fov":55}', `renderArgs: camera from "x,y,z" strings and arrays (${JSON.stringify(ra.camera)})`);
+  const err = (f: () => unknown) => { try { f(); return ''; } catch (e: any) { return e.message as string; } };
+  check(/from and to are the same point/.test(err(() => renderArgs({ camera: { from: [1, 1, 1], to: [1, 1, 1] } }))), 'camera: from equal to to is refused');
+  check(/fov is degrees across the view's width, above 0 and below 180/.test(err(() => renderArgs({ camera: { from: [0, 0, 5], to: [0, 0, 0], fov: 180 } }))), 'camera: fov 180 is refused');
+  check(/camera expects \{from/.test(err(() => renderArgs({ camera: { from: [0, 0], to: [0, 0, 0] } }))), 'camera: a from without three numbers is refused');
+}
+
 console.log(fail ? `\n${fail} render check(s) failed` : '\nrender: all checks passed');
 process.exit(fail ? 1 : 0);

@@ -1380,6 +1380,16 @@ FRAMING: every 3D view fits the bounds: the bbox corners fill the view with a sm
     e.g. render {views:"front", ortho_scale:0.5} shows 50 cm across the front view, at any size.
   size: pixels per view, n or "WxH": size:"1600x600" gives wide views a long prop fills (the fit follows the aspect);
     scale 2 makes a 2× image.
+CAMERA BY POSITION (match a concept or game camera; the fit can hide a piece that is 15 % too narrow):
+  camera: {from: [x, y, z], to: [x, y, z], fov: 40}: the persp view's eye at from, looking at to, world +Y up, fov in
+    degrees across the view's WIDTH (horizontal, as Unreal and Houdini give it; default 40, about a 50 mm lens). A
+    vertical fov v at a W×H view is 2·atan(tan(v/2)·W/H). Nothing is fitted: what the lens sees is drawn, cut at the
+    view's edges. Give size the concept's aspect ("1920x1080") and the concept as underlay: with a camera the underlay
+    fills the view (underlay_fit "view"). azimuth, elevation, look_at, zoom and bounds do not move it (a note says
+    so). Without views the render is the one camera view; ortho views in views still fit. A camera standing among the
+    geometry loses the triangles that reach behind it (a note counts them).
+    e.g. render {camera:{from:[6, 1.7, 9], to:[0, 2, 0], fov:60}, size:"1600x900", underlay:"inputs/concept.png"}
+    CLI: --from 6,1.7,9 --to 0,2,0 --fov 60 --size 1600x900 --underlay concept.png
 BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no ground grid or axis gizmo; the footer
   stays). grid:false drops the persp ground grid. underlay:"inputs/side.png" draws a reference image (PNG, relative to
   the package) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
@@ -1442,6 +1452,7 @@ CLI: several renders per cook: the options after a --render apply to that render
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
   --shading pbr --exposure 0.5 --views front_left --size 1600x600 --transparent --no-grid --sockets
   --azimuth -90 --elevation 10 --look-at 0.6,0.15,0 --zoom 4 --ortho-scale 0.5
+  --from 6,1.7,9 --to 0,2,0 --fov 60 (a camera by position)
   --underlay ref.png --underlay-opacity 0.6 --underlay-fit width (CLI paths are relative to the current folder)
   --no-view-labels --heightfield-res full --heightfield-layer flow`,
 

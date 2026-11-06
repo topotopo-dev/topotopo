@@ -138,6 +138,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          framing: every 3D view fits the bounds; [--zoom 1] is relative to that fit (above 1 only with --look-at or --ortho-scale)',
     '                          [--azimuth 35] (degrees around +Y: 0 = camera on +Z at the front, 90 = on +X, the right side) [--elevation 25] (degrees above the horizon)',
     '                          [--look-at x,y,z] (world metres, Y up, +Z front) [--ortho-scale 0.5] (metres across an ortho view)',
+    '                          camera by position: [--from x,y,z --to x,y,z] [--fov 40] (degrees across the width): the persp view from exactly there, nothing fitted,',
+    '                            to match a concept or game camera (an --underlay then fills the view); without --views the render is that one view',
     '                          [--bounds x0,y0,z0,x1,y1,z1] (world metres: every 3D view frames these corners instead of the own box of the geometry, so a sequence shares one camera)',
     '                          [--transparent] (PNG with alpha) [--no-grid] [--sockets] (scene empties as labelled dots with orient axes)',
     '                          [--underlay ref.png] (a reference PNG behind the 3D views) [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]',
@@ -413,7 +415,7 @@ async function cook() {
   const RENDER_FLAGS = ['--wireframe', '--hard-angle', '--section', '--clip', '--glyphs', '--glyph-attrib', '--glyph-scale', '--max-glyphs', '--labels', '--max-labels',
     '--shading', '--ao-radius', '--size', '--render-scale', '--azimuth', '--elevation', '--zoom', '--look-at', '--bounds', '--ortho-scale', '--texture', '--max-triangles', '--exposure', '--cd',
     '--heightfield-res', '--heightfield-layer', '--underlay', '--underlay-opacity', '--underlay-fit', '--legend', '--points', '--annotate', '--textures', '--transparent',
-    '--sockets', '--grey', '--no-view-labels', '--no-footer', '--no-grid', '--views', '--color-by', '--checker'];
+    '--sockets', '--grey', '--no-view-labels', '--no-footer', '--no-grid', '--views', '--color-by', '--checker', '--from', '--to', '--fov'];
 
   /** Render overlay flags → render tool arguments → RenderOptions (src/render/options.ts). */
   function renderFlags(get: (f: string) => string | undefined, has: (f: string) => boolean): RenderOptions {
@@ -424,6 +426,11 @@ async function cook() {
       ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--bounds', 'bounds'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'], ['--cd', 'cd'],
       ['--heightfield-res', 'heightfield_res'], ['--heightfield-layer', 'heightfield_layer'], ['--underlay-opacity', 'underlay_opacity'], ['--underlay-fit', 'underlay_fit']]) if (get(f) !== undefined) a[k] = get(f);
     for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures'], ['--transparent', 'transparent'], ['--sockets', 'sockets'], ['--grey', 'grey']]) if (has(f)) a[k] = true;
+    // a camera by position: --from x,y,z --to x,y,z [--fov 40]
+    if (get('--from') !== undefined || get('--to') !== undefined || get('--fov') !== undefined) {
+      if (get('--from') === undefined || get('--to') === undefined) return fail('a camera by position needs --from x,y,z and --to x,y,z (world metres; --fov is optional, degrees across the width, default 40)');
+      a.camera = { from: get('--from'), to: get('--to'), ...(get('--fov') !== undefined ? { fov: get('--fov') } : {}) };
+    }
     if (has('--no-view-labels')) a.view_labels = false;
     if (has('--no-grid')) a.grid = false;
     if (has('--no-footer')) a.footer = false;
