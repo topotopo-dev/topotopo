@@ -2176,6 +2176,9 @@ defineNode({
       // the values are baked into the map: the factors that multiply it stay 1
       entry = { ...entry, roughness: 1, metallic: 1 };
     } else if (tex.orm) {
+      // a grey image in the orm slot is read as occlusion, roughness and metallic alike: usually a roughness map in the wrong slot
+      const om = need('orm'), ol = om?.layer(om.mainLayer);
+      if (om && ol && channelsOf(ol, om.count) === 1) ctx.warn(`${type}: the orm image "${om.name}" is grey: glTF reads its one value as occlusion, roughness and metallic alike; a roughness map goes in "roughness" (or pack the channels with tex_channel)`);
       // glTF semantics: the factors multiply the ORM map, so they default to 1; the input material's scalars do not apply
       entry = { ...entry, roughness: rv ?? 1, metallic: mv ?? 1 };
     }

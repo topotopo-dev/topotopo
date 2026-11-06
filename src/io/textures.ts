@@ -5,7 +5,7 @@
 // applied (colour layers already hold display values; data maps are linear).
 import type { Geometry } from '../core/geometry.ts';
 import { Image, LUMA, MAX_PIXELS, channelsOf, imageRef, imageToBytes, opaque, referenceableImages } from '../core/image.ts';
-import { TEXTURE_SLOTS, mergeMaterialTables } from '../core/materials.ts';
+import { TEXTURE_SLOTS, exportFactors, mergeMaterialTables } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { encodePNG } from '../render/png.ts';
 import { encodeGreyPNG, zlibStored } from './heightmap.ts';
@@ -199,7 +199,8 @@ export function texturesExport(g: Geometry, dir: string, o: TexturesExportOption
       add(`${name}_${l}`, imagePNG(img, l, o.deflate));
     }
   }
-  // the materials (a material output's, or a mesh's) with the files of their maps, for engines to rebuild them
+  // the materials (a material output's, or a mesh's) with the files of their maps, for engines to rebuild them; the
+  // factors are the ones glTF writes (a map replaces its factor: exportFactors)
   const table = mergeMaterialTables([g, ...g.packedSources]);
   const names = Object.keys(table);
   if (names.length) {
@@ -212,7 +213,7 @@ export function texturesExport(g: Geometry, dir: string, o: TexturesExportOption
         const img = imageRef(ref);
         maps[slot] = img === null ? ref : fileOf.get(img) ?? ref;
       }
-      materials[n] = { ...values, maps };
+      materials[n] = { ...values, ...exportFactors(table[n]), maps };
     }
     files.push({ path: joinPath(dir, 'materials.json'), bytes: new TextEncoder().encode(`${JSON.stringify({ materials }, null, 1)}\n`) });
   }

@@ -75,7 +75,7 @@ import { resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { TANGENT_ATTRIB, cornerTangents, loadMikkTSpace, tangentProblem, transformTangents, vertexUV } from '../core/tangents.ts';
 import { gltfV } from '../core/texcoord.ts';
 import { posText, primWhere } from '../core/report.ts';
-import { DEFAULT_MATERIAL, materialAlphaMode, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
+import { DEFAULT_MATERIAL, exportFactors, materialAlphaMode, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
 import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4invert, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
 import { EMPTY_ATTRIB, PARENT_ATTRIB, sceneEmpties } from '../core/scene.ts';
@@ -87,6 +87,8 @@ import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stri
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
 import { imageFromPNG, imageTextureData } from './textures.ts';
 import { decodePNG } from './png-decode.ts';
+import { encodePNG } from '../render/png.ts';
+import { zlibStored } from './heightmap.ts';
 import { imageRef } from '../core/image.ts';
 import type { Image } from '../core/image.ts';
 
@@ -287,6 +289,8 @@ interface MatState {
   byLength: Map<number, { bytes: Uint8Array; tex: Texture }[]>;
   uris: Set<string>;
   warn?: (msg: string) => void;
+  /** PNG compression for images made here (Node: zlib.deflateSync; default stored blocks) */
+  deflate?: (d: Uint8Array) => Uint8Array;
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => {
@@ -307,19 +311,19 @@ export function imageMime(b: Uint8Array): string | null {
  * The glTF texture for an image path (created once per path, and once per distinct image: a path whose bytes equal an
  * earlier one's, e.g. each LOD's copy of a map, shares its texture), or null when its bytes are missing or not PNG/JPEG.
  */
-function textureFor(st: MatState, path: string): Texture | null {
+function textureFor(st: MatState, path: string, made?: { name: string; bytes: Uint8Array | null }): Texture | null {
   if (!st.data) return null;
   let t = st.textures.get(path);
   if (t !== undefined) return t;
   t = null;
-  const bytes = st.data.get(path);
+  const bytes = made ? made.bytes : st.data.get(path);
   const mime = bytes ? imageMime(bytes) : null;
   if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image; material exported without it`);
   if (bytes && mime) {
     const same = st.byLength.get(bytes.length)?.find((c) => sameBytes(c.bytes, bytes));
     if (same) t = same.tex;
     else {
-      const base = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
+      const base = (made?.name ?? (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, ''))).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
       const ext = mime === 'image/png' ? '.png' : '.jpg';
       let uri = base + ext, k = 1;
       while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
@@ -333,6 +337,29 @@ function textureFor(st: MatState, path: string): Texture | null {
   return t;
 }
 
+/**
+ * A separate roughness map beside a metallic above 0: glTF reads roughness from the green and metallic from the blue
+ * channel of one image, so a grey roughness map would also scale the metallic. It is repacked (green = its green,
+ * blue = 1) so the metallicFactor alone is the metallic; once per map. null when the map is not a readable PNG.
+ */
+function roughnessBesideMetallic(st: MatState, path: string): Texture | null {
+  const src = st.data?.get(path);
+  if (!src || imageMime(src) !== 'image/png') return null;
+  const stem = path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '');
+  return textureFor(st, `${path}\u0000roughness_metallic`, { name: `${stem}_roughness_metallic`, bytes: (() => {
+    let png;
+    try { png = decodePNG(src); } catch { return null; }
+    const n = png.width * png.height, c = png.channels, k = 255 / png.maxValue, out = new Uint8Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      out[i * 4] = 255;
+      out[i * 4 + 1] = Math.round(png.data[i * c + (c >= 3 ? 1 : 0)] * k);
+      out[i * 4 + 2] = 255;
+      out[i * 4 + 3] = 255;
+    }
+    return encodePNG(out, png.width, png.height, st.deflate ?? zlibStored);
+  })() });
+}
+
 function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: boolean, tint?: number[]): GMaterial {
   const key = `${name}\u0000${vertexColors ? 1 : 0}${blend ? 1 : 0}${tint ? `\u0000${tint.join(',')}` : ''}`;
   let m = st.cache.get(key);
@@ -343,16 +370,23 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   const baseTex = tex('baseColor'), normalTex = tex('normal'), ormTex = tex('orm');
   // an ORM map (occlusion R, roughness G, metallic B) is glTF's own layout: it is both the metallicRoughness and the
   // occlusion texture, and replaces a separate roughness map
-  const roughTex = ormTex ?? tex('roughness');
+  let roughTex = ormTex ?? tex('roughness');
   if (ormTex && mat.textures?.roughness) st.warn?.(`glTF: material "${name}" has an orm and a roughness map; the orm map's green channel is used`);
-  // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map; an ORM
-  // map's factors are the material's own metallic / roughness (1 unless set)
-  // a folded constant vertex colour multiplies a base colour map exactly as COLOR_0 would have
-  const rgb = tint ?? (vertexColors || baseTex ? [1, 1, 1] : mat.baseColor);
+  // a separate roughness map is glTF's metallicRoughness texture too: beside a metallic above 0 its blue channel is
+  // made 1 so the metallic stays the material's (with metallic 0 the map is written as it is)
+  if (roughTex && !ormTex && mat.metallic > 0) {
+    const packed = roughnessBesideMetallic(st, mat.textures!.roughness!);
+    if (packed) roughTex = packed;
+    else st.warn?.(`glTF: material "${name}": the roughness map "${mat.textures!.roughness}" is not a PNG, so it cannot be repacked: glTF reads metallic from its blue channel, and metallic ${mat.metallic} varies with the roughness (use a PNG roughness map, or an orm map with the metallic in blue)`);
+  }
+  // a map replaces its factor (exportFactors); a folded constant vertex colour multiplies a base colour map exactly as
+  // COLOR_0 would have
+  const f = exportFactors(mat, (slot) => (slot === 'baseColor' ? !!baseTex : slot === 'roughness' ? !!roughTex && !ormTex : slot === 'orm' ? !!ormTex : false));
+  const rgb = tint ?? (vertexColors ? [1, 1, 1] : f.baseColor);
   m = st.doc.createMaterial(isDefault ? 'default' : name)
     .setBaseColorFactor([toLinear(rgb[0]), toLinear(rgb[1]), toLinear(rgb[2]), mat.alpha]) // glTF factors are linear
-    .setMetallicFactor(mat.metallic)
-    .setRoughnessFactor(roughTex && !ormTex ? 1 : mat.roughness)
+    .setMetallicFactor(f.metallic)
+    .setRoughnessFactor(f.roughness)
     .setDoubleSided(mat.doubleSided);
   if (baseTex) m.setBaseColorTexture(baseTex);
   if (normalTex) m.setNormalTexture(normalTex);
@@ -441,7 +475,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const useMaterials = o.materials !== false;
   const st: MatState = {
     doc, table: useMaterials ? mergeMaterialTables([g, ...g.packedSources]) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material,
-    data: o.textureData, textures: new Map(), byLength: new Map(), uris: new Set(), warn: o.warn,
+    data: o.textureData, textures: new Map(), byLength: new Map(), uris: new Set(), warn: o.warn, deflate: o.deflate,
   };
   let noUV = 0;
   const custom = o.custom === true;

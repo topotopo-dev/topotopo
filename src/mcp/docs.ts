@@ -540,7 +540,8 @@ MATERIAL OUTPUTS (a material as a package output, kind "material": materials and
           renames it). The material node's own colour and map params are not used then.
   see     renders, the viewer and the web app show it on spheres (one per material) with its base colour maps;
           publishing records each map's size (packages lists "maps baseColor 2048, normal 4096").
-  export  format "textures": one PNG per map + materials.json (each material's values and the files of its maps), for
+  export  format "textures": one PNG per map + materials.json (each material's values, with the factors glb writes: white
+          base colour under a base colour map, roughness 1 under a roughness map; and the files of its maps), for
           engines to rebuild it; glb and usda need a mesh: export the mesh that uses it.`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
@@ -1507,7 +1508,8 @@ MATERIALS: the material node writes prim "material" + the detail table. A named 
   folded into the factor). a material's own alpha < 1 (or alpha_mode blend) → alphaMode BLEND; vertex Alpha is data: it stays COLOR_0.A and never changes the mode; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
 TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the package folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
-  map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
+  map replaces its factor; beside a metallic above 0 a separate roughness map is written repacked, blue 1, so the
+  metallic stays the material's value). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
   keep the paths in the material table. glTF import records texture paths (or "embedded:<name>") without decoding.
   "image:<name>" textures (texture_to_material, texture nodes) are image volumes of the geometry: glb/gltf encode them
   to PNG in memory, usda writes <name>_textures/<image>.png next to the .usda, format "textures" writes every image as
