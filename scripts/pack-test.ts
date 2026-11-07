@@ -4,8 +4,9 @@
 //
 // Checks
 // - npm pack (prepack builds dist/): required files are in the tarball, TopoTopo's built-in library among them (the
-//   versions of its own packages, library/<name>/versions/), and nothing from src/, test/, examples/, out/, the built-in packages'
-//   working folders and thumbnails, or the Rust sources is.
+//   versions of its own packages, library/<name>/versions/), the examples with their cards (examples/<name>.json and .md,
+//   each example package's manifest, graphs and inputs: help {examples}), and nothing from src/, test/, the examples'
+//   renders and package copies, out/, the built-in packages' working folders and thumbnails, or the Rust sources is.
 // - The bin from the installed package: `npm exec --no -- topotopo --help`, and cooking an example graph copied into the
 //   temp folder with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
 //   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
@@ -92,9 +93,24 @@ try {
     `tarball has every file of the Godot addon (${addonFiles.length}) and not its tests or demo${addonMissing.length ? `; missing: ${addonMissing.join(', ')}` : ''}`);
   const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
   check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
-  const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
-    (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
-  check(!stray.length, `tarball has no sources, tests, examples, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
+  // the examples and their cards (src/mcp/examples.ts, help {examples}), and each example package's manifest, graphs and inputs
+  const exampleFiles: string[] = [];
+  for (const e of fs.readdirSync(path.join(ROOT, 'examples'), { withFileTypes: true })) {
+    const dir = path.join(ROOT, 'examples', e.name);
+    if (e.isFile() && /\.(json|md)$/.test(e.name)) exampleFiles.push(`examples/${e.name}`);
+    else if (e.isDirectory() && fs.readdirSync(dir).some((f) => f.endsWith('.topo'))) {
+      for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.topo'))) exampleFiles.push(`examples/${e.name}/${f}`);
+      for (const sub of ['graphs', 'inputs']) {
+        if (fs.existsSync(path.join(dir, sub))) for (const f of fs.readdirSync(path.join(dir, sub)).filter((x) => !x.startsWith('.'))) exampleFiles.push(`examples/${e.name}/${sub}/${f}`);
+      }
+    }
+  }
+  const exampleMissing = exampleFiles.filter((f) => !files.includes(f));
+  check(exampleFiles.length > 30 && !exampleMissing.length, `tarball has the examples and their cards (${exampleFiles.length} files)${exampleMissing.length ? `; missing: ${exampleMissing.slice(0, 5).join(', ')}` : ''}`);
+  const shippedExample = (f: string) => /^examples\/[\w-]+\.(json|md)$/.test(f) || /^examples\/[\w-]+\/([\w-]+\.topo|(graphs|inputs)\/[^/]+)$/.test(f);
+  const stray = files.filter((f) => /^(src|test|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^examples\//.test(f) && !shippedExample(f)) ||
+    (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) || (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
+  check(!stray.length, `tarball has no sources, tests, example renders or package copies, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
   // every file of every version of TopoTopo's own packages: a version has the same files wherever it is
   const versionFiles: string[] = [];
   const walkVersions = (dir: string, rel: string) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = `${rel}/${e.name}`; if (e.isDirectory()) walkVersions(path.join(dir, e.name), r); else versionFiles.push(r); } };
@@ -270,6 +286,13 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     check(client.getServerVersion()?.name === NAME && client.getServerVersion()?.version === pkg.version, `server ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
     const cat = await call('catalog', {});
     check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('topotopo/nature/rock'), 'catalog lists the nodes and the installed packages of TopoTopo\'s own');
+    // the examples ship with the package: help lists them and gives one's card and graph, which validates here
+    const exIdx = await call('help', { topic: 'examples' });
+    const exOne = await call('help', { examples: ['skeleton_roofs'] });
+    const exGraph = /\nGRAPH [^\n]*\n\n(\{[\s\S]*\})$/.exec(exOne.txt)?.[1];
+    const exDry = exGraph ? await call('build', { name: 'roofs_example', graph: JSON.parse(exGraph), dry_run: true }) : null;
+    check(/\n- skeleton_roofs — /.test(exIdx.txt) && !!exDry && !exDry.isError && /^✓ valid/.test(exDry.txt),
+      `help lists the installed examples and gives one whose graph validates: ${exDry?.txt.split('\n')[0] ?? exOne.txt.slice(0, 80)}`);
     // the documented setup: a new folder, which the server made a package, so the first build that names a
     // an output of one of TopoTopo's own packages copies it in
     const rock = await call('build', { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' });

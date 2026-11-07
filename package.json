@@ -22,6 +22,11 @@
   "files": [
     "dist",
     "library/*/versions/**",
+    "examples/*.json",
+    "examples/*.md",
+    "examples/*/*.topo",
+    "examples/*/graphs/**",
+    "examples/*/inputs/**",
     "assets/fonts",
     "kernels/pkg",
     "kernels/pkg-simd",
