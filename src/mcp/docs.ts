@@ -17,7 +17,7 @@ Start a scene, an asset or a pipeline from the closest complete example: help {t
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs; overlays for specific questions: wireframe "hard"/"boundary", views "section", glyphs "N", label_groups, shading "matcap", see help topic "render"). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
-7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
+7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr, heightfields, images); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
 OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, material, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a package that publishes versions, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, material, volume, scene; a mesh with scene_null sockets is a mesh; materials alone are a material) pins what it must cook to: build warns and publishing blocks when it does not.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
@@ -1630,6 +1630,13 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    component; attrib_class), group (exists and is non-empty), expr (JS over npoints nprims nvertices npolys nlines
    bbox.min/.max/.size/.center (.x .y .z) volume area pieces open_pieces genus closed boundary_edges, and the graph
    vars by their bare name: "npoints == count * 8").
+   Heightfields and images have no points, so they have checks of their own: heightfields / images (names that must
+   exist; * wildcards), then for the ones named (every one when empty) samples ([x, z] or one number), height_min /
+   height_max (every height sample), match ("edges" | "all": the heightfield against the reference heightfield wired
+   to input 1, at the same world X and Z, within match_tolerance: a tile cooked on its own against its map),
+   image_size ([w, h] or one number) and image_min / image_max (every channel of every layer; NaN fails):
+   {"type":"assert","in":["tile","map"],"params":{"label":"seamless","match":"edges","height_min":0,"height_max":"=relief"}}
+   {"type":"assert","in":["maps"],"params":{"label":"maps","images":"stone_*","image_size":"=resolution","image_min":0,"image_max":1}}
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
    Every failed check names its first offender: the part (prim "name", groups) and its world position.

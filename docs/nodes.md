@@ -3766,15 +3766,16 @@ Measure prim area/perimeter, curve length, per-piece volume/area, or point curva
 
 category: `measure` · aliases: `expect`, `check`, `verify`
 
-Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression) and fail, warn or mark when a check fails. Passes the geometry through.
+Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression, heightfields, images) and fail, warn or mark when a check fails. Passes the geometry through.
 
-Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first). Each cook records stats checks and failed.
+Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first). Heightfields and images (which have no points) have checks of their own: heightfields / images name the ones that must exist, and the checks after each read those (every one when the name is empty): samples, height_min / height_max and match for heightfields (match compares with the heightfield of the reference input at the same world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size and image_min / image_max (every channel of every layer) for images. Each cook records stats checks and failed.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | geometry to check (passed through) |
+| 1 | `reference` | yes | no | optional: geometry with the heightfield match compares against |
 
 **Parameters**
 
@@ -3803,6 +3804,16 @@ Every check is off by default; enable the ones that express what the graph must 
 | `group` | string | `""` |  |  |  | group name (any class) that must exist and be non-empty ("" = off) |
 | `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first); e.g. "volume > 1 && pieces == 1" |
 | `tolerance` | float | `0.000001` | 0.. |  |  | distance tolerance for bbox_min/max and duplicate points *(advanced)* |
+| `heightfields` | string | `""` |  |  | `heightfield` | heightfield names that must exist (space-separated, * wildcards, ^name excludes; "" = off); the heightfield checks read these, or every heightfield when empty |
+| `samples` | json | `null` |  |  |  | [x, z] samples (or one number for both) every heightfield checked must have, e.g. an Unreal Landscape size (null = off) |
+| `height_min` | json | `null` |  |  |  | no height sample of a heightfield checked may lie below this (null = off) |
+| `height_max` | json | `null` |  |  |  | no height sample of a heightfield checked may lie above this (null = off) |
+| `match` | enum | `"off"` |  | `off`, `edges`, `all` |  | compare every heightfield checked with the first heightfield of input 1 at the same world X and Z: edges = its border samples (tiles join without seams), all = every sample |
+| `match_tolerance` | float | `0.0001` | 0.. |  |  | match: largest height difference allowed (m) *(advanced)* |
+| `images` | string | `""` |  |  | `image` | image names that must exist (space-separated, * wildcards, ^name excludes; "" = off); the image checks read these, or every image when empty |
+| `image_size` | json | `null` |  |  |  | [width, height] in pixels (or one number for both) every image checked must have (null = off) |
+| `image_min` | json | `null` |  |  |  | no channel value of an image checked may lie below this, in any layer; NaN fails (null = off) |
+| `image_max` | json | `null` |  |  |  | no channel value of an image checked may lie above this, in any layer; NaN fails (null = off) |
 
 **Writes:** passes geometry through; mark: detail int assert_failed, detail string assert_report, point/prim group assert_fail
 
