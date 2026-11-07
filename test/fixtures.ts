@@ -484,6 +484,19 @@ export function isolateConfig(): string {
 isolateConfig();
 
 /**
+ * The examples that do not meet a card yet (docs/examples.md; test/cards.ts): each still has no card (examples/<name>.md)
+ * or fails it. The list only shrinks: test/cards.ts fails for a name here that meets its card, or that is no example.
+ * test/golden.ts holds every other example to a clean cook (no errors, no warnings).
+ */
+export const EXAMPLES_PENDING = new Set([
+  'bevel', 'building', 'csg_bracket', 'deformers', 'drainage', 'drape', 'engraved_sign', 'erosion_models', 'forest', 'fractured',
+  'guided_town', 'house_city', 'image_cutouts', 'measures', 'particles', 'pcg_scatter', 'polyedit', 'quad_remesh', 'rbd_settle',
+  'remesh_lod', 'render_modes', 'rocks_on_terrain', 'sdf_creature', 'skeleton_roofs', 'solver_growth', 'spiral_stairs', 'splines',
+  'street_block', 'terrain_erosion', 'terrain_tiles', 'texture_lab', 'textures', 'tree', 'unreal_demo', 'uv_noisy_rock',
+  'uv_toolkit', 'voronoi_city', 'voxel_remesh', 'wrangle_waves',
+]);
+
+/**
  * The example packages: folders of examples/ that are packages of their own (an <id>.topo file and graphs/), such as
  * examples/guided_town, whose guides live in its own inputs/. Each graph as {name, dir, file}; dir is the package
  * folder its relative paths read from. examples/packages/ holds the examples' copies of TopoTopo's packages, not one.
