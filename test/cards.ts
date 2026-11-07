@@ -266,7 +266,8 @@ for (const e of examples) {
     // the card comes before its graph: its form fails now, the graph's mismatches wait
     for (const x of r.problems.filter((x) => x.startsWith('Card: '))) fail(`${e.name} · ${x}`);
     if (!r.problems.length) fail(`${e.name}: meets its card, so take it off EXAMPLES_PENDING (test/fixtures.ts)`);
-    else console.log(`pending ${e.name}: ${r.problems.length} problem(s), first: ${r.problems[0]}`);
+    else if (filter) console.log(`pending ${e.name}: ${r.problems.length} problem(s):\n  ${r.problems.join('\n  ')}`);
+    else console.log(`pending ${e.name}: ${r.problems.length} problem(s), first: ${r.problems[0]} (node test/cards.ts ${e.name}: all)`);
     continue;
   }
   if (r.problems.length) for (const x of r.problems) fail(`${e.name} · ${x}`);

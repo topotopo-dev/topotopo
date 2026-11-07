@@ -11,11 +11,14 @@ import { CATEGORY_ORDER, allNodeDefs } from '../src/graph/registry.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { PackageUses } from '../src/packages/registry.ts';
-import { readExamples } from '../src/mcp/examples.ts';
+import { examplesRoot, orphanCards, parseCard, readExamples } from '../src/mcp/examples.ts';
+import type { Card } from '../src/mcp/examples.ts';
 import type { NodeDef, ParamDef } from '../src/graph/types.ts';
 
 export const NODES_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'nodes.md');
 export const EXAMPLES_MD = path.join(path.dirname(NODES_MD), 'examples.md');
+/** The card docs/examples.md shows as the sample of the format. */
+const SAMPLE_CARD = 'forest_on_terrain';
 
 /** Escape text for a Markdown table cell. */
 const cell = (s: string) => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
@@ -162,7 +165,7 @@ export const readNodesMd = () => readDoc(NODES_MD);
 /** docs/examples.md: what an example is, its house rules, the card format, what the tests check, and every example. */
 export function examplesMarkdown(): string {
   const all = readExamples();
-  const carded = all.filter((e) => e.card), bare = all.filter((e) => !e.card);
+  const carded = all.filter((e) => e.fits), bare = all.filter((e) => !e.card);
   const first = (s: string) => (/^(.+?[.!?])(\s|$)/s.exec(s.trim())?.[1] ?? s.trim()).replace(/\s+/g, ' ');
   const out = [
     '# Examples',
@@ -199,29 +202,10 @@ export function examplesMarkdown(): string {
     'A card has a title, the request in a sentence or two, and four sections in this order. It says *what*, never *how*: no',
     'node names and no technique, so the graph can change underneath it.',
     '',
+    `For example, [examples/${SAMPLE_CARD}.md](../examples/${SAMPLE_CARD}.md):`,
+    '',
     '```markdown',
-    '# Forest on terrain',
-    '',
-    'A forest with rocks on rolling terrain, ready for a game engine.',
-    '',
-    '## In',
-    '- seed: 0–9999, default 1. Changes the layout, not the look.',
-    '- size: 50–500 m, default 200. Side of the square terrain.',
-    '- tree_density: 0–1, default 0.6. How full the forest is.',
-    '- max_slope: 10–60°, default 30. Steeper ground stays bare.',
-    '',
-    '## Out',
-    '- terrain (terrain): the ground, with a ground material.',
-    '- trees (instances): pine and birch trees, packed.',
-    '- rocks (instances): rocks, packed.',
-    '',
-    '## Promises',
-    '- slope: no tree or rock stands on ground steeper than max_slope.',
-    '- inside: everything stays within the terrain.',
-    '- full: at least 500 trees at the defaults.',
-    '',
-    '## Look',
-    'A dense forest with clearings and rocks gathered on slopes. Nothing floats.',
+    fs.readFileSync(path.join(examplesRoot(), `${SAMPLE_CARD}.md`), 'utf8').replace(/\r\n/g, '\n').trim(),
     '```',
     '',
     '- **In**: `- name: what it changes`, with its range (`2–40 m`, `0 to 1`) or its options (`one of grass, sand or',
@@ -236,7 +220,8 @@ export function examplesMarkdown(): string {
     '',
     '`npm test` runs `test/cards.ts`, which reads every card and checks its graph against it:',
     '',
-    '- every graph has a card and every card a graph;',
+    '- every graph has a card and every card a graph; a card written before its graph waits on a list in',
+    '  `test/fixtures.ts`, and only its form is checked until the graph is built to it;',
     '- **In**: the card\'s names are the graph\'s params, 3 to 10, each typed and described, with the range, default and',
     '  options the card gives; every param is read by an output;',
     '- **Out**: the card\'s names are the graph\'s named outputs, each with the kind the card gives, a label, three or',
@@ -255,14 +240,21 @@ export function examplesMarkdown(): string {
     '## The examples',
     '',
   ];
-  for (const e of carded) {
-    const c = e.card!;
-    out.push(`### [${c.title}](../examples/${e.name}.md) (\`${e.name}\`)`, '', c.request, '',
-      `- In: ${c.inputs.map((x) => `\`${x.name}\``).join(', ')}`,
-      `- Out: ${c.outputs.map((x) => `\`${x.name}\` (${x.kind})`).join(', ')}`, '');
+  const cardLines = (name: string, c: Card) => [`### [${c.title}](../examples/${name}.md) (\`${name}\`)`, '', c.request, '',
+    `- In: ${c.inputs.map((x) => `\`${x.name}\``).join(', ')}`,
+    `- Out: ${c.outputs.map((x) => `\`${x.name}\` (${x.kind})`).join(', ')}`, ''];
+  for (const e of carded) out.push(...cardLines(e.name, e.card!));
+  // cards ahead of their graph: written first (house rule 7), the graph still to be built or rebuilt to them
+  const ahead = [
+    ...all.filter((e) => e.card && !e.fits).map((e) => [e.name, e.card!] as const),
+    ...orphanCards().map((f) => [f.slice(0, -3), parseCard(fs.readFileSync(path.join(examplesRoot(), f), 'utf8')).card] as const),
+  ].sort((a, b) => a[0].localeCompare(b[0], 'en'));
+  if (ahead.length) {
+    out.push('## Cards waiting for their graph', '', 'Written first; their graphs are being built (or rebuilt) to them.', '');
+    for (const [name, c] of ahead) out.push(...cardLines(name, c));
   }
   if (bare.length) {
-    out.push(carded.length ? '### Without a card yet' : 'No example has its card yet. The graphs, until they do:', '');
+    out.push(carded.length || ahead.length ? '## Graphs without a card yet' : 'No example has its card yet. The graphs, until they do:', '');
     for (const e of bare) {
       const file = e.isPackage ? `${e.name}/` : `${e.name}.json`;
       const d = e.graph.description ?? e.graph.meta?.description;

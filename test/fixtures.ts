@@ -490,7 +490,7 @@ isolateConfig();
  */
 export const EXAMPLES_PENDING = new Set([
   'bevel', 'building', 'csg_bracket', 'deformers', 'drainage', 'drape', 'engraved_sign', 'erosion_models', 'forest', 'fractured',
-  'guided_town', 'house_city', 'image_cutouts', 'measures', 'particles', 'pcg_scatter', 'polyedit', 'quad_remesh', 'rbd_settle',
+  'house_city', 'image_cutouts', 'measures', 'particles', 'pcg_scatter', 'polyedit', 'quad_remesh', 'rbd_settle',
   'remesh_lod', 'render_modes', 'rocks_on_terrain', 'sdf_creature', 'skeleton_roofs', 'solver_growth', 'spiral_stairs', 'splines',
   'street_block', 'terrain_erosion', 'terrain_tiles', 'texture_lab', 'textures', 'tree', 'unreal_demo', 'uv_noisy_rock',
   'uv_toolkit', 'voronoi_city', 'voxel_remesh', 'wrangle_waves',
@@ -502,6 +502,9 @@ export const EXAMPLES_PENDING = new Set([
  * a graph. The list only shrinks: a name here that has its graph, or no card, fails.
  */
 export const CARDS_WAITING = new Set<string>([
+  'asset_cleanup', 'blob_creature', 'cloth_drape', 'eroded_valley', 'forest_on_terrain', 'fracture_settle', 'growth',
+  'lsystem_tree', 'machined_bracket', 'market_street', 'material_set', 'ocean_surface', 'rail_along_curve', 'scifi_panel',
+  'sparks', 'town_from_lots', 'unreal_landscape',
 ]);
 
 /**

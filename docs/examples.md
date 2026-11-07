@@ -32,29 +32,35 @@ Each example is a pair in [examples/](../examples):
 A card has a title, the request in a sentence or two, and four sections in this order. It says *what*, never *how*: no
 node names and no technique, so the graph can change underneath it.
 
+For example, [examples/forest_on_terrain.md](../examples/forest_on_terrain.md):
+
 ```markdown
 # Forest on terrain
 
-A forest with rocks on rolling terrain, ready for a game engine.
+A forest with rocks on rolling terrain, ready for a game engine: trees on the gentle ground, rocks gathered on the
+slopes, bare ground where it is too steep.
 
 ## In
-- seed: 0–9999, default 1. Changes the layout, not the look.
+- seed: 0–9999, default 1. Changes the hills and the layout, not the look.
 - size: 50–500 m, default 200. Side of the square terrain.
+- relief: 5–80 m, default 25. Height of the hills.
 - tree_density: 0–1, default 0.6. How full the forest is.
-- max_slope: 10–60°, default 30. Steeper ground stays bare.
+- rock_density: 0–1, default 0.3. How many rocks lie on the slopes.
+- max_slope: 10–60°, default 30. Steeper ground stays bare of trees.
 
 ## Out
-- terrain (terrain): the ground, with a ground material.
-- trees (instances): pine and birch trees, packed.
-- rocks (instances): rocks, packed.
+- terrain (terrain): the ground, with paint layers for grass, forest floor and rock.
+- trees (instances): pine, fir and oak trees, packed.
+- rocks (instances): rocks of several shapes, packed.
 
 ## Promises
-- slope: no tree or rock stands on ground steeper than max_slope.
-- inside: everything stays within the terrain.
-- full: at least 500 trees at the defaults.
+- slope: no tree stands on ground steeper than max_slope.
+- grounded: every tree and rock stands on the ground; none floats or sinks.
+- inside: every tree and rock stays within the terrain.
 
 ## Look
-A dense forest with clearings and rocks gathered on slopes. Nothing floats.
+Rolling green hills under a dense mixed forest with clearings, grey rocks gathered on the steeper slopes and bare rock
+on the steepest ground, seen from above at an angle.
 ```
 
 - **In**: `- name: what it changes`, with its range (`2–40 m`, `0 to 1`) or its options (`one of grass, sand or
@@ -69,7 +75,8 @@ A dense forest with clearings and rocks gathered on slopes. Nothing floats.
 
 `npm test` runs `test/cards.ts`, which reads every card and checks its graph against it:
 
-- every graph has a card and every card a graph;
+- every graph has a card and every card a graph; a card written before its graph waits on a list in
+  `test/fixtures.ts`, and only its form is checked until the graph is built to it;
 - **In**: the card's names are the graph's params, 3 to 10, each typed and described, with the range, default and
   options the card gives; every param is read by an output;
 - **Out**: the card's names are the graph's named outputs, each with the kind the card gives, a label, three or
@@ -87,7 +94,151 @@ the example no longer does its job.
 
 ## The examples
 
-No example has its card yet. The graphs, until they do:
+### [Guided town](../examples/guided_town.md) (`guided_town`)
+
+A village laid out along your own guides: the roads, house plots, fences, woods and clearings you draw in the viewer become a finished village, built again whenever you move one.
+
+- In: `road_width`, `lamp_spacing`, `floors`, `roof_pitch`, `tree_density`, `keep_clear`, `seed`
+- Out: `village` (scene)
+
+## Cards waiting for their graph
+
+Written first; their graphs are being built (or rebuilt) to them.
+
+### [Asset cleanup](../examples/asset_cleanup.md) (`asset_cleanup`)
+
+A rough, broken scan turned into a game-ready asset: holes filled, tangles removed, even triangles, clean UVs and levels of detail.
+
+- In: `source`, `detail`, `lods`, `lod_ratio`, `texel_density`, `seed`
+- Out: `asset` (mesh), `lods` (mesh)
+
+### [Blob creature](../examples/blob_creature.md) (`blob_creature`)
+
+A cartoon creature made of smooth blended shapes: a round body, a head, legs and a tail that melt into each other, and two eyes, as a closed mesh.
+
+- In: `body_size`, `head`, `legs`, `tail`, `blend`, `bumps`, `detail`, `seed`
+- Out: `creature` (mesh)
+
+### [Cloth drape](../examples/cloth_drape.md) (`cloth_drape`)
+
+A tablecloth draped over a table: it falls over the edges in soft folds and rests on the table top, a set-dressing prop.
+
+- In: `table_width`, `table_depth`, `cloth_size`, `stiffness`, `thickness`, `seed`
+- Out: `cloth` (mesh), `table` (mesh)
+
+### [Eroded valley](../examples/eroded_valley.md) (`eroded_valley`)
+
+A mountain valley worn by rain: sharp ridges, gullies and sediment fans, with a river along the valley floor, as a terrain for a game engine.
+
+- In: `size`, `height`, `erosion`, `river_depth`, `seed`
+- Out: `terrain` (terrain), `river` (curves), `preview` (mesh)
+
+### [Forest on terrain](../examples/forest_on_terrain.md) (`forest_on_terrain`)
+
+A forest with rocks on rolling terrain, ready for a game engine: trees on the gentle ground, rocks gathered on the slopes, bare ground where it is too steep.
+
+- In: `seed`, `size`, `relief`, `tree_density`, `rock_density`, `max_slope`
+- Out: `terrain` (terrain), `trees` (instances), `rocks` (instances)
+
+### [Fracture and settle](../examples/fracture_settle.md) (`fracture_settle`)
+
+A stone wall that breaks into pieces which fall and come to rest on the ground, for a destruction effect or a ruin.
+
+- In: `wall_width`, `wall_height`, `thickness`, `pieces`, `impact`, `seed`
+- Out: `broken` (mesh), `intact` (mesh)
+
+### [Growth](../examples/growth.md) (`growth`)
+
+A coral-like form that grows frame by frame, for a timelapse or a growth effect: it swells unevenly into knobs and folds.
+
+- In: `seed_size`, `rate`, `lumpiness`, `detail`, `seed`
+- Out: `form` (mesh)
+
+### [Image cutouts](../examples/image_cutouts.md) (`image_cutouts`)
+
+Game props cut out of pictures: the shapes in each picture are traced into flat, double-sided cards that keep the picture as a masked texture, all packed into one atlas, for foliage, decals and background props.
+
+- In: `outline`, `bend`, `copies`, `padding`, `atlas_size`
+- Out: `cards` (mesh), `atlas` (textures)
+
+### [L-system tree](../examples/lsystem_tree.md) (`lsystem_tree`)
+
+A stylised tree grown from rules: a trunk that branches again and again, thinning as it goes, with leaf cards at the tips, for a low-poly game.
+
+- In: `generations`, `angle`, `height`, `taper`, `leaf_size`, `seed`
+- Out: `tree` (mesh)
+
+### [Machined bracket](../examples/machined_bracket.md) (`machined_bracket`)
+
+A metal mounting bracket for a game prop or a print: an L-shaped plate with rounded edges, bolt holes in both legs and an engraved label.
+
+- In: `width`, `leg`, `thickness`, `holes`, `hole_size`, `bevel`, `label`
+- Out: `bracket` (mesh)
+
+### [Market street](../examples/market_street.md) (`market_street`)
+
+A town street ready for a level: a road with kerbs, pavements and lamp posts, a row of houses along one side and a small park with paths, trees and benches on the other.
+
+- In: `length`, `road_width`, `house_width`, `floors`, `lamp_spacing`, `park_density`, `seed`
+- Out: `street` (scene), `houses` (scene), `park` (scene), `block` (scene)
+
+### [Material set](../examples/material_set.md) (`material_set`)
+
+A set of tileable game materials made from scratch: rough stone blocks, wood planks and worn painted metal, each with colour, normal and packed roughness maps.
+
+- In: `resolution`, `tile_size`, `wear`, `dirt`, `seed`
+- Out: `stone` (material), `wood` (material), `metal` (material), `swatches` (mesh)
+
+### [Ocean surface](../examples/ocean_surface.md) (`ocean_surface`)
+
+An animated ocean surface for a water plane: rolling swells with smaller waves on top, moving with time, with foam where the waves crest.
+
+- In: `size`, `wave_height`, `wave_length`, `choppiness`, `wind_direction`, `detail`, `seed`
+- Out: `surface` (mesh)
+
+### [Rail along a curve](../examples/rail_along_curve.md) (`rail_along_curve`)
+
+A railing and pipes that follow a path: posts at even spacing, a handrail and pipes bending smoothly around every corner.
+
+- In: `length`, `corner_radius`, `post_spacing`, `rail_height`, `pipes`, `pipe_radius`, `seed`
+- Out: `railing` (mesh), `pipes` (mesh), `path` (curves)
+
+### [Sci-fi panel](../examples/scifi_panel.md) (`scifi_panel`)
+
+A sci-fi wall panel for a game level: a framed plate broken into recessed sections, with vents, pipes and small greebles, that tiles side by side.
+
+- In: `width`, `height`, `sections`, `depth`, `greebles`, `bevel`, `seed`
+- Out: `panel` (mesh)
+
+### [Sparks](../examples/sparks.md) (`sparks`)
+
+A burst of sparks for an effect: hot sparks fly out from a point, fall, bounce on the floor and cool down over a few seconds.
+
+- In: `count`, `speed`, `spread`, `bounce`, `life`, `seed`
+- Out: `sparks` (points), `trails` (curves)
+
+### [Terrain tiles](../examples/terrain_tiles.md) (`terrain_tiles`)
+
+A large terrain cut into square tiles that join without seams, so a big map can be cooked, streamed and exported one tile at a time.
+
+- In: `map_size`, `tiles`, `tile_x`, `tile_z`, `relief`, `river`, `seed`
+- Out: `map` (terrain), `tile` (terrain)
+
+### [Town from lots](../examples/town_from_lots.md) (`town_from_lots`)
+
+A town quarter built from a plan: the ground is cut into irregular lots along streets, and every lot gets a house that follows its shape, with a roof that fits.
+
+- In: `area`, `lots`, `street_width`, `floors`, `extra_floors`, `roof_pitch`, `seed`
+- Out: `houses` (mesh), `lots` (curves), `streets` (mesh)
+
+### [Unreal landscape](../examples/unreal_landscape.md) (`unreal_landscape`)
+
+A landscape for Unreal Engine: an eroded terrain sized to fit an Unreal Landscape exactly, with paint layers, a road, and trees and rocks as instances.
+
+- In: `samples`, `spacing`, `height`, `tree_density`, `rock_density`, `road`, `seed`
+- Out: `landscape` (terrain), `trees` (instances), `rocks` (instances), `road` (mesh), `level` (scene)
+
+## Graphs without a card yet
 
 - [`bevel`](../examples/bevel.json): poly_bevel: a box with every edge rounded (divisions 3, sphere-octant corners), a box with only its top edges chamfered (edge group from "angle>80" minus the lower edges), and an extruded star whose top rim is rounded (border of the extrude's top group).
 - [`building`](../examples/building.json): Procedural building: floors stacked with foreach; walls split into window cells (grid_split), inset and recessed (poly_extrude); roof slab from an offset footprint.
@@ -99,9 +250,7 @@ No example has its card yet. The graphs, until they do:
 - [`erosion_models`](../examples/erosion_models.json): Identical ridged terrain in four erosion modes: back row JS droplet (left), WASM droplet (right); front row virtual pipes (left), virtual pipes plus stream power (right).
 - [`forest`](../examples/forest.json): The PCG chain with packed instancing: a slope mask times a height mask on a terrain (mask), 30,000 candidate points spread by that mask (scatter density_mask), upright random headings and sizes (orient), trees whose trunks would collide removed (prune overlap), then packed copies of three low-poly variants (pine, fir, oak) picked with weights (copy_to_points pack + variant_weights), and the whole scene rotated (instances compose the rotation).
 - [`fractured`](../examples/fractured.json): Voronoi-fractured noisy sphere, pieces slightly separated and coloured by piece.
-- [`guided_town`](../examples/guided_town/): A village laid out with guides: draw it in the viewer and the graph builds it.
 - [`house_city`](../examples/house_city.json): Nested generators: the house of TopoTopo's architecture package, topotopo/architecture/house (walls from its wall_segment per footprint edge + its roof_skeleton), spawned on a grid of lots, each lot varying the house's parameters from its point attributes.
-- [`image_cutouts`](../examples/image_cutouts.json): General image cutout and atlas workflow: perforation, disconnected islands and thin strips.
 - [`measures`](../examples/measures.json): Measure nodes: a noisy sphere coloured by mean curvature (dark creases, bright bulges), a rock on the ground coloured by ambient occlusion (the ground is its occluder, so the contact darkens), and a ground grid coloured by its distance to a path curve.
 - [`particles`](../examples/particles.json): Particles: on the left, emitters scattered along the ridges of an eroded massif shed particles that run downhill (the heightfield as a gradient field), swirl with curl noise and slide over the terrain (the heightfield as the collision surface); their trails are polylines coloured by age (white at birth, through amber, to deep red after 4 s).
 - [`pcg_scatter`](../examples/pcg_scatter.json): PCG on a terrain with a road: the road curve is draped on the terrain (ray) and swept into a strip that is draped again across its width; lamp posts stand along it every 9 m on both sides (points_along_curve side_offset + both_sides → ray onto the ground → orient upright → packed copies); rocks are scattered by a mask that keeps 5 m away from the road and prefers slopes over 16° (mask distance × mask slope → scatter density_mask with an exact min_distance), aligned to the terrain normal with random yaw, tilt and scale (orient surface, align_axis y), pruned where they overlap, and coloured by k-means cluster for a debug view (cluster color) before packed copying.
@@ -118,7 +267,6 @@ No example has its card yet. The graphs, until they do:
 - [`splines`](../examples/splines.json): Spline toolkit: a road (NURBS through waypoints) projected onto bumpy ground, a boardwalk whose linear NURBS path gets filleted corners and a 3D-offset double rail swept into handrails, and a Bezier letter outline converted to polylines and extruded.
 - [`street_block`](../examples/street_block.json): A street block assembled from TopoTopo's own packages only (topotopo/architecture, nature, props and street): a road with kerbs, sidewalks, lane markings and lamp posts on both sides; three houses (wall_segment walls with window_frame/door_frame, gable and hip roofs, one with two storeys, one behind a scaffold), a picket fence and bushes in front of them, crates, barrels and a pallet in the alley; across the street a brick garden wall with an arched gate, benches and a forest_patch park.
 - [`terrain_erosion`](../examples/terrain_erosion.json): Heightfield terrain: a ridged massif on a 20 × 20 m field (0.1 m cells), hydraulic + thermal erosion (gullies, sediment fans), a road cut along a curve, rocks scattered on steep slopes away from the road, converted to a coloured mesh.
-- [`terrain_tiles`](../examples/terrain_tiles.json): A 64 × 64 m map (0.25 m cells) with meandering escarpments and a river, and one of its tiles cooked on its own.
 - [`texture_lab`](../examples/texture_lab.json): Worn painted metal from the texture nodes, every distance in metres on a 1 m texture: bolted plates from SDF shapes (tex_sdf_shape boxes with round corners, rivets kept to a band along the plate edges by tex_sdf_op and tex_sdf_boolean, bevelled by tex_sdf_to_mask), a slightly different paint per plate from tex_flood_fill and tex_histogram_range, edge wear where tex_curvature finds convex edges, broken up by tex_grunge and made ragged by tex_slope_blur, brushed steel under the paint from tex_directional_blur (its grain blended into the normal map only where the metal shows), rust running down from every rivet (a one-sided directional blur times grunge leaks), tex_ao in the seams, and an ORM map.
 - [`textures`](../examples/textures.json): Procedural textures and bakes: a brick wall material made only from texture nodes (tex_pattern bricks with a per-brick id colour, tex_noise grain, tex_normal_from_height, a roughness from tex_levels) and the crate of TopoTopo's props package (topotopo/props/crate) unwrapped with xatlas, its ambient occlusion and edge curvature baked into uv space and combined into an edge-wear mask (worn paint on convex edges, dirt in the AO), packed with roughness into an ORM map.
 - [`tree`](../examples/tree.json): L-system tree: branches swept into tapered tubes, leaf cards instanced on leaf points.

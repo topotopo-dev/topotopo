@@ -144,9 +144,18 @@ export interface Example {
   cardFile: string | null;
   card: Card | null;
   cardProblems: string[];
+  /**
+   * The card fits the graph: the graph's params are the card's inputs and its named outputs the card's outputs, by
+   * name. A card ahead of its graph (written first, the graph not rebuilt to it yet) does not fit, and help, the docs
+   * and the site do not present it as the graph's contract. test/cards.ts checks the rest.
+   */
+  fits: boolean;
   /** an example package (examples/<name>/ with its own .topo, graphs/ and inputs/) */
   isPackage: boolean;
 }
+
+/** The names of a list, sorted, joined: equal when the lists hold the same names. */
+const nameKey = (xs: string[]) => [...xs].sort().join('\n');
 
 /** The examples folder of this TopoTopo (beside src/ or dist/). */
 export function examplesRoot(): string {
@@ -166,7 +175,10 @@ export function readExamples(root = examplesRoot()): Example[] {
     const parsed = has ? parseCard(fs.readFileSync(cardFile, 'utf8')) : null;
     let graph: GraphSpec;
     try { graph = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { return; }
-    out.push({ name, dir, graphFile, graph, cardFile: has ? cardFile : null, card: parsed?.card ?? null, cardProblems: parsed?.problems ?? [], isPackage });
+    const card = parsed?.card ?? null;
+    const fits = !!card && nameKey(card.inputs.map((x) => x.name)) === nameKey(Object.keys(graph.params ?? {}))
+      && nameKey(card.outputs.map((x) => x.name)) === nameKey(Object.keys(graph.outputs ?? {}));
+    out.push({ name, dir, graphFile, graph, cardFile: has ? cardFile : null, card, cardProblems: parsed?.problems ?? [], fits, isPackage });
   };
   for (const e of fs.readdirSync(root, { withFileTypes: true })) {
     if (e.isFile() && e.name.endsWith('.json')) add(e.name.slice(0, -5), root, path.join(root, e.name), false);
@@ -193,18 +205,18 @@ export function orphanCards(root = examplesRoot()): string[] {
 /** The first sentence of a text. */
 const firstSentence = (s: string) => (/^(.+?[.!?])(\s|$)/s.exec(s.trim())?.[1] ?? s.trim()).replace(/\s+/g, ' ');
 
-/** One example in a line or two: its request, what goes in and what comes out (its graph's description without a card). */
+/** One example in a line or two: its request, what goes in and what comes out (its graph's description without a card that fits). */
 export function exampleSummary(e: Example): string {
-  if (!e.card) return `- ${e.name} — ${firstSentence(e.graph.description ?? e.graph.meta?.description ?? '(no description)')}`;
+  if (!e.card || !e.fits) return `- ${e.name} — ${firstSentence(e.graph.description ?? e.graph.meta?.description ?? '(no description)')}`;
   const ins = e.card.inputs.map((x) => x.name).join(', ');
   const outs = e.card.outputs.map((x) => `${x.name} (${x.kind})`).join(', ');
   return `- ${e.name} — ${e.card.request}\n    in: ${ins} · out: ${outs}`;
 }
 
-/** Help topic "examples": every example, those with a card first. */
+/** Help topic "examples": every example, those with a card that fits first. */
 export function examplesIndexText(root = examplesRoot()): string {
   const all = readExamples(root);
-  const carded = all.filter((e) => e.card), bare = all.filter((e) => !e.card);
+  const carded = all.filter((e) => e.fits), bare = all.filter((e) => !e.fits);
   const out = [
     'EXAMPLES: complete worked answers to real requests, from what goes in to a finished result.',
     'Each has a card (the request; In: the params a person tunes, with ranges and defaults; Out: its named outputs and',
@@ -219,7 +231,10 @@ export function examplesIndexText(root = examplesRoot()): string {
   return out.join('\n');
 }
 
-/** help {examples:[name]}: an example's card, then its graph, one node per line; unknown names get a did-you-mean. */
+/**
+ * help {examples:[name]}: an example's card (when it fits the graph), then its graph, one node per line; unknown names
+ * get a did-you-mean.
+ */
 export function exampleText(name: string, root = examplesRoot()): string {
   const all = readExamples(root);
   const e = all.find((x) => x.name === name);
@@ -228,7 +243,7 @@ export function exampleText(name: string, root = examplesRoot()): string {
     return `unknown example "${name}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''} (help topic "examples" lists them)`;
   }
   const out = [`## ${e.name} (example)`];
-  if (e.cardFile) out.push(fs.readFileSync(e.cardFile, 'utf8').replace(/\r\n/g, '\n').trim());
+  if (e.cardFile && e.fits) out.push(fs.readFileSync(e.cardFile, 'utf8').replace(/\r\n/g, '\n').trim());
   else out.push(`No card yet. ${e.graph.description ?? e.graph.meta?.description ?? ''}`.trim());
   if (e.isPackage) {
     const inputs = path.join(e.dir, 'inputs');

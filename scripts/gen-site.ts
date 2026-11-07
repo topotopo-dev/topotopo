@@ -95,7 +95,7 @@ const examples: Example[] = readExamples(path.join(ROOT, 'examples')).map((e) =>
   if (!render) console.warn(`warning: examples/renders/${name}.png is missing (npm run showcase)`);
   const types = [...new Set([...typesUsed(graph)].map((t) => resolveType(t) ?? t))].sort();
   const file = path.relative(ROOT, e.graphFile).split(path.sep).join('/');
-  return { name, file, graph, card: e.card, description: String(graph.meta?.description ?? graph.description ?? ''), types, nodes: Object.keys(graph.nodes ?? {}).length, render };
+  return { name, file, graph, card: e.fits ? e.card : null, description: String(graph.meta?.description ?? graph.description ?? ''), types, nodes: Object.keys(graph.nodes ?? {}).length, render };
 });
 const usedIn = new Map<string, string[]>();
 for (const e of examples) for (const t of e.types) usedIn.set(t, [...(usedIn.get(t) ?? []), e.name]);

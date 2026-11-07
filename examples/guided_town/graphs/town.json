@@ -58,6 +58,9 @@
     "built": { "type": "merge", "in": ["road_each", "houses", "fences"] },
     "out_of_town": { "type": "prune", "in": ["out_of_clearings", "built"], "params": { "mode": "near_geometry", "distance": "=keep_clear", "inside": false } },
     "forest_orient": { "type": "orient", "in": ["out_of_town"], "params": { "mode": "random", "upright": true, "random_yaw": [0, 360], "scale_min": 0.75, "scale_max": 1.3, "seed": "=seed" } },
+    "clearance": { "type": "distance", "in": ["forest_orient", "built"], "params": { "name": "clearance" } },
+    "clear": { "type": "assert", "in": ["clearance"], "params": { "label": "clear", "attrib": "clearance", "attrib_class": "point", "attrib_min": "=keep_clear - 0.001" } },
+    "tree_sites": { "type": "attrib_delete", "in": ["clear"], "params": { "names": "clearance" } },
     "tree_round": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "round", "height": 7, "canopy_radius": 2.2, "seed": 3 } },
     "tree_conifer": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "conifer", "height": 9, "canopy_radius": 2, "seed": 5 } },
     "bush": { "type": "topotopo/nature/bush", "params": { "size": 1.8, "height": 1.1 } },
@@ -65,7 +68,7 @@
     "named_conifer": { "type": "attrib_create", "in": ["tree_conifer"], "params": { "name": "variant_name", "class": "prim", "value": "conifer" } },
     "named_bush": { "type": "attrib_create", "in": ["bush"], "params": { "name": "variant_name", "class": "prim", "value": "bush" } },
     "woods_kit": { "type": "merge", "in": ["named_round", "named_conifer", "named_bush"] },
-    "woods": { "type": "copy_to_points", "in": ["woods_kit", "forest_orient"], "params": { "pack": true, "piece_attrib": "variant_name", "variant_weights": { "round": 3, "conifer": 4, "bush": 2 }, "seed": "=seed" } },
+    "woods": { "type": "copy_to_points", "in": ["woods_kit", "tree_sites"], "params": { "pack": true, "piece_attrib": "variant_name", "variant_weights": { "round": 3, "conifer": 4, "bush": 2 }, "seed": "=seed" } },
 
     "sites": { "type": "delete", "in": ["guides"], "params": { "group": "@role=site", "class": "point", "keep": true } },
     "site_kind": { "type": "wrangle", "in": ["sites"], "params": { "run_over": "points", "code": "const k = @name.split('_')[0]; s@kind = k === 'bench' || k === 'lamp' ? k : 'tree'; f@size = s@kind === 'tree' ? @pscale / 5 : 1; @pscale = 1;" } },
@@ -78,7 +81,9 @@
     "props_kit": { "type": "merge", "in": ["kind_bench", "kind_lamp", "kind_tree"] },
     "landmarks": { "type": "copy_to_points", "in": ["props_kit", "site_kind"], "params": { "pack": true, "piece_attrib": "kind", "variant_attrib": "kind", "scale_attrib": "size" } },
 
-    "village": { "type": "merge", "in": ["ground_mat", "road_each", "lamps", "houses", "fences", "woods", "landmarks"] }
+    "ground_named": { "type": "attrib_create", "in": ["ground_mat"], "params": { "name": "name", "class": "prim", "value": "meadow" } },
+    "parts": { "type": "merge", "in": ["ground_named", "road_each", "lamps", "houses", "fences", "woods", "landmarks"] },
+    "village": { "type": "assert", "in": ["parts"], "params": { "label": "grounded", "expr": "bbox.min.y >= -0.051" } }
   },
   "output": "village",
   "outputs": { "village": { "node": "village", "label": "Village", "kind": "scene", "tags": ["village", "guides", "level-design"] } }
