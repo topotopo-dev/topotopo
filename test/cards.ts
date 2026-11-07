@@ -4,15 +4,15 @@
 // these checks are what tells a rebuilt graph still does the same job.
 //   node test/cards.ts [filter]
 // Per example (a failure names the card section it breaks: "forest · Promises · slope: …"):
-// - Card: the form (title, request, the sections In, Out, Promises, Look in that order, their items).
+// - Card: the form (title, request, the sections In, Out, Promises, Look and an optional Cook in that order, their items).
 // - In: the graph's params are the card's inputs, 3–10 of them, typed and described, a default equal to the var, numbers
 //   with a range around it; a range, default or options the card gives are the param's; every one is read by an output.
 // - Out: the graph's named outputs are the card's, with the card's kind pinned, a label and at least 3 tags; the
 //   graph's default output is one of them.
 // - Promises: each key is the label of an assert node (on_fail "error") upstream of an output, so a cook that breaks the
 //   promise fails.
-// - Cook: every output cooks at the defaults (cold, under MAX_COOK_MS together, at meta.frame) without errors or
-//   warnings, to its kind; meshes and scenes name every piece and give it a material the material table defines.
+// - Cook: every output cooks at the defaults (cold, at meta.frame; together within COOK_SECONDS, or the longer limit,
+//   at most MAX_COOK_SECONDS, a simulation's card gives with its reason) without errors or warnings, to its kind; meshes and scenes name every piece and give it a material the material table defines.
 // - Sweep: every numeric param at its min and max, every option, every switch flipped: every output cooks without
 //   errors (so every promise holds), meshes and scenes still name and dress every piece.
 // The examples on EXAMPLES_PENDING (test/fixtures.ts) are skipped until they meet a card (the form of a card they
@@ -32,14 +32,12 @@ import { outputFieldIssues } from '../src/graph/outputs.ts';
 import { varsRead } from '../src/graph/packages.ts';
 import { outputKind, publishedKind } from '../src/io/kinds.ts';
 import { INSTRUCTIONS, TOPICS } from '../src/mcp/docs.ts';
-import { orphanCards, parseCard, readExamples } from '../src/mcp/examples.ts';
+import { COOK_SECONDS, orphanCards, parseCard, readExamples } from '../src/mcp/examples.ts';
 import type { Example } from '../src/mcp/examples.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { CARDS_WAITING, EXAMPLES_PENDING, ROOT } from './fixtures.ts';
 import { NUMERIC, namingProblems, paramProblems, sweepOf } from './asset-checks.ts';
 
-/** The default cook of an example, every output together, cold. */
-const MAX_COOK_MS = 3000;
 const filter = process.argv.slice(2).find((a) => !a.startsWith('--'));
 let fails = 0;
 const fail = (msg: string) => { fails++; console.log('FAIL ' + msg); };
@@ -142,7 +140,8 @@ async function checkExample(e: Example, engine: Engine): Promise<{ problems: str
   const t0 = performance.now();
   await cookAll(null, 'Cook', true);
   const ms = performance.now() - t0;
-  if (ms > MAX_COOK_MS) p(`Cook: the default cook took ${ms.toFixed(0)} ms (limit ${MAX_COOK_MS})`);
+  const limit = (card.cook?.seconds ?? COOK_SECONDS) * 1000;
+  if (ms > limit) p(`Cook: the default cook took ${ms.toFixed(0)} ms (limit ${limit}${card.cook ? ', from the card' : ''}): make the defaults lighter`);
 
   // ---- Sweep: every param at its ends, every option, every switch flipped
   const sweep = sweepOf(graph);
@@ -223,6 +222,9 @@ A light brown box standing on the ground.
   await run('no Look', g(), card.replace(/## Look[\s\S]*$/, ''), /^Card: section "## Look" is missing/);
   await run('a slider without a default', g(), card.replace(', default 0.8', ''), /^Card: In · height: no default/);
   await run('a default outside its range', g(), card.replace('default 1.', 'default 4.'), /^Card: In · width: default 4 is outside 0\.3–3/);
+  await run('a longer cook with its reason', g(), card + '\n## Cook\nUp to 6 s: it settles the lid over 40 frames.\n', null);
+  await run('a cook limit over the most', g(), card + '\n## Cook\nUp to 12 s: it settles the lid over 400 frames.\n', /^Card: Cook: 12 s, a limit above the usual 3 s and at most 10 s/);
+  await run('a longer cook without a reason', g(), card + '\n## Cook\nUp to 6 s.\n', /^Card: Cook: say why/);
   await run('a card without a graph', g(), card, /^Card: lonely\.md has no graph/, ['lonely.md', card]);
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`cards: the checks catch what they should (${fails ? 'NOT ALL' : `all ${runs} self-checks`})`);

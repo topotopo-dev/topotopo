@@ -70,6 +70,9 @@ on the steepest ground, seen from above at an angle.
 - **Promises**: `- key: what always holds`. Each key is the `label` of an `assert` node in the graph, upstream of an
   output, that stops the cook when the promise breaks.
 - **Look**: a few sentences on what the render shows.
+- **Cook** (optional, only for a simulation that steps through frames): `Up to 8 s: why it takes that long`. Every
+  other example cooks its defaults within 3 s; at most 10 s. Lighter defaults come first: a person tuning the
+  sliders waits for every cook.
 
 ## What the tests check
 
@@ -82,8 +85,8 @@ on the steepest ground, seen from above at an angle.
 - **Out**: the card's names are the graph's named outputs, each with the kind the card gives, a label, three or
   more tags and a description;
 - **Promises**: each key is an `assert` node that stops the cook (`on_fail: error`) and sits upstream of an output;
-- each output cooks at the defaults to its kind, with no errors and no warnings, and every mesh or scene piece has a
-  name and a material;
+- each output cooks at the defaults to its kind, with no errors and no warnings, all of them together within 3 s
+  (or the card's **Cook** limit), and every mesh or scene piece has a name and a material;
 - each output cooks again with every numeric param at its min and its max, every other option and every switch
   flipped.
 

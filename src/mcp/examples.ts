@@ -17,6 +17,8 @@
 //   - key: what always holds.
 //   ## Look
 //   What the render shows.
+//   ## Cook            (optional: a simulation that needs longer than COOK_SECONDS)
+//   Up to 8 s: why it takes that long.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,10 +40,20 @@ export interface CardIn {
 }
 export interface CardOut { name: string; kind: string; text: string }
 export interface CardPromise { key: string; text: string }
-export interface Card { title: string; request: string; inputs: CardIn[]; outputs: CardOut[]; promises: CardPromise[]; look: string }
+export interface Card {
+  title: string; request: string; inputs: CardIn[]; outputs: CardOut[]; promises: CardPromise[]; look: string;
+  /** the default cook's time limit a ## Cook section gives (seconds), and why; none: COOK_SECONDS */
+  cook?: { seconds: number; reason: string };
+}
 
-/** The sections of a card, in order. */
-export const CARD_SECTIONS = ['In', 'Out', 'Promises', 'Look'] as const;
+/** The sections of a card, in order; the last, Cook, is optional. */
+export const CARD_SECTIONS = ['In', 'Out', 'Promises', 'Look', 'Cook'] as const;
+const OPTIONAL_SECTIONS = new Set(['Cook']);
+/**
+ * How long an example's default cook (cold, every output) may take: COOK_SECONDS, or up to MAX_COOK_SECONDS when its
+ * card's ## Cook section says why (a simulation that steps through frames). Lighter defaults come before a longer limit.
+ */
+export const COOK_SECONDS = 3, MAX_COOK_SECONDS = 10;
 /** How many inputs a card lists (house rule 2; test/asset-checks.ts MIN_PARAMS, MAX_PARAMS hold the graph to the same). */
 export const MIN_INPUTS = 3, MAX_INPUTS = 10;
 const NAME = '[a-z][a-z0-9_]*';
@@ -78,7 +90,7 @@ export function parseCard(source: string): { card: Card; problems: string[] } {
   }
   const order = [...sections.keys()];
   if (order.join() !== CARD_SECTIONS.filter((s) => sections.has(s)).join()) problems.push(`the sections go in the order ${CARD_SECTIONS.join(', ')}`);
-  for (const s of CARD_SECTIONS) if (!sections.has(s)) problems.push(`section "## ${s}" is missing`);
+  for (const s of CARD_SECTIONS) if (!sections.has(s) && !OPTIONAL_SECTIONS.has(s)) problems.push(`section "## ${s}" is missing`);
 
   /** The "- " items of a section, a line that continues an item (indented) joined to it. */
   const items = (s: string): string[] => {
@@ -131,6 +143,14 @@ export function parseCard(source: string): { card: Card; problems: string[] } {
   if (sections.has('Out') && !card.outputs.length) problems.push('Out: no outputs');
   if (sections.has('Promises') && !card.promises.length) problems.push('Promises: no promises');
   if (sections.has('Look') && !card.look) problems.push('Look: empty');
+  if (sections.has('Cook')) {
+    const text = (sections.get('Cook') ?? []).join(' ').trim().replace(/\s+/g, ' ');
+    const m = /^up to (\d+(?:\.\d+)?) s\b[:.,;]?\s*(.*)$/i.exec(text);
+    if (!m) problems.push(`Cook: "${text.slice(0, 60)}" is not "Up to 8 s: why it takes that long"`);
+    else if (!(Number(m[1]) > COOK_SECONDS && Number(m[1]) <= MAX_COOK_SECONDS)) problems.push(`Cook: ${m[1]} s, a limit above the usual ${COOK_SECONDS} s and at most ${MAX_COOK_SECONDS} s`);
+    else if (m[2].length < 10) problems.push('Cook: say why it takes longer than the usual limit');
+    else card.cook = { seconds: Number(m[1]), reason: m[2] };
+  }
   return { card, problems };
 }
 
