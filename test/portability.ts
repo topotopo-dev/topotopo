@@ -49,7 +49,7 @@ else {
   for (const locale of ['lt_LT.UTF-8', 'cs_CZ.UTF-8']) {
     const env = { ...process.env, LC_ALL: locale, LANG: locale };
     jobs.push(run(path.join(ROOT, 'scripts', 'gen-docs.ts'), ['--check'], env).then((r) =>
-      check(r.code === 0, `docs/nodes.md is the same under LC_ALL=${locale} (${r.out.trim().split('\n').pop()})`)));
+      check(r.code === 0, `docs/nodes.md and docs/examples.md are the same under LC_ALL=${locale} (${r.out.trim().split('\n').pop()})`)));
     jobs.push(run(path.join(ROOT, 'scripts', 'gen-notice.ts'), ['--check'], env).then((r) =>
       check(r.code === 0, `NOTICE is the same under LC_ALL=${locale} (${r.out.trim().split('\n').pop()?.slice(0, 60)}…)`)));
   }
@@ -92,7 +92,7 @@ try {
     run(path.join(link, 'scripts', 'gen-builtin.ts'), ['--check'], process.env, tmp),
   ]);
   check(site.code === 1 && /does not exist/.test(site.out), `check-site through a symlinked path reports a missing site (exit ${site.code}: ${site.out.trim().split('\n')[0] || 'no output'})`);
-  check(docs.code === 0 && /docs\/nodes\.md is up to date/.test(docs.out), `gen-docs --check through a symlinked path runs its check (${docs.out.trim() || 'no output'})`);
+  check(docs.code === 0 && /docs\/nodes\.md and docs\/examples\.md are up to date/.test(docs.out), `gen-docs --check through a symlinked path runs its check (${docs.out.trim() || 'no output'})`);
   check(builtin.code === 0 && /^built-in packages: /m.test(builtin.out), `gen-builtin --check through a symlinked path runs its check (${builtin.out.trim().split('\n').pop() || 'no output'})`);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

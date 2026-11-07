@@ -1803,7 +1803,7 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}${kindTags(d) ? `  (${kindTags(d)})` : ''}`);
   }
   out.push(filter?.cli
-    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ')
+    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ') + '; --help-example <name> for an example\'s card and graph'
     : '(◦ = generator, no inputs). Use help {nodes:[...]} for params. Help topics: ' + topicList().join(', '));
   if (hidden) out.push(`${hidden} deprecated node type(s) hidden (include_deprecated: true lists them).`);
   return out.join('\n');

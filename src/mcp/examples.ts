@@ -172,7 +172,7 @@ export function readExamples(root = examplesRoot()): Example[] {
       if (shown && fs.existsSync(file)) add(e.name, dir, file, true);
     }
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'en'));
 }
 
 /** The cards in a folder that no example graph has: examples/<name>.md without <name>.json or <name>/. */
