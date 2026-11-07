@@ -149,7 +149,7 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
 {
   const x = await call('export', { path: 'exports/scene_z.obj', up_axis: 'z', scale: 100, frame: 3 });
   const s = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'scene_z.obj.source.json'), 'utf8')).source;
-  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"instancing":"packed","scale":100,"split_by_name":true,"up_axis":"z"}}', `the source records the frame, the export options given and the defaults of the rest (${JSON.stringify(s.export)})`);
+  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"instancing":"packed","materials":true,"scale":100,"split_by_name":true,"up_axis":"z"}}', `the source records the frame, the export options given and the defaults of the rest (${JSON.stringify(s.export)})`);
 }
 {
   const x = await call('export', { path: 'exports/scene_meshopt.glb', compress: 'meshopt' });

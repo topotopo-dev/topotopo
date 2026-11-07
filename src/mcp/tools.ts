@@ -413,6 +413,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           export_options: { type: 'object', description: 'detail "scene": export options as the export tool takes them (up_axis, scale, split_by_name, materials, custom_attribs, tangents, instancing, compress …)' },
           uv_attrib: { type: 'string', description: 'detail "uv": the uv attribute (default "uv")' },
           resolution: { description: 'detail "uv": texture size in texels for texel density, n or [width, height]', anyOf: [{ type: 'number' }, { type: 'array', items: { type: 'number' } }] },
+          per_piece: { type: 'boolean', description: 'detail "uv": every prim "name" (one object of a multi-object OBJ) has its own uv space: test overlaps within each piece only and report overlaps and utilization per piece' },
           json: { type: 'boolean', description: 'detail "uv", "budget" or "scene": append the report as JSON' },
           class: { type: 'string', enum: ['point', 'prim', 'vertex', 'detail', 'edge'], description: 'element class; "edge" lists unique edges (point pair, length, polygon count, dihedral angle, edge groups)' },
           attribs: { type: 'array', items: { type: 'string' } },
@@ -435,7 +436,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           return text([head, ...sceneReportText(rep), ...ex.warnings.map((w) => `warning: ${w}`), ...(a.json ? ['scene (JSON):', JSON.stringify(rep)] : [])].join('\n'));
         }
         const nodes = a.detail === 'budget' ? nodeBudgetInput(ws.getGraph(name), r.results) : undefined;
-        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, json: a.json, nodes }));
+        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, uvPerPiece: a.per_piece, json: a.json, nodes }));
       },
     },
     {

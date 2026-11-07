@@ -34,8 +34,10 @@ export interface ExportOptions {
   compress?: 'none' | 'meshopt' | 'draco';
   /** glTF: KHR_mesh_quantization (16-bit positions, 8-bit normals, 16-bit uv/colour) without compression */
   quantize?: boolean;
-  /** glTF: write materials from the prim "material" attribute and the detail table (default true) */
+  /** glTF, usda, obj: write materials from the prim "material" attribute and the detail table (default true) */
   materials?: boolean;
+  /** obj: the .mtl file beside it (mtllib), written by exportMTL; absent = usemtl names only */
+  mtllib?: string;
   /**
    * glTF: also write Cd / Alpha (COLOR_0) on primitives whose prim "material" names a material of the table (the
    * export tool's vertex_colors). Default false: a named material decides their colour as it is and their Cd is not
@@ -79,7 +81,7 @@ export interface ExportOptions {
   instances?: 'rows' | 'expand';
   /** glb/gltf: reads texture files named by the material table (usually Host.readFile); without it maps are skipped */
   readFile?: (path: string) => Promise<Uint8Array>;
-  /** usda: maps a material texture path to the asset path written into the file (e.g. relative to the output) */
+  /** usda, obj (.mtl): maps a material texture path to the path written into the file (e.g. relative to the output) */
   texturePath?: (path: string) => string;
   /** internal: texture bytes preloaded by exportGLB/exportGLTF for the synchronous document builder (null = unreadable) */
   textureData?: Map<string, Uint8Array | null>;

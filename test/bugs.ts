@@ -405,6 +405,29 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
     `extrude of a merged plate and two circles is one closed solid with two holes (${pr ? `${pr.pieces.length} piece(s), genus ${p0?.genus}, closed ${p0?.closed}` : errs(wall)})`);
 }
 
+// ------------------------------------------------------------------ 5g. attrib_copy copies P when named, and says what it cannot pair
+// names "P" moves the points (Houdini's Attribute Copy does); the default "*" leaves the shape alone; differing counts
+// in index mode and a name the source lacks in that class are warned of, never skipped silently.
+
+{
+  const nodes: Record<string, NodeSpec> = {
+    g: { type: 'grid', params: { size: [2, 2], divisions: [4, 4] } },
+    up: { type: 'transform', in: ['g'], params: { translate: [0, 1, 0] } },
+    tint: { type: 'color', in: ['up'], params: { mode: 'random' } },
+    big: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
+    uv: { type: 'uv_project', in: ['g'] },
+  };
+  const cook = async (out: NodeSpec) => { const r = await engine.cook({ nodes: { ...nodes, out }, output: 'out' }); return { r, ys: r.geo ? [...r.geo.P].filter((_, i) => i % 3 === 1) : [], w: r.warnings.map((x) => x.message).join('; ') }; };
+  const named = await cook({ type: 'attrib_copy', in: ['g', 'tint'], params: { names: 'P Cd' } });
+  check(named.r.ok && named.ys.every((y) => Math.abs(y - 1) < 1e-12) && named.r.geo!.points.has('Cd') && !named.w, `attrib_copy names "P Cd" moves the points up 1 and copies Cd (${named.w || 'no warnings'})`, errs(named.r));
+  const star = await cook({ type: 'attrib_copy', in: ['g', 'tint'] });
+  check(star.r.ok && star.ys.every((y) => Math.abs(y) < 1e-12) && star.r.geo!.points.has('Cd'), 'attrib_copy "*" copies Cd and leaves P alone', errs(star.r));
+  const short = await cook({ type: 'attrib_copy', in: ['big', 'tint'], params: { names: 'P' } });
+  check(/dest has 49 points and source 25: copied by index, so only the first 25 pair up/.test(short.w) && short.ys.filter((y) => Math.abs(y - 1) < 1e-12).length === 25, `attrib_copy P onto more points copies the first 25 and warns: ${short.w}`);
+  const wrong = await cook({ type: 'attrib_copy', in: ['g', 'uv'], params: { names: 'uv' } });
+  check(/no point attribute "uv" \(it has a vertex "uv": set class to vertex\)/.test(wrong.w), `attrib_copy names a vertex attribute with class point: the warning says which class has it (${wrong.w})`);
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.

@@ -6,7 +6,7 @@ import {
   m4applyDir, m4apply, m4determinant3, m4invert, m4mul, m4normalMatrix, m4trs, qFromMat, qMul, normalize, cross, dot,
 } from '../core/math.ts';
 import type { Mat4, Vec3 } from '../core/math.ts';
-import { pointNeighbors, reversePrims, buildEdges, refreshNormals } from '../core/topology.ts';
+import { relaxPoints, reversePrims, refreshNormals } from '../core/topology.ts';
 import { rng, rand } from '../core/random.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { primNormals } from '../core/topology.ts';
@@ -641,35 +641,7 @@ defineNode({
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const sel = mask(g, 'point', p.group);
-    const { start, nb } = pointNeighbors(g);
-    const pin = new Uint8Array(g.numPoints);
-    if (p.preserve_boundary) {
-      const E = buildEdges(g);
-      for (let e = 0; e < E.a.length; e++) if (E.count[e] === 1 && g.primClosed[E.firstPrim[e]]) { pin[E.a[e]] = 1; pin[E.b[e]] = 1; }
-      for (let pr = 0; pr < g.numPrims; pr++) if (!g.primClosed[pr]) {
-        pin[g.vertexPoint[g.primStart[pr]]] = 1;
-        pin[g.vertexPoint[g.primStart[pr + 1] - 1]] = 1;
-      }
-    }
-    const Pd = g.P, tmp = new Float64Array(Pd.length);
-    const pass = (lam: number) => {
-      tmp.set(Pd);
-      for (let i = 0; i < g.numPoints; i++) {
-        if (pin[i] || (sel && !sel[i])) continue;
-        const s = start[i], e = start[i + 1];
-        if (e === s) continue;
-        let x = 0, y = 0, z = 0;
-        for (let k = s; k < e; k++) { const j = nb[k]; x += tmp[j * 3]; y += tmp[j * 3 + 1]; z += tmp[j * 3 + 2]; }
-        const c = e - s;
-        Pd[i * 3] += (x / c - tmp[i * 3]) * lam;
-        Pd[i * 3 + 1] += (y / c - tmp[i * 3 + 1]) * lam;
-        Pd[i * 3 + 2] += (z / c - tmp[i * 3 + 2]) * lam;
-      }
-    };
-    for (let it = 0; it < p.iterations; it++) {
-      pass(p.strength);
-      if (p.method === 'taubin') pass(-p.strength * 1.04);
-    }
+    relaxPoints(g, { iterations: p.iterations, strength: p.strength, method: p.method === 'laplacian' ? 'laplacian' : 'taubin', preserveBoundary: !!p.preserve_boundary, sel });
     return refreshNormals(g);
   },
 });

@@ -3139,6 +3139,8 @@ category: `attribute` · aliases: `attribcopy`, `copy_attrib`
 
 Copy attributes from the second input by element index (or by matching an id attribute).
 
+Elements pair up by index (element i takes the source's element i), or by match_by. Point positions are copied when names lists P itself (names "P" or "P Cd"; normals are not recomputed: add a normal node), never through a wildcard, so the default "*" leaves the shape alone. Warns when the counts differ in index mode (only the first elements pair up: the topology differs, so match_by an id), and when a listed name is not on the source in that class.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -3150,7 +3152,7 @@ Copy attributes from the second input by element index (or by matching an id att
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `names` | string | `"*"` |  |  | `name`, `pattern` | attribute name pattern |
+| `names` | string | `"*"` |  |  | `name`, `pattern` | attribute name pattern (space-separated, * and ? wildcards, ^name excludes); point P only when listed by name |
 | `class` | enum | `"point"` |  | `point`, `prim`, `vertex`, `detail` |  | class |
 | `match_by` | string | `""` |  |  |  | match elements by this int/string attribute instead of index (e.g. "id" or "name") |
 
@@ -9104,7 +9106,7 @@ category: `uv` · aliases: `uvunwrap`, `autouv`, `xatlas`, `uv_auto`, `unwrap`
 
 Automatic UV unwrap: xatlas cuts and flattens charts per connected piece; they are packed without overlaps into the 0..1 square. Polygons are kept.
 
-Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Writes prim chart (and atlas with fit stack).
+Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the weights: chart_smoothing cuts and flattens the charts on a smoothed copy and keeps the uv on the real shape. Writes prim chart (and atlas with fit stack).
 
 **Inputs**
 
@@ -9117,6 +9119,7 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `use_seams` | bool | `false` |  |  |  | keep existing seams: edges where uv is discontinuous, and a "seams" edge group, become chart borders xatlas never crosses (seams that do not cut a region apart are hints only) |
+| `chart_smoothing` | int | `0` | 0..1000 |  |  | smoothing passes (taubin, as smooth) on a copy that the charts are cut and flattened on; the uv goes onto the real shape and packs by its areas. Noisy surfaces (scans, decimated or generated models) shatter into hundreds of ragged charts; 30 to 100 passes make a few smooth ones. 0 = off |
 | `max_chart_area` | float | `-1` | -1.. |  |  | largest chart area in world units²; 0 = unlimited (xatlas default), -1 = auto (unlimited below ~1000 triangles, then total area * 1000 / triangles to keep charting fast) |
 | `max_boundary_length` | float | `0` | 0.. |  |  | longest chart boundary in world units (0 = unlimited) |
 | `normal_deviation` | float | `2` | 0.. |  | `normal_deviation_weight` | weight of the angle between a face and the chart average normal |
@@ -9143,14 +9146,56 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 
 ```json
 {
-  "type": "uv_unwrap",
-  "in": [
-    "geo"
-  ],
-  "params": {
-    "padding": 4,
-    "resolution": 1024
-  }
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 4
+      }
+    },
+    "shape": {
+      "type": "noise_displace",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "amplitude": 0.35,
+        "frequency": 1.2
+      }
+    },
+    "rough": {
+      "type": "noise_displace",
+      "in": [
+        "shape"
+      ],
+      "params": {
+        "amplitude": 0.06,
+        "frequency": 9
+      }
+    },
+    "rock": {
+      "type": "decimate",
+      "in": [
+        "rough"
+      ],
+      "params": {
+        "ratio": 0.4
+      }
+    },
+    "out": {
+      "type": "uv_unwrap",
+      "in": [
+        "rock"
+      ],
+      "params": {
+        "chart_smoothing": 60,
+        "padding": 4,
+        "resolution": 1024
+      }
+    }
+  },
+  "output": "out"
 }
 ```
 

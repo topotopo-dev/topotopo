@@ -142,14 +142,14 @@ export function imageTextureData(g: Geometry, deflate?: (d: Uint8Array) => Uint8
 export interface TextureFile { path: string; bytes: Uint8Array }
 
 /**
- * PNG files for the "image:<name>" textures of a USD export to `usdPath`: <base>_textures/<name>.png next to it, and
- * the asset path (relative to the .usda) each texture path maps to.
+ * PNG files for the "image:<name>" textures of a usda or obj export to `mainPath`: <base>_textures/<name>.png next to
+ * it, and the path (relative to the main file, which the .mtl sits beside) each texture path maps to.
  */
-export function usdTextureFiles(g: Geometry, usdPath: string, deflate?: (d: Uint8Array) => Uint8Array, warn?: (msg: string) => void): { files: TextureFile[]; assetPath: Map<string, string> } {
-  const data = imageTextureData(g, deflate, warn, 'usda');
+export function textureFilesBeside(g: Geometry, mainPath: string, format: 'usda' | 'obj', deflate?: (d: Uint8Array) => Uint8Array, warn?: (msg: string) => void): { files: TextureFile[]; assetPath: Map<string, string> } {
+  const data = imageTextureData(g, deflate, warn, format);
   const files: TextureFile[] = [], assetPath = new Map<string, string>();
   if (!data.size) return { files, assetPath };
-  const base = baseOf(usdPath).replace(/\.[^.]*$/, '');
+  const base = baseOf(mainPath).replace(/\.[^.]*$/, '');
   const folder = `${base}_textures`;
   const used = new Set<string>();
   for (const [ref, bytes] of data) {
@@ -157,7 +157,7 @@ export function usdTextureFiles(g: Geometry, usdPath: string, deflate?: (d: Uint
     let f = safeFileName(ref.slice(6)), k = 1;
     while (used.has(f.toLowerCase())) f = `${safeFileName(ref.slice(6))}_${k++}`;
     used.add(f.toLowerCase());
-    files.push({ path: joinPath(dirOf(usdPath), folder, f + '.png'), bytes });
+    files.push({ path: joinPath(dirOf(mainPath), folder, f + '.png'), bytes });
     assetPath.set(ref, `${folder}/${f}.png`);
   }
   return { files, assetPath };

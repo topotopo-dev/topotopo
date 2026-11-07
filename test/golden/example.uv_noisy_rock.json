@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["error:float:1", "error_abs:float:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["chart:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.3341, 1.5694, 1.0145],
+      "min": [-1.382, -0.1464, -1.0882]
+    },
+    "counts": {
+      "points": 3074,
+      "prims": 6144,
+      "vertices": 18432,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "6cb1ac14e0fdb73a",
+      "attributes": {
+        "detail.error": "1cceb1a0144aeaba",
+        "detail.error_abs": "c81c89f6c2140a40",
+        "point.N": "86c7c08d75507eeb",
+        "prim.chart": "aa99126ef9124434",
+        "vertex.uv": "b687385f4a71b1a1"
+      },
+      "topology": "afb0ab6af10d5b00"
+    }
+  },
+  "name": "example.uv_noisy_rock",
+  "ok": true,
+  "source": "examples/uv_noisy_rock.json",
+  "warnings": []
+}

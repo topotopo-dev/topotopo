@@ -291,6 +291,43 @@ export function pointNeighbors(g: Geometry) {
   return { start: cnt, nb };
 }
 
+/**
+ * Relax point positions in place (the smooth node; uv_unwrap's chart_smoothing): each pass moves a point `strength`
+ * of the way to the mean of its edge neighbours; taubin follows each pass with one back (-1.04 × strength), so the
+ * shape does not shrink. preserveBoundary pins open-boundary points and polyline ends; points outside `sel` stay.
+ */
+export function relaxPoints(g: Geometry, o: { iterations: number; strength: number; method: 'taubin' | 'laplacian'; preserveBoundary: boolean; sel?: ArrayLike<number> | null }): void {
+  const { start, nb } = pointNeighbors(g);
+  const pin = new Uint8Array(g.numPoints);
+  if (o.preserveBoundary) {
+    const E = buildEdges(g);
+    for (let e = 0; e < E.a.length; e++) if (E.count[e] === 1 && g.primClosed[E.firstPrim[e]]) { pin[E.a[e]] = 1; pin[E.b[e]] = 1; }
+    for (let pr = 0; pr < g.numPrims; pr++) if (!g.primClosed[pr]) {
+      pin[g.vertexPoint[g.primStart[pr]]] = 1;
+      pin[g.vertexPoint[g.primStart[pr + 1] - 1]] = 1;
+    }
+  }
+  const Pd = g.P, tmp = new Float64Array(Pd.length), sel = o.sel;
+  const pass = (lam: number) => {
+    tmp.set(Pd);
+    for (let i = 0; i < g.numPoints; i++) {
+      if (pin[i] || (sel && !sel[i])) continue;
+      const s = start[i], e = start[i + 1];
+      if (e === s) continue;
+      let x = 0, y = 0, z = 0;
+      for (let k = s; k < e; k++) { const j = nb[k]; x += tmp[j * 3]; y += tmp[j * 3 + 1]; z += tmp[j * 3 + 2]; }
+      const c = e - s;
+      Pd[i * 3] += (x / c - tmp[i * 3]) * lam;
+      Pd[i * 3 + 1] += (y / c - tmp[i * 3 + 1]) * lam;
+      Pd[i * 3 + 2] += (z / c - tmp[i * 3 + 2]) * lam;
+    }
+  };
+  for (let it = 0; it < o.iterations; it++) {
+    pass(o.strength);
+    if (o.method === 'taubin') pass(-o.strength * 1.04);
+  }
+}
+
 /** Directed boundary half-edges of closed polygons, chained into loops of point indices. */
 export function boundaryLoops(g: Geometry): number[][] {
   const n = g.numPoints;

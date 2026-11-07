@@ -197,6 +197,8 @@ export interface InspectOptions {
   /** detail 'uv': uv attribute (default "uv"), texture size for texel density, and the report as JSON after the text */
   uvAttrib?: string;
   uvResolution?: number | [number, number];
+  /** detail 'uv': test overlaps within each prim "name" only (each piece has its own uv space) */
+  uvPerPiece?: boolean;
   json?: boolean;
   /** detail 'budget': the cooked nodes upstream of the result (nodeBudgetInput), for the per-node rows */
   nodes?: NodeBudgetInput[];
@@ -227,7 +229,7 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
   }
   if (detail === 'topology' || detail === 'all') out.push('topology:', ...topologyLines(g));
   if (detail === 'uv') {
-    const r = uvReport(g, { attribute: o.uvAttrib, resolution: o.uvResolution });
+    const r = uvReport(g, { attribute: o.uvAttrib, resolution: o.uvResolution, perPiece: o.uvPerPiece });
     out.push(...uvReportText(r));
     if (o.json) out.push('uv report (JSON):', JSON.stringify(r));
   }
