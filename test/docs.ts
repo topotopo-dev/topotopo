@@ -1,11 +1,11 @@
 // Docs staleness: docs/nodes.md must match what scripts/gen-docs.ts generates from the registry and TopoTopo's own
-// packages, and the
+// packages, docs/examples.md what it generates from the example cards, and the
 // README's node table must list every node type (its "N+ node types" claim must hold), and the help topic "godot" and
 // README's Godot section every command of the cook for Godot.
 //   node test/docs.ts
 import fs from 'node:fs';
 import path from 'node:path';
-import { readNodesMd, referenceMarkdown } from '../scripts/gen-docs.ts';
+import { EXAMPLES_MD, examplesMarkdown, readDoc, readNodesMd, referenceMarkdown } from '../scripts/gen-docs.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
 import { topicText } from '../src/mcp/docs.ts';
 import { GODOT_COMMANDS } from '../src/host/godot-commands.ts';
@@ -23,6 +23,21 @@ else {
     let i = 0;
     while (i < a.length && i < b.length && a[i] === b[i]) i++;
     console.log(`FAIL docs/nodes.md is stale (node definitions changed): run npm run docs`);
+    console.log(`  first difference at line ${i + 1}:`);
+    console.log(`    file:      ${a[i] === undefined ? '(end of file)' : a[i].slice(0, 160)}`);
+    console.log(`    generated: ${b[i] === undefined ? '(end of file)' : b[i].slice(0, 160)}`);
+  }
+}
+
+const exWant = examplesMarkdown(), exHave = readDoc(EXAMPLES_MD);
+if (exHave === exWant) console.log('docs: docs/examples.md is up to date');
+else {
+  fail++;
+  const a = (exHave ?? '').split('\n'), b = exWant.split('\n');
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  console.log(`FAIL docs/examples.md is ${exHave === null ? 'missing' : 'stale (an example or its card changed)'}: run npm run docs`);
+  if (exHave !== null) {
     console.log(`  first difference at line ${i + 1}:`);
     console.log(`    file:      ${a[i] === undefined ? '(end of file)' : a[i].slice(0, 160)}`);
     console.log(`    generated: ${b[i] === undefined ? '(end of file)' : b[i].slice(0, 160)}`);
