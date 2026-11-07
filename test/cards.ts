@@ -15,9 +15,11 @@
 //   warnings, to its kind; meshes and scenes name every piece and give it a material the material table defines.
 // - Sweep: every numeric param at its min and max, every option, every switch flipped: every output cooks without
 //   errors (so every promise holds), meshes and scenes still name and dress every piece.
-// The examples on EXAMPLES_PENDING (test/fixtures.ts) are skipped until they meet a card, and the list only shrinks: a
-// name on it that meets its card, or is no example, fails. A card without a graph fails. The help text names examples
-// by name (help {examples:[…]}), never by a file path, and only examples that exist.
+// The examples on EXAMPLES_PENDING (test/fixtures.ts) are skipped until they meet a card (the form of a card they
+// already have is checked), and the list only shrinks: a name on it that meets its card, or is no example, fails. A card
+// without a graph fails, unless it is on CARDS_WAITING (its graph is being built; its form is checked), a list that
+// only shrinks too. The help text names examples by name (help {examples:[…]}), never by a file path, and only
+// examples that exist.
 // The checks check themselves first: a small example in a temp folder meets its card, and each way of breaking it fails.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -30,10 +32,10 @@ import { outputFieldIssues } from '../src/graph/outputs.ts';
 import { varsRead } from '../src/graph/packages.ts';
 import { outputKind, publishedKind } from '../src/io/kinds.ts';
 import { INSTRUCTIONS, TOPICS } from '../src/mcp/docs.ts';
-import { orphanCards, readExamples } from '../src/mcp/examples.ts';
+import { orphanCards, parseCard, readExamples } from '../src/mcp/examples.ts';
 import type { Example } from '../src/mcp/examples.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
-import { EXAMPLES_PENDING, ROOT } from './fixtures.ts';
+import { CARDS_WAITING, EXAMPLES_PENDING, ROOT } from './fixtures.ts';
 import { NUMERIC, namingProblems, paramProblems, sweepOf } from './asset-checks.ts';
 
 /** The default cook of an example, every output together, cold. */
@@ -190,7 +192,9 @@ A plain wooden crate of a chosen size.
 ## Look
 A light brown box standing on the ground.
 `;
+  let runs = 0;
   const run = async (label: string, g: GraphSpec, c: string, want: RegExp | null, extra?: [string, string]) => {
+    runs++;
     for (const f of fs.readdirSync(tmp)) if (/\.(json|md)$/.test(f)) fs.rmSync(path.join(tmp, f));
     fs.writeFileSync(path.join(tmp, 'crate.json'), JSON.stringify(g));
     fs.writeFileSync(path.join(tmp, 'crate.md'), c);
@@ -217,16 +221,29 @@ A light brown box standing on the ground.
   await run('a piece without a material', without('wood'), card, /^Cook · crate: no prim string attribute "material"/);
   await run('a warning', (() => { const x = g(); x.nodes.body.params!.divisions = [0, 1, 1]; return x; })(), card, /^Cook · crate: warning /);
   await run('no Look', g(), card.replace(/## Look[\s\S]*$/, ''), /^Card: section "## Look" is missing/);
+  await run('a slider without a default', g(), card.replace(', default 0.8', ''), /^Card: In · height: no default/);
+  await run('a default outside its range', g(), card.replace('default 1.', 'default 4.'), /^Card: In · width: default 4 is outside 0\.3–3/);
   await run('a card without a graph', g(), card, /^Card: lonely\.md has no graph/, ['lonely.md', card]);
   fs.rmSync(tmp, { recursive: true, force: true });
-  console.log(`cards: the checks catch what they should (${fails ? 'NOT ALL' : 'all 15 self-checks'})`);
+  console.log(`cards: the checks catch what they should (${fails ? 'NOT ALL' : `all ${runs} self-checks`})`);
 }
 
 // ---- the examples
 const root = path.join(ROOT, 'examples');
 const examples = readExamples(root);
 const names = new Set(examples.map((e) => e.name));
-for (const f of orphanCards(root)) fail(`examples/${f}: a card without a graph (examples/${f.replace(/\.md$/, '.json')} or examples/${f.replace(/\.md$/, '')}/)`);
+// cards waiting for their graph: their form now, their graph later
+let waiting = 0;
+for (const f of orphanCards(root)) {
+  const n = f.replace(/\.md$/, '');
+  if (!CARDS_WAITING.has(n)) { fail(`examples/${f}: a card without a graph (examples/${n}.json or examples/${n}/; a card whose graph is being built goes on CARDS_WAITING in test/fixtures.ts)`); continue; }
+  waiting++;
+  for (const x of parseCard(fs.readFileSync(path.join(root, f), 'utf8')).problems) fail(`${n} · Card: ${x}`);
+}
+for (const n of CARDS_WAITING) {
+  if (names.has(n)) fail(`CARDS_WAITING (test/fixtures.ts) names "${n}", which has its graph now: take it off`);
+  else if (!fs.existsSync(path.join(root, `${n}.md`))) fail(`CARDS_WAITING (test/fixtures.ts) names "${n}", which has no card: take it off`);
+}
 for (const n of EXAMPLES_PENDING) if (!names.has(n)) fail(`EXAMPLES_PENDING (test/fixtures.ts) names "${n}", which is no example: take it off`);
 
 const flatEngine = new Engine(createNodeHost({ baseDir: root }));
@@ -246,6 +263,8 @@ for (const e of examples) {
   const r = await checkExample(e, engine);
   if (isPending) {
     pending++;
+    // the card comes before its graph: its form fails now, the graph's mismatches wait
+    for (const x of r.problems.filter((x) => x.startsWith('Card: '))) fail(`${e.name} · ${x}`);
     if (!r.problems.length) fail(`${e.name}: meets its card, so take it off EXAMPLES_PENDING (test/fixtures.ts)`);
     else console.log(`pending ${e.name}: ${r.problems.length} problem(s), first: ${r.problems[0]}`);
     continue;
@@ -262,5 +281,5 @@ const named = [...help.matchAll(/help \{examples:\s*\[([^\]]*)\]\}/g)].flatMap((
 const unknown = [...new Set(named.filter((n) => n !== 'name' && !names.has(n)))];
 if (unknown.length) fail(`the help text names examples that do not exist: ${unknown.join(', ')}`);
 
-console.log(`\ncards: ${examples.length} examples, ${met} meet their card, ${pending} pending, ${fails} failed`);
+console.log(`\ncards: ${examples.length} examples, ${met} meet their card, ${pending} pending, ${waiting} card(s) waiting for a graph, ${fails} failed`);
 process.exit(fails ? 1 : 0);

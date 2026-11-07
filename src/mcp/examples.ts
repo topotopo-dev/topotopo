@@ -42,6 +42,8 @@ export interface Card { title: string; request: string; inputs: CardIn[]; output
 
 /** The sections of a card, in order. */
 export const CARD_SECTIONS = ['In', 'Out', 'Promises', 'Look'] as const;
+/** How many inputs a card lists (house rule 2; test/asset-checks.ts MIN_PARAMS, MAX_PARAMS hold the graph to the same). */
+export const MIN_INPUTS = 3, MAX_INPUTS = 10;
 const NAME = '[a-z][a-z0-9_]*';
 
 /** A card's parts and what is wrong with its form (a problem names the section it is in). */
@@ -101,10 +103,16 @@ export function parseCard(source: string): { card: Card; problems: string[] } {
     if (r) { x.min = Number(r[1]); x.max = Number(r[2]); }
     const d = /\bdefault\s+(?:"([^"]*)"|(-?\d+(?:\.\d+)?)(?![\w])|([A-Za-z_][A-Za-z0-9_-]*))/.exec(m[2]);
     if (d) x.default = d[1] ?? (d[2] !== undefined ? Number(d[2]) : d[3]);
-    const o = /\bone of ([^.;]+)/.exec(m[2]);
+    const o = /\bone of (.+?)(?:,?\s+default\b|[.;]|$)/.exec(m[2]);
     if (o) x.options = o[1].split(/,\s*|\s+or\s+/).map((s) => s.trim()).filter(Boolean);
+    // house rule 2: every slider has a default, inside its range or among its options
+    if (x.default === undefined) problems.push(`In · ${x.name}: no default ("default 2", "default grass", "default on")`);
+    else if (typeof x.default === 'number' && x.min !== undefined && (x.default < x.min || x.default > x.max!)) problems.push(`In · ${x.name}: default ${x.default} is outside ${x.min}–${x.max}`);
+    else if (x.options && !x.options.includes(String(x.default))) problems.push(`In · ${x.name}: default ${x.default} is not one of ${x.options.join(', ')}`);
     card.inputs.push(x);
   }
+  if (card.inputs.length && (card.inputs.length < MIN_INPUTS || card.inputs.length > MAX_INPUTS))
+    problems.push(`In: ${MIN_INPUTS} to ${MAX_INPUTS} inputs, the sliders a person tunes (${card.inputs.length})`);
   for (const it of items('Out')) {
     const m = new RegExp(`^(${NAME}) \\(([a-z]+)\\): (.+)$`).exec(it);
     if (!m) { problems.push(`Out: "${it.slice(0, 60)}" is not "name (kind): what it is"`); continue; }

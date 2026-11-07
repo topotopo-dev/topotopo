@@ -497,6 +497,14 @@ export const EXAMPLES_PENDING = new Set([
 ]);
 
 /**
+ * The cards whose graph is still being built (docs/examples.md, house rule 7: the card comes first): examples/<name>.md
+ * without examples/<name>.json or examples/<name>/. test/cards.ts checks their form and fails for any other card without
+ * a graph. The list only shrinks: a name here that has its graph, or no card, fails.
+ */
+export const CARDS_WAITING = new Set<string>([
+]);
+
+/**
  * The example packages: folders of examples/ that are packages of their own (an <id>.topo file and graphs/), such as
  * examples/guided_town, whose guides live in its own inputs/. Each graph as {name, dir, file}; dir is the package
  * folder its relative paths read from. examples/packages/ holds the examples' copies of TopoTopo's packages, not one.
