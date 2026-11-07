@@ -218,8 +218,8 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
 - Optional "export" (on the graph for the default output, or on an entry of "outputs") is where that output
   exports: a format ("glb" → exports/<graph or output id>.glb) or {"format":"obj","path":"parts/a.obj","up_axis":"z"}
   (the export tool's options), always inside the package's exports/ (a workspace inside the engine project has it
-  inside the project, where the engine imports from; an "engine:" path prefix is gone: it warns, and exporting it is
-  refused). The person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
+  inside the project, where the engine imports from; a path starting with "exports/" drops it, with a warning, so it
+  never lands in exports/exports/; an "engine:" path prefix is gone: it warns, and exporting it is refused). The person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
   targets; set one with edit {op:"export", output?, export}.
   The viewer's Download buttons need no target: they offer the formats that fit the output (a heightfield: png16,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
@@ -259,7 +259,8 @@ MARKERS: what a person places by clicking in the live viewer (the guides tools: 
   other input. A graph meant to be directed by guides reads the file with "missing": "empty"
   ({"type":"file","params":{"path":"inputs/markers.json","missing":"empty"}}): it cooks before the first guide is
   drawn, and again each time the guides change.
-FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"), obj/stl/ply (no up axis:
+FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"; obj too: usemtl → "material",
+  its .mtl (mtllib, beside it) → the material table with colours, alpha, roughness and maps), obj/stl/ply (no up axis:
   Unreal exports and Blender exports with Up = Z are Z-up, so add "up_axis":"z"), geo/bgeo (Houdini), csv and
   points.json (one point per row; columns such as name, role, pscale become point attributes), blend (needs Blender
   installed; it converts the file headlessly). Images: png (8/16-bit grey or colour).
@@ -1322,6 +1323,11 @@ Which node:
                (cut_long). The result is checked and warnings name the part. use_seams:true keeps existing seams.
                Big smooth meshes chart slowly: max_chart_area -1 (auto) caps chart size above ~1000 triangles; a higher
                max_cost makes fewer, larger charts (less space lost to padding).
+               Noisy surfaces (scans, decimated or AI-generated rocks, cliffs, trunks) shatter into hundreds of ragged
+               charts whatever the weights: chart_smoothing 60 cuts and flattens the charts on a smoothed copy and puts
+               the uv on the real shape (packed by its real areas), e.g. a 6k-triangle rock: ~220 charts → ~20. More
+               passes = fewer, rounder charts with a little more stretch. Several rocks in one mesh: each piece is
+               charted on its own, so one uv_unwrap does them all (foreach by name only to give each its own 0..1).
   uv_flatten   LSCM (conformal) per chart, charts bounded by YOUR seams: uv discontinuities (use_seams), the
                "seams" edge group, point pairs ({"seams": [[a,b],[b,c]]}), a prim chart attribute, the group border.
                Closed charts / handles are cut open automatically (cut_closed). pins: [a,b] fixes orientation.
@@ -1365,7 +1371,10 @@ on edges, and its seam param turns where), utilization (exact for a
 clean atlas in 0..1, else a labelled raster ESTIMATE; tileUtilization per UDIM tile), texel density (density: overall,
 per chart 5 % / median / 95 %, the lowest and highest chart and where; texels/m with a resolution) and per-piece
 (prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
-CLI: --inspect uv --uv-resolution 1024 [--json].
+per_piece:true when every prim "name" has its own 0..1 layout (the objects of a multi-object OBJ, each with its own
+texture): overlaps are tested within each piece only, each piece lists its overlapping pairs and covered share
+(utilization is the mean over the pieces), and a whole file is checked in one call.
+CLI: --inspect uv --uv-resolution 1024 [--uv-per-piece] [--json].
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
   render: `RENDER (pick the overlay that answers your question; everything is off by default)
@@ -1477,7 +1486,9 @@ export {path:"exports/thing.glb"} — format from the extension:
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)
   csv           point stream, one row per point: P.x,P.y,P.z,N.x,…,pscale,name (strings quoted); prims are ignored
   points.json   {format:"topotopo-points", count, attributes:{P:{type,size,data}}} (same schema on import)
-  obj usda ply stl json (lossless topotopo)
+  obj           vertex colours; prims with a "material" get usemtl and <name>.mtl beside it (Kd / Ke linear, as Blender
+                reads them; d, Pr / Pm and Ns; map_Kd / norm / map_Pr, "image:<name>" maps as PNGs in <name>_textures/)
+  usda ply stl json (lossless topotopo)
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs (extra numeric attributes: default off for glb / gltf / usda and the GLBs of instance rows and bundles,

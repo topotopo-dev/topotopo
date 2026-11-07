@@ -53,7 +53,7 @@ export function exportDefaults(format: ExportFormat, a: Record<string, unknown> 
   switch (format) {
     case 'glb': case 'gltf': return { ...GLTF };
     case 'usda': return { ...MESH, split_by_name: true, custom_attribs: false, materials: true };
-    case 'obj': return { ...MESH, split_by_name: true };
+    case 'obj': return { ...MESH, split_by_name: true, materials: true };
     case 'ply': return { ...MESH, custom_attribs: true };
     case 'stl': return { ...MESH };
     case 'json': return { instancing: 'packed' };
@@ -134,13 +134,25 @@ export const prefixGone = (written: string) => {
 };
 
 /**
+ * A target path that starts with exports/ (as the export tool's paths do, relative to the package): a target is
+ * already inside exports/, so the prefix is dropped rather than written to exports/exports/.
+ */
+const EXPORTS_PREFIX = /^exports[\\/]+/i;
+
+/**
  * What a valid target is warned of when a graph is validated or cooked: a path still written with the prefix that is
- * gone, which cooks, views and freezes in versions as it is but is refused where a file would be written. null for
- * none.
+ * gone, which cooks, views and freezes in versions as it is but is refused where a file would be written; a path that
+ * starts with exports/, which is dropped. null for none.
  */
 export function targetWarning(t: unknown): string | null {
   const o: any = typeof t === 'string' ? null : t;
-  return o && typeof o === 'object' && gonePrefix(o.path) ? `${prefixGone(o.path)}; exporting it fails until its path is changed` : null;
+  if (!o || typeof o !== 'object') return null;
+  if (gonePrefix(o.path)) return `${prefixGone(o.path)}; exporting it fails until its path is changed`;
+  if (typeof o.path === 'string' && EXPORTS_PREFIX.test(o.path)) {
+    const rest = o.path.replace(EXPORTS_PREFIX, '');
+    return `export path "${o.path}": a target is already inside the package's exports/ folder, so it writes exports/${rest || '<name>'}, not exports/${o.path.replace(/\\/g, '/')}; write "${rest}"${rest ? '' : ' (or leave path out)'}`;
+  }
+  return null;
 }
 
 /**
@@ -189,8 +201,10 @@ export const fileStem = (s: string) => s.replace(/[^A-Za-z0-9_.-]+/g, '_').repla
 export function resolveTarget(t: ExportTarget, stem: string): ResolvedTarget {
   const { format, path, ...options } = typeof t === 'string' ? { format: t } : t;
   const f = targetFormat(format)!;
-  const gone = gonePrefix(path), rest = gone ? path.slice(GONE_PREFIX.length) : path;
-  return { format: f, path: (typeof rest === 'string' && rest ? rest : fileStem(stem) + targetExtension(f)).replace(/\\/g, '/'), options, ...(gone ? { refused: path } : {}) };
+  const p = typeof path === 'string' ? path : '', gone = gonePrefix(path);
+  // the prefix that is gone stays refused; a leading exports/ is dropped (targetWarning says so)
+  const rest = p.startsWith(GONE_PREFIX) ? p.slice(GONE_PREFIX.length) : p.replace(EXPORTS_PREFIX, '');
+  return { format: f, path: (rest || fileStem(stem) + targetExtension(f)).replace(/\\/g, '/'), options, ...(gone ? { refused: path } : {}) };
 }
 
 /** A target's path as written in a graph (one still written with the prefix that is gone, as it is). */

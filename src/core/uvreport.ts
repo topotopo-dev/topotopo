@@ -38,6 +38,11 @@ export interface UVReportOptions {
   resolution?: number | [number, number];
   /** prim string attribute naming pieces (default "name") */
   pieceAttrib?: string;
+  /**
+   * every piece has its own uv space (one 0..1 layout per mesh, as a multi-object OBJ has): overlaps are tested within
+   * each piece only, and utilization is per piece
+   */
+  perPiece?: boolean;
   /** most exact pair tests (default 4,000,000) */
   maxPairTests?: number;
   /** most overlap examples / collapsed triangle ids listed (default 16) */
@@ -57,7 +62,8 @@ export interface UVOverlap {
   where: [string, string];
 }
 
-export interface UVPiece { name: string; triangles: number; surfaceArea: number; uvArea: number; texelsPerMetre?: number }
+/** utilization: with perPiece, the share of the unit tile the piece covers (its uv area, when it has no overlaps) */
+export interface UVPiece { name: string; triangles: number; surfaceArea: number; uvArea: number; texelsPerMetre?: number; overlapPairs?: number; utilization?: number }
 
 export interface UVOverlapClass { pairs: number; area: number }
 
@@ -120,6 +126,8 @@ export interface UVReport {
   /** texel density of the atlas charts (null without any) */
   density: UVDensity | null;
   pieces: UVPiece[];
+  /** overlaps were tested within each piece only (options.perPiece with a piece attribute): pieces each have their own uv space */
+  perPiece: boolean;
   resolution?: [number, number];
 }
 
@@ -203,7 +211,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
     attribute: name, tiling: false, tilingCharts: 0, complete: true, reasons: [], missing: false, triangles: nt, nonFinite: 0, collapsed: 0, collapsedTriangles: [], firstCollapsed: null, firstOutOfTile: null, mirrored: 0, wrapSeam: { triangles: 0, prims: 0, examples: [] },
     outOfTile: 0, tiles: [], charts: 0, uvArea: 0,
     overlap: { pairs: 0, sameChartPairs: 0, area: 0, candidatePairs: 0, testedPairs: 0, inTile: { pairs: 0, area: 0 }, tiling: { pairs: 0, area: 0 }, acrossLods: { pairs: 0, area: 0 }, examples: [] },
-    utilization: { method: 'none', value: 0, note: '' }, tileUtilization: [], density: null, pieces: [], ...(res ? { resolution: res } : {}),
+    utilization: { method: 'none', value: 0, note: '' }, tileUtilization: [], density: null, pieces: [], perPiece: false, ...(res ? { resolution: res } : {}),
   };
   const f = g.findAttrib(name, ['vertex', 'point']);
   if (!f || f.attr.type !== 'float' || f.attr.isArray) {
@@ -315,30 +323,45 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
     if (signed[t] > 0) for (let k = 0; k < 6; k++) ccw[o6 + k] = U[o6 + k];
     else { ccw[o6] = U[o6]; ccw[o6 + 1] = U[o6 + 1]; ccw[o6 + 2] = U[o6 + 4]; ccw[o6 + 3] = U[o6 + 5]; ccw[o6 + 4] = U[o6 + 2]; ccw[o6 + 5] = U[o6 + 3]; }
   }
+  // per piece: each piece's triangles are scanned on their own (pairs across pieces are never candidates)
+  const pieceA = g.prims.get(o.pieceAttrib || 'name');
+  const pieceOf = o.perPiece && pieceA && pieceA.type === 'string' ? (t: number) => String(pieceA.get(triPrim[t]) ?? '') : null;
+  rep.perPiece = !!pieceOf;
+  if (o.perPiece && !pieceOf) rep.reasons.push(`per piece: no prim string attribute "${o.pieceAttrib || 'name'}", so overlaps were tested across the whole mesh`);
+  const pieceOverlaps = new Map<string, number>();
   if (valid.length > 1) {
-    const scan = uvOverlapPairs(U, valid, signed, (t0, t1, A) => {
-      const same = find(t0) === find(t1), k = classOf(t0, t1);
-      rep.overlap.pairs++; rep.overlap.area += A;
-      rep.overlap[k].pairs++; rep.overlap[k].area += A;
-      if (same) rep.overlap.sameChartPairs++;
-      // examples: the bake-relevant (inTile) pairs before the expected ones
-      const ex = { triangles: [t0, t1] as [number, number], prims: [triPrim[t0], triPrim[t1]] as [number, number], area: A, sameChart: same, kind: k, where: ['', ''] as [string, string] };
-      if (rep.overlap.examples.length < maxEx) rep.overlap.examples.push(ex);
-      else if (k === 'inTile') {
-        const j = rep.overlap.examples.findIndex((e) => e.kind !== 'inTile');
-        if (j >= 0) rep.overlap.examples[j] = ex;
-      }
-    }, { maxTests });
-    rep.overlap.candidatePairs = scan.candidatePairs;
-    rep.overlap.testedPairs = scan.testedPairs;
-    if (scan.stopped) { rep.complete = false; rep.reasons.push(scan.reason ? `overlap test skipped: ${scan.reason}` : `overlap test stopped after ${scan.testedPairs.toLocaleString('en-US')} exact pair tests (maxPairTests) of ${scan.candidatePairs.toLocaleString('en-US')} candidate pairs`); }
+    const groups = new Map<string, number[]>();
+    if (pieceOf) for (const t of valid) { const k = pieceOf(t); let l = groups.get(k); if (!l) groups.set(k, (l = [])); l.push(t); }
+    else groups.set('', valid);
+    let stopped = false, why = '';
+    for (const key of [...groups.keys()].sort()) {
+      const scan = uvOverlapPairs(U, groups.get(key)!, signed, (t0, t1, A) => {
+        const same = find(t0) === find(t1), k = classOf(t0, t1);
+        rep.overlap.pairs++; rep.overlap.area += A;
+        rep.overlap[k].pairs++; rep.overlap[k].area += A;
+        if (same) rep.overlap.sameChartPairs++;
+        if (pieceOf) pieceOverlaps.set(key, (pieceOverlaps.get(key) ?? 0) + 1);
+        // examples: the bake-relevant (inTile) pairs before the expected ones
+        const ex = { triangles: [t0, t1] as [number, number], prims: [triPrim[t0], triPrim[t1]] as [number, number], area: A, sameChart: same, kind: k, where: ['', ''] as [string, string] };
+        if (rep.overlap.examples.length < maxEx) rep.overlap.examples.push(ex);
+        else if (k === 'inTile') {
+          const j = rep.overlap.examples.findIndex((e) => e.kind !== 'inTile');
+          if (j >= 0) rep.overlap.examples[j] = ex;
+        }
+      }, { maxTests: Math.max(0, maxTests - rep.overlap.testedPairs) });
+      rep.overlap.candidatePairs += scan.candidatePairs;
+      rep.overlap.testedPairs += scan.testedPairs;
+      if (scan.stopped) { stopped = true; if (scan.reason && !why) why = `${pieceOf ? `piece "${key}": ` : ''}${scan.reason}`; }
+    }
+    if (stopped) { rep.complete = false; rep.reasons.push(why ? `overlap test skipped: ${why}` : `overlap test stopped after ${rep.overlap.testedPairs.toLocaleString('en-US')} exact pair tests (maxPairTests) of ${rep.overlap.candidatePairs.toLocaleString('en-US')} candidate pairs`); }
     const rank = (e: UVOverlap) => (e.kind === 'inTile' ? 0 : 1);
     rep.overlap.examples.sort((x, y) => rank(x) - rank(y) || y.area - x.area || x.triangles[0] - y.triangles[0] || x.triangles[1] - y.triangles[1]);
     for (const e of rep.overlap.examples) e.where = [triWhere(e.triangles[0]), triWhere(e.triangles[1])];
   }
 
-  // utilization
-  if (rep.overlap.pairs === 0 && rep.outOfTile === 0 && rep.complete) {
+  // utilization (per piece: set with the pieces below)
+  if (pieceOf) rep.utilization = { method: 'none', value: 0, note: 'per piece' };
+  else if (rep.overlap.pairs === 0 && rep.outOfTile === 0 && rep.complete) {
     rep.utilization = { method: 'exact', value: rep.uvArea, note: 'sum of uv triangle areas in the unit tile (no overlaps, nothing outside)' };
   } else if (valid.length) {
     const N = Math.max(16, Math.min(4096, Math.floor(o.rasterSize ?? 1024)));
@@ -383,7 +406,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
         min: lo.d, max: hi.d, lowest: triWhere(first.get(lo.r)!), highest: triWhere(first.get(hi.r)!),
       };
     }
-    if (tileArea.size > 1 && rep.overlap.inTile.pairs === 0 && rep.complete) rep.tileUtilization = [...tileArea].sort((x, y) => x[0] - y[0]).map(([tile, value]) => ({ tile, value }));
+    if (tileArea.size > 1 && !pieceOf && rep.overlap.inTile.pairs === 0 && rep.complete) rep.tileUtilization = [...tileArea].sort((x, y) => x[0] - y[0]).map(([tile, value]) => ({ tile, value }));
   }
 
   // per-piece surface and uv area, texel density
@@ -402,6 +425,16 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
     }
     rep.pieces = [...by.values()].sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
     if (res) for (const pc of rep.pieces) pc.texelsPerMetre = pc.surfaceArea > 0 ? Math.sqrt((pc.uvArea * res[0] * res[1]) / pc.surfaceArea) : 0;
+    if (pieceOf) {
+      // each piece its own 0..1: its uv area is its covered share when it has no overlaps (all inside the tile)
+      for (const pc of rep.pieces) { pc.overlapPairs = pieceOverlaps.get(pc.name) ?? 0; pc.utilization = pc.uvArea; }
+      const exact = rep.overlap.pairs === 0 && rep.outOfTile === 0 && rep.complete, n = rep.pieces.length;
+      const low = rep.pieces.reduce((a, b) => (b.uvArea < a.uvArea ? b : a), rep.pieces[0]);
+      rep.utilization = {
+        method: exact ? 'exact' : 'none', value: n ? rep.pieces.reduce((s, pc) => s + pc.uvArea, 0) / n : 0,
+        note: exact ? `mean over ${n} pieces, each in its own 0..1 (per piece; lowest ${(low.uvArea * 100).toFixed(1)}% "${low.name}")` : 'per piece: exact only without overlaps and with every triangle in the unit tile',
+      };
+    }
   }
   return rep;
 }
@@ -417,7 +450,7 @@ export function uvReportText(r: UVReport): string[] {
   if (ws.prims) out.push(`  WRAP SEAM: ${ws.prims} face${ws.prims === 1 ? '' : 's'} (${ws.triangles} triangles) span${ws.prims === 1 ? 's' : ''} the seam of an angle-based uv: corners at both ends of the turn, so the face gets the whole turn's tiles, mirrored (not counted as overlap or mirrored). uv_project cylindrical and spherical keep the seam on edges and turn it with seam; ${ws.examples.join('; ')}`);
   const ov = r.overlap;
   if (r.tiling) out.push(`  TILING: ${r.tilingCharts} chart${r.tilingCharts === 1 ? ' runs' : 's run'} across tile borders: uv for a repeating texture, not an atlas; overlap there is expected`);
-  out.push(`  overlaps in tiles (atlas, what a bake suffers): ${ov.inTile.pairs} triangle pairs, area ${f(ov.inTile.area)}; ${ov.testedPairs} of ${ov.candidatePairs} candidate pairs tested exactly`);
+  out.push(`  overlaps in tiles (atlas, what a bake suffers)${r.perPiece ? `, tested within each of ${r.pieces.length} pieces (each piece its own uv space; pieces overlapping each other are not counted)` : ''}: ${ov.inTile.pairs} triangle pairs, area ${f(ov.inTile.area)}; ${ov.testedPairs} of ${ov.candidatePairs} candidate pairs tested exactly`);
   if (ov.tiling.pairs) out.push(`  overlaps of tiling charts (expected): ${ov.tiling.pairs} pairs, area ${f(ov.tiling.area)}`);
   if (ov.acrossLods.pairs) out.push(`  overlaps across LODs (expected: names with different _lodN suffixes share the uv space): ${ov.acrossLods.pairs} pairs, area ${f(ov.acrossLods.area)}`);
   if (ov.sameChartPairs) out.push(`  ${ov.sameChartPairs} of the ${ov.pairs} overlapping pairs lie within one chart (folds)`);
@@ -430,8 +463,11 @@ export function uvReportText(r: UVReport): string[] {
   if (r.pieces.length) {
     const shown = r.pieces.slice(0, 24);
     out.push(`  pieces (${r.pieces.length})${r.resolution ? `, texel density at ${r.resolution[0]}×${r.resolution[1]}` : ''}:`);
-    for (const p of shown) out.push(`    ${p.name || '""'}: ${p.triangles} tris, surface ${f(p.surfaceArea)} m², uv ${f(p.uvArea)}${p.texelsPerMetre !== undefined ? `, ${f(p.texelsPerMetre)} texels/m` : ''}`);
-    if (r.pieces.length > shown.length) out.push(`    … ${r.pieces.length - shown.length} more`);
+    for (const p of shown) out.push(`    ${p.name || '""'}: ${p.triangles} tris, surface ${f(p.surfaceArea)} m², uv ${f(p.uvArea)}${p.texelsPerMetre !== undefined ? `, ${f(p.texelsPerMetre)} texels/m` : ''}${p.overlapPairs !== undefined ? `, ${p.overlapPairs} overlapping pairs` : ''}`);
+    if (r.pieces.length > shown.length) {
+      const hidden = r.pieces.slice(shown.length), bad = hidden.filter((p) => p.overlapPairs);
+      out.push(`    … ${hidden.length} more${r.perPiece ? `; ${bad.length ? `with overlaps: ${bad.slice(0, 12).map((p) => `${p.name} (${p.overlapPairs})`).join(', ')}` : 'none with overlaps'}` : ''}`);
+    }
   }
   return out;
 }

@@ -1,0 +1,13 @@
+{
+  "description": "Clean UVs on a noisy rock: a displaced sphere roughened with fine noise and decimated to irregular triangles, like a scanned, decimated or generated rock. Unwrapped as it is, xatlas shatters it into about 90 ragged charts; chart_smoothing 60 cuts and flattens the charts on a smoothed copy and puts the uv on the real shape, which gives 9 smooth charts at one texel density. Rendered with the persp view shaded by a uv checker and the uv view.",
+  "meta": { "render": { "views": ["persp", "uv"], "checker": true } },
+  "nodes": {
+    "ball": { "type": "sphere", "params": { "type": "ico", "level": 5 } },
+    "squash": { "type": "transform", "in": ["ball"], "params": { "scale": [1.3, 0.8, 1], "translate": [0, 0.7, 0] } },
+    "shape": { "type": "noise_displace", "in": ["squash"], "params": { "amplitude": 0.35, "frequency": 1.2 } },
+    "rough": { "type": "noise_displace", "in": ["shape"], "params": { "amplitude": 0.06, "frequency": 9 } },
+    "rock": { "type": "decimate", "in": ["rough"], "params": { "ratio": 0.3 } },
+    "unwrap": { "type": "uv_unwrap", "in": ["rock"], "params": { "chart_smoothing": 60, "padding": 8, "resolution": 2048 } }
+  },
+  "output": "unwrap"
+}

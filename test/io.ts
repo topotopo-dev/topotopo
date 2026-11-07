@@ -56,6 +56,22 @@ for (const fmt of ['json', 'obj', 'ply', 'glb', 'stl', 'geo'] as const) {
   if (fmt === 'geo') check(back.points.has('heat') && back.points.has('Cd') && back.numVertices === g.numVertices, 'geo keeps custom + Cd attributes and vertices');
   if (fmt === 'obj' || fmt === 'stl' || fmt === 'json' || fmt === 'ply' || fmt === 'geo') check(rep.closed, `${fmt}: watertight after round trip`);
 }
+{
+  // OBJ writes each distinct vt and vn once: a smooth unwrapped sphere shares them between the corners of a point
+  const sr = await engine.cook({ nodes: { s: { type: 'sphere', params: { type: 'quad', divisions: 24 } }, u: { type: 'uv_unwrap', in: ['s'] } }, output: 'u' });
+  const sg = sr.geo!;
+  const text = new TextDecoder().decode(await exportGeometryAsync(sg, 'obj', {}));
+  const nvt = (text.match(/^vt /gm) ?? []).length, nvn = (text.match(/^vn /gm) ?? []).length;
+  const back = await importGeometryAsync(new TextEncoder().encode(text), 'obj');
+  const ua = sg.vertices.get('uv') ?? sg.points.get('uv'), ub = back.vertices.get('uv') ?? back.points.get('uv');
+  let du = 0;
+  for (let v = 0; v < sg.numVertices; v++) {
+    const a = ua!.get(sg.vertices.get('uv') ? v : sg.vertexPoint[v]) as number[], b = ub!.get(back.vertices.get('uv') ? v : back.vertexPoint[v]) as number[];
+    du = Math.max(du, Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
+  }
+  check(nvt < sg.numVertices / 2 && nvn < sg.numVertices / 2 && back.numVertices === sg.numVertices && du <= 1e-6,
+    `obj: one vt and vn per distinct value (${nvt} vt, ${nvn} vn for ${sg.numVertices} corners, ${sg.numPoints} points); uv back per corner within ${du.toExponential(1)}`);
+}
 const usd = new TextDecoder().decode(exportGeometry(g, 'usda'));
 check(usd.startsWith('#usda 1.0') && usd.includes('def Mesh') && usd.includes('faceVertexCounts'), 'usda structure');
 
@@ -298,12 +314,69 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     const prepared = await prepareTarget(g, 'g', part as typeof part & { target: NonNullable<typeof part.target> }, dir, engine.host, { frame: 5 });
     const man = json(prepared.files.find((f) => f.path === prepared.sourceManifest)!.bytes).source;
     check(prepared.sourceManifest === path.join(dir, 'parts', 'b.obj.source.json') && man.graph === 'g' && man.output === 'part' && man.node === 'b' && man.frame === 5 && man.fps === 24
-      && JSON.stringify(man.export) === '{"format":"obj","options":{"instancing":"packed","scale":1,"split_by_name":true,"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
+      && JSON.stringify(man.export) === '{"format":"obj","options":{"instancing":"packed","materials":true,"scale":1,"split_by_name":true,"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
       `an export target records its source from the graph it is published from, every option the format reads with its default (${JSON.stringify(man.export)})`);
     writeTargets([prepared], dir);
     check(fs.existsSync(path.join(dir, 'parts', 'b.obj.source.json')) && new ArtifactStore(dir).records()[0].files.length === 2, 'writeTargets writes the manifest with the export and records both');
+    // a target path written as the export tool's (exports/…) lands in exports/, not exports/exports/, and the graph is told
+    const ge: GraphSpec = { nodes: { b: { type: 'box' } }, output: 'b', outputs: { rock: { node: 'b', export: { format: 'obj', path: 'exports/rocks/rock.obj' } } } };
+    const rock = publishedOutputs('g', ge, 'b').find((p) => p.output === 'rock')!;
+    const said = engine.validate(ge).warnings.map((w) => w.message).join('; ');
+    check(rock.target?.path === 'rocks/rock.obj' && /writes exports\/rocks\/rock\.obj, not exports\/exports\/rocks\/rock\.obj; write "rocks\/rock\.obj"/.test(said),
+      `an export target path starting with exports/ drops it (${rock.target?.path}) and warns: ${said}`);
   } finally {
     // mkdtemp returns the exact owned directory
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------- OBJ materials: usemtl + .mtl written, and read back
+{
+  const mr = await engine.cook({
+    nodes: {
+      a: { type: 'box', params: { center: [-1, 0, 0] } },
+      b: { type: 'box', params: { center: [1, 0, 0] } },
+      c: { type: 'box', params: { center: [0, 2, 0] } },
+      ma: { type: 'material', in: ['a'], params: { name: 'wet stone', base_color: [0.6, 0.5, 0.4], roughness: 0.3, metallic: 0.1, base_color_map: 'tex/stone.png', normal_map: 'tex/stone_n.png' } },
+      mb: { type: 'material', in: ['b'], params: { name: 'moss', base_color: [0.2, 0.5, 0.1], roughness: 0.9, alpha: 0.8, emissive: [0.1, 0.2, 0] } },
+      m: { type: 'merge', in: ['ma', 'mb', 'c'] },
+    },
+    output: 'm',
+  });
+  const src = mr.geo!;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-io-mtl-'));
+  try {
+    // the export as a package writes it: exports/ beside tex/, texture paths relative to the .obj
+    const res = await exportFilesAsync(src, 'obj', 'exports/rocks.obj', { texturePath: (t) => '../' + t });
+    check(res.files.map((f) => f.path).join() === 'exports/rocks.obj,exports/rocks.mtl', `obj with materials writes the .mtl beside it (${res.files.map((f) => f.path)}; ${res.summary})`);
+    for (const f of res.files) { fs.mkdirSync(path.dirname(path.join(dir, f.path)), { recursive: true }); fs.writeFileSync(path.join(dir, f.path), f.bytes); }
+    const objText = new TextDecoder().decode(res.files[0].bytes), mtlText = new TextDecoder().decode(res.files[1].bytes);
+    check(/^mtllib rocks\.mtl$/m.test(objText) && /^usemtl wet stone$/m.test(objText) && /^usemtl default$/m.test(objText) && /^map_Kd \.\.\/tex\/stone\.png$/m.test(mtlText) && /^norm \.\.\/tex\/stone_n\.png$/m.test(mtlText),
+      'obj: mtllib, usemtl per material (prims without one: "default"), the maps relative to the .mtl');
+    const warnings: string[] = [];
+    const reader = new Engine(createNodeHost({ baseDir: dir }));
+    await reader.init();
+    const back = await reader.cook({ nodes: { f: { type: 'file', params: { path: 'exports/rocks.obj' } } }, output: 'f' });
+    const bg = back.geo!;
+    warnings.push(...back.warnings.map((w) => w.message));
+    const { readMaterials, primMaterials } = await import('../src/core/materials.ts');
+    const before = primMaterials(src)!, after = primMaterials(bg)!;
+    check(after.every((m, i) => m === (before[i] || 'default')), `usemtl read back into prim material (${[...new Set(after)].join(', ')})`);
+    const t0 = readMaterials(src), t1 = readMaterials(bg);
+    const close = (a: number[], b: number[]) => a.every((x, k) => Math.abs(x - b[k]) < 1e-5);
+    const same = (n: string) => close(t0[n].baseColor, t1[n].baseColor) && close(t0[n].emissive, t1[n].emissive) && Math.abs(t0[n].roughness - t1[n].roughness) < 1e-5
+      && Math.abs(t0[n].metallic - t1[n].metallic) < 1e-5 && Math.abs(t0[n].alpha - t1[n].alpha) < 1e-5;
+    check(same('wet stone') && same('moss') && t1['wet stone'].textures?.baseColor === 'tex/stone.png' && t1['wet stone'].textures?.normal === 'tex/stone_n.png' && !!t1.default && !warnings.length,
+      `the .mtl read back into the material table: colours, roughness, metallic, alpha, emissive, maps (${JSON.stringify(t1['wet stone'])}; warnings: ${warnings.join('; ') || 'none'})`);
+    // a Blender-style .mtl: Ns for the roughness, map options before a file name with spaces; a missing library is warned of
+    const { readMTL, importOBJAsync } = await import('../src/io/import.ts');
+    const bl = readMTL('newmtl Rock\nNs 250.000000\nKa 1 1 1\nKd 0.8 0.8 0.8\nd 1.0\nillum 2\nmap_Kd -s 1 1 1 -bm 0.5 my textures/rock albedo.png\n', 'inputs');
+    check(Math.abs(bl.Rock.roughness - 0.5) < 1e-9 && Math.abs(bl.Rock.baseColor[0] - 0.9063) < 1e-3 && bl.Rock.textures?.baseColor === 'inputs/my textures/rock albedo.png',
+      `a Blender .mtl: roughness from Ns, Kd linear → display, map options skipped (${JSON.stringify(bl.Rock)})`);
+    const lost: string[] = [];
+    const nolib = await importOBJAsync('mtllib gone.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl Rock\nf 1 2 3\n', { path: 'inputs/a.obj', readFile: async (p) => { throw new Error(`no ${p}`); }, warn: (m) => lost.push(m) });
+    check(primMaterials(nolib)![0] === 'Rock' && /material library "gone\.mtl" could not be read \(no inputs\/gone\.mtl\)/.test(lost.join()), `a missing .mtl is warned of, the prims keep their names (${lost.join('; ')})`);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }

@@ -3,6 +3,7 @@
 //
 // importGeometry() is synchronous and covers every format except glTF, whose reader (gltf-transform) is
 // asynchronous: use importGeometryAsync() for glb/gltf (it handles every format, and reads external .bin files).
+// OBJ: usemtl → prim "material"; importGeometryAsync also reads the .mtl files (mtllib) into the material table.
 import { Geometry } from '../core/geometry.ts';
 import { geoFromJSON } from './json.ts';
 import { importGLTFAsync } from './gltf.ts';
@@ -10,6 +11,8 @@ import { importHoudiniBgeo, importHoudiniGeo, isBinaryJSON } from './hgeo.ts';
 import { importCSV, importPointsJSON, isPointsJSON } from './points.ts';
 import { imageFromPNGFile } from './textures.ts';
 import { SIDECAR_FORMATS, SIDECAR_NAMES, SIDECAR_TEXT } from './sidecars.ts';
+import { MATERIAL_ATTRIB, normalizeMaterial, primMaterials, writeMaterials } from '../core/materials.ts';
+import type { MaterialTable } from '../core/materials.ts';
 
 export { importGLTFAsync } from './gltf.ts';
 export { importHoudiniBgeo, importHoudiniGeo } from './hgeo.ts';
@@ -56,7 +59,7 @@ function importAnyJSON(j: any, warn?: (m: string) => void): Geometry {
 /** Synchronous import for every format except glb/gltf (see importGeometryAsync). */
 export function importGeometry(bytes: Uint8Array, fmt: string, opts: ImportOptions = {}): Geometry {
   switch (fmt) {
-    case 'obj': return importOBJ(td.decode(bytes));
+    case 'obj': return importOBJ(td.decode(bytes), opts.warn);
     case 'stl': return importSTL(bytes);
     case 'ply': return importPLY(bytes);
     case 'json': return importAnyJSON(JSON.parse(td.decode(bytes)), opts.warn);
@@ -78,13 +81,113 @@ export function importGeometry(bytes: Uint8Array, fmt: string, opts: ImportOptio
 /** Import any supported format. */
 export async function importGeometryAsync(bytes: Uint8Array, fmt: string, opts: ImportOptions = {}): Promise<Geometry> {
   if (fmt === 'glb' || fmt === 'gltf') return importGLTFAsync(bytes, opts);
+  if (fmt === 'obj') return importOBJAsync(td.decode(bytes), opts);
   return importGeometry(bytes, fmt, opts);
 }
 
-export function importOBJ(text: string): Geometry {
+/** An OBJ without its material libraries: usemtl names go into prim "material", the table stays empty (importOBJAsync reads it). */
+export function importOBJ(text: string, warn?: (msg: string) => void): Geometry {
+  const r = parseOBJ(text);
+  if (r.mtllibs.length) warn?.(`obj: material library ${r.mtllibs.map((l) => `"${l}"`).join(', ')} not read (no file access here); prims keep their material names`);
+  return r.geo;
+}
+
+/**
+ * An OBJ with its materials: usemtl → prim "material", and the .mtl files its mtllib lines name (read with
+ * opts.readFile, relative to opts.path) → the material table (readMTL). A library that cannot be read is warned of.
+ */
+export async function importOBJAsync(text: string, opts: ImportOptions = {}): Promise<Geometry> {
+  const { geo, mtllibs } = parseOBJ(text);
+  if (!mtllibs.length) return geo;
+  if (!opts.readFile) return importOBJ(text, opts.warn);
+  const dir = opts.path ? opts.path.replace(/[?#].*$/, '').replace(/[^\\/]*$/, '').replace(/[\\/]$/, '') : '';
+  const table: MaterialTable = {};
+  for (const lib of mtllibs) {
+    const at = fileNear(dir, lib);
+    try {
+      const t = readMTL(td.decode(await opts.readFile(at)), dirOfPath(at));
+      for (const [k, m] of Object.entries(t)) if (!(k in table)) table[k] = m;
+    } catch (e: any) {
+      opts.warn?.(`obj: material library "${lib}" could not be read (${e?.message ?? e}); prims keep their material names, shown with the default material`);
+    }
+  }
+  const missing = [...new Set(primMaterials(geo) ?? [])].filter((m) => m && !(m in table));
+  if (missing.length && Object.keys(table).length) opts.warn?.(`obj: ${missing.length} material(s) used but not defined in ${mtllibs.join(', ')}: ${missing.slice(0, 8).join(', ')}; shown with the default material`);
+  writeMaterials(geo, table);
+  return geo;
+}
+
+/** A path relative to a folder ("" = as it is), with "." and inner ".." resolved; absolute paths, drives and URLs stay. */
+const fileNear = (dir: string, p: string) => {
+  const q = p.replace(/\\/g, '/');
+  if (!dir || /^[a-z][a-z0-9+.-]*:/i.test(q) || q.startsWith('/')) return q;
+  const out: string[] = [];
+  for (const s of `${dir.replace(/\\/g, '/').replace(/\/+$/, '')}/${q}`.split('/')) {
+    if (s === '.' || (s === '' && out.length)) continue;
+    if (s === '..' && out.length && out[out.length - 1] !== '..' && out[out.length - 1] !== '') out.pop();
+    else out.push(s);
+  }
+  return out.join('/');
+};
+const dirOfPath = (p: string) => { const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')); return i < 0 ? '' : p.slice(0, i); };
+
+/** Texture map options of a .mtl that take one value (-o, -s, -t take up to three numbers, -mm two). */
+const MAP_OPTIONS = new Set(['-blendu', '-blendv', '-bm', '-boost', '-cc', '-clamp', '-imfchan', '-texres', '-type']);
+
+/** Linear (.mtl, as Blender writes it) to display values (TopoTopo colours). */
+const mtlDisplay = (c: number) => { const x = Math.max(0, Math.min(1, c)); return x <= 0.0031308 ? x * 12.92 : 1.055 * x ** (1 / 2.4) - 0.055; };
+
+/**
+ * A .mtl as a material table: Kd → baseColor, Ke → emissive (both linear in the file), d (else 1 - Tr) → alpha,
+ * Pr → roughness (else from Ns: 1 - sqrt(Ns / 1000), as Blender reads it), Pm → metallic, map_Kd / norm / map_Pr →
+ * the base colour, normal and roughness textures (relative to `dir`, the .mtl's folder; map options such as -s are skipped).
+ */
+export function readMTL(text: string, dir = ''): MaterialTable {
+  const out: MaterialTable = {};
+  let m: any = null, ns: number | null = null, rough = false, alpha = false;
+  const close = () => {
+    if (!m) return;
+    if (!rough && ns !== null) m.roughness = 1 - Math.sqrt(Math.max(0, Math.min(1000, ns)) / 1000);
+    out[m.name] = normalizeMaterial(m);
+  };
+  const map = (rest: string[]) => {
+    // options (-s 1 1 1, -bm 0.5, -clamp on …) come before the file name, which may hold spaces
+    let i = 0;
+    while (i < rest.length - 1 && rest[i].startsWith('-')) {
+      const opt = rest[i++].toLowerCase(), upTo3 = opt === '-o' || opt === '-s' || opt === '-t';
+      const n = upTo3 ? 3 : opt === '-mm' ? 2 : MAP_OPTIONS.has(opt) ? 1 : 0;
+      for (let k = 0; k < n && i < rest.length - 1 && (!upTo3 || /^[-+]?[\d.]/.test(rest[i])); k++) i++;
+    }
+    const file = rest.slice(i).join(' ');
+    return file ? fileNear(dir, file) : '';
+  };
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line[0] === '#') continue;
+    const parts = line.split(/\s+/), tag = parts[0].toLowerCase(), rest = parts.slice(1);
+    const rgb = () => (rest.length === 1 ? [rest[0], rest[0], rest[0]] : rest.slice(0, 3)).map((x) => mtlDisplay(+x));
+    if (tag === 'newmtl') { close(); m = { name: line.slice(parts[0].length).trim(), textures: {} }; ns = null; rough = false; alpha = false; continue; }
+    if (!m) continue;
+    if (tag === 'kd') m.baseColor = rgb();
+    else if (tag === 'ke') m.emissive = rgb();
+    else if (tag === 'd') { m.alpha = +rest[0]; alpha = true; }
+    else if (tag === 'tr' && !alpha) m.alpha = 1 - +rest[0];
+    else if (tag === 'pr') { m.roughness = +rest[0]; rough = true; }
+    else if (tag === 'pm') m.metallic = +rest[0];
+    else if (tag === 'ns') ns = +rest[0];
+    else if (tag === 'map_kd') m.textures.baseColor = map(rest);
+    else if (tag === 'norm') m.textures.normal = map(rest);
+    else if (tag === 'map_pr') m.textures.roughness = map(rest);
+  }
+  close();
+  return out;
+}
+
+function parseOBJ(text: string): { geo: Geometry; mtllibs: string[] } {
   const V: number[] = [], VC: number[] = [], VT: number[] = [], VN: number[] = [];
-  const faces: { v: number[]; t: number[]; n: number[]; name: string; closed: boolean }[] = [];
-  let name = '';
+  const faces: { v: number[]; t: number[]; n: number[]; name: string; mat: string; closed: boolean }[] = [];
+  const mtllibs: string[] = [];
+  let name = '', mat = '';
   let hasColor = false;
   for (const raw of text.split('\n')) {
     const line = raw.trim();
@@ -97,8 +200,10 @@ export function importOBJ(text: string): Geometry {
     } else if (tag === 'vt') VT.push(+parts[1], +(parts[2] ?? 0));
     else if (tag === 'vn') VN.push(+parts[1], +parts[2], +parts[3]);
     else if (tag === 'o' || tag === 'g') name = parts.slice(1).join(' ');
+    else if (tag === 'usemtl') mat = parts.slice(1).join(' ');
+    else if (tag === 'mtllib') { const lib = line.slice(tag.length).trim(); if (lib && !mtllibs.includes(lib)) mtllibs.push(lib); }
     else if (tag === 'f' || tag === 'l') {
-      const f = { v: [] as number[], t: [] as number[], n: [] as number[], name, closed: tag === 'f' };
+      const f = { v: [] as number[], t: [] as number[], n: [] as number[], name, mat, closed: tag === 'f' };
       for (const c of parts.slice(1)) {
         const [a, b, d] = c.split('/');
         const fix = (x: string | undefined, len: number) => (x ? (+x < 0 ? len + +x : +x - 1) : -1);
@@ -124,7 +229,11 @@ export function importOBJ(text: string): Geometry {
     const a = g.prims.add('name', 'string', 1);
     faces.forEach((f, i) => a.set(i, f.name));
   }
-  return g;
+  if (faces.some((f) => f.mat)) {
+    const a = g.prims.add(MATERIAL_ATTRIB, 'string', 1);
+    faces.forEach((f, i) => a.set(i, f.mat));
+  }
+  return { geo: g, mtllibs };
 }
 
 function weldTriangles(pos: number[]): Geometry {

@@ -10,7 +10,7 @@
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--vertex-colors] [--no-materials]
 //                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
 //                   (every option of the export tool has a flag; booleans take --name / --no-name)
-//                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--json]]
+//                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--uv-per-piece] [--json]]
 //   --output picks a named output (the graph's "outputs"); --var overrides a graph var for this run (src/graph/vars.ts).
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   Packed instances to .csv/.points.json: one row per instance + <name>.meshes.json + <name>_meshes/<Mesh>.glb.
@@ -119,7 +119,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
     '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb]',
-    '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--json]',
+    '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--uv-per-piece] [--json]',
     '           summary: one screen (counts, triangles, bbox in mm, parts, materials, images, uv state, closed or open edges)',
     '           topology: a closed solid or why not (open edges after welding seam splits, non-manifold, flipped, inward), with where',
     '           uv: overlaps (in-tile, tiling, across LODs), utilization, texel density; budget: triangles per part, per LOD and per node',
@@ -416,7 +416,7 @@ async function cook() {
   /** The --inspect report of a cook: text, or the uv / budget / scene report as JSON with --json. */
   async function inspectText(r: CookReport, u: Unit): Promise<string> {
     const inspectDetail = inspectOf(u), uvRes = uopt(u, '--uv-resolution') !== undefined ? Number(uopt(u, '--uv-resolution')) : undefined;
-    const geo = r.geo!, json = uhas(u, '--json');
+    const geo = r.geo!, json = uhas(u, '--json'), perPiece = uhas(u, '--uv-per-piece');
     if (inspectDetail === 'scene') {
       // the glb export with the export options given, read back
       const res = await serializeExport(geo, 'glb', 'scene.glb', exportArgs(u), engine.host);
@@ -426,9 +426,9 @@ async function cook() {
       const warn = res.warnings.map((w) => `warning: ${w}`);
       return json ? JSON.stringify(rep, null, 2) : [...sceneReportText(rep), ...warn].join('\n');
     }
-    if (inspectDetail === 'uv' && json) return JSON.stringify(uvReport(geo, { resolution: uvRes }), null, 2);
+    if (inspectDetail === 'uv' && json) return JSON.stringify(uvReport(geo, { resolution: uvRes, perPiece }), null, 2);
     if (inspectDetail === 'budget' && json) return JSON.stringify(budgetReport(geo, nodeBudgetInput(graph, r.results)), null, 2);
-    return inspect(geo, { detail: inspectDetail as any, uvResolution: uvRes, nodes: inspectDetail === 'budget' ? nodeBudgetInput(graph, r.results) : undefined });
+    return inspect(geo, { detail: inspectDetail as any, uvResolution: uvRes, uvPerPiece: perPiece, nodes: inspectDetail === 'budget' ? nodeBudgetInput(graph, r.results) : undefined });
   }
 
   function report(r: CookReport) {

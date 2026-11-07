@@ -95,6 +95,15 @@ export const SRC: Record<string, NodeSpec> = {
   TEXSDF: { type: 'tex_sdf_shape', params: { resolution: 64, shape: 'star', radius: 0.35, sides: 5 } },
   TEXSDF2: { type: 'tex_sdf_shape', params: { resolution: 48, shape: 'disc', radius: 0.2, center: [0.7, 0.6] } },
   UVBOX: { type: 'uv_unwrap', in: ['BOX'] },
+  // a noisy, decimated rock (as scanned or generated models come): irregular triangles that shatter uv_unwrap's charts
+  // (chart_smoothing); and a noisy quad rock, whose polygons the straddling split turns into triangles
+  ROCK_BALL: { type: 'sphere', params: { type: 'ico', level: 4 } },
+  ROCK_SHAPE: { type: 'noise_displace', in: ['ROCK_BALL'], params: { amplitude: 0.35, frequency: 1.2 } },
+  ROCK_ROUGH: { type: 'noise_displace', in: ['ROCK_SHAPE'], params: { amplitude: 0.06, frequency: 9 } },
+  NOISY_ROCK: { type: 'decimate', in: ['ROCK_ROUGH'], params: { ratio: 0.4 } },
+  QUAD_BALL: { type: 'sphere', params: { type: 'quad', divisions: 10 } },
+  QUAD_SHAPE: { type: 'noise_displace', in: ['QUAD_BALL'], params: { amplitude: 0.35, frequency: 1.2 } },
+  NOISY_QUAD_ROCK: { type: 'noise_displace', in: ['QUAD_SHAPE'], params: { amplitude: 0.06, frequency: 9 } },
   UVCOLOR: { type: 'color', in: ['UVBOX'], params: { mode: 'random' } },
   HIGHBOX: { type: 'subdivide', in: ['BOX'], params: { levels: 2 } },
   // rigid bodies: 25 packed small spheres 3 m above the bumpy grid; six packed crates on one spot for stacking

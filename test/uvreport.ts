@@ -161,6 +161,27 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   check(one.tileUtilization.length === 0, 'one tile: no per-tile list (utilization says it)');
 }
 
+// ---------------------------------------------------------------- per piece: each prim name has its own uv space
+{
+  // two rocks of one OBJ, each laid out in its own 0..1; rockB folds over itself
+  const clean = mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'rockA'), quad(5, 0, 0, 0, 1, 1, 'rockB')]);
+  const all = uvReport(clean), per = uvReport(clean, { perPiece: true });
+  check(!all.perPiece && all.overlap.inTile.pairs > 0, `whole mesh: the two rocks overlap each other (${all.overlap.inTile.pairs} pairs)`);
+  check(per.perPiece && per.complete && per.overlap.pairs === 0 && per.pieces.every((p) => p.overlapPairs === 0),
+    'per piece: rocks laid out on the same uv space are not overlaps');
+  check(per.utilization.method === 'exact' && near(per.utilization.value, (0.25 + 1) / 2) && near(per.pieces[0].utilization!, 0.25) && near(per.pieces[1].utilization!, 1),
+    `per piece utilization: each piece's covered share, the mean over pieces (${per.utilization.value})`);
+  const folded = mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'rockA'), quad(5, 0, 0.25, 0, 0.75, 0.5, 'rockB'), quad(7, 0, 0.5, 0, 1, 0.5, 'rockB')]);
+  const f = uvReport(folded, { perPiece: true });
+  const fa = f.pieces.find((p) => p.name === 'rockA')!, fb = f.pieces.find((p) => p.name === 'rockB')!;
+  check(fa.overlapPairs === 0 && fb.overlapPairs! > 0 && f.overlap.inTile.pairs === fb.overlapPairs && f.utilization.method === 'none',
+    `per piece: rockB's own overlap is found and named, the overlap with rockA is not counted (${fb.overlapPairs} pairs; whole mesh ${uvReport(folded).overlap.inTile.pairs})`);
+  const t = inspect(folded, { detail: 'uv', uvPerPiece: true });
+  check(/tested within each of 2 pieces/.test(t) && /rockB: 4 tris, .*, [1-9]\d* overlapping pairs/.test(t) && /rockA: 2 tris, .*, 0 overlapping pairs/.test(t), 'inspect uv per piece says so and lists the overlaps per piece');
+  const unnamed = uvReport(mesh([quad(0, 0, 0, 0, 0.5, 0.5), quad(5, 0, 0.25, 0, 0.75, 0.5)]), { perPiece: true });
+  check(!unnamed.perPiece && unnamed.overlap.inTile.pairs > 0 && /no prim string attribute "name"/.test(unnamed.reasons.join()), 'per piece without a name attribute: tested as one mesh, and it says so');
+}
+
 {
   // many large triangles on one uv (instanced copies of a mesh, cooked out): the candidate grid would list each in
   // thousands of cells and overflow; the scan stops and says so, the report is marked incomplete

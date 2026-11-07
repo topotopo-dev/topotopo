@@ -14,6 +14,7 @@ import { encodePNG } from '../src/render/png.ts';
 import zlib from 'node:zlib';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
+import { addFixture } from './fixtures.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -622,6 +623,25 @@ for (const node of ['uv_layout', 'uv_unwrap']) {
   }
   const lp = await cook(nodes(0.05, false, 'lod')), lk = await cook(nodes(0.05, true, 'lod'));
   check(uvReport(lp.geo).overlap.pairs > 0 && uvReport(lk.geo).overlap.pairs === 0 && lk.warnings.some((w) => w.includes('folds the uv') && w.includes('"ring"')), `lod keep_uv: a level of the unwrapped torus keeps the uv clean (plain: ${uvReport(lp.geo).overlap.pairs} overlapping pairs) and says where it held back`);
+}
+
+// chart_smoothing: a noisy rock is charted on a smoothed copy (a few smooth charts instead of many ragged ones) and the
+// uv goes onto the real shape: every point where it was, one texel density, no overlaps; on quads too, where the
+// straddling split turns some polygons into triangles
+for (const [fixture, halves] of [['NOISY_ROCK', true], ['NOISY_QUAD_ROCK', false]] as const) {
+  const nodes: GraphSpec['nodes'] = {};
+  addFixture(nodes, fixture);
+  const src = (await cook(nodes, fixture)).geo;
+  const plain = await cook({ ...nodes, out: { type: 'uv_unwrap', in: [fixture] } });
+  const soft = await cook({ ...nodes, out: { type: 'uv_unwrap', in: [fixture], params: { chart_smoothing: 60 } } });
+  const rp = uvReport(plain.geo), rs = uvReport(soft.geo, { resolution: 1024 });
+  const moved = soft.geo.numPoints === src.numPoints ? soft.geo.P.reduce((m, x, i) => Math.max(m, Math.abs(x - src.P[i])), 0) : Infinity;
+  const d = rs.density!;
+  check(rs.charts <= 10 && (!halves || rs.charts * 2 < rp.charts) && !soft.warnings.some((w) => w.includes('folded')), `uv_unwrap chart_smoothing on ${fixture}: ${rp.charts} charts → ${rs.charts}`);
+  if (!halves) check(soft.geo.numPrims > src.numPrims, `uv_unwrap chart_smoothing on ${fixture}: the straddling split made triangles (${src.numPrims} → ${soft.geo.numPrims} prims)`);
+  check(moved === 0, `uv_unwrap chart_smoothing on ${fixture}: the uv is on the real shape (${soft.geo.numPoints} of ${src.numPoints} points, largest move ${moved})`);
+  check(rs.overlap.pairs === 0 && rs.mirrored === 0 && rs.collapsed === 0 && d.p05 > d.median * 0.95 && d.p95 < d.median * 1.05,
+    `uv_unwrap chart_smoothing on ${fixture}: ${rs.overlap.pairs} overlapping pairs, ${rs.mirrored} mirrored, ${rs.collapsed} collapsed; texel density 5%..95% = ${(d.p05 / d.median).toFixed(3)}..${(d.p95 / d.median).toFixed(3)} of the median (${soft.geo.numPrims} prims from ${src.numPrims})`);
 }
 
 // a renamed or removed param is refused, and the error says what to write now (NodeDef.renamed)

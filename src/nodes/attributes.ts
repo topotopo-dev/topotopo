@@ -250,10 +250,15 @@ defineNode({
   category: 'attribute',
   packed: 'keep',
   summary: 'Copy attributes from the second input by element index (or by matching an id attribute).',
+  description:
+    'Elements pair up by index (element i takes the source\'s element i), or by match_by. Point positions are copied when ' +
+    'names lists P itself (names "P" or "P Cd"; normals are not recomputed: add a normal node), never through a wildcard, so ' +
+    'the default "*" leaves the shape alone. Warns when the counts differ in index mode (only the first elements pair up: the ' +
+    'topology differs, so match_by an id), and when a listed name is not on the source in that class.',
   aliases: ['attribcopy', 'copy_attrib'],
   inputs: [{ name: 'dest', desc: 'geometry receiving attributes' }, { name: 'source', desc: 'geometry providing attributes' }],
   params: {
-    names: { type: 'string', default: '*', desc: 'attribute name pattern', aliases: ['name', 'pattern'] },
+    names: { type: 'string', default: '*', desc: 'attribute name pattern (space-separated, * and ? wildcards, ^name excludes); point P only when listed by name', aliases: ['name', 'pattern'] },
     class: { type: 'enum', options: ['point', 'prim', 'vertex', 'detail'], default: 'point', desc: 'class' },
     match_by: { type: 'string', default: '', desc: 'match elements by this int/string attribute instead of index (e.g. "id" or "name")' },
   },
@@ -265,9 +270,10 @@ defineNode({
     },
     output: 'out',
   },
-  cook: ({ input, p }) => {
+  cook: ({ input, p, warn }) => {
     const g = input(0).clone(), s = input(1);
     const m = globRe(p.names);
+    const listed = String(p.names ?? '').split(/[\s,]+/).filter((t) => t && !t.startsWith('^') && !/[*?]/.test(t));
     const dt = g.table(p.class), st = s.table(p.class);
     let map: (i: number) => number = (i) => (i < st.count ? i : -1);
     if (p.match_by) {
@@ -278,11 +284,23 @@ defineNode({
       for (let i = 0; i < st.count; i++) idx.set(sa.get(i), i);
       map = (i) => idx.get(da.get(i)) ?? -1;
     }
+    let copied = 0;
     for (const [name, a] of st.map) {
-      if (name === 'P' || !m(name) || name === p.match_by) continue;
+      if (!m(name) || name === p.match_by) continue;
+      // positions only when named: the default "*" copies the attributes, not the shape
+      if (name === 'P' && p.class === 'point' && !listed.includes('P')) continue;
       const d = dt.add(name, a.type, a.size);
       for (let i = 0; i < dt.count; i++) { const j = map(i); if (j >= 0) d.set(i, a.get(j)); }
       d.compact();
+      copied++;
+    }
+    for (const n of listed) {
+      if (st.get(n) || n === p.match_by) continue;
+      const elsewhere = (['point', 'vertex', 'prim', 'detail'] as const).filter((c) => c !== p.class && s.table(c).get(n));
+      warn(`attrib_copy: the source has no ${p.class} attribute "${n}"${elsewhere.length ? ` (it has a ${elsewhere.join(' and a ')} "${n}": set class to ${elsewhere[0]})` : ''}; nothing copied for it`);
+    }
+    if (copied && !p.match_by && dt.count !== st.count) {
+      warn(`attrib_copy: dest has ${dt.count} ${p.class}s and source ${st.count}: copied by index, so only the first ${Math.min(dt.count, st.count)} pair up${dt.count > st.count ? ' (the rest keep their values, or get the default)' : ''}; when the topology differs, match_by an id attribute`);
     }
     return g;
   },
