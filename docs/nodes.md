@@ -6034,7 +6034,7 @@ category: `copy` · aliases: `scatter_points`, `distribute`
 
 Scatter points on surfaces (area-weighted, blue-noise spacing; by count or per m²; density attribute and 0..1 mask; relaxation; exact minimum distance), along curves, or inside volumes.
 
-Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or prim attribute, Houdini's density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; "^name" excludes). Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").
+Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or prim attribute, Houdini's density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; "^name" excludes). N: the input N is always carried (point or vertex N interpolated and normalised, prim N copied; attrib_delete removes it); scatter computes none of its own unless write_normals is on (the surface normal, or the tangent along curves), as the Houdini scatter does, because copy_to_points turns each copy so its +Z follows N and an N pointing up lays upright models on their side. Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").
 
 **Inputs**
 
@@ -6066,8 +6066,9 @@ Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sample
 | `write_sourceprim` | bool | `true` |  |  | `source_prim`, `sourceprim` | write int sourceprim (the source prim of each point) |
 | `write_primuv` | bool | `false` |  |  | `prim_uv`, `sourceprimuv` | write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention) |
 | `write_seed` | bool | `false` |  |  | `seed_attrib`, `pcg_seed` | write int seed per point (PCG $Seed; a hash of seed and the point number) |
+| `write_normals` | bool | `false` |  |  | `compute_normals`, `output_normals` | write N when no input N is carried: the surface normal (surface mode) or the curve tangent (curve mode); off leaves the points without N so copy_to_points stands copies upright |
 
-**Writes:** point N (surface normal), sourceprim; optional sourceprimuv, seed; source attributes (emit_attributes)
+**Writes:** point sourceprim; N when the input has N (carried) or write_normals is on; optional sourceprimuv, seed; source attributes (emit_attributes)
 
 **Example**
 
@@ -11386,6 +11387,7 @@ Unreal PCG: Self Pruning (overlap), Density Filter (density), Attribute Filter (
         "s"
       ],
       "params": {
+        "mode": "direction",
         "scale_min": 0.5,
         "scale_max": 1.5
       }

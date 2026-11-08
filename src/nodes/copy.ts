@@ -26,11 +26,13 @@ export { sampleEliminate };
  * pos[3c..3c+2] for c = keep[k]): what GeoBuilder.build gives for points added with provenance {i: corners, w} plus the
  * N, sourceprim and sourceprimuv attributes (the scatter node's builder path without emitted vertex/prim attributes),
  * assembled in typed arrays. Source point attributes not in skip are interpolated (floats blended with the weights,
- * others from the heaviest corner), P follows them, then N, sourceprim and sourceprimuv; no prims, no groups.
+ * others from the heaviest corner), P follows them, then N (normals: carry = the point N interpolated and normalised,
+ * face = the prim normal fn, none = no N), sourceprim and sourceprimuv; no prims, no groups.
  */
 function scatterSurfaceGeo(
   g: Geometry, skip: Set<string>, keep: ArrayLike<number>, candT: Int32Array, candW: Float64Array, pos: Float64Array,
-  tris: ArrayLike<number>, triPrim: ArrayLike<number>, fn: Float64Array, writeSourceprim: boolean, writePrimuv: boolean,
+  tris: ArrayLike<number>, triPrim: ArrayLike<number>, normals: 'carry' | 'face' | 'none', fn: Float64Array,
+  writeSourceprim: boolean, writePrimuv: boolean,
 ): Geometry {
   const n = keep.length, vp = g.vertexPoint;
   const corner = new Int32Array(n * 3), wt = new Float64Array(n * 3), dom = new Int32Array(n);
@@ -74,13 +76,10 @@ function scatterSurfaceGeo(
   }
   const P = pts.add('P', 'float', 3).data as Float64Array;
   for (let k = 0; k < n; k++) { const c = keep[k]; P[k * 3] = pos[c * 3]; P[k * 3 + 1] = pos[c * 3 + 1]; P[k * 3 + 2] = pos[c * 3 + 2]; }
-  // N: the prim normal, or the point N interpolated and normalised
-  const nA = g.points.get('N');
-  const exN = pts.get('N');
-  const NA = exN && exN.type === 'float' && exN.size === 3 ? exN : pts.add('N', 'float', 3, defaultValueFor('N', 3, 'float'));
-  const Nd = NA.data as Float64Array;
-  const ndat = nA && nA.size === 3 ? (nA.data as Float64Array) : null;
-  for (let k = 0; k < n; k++) {
+  // N: the point N interpolated and normalised, or the prim normal
+  const Nd = normals === 'none' ? null : pts.add('N', 'float', 3, defaultValueFor('N', 3, 'float')).data as Float64Array;
+  const ndat = normals === 'carry' ? (g.points.get('N')!.data as Float64Array) : null;
+  if (Nd) for (let k = 0; k < n; k++) {
     const c = keep[k], pr = triPrim[candT[c]];
     if (ndat) {
       const w0 = candW[c * 3], w1 = candW[c * 3 + 1], w2 = candW[c * 3 + 2];
@@ -193,7 +192,10 @@ defineNode({
     'through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart ' +
     'throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source ' +
     'prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; ' +
-    '"^name" excludes). Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").',
+    '"^name" excludes). N: the input N is always carried (point or vertex N interpolated and normalised, prim N copied; ' +
+    'attrib_delete removes it); scatter computes none of its own unless write_normals is on (the surface normal, or the tangent along ' +
+    'curves), as the Houdini scatter does, because copy_to_points turns each copy so its +Z follows N and an N pointing up lays ' +
+    'upright models on their side. Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").',
   aliases: ['scatter_points', 'distribute'],
   inputs: [{ name: 'geo', desc: 'surface, curves, or closed mesh (volume mode)' }],
   params: {
@@ -217,8 +219,9 @@ defineNode({
     write_sourceprim: { type: 'bool', default: true, desc: 'write int sourceprim (the source prim of each point)', aliases: ['source_prim', 'sourceprim'] },
     write_primuv: { type: 'bool', default: false, desc: 'write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention)', aliases: ['prim_uv', 'sourceprimuv'] },
     write_seed: { type: 'bool', default: false, desc: 'write int seed per point (PCG $Seed; a hash of seed and the point number)', aliases: ['seed_attrib', 'pcg_seed'] },
+    write_normals: { type: 'bool', default: false, desc: 'write N when no input N is carried: the surface normal (surface mode) or the curve tangent (curve mode); off leaves the points without N so copy_to_points stands copies upright', aliases: ['compute_normals', 'output_normals'] },
   },
-  outputs: 'point N (surface normal), sourceprim; optional sourceprimuv, seed; source attributes (emit_attributes)',
+  outputs: 'point sourceprim; N when the input has N (carried) or write_normals is on; optional sourceprimuv, seed; source attributes (emit_attributes)',
   example: {
     nodes: {
       ground: { type: 'grid', params: { size: [20, 20], divisions: [40, 40] } },
@@ -288,7 +291,13 @@ defineNode({
     else for (const n of g.points.names()) if (n !== 'P' && !emitOk(n)) b.skip.point.add(n);
     b.skip.point.add('N');
     b.keepSrcGroups = false;
-    const Nout = b.attrib('point', 'N', 3);
+    // N: the input's own N is always carried (point N interpolated and normalised here, vertex and prim N with the
+    // emitted attributes below); scatter computes one (surface normal, curve tangent) only with write_normals
+    const vec3 = (a: Attribute | undefined) => !!a && a.type === 'float' && a.size === 3 && !a.isArray;
+    const carryN = (['point', 'vertex', 'prim'] as const).find((cls) => vec3(g.table(cls).get('N'))) ?? null;
+    const normals: 'carry' | 'face' | 'none' = carryN === 'point' ? 'carry' : !carryN && p.write_normals ? 'face' : 'none';
+    const Nin = carryN === 'point' ? (g.points.get('N')!.data as Float64Array) : null;
+    const Nout = normals !== 'none' ? b.attrib('point', 'N', 3) : null;
     const sp = p.write_sourceprim ? b.attrib('point', 'sourceprim', 1, 'int') : null;
     const puv = p.write_primuv ? b.attrib('point', 'sourceprimuv', 3) : null;
     // vertex and prim attributes carried onto the points (point attributes travel through the builder's provenance)
@@ -301,6 +310,7 @@ defineNode({
           const a = g.table(cls).get(name)!;
           emits.push({ name, cls, a, out: b.attrib('point', name, a.size, a.type, a.def) });
         }
+    if (carryN === 'vertex' || carryN === 'prim') emits.push({ name: 'N', cls: carryN, a: g.table(carryN).get('N')!, out: b.attrib('point', 'N', 3) });
     const emitAt = (id: number, verts: number[], w: number[], pr: number) => {
       for (const e of emits) {
         const a = e.a;
@@ -320,6 +330,10 @@ defineNode({
     const finish = (built?: Geometry): Geometry => {
       const out = built ?? b.build();
       for (const e of emits) { out.vertices.delete(e.name); out.prims.delete(e.name); }
+      if (carryN === 'vertex') {
+        const d = out.points.get('N')!.data as Float64Array;
+        for (let i = 0; i < d.length; i += 3) { const l = Math.hypot(d[i], d[i + 1], d[i + 2]); if (l > 1e-20) { d[i] /= l; d[i + 1] /= l; d[i + 2] /= l; } }
+      }
       if (p.write_seed) { const s = out.points.add('seed', 'int', 1).data as Int32Array; for (let i = 0; i < s.length; i++) s[i] = elementSeed(p.seed, i); }
       return out;
     };
@@ -416,8 +430,7 @@ defineNode({
         outKeep = order; outT = RT; outW = RW; outPos = RP;
       }
       // no emitted vertex/prim attributes: assemble the result directly (what the builder path below gives)
-      if (!emits.length) return finish(scatterSurfaceGeo(g, b.skip.point, outKeep, outT, outW, outPos, tris, triPrim, fn, !!sp, !!puv));
-      const nA = g.points.get('N');
+      if (!emits.length) return finish(scatterSurfaceGeo(g, b.skip.point, outKeep, outT, outW, outPos, tris, triPrim, normals, fn, !!sp, !!puv));
       for (let o = 0; o < outKeep.length; o++) {
         const k = outKeep[o];
         const c = { t: outT[k], w: [outW[k * 3], outW[k * 3 + 1], outW[k * 3 + 2]], pos: [outPos[k * 3], outPos[k * 3 + 1], outPos[k * 3 + 2]] };
@@ -425,12 +438,8 @@ defineNode({
         const ids = verts.map((v) => vp[v]);
         const id = b.addPoint(c.pos[0], c.pos[1], c.pos[2], { i: ids, w: c.w });
         const pr = triPrim[c.t];
-        let n: number[] = [fn[pr * 3], fn[pr * 3 + 1], fn[pr * 3 + 2]];
-        if (nA && nA.size === 3) {
-          const d = nA.data as Float64Array;
-          n = normalize([0, 1, 2].map((cc) => c.w[0] * d[ids[0] * 3 + cc] + c.w[1] * d[ids[1] * 3 + cc] + c.w[2] * d[ids[2] * 3 + cc]) as Vec3);
-        }
-        Nout.set(id, n);
+        if (Nin) Nout!.set(id, normalize([0, 1, 2].map((cc) => c.w[0] * Nin[ids[0] * 3 + cc] + c.w[1] * Nin[ids[1] * 3 + cc] + c.w[2] * Nin[ids[2] * 3 + cc]) as Vec3));
+        else if (Nout) Nout.set(id, [fn[pr * 3], fn[pr * 3 + 1], fn[pr * 3 + 2]]);
         if (sp) sp.set(id, pr);
         if (puv) {
           let u = 0, v = 0;
@@ -481,7 +490,8 @@ defineNode({
       for (let o = 0; o < order.length; o++) {
         const { sg: si, f } = picks[order[o]], sg = segs[si];
         const id = b.blendPoint([sg.a, sg.b], [1 - f, f]);
-        Nout.set(id, normalize([Pd[sg.b * 3] - Pd[sg.a * 3], Pd[sg.b * 3 + 1] - Pd[sg.a * 3 + 1], Pd[sg.b * 3 + 2] - Pd[sg.a * 3 + 2]]));
+        if (Nin) Nout!.set(id, normalize([0, 1, 2].map((cc) => Nin[sg.a * 3 + cc] * (1 - f) + Nin[sg.b * 3 + cc] * f) as Vec3));
+        else if (Nout) Nout.set(id, normalize([Pd[sg.b * 3] - Pd[sg.a * 3], Pd[sg.b * 3 + 1] - Pd[sg.a * 3 + 1], Pd[sg.b * 3 + 2] - Pd[sg.a * 3 + 2]]));
         if (sp) sp.set(id, sg.pr);
         if (puv) puv.set(id, [sg.u0 + (sg.u1 - sg.u0) * f, 0, 0]);
         if (emits.length) emitAt(id, [sg.va, sg.vb], [1 - f, f], sg.pr);

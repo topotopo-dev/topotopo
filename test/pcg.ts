@@ -181,7 +181,7 @@ section('scatter v2');
 
   // relaxation pushes points apart
   const raw = await geo({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 300, relax: false, seed: 3 } } }, 's');
-  const rel = await geo({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 300, relax: false, seed: 3, relax_iterations: 10 } } }, 's');
+  const rel = await geo({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 300, relax: false, seed: 3, relax_iterations: 10, write_normals: true } } }, 's');
   const d0 = nnDistances(raw.P), d1 = nnDistances(rel.P);
   let onPlane = true;
   for (let i = 0; i < rel.numPoints; i++) if (Math.abs(rel.P[i * 3 + 1]) > 1e-9 || Math.abs(rel.P[i * 3]) > 5 + 1e-9 || Math.abs(rel.P[i * 3 + 2]) > 5 + 1e-9) onPlane = false;
@@ -256,6 +256,35 @@ section('scatter v2');
   const def = await geo({ m: { type: 'sphere', params: { type: 'ico', level: 2 } }, s: { type: 'scatter', in: ['m'] } }, 's');
   const explicit = await geo({ m: { type: 'sphere', params: { type: 'ico', level: 2 } }, s: { type: 'scatter', in: ['m'], params: { generate_by: 'auto', density_mask: '', density_scale: 1, relax_iterations: 0, relax_radius: 0, min_distance: 0, max_per_prim: 0, emit_attributes: '*', write_sourceprim: true, write_primuv: false, write_seed: false } } }, 's');
   check(fpEq(def, explicit), 'scatter: new params at their defaults give the legacy result');
+
+  // N: carried from the input, computed only with write_normals, so the plain scatter → copy_to_points stands copies upright
+  const unitN = (g: Geometry) => { const d = attr(g, 'N'); let e = 0; for (let i = 0; i < g.numPoints; i++) e = Math.max(e, Math.abs(Math.hypot(d[i * 3], d[i * 3 + 1], d[i * 3 + 2]) - 1)); return e; };
+  const plain = await geo({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 50 } } }, 's');
+  const faceN = await geo({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 50, write_normals: true } } }, 's');
+  const fN = attr(faceN, 'N');
+  check(!plain.points.has('N') && faceN.numPoints === 50 && maxDiff(fN.slice(0, 3), [0, 1, 0]) < 1e-12 && unitN(faceN) < 1e-12,
+    'scatter: no N on a surface without N; write_normals writes the surface normal');
+  const ter = await geo({ t: { type: 'terrain', params: { size: [20, 20], height: 4 } }, s: { type: 'scatter', in: ['t'], params: { count: 80, emit_attributes: '^*' } } }, 's');
+  check(ter.points.has('N') && unitN(ter) < 1e-12 && attr(ter, 'N').some((x, i) => i % 3 === 0 && Math.abs(x) > 0.05), 'scatter: an input point N is carried (interpolated, normalised), whatever emit_attributes says');
+  const vN = await geo({ b: { type: 'box' }, n: { type: 'normal', in: ['b'], params: { class: 'vertex', cusp_angle: 30 } }, s: { type: 'scatter', in: ['n'], params: { count: 60, write_normals: false } } }, 's');
+  const vd = attr(vN, 'N');
+  let axial = true;
+  for (let i = 0; i < vN.numPoints; i++) if (Math.max(Math.abs(vd[i * 3]), Math.abs(vd[i * 3 + 1]), Math.abs(vd[i * 3 + 2])) < 1 - 1e-9) axial = false;
+  check(!!vd && axial && unitN(vN) < 1e-12 && !vN.vertices.has('N'), 'scatter: a vertex N is carried onto the points (the normals of the box faces)');
+  const line = { c: { type: 'curve', params: { points: [[0, 0, 0], [10, 0, 0]] } } } as Record<string, NodeSpec>;
+  const lp = await geo({ ...line, s: { type: 'scatter', in: ['c'], params: { count: 20 } } }, 's');
+  const lt = await geo({ ...line, s: { type: 'scatter', in: ['c'], params: { count: 20, write_normals: true } } }, 's');
+  const ln = await geo({ ...line, n: { type: 'attrib_create', in: ['c'], params: { name: 'N', class: 'point', value: [0, 0, 2] } }, s: { type: 'scatter', in: ['n'], params: { count: 20, write_normals: true } } }, 's');
+  check(!lp.points.has('N') && maxDiff(attr(lt, 'N').slice(0, 3), [1, 0, 0]) < 1e-12 && maxDiff(attr(ln, 'N').slice(0, 3), [0, 0, 1]) < 1e-12,
+    'scatter on curves: no N by default, the tangent with write_normals, an input N carried (normalised) before either');
+  // a tall post copied onto the scattered points stands upright (2 m tall), not on its side
+  const posts = await geo({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 20 } }, post: { type: 'box', params: { size: [0.2, 2, 0.2] } }, c: { type: 'copy_to_points', in: ['post', 's'] } }, 'c');
+  const pb = posts.bbox();
+  check(Math.abs(pb.max[1] - pb.min[1] - 2) < 1e-9, `scatter → copy_to_points: copies stand upright (height ${(pb.max[1] - pb.min[1]).toFixed(3)} m, want 2)`);
+  // orient normal_up on points without N: a full random yaw with upright decides the heading anyway, so no warning
+  const yawAll = await run({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 20 } }, o: { type: 'orient', in: ['s'], params: { upright: true, random_yaw: [0, 360] } } }, 'o');
+  const yawNone = await run({ grid: GRID, s: { type: 'scatter', in: ['grid'], params: { count: 20 } }, o: { type: 'orient', in: ['s'], params: { upright: true } } }, 'o');
+  check(yawAll.ok && !yawAll.warnings.length && yawNone.warnings.some((w) => /no N/.test(w.message)), 'orient normal_up without N: silent when upright and a full random yaw choose the heading, a warning otherwise');
 }
 
 // ---------------------------------------------------------------- mask

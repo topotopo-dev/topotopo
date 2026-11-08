@@ -952,7 +952,9 @@ scatter: generate_by count (exactly count) | density (density × density_scale p
   density, else count). weight = density_attrib (point/vertex/prim, ≥ 0) × density_mask (0..1). relax (blue noise, follows
   the weights), relax_iterations (Lloyd-style push-apart on the surface), min_distance (exact), max_per_prim,
   emit_attributes ("*": point/vertex attributes interpolated, prim attributes copied; "^uv" excludes), write_primuv
-  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume.
+  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume. The input N is carried; write_normals
+  writes the surface normal (curve tangent) when the input has none.
+  N on points orients copies (+Z along N), so delete it or set orient/up when instances should stand upright.
   backend auto (default) uses WASM when already loaded, otherwise JS; kernel loads WASM, js forces the reference path.
   Elimination, ordered minimum-distance rejection (including per-prim caps), and surface relaxation have Rust kernels.
   min_distance can reduce the count; blue-noise elimination alone is not a hard separation constraint.

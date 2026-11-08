@@ -34,11 +34,11 @@
     "hashes": {
       "P": "4f30b0d01f743312",
       "attributes": {
-        "point.N": "ddaec73db9580bb7",
-        "point.orient": "fe4ee5886c101676",
+        "point.N": "83bbc4759e84f5b7",
+        "point.orient": "5eb1836ffe58d3ad",
         "point.pscale": "ff138e1398660085",
         "point.sourceprim": "0b0b34b5b73b936f",
-        "point.up": "655f96b6ec418ffc",
+        "point.up": "dd3a064281387798",
         "point.uv": "999d7901d2ac009f"
       },
       "topology": "c6aecfc4fbcb4a1e"
@@ -47,5 +47,5 @@
   "name": "node.orient",
   "ok": true,
   "source": "fixture for node type \"orient\" (test/fixtures.ts)",
-  "warnings": []
+  "warnings": ["[target] points have no N (and no polygons): N defaults to the direction param"]
 }
