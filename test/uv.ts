@@ -598,6 +598,18 @@ for (const node of ['uv_layout', 'uv_unwrap']) {
     `inspect uv names the face a wrap seam runs through instead of reporting folds (${rw.wrapSeam.prims} faces, ${rw.wrapSeam.examples[0]}; ${rw.overlap.pairs} overlapping pairs)`);
   const { inspect } = await import('../src/inspect.ts');
   check(/WRAP SEAM: 1 face \(2 triangles\) spans the seam/.test(inspect(w.geo, { detail: 'uv' })) && /1 faces span a wrap seam/.test(inspect(w.geo)), 'inspect uv and the summary print the wrap seam line');
+  // a revolve (its start and end columns welded), seams on and off its columns, a pole: every face spans its share of a
+  // turn, no strip, and the GLB splits the seam's points so it reads back the same
+  for (const seam of [0, 7]) {
+    const rev = await cook({
+      p: { type: 'curve', params: { points: [[0, 0, 0], [0.4, 0, 0], [0.25, 0.6, 0], [0.45, 1.2, 0]] } }, r: { type: 'revolve', in: ['p'], params: { segments: 24 } },
+      out: { type: 'uv_project', in: ['r'], params: { method: 'cylindrical', seam, scale: [4, 0.25] } },
+    });
+    const widest = Math.max(...spans(rev.geo).map((f) => f.hi - f.lo)), rr = uvReport(rev.geo);
+    const back = await importGeometryAsync(await exportGeometryAsync(rev.geo, 'glb'), 'glb'), backWidest = Math.max(...spans(back).map((f) => f.hi - f.lo));
+    check(Math.abs(widest - 4 / 24) < 1e-9 && rr.overlap.pairs === 0 && rr.mirrored === 0 && rr.wrapSeam.prims === 0 && Math.abs(backWidest - 4 / 24) < 1e-6,
+      `cylindrical on a revolve, seam ${seam}: the widest face spans one face's share of a turn (${widest.toFixed(4)}; read back from GLB ${backWidest.toFixed(4)}), no strip or fold`);
+  }
 }
 
 // decimating after the unwrap: a plain reduction folds the uv of a torus; keep_uv (the default) never does, says where
