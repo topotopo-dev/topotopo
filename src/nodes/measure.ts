@@ -281,7 +281,7 @@ export function assertScope(g: Geometry, pr: PieceReport): Record<string, any> {
   };
 }
 
-const EXPR_NAMES = 'npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first)';
+const EXPR_NAMES = 'npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement)';
 
 defineNode({
   type: 'assert',
@@ -493,8 +493,18 @@ defineNode({
     if (String(p.expr ?? '').trim()) {
       checks++;
       const src = String(p.expr).trim();
-      // the measurements, over the graph vars the expression names
-      const scope: Record<string, any> = { ...pickVars(vars, codeVarNames(src, vars)), ...assertScope(g, pieces()) };
+      // the measurements and the graph vars the expression names; as in every expression a var comes first, and geo
+      // always holds the measurements, so one expression can read both ("geo.pieces == pieces")
+      const measured = assertScope(g, pieces());
+      const named = pickVars(vars, codeVarNames(src, vars));
+      const scope: Record<string, any> = { ...measured, ...named, geo: measured };
+      const bare = (k: string) => new RegExp(`(?<![\\w$.])${k}(?![\\w$])`).test(src);
+      const viaGeo = (k: string) => new RegExp(`(?<![\\w$.])geo\\s*\\.\\s*${k}(?![\\w$])`).test(src);
+      for (const k of Object.keys(named)) {
+        if (k === 'geo') warn('assert expr: geo holds the measurements here, so the graph var geo cannot be read; rename the var');
+        else if (Object.hasOwn(measured, k) && bare(k) && !viaGeo(k))
+          warn(`assert expr: ${k} is the graph var ${k} (${String(named[k])}), not the measured ${k} (${typeof measured[k] === 'number' ? fmt(measured[k]) : String(measured[k])}); write geo.${k} for the measurement`);
+      }
       let res: any;
       try { res = evalExpr(src, scope, { host: engine.host, timeoutMs: engine.scriptTimeoutMs }); }
       catch (e: any) {
@@ -503,13 +513,15 @@ defineNode({
         throw new NodeError(`assert expr "${src}" cannot be evaluated: ${why}`, `expr can read ${EXPR_NAMES}`);
       }
       if (!res) {
-        const used = Object.keys(scope).filter((k) => new RegExp(`\\b${k}\\b`).test(src));
-        const val = (k: string) => {
-          const x = scope[k];
-          if (k === 'bbox') return `bbox ${v3(x.min)} .. ${v3(x.max)}`;
+        const val = (k: string, x: any) => {
+          if (/^(geo\.)?bbox$/.test(k) && x && x.min) return `${k} ${v3(x.min)} .. ${v3(x.max)}`;
           return `${k} ${typeof x === 'number' ? fmt(x) : String(x)}`;
         };
-        fail('expr', `"${src}" is false${used.length ? ` (${used.map(val).join(', ')})` : ''}`);
+        const used = [
+          ...Object.keys(scope).filter((k) => k !== 'geo' && bare(k)).map((k) => val(k, scope[k])),
+          ...Object.keys(measured).filter(viaGeo).map((k) => val(`geo.${k}`, measured[k])),
+        ];
+        fail('expr', `"${src}" is false${used.length ? ` (${used.join(', ')})` : ''}`);
       }
     }
 

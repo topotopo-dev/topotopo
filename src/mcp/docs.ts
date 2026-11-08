@@ -1634,7 +1634,9 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    (BVH, stops after max_tests candidate pairs and says so), attrib (must exist; attrib_min/attrib_max bound its first
    component; attrib_class), group (exists and is non-empty), expr (JS over npoints nprims nvertices npolys nlines
    bbox.min/.max/.size/.center (.x .y .z) volume area pieces open_pieces genus closed boundary_edges, and the graph
-   vars by their bare name: "npoints == count * 8").
+   vars by their bare name: "npoints == count * 8"). As in every expression a var comes first: with a slider "pieces",
+   pieces is the slider and geo.pieces the measurement (geo holds every measurement), so "geo.pieces == pieces" reads
+   both; an expr that reads such a name bare, without geo, gets a warning naming the clash.
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
    Every failed check names its first offender: the part (prim "name", groups) and its world position.
