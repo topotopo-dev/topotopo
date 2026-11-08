@@ -3,8 +3,8 @@
 // topology (welding, pieces, the render tool's edge classes), the Controls rules, the status and cook state lines,
 // the output cards (kind line, heightfield layers, formats offered, download names), the Packages tab (a package's
 // state, the Scene tree's mark, a before/after's places) and the minimal edits the viewer makes to a graph file
-// (src/viewer/json-edit.ts). Also checks that the page's
-// modules only import each other and the served three.js.
+// (src/viewer/json-edit.ts), and packed instances as the page loads them (scene.js: drawn and framed at their places).
+// Also checks that the page's modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,7 +27,11 @@ import * as info from '../src/viewer/app/output-info.js';
 import * as pop from '../src/viewer/app/export-popover.js';
 import * as pkgs from '../src/viewer/app/packages.js';
 import { heightfieldPreviewStep } from '../src/core/heightfield.ts';
-import { HEIGHTFIELD_PREVIEW_RES } from '../src/render/preview.ts';
+import { HEIGHTFIELD_PREVIEW_RES, previewGLB } from '../src/render/preview.ts';
+import { MeshObject, parseGLB } from '../src/viewer/app/scene.js';
+import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
+import { packedFromMatrices } from '../src/core/packed.ts';
+import { m4translate } from '../src/core/math.ts';
 import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -583,6 +587,28 @@ section('the page\'s modules');
   const shell = fs.readFileSync(path.join(root, 'src', 'viewer', 'index.html'), 'utf8');
   check(!problems.length && files.includes('style.css') && /src="\/app\/main\.js"/.test(shell) && /href="\/app\/style\.css"/.test(shell) && !/<script(?![^>]*src)[^>]*>[^<]{200,}/.test(shell),
     `index.html is a shell loading /app/main.js and /app/style.css; modules import only each other and three (${problems.join('; ') || `${files.length} files`})`);
+}
+
+section('packed instances in the viewer: drawn where they are, framed where they are (F-96, F-101)');
+{
+  // a source of a triangle with no material, a polyline and a loose point, packed twice far from the origin, loaded the
+  // way the viewer loads /api/geo: three.js instances triangle meshes only, so a points or lines primitive in the
+  // instanced mesh made it draw one copy at the origin and no instance, and frame all took in the origin
+  const b = new GeoBuilder(new Geometry());
+  b.addPrim([b.addPoint(0, 0, 0), b.addPoint(1, 0, 0), b.addPoint(1, 1, 0)], true);
+  b.addPrim([b.addPoint(0, 2, 0), b.addPoint(0, 3, 0)], false);
+  b.addPoint(0, 4, 0);
+  const g = packedFromMatrices(b.build(), [m4translate(-834, 0, 2567), m4translate(-800, 0, 2600)]);
+  const bytes = await previewGLB(g);
+  const obj = new MeshObject('out', await parseGLB(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)));
+  const inst = obj.parts.filter((p: any) => p.type === 'inst'), box = obj.bounds();
+  check(inst.length === 1 && inst[0].obj.count === 2 && !obj.parts.some((p: any) => p.type === 'mesh'), `the triangle is one instanced mesh of 2 instances (parts: ${obj.parts.map((p: any) => p.type).join(', ')})`);
+  check(!box.isEmpty() && box.min.x > -835 && box.max.x < -798 && box.min.z > 2566 && box.max.z < 2601 && !box.containsPoint(new THREE.Vector3()),
+    `frame all's bounds hold the instances alone, far from the origin (${box.min.toArray().join(', ')} to ${box.max.toArray().join(', ')})`);
+  const k = obj.parts.indexOf(inst[0]) >= 0 ? (obj.pieceCount(), inst[0].offset) : -1;
+  const pb = [k, k + 1].map((i) => obj.bounds(i));
+  check(k >= 0 && pb.every((x: any) => !x.isEmpty()) && pb[0].min.x > -835 && pb[0].max.x < -832 && pb[1].min.x > -801 && pb[1].max.x < -798,
+    `frame selection: each picked instance has its own bounds at its place (${pb.map((x: any) => x.min.x).join(', ')})`);
 }
 
 console.log(`\n${passes} passed, ${failures} failed`);
