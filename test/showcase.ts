@@ -12,7 +12,7 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { openPackages } from '../src/packages/registry.ts';
-import { renderGeometry } from '../src/render/raster.ts';
+import { renderGeometryAsync } from '../src/render/raster.ts';
 import { renderArgs } from '../src/render/options.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
@@ -52,7 +52,7 @@ for (const job of jobs.filter((j) => !filter || j.name.includes(filter))) {
   }
   const t0 = performance.now();
   const ro = graph.meta?.render ?? {};
-  const img = renderGeometry(r.geo, { ...renderArgs(ro), title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name, views: ro.views, checker: !!ro.checker, colorBy: ro.color_by ?? null, azimuth: ro.azimuth, elevation: ro.elevation, zoom: ro.zoom });
+  const img = await renderGeometryAsync(r.geo, { ...renderArgs(ro), title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name, views: ro.views, checker: !!ro.checker, colorBy: ro.color_by ?? null, azimuth: ro.azimuth, elevation: ro.elevation, zoom: ro.zoom });
   fs.writeFileSync(path.join(outDir, name + '.png'), encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
   console.log(`ok   ${name}: cook ${r.ms.toFixed(0)} ms, render ${(performance.now() - t0).toFixed(0)} ms${r.warnings.length ? `, ${r.warnings.length} warnings: ${r.warnings.slice(0, 2).map((w) => `[${w.node}] ${w.message}`).join('; ')}` : ''}`);
   console.log('     ' + summarize(r.geo).split('\n').slice(0, 2).join('\n     '));
