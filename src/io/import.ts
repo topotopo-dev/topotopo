@@ -8,7 +8,7 @@ import { Geometry } from '../core/geometry.ts';
 import { geoFromJSON } from './json.ts';
 import { importGLTFAsync } from './gltf.ts';
 import { importHoudiniBgeo, importHoudiniGeo, isBinaryJSON } from './hgeo.ts';
-import { importCSV, importPointsJSON, isPointsJSON } from './points.ts';
+import { importCSV, importPointRows, importPointsJSON, isPointRows, isPointsJSON } from './points.ts';
 import { imageFromPNGFile } from './textures.ts';
 import { SIDECAR_FORMATS, SIDECAR_NAMES, SIDECAR_TEXT } from './sidecars.ts';
 import { MATERIAL_ATTRIB, normalizeMaterial, primMaterials, writeMaterials } from '../core/materials.ts';
@@ -41,8 +41,9 @@ export function importFormatFromPath(path: string): string {
   return p.slice(p.lastIndexOf('.') + 1);
 }
 
-/** JSON of any supported flavour: topotopo geometry, points stream, or Houdini .geo (a key/value array). */
+/** JSON of any supported flavour: topotopo geometry, points stream, point rows, or Houdini .geo (a key/value array). */
 function importAnyJSON(j: any, warn?: (m: string) => void): Geometry {
+  if (isPointRows(j)) return importPointRows(j);
   if (Array.isArray(j)) return importHoudiniGeo(j, warn);
   if (isPointsJSON(j)) return importPointsJSON(j);
   // an export's sidecar (io/sidecars.ts) is metadata of the file beside it: say so instead of "not a topotopo-geo file"
@@ -65,7 +66,7 @@ export function importGeometry(bytes: Uint8Array, fmt: string, opts: ImportOptio
     case 'json': return importAnyJSON(JSON.parse(td.decode(bytes)), opts.warn);
     case 'geo': case 'hgeo': case 'bgeo': return isBinaryJSON(bytes) ? importHoudiniBgeo(bytes, opts.warn) : importHoudiniGeo(td.decode(bytes), opts.warn);
     case 'csv': return importCSV(td.decode(bytes));
-    case 'pointsjson': return importPointsJSON(JSON.parse(td.decode(bytes)));
+    case 'pointsjson': { const j = JSON.parse(td.decode(bytes)); return isPointRows(j) ? importPointRows(j) : importPointsJSON(j); }
     case 'png': {
       // an image volume named after the file, as the image_file node reads it with its defaults
       const g = new Geometry();

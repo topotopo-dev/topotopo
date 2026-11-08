@@ -862,6 +862,8 @@ Make them:
   pack {by: connectivity|name|attrib|all, pivot}   pieces → instances; identical pieces share one source;
                                constant name/Cd/material per piece move onto the instance.
   file *.glb                   EXT_mesh_gpu_instancing comes in packed (instancing:"expand" for real geometry).
+  file *.csv / *.json          a placement list (P, yaw, pscale, a piece name per row) as the template points: help
+                               topic "recipes", 15 (instance a placement list).
 Nodes that KEEP instances (work on anchors / packed prims): transform (also rotates/scales each instance), match_size,
   copy_xform, copy_to_points, merge, switch, null, foreach (pieces/prims/points: one iteration per instance), solver,
   graph_ref, file, delete (not edge dissolve), group, group_*, attrib_* (create, randomize, promote, delete, rename,
@@ -1772,7 +1774,27 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
  topotopo/architecture/wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true on the front) +
  topotopo/architecture/roof_gable or roof_hip translated to the wall top; topotopo/street/fence and bench,
  topotopo/props/crate and topotopo/nature/tree_lowpoly placed with transform or copy_to_points;
- topotopo/nature/forest_patch on a grid for a park. Whole graph: examples/street_block.json.`,
+ topotopo/nature/forest_patch on a grid for a park. Whole graph: examples/street_block.json.
+15) Instance a placement list (a position, yaw, scale and piece name per row, from a file) into one instanced GLB:
+ placements  file {path:"inputs/placements.json"}: a JSON list of rows [{"P":[2,0,0], "yaw":45, "pscale":1.2,
+             "name":"barrel"}, …], or a CSV with the columns P.x,P.y,P.z,yaw,pscale,name; every key or column is a
+             point attribute (orient.x…w or N and up in place of yaw, scale for a per-axis scale; yaw in degrees,
+             counter-clockwise seen from above, so a list from Unreal, clockwise, needs its sign flipped).
+ pieces      one file node per piece (pieces/crate.glb, or a package output in its place) + attrib_create
+             {name:"name", class:"prim", value:"crate"}, merged; or a folder, file {path:"pieces"}, whose files
+             are named after their stems ("<stem>/<part>" for a file with several named parts: wrangle
+             {run_over:"prims", code:"s@name = @name.split('/')[0];"} makes each file one piece again).
+ instance    copy_to_points {pack:true, variants:"name", variant_attrib:"name", rotate_attrib:"yaw"} (in: pieces,
+             placements); rows naming no piece get no copy and a warning that lists them.
+ export      glb: one mesh per piece with EXT_mesh_gpu_instancing (help topic "instancing").
+ {"nodes":{"crate":{"type":"file","params":{"path":"pieces/crate.glb"}},
+  "crate_n":{"type":"attrib_create","in":["crate"],"params":{"name":"name","class":"prim","value":"crate"}},
+  "barrel":{"type":"file","params":{"path":"pieces/barrel.glb"}},
+  "barrel_n":{"type":"attrib_create","in":["barrel"],"params":{"name":"name","class":"prim","value":"barrel"}},
+  "pieces":{"type":"merge","in":["crate_n","barrel_n"]},
+  "spots":{"type":"file","params":{"path":"inputs/placements.json"}},
+  "layout":{"type":"copy_to_points","in":["pieces","spots"],"params":{"pack":true,"variants":"name","variant_attrib":"name","rotate_attrib":"yaw"}}},
+  "output":"layout"}`,
 };
 
 export function topicList() {

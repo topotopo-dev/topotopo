@@ -13,6 +13,9 @@
 //   Color "(X=r,Y=g,Z=b,W=a)" (FVector4), Seed. A row struct {FVector Position; FRotator Rotation; FVector Scale;
 //   float Density; FVector4 Color; int32 Seed} imports it directly.
 // Points JSON: { format: "topotopo-points", version: 1, count, attributes: { P: { type, size, data } } }.
+// Point rows (import only): a JSON list of objects, one per point, such as a placement list
+//   [{"P": [0, 0, 2], "yaw": 30, "pscale": 1.2, "name": "crate"}, …]; each key is read as a CSV column of that name
+//   ("x", "y", "z" are P), a list is a vector, text is a string attribute.
 //
 // Instance stream (geometry with packed prims, instances 'rows', the default): one row per packed instance instead of
 // one per point. P = anchor position, orient + scale = the instance's 3×3 decomposed (rotation · per-axis scale; a
@@ -358,8 +361,38 @@ function splitColumn(h: string): { base: string; comp: number } {
 export function importCSV(text: string): Geometry {
   const rows = parseCSV(text);
   if (!rows.length) return new Geometry();
-  const header = rows[0];
-  const body = rows.slice(1);
+  return pointsFromTable(rows[0], rows.slice(1), 'CSV needs position columns: P.x,P.y,P.z (or x,y,z, or Unreal Position.X/Y/Z)');
+}
+
+/** A JSON list of objects, one per point ([{"P": [x, y, z], "yaw": 30, "name": "crate"}, …]), not a Houdini .geo array. */
+export function isPointRows(j: any): j is Record<string, unknown>[] {
+  return Array.isArray(j) && j.length > 0 && j.every((r) => r !== null && typeof r === 'object' && !Array.isArray(r));
+}
+
+/**
+ * Points from a JSON list of rows (see the module comment): every key is an attribute, read as CSV reads a column; an
+ * array is a vector (its items are the components).
+ */
+export function importPointRows(rows: Record<string, unknown>[]): Geometry {
+  const header: string[] = [], at = new Map<string, number>();
+  const cells: string[][] = rows.map(() => []);
+  const put = (r: number, key: string, v: unknown) => {
+    if (v !== null && typeof v === 'object') throw new Error(`point rows: "${key}" in row ${r + 1} is an object; write a vector as a list ([x, y, z]) and a name as text`);
+    let c = at.get(key);
+    if (c === undefined) { c = header.length; at.set(key, c); header.push(key); }
+    cells[r][c] = v === undefined || v === null ? '' : typeof v === 'boolean' ? (v ? '1' : '0') : String(v);
+  };
+  rows.forEach((row, r) => {
+    for (const [key, v] of Object.entries(row)) {
+      if (Array.isArray(v)) v.forEach((x, i) => put(r, `${key}.${i}`, x));
+      else put(r, key, v);
+    }
+  });
+  return pointsFromTable(header, cells, 'point rows need a position: "P": [x, y, z] (or "x", "y", "z")');
+}
+
+/** Points from a header and rows of cells, every column grouped into an attribute by its name (splitColumn). */
+function pointsFromTable(header: string[], body: string[][], noPosition: string): Geometry {
   const n = body.length;
   const posCol = header.findIndex((h) => /^position$/i.test(h.trim()));
   const pcg = header.some((h) => /^position\.x$/i.test(h.trim())) || (posCol >= 0 && !!body.length && !!ueStruct(body[0][posCol] ?? ''));
@@ -374,7 +407,7 @@ export function importCSV(text: string): Geometry {
     if (!gr) { gr = { comps: new Map(), scalar: -1 }; groups.set(base, gr); }
     if (comp < 0) gr.scalar = i; else gr.comps.set(comp, i);
   });
-  if (!groups.has('P')) throw new Error('CSV needs position columns: P.x,P.y,P.z (or x,y,z, or Unreal Position.X/Y/Z)');
+  if (!groups.has('P')) throw new Error(noPosition);
   const g = new Geometry({ positions: new Float64Array(n * 3) });
   const t = g.points;
   for (const [base, gr] of groups) {

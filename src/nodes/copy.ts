@@ -717,7 +717,8 @@ defineNode({
     'the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, ' +
     'or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random ' +
     'with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from ' +
-    'any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner.',
+    'any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner. ' +
+    'Pieces placed from a list in a file (P, yaw, pscale, name per row): help topic "recipes", "instance a placement list".',
   inputs: [{ name: 'geo', desc: 'geometry to copy' }, { name: 'points', desc: 'template points' }],
   params: {
     group: P.group('point', 'template points to use ("" = all)'),
@@ -784,6 +785,19 @@ defineNode({
       if (byValue) {
         const unknown = Object.keys(byValue).filter((k) => !values.some((v) => String(v) === k));
         if (unknown.length) warn(`variant_weights: no variant named ${unknown.map((k) => `"${k}"`).join(', ')} (variants: ${values.join(', ')})`);
+      }
+      if (va) {
+        // a value that is neither a variant nor an index picks nothing: say which, as a misspelt name drops copies
+        const miss = new Map<string, number>();
+        for (const ti of tpts) { const v = va.get(ti) as any; if (typeof v !== 'number' && !subsets.has(v)) miss.set(String(v), (miss.get(String(v)) ?? 0) + 1); }
+        if (miss.size) {
+          const said = [...miss].slice(0, 6).map(([v, k]) => `"${v}"${k > 1 ? ` ×${k}` : ''}`).join(', ') + (miss.size > 6 ? ` and ${miss.size - 6} more` : '');
+          warn(`${[...miss.values()].reduce((a, b) => a + b, 0)} template point(s) get no copy: their "${p.variant_attrib}" names no variant (${said}; variants: ${values.slice(0, 12).join(', ')}${values.length > 12 ? ', …' : ''})`);
+        }
+      } else if (splitAttr && !wts.length) {
+        // a placement list names its pieces in the attribute the source is split by (Houdini's piece attribute)
+        const same = t.points.get(splitAttr);
+        if (same && tpts.some((ti) => subsets!.has(same.get(ti) as any))) warn(`the template points have "${splitAttr}" with the variants' names, but ${p.variant_attrib ? `no "${p.variant_attrib}" (variant_attrib)` : 'variant_attrib is empty'}: the variants cycle; set variant_attrib "${splitAttr}" to copy the one each point names`);
       }
       let wcdf: Float64Array | null = null;
       if (wts.length && va) warn(`variant_weights ignored: the template points have "${p.variant_attrib}", which picks the variants`);

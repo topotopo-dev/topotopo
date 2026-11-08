@@ -8,6 +8,7 @@ import type { CookReport } from '../graph/engine.ts';
 import { hashString } from '../core/random.ts';
 import { IMPORT_FORMATS, importFormatFromPath, importGeometryAsync } from '../io/import.ts';
 import { readImageFile } from '../io/textures.ts';
+import { SIDECAR_FORMATS, jsonFormat, maybeSidecar } from '../io/sidecars.ts';
 import type { HostFiles } from '../host/types.ts';
 import { scopeSig } from '../graph/scope.ts';
 import { fusePoints } from './transform.ts';
@@ -427,12 +428,12 @@ defineNode({
   type: 'file',
   category: 'io',
   packed: 'keep',
-  summary: 'Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON; a PNG becomes an image volume named after the file, as image_file reads it with its defaults (image_file has the layer and colour options). .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively: name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points); its PNGs become images. copy_to_points {variants: \'name\'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.',
+  summary: 'Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON, a JSON list of point rows (a placement list) or topotopo JSON; a PNG becomes an image volume named after the file, as image_file reads it with its defaults (image_file has the layer and colour options). .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively (export sidecars such as crate.glb.source.json are skipped): name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points); its PNGs become images. copy_to_points {variants: \'name\'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.',
   aliases: ['import', 'load', 'read'],
   inputs: [],
   params: {
     path: { type: 'path', default: '', desc: 'file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a .topo file at or above the graph), else from the graph\'s folder (MCP: the package); folder mode needs directory support in the host', aliases: ['file', 'filename'] },
-    format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume)' },
+    format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams, point rows ([{"P": [x, y, z], "yaw": 30, "name": "crate"}, …], each key an attribute as a CSV column) and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
     weld: { type: 'bool', default: false, desc: 'fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances)' },
@@ -448,7 +449,7 @@ defineNode({
   async cook({ p, scope, warn }) {
     if (!p.path) throw new NodeError('path is empty');
     const host = scope.files, files = directoryFiles(p.path, host);
-    const read = async (file: string, format: string) => {
+    const read = async (file: string, format: string, given?: Uint8Array) => {
       if (format === 'png') {
         // an image, not a mesh: the image_file loader (its defaults), and no axis, scale or weld
         const g = new Geometry();
@@ -461,7 +462,7 @@ defineNode({
         if (!host.convertFile) throw new NodeError('.blend needs the Node host with Blender installed (set TOPOTOPO_BLENDER); export a .glb instead');
         bytes = await host.convertFile(host.resolvePath(file), 'glb');
         fmt = 'glb';
-      } else bytes = await host.readFile(file).catch((e: any) => { throw new NodeError(`cannot read "${file}": ${e.message}${!host.isDirectory || !host.listDir ? `; ${folderError}` : ''}`); });
+      } else bytes = given ?? await host.readFile(file).catch((e: any) => { throw new NodeError(`cannot read "${file}": ${e.message}${!host.isDirectory || !host.listDir ? `; ${folderError}` : ''}`); });
       let g = await importGeometryAsync(bytes, fmt, { path: file, readFile: (f) => host.readFile(f), warn, instancing: p.instancing });
       if (p.up_axis === 'z' || p.scale !== 1) {
         // packed instances: anchors convert like points, the conversion composes into their transforms (sources stay)
@@ -505,7 +506,10 @@ defineNode({
         try { parts.push(await read(childPath(p.path, file), fmt)); } catch (e: any) { warn(`skipped ${file}: ${e?.message ?? e}`); }
         continue;
       }
-      parts.push(folderNames(await read(childPath(p.path, file), fmt), file));
+      // an export's sidecar (crate.glb.source.json beside crate.glb) describes the file beside it: not a model
+      const bytes = maybeSidecar(file) ? await host.readFile(childPath(p.path, file)) : undefined;
+      if (bytes && SIDECAR_FORMATS[jsonFormat(bytes) ?? '']) continue;
+      parts.push(folderNames(await read(childPath(p.path, file), fmt, bytes), file));
     }
     return Geometry.merge(parts);
   },
