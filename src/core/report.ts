@@ -11,7 +11,7 @@
 // one's position and the fix. Seam welding: a boundary edge whose two points coincide (within 1e-7 of the bbox
 // diagonal) with those of exactly one other boundary edge is a seam split, not a hole.
 import type { Geometry } from './geometry.ts';
-import { buildEdges, primArea, triangulate } from './topology.ts';
+import { buildEdges, growInt32, PairIds, primArea, triangulate } from './topology.ts';
 import type { Triangulation } from './topology.ts';
 import { halfEdges } from './halfedge.ts';
 
@@ -116,6 +116,8 @@ export interface SolidReportOptions {
   tri?: Triangulation;
   /** look for winding flips (a half-edge structure; default true) */
   flips?: boolean;
+  /** look for closed pieces facing inward (default true; compares the pieces pairwise to tell cavity walls) */
+  inward?: boolean;
 }
 
 /** Whether the mesh is a closed solid, and why not (see the file comment). */
@@ -131,18 +133,22 @@ export function solidReport(g: Geometry, o: SolidReportOptions = {}): SolidRepor
   // copies on boundary edges; points elsewhere stay themselves)
   const b = g.bbox();
   const diag = Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1;
-  const q = diag * 1e-7, canon = Int32Array.from({ length: np }, (_, i) => i), byPos = new Map<string, number>();
+  // (typed tables throughout, no JS Map: a Map stops at 2^24 entries, which the edges, points and pieces of a large
+  // render pass; positions are counted in steps of q from the bbox corner, so they fit an int)
+  const q = diag * 1e-7, canon = Int32Array.from({ length: np }, (_, i) => i);
+  const xy = new PairIds(), xyz = new PairIds();
+  let firstAt: Int32Array = new Int32Array(16);
   const onBoundary = new Uint8Array(np);
   for (let e = 0; e < E.a.length; e++) if (E.count[e] === 1 && g.primClosed[E.firstPrim[e]]) { onBoundary[E.a[e]] = 1; onBoundary[E.b[e]] = 1; }
   for (let i = 0; i < np; i++) {
     if (!onBoundary[i]) continue;
-    const k = `${Math.round(P[i * 3] / q)},${Math.round(P[i * 3 + 1] / q)},${Math.round(P[i * 3 + 2] / q)}`;
-    const c = byPos.get(k);
-    if (c === undefined) byPos.set(k, i); else canon[i] = c;
+    const at = xyz.size, k = xyz.add(xy.add(Math.round((P[i * 3] - b.min[0]) / q), Math.round((P[i * 3 + 1] - b.min[1]) / q)), Math.round((P[i * 3 + 2] - b.min[2]) / q));
+    if (k === at) { firstAt = growInt32(firstAt, at + 1, at); firstAt[at] = i; } else canon[i] = firstAt[k];
   }
-  // boundary edges of polygons, grouped by their welded end points
+  // boundary edges of polygons, grouped by their welded end points: per group the edge count and the first edge
   let boundary = 0, rawNonManifold = 0, firstNM = -1;
-  const groups = new Map<string, number[]>();
+  const groups = new PairIds(), edgeGroup = new Int32Array(E.a.length).fill(-1);
+  let gCount: Int32Array = new Int32Array(16), gFirst: Int32Array = new Int32Array(16);
   for (let e = 0; e < E.a.length; e++) {
     if (!g.primClosed[E.firstPrim[e]]) continue;
     if (E.count[e] > 2) { rawNonManifold++; if (firstNM < 0) firstNM = e; continue; }
@@ -150,16 +156,16 @@ export function solidReport(g: Geometry, o: SolidReportOptions = {}): SolidRepor
     boundary++;
     const ca = canon[E.a[e]], cb = canon[E.b[e]];
     if (ca === cb) continue;
-    const k = ca < cb ? `${ca},${cb}` : `${cb},${ca}`;
-    let l = groups.get(k);
-    if (!l) groups.set(k, (l = []));
-    l.push(e);
+    const at = groups.size, k = ca < cb ? groups.add(ca, cb) : groups.add(cb, ca);
+    if (k === at) { gCount = growInt32(gCount, at + 1, at); gFirst = growInt32(gFirst, at + 1, at); gCount[k] = 0; gFirst[k] = e; }
+    gCount[k]++;
+    edgeGroup[e] = k;
   }
   let seam = 0, open = 0, firstOpen = -1, nonManifold = rawNonManifold;
-  for (const l of groups.values()) {
-    if (l.length === 2) seam += 2;
-    else if (l.length === 1) { open++; if (firstOpen < 0 || l[0] < firstOpen) firstOpen = l[0]; }
-    else { nonManifold += 1; if (firstNM < 0) firstNM = l[0]; }
+  for (let k = 0; k < groups.size; k++) {
+    if (gCount[k] === 2) seam += 2;
+    else if (gCount[k] === 1) { open++; if (firstOpen < 0 || gFirst[k] < firstOpen) firstOpen = gFirst[k]; }
+    else { nonManifold += 1; if (firstNM < 0) firstNM = gFirst[k]; }
   }
   // winding flips (as the points are: a seam split separates the two sides anyway)
   const he = o.flips === false ? null : halfEdges(g);
@@ -174,19 +180,18 @@ export function solidReport(g: Geometry, o: SolidReportOptions = {}): SolidRepor
     const r0 = find(canon[g.vertexPoint[s]]);
     for (let v = s + 1; v < e; v++) { const r = find(canon[g.vertexPoint[v]]); if (r !== r0) parent[r] = r0; }
   }
-  const pieceOf = new Map<number, number>();
+  const pieceOf = new Int32Array(np).fill(-1); // piece by root point
   const primPiece = new Int32Array(g.numPrims).fill(-1);
+  let n = 0;
   for (let p = 0; p < g.numPrims; p++) {
     if (g.primStart[p + 1] === g.primStart[p]) continue;
     const r = find(canon[g.vertexPoint[g.primStart[p]]]);
-    let k = pieceOf.get(r);
-    if (k === undefined) pieceOf.set(r, (k = pieceOf.size));
-    primPiece[p] = k;
+    if (pieceOf[r] < 0) pieceOf[r] = n++;
+    primPiece[p] = pieceOf[r];
   }
   // per welded piece: open after welding?, signed volume, bbox
-  const n = pieceOf.size;
   const openPiece = new Uint8Array(n), vol = new Float64Array(n), mn = new Float64Array(n * 3).fill(Infinity), mx = new Float64Array(n * 3).fill(-Infinity);
-  for (const l of groups.values()) if (l.length !== 2) for (const e of l) openPiece[primPiece[E.firstPrim[e]]] = 1;
+  for (let e = 0; e < E.a.length; e++) if (edgeGroup[e] >= 0 && gCount[edgeGroup[e]] !== 2) openPiece[primPiece[E.firstPrim[e]]] = 1;
   for (let e = 0; e < E.a.length; e++) if (E.count[e] > 2 && g.primClosed[E.firstPrim[e]]) openPiece[primPiece[E.firstPrim[e]]] = 1;
   for (let p = 0; p < g.numPrims; p++) if (!g.primClosed[p] && primPiece[p] >= 0) openPiece[primPiece[p]] = 1;
   const { tris, triPrim } = o.tri ?? triangulate(g);
@@ -198,7 +203,7 @@ export function solidReport(g: Geometry, o: SolidReportOptions = {}): SolidRepor
     for (const i of [a, c1, c2]) for (let d = 0; d < 3; d++) { mn[k * 3 + d] = Math.min(mn[k * 3 + d], P[i + d]); mx[k * 3 + d] = Math.max(mx[k * 3 + d], P[i + d]); }
   }
   let inward = 0, firstInwardPrim = -1;
-  for (let k = 0; k < n; k++) {
+  for (let k = 0; k < n && o.inward !== false; k++) {
     if (openPiece[k] || !(vol[k] < 0)) continue;
     // the wall of a cavity: inside the bbox of a larger outward-facing closed piece
     let cavity = false;

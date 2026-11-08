@@ -525,7 +525,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const nrmOf = (v: number, out: number[]) => { out[0] = vnorm[v * 3]; out[1] = vnorm[v * 3 + 1]; out[2] = vnorm[v * 3 + 2]; };
   // back faces are only suspicious on closed pieces (closed once the vertex splits of uv / normal seams are welded, as
   // an imported mesh has them); open sheets / cards are shaded two-sided. The pieces are the welded ones (core/report.ts).
-  const solid = nTri ? solidReport(g, { tri: { tris, triPrim }, flips: false }) : null;
+  const solid = nTri ? solidReport(g, { tri: { tris, triPrim }, flips: false, inward: false }) : null;
   const pieceOf = solid ? solid.primPiece : new Int32Array(0), closedPiece = solid ? solid.pieceClosed : new Uint8Array(0);
 
   // --- colours per vertex (Cd, colour-by, highlight)
@@ -545,12 +545,13 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const a = f.attr;
       const ci = comp ? 'xyzwrgb'.indexOf(comp) % 4 : -1;
       if (a.type === 'string' || (a.type === 'int' && a.size === 1)) {
+        // distinct values, counted up to 100,000 (a Set stops at 2^24 entries; the legend shows a few dozen)
         const seen = new Set<any>();
-        for (let i = 0; i < a.count; i++) seen.add(a.get(i));
+        for (let i = 0; i < a.count && seen.size < 100_000; i++) seen.add(a.get(i));
         const toKey = (x: any) => (typeof x === 'string' ? hashStr(x) : x);
         colorOf = (v) => catColor(toKey(a.get(elemIndex(f.cls, v))));
         pointColorOf = f.cls === 'point' ? (p) => catColor(toKey(a.get(p))) : () => null;
-        legend = `COLOR BY ${aname} (${seen.size} VALUES)`;
+        legend = `COLOR BY ${aname} (${seen.size < 100_000 ? seen.size : '100000+'} VALUES)`;
         if (o.legend) cbLegend = categoryLegend(`COLOR BY ${aname}`, seen, (x) => catColor(toKey(x)));
       } else {
         const scalar = (i: number) => {
@@ -723,9 +724,12 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const cdMode = o.vertexColors && o.vertexColors !== 'auto' ? ` CD ${o.vertexColors.toUpperCase()}` : '';
     ovDesc.push(`SHADING PBR${o.grey ? ' GREY 18%' : ''} STUDIO EV ${fmtNum(ev)}${cdMode} (${pbrS.summary.toUpperCase()})`);
     // blend triangles grouped by prim, for the back-to-front pass of each view
-    const byPrim = new Map<number, number[]>();
-    for (let t = 0; t < nTri; t++) if (pbrS.triAlpha[t] === ALPHA_BLEND) { const p = triPrim[t]; let l = byPrim.get(p); if (!l) byPrim.set(p, (l = [])); l.push(t); }
-    for (const [prim, ts] of byPrim) pbrBlend.push({ prim, tris: ts });
+    // (a prim's triangles are consecutive, so no Map by prim: a Map stops at 2^24 entries)
+    for (let t = 0; t < nTri; t++) {
+      if (pbrS.triAlpha[t] !== ALPHA_BLEND) continue;
+      const last = pbrBlend[pbrBlend.length - 1];
+      if (last && last.prim === triPrim[t]) last.tris.push(t); else pbrBlend.push({ prim: triPrim[t], tris: [t] });
+    }
   } else if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
   // section / clip planes
   const planeAt = (k: number, off: number | undefined, abs: boolean | undefined) => (abs ? off ?? 0 : bmin[k] + (bmax[k] - bmin[k]) * (off ?? 0.5));
