@@ -1364,6 +1364,7 @@ export class PackageUses implements SessionPackages {
         rootPath: this.rootPath,
         ...(o.info?.note ? { note: o.info.note } : {}), ...(x.label ? { label: x.label } : {}), ...(kind ? { kind } : {}), ...(tags?.length ? { tags } : {}),
         ...(o.warning ? { warning: o.warning } : {}),
+        ...(rec?.maps && !o.warning ? { materials: Object.keys(rec.maps) } : {}),
       });
     };
     const loaded: Loaded = {

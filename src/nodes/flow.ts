@@ -22,6 +22,8 @@ defineNode({
   aliases: ['combine', 'join'],
   inputs: [{ name: 'inputs', desc: 'any number of geometries', multi: true }],
   params: {},
+  // a material node reading one material of the merge reads it of the input that holds it (src/graph/demand.ts)
+  passesMaterials: true,
   example: {
     nodes: {
       box: { type: 'box' },

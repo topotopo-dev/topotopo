@@ -53,6 +53,8 @@ import type { AssetEntry, PackageIssue, PackageResolver, Scope } from './scope.t
 import { NodeError, STOPPED } from './types.ts';
 import type { CookContext, GraphSpec, InputDef, NodeDef, NodeSpec, ParamDef } from './types.ts';
 import { VAR_NAME_HINT, varNameError } from './vars.ts';
+import { inputsNotRead, materialDemands } from './demand.ts';
+import type { Demand, DemandGraph } from './demand.ts';
 import { codeVarNames, pickVars } from '../core/usercode.ts';
 
 export type { TimeState } from './params.ts';
@@ -479,6 +481,10 @@ interface CookSession {
   pdone: Map<string, NodeParams>;
   /** results that shared another result's in-flight cook */
   shared: { leader: NodeResult; waiter: NodeResult }[];
+  /** what the cook reads of each node it reaches (src/graph/demand.ts), worked out when a merge first asks */
+  demand?: Map<string, Demand>;
+  /** the inputs of a merge the cook leaves out: package material outputs holding no material read */
+  notRead: Map<string, Set<number>>;
 }
 
 /** What an in-flight cook hands to the cooks that wait for it. */
@@ -932,7 +938,7 @@ export class Engine {
     const memo = new Map<string, Promise<NodeResult>>();
     const pmemo = new Map<string, Promise<NodeParams>>();
     const s: CookSession = {
-      graph, opts, scope, time, depth, report, memo, pmemo, pdone: new Map(), shared: [],
+      graph, opts, scope, time, depth, report, memo, pmemo, pdone: new Map(), shared: [], notRead: new Map(),
       vars: { ...(graph.vars ?? {}), ...(opts.vars ?? {}) },
       pull: (name) => {
         let pr = memo.get(name);
@@ -1036,6 +1042,22 @@ export class Engine {
     return { rp, refSig: parts.join(','), usesTime: usesTime || rp.usesTime, depsTimeDependent: depTime };
   }
 
+  /** The inputs of a merge (NodeDef.passesMaterials) this cook leaves out: src/graph/demand.ts. */
+  private inputsNotRead(s: CookSession, name: string): Set<number> {
+    let skip = s.notRead.get(name);
+    if (skip) return skip;
+    const view: DemandGraph = {
+      graph: s.graph,
+      def: (n) => (Object.hasOwn(s.graph.nodes, n) ? this.resolveDef(s.graph.nodes[n].type, s.scope) : undefined),
+      wiring: (n) => { const d = view.def(n); return d ? wiringOf(s.graph.nodes[n], d).list : []; },
+      refs: (n) => { const d = view.def(n); if (!d) return []; const r = scanNodeRefs(d, s.graph.nodes[n].params); return [...r.geo, ...r.ch.map((c) => c.node)]; },
+    };
+    s.demand ??= materialDemands(view, s.report.target);
+    skip = inputsNotRead(view, name, s.demand.get(name) ?? 'all');
+    s.notRead.set(name, skip);
+    return skip;
+  }
+
   /** Cook a single node of a graph (pulling inputs and referenced nodes through the session). */
   private async cookOne(s: CookSession, name: string): Promise<NodeResult> {
     const { graph, vars, opts, scope, time, depth, report } = s;
@@ -1057,7 +1079,9 @@ export class Engine {
       const np0 = await s.paramsOf(name);
       if (!np0.error && !np0.rp.errors.length) used = def.inputsUsed!(np0.rp.values, wiring.length);
     }
-    const wanted = (i: number) => !!wiring[i] && (!lazy || !!used?.[i]);
+    // a merge read for named materials leaves out the package material outputs that hold none of them
+    const notRead = def.passesMaterials && !spec.bypass ? this.inputsNotRead(s, name) : null;
+    const wanted = (i: number) => !!wiring[i] && (!lazy || !!used?.[i]) && !notRead?.has(i);
     // concurrent: start every input, and the params with the nodes they reference, at once
     const started = this.concurrent ? wiring.map((ref, i) => (wanted(i) ? s.pull(ref!) : null)) : null;
     if (this.concurrent && !lazy && def.type !== 'input') s.paramsOf(name);
@@ -1330,9 +1354,10 @@ export class Engine {
         if (!params(n)) return;
         used = def.inputsUsed!(s.pdone.get(n)!.rp.values, wiring.length);
       }
+      const notRead = def.passesMaterials && !spec.bypass ? s.notRead.get(n) : undefined;
       for (let i = 0; i < wiring.length; i++) {
         const ref = wiring[i];
-        if (!ref || (used && !used[i])) continue;
+        if (!ref || (used && !used[i]) || notRead?.has(i)) continue;
         pull(ref);
         if (!res.has(ref) || res.get(ref)!.error) return;
       }

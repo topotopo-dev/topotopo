@@ -2204,6 +2204,63 @@ section('exporting from a followed working folder: a sibling package with no pub
     `an export target without follow is refused, with it written (${target.split('\n')[0].slice(0, 160)})`);
 }
 
+section('a material read by name from a merge of package material outputs cooks only the outputs that hold it');
+{
+  // studio/paints: four material outputs, one with a map; a version records the materials each holds
+  const PAINTS = path.join(dirs.lib, 'paints');
+  const paint = (name: string) => ({ type: 'material', params: { name, base_color: `=[shade, ${name === 'red' ? 0.1 : 0.5}, 0.2]` } });
+  writePackage(PAINTS, { name: 'studio/paints' }, {
+    main: {
+      nodes: {
+        red: paint('red'), green: paint('green'), blue: paint('blue'),
+        bricks: { type: 'tex_pattern', params: { resolution: 16 } },
+        brick: { type: 'texture_to_material', in: [null, 'bricks'], params: { material: 'brick', base_color: 'bricks' } },
+      },
+      output: 'red', vars: { shade: 0.8 }, params: { shade: { type: 'float', min: 0, max: 1, desc: 'red channel' } },
+      outputs: { red: { node: 'red', kind: 'material' }, green: { node: 'green', kind: 'material' }, blue: { node: 'blue', kind: 'material' }, brick: { node: 'brick', kind: 'material' } },
+    },
+  });
+  check((await publish(PAINTS, 'paints')).ok && Object.keys(readJSON(path.join(PAINTS, 'versions', '1.0', 'version.json')).outputs.brick.maps).join() === 'brick',
+    'a package of four material outputs is published, its version recording the materials of each');
+  const SHOP = path.join(dirs.repo, 'shop');
+  writePackage(SHOP, {}, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  const o = await open(SHOP);
+  o.pk.use('studio/paints');
+  const { exportGeometryAsync } = await import('../src/io/export.ts');
+  const { readMaterials } = await import('../src/core/materials.ts');
+  const kit = (from: string, extra: Record<string, any> = {}): GraphSpec => ({
+    nodes: {
+      p_red: { type: 'studio/paints/red' }, p_green: { type: 'studio/paints/green' }, p_blue: { type: 'studio/paints/blue' }, p_brick: { type: 'studio/paints/brick' },
+      all: { type: 'merge', in: ['p_red', 'p_green', 'p_blue', 'p_brick'] }, more: { type: 'merge', in: ['all'] },
+      b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
+      m: { type: 'material', in: ['uv', 'more'], params: { from } }, ...extra,
+    },
+    output: 'm',
+  });
+  const cooked = (r: CookReport) => [...r.results.keys()].filter((n) => n.startsWith('p_')).sort().join();
+  const glb = async (r: CookReport) => (r.ok && r.geo ? sha(await exportGeometryAsync(r.geo, 'glb')) : `failed: ${errorOf(r)}`);
+
+  const named = await o.engine.cook(kit('brick'));
+  const whole = await o.engine.cook(kit('="brick"'));
+  check(named.ok && cooked(named) === 'p_brick' && cooked(whole) === 'p_blue,p_brick,p_green,p_red',
+    `from "brick" through two merges cooks only the output that holds it; from as an expression cooks all four (${cooked(named)} | ${cooked(whole)})`);
+  check(named.ok && whole.ok && await glb(named) === await glb(whole) && Object.keys(readMaterials(named.geo!)).join() === 'brick',
+    'the result is the same as with every output cooked: the same GLB, the one material and its map');
+  const red = await o.engine.cook(kit('red'));
+  check(red.ok && cooked(red) === 'p_red' && readMaterials(red.geo!).red?.baseColor?.[0] === 0.8,
+    `another name in the same engine cooks only its own output (${cooked(red)}; base colour ${JSON.stringify(readMaterials(red.geo!).red?.baseColor)})`);
+  const merged = await o.engine.cook({ ...kit('red'), output: 'more' });
+  check(merged.ok && cooked(merged) === 'p_blue,p_brick,p_green,p_red' && Object.keys(readMaterials(merged.geo!)).length === 4,
+    `the merge as the target cooks all four (${cooked(merged)})`);
+  const set = await o.engine.cook(kit('red', { p_green: { type: 'studio/paints/green', params: { shade: 0.3 } } }));
+  check(set.ok && cooked(set) === 'p_green,p_red', `an output given params is cooked, as its version's record does not say what it then holds (${cooked(set)})`);
+  const geo = await o.engine.cook(kit('red', { look: { type: 'merge', in: ['m', 'all'] } }), { target: 'look' });
+  check(geo.ok && cooked(geo) === 'p_blue,p_brick,p_green,p_red', `a merge read whole elsewhere in the cook cooks all four (${cooked(geo)})`);
+  const typo = await o.engine.cook(kit('brik'));
+  check(!typo.ok && cooked(typo) === 'p_blue,p_brick,p_green,p_red' && /input 1 has no material "brik".*its materials: blue, brick, green, red\)/.test(errorOf(typo)),
+    `a name no output holds cooks all, so the error lists every material (${errorOf(typo).slice(0, 140)})`);
+}
+
 await engines[0]?.host.pool?.close();
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);

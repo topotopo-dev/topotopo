@@ -94,6 +94,15 @@ export interface NodeDef {
    * selected candidate). Inputs marked false are not cooked and appear as null. Default: all inputs.
    */
   inputsUsed?: (p: Record<string, any>, count: number) => boolean[];
+  /**
+   * The materials the node reads from one input, by name, from its params as written (`raw(name)`: a param's value
+   * before expressions, aliases resolved), or null when it reads the input whole (the material node with input 1 and a
+   * "from" name). A cook that reaches a node only through such reads leaves out the package material outputs that hold
+   * none of those materials (src/graph/demand.ts).
+   */
+  materialsRead?: (raw: (param: string) => unknown) => { input: number; names: string[] } | null;
+  /** The node's result holds its inputs' materials as they are (merge): what is read of it is read of each input. */
+  passesMaterials?: boolean;
   /** extra cache-key material (e.g. file mtime), from the scope the node cooks in */
   signatureExtra?: (p: Record<string, any>, scope: Scope) => string;
   /** a package output's node type (src/graph/packages.ts): the package, its version and what it cooks */
