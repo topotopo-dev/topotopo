@@ -21,5 +21,5 @@ levels of detail.
 - uv: every face has uv inside the 0 to 1 square.
 
 ## Look
-The cleaned rock (or column) with an even triangle wireframe, a checker-textured copy beside it, and its smaller levels
-of detail in a row.
+The broken scan first, with its holes and loose chips, then the cleaned rock (or column) with an even triangle
+wireframe, a checker-textured copy beside it, and its smaller levels of detail in a row.
