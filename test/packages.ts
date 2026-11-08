@@ -941,6 +941,16 @@ section('copies: edited by hand, missing, one version with two contents');
   check(o.pk.verifyCopies().some((p) => /edited by hand/.test(p)), 'checked now as well');
   const blocked = await publish(dirs.forest, 'with an edited copy');
   check(!blocked.ok && blocked.blocks.some((b) => /edited by hand/.test(b)), 'publishing a package with a copy edited by hand is refused');
+  // a file Git LFS never fetched (a clone without git lfs): said as such, with what to run, not as an edit
+  const pointer = `version https://git-lfs.github.com/spec/v1
+oid sha256:${'0'.repeat(64)}
+size 1234
+`;
+  fs.writeFileSync(crownFile, pointer);
+  const lfs = await open(dirs.forest), lfsSaid = lfs.pk.check();
+  check(lfsSaid.some((p) => p === 'the copy of studio/trees 1.1 (packages/studio/trees/1.1) holds Git LFS pointers, not its files (graphs/crown.json): Git never fetched them; run git lfs pull in its repository')
+    && !lfsSaid.some((p) => /edited by hand/.test(p)) && lfs.pk.verifyCopies().some((p) => /holds Git LFS pointers.*run git lfs pull in its repository/.test(p)),
+    `a copy holding Git LFS pointers says so and what to run (${lfsSaid.find((p) => /LFS/.test(p))})`);
   fs.writeFileSync(crownFile, before);
   check(!(await open(dirs.forest)).pk.check().some((p) => /edited by hand/.test(p)), 'restored, it is fine again');
   check(!o.pk.check().some((p) => /edited by hand/.test(p)) && !(await o.engine.cook({ nodes: { t: { type: 'studio/trees/pine' } } })).warnings.some((w) => /edited by hand/.test(w.message)),
@@ -968,6 +978,9 @@ section('copies: edited by hand, missing, one version with two contents');
   check((await publish(TAMPER, 'tamper')).ok, 'studio/tamper 1.0');
   setGraph(path.join(TAMPER, 'versions', '1.0'), 'main', { nodes: { b: { type: 'sphere' } }, output: 'b' });
   check(/studio\/tamper 1\.0 in .* \(library "lib"\) was changed after publishing/.test(errorText(() => m.pk.use('studio/tamper'))), 'a version whose files no longer give its hash is not copied');
+  write(path.join(TAMPER, 'versions', '1.0', 'graphs', 'main.json'), pointer);
+  check(/studio\/tamper 1\.0 in .* \(library "lib"\) holds Git LFS pointers, not its files \(graphs\/main\.json\): Git never fetched them; run git lfs pull in its repository, so it is not copied/.test(errorText(() => m.pk.use('studio/tamper'))),
+    `a library version holding Git LFS pointers says so (${errorText(() => m.pk.use('studio/tamper')).replace(/.* holds/, 'holds')})`);
   // the same name in two places: the first place that has it gives it (game comes before lib); the other is not used, said
   const twin = path.join(dirs.game, 'rocks-twin');
   fs.cpSync(ROCKS, twin, { recursive: true });
