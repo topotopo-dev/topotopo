@@ -1,0 +1,55 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [100, 25, 100],
+          "min": [-100, 0, -100]
+        },
+        "grid": {
+          "cellSize": 0.78125,
+          "height": 257,
+          "origin": [-100, -100],
+          "width": 257
+        },
+        "kind": "heightfield",
+        "layers": {
+          "forest_floor": "1f38cbc84f59bb1e",
+          "grass": "0db4e96c0d3a512a",
+          "height": "c18a175f3f765265",
+          "rock": "97714a0cb2e3b14e"
+        },
+        "name": "terrain"
+      }
+    ]
+  },
+  "name": "example.forest_on_terrain",
+  "ok": true,
+  "source": "examples/forest_on_terrain.json",
+  "warnings": []
+}

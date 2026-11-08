@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "description": "A forest with rocks on rolling terrain, ready for a game engine. The ground is a heightfield of 257 × 257 samples over the chosen size: broad rolling hills with ridged flanks, scaled to exactly 0..relief. Its paint layers are weights that add up to 1: rock on the steepest ground (8° and more above max_slope), forest floor under the forest (gentle ground, broken into clearings by a noise that tree_density thresholds) and grass on the rest. Trees (pine, fir and oak, from topotopo/nature/tree_lowpoly; oaks lower down, conifers higher up) are scattered on the forest at an even spacing, upright with a random heading and size; rocks (three shapes of topotopo/nature/rock) gather in clusters on the slopes from just below max_slope to the steepest, leaning with the ground. Both are packed instances placed on the ground as an engine's landscape triangulates it (heightfield_scatter sample unreal_triangles), whole within the terrain. Asserts check that no tree stands steeper than max_slope, that every instance sits on the ground (within 1 cm of the terrain's surface under it) and that every instance's bounds stay within the terrain. Node showcase (not an output) draws the three together, the ground coloured by its paint layers.",
+  "params": {
+    "seed": { "type": "int", "default": 1, "min": 0, "max": 9999, "label": "seed", "desc": "changes the hills and the layout, not the look" },
+    "size": { "type": "float", "default": 200, "min": 50, "max": 500, "step": 10, "label": "size", "desc": "side of the square terrain (m)" },
+    "relief": { "type": "float", "default": 25, "min": 5, "max": 80, "step": 1, "label": "relief", "desc": "height of the hills, from the lowest ground to the highest (m)" },
+    "tree_density": { "type": "float", "default": 0.6, "min": 0, "max": 1, "step": 0.05, "label": "tree density", "desc": "how full the forest is: the share of the gentle ground under trees" },
+    "rock_density": { "type": "float", "default": 0.3, "min": 0, "max": 1, "step": 0.05, "label": "rock density", "desc": "how many rocks lie on the slopes" },
+    "max_slope": { "type": "float", "default": 30, "min": 10, "max": 60, "step": 1, "label": "max slope", "desc": "steeper ground than this stays bare of trees (degrees)" }
+  },
+  "vars": { "seed": 1, "size": 200, "relief": 25, "tree_density": 0.6, "rock_density": 0.3, "max_slope": 30 },
+  "meta": { "render": { "node": "showcase", "views": ["persp"], "azimuth": 25, "elevation": 30, "look_at": [0, 4, 8], "zoom": 1.2, "size": "1600x900", "shading": "pbr", "grid": false } },
+  "nodes": {
+    "field": { "type": "heightfield", "params": { "size": ["=size", "=size"], "samples": [257, 257], "name": "terrain" } },
+    "hills": { "type": "heightfield_noise", "in": ["field"], "params": { "fractal": "fbm", "amplitude": 1, "element_size": "=size * 1.2", "octaves": 4, "roughness": 0.4, "range": "positive", "seed": "=seed", "warp_amplitude": "=size * 0.08", "warp_element_size": "=size * 0.5", "warp_seed": "=seed + 1" } },
+    "flanks": { "type": "heightfield_noise", "in": ["hills"], "params": { "fractal": "ridged", "amplitude": 0.25, "element_size": "=size * 0.4", "octaves": 3, "range": "positive", "seed": "=seed + 2" } },
+    "ground": { "type": "heightfield_remap", "in": ["flanks"], "params": { "auto_range": true, "output_min": 0, "output_max": "=relief", "ramp": [[0, 0], [1, 1]] } },
+
+    "rock_layer": { "type": "heightfield_mask_by_feature", "in": ["ground"], "params": { "feature": "slope", "layer": "rock", "min_angle": "=Math.min(max_slope + 8, 89)", "angle_falloff": 6, "blur": 1.5 } },
+    "gentle": { "type": "heightfield_mask_by_feature", "in": ["rock_layer"], "params": { "feature": "slope", "layer": "mask", "min_angle": 0, "max_angle": "=max_slope - 3", "angle_falloff": 2.5 } },
+    "clearings": { "type": "heightfield_mask_noise", "in": ["gentle"], "params": { "layer": "cover", "element_size": "=size * 0.22", "octaves": 3, "contrast": 2.2, "seed": "=seed + 3" } },
+    "forest_layer": { "type": "heightfield_layer", "in": ["clearings"], "params": { "layer": "forest_floor", "expression": "const t = 1.05 - 1.1 * tree_density; return mask * smoothstep(t - 0.05, t + 0.05, cover) * (1 - rock);" } },
+    "forest_soft": { "type": "heightfield_mask_blur", "in": ["forest_layer"], "params": { "layer": "forest_floor", "radius": 1.5 } },
+    "forest_fit": { "type": "heightfield_layer", "in": ["forest_soft"], "params": { "layer": "forest_floor", "expression": "clamp(forest_floor, 0, 1 - rock)" } },
+    "grass_layer": { "type": "heightfield_layer", "in": ["forest_fit"], "params": { "layer": "grass", "expression": "Math.max(0, 1 - rock - forest_floor)" } },
+    "rocky": { "type": "heightfield_mask_by_feature", "in": ["grass_layer"], "params": { "feature": "slope", "layer": "rocky", "min_angle": "=max_slope - 4", "angle_falloff": 6 } },
+    "rock_clusters": { "type": "heightfield_mask_noise", "in": ["rocky"], "params": { "layer": "rocky", "mode": "multiply", "element_size": "=size * 0.1", "octaves": 2, "contrast": 1.8, "seed": "=seed + 12" } },
+
+    "tree_pts": { "type": "heightfield_scatter", "in": ["grass_layer"], "params": { "density": 0.05, "mask_layer": "forest_floor", "min_distance": 3.2, "align": "upright", "sample": "unreal_triangles", "seed": "=seed + 4" } },
+    "tree_pick": {
+      "type": "wrangle", "in": ["tree_pts"],
+      "params": { "run_over": "points", "code": "// a random size and heading; oaks lower down, conifers higher up\n@pscale = fit(rand(@ptnum, seed, 7), 0, 1, 0.75, 1.25);\nf@yaw = 360 * rand(@ptnum, seed, 6);\nconst oak = 0.7 - 0.55 * clamp(@height / relief, 0, 1), u = rand(@ptnum, seed, 5);\ns@variant = u < oak ? 'oak' : u < oak + (1 - oak) * 0.5 ? 'pine' : 'fir';\n// whole trees stay on the terrain (4.5 m: the widest crown, turned, at scale 1) and off ground steeper than max_slope\nconst edge = size / 2 - 4.5 * @pscale;\nif (Math.abs(@P.x) > edge || Math.abs(@P.z) > edge || @slope > max_slope) removepoint(0, @ptnum);" }
+    },
+    "pine_src": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "conifer", "height": 11, "canopy_radius": 1.9, "trunk_radius": 0.22, "seed": 3 } },
+    "fir_src": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "conifer", "height": 8.5, "canopy_radius": 2.6, "trunk_radius": 0.24, "seed": 7 } },
+    "oak_src": { "type": "topotopo/nature/tree_lowpoly", "params": { "style": "round", "height": 8, "canopy_radius": 3.1, "trunk_radius": 0.3, "seed": 5 } },
+    "pine_needles": { "type": "material", "in": ["pine_src"], "params": { "name": "pine_needles", "group": "@name=tree_canopy", "base_color": "#3f6b35", "roughness": 0.9 } },
+    "fir_needles": { "type": "material", "in": ["fir_src"], "params": { "name": "fir_needles", "group": "@name=tree_canopy", "base_color": "#2c4f30", "roughness": 0.9 } },
+    "oak_leaves": { "type": "material", "in": ["oak_src"], "params": { "name": "oak_leaves", "group": "@name=tree_canopy", "base_color": "#5f8a3a", "roughness": 0.85 } },
+    "pine": { "type": "attrib_create", "in": ["pine_needles"], "params": { "name": "variant_name", "class": "prim", "value": "pine" } },
+    "fir": { "type": "attrib_create", "in": ["fir_needles"], "params": { "name": "variant_name", "class": "prim", "value": "fir" } },
+    "oak": { "type": "attrib_create", "in": ["oak_leaves"], "params": { "name": "variant_name", "class": "prim", "value": "oak" } },
+    "tree_kit": { "type": "merge", "in": ["pine", "fir", "oak"] },
+    "tree_copies": { "type": "copy_to_points", "in": ["tree_kit", "tree_pick"], "params": { "pack": true, "piece_attrib": "variant_name", "variant_attrib": "variant", "rotate_attrib": "yaw" } },
+
+    "rock_pts": { "type": "heightfield_scatter", "in": ["rock_clusters"], "params": { "density": "=0.15 * rock_density", "mask_layer": "rocky", "min_distance": 2.2, "align": "slope", "sample": "unreal_triangles", "seed": "=seed + 8" } },
+    "rock_pick": {
+      "type": "wrangle", "in": ["rock_pts"],
+      "params": { "run_over": "points", "code": "// three shapes, a random size and heading\n@pscale = fit(rand(@ptnum, seed, 11), 0, 1, 0.7, 1.6);\nf@yaw = 360 * rand(@ptnum, seed, 10);\ns@variant = pick(['boulder', 'slab', 'stone'], rand(@ptnum, seed, 9));\n// whole rocks stay on the terrain (3.1 m: the largest rock, turned and tilted, at scale 1)\nconst edge = size / 2 - 3.1 * @pscale;\nif (Math.abs(@P.x) > edge || Math.abs(@P.z) > edge) removepoint(0, @ptnum);" }
+    },
+    "boulder_src": { "type": "topotopo/nature/rock", "params": { "size": 3, "flatness": 0.7, "roughness": 0.4, "sink": 0.15, "seed": 3 } },
+    "slab_src": { "type": "topotopo/nature/rock", "params": { "size": 3.6, "flatness": 0.4, "roughness": 0.3, "sink": 0.15, "seed": 11 } },
+    "stone_src": { "type": "topotopo/nature/rock", "params": { "size": 1.8, "flatness": 0.85, "roughness": 0.45, "sink": 0.15, "seed": 27 } },
+    "boulder": { "type": "attrib_create", "in": ["boulder_src"], "params": { "name": "variant_name", "class": "prim", "value": "boulder" } },
+    "slab": { "type": "attrib_create", "in": ["slab_src"], "params": { "name": "variant_name", "class": "prim", "value": "slab" } },
+    "stone": { "type": "attrib_create", "in": ["stone_src"], "params": { "name": "variant_name", "class": "prim", "value": "stone" } },
+    "rock_shapes": { "type": "merge", "in": ["boulder", "slab", "stone"] },
+    "rock_kit": { "type": "material", "in": ["rock_shapes"], "params": { "name": "rock", "base_color": "#77736c", "roughness": 0.92 } },
+    "rock_copies": { "type": "copy_to_points", "in": ["rock_kit", "rock_pick"], "params": { "pack": true, "piece_attrib": "variant_name", "variant_attrib": "variant", "rotate_attrib": "yaw" } },
+
+    "no_cover": { "type": "heightfield_layer", "in": ["grass_layer"], "params": { "operation": "delete", "layer": "cover" } },
+    "terrain_out": { "type": "heightfield_layer", "in": ["no_cover"], "params": { "operation": "delete", "layer": "mask" } },
+    "ground_grid": { "type": "heightfield_to_mesh", "in": ["terrain_out"], "params": { "layers": false, "normals": false, "uv": false } },
+
+    "tree_gap": { "type": "wrangle", "in": ["tree_copies", "ground_grid"], "note": "no assert compares points with a heightfield surface, so the ground under each instance is read from the grid here; slope is declared again because copy_to_points with no points drops the point attributes, and assert slope reads it", "params": { "run_over": "points", "code": "f@slope = @slope; // the slope each tree stands on, from the scatter (declared even when there are no trees)\n// the ground under each instance, read from the terrain's samples (grid points, row by row), each cell cut along its (0,0)-(1,1) diagonal as a game engine's landscape draws it\nconst n = Math.round(Math.sqrt(npoints(1))), o = point(1, 'P', 0), cell = point(1, 'P', 1)[0] - o[0];\nconst fx = (@P.x - o[0]) / cell, fz = (@P.z - o[2]) / cell;\nconst i = clamp(Math.floor(fx), 0, n - 2), j = clamp(Math.floor(fz), 0, n - 2), u = fx - i, v = fz - j;\nconst h = (a, b) => point(1, 'P', (j + b) * n + i + a)[1];\nconst y = u >= v ? h(0, 0) + u * (h(1, 0) - h(0, 0)) + v * (h(1, 1) - h(1, 0)) : h(0, 0) + v * (h(0, 1) - h(0, 0)) + u * (h(1, 1) - h(0, 1));\nf@ground_gap = @P.y - y;" } },
+    "slope": { "type": "assert", "in": ["tree_gap"], "params": { "label": "slope", "attrib": "slope", "attrib_class": "point", "attrib_max": "=max_slope" } },
+    "tree_grounded": { "type": "assert", "in": ["slope"], "params": { "label": "grounded", "attrib": "ground_gap", "attrib_class": "point", "attrib_min": -0.01, "attrib_max": 0.01 } },
+    "tree_reach": { "type": "wrangle", "in": ["tree_grounded"], "params": { "run_over": "prims", "code": "// how far the instance reaches from the centre in X or Z\nconst b = primintrinsic(0, 'bounds', @primnum);\nf@reach = Math.max(-b[0], b[1], -b[4], b[5]);" } },
+    "tree_inside": { "type": "assert", "in": ["tree_reach"], "params": { "label": "inside", "attrib": "reach", "attrib_class": "prim", "attrib_max": "=size / 2" } },
+    "trees_out": { "type": "attrib_delete", "in": ["tree_inside"], "params": { "names": "ground_gap reach mask height variant yaw" } },
+
+    "rock_gap": { "type": "wrangle", "in": ["rock_copies", "ground_grid"], "note": "no assert compares points with a heightfield surface, so the ground under each instance is read from the grid here", "params": { "run_over": "points", "code": "// the ground under each instance, read from the terrain's samples (grid points, row by row), each cell cut along its (0,0)-(1,1) diagonal as a game engine's landscape draws it\nconst n = Math.round(Math.sqrt(npoints(1))), o = point(1, 'P', 0), cell = point(1, 'P', 1)[0] - o[0];\nconst fx = (@P.x - o[0]) / cell, fz = (@P.z - o[2]) / cell;\nconst i = clamp(Math.floor(fx), 0, n - 2), j = clamp(Math.floor(fz), 0, n - 2), u = fx - i, v = fz - j;\nconst h = (a, b) => point(1, 'P', (j + b) * n + i + a)[1];\nconst y = u >= v ? h(0, 0) + u * (h(1, 0) - h(0, 0)) + v * (h(1, 1) - h(1, 0)) : h(0, 0) + v * (h(0, 1) - h(0, 0)) + u * (h(1, 1) - h(0, 1));\nf@ground_gap = @P.y - y;" } },
+    "rock_grounded": { "type": "assert", "in": ["rock_gap"], "params": { "label": "grounded", "attrib": "ground_gap", "attrib_class": "point", "attrib_min": -0.01, "attrib_max": 0.01 } },
+    "rock_reach": { "type": "wrangle", "in": ["rock_grounded"], "params": { "run_over": "prims", "code": "// how far the instance reaches from the centre in X or Z\nconst b = primintrinsic(0, 'bounds', @primnum);\nf@reach = Math.max(-b[0], b[1], -b[4], b[5]);" } },
+    "rock_inside": { "type": "assert", "in": ["rock_reach"], "params": { "label": "inside", "attrib": "reach", "attrib_class": "prim", "attrib_max": "=size / 2" } },
+    "rocks_out": { "type": "attrib_delete", "in": ["rock_inside"], "params": { "names": "ground_gap reach mask height variant yaw" } },
+
+    "showcase_mesh": { "type": "heightfield_to_mesh", "in": ["terrain_out"], "params": { "uv": false } },
+    "showcase_ground": { "type": "wrangle", "in": ["showcase_mesh"], "params": { "run_over": "points", "code": "// the paint layers as colours: grass (fresher in the valleys), forest floor, rock\nconst g = mix([0.3, 0.47, 0.17], [0.46, 0.55, 0.25], clamp(@height / relief, 0, 1)), f = [0.24, 0.25, 0.13], r = [0.5, 0.48, 0.45];\n@Cd = add(mul(g, @grass), mul(f, @forest_floor), mul(r, @rock));" } },
+    "showcase": { "type": "merge", "in": ["showcase_ground", "trees_out", "rocks_out"] }
+  },
+  "output": "terrain_out",
+  "outputs": {
+    "terrain": { "node": "terrain_out", "label": "Terrain", "kind": "terrain", "tags": ["terrain", "heightfield", "hills", "paint-layers"], "description": "The ground: a heightfield from 0 to relief with the paint layers grass, forest_floor and rock (weights that add up to 1)." },
+    "trees": { "node": "trees_out", "label": "Trees", "kind": "instances", "tags": ["forest", "trees", "vegetation", "scatter", "low-poly"], "description": "Pine, fir and oak trees on the gentle ground, packed instances standing on the terrain." },
+    "rocks": { "node": "rocks_out", "label": "Rocks", "kind": "instances", "tags": ["rocks", "stone", "scatter", "low-poly"], "description": "Rocks of three shapes on the steeper slopes, packed instances leaning with the ground." }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["N:float:3", "P:float:3", "uv:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [200, 150, 200],
+      "min": [-200, 0, -200]
+    },
+    "counts": {
+      "points": 66049,
+      "prims": 65536,
+      "vertices": 262144,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "e19f29c8ace8472a",
+      "attributes": {
+        "detail.materials": "fdd4c405ab2f5c6b",
+        "point.N": "ea06caf429502d32",
+        "point.uv": "69336c8d4baabc07",
+        "prim.material": "b0b69dc592265d1f",
+        "prim.name": "a0089dc561b45d1f"
+      },
+      "topology": "d43e340a68975970"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 257,
+          "width": 257
+        },
+        "kind": "image",
+        "layers": {
+          "C": "f0e9e62838897112"
+        },
+        "name": "valley_colour"
+      }
+    ]
+  },
+  "name": "example.eroded_valley",
+  "ok": true,
+  "source": "examples/eroded_valley.json",
+  "warnings": []
+}

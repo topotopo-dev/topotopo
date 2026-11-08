@@ -492,7 +492,7 @@ export const EXAMPLES_PENDING = new Set([
   'bevel', 'building', 'csg_bracket', 'deformers', 'drainage', 'drape', 'engraved_sign', 'erosion_models', 'forest', 'fractured',
   'house_city', 'measures', 'particles', 'pcg_scatter', 'polyedit', 'quad_remesh', 'rbd_settle',
   'remesh_lod', 'rocks_on_terrain', 'sdf_creature', 'skeleton_roofs', 'solver_growth', 'splines',
-  'street_block', 'terrain_erosion', 'terrain_tiles', 'tree', 'unreal_demo', 'uv_noisy_rock',
+  'street_block', 'terrain_erosion', 'tree', 'unreal_demo', 'uv_noisy_rock',
   'uv_toolkit', 'voronoi_city', 'voxel_remesh', 'wrangle_waves',
 ]);
 
@@ -502,9 +502,8 @@ export const EXAMPLES_PENDING = new Set([
  * a graph. The list only shrinks: a name here that has its graph, or no card, fails.
  */
 export const CARDS_WAITING = new Set<string>([
-  'asset_cleanup', 'blob_creature', 'eroded_valley', 'forest_on_terrain',
+  'asset_cleanup', 'blob_creature',
   'lsystem_tree', 'machined_bracket', 'ocean_surface', 'rail_along_curve', 'scifi_panel',
-  'unreal_landscape',
 ]);
 
 /**

@@ -1,32 +1,444 @@
 {
-  "description": "A 64 × 64 m map (0.25 m cells) with meandering escarpments and a river, and one of its tiles cooked on its own. Domain warp bends a broad noise's contours, absolute terraces turn them into cliff bands, and a band of a warped mask noise carves the river. Above the map floats tile [1, 0] of a 2 × 2 grid: the flat map cropped with a 2 m margin (heightfield_crop), run through the same nodes and cropped back to its core; its samples equal the map's below it. Colours come from absolute heights and the river layer, so the tile and the map share them too.",
-  "meta": { "render": { "views": ["persp"], "azimuth": 30, "elevation": 24 } },
-  "nodes": {
-    "map": { "type": "heightfield", "params": { "size": [64, 64], "resolution": 0.25, "name": "map" } },
-
-    "land": { "type": "heightfield_noise", "in": ["map"], "params": { "noise": "perlin", "octaves": 2, "amplitude": 16, "element_size": 50, "range": "positive", "seed": 3, "warp_amplitude": 10, "warp_element_size": 30, "warp_seed": 1 } },
-    "mesas": { "type": "heightfield_terrace", "in": ["land"], "params": { "step_height": 3, "rounding": 0.25 } },
-    "rough": { "type": "heightfield_noise", "in": ["mesas"], "params": { "amplitude": 0.25, "element_size": 3, "octaves": 5, "seed": 8 } },
-    "river": { "type": "heightfield_mask_noise", "in": ["rough"], "params": { "layer": "river", "octaves": 2, "element_size": 40, "seed": 5, "warp_amplitude": 7, "warp_element_size": 20, "warp_seed": 2 } },
-    "bed": { "type": "heightfield_layer", "in": ["river"], "params": { "layer": "river", "expression": "1 - smoothstep(0.004, 0.014, abs(river - 0.5))" } },
-    "carve": { "type": "heightfield_layer", "in": ["bed"], "params": { "expression": "height - 2.5 * river" } },
-    "ground": { "type": "heightfield_blur", "in": ["carve"], "params": { "radius": 0.5 } },
-
-    "tile": { "type": "heightfield_crop", "in": ["map"], "params": { "tiles": [2, 2], "tile": [1, 0], "margin": 2 } },
-    "t_land": { "type": "heightfield_noise", "in": ["tile"], "params": { "noise": "perlin", "octaves": 2, "amplitude": 16, "element_size": 50, "range": "positive", "seed": 3, "warp_amplitude": 10, "warp_element_size": 30, "warp_seed": 1 } },
-    "t_mesas": { "type": "heightfield_terrace", "in": ["t_land"], "params": { "step_height": 3, "rounding": 0.25 } },
-    "t_rough": { "type": "heightfield_noise", "in": ["t_mesas"], "params": { "amplitude": 0.25, "element_size": 3, "octaves": 5, "seed": 8 } },
-    "t_river": { "type": "heightfield_mask_noise", "in": ["t_rough"], "params": { "layer": "river", "octaves": 2, "element_size": 40, "seed": 5, "warp_amplitude": 7, "warp_element_size": 20, "warp_seed": 2 } },
-    "t_bed": { "type": "heightfield_layer", "in": ["t_river"], "params": { "layer": "river", "expression": "1 - smoothstep(0.004, 0.014, abs(river - 0.5))" } },
-    "t_carve": { "type": "heightfield_layer", "in": ["t_bed"], "params": { "expression": "height - 2.5 * river" } },
-    "t_ground": { "type": "heightfield_blur", "in": ["t_carve"], "params": { "radius": 0.5 } },
-    "t_core": { "type": "heightfield_crop", "in": ["t_ground"], "params": { "mode": "bounds", "min": [0, -32], "max": [32, 0] } },
-
-    "map_mesh": { "type": "heightfield_to_mesh", "in": ["ground"] },
-    "tile_mesh": { "type": "heightfield_to_mesh", "in": ["t_core"] },
-    "tile_lift": { "type": "transform", "in": ["tile_mesh"], "params": { "translate": [0, 30, 0] } },
-    "both": { "type": "merge", "in": ["map_mesh", "tile_lift"] },
-    "out": { "type": "wrangle", "in": ["both"], "params": { "code": "const h = f@height, steep = 1 - @N.y;\nconst rock = smoothstep(0.25, 0.5, steep);\nlet c = mix(mix([0.4, 0.5, 0.28], [0.78, 0.7, 0.52], smoothstep(2, 15, h)), [0.48, 0.36, 0.28], rock);\n@Cd = mix(c, [0.12, 0.34, 0.58], smoothstep(0.2, 0.8, f@river));" } }
+  "description": "A large terrain cut into square tiles that join without seams. The map is a heightfield of about 256 cells a side: the cell is a power of two in metres (exact in binary, so a tile's samples sit exactly where the map's do) and the side is map_size rounded to whole tiles of whole cells, so tile borders fall on samples. Domain-warped perlin hills, absolute terraces (relief / 8 apart) turn their contours into winding escarpments, fine noise roughens them, and a river winding along X cuts its valley down to a floor that falls from +X to -X (layer water); a blur softens it all and a clip keeps the ground between 0 and relief. The tile (tile_x, tile_z, kept within the map) is cooked on its own: the same grid, cropped to the tile with a margin of 6 samples for the blur (heightfield_crop), run through the same nodes and cropped back to its core. Every step works at world positions, so the tile gets the samples of the map where it lies; assert seamless compares them, sample for sample, and assert height checks that the map stays between 0 and relief. Node showcase (not an output) draws the map with a dark frame on the tile's spot and the tile lifted above it on lines from its corners, coloured by absolute height.",
+  "params": {
+    "map_size": {
+      "type": "float",
+      "default": 1024,
+      "min": 256,
+      "max": 4096,
+      "step": 64,
+      "label": "map size",
+      "desc": "side of the whole map (m), rounded to whole tiles of whole cells"
+    },
+    "tiles": {
+      "type": "int",
+      "default": 4,
+      "min": 2,
+      "max": 8,
+      "label": "tiles",
+      "desc": "tiles along each side of the map"
+    },
+    "tile_x": {
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 7,
+      "label": "tile x",
+      "desc": "column of the tile cooked on its own, kept within the map"
+    },
+    "tile_z": {
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 7,
+      "label": "tile z",
+      "desc": "row of the tile cooked on its own, kept within the map"
+    },
+    "relief": {
+      "type": "float",
+      "default": 120,
+      "min": 10,
+      "max": 400,
+      "step": 5,
+      "label": "relief",
+      "desc": "height of the escarpments (m)"
+    },
+    "river": {
+      "type": "bool",
+      "default": true,
+      "label": "river",
+      "desc": "a river winding across the map"
+    },
+    "seed": {
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 9999,
+      "label": "seed",
+      "desc": "changes the landforms, not the look"
+    }
   },
-  "output": "out"
+  "vars": {
+    "map_size": 1024,
+    "tiles": 4,
+    "tile_x": 1,
+    "tile_z": 2,
+    "relief": 120,
+    "river": true,
+    "seed": 1
+  },
+  "meta": {
+    "render": {
+      "node": "showcase",
+      "views": [
+        "persp"
+      ],
+      "azimuth": 30,
+      "elevation": 22,
+      "size": "1600x900",
+      "shading": "pbr",
+      "grid": false
+    }
+  },
+  "nodes": {
+    "map": {
+      "type": "heightfield",
+      "note": "about 256 cells a side, the side rounded to whole tiles of whole cells; the cell is a power of two in metres because warped heightfield_noise gives a tile up to 4.5 cm other heights than its map where the cell is not exact in binary (without warp they match at any cell)",
+      "params": {
+        "size": [
+          "=tiles * Math.round(map_size / tiles / Math.pow(2, Math.round(Math.log2(map_size / 256)))) * Math.pow(2, Math.round(Math.log2(map_size / 256)))",
+          "=tiles * Math.round(map_size / tiles / Math.pow(2, Math.round(Math.log2(map_size / 256)))) * Math.pow(2, Math.round(Math.log2(map_size / 256)))"
+        ],
+        "resolution": "=Math.pow(2, Math.round(Math.log2(map_size / 256)))",
+        "name": "map"
+      }
+    },
+    "land": {
+      "type": "heightfield_noise",
+      "in": [
+        "map"
+      ],
+      "params": {
+        "noise": "perlin",
+        "octaves": 3,
+        "amplitude": "=relief * 1.1",
+        "element_size": "=map_size * 0.4",
+        "range": "positive",
+        "seed": "=seed",
+        "warp_amplitude": "=map_size * 0.25",
+        "warp_element_size": "=map_size * 0.25",
+        "warp_seed": "=seed + 1"
+      }
+    },
+    "escarpments": {
+      "type": "heightfield_terrace",
+      "in": [
+        "land"
+      ],
+      "params": {
+        "step_height": "=relief / 8",
+        "base": "=-relief * 0.05",
+        "rounding": 0.15
+      }
+    },
+    "rough": {
+      "type": "heightfield_noise",
+      "in": [
+        "escarpments"
+      ],
+      "params": {
+        "amplitude": "=relief * 0.015",
+        "element_size": "=map_size * 0.04",
+        "octaves": 4,
+        "seed": "=seed + 2"
+      }
+    },
+    "water": {
+      "type": "heightfield_layer",
+      "in": [
+        "rough"
+      ],
+      "params": {
+        "layer": "water",
+        "expression": "// the river: a band winding across the map along X (0 when river is off)\nconst a = 3 + 2.39996 * seed, b = 0.9 + 3.88322 * seed; // the bends' phases, a golden angle further per seed\nconst d = abs(z - map_size * (0.2 * sin(TAU * 0.8 * x / map_size + a) + 0.06 * sin(TAU * 2.1 * x / map_size + b))) / map_size;\nreturn river ? 1 - smoothstep(0.006, 0.012, d) : 0;"
+      }
+    },
+    "valley": {
+      "type": "heightfield_layer",
+      "in": [
+        "water"
+      ],
+      "params": {
+        "expression": "// the river valley: cut down to a floor that falls from +X to -X, the channel a little deeper\nconst a = 3 + 2.39996 * seed, b = 0.9 + 3.88322 * seed;\nconst d = abs(z - map_size * (0.2 * sin(TAU * 0.8 * x / map_size + a) + 0.06 * sin(TAU * 2.1 * x / map_size + b))) / map_size;\nconst floor = relief * (0.06 + 0.08 * (x / map_size + 0.5)) - relief * 0.03 * water;\nreturn river ? Math.min(value, mix(value, floor, 1 - smoothstep(0.02, 0.07, d))) : value;"
+      }
+    },
+    "ground": {
+      "type": "heightfield_blur",
+      "in": [
+        "valley"
+      ],
+      "params": {
+        "radius": "=ch('map', 'resolution') * 1.5"
+      }
+    },
+    "clipped": {
+      "type": "heightfield_clip",
+      "in": [
+        "ground"
+      ],
+      "params": {
+        "min": 0,
+        "max": "=relief"
+      }
+    },
+    "no_mask": {
+      "type": "heightfield_layer",
+      "in": [
+        "clipped"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "mask"
+      }
+    },
+    "map_out": {
+      "type": "assert",
+      "in": [
+        "no_mask"
+      ],
+      "params": {
+        "label": "height",
+        "heightfields": "map",
+        "height_min": 0,
+        "height_max": "=relief"
+      }
+    },
+    "tile_grid": {
+      "type": "heightfield",
+      "note": "the same grid as the map, named for the tile",
+      "params": {
+        "size": [
+          "=ch('map', 'size')[0]",
+          "=ch('map', 'size')[1]"
+        ],
+        "resolution": "=ch('map', 'resolution')",
+        "name": "tile"
+      }
+    },
+    "tile_cut": {
+      "type": "heightfield_crop",
+      "in": [
+        "tile_grid"
+      ],
+      "note": "6 samples of margin: the reach of the blur in ground",
+      "params": {
+        "tiles": [
+          "=tiles",
+          "=tiles"
+        ],
+        "tile": [
+          "=Math.min(tile_x, tiles - 1)",
+          "=Math.min(tile_z, tiles - 1)"
+        ],
+        "margin": 6,
+        "margin_unit": "samples"
+      }
+    },
+    "t_land": {
+      "type": "heightfield_noise",
+      "in": [
+        "tile_cut"
+      ],
+      "params": {
+        "noise": "perlin",
+        "octaves": 3,
+        "amplitude": "=relief * 1.1",
+        "element_size": "=map_size * 0.4",
+        "range": "positive",
+        "seed": "=seed",
+        "warp_amplitude": "=map_size * 0.25",
+        "warp_element_size": "=map_size * 0.25",
+        "warp_seed": "=seed + 1"
+      }
+    },
+    "t_escarpments": {
+      "type": "heightfield_terrace",
+      "in": [
+        "t_land"
+      ],
+      "params": {
+        "step_height": "=relief / 8",
+        "base": "=-relief * 0.05",
+        "rounding": 0.15
+      }
+    },
+    "t_rough": {
+      "type": "heightfield_noise",
+      "in": [
+        "t_escarpments"
+      ],
+      "params": {
+        "amplitude": "=relief * 0.015",
+        "element_size": "=map_size * 0.04",
+        "octaves": 4,
+        "seed": "=seed + 2"
+      }
+    },
+    "t_water": {
+      "type": "heightfield_layer",
+      "in": [
+        "t_rough"
+      ],
+      "params": {
+        "layer": "water",
+        "expression": "// the river: a band winding across the map along X (0 when river is off)\nconst a = 3 + 2.39996 * seed, b = 0.9 + 3.88322 * seed; // the bends' phases, a golden angle further per seed\nconst d = abs(z - map_size * (0.2 * sin(TAU * 0.8 * x / map_size + a) + 0.06 * sin(TAU * 2.1 * x / map_size + b))) / map_size;\nreturn river ? 1 - smoothstep(0.006, 0.012, d) : 0;"
+      }
+    },
+    "t_valley": {
+      "type": "heightfield_layer",
+      "in": [
+        "t_water"
+      ],
+      "params": {
+        "expression": "// the river valley: cut down to a floor that falls from +X to -X, the channel a little deeper\nconst a = 3 + 2.39996 * seed, b = 0.9 + 3.88322 * seed;\nconst d = abs(z - map_size * (0.2 * sin(TAU * 0.8 * x / map_size + a) + 0.06 * sin(TAU * 2.1 * x / map_size + b))) / map_size;\nconst floor = relief * (0.06 + 0.08 * (x / map_size + 0.5)) - relief * 0.03 * water;\nreturn river ? Math.min(value, mix(value, floor, 1 - smoothstep(0.02, 0.07, d))) : value;"
+      }
+    },
+    "t_ground": {
+      "type": "heightfield_blur",
+      "in": [
+        "t_valley"
+      ],
+      "params": {
+        "radius": "=ch('map', 'resolution') * 1.5"
+      }
+    },
+    "t_clipped": {
+      "type": "heightfield_clip",
+      "in": [
+        "t_ground"
+      ],
+      "params": {
+        "min": 0,
+        "max": "=relief"
+      }
+    },
+    "t_no_mask": {
+      "type": "heightfield_layer",
+      "in": [
+        "t_clipped"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "mask"
+      }
+    },
+    "tile_core": {
+      "type": "heightfield_crop",
+      "in": [
+        "t_no_mask"
+      ],
+      "params": {
+        "mode": "bounds",
+        "min": [
+          "=detail('tile_cut', 'crop_core_min', 0)",
+          "=detail('tile_cut', 'crop_core_min', 1)"
+        ],
+        "max": [
+          "=detail('tile_cut', 'crop_core_max', 0)",
+          "=detail('tile_cut', 'crop_core_max', 1)"
+        ]
+      }
+    },
+    "tile_out": {
+      "type": "assert",
+      "in": [
+        "tile_core",
+        "map_out"
+      ],
+      "params": {
+        "label": "seamless",
+        "heightfields": "tile",
+        "match": "all",
+        "match_tolerance": 0.0001
+      }
+    },
+    "show_map": {
+      "type": "heightfield_to_mesh",
+      "in": [
+        "map_out"
+      ],
+      "params": {
+        "uv": false
+      }
+    },
+    "show_tile": {
+      "type": "heightfield_to_mesh",
+      "in": [
+        "tile_out"
+      ],
+      "params": {
+        "uv": false
+      }
+    },
+    "show_lift": {
+      "type": "transform",
+      "in": [
+        "show_tile"
+      ],
+      "params": {
+        "translate": [
+          0,
+          "=relief + map_size * 0.18",
+          0
+        ]
+      }
+    },
+    "show_both": {
+      "type": "merge",
+      "in": [
+        "show_map",
+        "show_lift"
+      ]
+    },
+    "show_nothing": {
+      "type": "merge"
+    },
+    "show_guides": {
+      "type": "wrangle",
+      "in": [
+        "show_nothing",
+        "show_tile"
+      ],
+      "params": {
+        "run_over": "detail",
+        "code": "// dark lines from the tile's corners on the map up to the lifted tile\nconst n = Math.round(Math.sqrt(npoints(1)));\nfor (const k of [0, n - 1, n * (n - 1), n * n - 1]) {\n  const p = point(1, 'P', k), a = addpoint(0, p), b = addpoint(0, [p[0], p[1] + relief + map_size * 0.18, p[2]]);\n  addprim(0, 'polyline', [a, b]);\n  setpointattrib(0, 'Cd', a, [0.12, 0.1, 0.09]); setpointattrib(0, 'Cd', b, [0.12, 0.1, 0.09]);\n}"
+      }
+    },
+    "show_paint": {
+      "type": "wrangle",
+      "in": [
+        "show_both",
+        "tile_out"
+      ],
+      "params": {
+        "code": "// colours from the heights (absolute, so the tile and the map share them): green lowland, pale upland, red-brown\n// escarpment faces, blue water; a dark frame on the map marks the tile's spot\nconst h = clamp(@height / relief, 0, 1), steep = 1 - smoothstep(0.62, 0.82, @N[1]);\nlet c = mix([0.30, 0.43, 0.19], [0.66, 0.58, 0.40], smoothstep(0.25, 0.8, h));\nc = mix(c, [0.50, 0.36, 0.27], steep);\nc = mix(c, [0.10, 0.27, 0.42], @water);\nconst lo = detail(1, 'crop_core_min'), hi = detail(1, 'crop_core_max'), e = map_size / 200; // the tile's bounds\nconst inside = @P.x > lo[0] - e && @P.x < hi[0] + e && @P.z > lo[1] - e && @P.z < hi[1] + e;\nconst frame = inside && (@P.x < lo[0] + e || @P.x > hi[0] - e || @P.z < lo[1] + e || @P.z > hi[1] - e);\n@Cd = frame && @P.y < relief * 1.05 ? [0.12, 0.1, 0.09] : c;"
+      }
+    },
+    "showcase": {
+      "type": "merge",
+      "in": [
+        "show_paint",
+        "show_guides"
+      ]
+    }
+  },
+  "output": "map_out",
+  "outputs": {
+    "map": {
+      "node": "map_out",
+      "label": "Map",
+      "kind": "terrain",
+      "tags": [
+        "terrain",
+        "heightfield",
+        "escarpments",
+        "river",
+        "tiles"
+      ],
+      "description": "The whole map from 0 to relief, with the layer water under the river."
+    },
+    "tile": {
+      "node": "tile_out",
+      "label": "Tile",
+      "kind": "terrain",
+      "tags": [
+        "terrain",
+        "heightfield",
+        "tile",
+        "streaming",
+        "seamless"
+      ],
+      "description": "One tile of the map cooked on its own, equal to the map where it lies, sample for sample."
+    }
+  }
 }

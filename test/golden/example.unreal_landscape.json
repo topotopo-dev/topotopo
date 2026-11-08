@@ -1,0 +1,79 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3", "slope:float:1"],
+      "prim": ["copynum:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [125.8414, 45.2566, 125.8615],
+      "min": [-125.509, 0.2543, -125.867]
+    },
+    "counts": {
+      "points": 1924,
+      "prims": 1670,
+      "vertices": 2426,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["caps", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "dc0e4b1226594dc8",
+      "attributes": {
+        "detail.materials": "6db9822e88c6b554",
+        "group.prim.caps": "6a6f50858d8aa2ff",
+        "group.prim.sides": "e8fb1fc51ebfa91f",
+        "point.slope": "96454a3d16e4b5a7",
+        "prim.copynum": "ee09c801a5ae2c0b",
+        "prim.material": "076db6c9e244600b",
+        "prim.name": "3e3fd0e987811cab",
+        "vertex.uv": "8cb2caadef297c5f"
+      },
+      "topology": "0dd3d8282da9580a"
+    },
+    "packed": {
+      "hash": "680f79c95b35b36f",
+      "instances": 1418,
+      "sources": [
+        "d90afdb04be73f0a",
+        "d2426469eec12de3",
+        "d6254f265fb203cc",
+        "247c049556361b5b",
+        "f1a1e6385e207632",
+        "95ccab05eca01e7b"
+      ]
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [126, 39.8848, 126],
+          "min": [-126, 0.2437, -126]
+        },
+        "grid": {
+          "cellSize": 1,
+          "height": 253,
+          "origin": [-126, -126],
+          "width": 253
+        },
+        "kind": "heightfield",
+        "layers": {
+          "grass": "9ccc10272b12d129",
+          "height": "0ead8cc0faf42956",
+          "road": "78e10bc5f9777867",
+          "rock": "7f1b20441876bb0e"
+        },
+        "name": "landscape"
+      }
+    ]
+  },
+  "name": "example.unreal_landscape",
+  "ok": true,
+  "source": "examples/unreal_landscape.json",
+  "warnings": []
+}
