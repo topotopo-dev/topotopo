@@ -512,6 +512,7 @@
         "fit",
         "weathered"
       ],
+      "note": "workaround for F-136: a thermal-only heightfield_erode still rewrites the flow and water layers, so only its heights are taken back here; once F-136 lands, terrain_out can read weathered directly",
       "params": {
         "expression": "// the weathered heights (input 1); the other layers stay as fitted, since the erode rewrites flow and water\nb_height"
       }
