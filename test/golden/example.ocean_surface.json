@@ -8,14 +8,14 @@
       "vertex": []
     },
     "bbox": {
-      "max": [50, 0.9299, 50],
-      "min": [-50, -0.9249, -50]
+      "max": [50, 0.8779, 50],
+      "min": [-50, -0.7794, -50]
     },
     "counts": {
       "points": 10201,
       "prims": 10000,
       "vertices": 40000,
-      "volumes": 1
+      "volumes": 3
     },
     "groups": {
       "edge": [],
@@ -24,11 +24,11 @@
       "vertex": []
     },
     "hashes": {
-      "P": "db94870d743b401f",
+      "P": "2e66ebf3abf2fea9",
       "attributes": {
-        "detail.materials": "6a60f769bd3429ff",
-        "point.N": "ce4edbee91b302d0",
-        "point.foam": "e551d8a8a0f1aaaa",
+        "detail.materials": "dcd6eaa6e1208ae4",
+        "point.N": "6cd08f0cc6f80a8e",
+        "point.foam": "a27230cda6e41877",
         "point.uv": "e3cca7d53bc3f70f",
         "prim.material": "fc97b3e522550eff",
         "prim.name": "01b09305aeeb159f"
@@ -47,10 +47,41 @@
         },
         "kind": "image",
         "layers": {
-          "C": "5785dcef140f3439",
+          "C": "4df06bd60dda4d0c",
           "mask": "7640f0f52de3d70f"
         },
         "name": "ocean_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 1024,
+          "width": 1024
+        },
+        "kind": "image",
+        "layers": {
+          "C": "a0d7c18e80c70330"
+        },
+        "name": "ocean_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 1024,
+          "width": 1024
+        },
+        "kind": "image",
+        "layers": {
+          "C": "0986a45c243e1b4a",
+          "mask": "7640f0f52de3d70f"
+        },
+        "name": "ocean_rough"
       }
     ]
   },
