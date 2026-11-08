@@ -42,6 +42,7 @@ import { folderKey } from '../scan.ts';
 import { createNodeHost } from './node.ts';
 import type { Host, HostFiles, WorkerPool } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
+import { engineSha256 } from './engine-code.ts';
 
 /** The jobs file's and report's protocol: an engine plugin that speaks another one is told to update. */
 export const COOK_PROTOCOL = 1;
@@ -406,7 +407,11 @@ export function cacheRoot(): string {
 /** A cached result: the deps it read and their hashes, the folders it listed, its files (by name in its folder: blob). */
 interface Candidate { deps: Record<string, string>; folders: Record<string, string[]>; files: Record<string, string>; kind: string; instances: Record<string, number>; warnings: string[] }
 
-const cacheKey = (flavour: string, instancing: string, pkg: string, id: string) => sha256(JSON.stringify([TOPOTOPO_VERSION, flavour, { instancing }, pkg, id]));
+/**
+ * An output's entry: the engine's code hash (engine-code.ts) as well as its version, since checkouts and worktrees
+ * share the cache and a source checkout keeps one version through many engine changes.
+ */
+const cacheKey = (flavour: string, instancing: string, pkg: string, id: string) => sha256(JSON.stringify([TOPOTOPO_VERSION, engineSha256(), flavour, { instancing }, pkg, id]));
 
 function readCandidates(key: string): Candidate[] {
   try {

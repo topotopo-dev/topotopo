@@ -242,6 +242,34 @@ section('the cache: a second checkout of the package is a copy, not a cook');
   check(fs.existsSync(path.join(tmp, 'cache', 'cook', 'blobs')), 'the cache lives in $TOPOTOPO_CACHE/cook');
 }
 
+section('the cache is keyed by the engine code: an engine edit under the same version cooks again');
+{
+  // a copy of this checkout's engine (its code copied, the rest linked) cooks into new projects through the CLI
+  const copy = path.join(tmp, 'engine-copy');
+  copyDir(path.join(ROOT, 'src'), path.join(copy, 'src'));
+  fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(copy, 'package.json'));
+  const linked = ['node_modules', 'library', 'kernels', 'assets'].filter((d) => fs.existsSync(path.join(ROOT, d)));
+  for (const d of linked) fs.symlinkSync(path.join(ROOT, d), path.join(copy, d), 'junction');
+  const rep = path.join(tmp, 'copy-report.json');
+  const copyCook = (pkg: string) => {
+    const r = spawnSync(process.execPath, [path.join(copy, 'src', 'cli.ts'), 'cook', pkg, '--for', 'godot', '--report', rep], { encoding: 'utf8', env: { ...process.env, TOPOTOPO_WORKERS: '0' } });
+    const report: PackageReport | null = fs.existsSync(rep) ? json(rep) : null;
+    fs.rmSync(rep, { force: true });
+    return { code: r.status, rep: report, err: r.stderr.slice(0, 300) };
+  };
+  const outs = ['crate', 'panels', 'props', 'scatter'];
+  const same = copyCook(path.join(project('e1'), 'props'));
+  fs.appendFileSync(path.join(copy, 'src', 'nodes', 'generate.ts'), '\n// an engine edit that keeps the version\n');
+  const edited = copyCook(path.join(project('e2'), 'props'));
+  const again = copyCook(path.join(project('e3'), 'props'));
+  check(same.code === 0 && outs.every((k) => states(same.rep)[k] === 'cached'), `the same engine code elsewhere takes every output from the cache (${stateText(same.rep)}${same.err})`);
+  check(edited.code === 0 && outs.every((k) => states(edited.rep)[k] === 'written'), `an engine file edited under the same version: every output cooked, none from the cache (${stateText(edited.rep)}${edited.err})`);
+  check(again.code === 0 && outs.every((k) => states(again.rep)[k] === 'cached'), `and the edited engine's results are cached in turn (${stateText(again.rep)}${again.err})`);
+  // the links first (unlinking leaves the checkout's folders alone), then the copy
+  for (const d of linked) fs.unlinkSync(path.join(copy, d));
+  fs.rmSync(copy, { recursive: true, force: true });
+}
+
 section('a workspace around the engine project: its file is recorded from the package, so a checkout anywhere is current');
 {
   // as a game repository holds it: topotopo-workspace.json at the root, the Godot project in game/
