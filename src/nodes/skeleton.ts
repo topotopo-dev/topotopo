@@ -171,6 +171,58 @@ function footprints(g: Geometry, selected: Uint8Array | null): Ring[] {
   return loops;
 }
 
+/** Corners nearer than this fraction of the shape's extent to the line between their neighbours are straight. */
+const STRAIGHT = 1e-5;
+
+/** One kernel contour: its corners, and per kernel edge the input edges it stands for. */
+interface Contour {
+  xy: Float64Array;
+  runs: Edge[][];
+}
+
+/**
+ * Drop straight and doubled corners before the skeleton: an almost straight corner makes the wavefront
+ * numerically ambiguous. A run of corners goes when every one lies within `STRAIGHT` of the shape's extent
+ * from the segment between the corners kept around it, and edges with different pitches never merge.
+ * Kept corners stay in input order, so a contour without straight corners reaches the kernel unchanged.
+ */
+function straighten(ring: Ring, frame: { x: number; z: number; size: number }, pitch: Float64Array | null): Contour {
+  const n = ring.edges.length, x = (i: number) => (ring.xy[i * 2] - frame.x) / frame.size, z = (i: number) => (ring.xy[i * 2 + 1] - frame.z) / frame.size;
+  const off = (i: number, a: number, c: number): number => {
+    const dx = x(c) - x(a), dz = z(c) - z(a), length2 = dx * dx + dz * dz;
+    const t = length2 > 0 ? Math.max(0, Math.min(1, ((x(i) - x(a)) * dx + (z(i) - z(a)) * dz) / length2)) : 0;
+    return Math.hypot(x(i) - x(a) - t * dx, z(i) - z(a) - t * dz);
+  };
+  const same = (i: number, j: number) => !pitch || pitch.length === 1 || pitch[i] === pitch[j];
+  // Start at the sharpest corner: it is always kept.
+  let start = 0, sharpest = -1;
+  for (let i = 0; i < n; i++) {
+    const d = off(i, (i + n - 1) % n, (i + 1) % n);
+    if (d > sharpest) { sharpest = d; start = i; }
+  }
+  const kept = [start];
+  for (let step = 1, a = start; step < n; step++) {
+    const j = (start + step) % n, c = (j + 1) % n;
+    let drop = same(a, j);
+    for (let k = (a + 1) % n; drop; k = (k + 1) % n) {
+      if (off(k, a, c) > STRAIGHT) drop = false;
+      if (k === j) break;
+    }
+    if (!drop) { kept.push(j); a = j; }
+  }
+  if (kept.length < 3)
+    throw new NodeError(`straight_skeleton: primitive ${ring.edges[0].prim} has fewer than three corners that are not straight or doubled, so it encloses no area`);
+  kept.sort((a, b) => a - b);
+  const xy = new Float64Array(kept.length * 2), runs: Edge[][] = [];
+  kept.forEach((corner, k) => {
+    xy[k * 2] = ring.xy[corner * 2]; xy[k * 2 + 1] = ring.xy[corner * 2 + 1];
+    const run: Edge[] = [];
+    for (let i = corner; i !== kept[(k + 1) % kept.length]; i = (i + 1) % n) run.push(ring.edges[i]);
+    runs.push(run);
+  });
+  return { xy, runs };
+}
+
 function projection(g: Geometry, edge: Edge, x: number, z: number): { t: number; d: number } {
   const ax = g.P[edge.a * 3], az = g.P[edge.a * 3 + 2];
   const dx = g.P[edge.b * 3] - ax, dz = g.P[edge.b * 3 + 2] - az;
@@ -248,7 +300,7 @@ defineNode({
   type: 'straight_skeleton',
   category: 'curve',
   summary: 'Straight skeleton, polygon offsets and pitched roofs from planar footprints, including holes.',
-  description: 'Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order.',
+  description: 'Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order. Straight and doubled corners (within 1e-5 of the shape\'s extent of the line between their neighbours) are dropped before the skeleton when the edges around them have the same pitch: one roof face spans them, its eave still runs through every footprint point, and its edge number is the first of the merged edges.',
   inputs: [{ name: 'footprint', desc: 'Closed planar footprints, with nested contours for holes.' }],
   params: {
     mode: { type: 'enum', default: 'skeleton', options: ['skeleton', 'offset', 'roof'], desc: 'Emit skeleton and contour arcs, offset contours, or roof faces.' },
@@ -284,37 +336,68 @@ defineNode({
         if (outer.depth % 2) continue;
         const holes = loops.filter((loop) => loop.parent === i);
         const edges = [outer, ...holes].flatMap((loop) => loop.edges);
-        const holeXY = holes.map((loop) => loop.xy);
+        // Straight corners are dropped for the kernel; `runs[k]` lists the input edges kernel edge k stands for.
+        let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+        for (let v = 0; v < outer.xy.length; v += 2) {
+          minX = Math.min(minX, outer.xy[v]); maxX = Math.max(maxX, outer.xy[v]);
+          minZ = Math.min(minZ, outer.xy[v + 1]); maxZ = Math.max(maxZ, outer.xy[v + 1]);
+        }
+        const frame = { x: minX, z: minZ, size: Math.max(maxX - minX, maxZ - minZ) || 1 };
+        const contours = [outer, ...holes].map((loop) => straighten(loop, frame, p.mode === 'roof' && p.pitch_attrib ? pitches(g, loop.edges, p.pitch_attrib, p.pitch) : null));
+        const runs = contours.flatMap((contour) => contour.runs);
+        const next: number[] = [];
+        for (const contour of contours) {
+          const base = next.length;
+          for (let j = 0; j < contour.runs.length; j++) next.push(base + (j + 1) % contour.runs.length);
+        }
+        const holeXY = contours.slice(1).map((contour) => contour.xy);
         const addPoint = (x: number, z: number, height = 0, sourcePoint = -1): number => {
           const y = outer.y + height;
           if (![x, y, z].every(Number.isFinite))
             throw new NodeError('straight_skeleton: output exceeds the finite numeric range; rescale the footprint or lower its elevation');
-          if (sourcePoint >= 0) return builder.addPoint(x, y, z, edges[sourcePoint].a);
+          if (sourcePoint >= 0) return builder.addPoint(x, y, z, runs[sourcePoint][0].a);
           const from = nearest(g, edges, x, z);
           return builder.addPoint(x, y, z, source(from.edge, from.t));
         };
+        // Dropped corners come back on the footprint outline, so the output still meets it at every input point.
+        const dropped = new Map<number, number>();
+        const droppedPoint = (edge: Edge): number => {
+          if (!dropped.has(edge.a)) dropped.set(edge.a, builder.addPoint(g.P[edge.a * 3], outer.y, g.P[edge.a * 3 + 2], edge.a));
+          return dropped.get(edge.a)!;
+        };
         if (p.mode === 'skeleton') {
-          const result = kernels.straight_skeleton(outer.xy, holeXY);
+          const result = kernels.straight_skeleton(contours[0].xy, holeXY);
           const kind = builder.attrib('prim', 'kind', 1, 'int');
-          const points = new Map<string, number>();
+          const points = new Map<string, number>(), corner = new Map<string, number>();
           for (let v = 0; v < result.vertices.length; v += 2) {
-            const x = result.vertices[v], z = result.vertices[v + 1];
-            points.set(`${x},${z}`, addPoint(x, z, 0, result.src_point[v / 2]));
+            const x = result.vertices[v], z = result.vertices[v + 1], src = result.src_point[v / 2];
+            points.set(`${x},${z}`, addPoint(x, z, 0, src));
+            if (src >= 0) corner.set(`${x},${z}`, src);
           }
           const pointAt = (x: number, z: number): number => {
             const key = `${x},${z}`;
             if (!points.has(key)) points.set(key, addPoint(x, z));
             return points.get(key)!;
           };
-          for (let arc = 0; arc < result.arc_kind.length; arc++) {
-            const a = arc * 4, x = result.arcs[a], z = result.arcs[a + 1], xx = result.arcs[a + 2], zz = result.arcs[a + 3];
+          const addArc = (x: number, z: number, xx: number, zz: number, arcKind: number) => {
             const from = nearest(g, edges, x / 2 + xx / 2, z / 2 + zz / 2).edge;
             const prim = builder.addPrim([pointAt(x, z), pointAt(xx, zz)], false, from.prim,
               [source(from, projection(g, from, x, z).t, true), source(from, projection(g, from, xx, zz).t, true)]);
-            kind.set(prim, [result.arc_kind[arc]]);
+            kind.set(prim, [arcKind]);
+          };
+          for (let arc = 0; arc < result.arc_kind.length; arc++) {
+            const a = arc * 4, x = result.arcs[a], z = result.arcs[a + 1], xx = result.arcs[a + 2], zz = result.arcs[a + 3];
+            const from = corner.get(`${x},${z}`), to = corner.get(`${xx},${zz}`);
+            const run = from === undefined || to === undefined ? null : next[from] === to ? runs[from] : next[to] === from ? runs[to] : null;
+            if (!result.arc_kind[arc] || !run || run.length === 1) { addArc(x, z, xx, zz, result.arc_kind[arc]); continue; }
+            // A contour arc over dropped corners follows the input edges.
+            const path = run.map((edge) => edge.a).concat(run[run.length - 1].b);
+            if (next[from!] !== to) path.reverse();
+            for (let s = 0; s + 1 < path.length; s++)
+              addArc(g.P[path[s] * 3], g.P[path[s] * 3 + 2], g.P[path[s + 1] * 3], g.P[path[s + 1] * 3 + 2], 1);
           }
         } else if (p.mode === 'offset') {
-          const result = kernels.offset_polygon(outer.xy, holeXY, p.distance);
+          const result = kernels.offset_polygon(contours[0].xy, holeXY, p.distance);
           const points: number[] = [];
           for (let v = 0; v < result.vertices.length; v += 2) points.push(addPoint(result.vertices[v], result.vertices[v + 1]));
           for (let poly = 0; poly + 1 < result.polygon_start.length; poly++) {
@@ -324,25 +407,38 @@ defineNode({
               from.map((item) => source(item.edge, item.t, true)));
           }
         } else {
-          const result = kernels.roof(outer.xy, holeXY, pitches(g, edges, p.pitch_attrib, p.pitch), p.height_cap > 0 ? p.height_cap : undefined);
+          const result = kernels.roof(contours[0].xy, holeXY, pitches(g, runs.map((run) => run[0]), p.pitch_attrib, p.pitch), p.height_cap > 0 ? p.height_cap : undefined);
           const points: number[] = [];
           for (let v = 0; v < result.vertices.length; v += 3)
             points.push(addPoint(result.vertices[v], result.vertices[v + 1], result.vertices[v + 2], result.src_point[v / 3]));
           const attr = builder.attrib('prim', 'edge', 1, 'int', [-1]);
           for (let face = 0; face + 1 < result.face_start.length; face++) {
             const ids = Array.from(result.face_vertex_index.slice(result.face_start[face], result.face_start[face + 1])).reverse();
-            const edge = edges[result.face_edge[face]];
+            const run = runs[result.face_edge[face]], edge = run?.[0];
+            const corners = ids.map((id) => points[id]);
             const provenance = ids.map((id) => {
               const x = result.vertices[id * 3], z = result.vertices[id * 3 + 1];
-              const from = edge ? { edge, t: projection(g, edge, x, z).t } : nearest(g, edges, x, z);
+              const from = run ? nearest(g, run, x, z) : nearest(g, edges, x, z);
               return source(from.edge, from.t, true);
             });
-            const prim = builder.addPrim(ids.map((id) => points[id]), true, edge?.prim ?? outer.edges[0].prim, provenance);
+            if (run && run.length > 1) {
+              // Put the dropped corners back on this face's eave, between the two kept corners of its run.
+              const k = result.face_edge[face], src = (at: number) => result.src_point[ids[at % ids.length]];
+              const at = ids.findIndex((_, j) => src(j) === k && src(j + 1) === next[k] || src(j) === next[k] && src(j + 1) === k);
+              if (at >= 0) {
+                const between = run.slice(1);
+                if (src(at) !== k) between.reverse();
+                corners.splice(at + 1, 0, ...between.map(droppedPoint));
+                provenance.splice(at + 1, 0, ...between.map((item) => item.va));
+              }
+            }
+            const prim = builder.addPrim(corners, true, edge?.prim ?? outer.edges[0].prim, provenance);
             attr.set(prim, [edge?.id ?? -1]);
           }
         }
       }
     } catch (error) {
+      if (error instanceof NodeError) throw error;
       throw new NodeError(`straight_skeleton: ${error instanceof Error ? error.message : String(error)}`);
     }
     const out = builder.build();

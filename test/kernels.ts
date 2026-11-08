@@ -428,6 +428,45 @@ await test('one bridged primitive encodes the same courtyard as separate opposit
   assertWatertight(geo, courtyard);
   near(Array.from({ length: geo.numPrims }, (_, f) => Math.abs(primNewell(geo, f)[1]) / 2).reduce((a, b) => a + b, 0), 48, 'bridged courtyard roof excludes the hole');
 });
+/** Split edge `edge` of a ring with a corner at parameter t, `offset` (a fraction of the ring's extent) off the edge's line. */
+function splitEdge(ring: number[], edge: number, t: number, offset: number): number[] {
+  const n = ring.length / 2, a = edge * 2, c = ((edge + 1) % n) * 2;
+  const xs = ring.filter((_, i) => i % 2 === 0), zs = ring.filter((_, i) => i % 2 === 1);
+  const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
+  const dx = ring[c] - ring[a], dz = ring[c + 1] - ring[a + 1], l = Math.hypot(dx, dz);
+  const out = ring.slice();
+  out.splice(a + 2, 0, ring[a] + dx * t - dz / l * offset * size, ring[a + 1] + dz * t + dx / l * offset * size);
+  return out;
+}
+// The reported footprint: its fourth corner lies about 1e-8 m off the line between its neighbours.
+const reported = [-12.223, 1.311, -8.934, 4.736, -6.589, 4.338, -7.64, -1.867];
+const nearlyStraight: PolygonCase[] = [
+  { name: 'reported near-straight corner', holes: [], outer: splitEdge(reported, 2, 0.3, 1e-8 / 8.6) },
+  ...[1e-7, -1e-8, 1e-9, -1e-10, 1e-11].map((offset, i) => ({ name: `noisy polygon with a corner ${offset} off its edge`, holes: [], outer: splitEdge(noisy.outer, 17 + 41 * i, 0.3 + 0.1 * i, offset) })),
+  { name: 'near-duplicate corner', holes: [], outer: [0, 0, 6, 0, 6, 4, 6 + 1e-13, 4 + 1e-13, 0, 4] },
+  { name: 'exactly straight corner', holes: [], outer: collinear.outer },
+  { name: 'near-parallel opposite edges', holes: [], outer: [0, 0, 10, 1e-9, 9, 2, 1, 2] },
+  { name: 'courtyard hole with a near-straight corner', outer: courtyard.outer, holes: [splitEdge(courtyard.holes[0], 1, 0.4, -1e-9)] },
+];
+for (const p of nearlyStraight) {
+  await test(`node ${p.name}: straight corners do not stop the skeleton, the roof still meets every footprint point`, async () => {
+    const src = footprint(p), pitch = src.points.add('pitch', 'float', 1);
+    for (let i = 0; i < src.numPoints; i++) pitch.set(i, 35);
+    const roof = await cook(src, { mode: 'roof', pitch_attrib: 'pitch' });
+    // A footprint cap over two points 1e-13 apart has a zero-area triangle, so that case checks the outline only.
+    if (p.name === 'near-duplicate corner') assert.equal(topologyReport(roof).boundaryEdges, src.numPoints, 'the roof eave runs through every footprint point');
+    else assertWatertight(roof, p);
+    near(Array.from({ length: roof.numPrims }, (_, f) => Math.abs(primNewell(roof, f)[1]) / 2).reduce((a, b) => a + b, 0), inputArea(p), 'roof covers the footprint', 1e-6 * inputArea(p));
+    const skeleton = await cook(src, { mode: 'skeleton' });
+    const kind = skeleton.prims.get('kind')!.data as Int32Array;
+    assert.equal(Array.from(kind).filter((value) => value === 1).length, src.numPoints, 'contour arcs follow every footprint edge');
+    await cook(src, { mode: 'offset', distance: 0.1 });
+  });
+}
+await test('a straight corner between equal pitches does not split the roof face', async () => {
+  const geo = await cook(footprint(collinear), { mode: 'roof', pitch: 35 });
+  assert.deepStrictEqual(Array.from(geo.prims.get('edge')!.data as Int32Array).sort(), [0, 2, 3, 4], 'edges 0 and 1 share one face');
+});
 await test('group preserves unselected primitives and their attributes unchanged', async () => {
   const p: PolygonCase = { name: 'two footprints', outer: rectangle.outer, holes: [[10, 0, 12, 0, 12, 2, 10, 2]] };
   const src = footprint(p), geo = await cook(src, { mode: 'roof', pitch: 35, group: '0' });

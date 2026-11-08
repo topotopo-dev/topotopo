@@ -1872,7 +1872,7 @@ category: `curve`
 
 Straight skeleton, polygon offsets and pitched roofs from planar footprints, including holes.
 
-Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order.
+Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order. Straight and doubled corners (within 1e-5 of the shape's extent of the line between their neighbours) are dropped before the skeleton when the edges around them have the same pitch: one roof face spans them, its eave still runs through every footprint point, and its edge number is the first of the merged edges.
 
 **Inputs**
 
