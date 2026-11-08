@@ -3,19 +3,19 @@
   "fingerprint": {
     "attributes": {
       "detail": ["materials:string:1"],
-      "point": ["Cd:float:3", "N:float:3", "P:float:3", "foam:float:1", "uv:float:3"],
+      "point": ["N:float:3", "P:float:3", "foam:float:1", "uv:float:3"],
       "prim": ["material:string:1", "name:string:1"],
       "vertex": []
     },
     "bbox": {
-      "max": [50, 0.9319, 50],
-      "min": [-50, -1.0058, -50]
+      "max": [50, 0.9299, 50],
+      "min": [-50, -0.9249, -50]
     },
     "counts": {
       "points": 10201,
       "prims": 10000,
       "vertices": 40000,
-      "volumes": 0
+      "volumes": 1
     },
     "groups": {
       "edge": [],
@@ -24,18 +24,35 @@
       "vertex": []
     },
     "hashes": {
-      "P": "9ef0a1901d777e9e",
+      "P": "db94870d743b401f",
       "attributes": {
-        "detail.materials": "af00efddb785ae73",
-        "point.Cd": "0ae2ecf5f48cf637",
-        "point.N": "73b2b21994c47153",
-        "point.foam": "1308e3a0df9c25a6",
+        "detail.materials": "6a60f769bd3429ff",
+        "point.N": "ce4edbee91b302d0",
+        "point.foam": "e551d8a8a0f1aaaa",
         "point.uv": "e3cca7d53bc3f70f",
         "prim.material": "fc97b3e522550eff",
         "prim.name": "01b09305aeeb159f"
       },
       "topology": "092b66ecef0fb8e6"
-    }
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 1024,
+          "width": 1024
+        },
+        "kind": "image",
+        "layers": {
+          "C": "5785dcef140f3439",
+          "mask": "7640f0f52de3d70f"
+        },
+        "name": "ocean_color"
+      }
+    ]
   },
   "name": "example.ocean_surface",
   "ok": true,
