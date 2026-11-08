@@ -109,7 +109,7 @@ A rough, broken scan turned into a game-ready asset: holes filled, tangles remov
 
 A cartoon creature made of smooth blended shapes: a round body, a head, legs and a tail that melt into each other, and two eyes, as a closed mesh.
 
-- In: `body_size`, `head`, `legs`, `tail`, `blend`, `bumps`, `feature_size`, `seed`
+- In: `body_size`, `head`, `legs`, `tail`, `blend`, `spines`, `feature_size`, `seed`
 - Out: `creature` (mesh)
 
 ### [Cloth drape](../examples/cloth_drape.md) (`cloth_drape`)

@@ -8,13 +8,13 @@
       "vertex": ["uv:float:3"]
     },
     "bbox": {
-      "max": [0.7697, 1.1128, 0.3793],
-      "min": [-0.9395, 0, -0.3974]
+      "max": [0.7699, 1.1128, 0.379],
+      "min": [-0.9395, 0, -0.3793]
     },
     "counts": {
-      "points": 1882,
-      "prims": 3496,
-      "vertices": 10744,
+      "points": 2012,
+      "prims": 3756,
+      "vertices": 11524,
       "volumes": 0
     },
     "groups": {
@@ -24,15 +24,15 @@
       "vertex": []
     },
     "hashes": {
-      "P": "909855b03306f9a6",
+      "P": "c76709fce801b1d6",
       "attributes": {
         "detail.materials": "5a95f8dd1adcbe67",
-        "point.N": "755b9a773f1898b5",
-        "prim.material": "8bf33d85f6206edf",
-        "prim.name": "954120053d4dacbf",
-        "vertex.uv": "d9643bc0d4a8c982"
+        "point.N": "24e764a573b2b54f",
+        "prim.material": "911646a5fe39613f",
+        "prim.name": "fba4f0a5c493c02f",
+        "vertex.uv": "7a01664e3e422964"
       },
-      "topology": "bc1c0b1d57f34f37"
+      "topology": "f243c1415152ad1b"
     }
   },
   "name": "example.blob_creature",
