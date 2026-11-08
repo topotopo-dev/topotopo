@@ -12,9 +12,9 @@
       "min": [-0.45, 0, -0.45]
     },
     "counts": {
-      "points": 1766,
-      "prims": 3394,
-      "vertices": 10224,
+      "points": 998,
+      "prims": 1858,
+      "vertices": 5616,
       "volumes": 0
     },
     "groups": {
@@ -24,16 +24,16 @@
       "vertex": []
     },
     "hashes": {
-      "P": "9b5cdc1215e37944",
+      "P": "0eb697013a6e647b",
       "attributes": {
         "detail.materials": "d82c7e2a18809c50",
-        "point.N": "324b85beeff055b4",
-        "prim.Cd": "04b412ad4cb8af4f",
-        "prim.material": "d961fb1d319aa4ff",
-        "prim.name": "68e1b3dd5d9721f7",
-        "vertex.uv": "cd32e7adea651497"
+        "point.N": "1fdfc5beaacdb5b4",
+        "prim.Cd": "847d8aad01f0a74f",
+        "prim.material": "206e9f1d985780ff",
+        "prim.name": "44b227dd087c95f7",
+        "vertex.uv": "d70527ad6c361497"
       },
-      "topology": "14a3ed79b75a53af"
+      "topology": "67a5176cac8d3f8e"
     }
   },
   "name": "package.topotopo.street.sign_post",

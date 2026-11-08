@@ -509,7 +509,9 @@ None (generator).
 
 category: `generate` · aliases: `font`, `type`, `lettering`
 
-Text from a TrueType/OpenType font: filled faces, outlines, or extruded solid. Lies in the XY plane facing +Z.
+Text from a TrueType/OpenType font: filled faces, outlines, or an extruded solid, in the XY plane facing +Z (a solid stands out towards +Z from its back face).
+
+Lettering for signs, signage, labels, plaques and logos. The letters lie in the XY plane and face +Z, placed by center: x and y where align and valign put the text, z the plane of the faces and outlines, and of the back face of a solid (depth > 0), whose front face is at center z + depth. So letters on a wall at z = 0 stand out from it towards +Z; turn and move the result to face elsewhere. back false leaves the back face of a solid off (letters mounted on a wall, whose back is never seen: fewer triangles, an open solid). To engrave, set center z to minus half the depth (the letters straddle the surface) and subtract the text from the surface with boolean; to emboss, merge it onto the surface or union it. curve_segments 2 (the default) suits signs; 4 to 8 for large lettering seen up close (each step adds about a third more triangles).
 
 **Inputs**
 
@@ -528,8 +530,9 @@ None (generator).
 | `depth` | float | `0` | 0.. |  |  | extrusion depth (> 0 makes a solid) |
 | `output` | enum | `"auto"` |  | `auto`, `faces`, `outlines`, `solid` |  | auto = solid if depth > 0, else faces |
 | `line_spacing` | float | `1.2` |  |  |  | line height as a multiple of size |
-| `curve_segments` | int | `6` | 1..32 |  |  | segments per glyph curve |
-| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
+| `curve_segments` | int | `2` | 1..32 |  |  | segments per glyph curve: 2 suits signs; 4 to 8 for large lettering seen up close |
+| `back` | bool | `true` |  |  | `back_face` | solid: its back face at center z (false leaves it off: letters on a wall, whose back is never seen; the solid is then open) |
+| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | position: x and y where align and valign put the text; z the plane of faces and outlines, and the back face of a solid |
 
 **Example**
 

@@ -210,6 +210,21 @@ section('generators: deterministic, seeded, tileable');
   const plain = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab', weight: 700 } } });
   const plain400 = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab' } } });
   check(plain.warnings.some((w) => /no weight axis \(wght\)/.test(w)) && !plain400.warnings.length && JSON.stringify(fingerprint(plain.geo)) === JSON.stringify(fingerprint(plain400.geo)), 'a static font is drawn at its own weight: weight 700 warns, 400 does not');
+  // a solid stands out towards +Z from its back face at center z; back false leaves that face off; 2 segments per curve
+  const { primNormals } = await import('../src/core/topology.ts');
+  const { catalogText } = await import('../src/mcp/docs.ts');
+  const sign = (params: Record<string, unknown>) => cookOn(engine, { t: { type: 'text', params: { text: 'EXIT', size: 0.5, depth: 0.1, center: [0, 0, 2], ...params } } });
+  const solid = await sign({}), open = await sign({ back: false });
+  const facingBack = (g: any) => { const n = primNormals(g); let k = 0; for (let p = 0; p < g.numPrims; p++) if (n[p * 3 + 2] < -0.99) k++; return k; };
+  const sb = solid.geo.bbox(), ob = open.geo.bbox();
+  check(Math.abs(sb.min[2] - 2) < 1e-6 && Math.abs(sb.max[2] - 2.1) < 1e-6 && facingBack(solid.geo) > 0 && facingBack(open.geo) === 0
+    && open.geo.numPrims === solid.geo.numPrims - facingBack(solid.geo) && Math.abs(ob.min[2] - 2) < 1e-6 && Math.abs(ob.max[2] - 2.1) < 1e-6,
+    `text solid: back face at center z (${f3(sb.min[2])}), front at center z + depth (${f3(sb.max[2])}); back false leaves the ${facingBack(solid.geo)} back triangles off`);
+  const o = async (params: Record<string, unknown>) => (await cookOn(engine, { t: { type: 'text', params: { text: 'O', depth: 0.1, ...params } } })).geo;
+  const [o0, o2, o6] = [await o({}), await o({ curve_segments: 2 }), await o({ curve_segments: 6 })];
+  check(JSON.stringify(fingerprint(o0)) === JSON.stringify(fingerprint(o2)) && o6.numPrims > o2.numPrims * 1.5, `text curve_segments is 2 by default (O: ${o2.numPrims} triangles; ${o6.numPrims} at 6)`);
+  const found = ['sign', 'lettering', 'label', 'font', 'engrave'].filter((w) => / {2}text\b/.test(catalogText(allNodeDefs(), { search: w })));
+  check(found.length === 5, `the catalog finds text by sign, lettering, label, font and engrave (${found.join(', ')})`);
   const cover = async (weight: number) => {
     const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, size: 0.8 } } });
     return { c: mean(findImage(r.geo, '')!.layer('C')!), warnings: r.warnings };

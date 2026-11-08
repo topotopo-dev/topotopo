@@ -482,7 +482,7 @@ defineNode({
   async cook(ctx) {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
-    const r = await ctx.subcook({ nodes: { t: { type: 'text', params: { text: p.text, font: p.font, weight: p.weight, size: 1, align: p.align, valign: 'center', output: 'outlines' } } }, output: 't' });
+    const r = await ctx.subcook({ nodes: { t: { type: 'text', params: { text: p.text, font: p.font, weight: p.weight, size: 1, align: p.align, valign: 'center', output: 'outlines', curve_segments: 6 } } }, output: 't' });
     if (!r.ok || !r.geo) throw new NodeError(`${type}: ${r.errors.map((e) => e.message).join('; ') || 'text failed'}`);
     for (const w of r.warnings) ctx.warn(w.message);
     const g = r.geo;
