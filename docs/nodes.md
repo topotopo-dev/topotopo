@@ -6443,7 +6443,7 @@ Shatter a closed solid into convex Voronoi pieces (sites from input 2 or scatter
 | `count` | int | `12` | 1..10000 |  |  | number of pieces when no site points are given |
 | `seed` | float | `0` |  |  |  | random seed |
 | `gap` | float | `0` | 0.. |  |  | shrink each piece toward its centre by this distance (visual separation) |
-| `neighbors` | int | `24` | 4..1024 |  |  | nearest sites considered per cell (raise if cells look wrong) |
+| `neighbors` | int | `24` | 4..1024 |  |  | nearest sites that cut each cell first; farther sites that can still reach the cell cut it too, so cells are exact and pieces never overlap |
 
 **Writes:** prim name ("piece0"...), class (int), group inside; point/prim attributes from the source
 

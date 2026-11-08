@@ -2,6 +2,7 @@
 //   node test/bugs.ts [--verbose]
 import { allNodeDefs } from '../src/graph/registry.ts';
 import type { GraphSpec, NodeDef, NodeSpec } from '../src/graph/types.ts';
+import type { Geometry } from '../src/core/geometry.ts';
 import { SKIP, checkGeo, createFixtureEngine, fixtureGraphFor } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff } from './fingerprint.ts';
 
@@ -496,6 +497,61 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
     const { r, xs, prims: np } = await run(code);
     check(r.ok && xs === want && np === prims, `wrangle ${label}: points at x = ${want}, ${prims} prim(s) (got ${xs || 'none'}, ${np})`, errs(r));
   }
+}
+
+// ------------------------------------------------------------------ 5j. voronoi_fracture pieces never overlap
+// voronoi_fracture cut each cell by its 24 nearest sites only, so with more pieces some cells came out too big and
+// overlapped their neighbours by centimetres; rbd_settle then (rightly) found pieces inside each other and pushed them
+// apart. Now every site that can reach a cell cuts it. Touching pieces are contact, not overlap; real overlap warns.
+
+{
+  const block = (count: number): Record<string, NodeSpec> => ({
+    b: { type: 'box', params: { size: [1, 1, 1], center: [0, 0.5, 0] } },
+    f: { type: 'voronoi_fracture', in: ['b'], params: { count, gap: 0, seed: 2 } },
+    s: { type: 'rbd_settle', in: ['f'] },
+  });
+  // volume of the pieces: their closed shells, by the divergence theorem over the triangulated polygons
+  const volumeOf = (g: Geometry) => {
+    let v = 0;
+    for (let p = 0; p < g.numPrims; p++) {
+      const q = g.primPoints(p);
+      for (let k = 1; k + 1 < q.length; k++) {
+        const a = q[0] * 3, b = q[k] * 3, c = q[k + 1] * 3, P = g.P;
+        v += (P[a] * (P[b + 1] * P[c + 2] - P[b + 2] * P[c + 1]) - P[a + 1] * (P[b] * P[c + 2] - P[b + 2] * P[c]) + P[a + 2] * (P[b] * P[c + 1] - P[b + 1] * P[c])) / 6;
+      }
+    }
+    return v;
+  };
+  const centres = (g: Geometry) => {
+    const nm = g.prims.get('name')!.data as string[], m = new Map<string, number[]>();
+    for (let p = 0; p < g.numPrims; p++) for (const q of g.primPoints(p)) {
+      const a = m.get(nm[p]) ?? [0, 0, 0, 0];
+      a[0] += g.P[q * 3]; a[1] += g.P[q * 3 + 1]; a[2] += g.P[q * 3 + 2]; a[3]++;
+      m.set(nm[p], a);
+    }
+    return m;
+  };
+  const fr = await engine.cook({ nodes: block(60), output: 'f' });
+  const vol = fr.geo ? volumeOf(fr.geo) : NaN;
+  check(fr.ok && fr.geo!.prims.get('name') && Math.abs(vol - 1) < 1e-6, `voronoi_fracture of a 1 m box into 60 pieces: the pieces fill it once (volume ${vol.toFixed(6)})`, errs(fr));
+  const st = await engine.cook({ nodes: block(60), output: 's' });
+  const before = centres(fr.geo!), after = st.geo ? centres(st.geo) : new Map();
+  const moved = [...before].map(([k, a]) => { const b = after.get(k)!; return Math.hypot(a[0] / a[3] - b[0] / b[3], a[1] / a[3] - b[1] / b[3], a[2] / a[3] - b[2] / b[3]); }).sort((x, y) => x - y);
+  check(st.ok && !st.warnings.some((w) => /started inside/.test(w.message)) && moved[moved.length >> 1] < 0.01,
+    `rbd_settle of the fractured box: no piece starts inside another, the pieces stay together (median move ${(moved[moved.length >> 1] ?? NaN).toFixed(4)} m)`, st.warnings.map((w) => w.message).join('; '));
+  // two boxes sharing a face rest as they are; two boxes overlapping by 30 cm are pushed apart, with a warning
+  const pair = (x: number): Record<string, NodeSpec> => ({
+    l: { type: 'box', params: { size: [1, 1, 1], center: [-x, 0.5, 0] } },
+    r: { type: 'box', params: { size: [1, 1, 1], center: [x, 0.5, 0] } },
+    m: { type: 'merge', in: ['l', 'r'] },
+    s: { type: 'rbd_settle', in: ['m'], params: { jitter: 0 } },
+  });
+  const touch = await engine.cook({ nodes: pair(0.5), output: 's' });
+  const tb = touch.geo?.bbox();
+  check(touch.ok && !touch.warnings.length && !!tb && Math.abs(tb.min[0] + 1) < 1e-3 && Math.abs(tb.max[0] - 1) < 1e-3,
+    `rbd_settle: boxes sharing a face are in contact, not overlapping (no warning, x ${tb?.min[0].toFixed(4)} .. ${tb?.max[0].toFixed(4)})`, touch.warnings.map((w) => w.message).join('; '));
+  const deep = await engine.cook({ nodes: pair(0.35), output: 's' });
+  check(deep.ok && deep.warnings.some((w) => /2 pieces started inside/.test(w.message)), 'rbd_settle: boxes overlapping by 30 cm still warn', deep.warnings.map((w) => w.message).join('; '));
 }
 
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
