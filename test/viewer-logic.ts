@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
-import { markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
+import { markersFromGeometry, markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
 import * as km from '../src/viewer/app/keymap.js';
 import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
@@ -207,6 +207,62 @@ section('guides: cancellation while a prior save is queued');
     await tick();
     check(bodies.length === writes && !idle.saving(), 'cancelling an ordinary drag with no pending save performs no network write');
   } finally { api.saveMarkers = originalSave; }
+}
+
+section('guides: placing while the scene loads');
+{
+  // a heavy terrain still cooking: a click that finds no surface would put the null on the grid (y = 0) under it
+  const originalSave = api.saveMarkers;
+  api.saveMarkers = async () => ({ ok: true });
+  try {
+    const said: string[] = [];
+    let hit: any = { point: new THREE.Vector3(5, 0, 5), surface: false };
+    const ctx: any = {
+      store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
+      selection: { has: () => false, prune: () => {}, apply: () => {} }, undo: { push: () => {} }, requestRender: () => {},
+      message: (m: string) => said.push(m), emit: () => {}, pxWorld: () => 0.01, coalesce, surfacePoint: () => hit,
+      output: { loading: true }, layers: { loading: () => false },
+      views: { cam: () => ({ name: 'persp' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
+    };
+    const guides = createGuides(ctx);
+    const click = (x = 10, y = 10) => { guides.pointerDown(0, x, y); guides.pointerUp(0, x, y); };
+    guides.setMode('site');
+    click();
+    check(guides.list.length === 0 && /still loading/.test(said[said.length - 1] ?? ''), `a null clicked on no surface while the output loads is not placed; the hint says why (${said[said.length - 1]})`);
+    hit = { point: new THREE.Vector3(5, 7, 5), surface: true };
+    click();
+    check(guides.list.length === 1 && guides.list[0].points[0][1] === 7, 'on a surface already drawn it is placed while loading');
+    ctx.output.loading = false; ctx.layers.loading = () => true;
+    hit = { point: new THREE.Vector3(1, 0, 1), surface: false };
+    click();
+    check(guides.list.length === 1, 'a shown reference layer still loading holds it back too');
+    ctx.layers.loading = () => false;
+    click();
+    check(guides.list.length === 2 && guides.list[1].points[0][1] === 0, 'once the scene is drawn, a click on no surface places it on the grid as before');
+    guides.setMode('volume');
+    ctx.output.loading = true;
+    guides.pointerDown(0, 0, 0); guides.pointerUp(0, 40, 40);
+    check(guides.list.length === 2 && /still loading/.test(said[said.length - 1] ?? ''), 'a volume dragged on no surface while loading is not drawn either');
+  } finally { api.saveMarkers = originalSave; }
+}
+
+section('guides: a markers.json written as geometry reads back as guides');
+{
+  const kinds = [
+    { id: 'a', kind: 'site', name: 'village', points: [[10, 2, -5]], radius: 7 },
+    { id: 'b', kind: 'path', name: 'road', points: [[0, 0, 0], [20, 1, 0], [20, 2, 30]] },
+    { id: 'c', kind: 'zone', name: 'keep empty', points: [[0, 0, 0], [0, 0, 10], [10, 0, 10], [10, 0, 0]] },
+    { id: 'd', kind: 'volume', name: 'no trees', points: [[20, 1, 30], [30, 1, 40]], height: 8 },
+  ];
+  const back = mk.parseMarkers({ markers: markersFromGeometry(markersGeometry(kinds as any)) });
+  const by = (k: string) => back.find((m: any) => m.kind === k);
+  const zone = by('zone');
+  check(back.length === 4 && JSON.stringify(by('site').points) === '[[10,2,-5]]' && by('site').radius === 7 && JSON.stringify(by('path').points) === JSON.stringify(kinds[1].points)
+    && by('volume').height === 8 && JSON.stringify(by('volume').points) === JSON.stringify(kinds[3].points) && zone.points.length === 4 && zone.name === 'keep empty',
+    `markersFromGeometry(markersGeometry(list)) gives the guides back: names, points, radius, height (${back.map((m: any) => m.name).join(', ')})`);
+  const other = new GeoBuilder(new Geometry());
+  other.addPrim([other.addPoint(0, 0, 0), other.addPoint(1, 0, 0)], false);
+  check(markersFromGeometry(other.build()).length === 0, 'elements without a guide role are not guides');
 }
 
 section('guides: the marker rules the server uses');

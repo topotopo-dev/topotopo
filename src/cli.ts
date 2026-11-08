@@ -24,7 +24,7 @@
 //   node src/cli.ts --catalog | --help-node scatter | --help-topic export | --version
 //   node src/cli.ts mcp [--package dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
-//                                                         files dropped on the page go to inputs/ beside the graph file
+//                                                         guides and dropped files go to the package's inputs/
 //   node src/cli.ts web [--port 7340] [--library dir]  the web app for the workspaces and libraries (src/packages/commands.ts)
 //   node src/cli.ts library add|remove|list|new|bake …    registered libraries and packages; edit [folder] opens the
 //                                                         live viewer on a package
@@ -178,7 +178,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
     `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output)`,
     `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
-    `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; files dropped on the page go to inputs/ beside it)`,
+    `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; guides and files dropped on the page go to the package's inputs/, beside the file in no package)`,
     `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
     `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: the registered workspaces and every library's packages, stable links for a board)`,
     `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,

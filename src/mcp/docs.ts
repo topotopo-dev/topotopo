@@ -267,7 +267,9 @@ MARKERS: what a person places by clicking in the live viewer (the guides tools: 
   pscale and orient; paths open and zones closed polylines; volumes closed boxes), so describe it and read it like any
   other input. A graph meant to be directed by guides reads the file with "missing": "empty"
   ({"type":"file","params":{"path":"inputs/markers.json","missing":"empty"}}): it cooks before the first guide is
-  drawn, and again each time the guides change.
+  drawn, and again each time the guides change. One markers.json per package: every graph in it shares the guides
+  (topotopo view <graph> uses the graph's package's inputs/ too). Guides can be written: a markers.json of that geometry
+  (by hand or by a graph's export) shows in the viewer's GUIDES list, ready to drag.
 FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"; obj too: usemtl → "material",
   its .mtl (mtllib, beside it) → the material table with colours, alpha, roughness and maps), obj/stl/ply (no up axis:
   Unreal exports and Blender exports with Up = Z are Z-up, so add "up_axis":"z"), geo/bgeo (Houdini), csv and

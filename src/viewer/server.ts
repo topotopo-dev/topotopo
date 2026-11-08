@@ -2,9 +2,9 @@
 // from /vendor/three/) that shows any graph/node of the package and refreshes over
 // Server-Sent Events whenever a graph is rebuilt/edited.
 // It is also the human's control surface: files dropped on the page are stored in the package's inputs/ (under
-// `topotopo view`, the inputs/ beside the graph file) and shown as reference layers, the graph's exposed vars are set
-// from generated controls (POST /api/vars), and markers clicked into the view (sites, paths, zones, volumes) become
-// inputs/markers.json (POST /api/markers).
+// `topotopo view`, the graph file's package's, or beside the file in no package) and shown as reference layers, the
+// graph's exposed vars are set from generated controls (POST /api/vars), and markers clicked into the view (sites,
+// paths, zones, volumes) become inputs/markers.json (POST /api/markers).
 // Cooks report their progress (the node cooking, the time) as {cook} events, and POST /api/cook/stop stops them at
 // the next node boundary. A new value supersedes the cook of the one before: the latest value wins.
 // Over a graph file (`topotopo view`, ViewerOptions.source) the controls set session values over the graph, which
@@ -28,6 +28,7 @@ import { GeoBuilder } from '../core/geometry.ts';
 import type { Geometry } from '../core/geometry.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { exportGeometry } from '../io/export.ts';
+import { geoFromJSON } from '../io/json.ts';
 import { previewGLB, heightfieldRes } from '../render/preview.ts';
 import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
@@ -184,6 +185,43 @@ export function markersGeometry(list: Marker[]): Geometry {
   return b.build();
 }
 
+/**
+ * The guides an inputs/markers.json holds, read back from its geometry (markersGeometry's conventions): points with
+ * role "site", prims with role "path" (open), "zone" (closed) and "volume" (its quads, by name: the box's lower corners
+ * and height). Elements with another role, or none, are not guides. For a markers.json written by hand or by an agent.
+ */
+export function markersFromGeometry(g: Geometry): Marker[] {
+  const str = (cls: 'point' | 'prim', n: string, i: number) => { const a = cls === 'point' ? g.points.get(n) : g.prims.get(n); return a && a.type === 'string' ? String(a.get(i) ?? '') : ''; };
+  const ps = g.points.get('pscale');
+  const P = (i: number): [number, number, number] => [g.P[i * 3], g.P[i * 3 + 1], g.P[i * 3 + 2]];
+  const out: Marker[] = [];
+  const used = new Uint8Array(g.numPoints);
+  for (let v = 0; v < g.numVertices; v++) used[g.vertexPoint[v]] = 1;
+  for (let i = 0; i < g.numPoints; i++) {
+    if (used[i] || str('point', 'role', i) !== 'site') continue;
+    const r = ps ? Number(ps.get(i)) : NaN;
+    out.push({ id: `m${out.length + 1}`, kind: 'site', name: str('point', 'name', i), points: [P(i)], ...(r > 0 ? { radius: r } : {}) });
+  }
+  const boxes = new Map<string, number[]>();
+  for (let p = 0; p < g.numPrims; p++) {
+    const role = str('prim', 'role', p), name = str('prim', 'name', p);
+    const pts = Array.from(g.vertexPoint.subarray(g.primStart[p], g.primStart[p + 1]), P);
+    if (role === 'path' && !g.primClosed[p]) out.push({ id: `m${out.length + 1}`, kind: 'path', name, points: pts });
+    else if (role === 'zone' && g.primClosed[p]) out.push({ id: `m${out.length + 1}`, kind: 'zone', name, points: pts });
+    else if (role === 'volume') { let l = boxes.get(name); if (!l) boxes.set(name, (l = [])); l.push(p); }
+  }
+  for (const [name, prims] of boxes) {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const p of prims) for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) {
+      const q = P(g.vertexPoint[v]);
+      for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], q[a]); hi[a] = Math.max(hi[a], q[a]); }
+    }
+    const height = hi[1] - lo[1];
+    out.push({ id: `m${out.length + 1}`, kind: 'volume', name, points: [[lo[0], lo[1], lo[2]], [hi[0], lo[1], hi[2]]], ...(height > 0 ? { height } : {}) });
+  }
+  return out;
+}
+
 interface VarsBody {
   ok: boolean; ms: number; errors: string[];
   /** the values the controls show (the graph's vars with the session's over them), the graph's own, the session's names */
@@ -296,7 +334,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     .map((f) => (f.sidecar ? { ...f, about: `${SIDECAR_NAMES[f.sidecar.role]}: ${SIDECAR_TEXT[f.sidecar.role]}` } : f));
   const inputsWhere = () => opts.inputsWhere ?? (path.dirname(ws.inputDir) === ws.dir ? (packageOf() ? 'in the package' : 'in this folder') : `in ${path.dirname(ws.inputDir)}`);
   // Files copied into inputs/ by other means (file manager, an agent) show up too, once the folder exists. The viewer
-  // does not make it just to watch it (`topotopo view`'s inputs/ beside the graph file appears with the first drop):
+  // does not make it just to watch it (`topotopo view`'s inputs/ appears with the first drop):
   // uploads and listings start the watch when the folder is there by then.
   let watcher: fs.FSWatcher | null = null, watchTimer: ReturnType<typeof setTimeout> | undefined, closed = false;
   const changed = () => { clearTimeout(watchTimer); watchTimer = setTimeout(inputsChanged, 250); };
@@ -387,11 +425,30 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     const part = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.part`);
     try { fs.writeFileSync(part, data); fs.renameSync(part, file); } catch (e) { fs.rmSync(part, { force: true }); throw e; }
   };
+  const mtime = (f: string) => fs.statSync(f, { throwIfNoEntry: false })?.mtimeMs ?? null;
   const loadMarkers = (): { markers: Marker[]; error?: string } => {
-    let text: string;
-    try { text = fs.readFileSync(markersListFile(), 'utf8'); } catch { return { markers: [] }; }
-    try { return { markers: parseMarkers(JSON.parse(text)) }; }
-    catch (e: any) { return { markers: [], error: `inputs/.markers.json is unreadable (${e.message}); saving markers replaces it` }; }
+    // the list the page saved, unless markers.json was written after it (by hand or by an agent) or there is none:
+    // then the guides markers.json holds, as geometry or as the page's own list ({"markers": [...]})
+    const listAt = mtime(markersListFile()), geoAt = mtime(markersGeoFile());
+    if (listAt !== null && (geoAt === null || geoAt <= listAt)) {
+      let text: string;
+      try { text = fs.readFileSync(markersListFile(), 'utf8'); } catch { return { markers: [] }; }
+      try { return { markers: parseMarkers(JSON.parse(text)) }; }
+      catch (e: any) { return { markers: [], error: `inputs/.markers.json is unreadable (${e.message}); saving markers replaces it` }; }
+    }
+    if (geoAt === null) return { markers: [] };
+    try {
+      const j = JSON.parse(fs.readFileSync(markersGeoFile(), 'utf8'));
+      if (Array.isArray(j?.markers)) {
+        // the page's list format in markers.json: stored as the page stores it, so agents read geometry there again
+        const list = parseMarkers(j);
+        saveMarkers(list);
+        return { markers: list };
+      }
+      const list = parseMarkers({ markers: markersFromGeometry(geoFromJSON(j)) });
+      if (list.length) writeAtomic(markersListFile(), JSON.stringify({ markers: list }, null, 1));
+      return { markers: list };
+    } catch (e: any) { return { markers: [], error: `inputs/markers.json holds no guides the viewer can read (${e.message}); saving markers replaces it` }; }
   };
   const saveMarkers = (list: Marker[]) => {
     let counts = { points: 0, prims: 0 };

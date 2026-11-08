@@ -430,6 +430,59 @@ section('topotopo view: drops go to inputs/ beside the graph file');
   } finally { proc.kill(); }
 }
 
+section('topotopo view on a graph in a package: guides go to the package\'s inputs/, and a markers.json written by hand is listed');
+{
+  // the graph reads "inputs/markers.json" from its package folder (host/node.ts packageBaseDir), so that is where the
+  // viewer must keep the guides; graphs/inputs/ beside the file would never be read
+  const pkg = path.join(tmp, 'cliffpkg'), graphs = path.join(pkg, 'graphs'), inputs = path.join(pkg, 'inputs');
+  fs.mkdirSync(graphs, { recursive: true });
+  fs.writeFileSync(path.join(pkg, 'cliffs.topo'), JSON.stringify({ title: 'Cliffs', graph: 'cliffs' }));
+  const gfile = path.join(graphs, 'cliffs.json');
+  fs.writeFileSync(gfile, JSON.stringify({ nodes: { m: { type: 'file', params: { path: 'inputs/markers.json', missing: 'empty' } } }, output: 'm' }));
+  const open = async () => {
+    const v = await viewGraphFile(gfile, { name: 'cliffs', port: 0, log: () => {} });
+    const getJSON = async (p: string) => { const r = await fetch(v.url + p); return { status: r.status, j: await r.json() as any }; };
+    return { v, getJSON };
+  };
+  let s = await open();
+  try {
+    const where = (await s.getJSON('api/inputs_dir')).j;
+    check(where.dir === inputs && where.where === 'in the package', `GET /api/inputs_dir: the package's inputs/ (${JSON.stringify(where)})`);
+    const r = await fetch(`${s.v.url}api/markers`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ markers: [{ id: 's', kind: 'site', name: 'camp', points: [[-834, 12, 2567]] }] }) });
+    let cooked: any = {};
+    for (let i = 0; i < 100 && !/1 points/.test(cooked.summary ?? ''); i++) { await sleep(100); cooked = (await s.getJSON('api/info?graph=cliffs')).j; }
+    check(r.status === 200 && fs.existsSync(path.join(inputs, 'markers.json')) && !fs.existsSync(path.join(graphs, 'inputs')) && /1 points/.test(cooked.summary ?? ''),
+      `a guide is saved to <package>/inputs/markers.json, not graphs/inputs/, and the graph reads it (${String(cooked.summary ?? cooked.error).split('\n')[0]})`);
+  } finally { s.v.close(); }
+  // written by hand (or by an agent) as geometry, without the page's list: listed under GUIDES after a restart
+  const kinds = [
+    { id: 'a', kind: 'site', name: 'village', points: [[-834, 2, 2567]], radius: 7 },
+    { id: 'b', kind: 'path', name: 'road', points: [[0, 0, 0], [20, 1, 0], [20, 2, 30]] },
+    { id: 'c', kind: 'zone', name: 'keep empty', points: [[0, 0, 0], [10, 0, 0], [10, 0, 10], [0, 0, 10]] },
+    { id: 'd', kind: 'volume', name: 'no trees', points: [[20, 1, 30], [30, 1, 40]], height: 8 },
+  ];
+  const { markersGeometry } = await import('../src/viewer/server.ts');
+  const { exportGeometry } = await import('../src/io/export.ts');
+  fs.rmSync(path.join(inputs, '.markers.json'));
+  fs.writeFileSync(path.join(inputs, 'markers.json'), exportGeometry(markersGeometry(kinds as any), 'json'));
+  s = await open();
+  try {
+    const got = (await s.getJSON('api/markers')).j.markers ?? [];
+    const same = (m: any, k: any) => m.kind === k.kind && m.name === k.name && JSON.stringify(m.points) === JSON.stringify(k.points) && (k.radius === undefined || m.radius === k.radius) && (k.height === undefined || m.height === k.height);
+    const zoneCCW = got.find((m: any) => m.kind === 'zone');
+    check(got.length === 4 && same(got.find((m: any) => m.kind === 'site'), kinds[0]) && same(got.find((m: any) => m.kind === 'path'), kinds[1])
+      && same(got.find((m: any) => m.kind === 'volume'), kinds[3]) && zoneCCW?.name === 'keep empty' && zoneCCW.points.length === 4,
+      `a markers.json written as geometry, without .markers.json: its site, path, zone and volume are listed (${got.map((m: any) => `${m.kind} ${m.name}`).join(', ')})`);
+    // the page's own list format written into markers.json: listed, and markers.json is made geometry again for agents
+    await sleep(50);
+    fs.writeFileSync(path.join(inputs, 'markers.json'), JSON.stringify({ markers: [{ kind: 'site', name: 'well', points: [[1, 2, 3]] }] }));
+    const later = (await s.getJSON('api/markers')).j.markers ?? [];
+    const info = (await s.getJSON('api/input_info?path=markers.json')).j;
+    check(later.length === 1 && later[0].name === 'well' && /1 points, 0 prims/.test(info.summary ?? ''),
+      `a markers.json in the page's list format (newer than the list) is listed and stored as geometry again (${String(info.summary ?? info.error).split('\n')[0]})`);
+  } finally { s.v.close(); }
+}
+
 section('GET /api/input: "inputs/<rel>" through the host, the path a graph uses');
 {
   // the engine's base folder holds inputs/ under the MCP server and under `topotopo view`; an engine that resolves paths

@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import '../nodes/index.ts';
 import { Engine } from '../graph/engine.ts';
-import { createNodeHost } from '../host/node.ts';
+import { createNodeHost, packageBaseDir } from '../host/node.ts';
 import { openPackages } from '../packages/registry.ts';
 import { Session } from '../session.ts';
 import { startViewer } from './server.ts';
@@ -146,7 +146,8 @@ export interface ViewGraphFileOptions {
 
 /**
  * `topotopo view <graph.json>`: cook the file, serve the live viewer on it and follow its saves. The session is a
- * scratch folder; inputs/ and exports/ are beside the graph file (inputs/ made by the first file dropped on the page).
+ * scratch folder; inputs/ and exports/ are the package's (the folders the graph's "inputs/…" paths and exports use),
+ * beside the graph file when it is in no package; inputs/ is made by the first file dropped or guide placed.
  */
 export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): Promise<{ url: string; viewer: Viewer; ws: Session; source: GraphFile; close: () => void }> {
   const log = opts.log ?? ((l: string) => console.log(l));
@@ -155,7 +156,10 @@ export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): P
   await engine.init();
   const packages = openPackages(engine, dir, { follow: opts.follow });
   // exports go into the package's exports/ (a graph file in no package: beside it), as the CLI's do
-  const ws = new Session(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs: path.join(dir, 'inputs'), exports: exportsFolderFor(file) });
+  // inputs/ as the graph reads it: relative paths resolve against the package folder (host/node.ts packageBaseDir), so
+  // the guides placed and the files dropped land where its {"type":"file","params":{"path":"inputs/…"}} nodes look
+  const base = packageBaseDir(dir), inputs = path.join(base, 'inputs');
+  const ws = new Session(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-view-')), engine, { inputs, exports: exportsFolderFor(file) });
   ws.packages = packages;
   ws.load();
   for (const p of packages.check()) log(`warning: ${p}`);
@@ -163,8 +167,8 @@ export async function viewGraphFile(file: string, opts: ViewGraphFileOptions): P
   const source = new GraphFile(ws, file, opts.name, log);
   await source.load();
   // the viewer cooks the graph again after a save in the working folder of a package it follows (src/viewer/packages.ts)
-  const viewer = await startViewer(ws, opts.port, { inputsWhere: `beside ${path.basename(file)}`, source });
-  log(`view: ${viewer.url}  (watching ${file}; files dropped on the page go to ${path.join(path.dirname(file), 'inputs') + path.sep}; Ctrl+C to stop)`);
+  const viewer = await startViewer(ws, opts.port, { inputsWhere: base === dir ? `beside ${path.basename(file)}` : 'in the package', source });
+  log(`view: ${viewer.url}  (watching ${file}; guides and files dropped on the page go to ${inputs + path.sep}; Ctrl+C to stop)`);
   source.watch();
   return { url: viewer.url, viewer, ws, source, close: () => { source.close(); viewer.close(); } };
 }
