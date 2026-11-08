@@ -554,6 +554,29 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(deep.ok && deep.warnings.some((w) => /2 pieces started inside/.test(w.message)), 'rbd_settle: boxes overlapping by 30 cm still warn', deep.warnings.map((w) => w.message).join('; '));
 }
 
+// ------------------------------------------------------------------ 5k. scatter never scatters at the origin
+// A heightfield (or an SDF) has no prims and no points: scatter fell back to volume mode over an empty box and put
+// every point at the origin, without a word. It now names what works; an empty input gives no points and says so.
+
+{
+  const terrain: Record<string, NodeSpec> = {
+    h: { type: 'heightfield', params: { size: [20, 20] } },
+    n: { type: 'heightfield_noise', in: ['h'], params: { height: 4 } },
+  };
+  for (const mode of ['auto', 'surface', 'volume']) {
+    const r = await engine.cook({ nodes: { ...terrain, s: { type: 'scatter', in: ['n'], params: { count: 50, mode } } }, output: 's' });
+    check(!r.ok && /heightfield, which has no polygons/.test(r.errors[0]?.message ?? '') && /heightfield_scatter/.test(r.errors[0]?.hint ?? '') && /heightfield_to_mesh/.test(r.errors[0]?.hint ?? ''),
+      `scatter mode ${mode} on a heightfield: an error naming heightfield_scatter and heightfield_to_mesh (${r.errors[0]?.message})`);
+  }
+  const meshed = await engine.cook({ nodes: { ...terrain, m: { type: 'heightfield_to_mesh', in: ['n'] }, s: { type: 'scatter', in: ['m'], params: { count: 50 } } }, output: 's' });
+  const mb = meshed.geo?.bbox();
+  check(meshed.ok && meshed.geo!.numPoints === 50 && !!mb && mb.max[0] - mb.min[0] > 10 && mb.max[2] - mb.min[2] > 10, `scatter after heightfield_to_mesh spreads over the terrain (${mb ? (mb.max[0] - mb.min[0]).toFixed(1) : '?'} m wide)`, errs(meshed));
+  const sdf = await engine.cook({ nodes: { b: { type: 'sphere' }, v: { type: 'sdf_from_mesh', in: ['b'] }, s: { type: 'scatter', in: ['v'], params: { count: 20 } } }, output: 's' });
+  check(!sdf.ok && /SDF volume/.test(sdf.errors[0]?.message ?? '') && /sdf_to_mesh/.test(sdf.errors[0]?.hint ?? ''), `scatter on an SDF: an error naming sdf_to_mesh (${sdf.errors[0]?.message})`);
+  const empty = await engine.cook({ nodes: { e: { type: 'null' }, s: { type: 'scatter', in: ['e'], params: { count: 20 } } }, output: 's' });
+  check(empty.ok && empty.geo!.numPoints === 0 && empty.warnings.some((w) => /no points/.test(w.message)), 'scatter on an empty input: no points, with a warning', errs(empty));
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.

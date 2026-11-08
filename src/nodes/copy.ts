@@ -195,7 +195,8 @@ defineNode({
     '"^name" excludes). N: the input N is always carried (point or vertex N interpolated and normalised, prim N copied; ' +
     'attrib_delete removes it); scatter computes none of its own unless write_normals is on (the surface normal, or the tangent along ' +
     'curves), as the Houdini scatter does, because copy_to_points turns each copy so its +Z follows N and an N pointing up lays ' +
-    'upright models on their side. Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").',
+    'upright models on their side. Packed input is unpacked first. A heightfield or an SDF has no polygons and is refused: use ' +
+    'heightfield_scatter, or heightfield_to_mesh / sdf_to_mesh first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").',
   aliases: ['scatter_points', 'distribute'],
   inputs: [{ name: 'geo', desc: 'surface, curves, or closed mesh (volume mode)' }],
   params: {
@@ -249,6 +250,11 @@ defineNode({
     let hasPoly = false, hasLine = false;
     for (let pr = 0; pr < g.numPrims; pr++) if (!sel || sel[pr]) { if (g.primClosed[pr]) hasPoly = true; else hasLine = true; }
     const mode = p.mode === 'auto' ? (hasPoly ? 'surface' : hasLine ? 'curve' : 'volume') : p.mode;
+    // a heightfield or an SDF has no prims or points to scatter on or in: say what does, never scatter at the origin
+    if (!g.numPrims && g.volumes.some((v) => v.kind === 'heightfield'))
+      throw new NodeError('scatter: the input is a heightfield, which has no polygons to scatter on', 'use heightfield_scatter (it reads the mask layers), or heightfield_to_mesh first and scatter on the mesh');
+    if (!g.numPrims && g.volumes.some((v) => v.kind === 'sdf' || v.kind === 'grid'))
+      throw new NodeError('scatter: the input is an SDF volume, which has no polygons to scatter on or in', 'sdf_to_mesh first, then scatter on the mesh (mode volume for points inside it)');
     const dA = cornerReader(g, p.density_attrib, 'density_attrib');
     const mA = cornerReader(g, p.density_mask, 'density_mask');
     const weighted = !!(dA || mA);
@@ -500,6 +506,7 @@ defineNode({
     }
 
     // volume
+    if (!g.numPoints) { warn('the input has no points, so there is no box to scatter in: no points'); return finish(); }
     const bb = g.bbox();
     const ext = [0, 1, 2].map((a) => bb.max[a] - bb.min[a]);
     const closed = hasPoly ? new TriBVH(g) : null;
