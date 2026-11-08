@@ -428,6 +428,44 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(/no point attribute "uv" \(it has a vertex "uv": set class to vertex\)/.test(wrong.w), `attrib_copy names a vertex attribute with class point: the warning says which class has it (${wrong.w})`);
 }
 
+// ------------------------------------------------------------------ 5h. extrude carries its input's attributes
+// extrude used to drop every attribute. Like polyextrude: caps and side walls take their contour prim's attributes,
+// new points their source point's, corners their source corner's; a vertex uv gets its own layout up the walls.
+
+{
+  const nodes: Record<string, NodeSpec> = {
+    plate: { type: 'shape2d', params: { shape: 'rect', size: [4, 2] } },
+    hole: { type: 'circle', params: { radius: 0.5, divisions: 12 } },
+    both: { type: 'merge', in: ['plate', 'hole'] },
+    tag: { type: 'wrangle', in: ['both'], params: { run_over: 'prims', code: "s@name = 'part' + @primnum; i@lot = 7 + @primnum;" } },
+    paint: { type: 'wrangle', in: ['tag'], params: { run_over: 'points', code: 'f@height = @ptnum; @Cd = [1, 0.5, 0];' } },
+    uv: { type: 'uv_project', in: ['paint'] },
+    group: { type: 'group', in: ['uv'], params: { name: 'chosen', class: 'prim', expr: '@primnum == 1' } },
+  };
+  for (const params of [{ height: 0.5 }, { height: -0.5, divisions: 3, twist: 20, scale_top: [0.8, 0.8] }]) {
+    const r = await engine.cook({ nodes: { ...nodes, e: { type: 'extrude', in: ['group'], params } }, output: 'e' });
+    const g = r.geo, label = `extrude ${JSON.stringify(params)}`;
+    check(r.ok && g, `${label} cooks`, errs(r));
+    if (!g) continue;
+    const name = (pr: number) => g.prims.get('name')?.get(pr), lot = (pr: number) => g.prims.get('lot')?.get(pr);
+    const sideHole = Array.from({ length: g.numPrims }, (_, pr) => pr).filter((pr) => g.primGroups.get('side')![pr] && name(pr) === 'part1');
+    const caps = Array.from({ length: g.numPrims }, (_, pr) => pr).filter((pr) => !g.primGroups.get('side')![pr]);
+    check(sideHole.length === 12 * (params.divisions ?? 1) && sideHole.every((pr) => lot(pr) === 8 && g.primGroups.get('chosen')![pr]),
+      `${label}: the hole's side walls keep the hole prim's name, lot and group`);
+    check(caps.length > 0 && caps.every((pr) => name(pr) === 'part0' && lot(pr) === 7 && !g.primGroups.get('chosen')![pr]), `${label}: the caps (with the hole cut) keep the plate's attributes`);
+    const height = g.points.get('height'), Cd = g.points.get('Cd');
+    check(!!height && !!Cd && Array.from({ length: g.numPoints }, (_, i) => Cd.get(i)).every((c) => JSON.stringify(c) === '[1,0.5,0]'), `${label}: every point keeps Cd`);
+    check(!g.points.has('N') && !g.vertices.has('N'), `${label}: no stale N`);
+    const uv = g.vertices.get('uv')!, side = g.primGroups.get('side')!;
+    let wallArea = 0;
+    for (let pr = 0; pr < g.numPrims; pr++) if (side[pr]) {
+      const c = Array.from({ length: 4 }, (_, k) => uv.get(g.primStart[pr] + k) as number[]);
+      wallArea += Math.abs((c[1][0] - c[0][0]) * (c[3][1] - c[0][1]) - (c[3][0] - c[0][0]) * (c[1][1] - c[0][1]));
+    }
+    check(Math.abs(wallArea - 2) < 1e-9, `${label}: side walls get a 0..1 uv layout per contour (uv area ${wallArea}, plate and hole 1 each)`);
+  }
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.

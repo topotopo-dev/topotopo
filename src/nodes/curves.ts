@@ -781,7 +781,11 @@ defineNode({
     'A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; ' +
     'which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect ' +
     'and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes ' +
-    'through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids.',
+    'through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids. ' +
+    'Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the ' +
+    'shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, ' +
+    'corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: ' +
+    'u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.',
   aliases: ['linear_extrude', 'extrude2d'],
   inputs: [{ name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' }],
   params: {
@@ -793,7 +797,7 @@ defineNode({
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis)' },
     caps: { type: 'bool', default: true, desc: 'add top/bottom caps' },
   },
-  outputs: 'prim groups top, bottom, side',
+  outputs: 'prim groups top, bottom, side; the attributes and groups of the input (see above)',
   example: {
     nodes: {
       star: { type: 'shape2d', params: { shape: 'star', radius: 1, inner_radius: 0.5, sides: 5 } },
@@ -832,9 +836,21 @@ defineNode({
     const { polys, depth, parent } = orientNested(raw);
     const root = polys.map((_, i) => { let r = i; while (parent[r] >= 0) r = parent[r]; return r; });
     const centre = polys.map((poly) => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length]);
-    const b = new GeoBuilder();
+    // where each contour corner came from: toPolygons skips prims under 3 corners, orientNested may reverse a contour
+    const srcPrim: number[] = [], srcVertex: number[][] = [];
+    for (let pr = 0, k = 0; pr < g.numPrims && k < raw.length; pr++) {
+      if (g.primStart[pr + 1] - g.primStart[pr] < 3) continue;
+      const vs = Array.from({ length: raw[k].length }, (_, j) => g.primStart[pr] + j);
+      srcPrim.push(pr); srcVertex.push(area2(raw[k]) > 0 === (depth[k] % 2 === 0) ? vs : vs.reverse());
+      k++;
+    }
+    // like polyextrude: new points take their source point's attributes, caps and side walls their contour prim's,
+    // corners their source corner's (normals are left out: they no longer fit)
+    const b = new GeoBuilder(g);
+    for (const cls of ['point', 'vertex', 'prim'] as const) b.skip[cls].add('N');
     const top = b.group('prim', 'top'), bottom = b.group('prim', 'bottom'), side = b.group('prim', 'side');
     const h0 = p.center ? -p.height / 2 : 0;
+    const vertexOf = new Map<number, number>(), contourOf = new Map<number, number>();
     const rings = polys.map((poly, i) => {
       // twist and taper about the outermost outline's centre, so holes stay where they are in their shape
       const [cx, cy] = centre[root[i]];
@@ -843,19 +859,33 @@ defineNode({
         const t = k / p.divisions, w = offset + h0 + p.height * t;
         const a = ((p.twist * t) * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
         const sx = 1 + (p.scale_top[0] - 1) * t, sy = 1 + (p.scale_top[1] - 1) * t;
-        out.push(poly.map(([u, v]) => {
+        out.push(poly.map(([u, v], j) => {
           const du = (u - cx) * sx, dv = (v - cy) * sy;
-          const uu = cx + du * c - dv * sn, vv = cy + du * sn + dv * c;
-          return b.addPoint(F.U[0] * uu + F.V[0] * vv + F.N[0] * w, F.U[1] * uu + F.V[1] * vv + F.N[1] * w, F.U[2] * uu + F.V[2] * vv + F.N[2] * w);
+          const uu = cx + du * c - dv * sn, vv = cy + du * sn + dv * c, vertex = srcVertex[i][j];
+          const id = b.addPoint(F.U[0] * uu + F.V[0] * vv + F.N[0] * w, F.U[1] * uu + F.V[1] * vv + F.N[1] * w, F.U[2] * uu + F.V[2] * vv + F.N[2] * w, g.vertexPoint[vertex]);
+          vertexOf.set(id, vertex); contourOf.set(id, i);
+          return id;
         }));
       }
       return out;
     });
+    // a vertex uv cannot be copied up a wall (it would collapse to a line): side walls get their own layout,
+    // u once around the contour by length and v up the extrusion, both 0 to 1, as revolve and sweep lay them out
+    const uvIn = g.vertices.get('uv'), sideUV = uvIn?.type === 'float' && uvIn.size >= 2 ? b.attrib('vertex', 'uv', uvIn.size, 'float') : null;
     polys.forEach((poly, i) => {
-      const m = poly.length, r = rings[i];
+      const m = poly.length, r = rings[i], vs = srcVertex[i];
+      const along = [0];
+      for (let j = 0; j < m; j++) along.push(along[j] + Math.hypot(poly[(j + 1) % m][0] - poly[j][0], poly[(j + 1) % m][1] - poly[j][1]));
       for (let k = 0; k < p.divisions; k++)
-        for (let j = 0; j < m; j++) side.add(b.addPrim([r[k][j], r[k][(j + 1) % m], r[k + 1][(j + 1) % m], r[k + 1][j]]));
+        for (let j = 0; j < m; j++) {
+          const j1 = (j + 1) % m, first = b.numVertices;
+          side.add(b.addPrim([r[k][j], r[k][j1], r[k + 1][j1], r[k + 1][j]], true, srcPrim[i], [vs[j], vs[j1], vs[j1], vs[j]]));
+          if (!sideUV) continue;
+          const u0 = along[j] / (along[m] || 1), u1 = along[j + 1] / (along[m] || 1), v0 = k / p.divisions, v1 = (k + 1) / p.divisions;
+          [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].forEach((uv, c) => sideUV.set(first + c, uv.concat(new Array(uvIn!.size - 2).fill(0))));
+        }
     });
+    const corners = (points: number[]) => points.map((id) => vertexOf.get(id)!);
     if (p.caps) {
       // each outline with its own holes is one cap, triangulated on the ring points (so it stays watertight) and
       // merged back into as few polygons as a cap with holes needs
@@ -864,8 +894,9 @@ defineNode({
         if (depth[i] % 2) return;
         const holes = polys.map((_, j) => j).filter((j) => parent[j] === i);
         if (!holes.length) {
-          bottom.add(b.addPrim(rings[i][0].slice().reverse()));
-          top.add(b.addPrim(rings[i][p.divisions].slice()));
+          const under = rings[i][0].slice().reverse(), over = rings[i][p.divisions].slice();
+          bottom.add(b.addPrim(under, true, srcPrim[i], corners(under)));
+          top.add(b.addPrim(over, true, srcPrim[i], corners(over)));
           return;
         }
         const flat: number[] = [], holeAt: number[] = [], ids: number[] = [];
@@ -907,7 +938,12 @@ defineNode({
       };
       for (const [level, grp, flip] of [[0, bottom, true], [p.divisions, top, false]] as const) {
         const { merged, back } = capGeo(level, flip);
-        for (let pr = 0; pr < merged.numPrims; pr++) grp.add(b.addPrim(merged.primPoints(pr).map((i) => back.get(i)!)));
+        for (let pr = 0; pr < merged.numPrims; pr++) {
+          const points = Array.from(merged.primPoints(pr), (i) => back.get(i)!);
+          // a cap belongs to its outline: the contour of its first corner, or that contour's parent for a hole
+          const j = contourOf.get(points[0])!, owner = depth[j] % 2 ? parent[j] : j;
+          grp.add(b.addPrim(points, true, srcPrim[owner], corners(points)));
+        }
       }
     }
     let out = b.build();

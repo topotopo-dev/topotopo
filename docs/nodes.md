@@ -1025,7 +1025,7 @@ category: `curve` · aliases: `linear_extrude`, `extrude2d`
 
 Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.
 
-A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids.
+A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids. Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.
 
 **Inputs**
 
@@ -1045,7 +1045,7 @@ A shape that lies inside another shape of the same input is a hole, and a shape 
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis) |
 | `caps` | bool | `true` |  |  |  | add top/bottom caps |
 
-**Writes:** prim groups top, bottom, side
+**Writes:** prim groups top, bottom, side; the attributes and groups of the input (see above)
 
 **Example**
 
