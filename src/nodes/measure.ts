@@ -579,12 +579,13 @@ defineNode({
           // every component of every element: a uv whose v leaves the range fails like one whose u does
           const a = f.attr, d = a.data as Float64Array, s = a.size, n = a.count;
           let bad = 0, firstBad = -1;
-          const badOf = new Array<number>(s).fill(0), mn = new Array<number>(s).fill(Infinity), mx = new Array<number>(s).fill(-Infinity);
+          const badOf = new Array<number>(s).fill(0), nanOf = new Array<number>(s).fill(0), mn = new Array<number>(s).fill(Infinity), mx = new Array<number>(s).fill(-Infinity);
           const vp = f.cls === 'vertex' ? g.vertexPrims() : null;
           for (let i = 0; i < n; i++) {
             let out = false;
             for (let c = 0; c < s; c++) {
               const x = d[i * s + c];
+              if (x !== x) nanOf[c]++; // NaN is outside every range
               if (x < mn[c]) mn[c] = x;
               if (x > mx[c]) mx[c] = x;
               if ((lo !== null && !(x >= lo)) || (hi !== null && !(x <= hi))) { badOf[c]++; out = true; }
@@ -599,8 +600,8 @@ defineNode({
           }
           const where = firstBad < 0 || f.cls === 'detail' ? '' : `; first ${f.cls === 'point' ? pointWhere(g, firstBad) : primWhere(g, f.cls === 'prim' ? firstBad : vp![firstBad])}`;
           const range = `${lo !== null ? fmt(lo) : '-inf'} .. ${hi !== null ? fmt(hi) : 'inf'}`;
-          const comps = s === 1 ? `range ${fmt(mn[0])} .. ${fmt(mx[0])}`
-            : badOf.map((b, c) => (b ? `[${c}] ${b} value(s), range ${fmt(mn[c])} .. ${fmt(mx[c])}` : '')).filter(Boolean).join('; ');
+          const spread = (c: number) => [mn[c] <= mx[c] ? `range ${fmt(mn[c])} .. ${fmt(mx[c])}` : '', nanOf[c] ? `${nanOf[c]} NaN` : ''].filter(Boolean).join(', ');
+          const comps = s === 1 ? spread(0) : badOf.map((b, c) => (b ? `[${c}] ${b} value(s), ${spread(c)}` : '')).filter(Boolean).join('; ');
           if (bad) fail('attrib', `${bad} ${f.cls} value(s) of "${p.attrib}" outside ${range} (${comps})${where}`);
         }
       }

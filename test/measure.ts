@@ -200,6 +200,9 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   const uvOut = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'uv', value: [0.5, 1.25] } }, a: { type: 'assert', in: ['c'], params: { attrib: 'uv', attrib_class: 'point', attrib_min: 0, attrib_max: 1 } } }, 'a');
   const um = uvOut.errors[0]?.message ?? '';
   check(!uvOut.ok && /8 point value\(s\) of "uv" outside 0 \.\. 1 \(\[1\] 8 value\(s\), range 1\.25 \.\. 1\.25\)/.test(um) && !/\[0\]/.test(um), `attrib range checks every component and names the one out of range: ${um}`);
+  // NaN is outside every range: a promise measured as NaN never passes
+  const nan = await cook({ ...box, w: { type: 'wrangle', in: ['b'], params: { run_over: 'points', code: '@gap = NaN;' } }, a: { type: 'assert', in: ['w'], params: { attrib: 'gap', attrib_class: 'point', attrib_min: 0 } } }, 'a');
+  check(!nan.ok && /8 point value\(s\) of "gap" outside 0 \.\. inf \(8 NaN\)/.test(nan.errors[0]?.message ?? ''), `attrib range fails NaN and says so: ${nan.errors[0]?.message}`);
   const uvIn = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'uv', value: [0.5, 0.75] } }, a: { type: 'assert', in: ['c'], params: { attrib: 'uv', attrib_class: 'point', attrib_min: 0, attrib_max: 1 } } }, 'a');
   check(uvIn.ok, `attrib range: every component inside passes (${uvIn.errors[0]?.message ?? 'ok'})`);
   const short = await cook({ ...box, a: { type: 'assert', in: ['b'], params: { min_edge_length: 1.5 } } });
