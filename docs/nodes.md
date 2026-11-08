@@ -3799,8 +3799,8 @@ Every check is off by default; enable the ones that express what the graph must 
 | `max_tests` | int | `2000000` | 1000..1000000000 |  |  | self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped) *(advanced)* |
 | `attrib` | string | `""` |  |  | `attribute` | attribute that must exist ("" = off) |
 | `attrib_class` | enum | `"auto"` |  | `auto`, `point`, `vertex`, `prim`, `detail` |  | where attrib must live (auto = any class: vertex, point, prim, detail) |
-| `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of its first component (null = off) |
-| `attrib_max` | json | `null` |  |  |  | attrib: largest allowed value of its first component (null = off) |
+| `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of every component (null = off) |
+| `attrib_max` | json | `null` |  |  |  | attrib: largest allowed value of every component (null = off) |
 | `group` | string | `""` |  |  |  | group name (any class) that must exist and be non-empty ("" = off) |
 | `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first); e.g. "volume > 1 && pieces == 1" |
 | `tolerance` | float | `0.000001` | 0.. |  |  | distance tolerance for bbox_min/max and duplicate points *(advanced)* |

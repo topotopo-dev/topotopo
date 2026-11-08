@@ -196,6 +196,12 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   const attr = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'h', value: 2 } }, a: { type: 'assert', in: ['c'], params: { attrib: 'h', attrib_class: 'point', attrib_max: 1.5, group: 'nope' } } }, 'a');
   const am = attr.errors[0]?.message ?? '';
   check(!attr.ok && /8 point value\(s\) of "h" outside -inf \.\. 1\.5/.test(am) && /group: "nope" does not exist/.test(am), `attrib range and missing group: ${am}`);
+  // every component counts: a uv whose u is in 0..1 but whose v is not fails, and says which component
+  const uvOut = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'uv', value: [0.5, 1.25] } }, a: { type: 'assert', in: ['c'], params: { attrib: 'uv', attrib_class: 'point', attrib_min: 0, attrib_max: 1 } } }, 'a');
+  const um = uvOut.errors[0]?.message ?? '';
+  check(!uvOut.ok && /8 point value\(s\) of "uv" outside 0 \.\. 1 \(\[1\] 8 value\(s\), range 1\.25 \.\. 1\.25\)/.test(um) && !/\[0\]/.test(um), `attrib range checks every component and names the one out of range: ${um}`);
+  const uvIn = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'uv', value: [0.5, 0.75] } }, a: { type: 'assert', in: ['c'], params: { attrib: 'uv', attrib_class: 'point', attrib_min: 0, attrib_max: 1 } } }, 'a');
+  check(uvIn.ok, `attrib range: every component inside passes (${uvIn.errors[0]?.message ?? 'ok'})`);
   const short = await cook({ ...box, a: { type: 'assert', in: ['b'], params: { min_edge_length: 1.5 } } });
   check(!short.ok && /8 edge\(s\) shorter than 1\.5 \(shortest 1\)/.test(short.errors[0]?.message ?? ''), `min_edge_length: ${short.errors[0]?.message}`);
   const none = await cook({ ...box, a: { type: 'assert', in: ['b'] } });

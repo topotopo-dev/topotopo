@@ -84,10 +84,7 @@
     "smooth": {"type": "normal", "in": ["all_cards"], "params": {"class": "point"}},
     "cutout_material": {"type": "material", "in": ["smooth"], "params": {"name": "cutouts", "alpha_mode": "mask", "alpha_cutoff": 0.5, "double_sided": true}},
     "textured": {"type": "texture_to_material", "in": ["cutout_material", "atlas"], "params": {"material": "cutouts", "base_color": "cutouts_color", "normal": "cutouts_normal", "roughness": "cutouts_roughness"}},
-    "u_checked": {"type": "assert", "in": ["textured"], "params": {"label": "in_atlas", "attrib": "uv", "attrib_class": "vertex", "attrib_min": 0, "attrib_max": 1}},
-    "v_copy": {"type": "wrangle", "in": ["u_checked"], "params": {"run_over": "vertices", "code": "@atlas_v = @uv.y;"}},
-    "v_checked": {"type": "assert", "in": ["v_copy"], "params": {"label": "in_atlas", "attrib": "atlas_v", "attrib_class": "vertex", "attrib_min": 0, "attrib_max": 1}},
-    "cards": {"type": "attrib_delete", "in": ["v_checked"], "params": {"names": "atlas_v", "class": "vertex"}}
+    "cards": {"type": "assert", "in": ["textured"], "params": {"label": "in_atlas", "attrib": "uv", "attrib_class": "vertex", "attrib_min": 0, "attrib_max": 1}}
   },
   "output": "cards",
   "outputs": {

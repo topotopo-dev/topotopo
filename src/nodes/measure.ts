@@ -424,8 +424,8 @@ defineNode({
     max_tests: { type: 'int', default: 2000000, min: 1000, max: 1000000000, desc: 'self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped)', advanced: true },
     attrib: { type: 'string', default: '', desc: 'attribute that must exist ("" = off)', aliases: ['attribute'] },
     attrib_class: { type: 'enum', options: ['auto', 'point', 'vertex', 'prim', 'detail'], default: 'auto', desc: 'where attrib must live (auto = any class: vertex, point, prim, detail)' },
-    attrib_min: { type: 'json', default: null, desc: 'attrib: smallest allowed value of its first component (null = off)' },
-    attrib_max: { type: 'json', default: null, desc: 'attrib: largest allowed value of its first component (null = off)' },
+    attrib_min: { type: 'json', default: null, desc: 'attrib: smallest allowed value of every component (null = off)' },
+    attrib_max: { type: 'json', default: null, desc: 'attrib: largest allowed value of every component (null = off)' },
     group: { type: 'string', default: '', desc: 'group name (any class) that must exist and be non-empty ("" = off)' },
     expr: { type: 'code', default: '', desc: `JS expression that must be true ("" = off) over ${EXPR_NAMES}; e.g. "volume > 1 && pieces == 1"`, aliases: ['expression', 'condition'] },
     tolerance: { type: 'float', default: 1e-6, min: 0, desc: 'distance tolerance for bbox_min/max and duplicate points', advanced: true },
@@ -576,14 +576,20 @@ defineNode({
       else if (lo !== null || hi !== null) {
         if (f.attr.type === 'string') fail('attrib', `"${p.attrib}" is a string attribute: attrib_min/max need numbers`);
         else {
+          // every component of every element: a uv whose v leaves the range fails like one whose u does
           const a = f.attr, d = a.data as Float64Array, s = a.size, n = a.count;
-          let bad = 0, mn = Infinity, mx = -Infinity, firstBad = -1;
+          let bad = 0, firstBad = -1;
+          const badOf = new Array<number>(s).fill(0), mn = new Array<number>(s).fill(Infinity), mx = new Array<number>(s).fill(-Infinity);
           const vp = f.cls === 'vertex' ? g.vertexPrims() : null;
           for (let i = 0; i < n; i++) {
-            const x = d[i * s];
-            if (x < mn) mn = x;
-            if (x > mx) mx = x;
-            if ((lo !== null && !(x >= lo)) || (hi !== null && !(x <= hi))) {
+            let out = false;
+            for (let c = 0; c < s; c++) {
+              const x = d[i * s + c];
+              if (x < mn[c]) mn[c] = x;
+              if (x > mx[c]) mx[c] = x;
+              if ((lo !== null && !(x >= lo)) || (hi !== null && !(x <= hi))) { badOf[c]++; out = true; }
+            }
+            if (out) {
               bad++;
               if (firstBad < 0) firstBad = i;
               if (f.cls === 'point') ptFail[i] = 1;
@@ -592,7 +598,10 @@ defineNode({
             }
           }
           const where = firstBad < 0 || f.cls === 'detail' ? '' : `; first ${f.cls === 'point' ? pointWhere(g, firstBad) : primWhere(g, f.cls === 'prim' ? firstBad : vp![firstBad])}`;
-          if (bad) fail('attrib', `${bad} ${f.cls} value(s) of "${p.attrib}"${s > 1 ? '[0]' : ''} outside ${lo !== null ? fmt(lo) : '-inf'} .. ${hi !== null ? fmt(hi) : 'inf'} (range ${fmt(mn)} .. ${fmt(mx)})${where}`);
+          const range = `${lo !== null ? fmt(lo) : '-inf'} .. ${hi !== null ? fmt(hi) : 'inf'}`;
+          const comps = s === 1 ? `range ${fmt(mn[0])} .. ${fmt(mx[0])}`
+            : badOf.map((b, c) => (b ? `[${c}] ${b} value(s), range ${fmt(mn[c])} .. ${fmt(mx[c])}` : '')).filter(Boolean).join('; ');
+          if (bad) fail('attrib', `${bad} ${f.cls} value(s) of "${p.attrib}" outside ${range} (${comps})${where}`);
         }
       }
     }
