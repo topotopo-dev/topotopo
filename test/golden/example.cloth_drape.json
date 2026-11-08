@@ -8,13 +8,13 @@
       "vertex": []
     },
     "bbox": {
-      "max": [1.0387, 0.782, 0.6748],
-      "min": [-1.0861, 0.002, -0.6829]
+      "max": [1.0181, 0.682, 0.777],
+      "min": [-1.063, 0.002, -0.831]
     },
     "counts": {
-      "points": 14641,
-      "prims": 14400,
-      "vertices": 57600,
+      "points": 25921,
+      "prims": 25600,
+      "vertices": 102400,
       "volumes": 0
     },
     "groups": {
@@ -24,15 +24,15 @@
       "vertex": []
     },
     "hashes": {
-      "P": "7b8e3444eb844d4e",
+      "P": "eeb4c92801066aca",
       "attributes": {
         "detail.materials": "5eb497038cc3e0a1",
-        "point.N": "b72cbb94a22470e6",
-        "point.uv": "7c374b6118cb5f53",
-        "prim.material": "a41125c53501301f",
-        "prim.name": "2481ca45938ab19f"
+        "point.N": "9f84829ddde78f0b",
+        "point.uv": "6f3e9876db32c1ec",
+        "prim.material": "bb411dc50c5c0d1f",
+        "prim.name": "a300d5c54b62951f"
       },
-      "topology": "ab6fe5a73ebb55f9"
+      "topology": "bbfc3cb31b174f6d"
     }
   },
   "name": "example.cloth_drape",

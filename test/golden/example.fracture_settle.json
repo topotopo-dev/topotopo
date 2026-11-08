@@ -8,14 +8,14 @@
       "vertex": ["N:float:3", "uv:float:3"]
     },
     "bbox": {
-      "max": [3.1123, 1.4017, 5.9992],
-      "min": [-3.7946, -0.0032, -2.5279]
+      "max": [3.3572, 1.0791, 5.2875],
+      "min": [-2.8671, -0.0015, -1.4326]
     },
     "counts": {
-      "points": 442,
-      "prims": 724,
-      "vertices": 2172,
-      "volumes": 2
+      "points": 496,
+      "prims": 832,
+      "vertices": 2496,
+      "volumes": 3
     },
     "groups": {
       "edge": [],
@@ -24,17 +24,17 @@
       "vertex": []
     },
     "hashes": {
-      "P": "c6904a53341819cd",
+      "P": "b52d37761008c05c",
       "attributes": {
-        "detail.materials": "65063a4da6a94aeb",
-        "group.prim.inside": "d6397dfaa3739770",
-        "prim.class": "3e4deac501899fdf",
-        "prim.material": "ac39ae05da516f1f",
-        "prim.name": "816a9de5a2d68f3f",
-        "vertex.N": "be90779945970d23",
-        "vertex.uv": "226826c7f9bb29a5"
+        "detail.materials": "621f9447c228d605",
+        "group.prim.inside": "955cd50f4f58fef1",
+        "prim.class": "5c91f2c502d3b25f",
+        "prim.material": "5e7b70c5e0d4962f",
+        "prim.name": "9586a35d0d133b37",
+        "vertex.N": "22e68d8947ff858b",
+        "vertex.uv": "491ee710f5cf83ea"
       },
-      "topology": "ca021a77cc582f5d"
+      "topology": "d0539306e4b4c968"
     },
     "volumes": [
       {
@@ -48,7 +48,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "885119a3b5e496fd"
+          "C": "6d0553b4c5c85df2"
         },
         "name": "grain_stone"
       },
@@ -63,9 +63,24 @@
         },
         "kind": "image",
         "layers": {
-          "C": "c719d1554f79f747"
+          "C": "385785fcce57656e"
         },
         "name": "grain_raw"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "4af1393277b55638"
+        },
+        "name": "grit_relief"
       }
     ]
   },
