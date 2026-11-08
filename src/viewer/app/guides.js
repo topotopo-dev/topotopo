@@ -351,12 +351,24 @@ export function createGuides(ctx) {
     return false;
   };
   const mm = (p) => [M.mm(p.x), M.mm(p.y), M.mm(p.z)];
+  /** The scene is still being drawn: the output's cook and GLB in flight, or a shown reference layer loading. */
+  const sceneLoading = () => !!ctx.output?.loading || !!ctx.layers?.loading?.();
+  const LOADING = ' · the scene is still loading: place it once it is drawn';
+  /**
+   * Where a click puts a guide point: the surface under the pointer, else the grid plane; but while the scene is still
+   * loading a click on no surface places nothing (the terrain not drawn yet would leave the guide on the grid under it).
+   */
+  const placeAt = (slot, x, y) => {
+    const hit = ctx.surfacePoint(slot, x, y);
+    return hit && !hit.surface && sceneLoading() ? { wait: true } : hit;
+  };
   /** A left press in a placement mode (x, y in viewport pixels). */
   G.pointerDown = (slot, x, y) => {
     G.down = { slot, x, y };
     if (G.mode !== 'volume') return;
-    const hit = ctx.surfacePoint(slot, x, y);
-    if (hit) { G.draft = { kind: 'volume', y: hit.point.y, a: hit.point.clone(), b: hit.point.clone() }; G.drawDraft(); }
+    const hit = placeAt(slot, x, y);
+    if (hit?.wait) G.down.wait = true;
+    else if (hit) { G.draft = { kind: 'volume', y: hit.point.y, a: hit.point.clone(), b: hit.point.clone() }; G.drawDraft(); }
   };
   G.pointerMove = (slot, x, y) => {
     if (!G.mode) return;
@@ -380,7 +392,7 @@ export function createGuides(ctx) {
     if (G.mode === 'volume') {
       const d = G.draft;
       G.draft = null; G.drawDraft();
-      if (!d) return G.hint(' · nothing under the pointer');
+      if (!d) return G.hint(down.wait ? LOADING : ' · nothing under the pointer');
       if (moved < 5 || Math.abs(d.b.x - d.a.x) < 0.01 || Math.abs(d.b.z - d.a.z) < 0.01) return G.hint(' · drag to draw the box');
       G.add({ kind: 'volume', points: [[M.mm(d.a.x), M.mm(d.y), M.mm(d.a.z)], [M.mm(d.b.x), M.mm(d.y), M.mm(d.b.z)]] });
       return G.hint(` · added ${G.list[G.list.length - 1].name}`);
@@ -390,7 +402,8 @@ export function createGuides(ctx) {
       const f = ctx.views.project(slot, V3(G.draft.points[0]));
       if (f && Math.hypot(f.x - x, f.y - y) < 10) { finish(); return; }
     }
-    const hit = ctx.surfacePoint(slot, x, y);
+    const hit = placeAt(slot, x, y);
+    if (hit?.wait) return G.hint(LOADING);
     if (!hit) return G.hint(' · nothing under the pointer');
     const p = mm(hit.point);
     if (G.mode === 'site') { const m = G.add({ kind: 'site', points: [p] }); return G.hint(` · added ${m.name}`); }

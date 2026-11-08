@@ -3,14 +3,14 @@
 // topology (welding, pieces, the render tool's edge classes), the Controls rules, the status and cook state lines,
 // the output cards (kind line, heightfield layers, formats offered, download names), the Packages tab (a package's
 // state, the Scene tree's mark, a before/after's places) and the minimal edits the viewer makes to a graph file
-// (src/viewer/json-edit.ts). Also checks that the page's
-// modules only import each other and the served three.js.
+// (src/viewer/json-edit.ts), and packed instances as the page loads them (scene.js: drawn and framed at their places).
+// Also checks that the page's modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
-import { markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
+import { markersFromGeometry, markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
 import * as km from '../src/viewer/app/keymap.js';
 import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
@@ -26,6 +26,12 @@ import * as cooking from '../src/viewer/app/cooking.js';
 import * as info from '../src/viewer/app/output-info.js';
 import * as pop from '../src/viewer/app/export-popover.js';
 import * as pkgs from '../src/viewer/app/packages.js';
+import { heightfieldPreviewStep } from '../src/core/heightfield.ts';
+import { HEIGHTFIELD_PREVIEW_RES, previewGLB } from '../src/render/preview.ts';
+import { MeshObject, parseGLB } from '../src/viewer/app/scene.js';
+import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
+import { packedFromMatrices } from '../src/core/packed.ts';
+import { m4translate } from '../src/core/math.ts';
 import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -203,6 +209,62 @@ section('guides: cancellation while a prior save is queued');
   } finally { api.saveMarkers = originalSave; }
 }
 
+section('guides: placing while the scene loads');
+{
+  // a heavy terrain still cooking: a click that finds no surface would put the null on the grid (y = 0) under it
+  const originalSave = api.saveMarkers;
+  api.saveMarkers = async () => ({ ok: true });
+  try {
+    const said: string[] = [];
+    let hit: any = { point: new THREE.Vector3(5, 0, 5), surface: false };
+    const ctx: any = {
+      store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
+      selection: { has: () => false, prune: () => {}, apply: () => {} }, undo: { push: () => {} }, requestRender: () => {},
+      message: (m: string) => said.push(m), emit: () => {}, pxWorld: () => 0.01, coalesce, surfacePoint: () => hit,
+      output: { loading: true }, layers: { loading: () => false },
+      views: { cam: () => ({ name: 'persp' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
+    };
+    const guides = createGuides(ctx);
+    const click = (x = 10, y = 10) => { guides.pointerDown(0, x, y); guides.pointerUp(0, x, y); };
+    guides.setMode('site');
+    click();
+    check(guides.list.length === 0 && /still loading/.test(said[said.length - 1] ?? ''), `a null clicked on no surface while the output loads is not placed; the hint says why (${said[said.length - 1]})`);
+    hit = { point: new THREE.Vector3(5, 7, 5), surface: true };
+    click();
+    check(guides.list.length === 1 && guides.list[0].points[0][1] === 7, 'on a surface already drawn it is placed while loading');
+    ctx.output.loading = false; ctx.layers.loading = () => true;
+    hit = { point: new THREE.Vector3(1, 0, 1), surface: false };
+    click();
+    check(guides.list.length === 1, 'a shown reference layer still loading holds it back too');
+    ctx.layers.loading = () => false;
+    click();
+    check(guides.list.length === 2 && guides.list[1].points[0][1] === 0, 'once the scene is drawn, a click on no surface places it on the grid as before');
+    guides.setMode('volume');
+    ctx.output.loading = true;
+    guides.pointerDown(0, 0, 0); guides.pointerUp(0, 40, 40);
+    check(guides.list.length === 2 && /still loading/.test(said[said.length - 1] ?? ''), 'a volume dragged on no surface while loading is not drawn either');
+  } finally { api.saveMarkers = originalSave; }
+}
+
+section('guides: a markers.json written as geometry reads back as guides');
+{
+  const kinds = [
+    { id: 'a', kind: 'site', name: 'village', points: [[10, 2, -5]], radius: 7 },
+    { id: 'b', kind: 'path', name: 'road', points: [[0, 0, 0], [20, 1, 0], [20, 2, 30]] },
+    { id: 'c', kind: 'zone', name: 'keep empty', points: [[0, 0, 0], [0, 0, 10], [10, 0, 10], [10, 0, 0]] },
+    { id: 'd', kind: 'volume', name: 'no trees', points: [[20, 1, 30], [30, 1, 40]], height: 8 },
+  ];
+  const back = mk.parseMarkers({ markers: markersFromGeometry(markersGeometry(kinds as any)) });
+  const by = (k: string) => back.find((m: any) => m.kind === k);
+  const zone = by('zone');
+  check(back.length === 4 && JSON.stringify(by('site').points) === '[[10,2,-5]]' && by('site').radius === 7 && JSON.stringify(by('path').points) === JSON.stringify(kinds[1].points)
+    && by('volume').height === 8 && JSON.stringify(by('volume').points) === JSON.stringify(kinds[3].points) && zone.points.length === 4 && zone.name === 'keep empty',
+    `markersFromGeometry(markersGeometry(list)) gives the guides back: names, points, radius, height (${back.map((m: any) => m.name).join(', ')})`);
+  const other = new GeoBuilder(new Geometry());
+  other.addPrim([other.addPoint(0, 0, 0), other.addPoint(1, 0, 0)], false);
+  check(markersFromGeometry(other.build()).length === 0, 'elements without a guide role are not guides');
+}
+
 section('guides: the marker rules the server uses');
 {
   check(JSON.stringify(SERVER_KINDS) === JSON.stringify(mk.MARKER_KINDS), 'the server\'s MARKER_KINDS are the shared module\'s');
@@ -349,8 +411,26 @@ section('Controls rules (section 8)');
   const r = vars.rangeOf({ min: 0.1, max: 10 }, 1, false);
   check(r.lo === 0.1 && r.hi === 10 && r.step === 0.01 && vars.rangeOf({ default: 5 }, 5, true).hi === 20 && vars.rangeOf({}, 0, false).lo === -1,
     'slider ranges: declared, 0..4×default, −1..1 around 0');
+  // min/max are the slider's range, not a limit on the person: 5 typed into 0.3..3 stays 5 and the slider widens to it;
+  // ↺ builds the declared range again (rangeOf)
+  const wide = vars.widenRange(vars.rangeOf({ min: 0.3, max: 3 }, 1, false), 5), low = vars.widenRange(vars.rangeOf({ min: 1, max: 10 }, 2, true), -2.5);
+  check(wide.lo === 0.3 && wide.hi === 5 && wide.step === 0.01 && low.lo === -3 && low.hi === 10 && low.step === 1 && vars.rangeOf({ min: 0.3, max: 3 }, 5, false).hi === 3
+    && vars.widenRange(vars.rangeOf({ min: 0, max: 1, step: 0.25 }, 0, false), 40).step === 0.25 && vars.widenRange(vars.rangeOf({ min: 0, max: 1 }, 0, false), 40).step === 0.1,
+    'a value past a declared end widens the slider to it (an int range to whole numbers; the step follows unless declared); the declared range comes back');
+  check(vars.pastDeclared({ min: 0.3, max: 3 }, 5) && vars.pastDeclared({ min: 0.3 }, 0.1) && !vars.pastDeclared({ min: 0.3, max: 3 }, 3) && !vars.pastDeclared({}, 1e9) && !vars.pastDeclared({ max: 3 }, 'x'),
+    'a value past a declared end is marked; inside the range or with no declared end it is not');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
+  // param groups: a heading per group in the order of its first param, ungrouped params first, undeclared vars closed
+  const secs = vars.controlSections(
+    { count: { group: 'Scatter' }, size: { group: 'Rocks' }, seed: {}, gap: { group: 'Rocks' }, jitter: { group: ' Scatter ' }, blank: { group: '' } },
+    { count: 1, size: 1, seed: 1, gap: 1, jitter: 1, blank: 1, smallest: 0.2 });
+  check(JSON.stringify(secs.map((s: any) => [s.group, s.keys.join()])) === JSON.stringify([[null, 'seed,blank'], ['Scatter', 'count,jitter'], ['Rocks', 'size,gap'], ['other vars', 'smallest']]),
+    `sections: ungrouped first, then groups in declaration order holding their params, then "other vars" (${JSON.stringify(secs.map((s: any) => s.group))})`);
+  const otherSec = secs[3], rocks = secs[2], loose = vars.controlSections({}, { a: 1 });
+  check(vars.sectionClosed(otherSec) && !vars.sectionClosed(rocks) && vars.sectionClosed(rocks, { 'g:Rocks': true }) && !vars.sectionClosed(otherSec, { other: false })
+    && loose.length === 1 && loose[0].group === null && loose[0].other && !vars.sectionClosed(loose[0], { other: true }),
+    'the undeclared vars start closed when the graph declares params, groups open; the remembered state wins; with nothing declared they are listed as they are');
   // a menu of numbers wrote the picked entry as text ("8"): an entry stands for its option
   const nums = vars.menuOf({ options: [4, 8, 16] }, 8), texts = vars.menuOf({ options: ['low', 'high'] }, 'low'), idx = vars.menuOf({ options: ['low', 'high'] }, 1);
   check(vars.kindOf({ type: 'enum', options: [4, 8, 16] }, 8) === 'select' && nums.valueOf('16') === 16 && nums.textOf(8) === '8' && !nums.byIndex && nums.valueOf('5') === undefined
@@ -507,6 +587,18 @@ section('output cards: what an output is, its formats and downloads');
     'the layers a terrain shows in red: the mask first, others with their range, then none (never the height itself)');
   check(info.shownLayer(hf, undefined) === 'mask' && info.shownLayer(hf, 'flow') === 'flow' && info.shownLayer(hf, 'gone') === 'mask' && info.shownLayer(hf, 'none') === 'none'
     && info.shownLayer({ layers: [{ name: 'height', min: 0, max: 1 }] }, undefined) === 'none', 'the layer shown: the chosen one while the field has it, else the mask, else none');
+  // terrain detail: the page's step and triangle count agree with the server's preview mesh; choices that draw the same
+  // are listed once, one that draws every sample is "full", one too heavy for a browser tab is disabled
+  check(info.PREVIEW_RES === HEIGHTFIELD_PREVIEW_RES, 'the page and the server agree on the preview budget');
+  for (const [w, h, res] of [[1001, 1001, 512], [4001, 2001, 1024], [130, 70, 64], [4001, 4001, Infinity]] as const) {
+    const fake = { width: w, height: h } as any, a = info.previewStep(fake, res), b = heightfieldPreviewStep(fake, res);
+    check(a.step === b.step && a.triangles === 2 * (b.shown[0] - 1) * (b.shown[1] - 1), `step and triangles of ${w} × ${h} at ${res}: ${a.step}, ${a.triangles}`);
+  }
+  const two = info.detailChoices({ width: 1001, height: 1001, cell: 2 }), eight = info.detailChoices({ width: 4001, height: 4001, cell: 2 });
+  check(JSON.stringify(two.map((c: any) => c.label)) === JSON.stringify(['preview (4 m, 500k triangles)', 'full (every sample, 2M triangles)'])
+    && JSON.stringify(eight.map((c: any) => [c.value, c.disabled])) === JSON.stringify([['preview', false], ['1024', false], ['2048', false], ['full', true]])
+    && /too many for the viewer/.test(eight[3].label) && info.detailChoices({ width: 129, height: 129, cell: 1 }).length === 1,
+    `terrain detail choices: a 2 km field at 2 m (${two.map((c: any) => c.label).join(' | ')}), an 8 km one (full disabled), a small one (only the preview)`);
   const formats = [{ format: 'glb', label: 'GLB', extension: '.glb' }, { format: 'png16', label: 'Heightmap', extension: '.png' }];
   const glb = { format: 'glb', label: 'GLB', extension: '.glb', writes: 'binary glTF', leaves: [], oneFile: true };
   const png = { format: 'png16', label: 'Heightmap', extension: '.png', writes: '16-bit PNG + JSON sidecar', leaves: ['instances'], oneFile: false };
@@ -551,6 +643,28 @@ section('the page\'s modules');
   const shell = fs.readFileSync(path.join(root, 'src', 'viewer', 'index.html'), 'utf8');
   check(!problems.length && files.includes('style.css') && /src="\/app\/main\.js"/.test(shell) && /href="\/app\/style\.css"/.test(shell) && !/<script(?![^>]*src)[^>]*>[^<]{200,}/.test(shell),
     `index.html is a shell loading /app/main.js and /app/style.css; modules import only each other and three (${problems.join('; ') || `${files.length} files`})`);
+}
+
+section('packed instances in the viewer: drawn where they are, framed where they are (F-96, F-101)');
+{
+  // a source of a triangle with no material, a polyline and a loose point, packed twice far from the origin, loaded the
+  // way the viewer loads /api/geo: three.js instances triangle meshes only, so a points or lines primitive in the
+  // instanced mesh made it draw one copy at the origin and no instance, and frame all took in the origin
+  const b = new GeoBuilder(new Geometry());
+  b.addPrim([b.addPoint(0, 0, 0), b.addPoint(1, 0, 0), b.addPoint(1, 1, 0)], true);
+  b.addPrim([b.addPoint(0, 2, 0), b.addPoint(0, 3, 0)], false);
+  b.addPoint(0, 4, 0);
+  const g = packedFromMatrices(b.build(), [m4translate(-834, 0, 2567), m4translate(-800, 0, 2600)]);
+  const bytes = await previewGLB(g);
+  const obj = new MeshObject('out', await parseGLB(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)));
+  const inst = obj.parts.filter((p: any) => p.type === 'inst'), box = obj.bounds();
+  check(inst.length === 1 && inst[0].obj.count === 2 && !obj.parts.some((p: any) => p.type === 'mesh'), `the triangle is one instanced mesh of 2 instances (parts: ${obj.parts.map((p: any) => p.type).join(', ')})`);
+  check(!box.isEmpty() && box.min.x > -835 && box.max.x < -798 && box.min.z > 2566 && box.max.z < 2601 && !box.containsPoint(new THREE.Vector3()),
+    `frame all's bounds hold the instances alone, far from the origin (${box.min.toArray().join(', ')} to ${box.max.toArray().join(', ')})`);
+  const k = obj.parts.indexOf(inst[0]) >= 0 ? (obj.pieceCount(), inst[0].offset) : -1;
+  const pb = [k, k + 1].map((i) => obj.bounds(i));
+  check(k >= 0 && pb.every((x: any) => !x.isEmpty()) && pb[0].min.x > -835 && pb[0].max.x < -832 && pb[1].min.x > -801 && pb[1].max.x < -798,
+    `frame selection: each picked instance has its own bounds at its place (${pb.map((x: any) => x.min.x).join(', ')})`);
 }
 
 console.log(`\n${passes} passed, ${failures} failed`);

@@ -1,16 +1,17 @@
 // The properties column: what the selection is (a guide's name, kind,
 // translate / rotate / scale, radius or height and the attributes the LLM reads; a layer's file, counts, bbox and
 // display mode; the output's summary; a piece's size), and below it the Controls: the graph's exposed vars as
-// sliders, fields, checkboxes, menus and colour pickers. Drags post at most every 100 ms; each control resets to its
-// default; undeclared vars are listed under "other vars". Transform fields are read-only until phase 2.
+// sliders, fields, checkboxes, menus and colour pickers, under a collapsible heading per param "group". Drags post at
+// most every 100 ms; each control resets to its default; undeclared vars are listed under "other vars" (closed when the
+// graph declares params). Transform fields are read-only until phase 2.
 import { api } from './api.js';
 import * as M from './markers.js';
 import { parseId } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
-import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, autoStep, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
+import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, widenRange, pastDeclared, snapTo, controlList, controlSections, sectionClosed, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
 import { fmtDuration } from './cooking.js';
-import { kindLine, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, layerChoices, shownLayer, detailChoices, PREVIEW_RES } from './output-info.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const $ = (id) => document.getElementById(id);
@@ -136,6 +137,15 @@ export function createProps(ctx) {
       s.onchange = () => { ctx.sceneLayer.set(s.value); s.blur(); };
       g.append(row('layer in red', s, 'the heightfield layer drawn in red over the terrain: 0..1 layers as they are, others from their minimum to their maximum'));
     }
+    if (o.about?.heightfield) {
+      // how finely the terrain is drawn (this browser's setting): instances scattered on the real surface sit on it when
+      // every sample is drawn; finer draws take longer to load after each change
+      const s = el('select'), choices = detailChoices(o.about.heightfield), cur = ctx.terrainDetail.get();
+      for (const c of choices) { const op = new Option(c.label, c.value); op.disabled = c.disabled; s.append(op); }
+      s.value = choices.some((c) => c.value === cur && !c.disabled) ? cur : 'preview';
+      s.onchange = () => { ctx.terrainDetail.set(s.value); s.blur(); };
+      g.append(row('terrain detail', s, `how finely the terrain is drawn here (it cooks at full resolution either way): the preview draws at most ${PREVIEW_RES} quads per side; instances placed on the surface sit exactly on it only with every sample. Finer draws take longer to load after each change. Remembered in this browser.`));
+    }
     if (o.report?.cooked) g.append(row('cook', `${fmtNum(o.report.ms, 0)} ms${o.report.ok ? '' : ' · failed'}`));
     const ec = o.mesh?.edgeCounts();
     if (ec) g.append(row('edges', `${fmtCount(ec.open)} open · ${fmtCount(ec.nonManifold)} non-manifold · ${fmtCount(ec.flipped)} flipped`, 'the edge check in the top bar draws them: pink open, yellow non-manifold, violet winding flips'));
@@ -217,6 +227,8 @@ function createControls(ctx) {
     // var → its value when the change being made began (the undo step's "before")
     begin: new Map(), values: new Map(),
     sub: el('div', 'sub'), none: el('div', 'none'),
+    // section key → its heading (sectionHead)
+    heads: new Map(),
   };
   addEventListener('pointerup', () => endDrag(), true);
   addEventListener('pointercancel', () => endDrag(), true);
@@ -230,19 +242,19 @@ function createControls(ctx) {
     number(name, vd, value, cw) {
       // declared int: integer values; an undeclared whole number gets integer slider steps but takes any typed value
       const int = vd.type === 'int', intSteps = int || (vd.type === undefined && Number.isInteger(value));
-      let cur = value;
-      const r = rangeOf(vd, cur, intSteps);
+      // min/max are the slider's range, not a limit: a value past them is kept and the slider widens to it; ↺ (and
+      // Reset all) bring the declared range back (vars.js rangeOf)
+      let cur = value, r = rangeOf(vd, cur, intSteps);
       const slider = el('input'), num = el('input');
       slider.type = 'range'; num.type = 'number'; num.step = int ? String(r.step) : 'any';
-      const fit = () => { slider.min = r.lo; slider.max = r.hi; slider.step = r.step; if (r.fixLo) num.min = r.lo; if (r.fixHi) num.max = r.hi; };
-      const widen = (v) => {
-        const lo = !r.fixLo && v < r.lo, hi = !r.fixHi && v > r.hi;
-        if (lo) r.lo = v;
-        if (hi) r.hi = v;
-        if ((lo || hi) && !r.fixStep) r.step = autoStep(r);
-        if (lo || hi) fit();
+      const fit = () => { slider.min = r.lo; slider.max = r.hi; slider.step = r.step; };
+      const widen = (v) => { const [lo, hi, st] = [r.lo, r.hi, r.step]; widenRange(r, v); if (r.lo !== lo || r.hi !== hi || r.step !== st) fit(); };
+      const show = () => {
+        slider.value = cur; num.value = fmt(cur);
+        const past = pastDeclared(vd, cur);
+        num.classList.toggle('past', past);
+        num.title = past ? `past the declared range ${vd.min ?? '…'}..${vd.max ?? '…'}: kept (↺ brings back the declared value and range)` : '';
       };
-      const show = () => { slider.value = cur; num.value = fmt(cur); };
       slider.addEventListener('pointerdown', () => { ctl.active = name; });
       slider.addEventListener('input', () => { cur = snapTo(r, Number(slider.value)); num.value = fmt(cur); queueVar(name, cur); });
       // a finished change gives the keys back to the viewport
@@ -251,13 +263,16 @@ function createControls(ctx) {
         let v = Number(num.value);
         if (num.value.trim() === '' || !Number.isFinite(v)) return show();
         if (int) v = Math.round(v);
-        if (r.fixLo) v = Math.max(v, r.lo);
-        if (r.fixHi) v = Math.min(v, r.hi);
         widen(v); cur = v; show(); queueVar(name, v, true);
       });
       cw.append(slider, num);
       fit(); widen(cur); show();
-      return { set(v) { if (!isNum(v)) return; cur = v; widen(v); show(); }, get: () => cur, typing: () => document.activeElement === num };
+      return {
+        set(v) { if (!isNum(v)) return; cur = v; widen(v); show(); },
+        get: () => cur, typing: () => document.activeElement === num,
+        /** ↺: the declared range again, widened only as far as the value it goes back to needs */
+        reset(v) { if (!isNum(v)) return; r = rangeOf(vd, v, intSteps); cur = v; fit(); widen(v); show(); },
+      };
     },
     bool(name, vd, value, cw) {
       const asNum = isNum(value), b = el('input');
@@ -366,6 +381,8 @@ function createControls(ctx) {
       /** what ↺ goes back to (vars.js baseValue), undefined: nothing */
       base: undefined,
       set(v) { w.set(v); r.sync(); },
+      /** ↺: the value, and a slider's declared range */
+      reset(v) { (w.reset ?? w.set)(v); r.sync(); },
       get: () => w.get(),
       typing: () => w.typing?.() ?? false,
       /** differs from the graph file (marked) */
@@ -403,7 +420,7 @@ function createControls(ctx) {
     count.textContent = declared.length + other.length || '';
     let deferred = false;
     const wanted = new Set(), els = [];
-    const place = (k, vd) => {
+    const place = (k, vd, closed) => {
       wanted.add(k);
       // a row the person is changing keeps the value it shows; the shape is the server's otherwise
       const local = ctl.rows.has(k) && holding(k, issued);
@@ -417,11 +434,18 @@ function createControls(ctx) {
       }
       if (!r) { r = controlRow(k, vd, v, shape); ctl.rows.set(k, r); }
       r.base = baseValue(ctl.mode, vd, ctl.graphVars, k);
+      r.el.hidden = closed;
       els.push(r.el);
     };
-    for (const k of declared) place(k, params[k] ?? {});
-    if (other.length) { ctl.sub.textContent = declared.length ? 'other vars' : 'vars (none declared in "params")'; els.push(ctl.sub); }
-    for (const k of other) place(k, null);
+    // declared params without a group, then a collapsible heading per group (declaration order), then the undeclared
+    // vars: behind a closed "other vars" heading when the graph declares params (vars.js controlSections)
+    const saved = sectionState(name);
+    for (const sec of controlSections(params, vars)) {
+      const closed = sectionClosed(sec, saved);
+      if (sec.group !== null) els.push(sectionHead(sec, closed).el);
+      else if (sec.other) { ctl.sub.textContent = 'vars (none declared in "params")'; els.push(ctl.sub); }
+      for (const k of sec.keys) place(k, sec.other ? null : params[k] ?? {}, closed);
+    }
     if (!els.length) { ctl.none.textContent = g ? 'none — this graph exposes no vars' : 'none'; els.push(ctl.none); }
     // in order, moving only what is out of place (the scroll position and an open menu stay)
     let prev = null;
@@ -432,10 +456,44 @@ function createControls(ctx) {
       r.el.remove(); ctl.rows.delete(k); ctl.values.delete(k);
     }
     for (const e of [ctl.sub, ctl.none]) if (!els.includes(e)) e.remove();
+    for (const [key, h] of ctl.heads) if (!els.includes(h.el)) { h.el.remove(); ctl.heads.delete(key); }
     ctl.deferred = deferred ? [g, issued] : null;
     applyValues(vars, issued);
     for (const r of ctl.rows.values()) r.sync();
     renderBar();
+  }
+
+  /** The sections a person opened or closed, per graph: remembered in this browser ({section key: closed}). */
+  const sectionState = (graph) => ctx.store?.get(`controls.closed.${graph}`, {}) ?? {};
+  /** A section's heading (kept per section key): a caret, the group's name and how many controls it holds. */
+  function sectionHead(sec, closed) {
+    let h = ctl.heads.get(sec.key);
+    if (!h) {
+      const b = el('button', 'cgroup'), caret = el('span', 'caret'), name = el('span', 'gname'), n = el('span', 'gcount');
+      b.type = 'button';
+      b.append(caret, name, n);
+      h = { el: b, keys: [], closed: false, caret, name, n };
+      b.onclick = () => {
+        b.blur();
+        h.closed = !h.closed;
+        const st = sectionState(ctl.graph);
+        st[sec.key] = h.closed;
+        ctx.store?.set(`controls.closed.${ctl.graph}`, st);
+        h.show();
+        for (const k of h.keys) { const r = ctl.rows.get(k); if (r) r.el.hidden = h.closed; }
+      };
+      h.show = () => {
+        h.caret.textContent = h.closed ? '▸' : '▾';
+        b.setAttribute('aria-expanded', String(!h.closed));
+        b.title = sec.other ? `vars the graph does not declare in "params" (${h.closed ? 'show' : 'hide'} them)` : `${h.closed ? 'show' : 'hide'} the ${h.keys.length} control${h.keys.length === 1 ? '' : 's'} of ${sec.group}`;
+      };
+      ctl.heads.set(sec.key, h);
+    }
+    h.keys = sec.keys; h.closed = closed;
+    h.name.textContent = sec.group; h.n.textContent = String(sec.keys.length);
+    h.el.classList.toggle('other', sec.other);
+    h.show();
+    return h;
   }
 
   /** The person has a change of var k on the way, is dragging it or typing in it: the server's value waits. */
@@ -477,13 +535,13 @@ function createControls(ctx) {
     if (!rows.length) return;
     const graph = ctl.graph, before = new Map(rows.map((r) => [r.name, ctl.values.get(r.name)])), after = new Map(rows.map((r) => [r.name, r.base]));
     // over a graph file null drops the session value; in a package the default is stored
-    for (const r of rows) { r.set(r.base); queueVar(r.name, ctl.mode === 'file' ? null : r.base, false, true, r.base); }
-    const apply = (m) => {
+    for (const r of rows) { r.reset(r.base); queueVar(r.name, ctl.mode === 'file' ? null : r.base, false, true, r.base); }
+    const apply = (m, reset) => {
       if (ctl.graph !== graph) { api.vars(graph, Object.fromEntries(m)); return; }
-      for (const [k, v] of m) if (ctl.rows.has(k)) { ctl.rows.get(k).set(v); queueVar(k, v, false, true); }
+      for (const [k, v] of m) if (ctl.rows.has(k)) { ctl.rows.get(k)[reset ? 'reset' : 'set'](v); queueVar(k, v, false, true); }
       flushVars();
     };
-    ctx.undo.push({ label: rows.length === 1 ? `${rows[0].name} = ${short(rows[0].base)}` : `reset ${rows.length} values`, undo: () => apply(before), redo: () => apply(after) });
+    ctx.undo.push({ label: rows.length === 1 ? `${rows[0].name} = ${short(rows[0].base)}` : `reset ${rows.length} values`, undo: () => apply(before), redo: () => apply(after, true) });
     flushVars();
   }
   resetBtn.onclick = () => { resetBtn.blur(); resetVars([...ctl.rows.values()].filter((r) => r.changed()).map((r) => r.name)); };

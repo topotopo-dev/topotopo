@@ -790,8 +790,29 @@ section('param ranges');
   engine.registerAsset('test_strict_floors', narrow);
   const caller = await engine.cook({ strict: true, nodes: { h: { type: 'test_strict_floors', params: { floors: 6 } } } });
   check(!caller.ok && caller.errors.some((e) => e.node === 'h' && /"floors" 6 is above its range 1\.\.4/.test(e.message)), 'strict: an asset range narrower than its caller fails the caller');
+  // the asset's own value past its declared range (typed past the slider in the viewer) is no caller's mistake: it cooks
+  // as it does on its own, while a caller's value past the range still clamps
+  engine.registerAsset('test_own_floors', { ...narrow, vars: { floors: 6 } });
+  const own = await engine.cook({ strict: true, nodes: { h: { type: 'test_own_floors' } } });
+  check(own.ok && !own.warnings.length && size3(own.geo)[1] === 6, `an asset's own value past its range is not clamped (${own.errors.map((e) => e.message).join('; ')})`);
+  const past = await engine.cook({ nodes: { h: { type: 'test_own_floors', params: { floors: 9 } } } });
+  check(past.ok && past.warnings.some((w) => /"floors" 9 clamped to 6 \(range 1\.\.6\)/.test(w.message)), `a caller's value past it still clamps, to the widened end (${past.warnings.map((w) => w.message).join('; ')})`);
   check(engine.validate({ strict: 'yes' as any, nodes: { s: { type: 'sphere' } } }).errors.some((e) => /"strict" must be true or false/.test(e.message))
     && engine.validate({ nodes: { s: { type: 'sphere', strict: 1 as any } } }).errors.some((e) => e.node === 's' && /"strict" must be true or false/.test(e.message)), 'strict must be a boolean (graph and node)');
+}
+
+section('declared params: desc and group');
+{
+  // desc is the control's hover text: a declared param without one warns (build, dry run and cook); group is a heading
+  const g = { vars: { gap: 2, n: 3 }, params: { gap: { type: 'float', min: 0, max: 5, label: 'Gap between cliffs (m)', group: 'Layout' }, n: { type: 'int', desc: 'count', group: 'Layout' } }, nodes: { b: { type: 'box', params: { size: '=gap' } } } };
+  const v = engine.validate(g as any);
+  check(!v.errors.length && v.warnings.length === 1 && v.warnings[0].node === '(params)' && /^params "gap" has no "desc"/.test(v.warnings[0].message) && /unit/.test(v.warnings[0].hint ?? ''),
+    `a declared param without desc warns, naming it (${v.warnings.map((w) => w.message).join('; ')})`);
+  const c = await engine.cook(g as any);
+  check(c.ok && c.warnings.some((w) => /"gap" has no "desc"/.test(w.message)) && engine.dryRun(g as any).warnings.some((w) => /"gap" has no "desc"/.test(w.message)), 'the cook and the dry run carry the warning');
+  check(!engine.validate({ ...g, params: { ...g.params, gap: { ...g.params.gap, desc: 'gap between cliffs, metres' } } } as any).warnings.length, 'with a desc: no warning');
+  check(engine.validate({ ...g, params: { n: { desc: 'count', group: 3 } } } as any).errors.some((e) => /params "n": "group" must be a heading/.test(e.message))
+    && engine.validate({ ...g, params: { n: { desc: 'count', group: ' ' } } } as any).errors.some((e) => /"group" must be a heading/.test(e.message)), 'group must be a non-empty string');
 }
 
 // ------------------------------------------------------------------ CLI
@@ -1227,7 +1248,7 @@ section('refresh: a regenerated graph keeps what a person tuned on it');
   check(r3.graph.vars!.floors === 7 && r3.graph.vars!.height === 3, 'refresh: an untouched value follows the generator back');
   const tall = structuredClone(g); tall.vars!.height = 8;
   const r4 = refreshGraph(tall, gen({ hmax: 6 }));
-  check(r4.graph.vars!.height === 3 && r4.reset.some((x) => /^height=8 → 3: above the new range 1\.\.6/.test(x)), `refresh resets a value above the new range (${r4.reset.join('; ')})`);
+  check(r4.graph.vars!.height === 8 && !r4.reset.length, `refresh keeps a value past the new range: min/max are the slider's range, not a limit (${r4.reset.join('; ')})`);
   const frac = structuredClone(g); frac.params!.floors.type = 'float'; frac.vars!.floors = 6.5;
   const r5 = refreshGraph(frac, gen());
   check(r5.graph.vars!.floors === 4 && r5.reset.some((x) => /^floors=6\.5 → 4: not a whole number/.test(x)), `refresh resets a fraction for an int var (${r5.reset.join('; ')})`);
