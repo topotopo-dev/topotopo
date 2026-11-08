@@ -466,6 +466,38 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   }
 }
 
+// ------------------------------------------------------------------ 5i. removeprim andpoints removes only the prim's own points
+// removeprim(0, pr, 1) used to delete every point no prim used, the ones it never touched included, and a removepoint
+// in the same run then took its numbers after that renumbering. Houdini removes only the removed prim's points that no
+// other prim uses.
+
+{
+  const pts = 'for (let i = 0; i < 5; i++) addpoint(0, [i, 0, 0]);\naddprim(0, [0, 1, 2], false);\naddprim(0, [2, 3], false);';
+  const run = async (code: string) => {
+    const r = await engine.cook({ nodes: {
+      e: { type: 'null' },
+      a: { type: 'wrangle', in: ['e'], params: { run_over: 'detail', code: pts } },
+      b: { type: 'wrangle', in: ['a'], params: { run_over: 'detail', code } },
+    }, output: 'b' });
+    const g = r.geo;
+    return { r, xs: g ? Array.from({ length: g.numPoints }, (_, i) => g.P[i * 3]).join(',') : '', prims: g?.numPrims ?? -1 };
+  };
+  // 5 points: polyline 0-1-2 and segment 2-3; point 4 belongs to no prim
+  const cases: [string, string, string, number][] = [
+    ['removeprim(0, 0, 1)', 'removeprim(0, 0, 1);', '2,3,4', 1],
+    ['removeprim(0, 0, 0)', 'removeprim(0, 0, 0);', '0,1,2,3,4', 1],
+    ['removeprim(0, 1, 1)', 'removeprim(0, 1, 1);', '0,1,2,4', 1],
+    ['removeprim both with andpoints', 'removeprim(0, 0, 1); removeprim(0, 1, 1);', '4', 0],
+    ['removeprim with and without andpoints', 'removeprim(0, 0, 0); removeprim(0, 1, 1);', '0,1,4', 0],
+    ['removeprim andpoints and removepoint', 'removeprim(0, 1, 1); removepoint(0, 1);', '0,2,4', 1],
+    ['removepoint', 'removepoint(0, 4);', '0,1,2,3', 2],
+  ];
+  for (const [label, code, want, prims] of cases) {
+    const { r, xs, prims: np } = await run(code);
+    check(r.ok && xs === want && np === prims, `wrangle ${label}: points at x = ${want}, ${prims} prim(s) (got ${xs || 'none'}, ${np})`, errs(r));
+  }
+}
+
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests
 // A ray through a shared edge or vertex used to miss both triangles or hit several (Möller–Trumbore rounding): the
 // `ray` node lost points on seams and inside/outside parity counts went wrong.
