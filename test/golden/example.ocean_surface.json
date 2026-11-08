@@ -1,0 +1,44 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["Cd:float:3", "N:float:3", "P:float:3", "foam:float:1", "uv:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [50, 0.9319, 50],
+      "min": [-50, -1.0058, -50]
+    },
+    "counts": {
+      "points": 10201,
+      "prims": 10000,
+      "vertices": 40000,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "9ef0a1901d777e9e",
+      "attributes": {
+        "detail.materials": "af00efddb785ae73",
+        "point.Cd": "0ae2ecf5f48cf637",
+        "point.N": "73b2b21994c47153",
+        "point.foam": "1308e3a0df9c25a6",
+        "point.uv": "e3cca7d53bc3f70f",
+        "prim.material": "fc97b3e522550eff",
+        "prim.name": "01b09305aeeb159f"
+      },
+      "topology": "092b66ecef0fb8e6"
+    }
+  },
+  "name": "example.ocean_surface",
+  "ok": true,
+  "source": "examples/ocean_surface.json",
+  "warnings": []
+}

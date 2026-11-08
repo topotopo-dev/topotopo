@@ -1,0 +1,53 @@
+{
+  "description": "An animated, tileable ocean patch for a water plane. A detail wrangle picks the waves once: a main swell of wave_length running with the wind, three more swells around it and sixteen small waves on top, each a whole number of waves across the patch (the way an FFT ocean tile is built, so copies of the patch join without a seam), their heights adding up to wave_height. A point wrangle moves them with time (deep-water speeds) as Gerstner waves whose crests choppiness pulls together, while every vertex stays on the regular grid (it solves for the wave that lands on it), so the patch stays exactly size by size; it writes exact normals, a foam value where the crests are squeezed together, and Cd from deep water to pale foam (the water material is white, so Cd is the colour: export with vertex colours). The render shows nine copies of the patch side by side.",
+  "params": {
+    "size": {"type": "float", "default": 100, "min": 10, "max": 500, "step": 10, "desc": "side of the square patch (m)"},
+    "wave_height": {"type": "float", "default": 1.5, "min": 0, "max": 6, "step": 0.1, "desc": "height of the largest swells above sea level (m); no point rises or sinks further"},
+    "wave_length": {"type": "float", "default": 30, "min": 5, "max": 100, "step": 1, "desc": "distance between the largest swells (m), rounded so whole swells fit across the patch (at most size)"},
+    "choppiness": {"type": "float", "default": 0.4, "min": 0, "max": 1, "step": 0.05, "desc": "how sharp the crests are: 0 round swells, 1 peaked crests with plenty of foam"},
+    "wind_direction": {"type": "float", "default": 30, "min": 0, "max": 360, "step": 5, "desc": "where the waves run to (degrees counter-clockwise from +X, seen from above)"},
+    "vertex_spacing": {"type": "float", "default": 1, "min": 0.25, "max": 4, "step": 0.25, "desc": "distance between the surface's vertices (m); a patch has at most 400 x 400 quads, so a large patch with a fine spacing gets coarser"},
+    "seed": {"type": "int", "default": 1, "min": 0, "max": 9999, "desc": "random seed of the waves' directions, lengths and phases (the sea state stays)"}
+  },
+  "vars": {"size": 100, "wave_height": 1.5, "wave_length": 30, "choppiness": 0.4, "wind_direction": 30, "vertex_spacing": 1, "seed": 1},
+  "meta": {"frame": 48, "render": {"node": "tiled_preview", "camera": {"from": [-50, 20, 50], "to": [15, -6, -15], "fov": 50}, "size": "1600x900", "shading": "pbr", "cd": "multiply", "grid": false}},
+  "nodes": {
+    "patch": {"type": "grid", "params": {"size": ["=size", "=size"], "divisions": ["=min(400, max(4, round(size / vertex_spacing)))", "=min(400, max(4, round(size / vertex_spacing)))"]}},
+    "wave_set": {
+      "type": "wrangle",
+      "in": ["patch"],
+      "params": {
+        "run_over": "detail",
+        "code": "// the waves: one main swell of wave_length running with the wind, three more swells around it and sixteen small\n// waves on top, each a whole number of waves across the patch (so patches tile), with a seeded length, direction and phase\nconst TAU = 2 * Math.PI, L = size, A = wave_height, wd = wind_direction * Math.PI / 180;\nconst spacing = L / Math.min(400, Math.max(4, Math.round(L / vertex_spacing)));\nconst kx = [], kz = [], amp = [], om = [], ph = [];\nconst share = [0.45, 0.3, 0.25];\nconst sums = [0, 0, 0];\nfor (let i = 0; i < 20; i++) {\n  const band = i === 0 ? 0 : i < 4 ? 1 : 2, r1 = rand(i, seed, 1), r2 = i === 0 ? 0 : rand(i, seed, 2) * 2 - 1;\n  const lam = band === 0 ? wave_length : band === 1 ? wave_length * Math.pow(2, r1 - 0.5) : wave_length * (0.15 + 0.25 * r1);\n  const a = wd + r2 * (band === 2 ? 1.2 : 0.5);\n  let nx = Math.round(L / lam * Math.cos(a)), nz = Math.round(-L / lam * Math.sin(a));\n  if (nx === 0 && nz === 0) { if (Math.abs(Math.cos(a)) >= Math.abs(Math.sin(a))) nx = Math.sign(Math.cos(a)); else nz = -Math.sign(Math.sin(a)); }\n  const qx = nx * TAU / L, qz = nz * TAU / L, k = Math.hypot(qx, qz), lq = TAU / k;\n  // a wave shorter than about four vertex spacings cannot be drawn: fade it out\n  const w = (1 - 0.5 * Math.abs(r2)) * Math.min(1, lq / wave_length) * smoothstep(3 * spacing, 6 * spacing, lq);\n  sums[band] += w;\n  kx.push(qx); kz.push(qz); amp.push(w); om.push(Math.sqrt(9.81 * k)); ph.push(rand(i, seed, 3) * TAU);\n}\n// heights add up to at most wave_height; choppiness pulls the crests together (Gerstner), steepness shared like the\n// heights and kept below 1 in all, so the surface never folds over\nconst c = 0.95 * choppiness, hx = [], hz = [];\nfor (let i = 0; i < 20; i++) {\n  const band = i === 0 ? 0 : i < 4 ? 1 : 2;\n  amp[i] *= sums[band] > 0 ? A * share[band] / sums[band] : 0;\n  const k = Math.hypot(kx[i], kz[i]), d = A > 0 ? c * amp[i] / (A * k) : 0;\n  hx.push(d * kx[i] / k); hz.push(d * kz[i] / k);\n}\nf[]@kx = kx; f[]@kz = kz; f[]@amp = amp; f[]@omega = om; f[]@phase = ph; f[]@hx = hx; f[]@hz = hz;"
+      }
+    },
+    "waves": {
+      "type": "wrangle",
+      "in": ["wave_set"],
+      "params": {
+        "run_over": "points",
+        "code": "// the vertex stays on the grid: find the rest position x0 whose wave lands here (x = x0 - D(x0)), then its height\nconst t = @Time, kx = @kx, kz = @kz, amp = @amp, om = @omega, ph = @phase, hx = @hx, hz = @hz, n = kx.length;\nconst x = @P.x, z = @P.z;\nlet x0 = x, z0 = z;\nfor (let it = 0; it < 8; it++) {\n  let dx = 0, dz = 0;\n  for (let i = 0; i < n; i++) { const s = Math.sin(kx[i] * x0 + kz[i] * z0 - om[i] * t + ph[i]); dx += hx[i] * s; dz += hz[i] * s; }\n  x0 = x + dx; z0 = z + dz;\n}\nlet y = 0, gx = 0, gz = 0, jxx = 1, jzz = 1, jxz = 0, sxx = 1, szz = 1, sxz = 0;\nfor (let i = 0; i < n; i++) {\n  const th = kx[i] * x0 + kz[i] * z0 - om[i] * t + ph[i], s = Math.sin(th), co = Math.cos(th);\n  y += amp[i] * co; gx -= amp[i] * kx[i] * s; gz -= amp[i] * kz[i] * s;\n  jxx -= hx[i] * kx[i] * co; jzz -= hz[i] * kz[i] * co; jxz -= hx[i] * kz[i] * co;\n  if (i < 4) { sxx -= hx[i] * kx[i] * co; szz -= hz[i] * kz[i] * co; sxz -= hx[i] * kz[i] * co; }\n}\n// slope through the squeeze of the grid (chain rule), so the normals are exact and match across tile borders\nconst det = jxx * jzz - jxz * jxz, sx = (gx * jzz - gz * jxz) / det, sz = (gz * jxx - gx * jxz) / det;\n@P.y = y;\n@N = normalize([-sx, 1, -sz]);\n// foam where the swells squeeze their crests together, a little more where the small waves add to it\nconst squeeze = 1 - (sxx * szz - sxz * sxz), extra = (1 - det) - squeeze;\nf@foam = smoothstep(0.08, 0.24, squeeze + 0.5 * extra);\nconst deep = [0.0, 0.07, 0.13], crest = [0.0, 0.3, 0.32];\n@Cd = mix(mix(deep, crest, wave_height > 0 ? fit(y, -wave_height, wave_height, 0, 1) : 0.5), [0.95, 0.98, 0.98], @foam);"
+      }
+    },
+    "tidy": {"type": "attrib_delete", "in": ["waves"], "params": {"names": "kx kz amp omega phase hx hz"}},
+    "named": {"type": "attrib_create", "in": ["tidy"], "params": {"name": "name", "class": "prim", "value": "ocean"}},
+    "water": {"type": "material", "in": ["named"], "params": {"name": "water", "base_color": [1, 1, 1], "roughness": 0.12}},
+    "height": {"type": "assert", "in": ["water"], "params": {"label": "height", "bbox_min": "=[-1e9, -wave_height, -1e9]", "bbox_max": "=[1e9, wave_height, 1e9]", "tolerance": 0.0001}},
+    "foam": {"type": "assert", "in": ["height"], "params": {"label": "foam", "attrib": "foam", "attrib_class": "point", "attrib_min": 0, "attrib_max": 1}},
+    "surface": {
+      "type": "assert",
+      "in": ["foam"],
+      "params": {
+        "label": "size",
+        "expr": "abs(bbox.min.x + size / 2) < 0.001 && abs(bbox.max.x - size / 2) < 0.001 && abs(bbox.min.z + size / 2) < 0.001 && abs(bbox.max.z - size / 2) < 0.001"
+      }
+    },
+    "preview_row": {"type": "copy_xform", "in": ["surface"], "params": {"count": 3, "translate": ["=size", 0, 0]}},
+    "preview_tiles": {"type": "copy_xform", "in": ["preview_row"], "params": {"count": 3, "translate": [0, 0, "=size"]}},
+    "tiled_preview": {"type": "transform", "in": ["preview_tiles"], "params": {"translate": ["=-size", 0, "=-size"]}}
+  },
+  "output": "surface",
+  "outputs": {
+    "surface": {"node": "surface", "label": "Ocean surface", "kind": "mesh", "tags": ["ocean", "water", "waves", "animated", "tileable"], "description": "The water surface at the current frame: a size x size grid centred on the origin at sea level (y = 0), tileable, with uv, normals, a point foam value 0..1 and Cd, in the water material."}
+  }
+}

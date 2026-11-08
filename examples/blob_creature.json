@@ -1,0 +1,102 @@
+{
+  "description": "A cartoon creature from one signed-distance field (sdf_expr): an egg-shaped body, a round head, `legs` stubby legs on flat feet and a tapering tail curling up behind, melted together with a smooth minimum of width blend, and a few seeded soft lumps on the back; the soles are cut flat at the ground with rounded rims. The bounds follow the parts, so the field is only sampled around the creature. sdf_to_mesh meshes it with edges of feature_size (parts are never made thinner than two edges, so the body stays one piece), decimate thins the mesh where the skin is flat, mesh_repair guards the thinnest parts, and uv_unwrap packs the body's charts into the 0..1 tile. Two dark eye spheres sit on the head as separate pieces. Asserts check that the body is one closed, outward-facing piece without self-intersections, and that the creature stands on its feet: its lowest point on the ground and the points near the ground spread over at least 0.3 body_size.",
+  "params": {
+    "body_size": {"type": "float", "default": 1, "min": 0.3, "max": 2, "step": 0.05, "desc": "length of the body (m)"},
+    "head": {"type": "float", "default": 0.6, "min": 0.3, "max": 1, "step": 0.05, "desc": "size of the head next to the body"},
+    "legs": {"type": "int", "default": 4, "min": 2, "max": 8, "desc": "number of legs, spread evenly around the belly"},
+    "tail": {"type": "float", "default": 0.8, "min": 0, "max": 2, "step": 0.05, "desc": "length of the tail next to the body; 0 leaves it off"},
+    "blend": {"type": "float", "default": 0.15, "min": 0.02, "max": 0.4, "step": 0.01, "desc": "how softly the parts melt into each other (m)"},
+    "bumps": {"type": "float", "default": 0.2, "min": 0, "max": 1, "step": 0.05, "desc": "lumps on the skin"},
+    "feature_size": {"type": "float", "default": 0.04, "min": 0.02, "max": 0.1, "step": 0.005, "desc": "size of the smallest feature kept (m), at least body_size / 50: the skin is meshed at this edge length, then thinned where it is flat"},
+    "seed": {"type": "int", "default": 1, "min": 0, "max": 9999, "desc": "random seed of the bumps and the pose of the legs"}
+  },
+  "vars": {"body_size": 1, "head": 0.6, "legs": 4, "tail": 0.8, "blend": 0.15, "bumps": 0.2, "feature_size": 0.04, "seed": 1},
+  "meta": {"render": {"views": ["persp"], "azimuth": 35, "elevation": 22, "size": "1600x1100", "shading": "pbr"}},
+  "nodes": {
+    "shape": {
+      "type": "sdf_expr",
+      "note": "the bounds hold the parts (smooth joins grow them by up to a quarter of their width); sdf_to_mesh adds two edge lengths around them",
+      "params": {
+        "bounds_min": ["=-max(0.59, 0.55 + 0.6 * tail) * body_size - 0.25 * max(blend, 2 * max(feature_size, body_size / 50))", "=0", "=-0.47 * body_size - 0.25 * max(blend, 2 * max(feature_size, body_size / 50))"],
+        "bounds_max": ["=max(0.59, 0.42 + 0.59 * head) * body_size + 0.25 * max(blend, 2 * max(feature_size, body_size / 50))", "=max(1.01, 0.86 + 0.5 * head, 0.62 + 0.6 * tail) * body_size + 0.25 * max(blend, 2 * max(feature_size, body_size / 50))", "=0.47 * body_size + 0.25 * max(blend, 2 * max(feature_size, body_size / 50))"],
+        "code": "// one signed distance per sample, in plain arithmetic (no vectors, no rand(): this runs for every sample of the mesh)\nconst L = body_size, fsz = Math.max(feature_size, L / 50);  // x, y, z: the sample point; fsz: the mesh's edge length\nconst hash = (n) => { let h = Math.imul(n + 0x9e3779b9, 0x85ebca6b) ^ Math.imul(seed + 0x27d4eb2f, 0xc2b2ae35); h = Math.imul(h ^ (h >>> 15), 0x2c1b873b); h = Math.imul(h ^ (h >>> 13), 0x297a2d39); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };\nconst sm = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };\nconst ell = (px, py, pz, a, b, c) => {\n  const k0 = Math.sqrt((px / a) ** 2 + (py / b) ** 2 + (pz / c) ** 2), k1 = Math.sqrt((px / (a * a)) ** 2 + (py / (b * b)) ** 2 + (pz / (c * c)) ** 2);\n  return k1 > 1e-9 ? k0 * (k0 - 1) / k1 : -Math.min(a, b, c);\n};\n// a capsule from a (radius ra) to b (radius rb)\nconst cap = (ax, ay, az, bx, by, bz, ra, rb) => {\n  const pax = x - ax, pay = y - ay, paz = z - az, bax = bx - ax, bay = by - ay, baz = bz - az;\n  const h = Math.max(0, Math.min(1, (pax * bax + pay * bay + paz * baz) / (bax * bax + bay * bay + baz * baz)));\n  const dx = pax - bax * h, dy = pay - bay * h, dz = paz - baz * h;\n  return Math.sqrt(dx * dx + dy * dy + dz * dz) - (ra + (rb - ra) * h);\n};\nconst sph = (cx, cy, cz, r) => Math.sqrt((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) - r;\n// the soles are cut off at the ground with edges rounded over k (at least the edge length: a sharper rim meshes with\n// spikes); the creature stands k lower, so the rounding does not shorten the legs\nconst k = Math.max(0.02 * L, fsz);\ny += k;  // from here on, y is measured from k below the ground\n// parts melt together over blend, never sharper than the mesh can show: closer than its edge length, they join\nconst kb = Math.max(blend, 2 * fsz), kf = Math.max(0.5 * blend, 2 * fsz);\n// body: an egg along X (the creature faces +X), its belly 0.24 body_size up (0.24 body_size - k above the ground)\nconst rx = 0.5 * L, ry = 0.34 * L, rz = 0.38 * L, cy = 0.24 * L + ry;\nlet d = ell(x, y - cy, z, rx, ry, rz);\n// a round head in front, on top\nconst rh = 0.38 * L * head;\nd = sm(d, sph(0.42 * L + 0.55 * rh, cy + 0.28 * L + 0.3 * rh, 0, rh), kb);\n// stubby legs around the belly, each on a flat foot (slimmer when there are many); the seed moves the feet a little.\n// Legs, feet and tail are never thinner than two edge lengths (thinner parts mesh as loose bits or folds)\nconst slim = Math.min(1, Math.sqrt(4 / legs)), thin = fsz, rl = Math.max(0.085 * L * slim, thin), rf = Math.max(0.11 * L * slim, 1.25 * thin);\nfor (let i = 0; i < legs; i++) {\n  const a = (i + 0.5) * 2 * Math.PI / legs, hx = 0.6 * rx * Math.cos(a), hz = 0.62 * rz * Math.sin(a), hy = cy - 0.45 * ry;\n  const fx = hx * 1.15 + (hash(i * 2) - 0.5) * 0.14 * L, fz = hz * 1.25 + (hash(i * 2 + 1) - 0.5) * 0.1 * L, fy = 0.55 * rf;\n  d = sm(d, cap(hx, hy, hz, fx, fy, fz, rl, rl), kb);\n  d = sm(d, ell(x - fx - 0.03 * L, y - fy, z - fz, 1.3 * rf, 0.8 * rf, rf), kf);\n}\n// tail: five tapering segments curling up behind, 0.9 tail body lengths long\nif (tail > 0) {\n  const s = 0.18 * tail * L;\n  let ax = -0.85 * rx, ay = cy, ra = Math.max(0.12 * L, thin), t = Infinity;\n  for (let i = 0; i < 5; i++) {\n    const th = (165 - 15 * i) * Math.PI / 180, bx = ax + s * Math.cos(th), by = ay + s * Math.sin(th), rb = Math.max(0.8 * ra, thin);\n    t = Math.min(t, cap(ax, ay, 0, bx, by, 0, ra, rb));\n    ax = bx; ay = by; ra = rb;\n  }\n  d = sm(d, t, kb);\n}\n// a few soft lumps on the back, a little more than half out of the skin\nif (bumps > 0) {\n  const n = Math.round(2 + 8 * bumps);\n  for (let j = 0; j < n; j++) {\n    const t = hash(100 + j) * 2 * Math.PI, ph = 0.2 + hash(200 + j) * 0.9, rb = L * (0.06 + 0.05 * hash(300 + j)) * (0.6 + 0.4 * bumps);\n    const sx = rx * Math.cos(ph) * Math.cos(t), sy = ry * Math.sin(ph), sz = rz * Math.cos(ph) * Math.sin(t), f = 1 - 0.4 * rb / Math.sqrt(sx * sx + sy * sy + sz * sz);\n    d = sm(d, sph(f * sx, cy + f * sy, f * sz, rb), 0.65 * rb);\n  }\n}\n// flat soles: cut softly at the ground\nconst g = k - y, h = Math.max(k - Math.abs(d - g), 0) / k;\nreturn Math.max(d, g) + h * h * k * 0.25;"
+      }
+    },
+    "skin_mesh": {"type": "sdf_to_mesh", "in": ["shape"], "params": {"edge_length": "=max(feature_size, body_size / 50)"}},
+    "skin_lean": {
+      "type": "decimate",
+      "in": ["skin_mesh"],
+      "note": "thinned where the skin is flat (it moves less than a tenth of the edge length), to no fewer than 3000 triangles. Workaround for speed: uv_unwrap takes about 2 s on the full mesh, under 1 s on this one",
+      "params": {
+        "ratio": 0.05,
+        "target_count": 3000,
+        "max_error": "=0.1 * max(feature_size, body_size / 50)",
+        "error_absolute": true,
+        "attributes": "N:0.5"
+      }
+    },
+    "skin_repair": {
+      "type": "mesh_repair",
+      "in": ["skin_lean"],
+      "note": "workaround: where a part is barely two edge lengths thick, sdf_to_mesh can leave zero-area or crossing faces and decimate can then split a seam open; mesh_repair closes and removes them (nothing to do at the defaults)",
+      "params": {
+        "self_intersections": "remove_faces",
+        "warn": false
+      }
+    },
+    "body_uv": {"type": "uv_unwrap", "in": ["skin_repair"], "note": "chart_smoothing: the thinned mesh is charted on a smoothed copy, so no chart folds", "params": {"chart_smoothing": 20}},
+    "body_named": {"type": "attrib_create", "in": ["body_uv"], "params": {"name": "name", "class": "prim", "value": "body"}},
+    "body_skin": {"type": "material", "in": ["body_named"], "params": {"name": "skin", "base_color": "#7fc4a0", "roughness": 0.6}},
+    "closed": {"type": "assert", "in": ["body_skin"], "params": {"label": "closed", "watertight": true, "no_flipped": true, "no_self_intersections": true, "expr": "pieces == 1"}},
+    "eye_right": {
+      "type": "sphere",
+      "note": "on the head (radius r = 0.38 body_size head, centre 0.42 body_size + 0.55 r ahead and 0.86 body_size + 0.3 r up), 0.85 r out from its centre towards (0.85, 0.26, 0.45), lowered like the creature (k in shape)",
+      "params": {
+        "type": "uv",
+        "rows": 10,
+        "cols": 16,
+        "radius": "=0.091 * head * body_size",
+        "center": ["=(0.42 + 0.484 * head) * body_size", "=(0.86 + 0.198 * head) * body_size - max(0.02 * body_size, max(feature_size, body_size / 50))", "=0.145 * head * body_size"]
+      }
+    },
+    "eyes_both": {"type": "mirror", "in": ["eye_right"], "params": {"axis": "z"}},
+    "eyes_named": {"type": "attrib_create", "in": ["eyes_both"], "params": {"name": "name", "class": "prim", "value": "eyes"}},
+    "eyes": {"type": "material", "in": ["eyes_named"], "params": {"name": "eye", "base_color": "#15110f", "roughness": 0.15}},
+    "parts": {"type": "merge", "in": ["closed", "eyes"]},
+    "on_ground": {
+      "type": "transform",
+      "in": ["parts"],
+      "note": "where a sole is narrower than the mesh's cells, its lowest point can sit a little above the ground: this puts the lowest point exactly on it (no move at the defaults)",
+      "params": {
+        "translate": [0, "=-bbox('parts').min.y", 0]
+      }
+    },
+    "contact": {
+      "type": "wrangle",
+      "in": ["on_ground"],
+      "note": "how far apart the points near the ground lie (within half an edge length of it), for the standing promise",
+      "params": {
+        "run_over": "detail",
+        "code": "// how far apart the points near the ground lie (the soles of the feet)\nconst near = 0.5 * Math.max(feature_size, body_size / 50);\nlet x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;\nfor (let i = 0; i < npoints(0); i++) {\n  const q = point(0, 'P', i);\n  if (q[1] < near) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); z0 = Math.min(z0, q[2]); z1 = Math.max(z1, q[2]); }\n}\nf@ground_span = x1 >= x0 ? Math.max(x1 - x0, z1 - z0) : 0;"
+      }
+    },
+    "standing": {
+      "type": "assert",
+      "in": ["contact"],
+      "params": {
+        "label": "standing",
+        "bbox_min": "=[-1e9, 0, -1e9]",
+        "tolerance": 0.0001,
+        "attrib": "ground_span",
+        "attrib_class": "detail",
+        "attrib_min": "=0.3 * body_size"
+      }
+    },
+    "tidy": {"type": "attrib_delete", "in": ["standing"], "params": {"names": "ground_span error error_abs repair_report chart"}},
+    "creature": {"type": "group_delete", "in": ["tidy"], "params": {"groups": "*"}}
+  },
+  "output": "creature",
+  "outputs": {
+    "creature": {"node": "creature", "label": "Blob creature", "kind": "mesh", "tags": ["creature", "character", "sdf", "cartoon", "organic"], "description": "The creature standing on the origin and facing +X, its soles at y = 0: the body as one closed, outward-facing mesh with uv (its charts packed in the 0..1 tile) in the skin material, and two eye spheres, with the sphere's own uv, in the eye material."}
+  }
+}
