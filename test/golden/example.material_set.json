@@ -1,0 +1,182 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.4, 0.04, 1],
+      "min": [-3.4, 0, -1]
+    },
+    "counts": {
+      "points": 24,
+      "prims": 18,
+      "vertices": 72,
+      "volumes": 9
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "144bf59d7dfb1d77",
+      "attributes": {
+        "detail.materials": "a59721cadb587da4",
+        "prim.material": "d82184396524b8cb",
+        "prim.name": "d324113d13ca2f87",
+        "vertex.uv": "577e6ced40c282c7"
+      },
+      "topology": "b2931e209b011d3a"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "59a5492aad293bd8"
+        },
+        "name": "stone_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "8ab29ea7882bfc69",
+          "id": "3ba59181b512b6fb"
+        },
+        "name": "stone_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "1f6e55ab825d2085"
+        },
+        "name": "stone_orm"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "f3b1aeed2ae46887"
+        },
+        "name": "wood_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "e645ad45a4c033f3",
+          "id": "c4c9c18177f8fefb"
+        },
+        "name": "wood_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "9829cfee4fb9ca8c"
+        },
+        "name": "wood_orm"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "18eeec7cb741b6e6",
+          "id": "5a8f9181fe7eb6fb"
+        },
+        "name": "metal_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "49cf8202547211b0",
+          "id": "5a8f9181fe7eb6fb"
+        },
+        "name": "metal_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "fed7d5dd53f57597"
+        },
+        "name": "metal_orm"
+      }
+    ]
+  },
+  "name": "example.material_set",
+  "ok": true,
+  "source": "examples/material_set.json",
+  "warnings": []
+}

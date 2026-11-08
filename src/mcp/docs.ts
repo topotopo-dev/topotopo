@@ -806,7 +806,7 @@ SEE IT: render of a geometry holding only images shows the "texture" view; rende
 EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metallicRoughnessTexture); usda writes
   <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
   <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
-RECIPE (brick wall + worn crate: help {examples:["textures"]}):
+RECIPE (brick wall + worn crate; tileable stone, wood and metal from texture nodes: help {examples:["material_set"]}):
   bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {layer:"id"}
   color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)
   normal = tex_normal_from_height(bricks) {depth:0.035, size:1.6} · crate: uv_unwrap → bake_ao + bake_curvature →
@@ -814,7 +814,7 @@ RECIPE (brick wall + worn crate: help {examples:["textures"]}):
   tex_blend(wood, paint, wear) → tex_channel(ao, rough) = ORM → texture_to_material {base_color, orm}.
   Detail on a bake: grain = tex_noise {scale:60} → grain_n = tex_normal_from_height {depth:0.0003, size:<uv span in m>}
   → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.
-RECIPE (worn painted metal from texture nodes only: help {examples:["texture_lab"]}): SDF plates and rivets → height →
+RECIPE (worn painted metal from texture nodes only; the metal of help {examples:["material_set"]}): plates and rivets → height →
   normal, tex_ao · edge wear = tex_curvature(normal) layer convex × tex_grunge chips → tex_slope_blur {mode:"max"}
   (ragged) → tex_histogram_scan {coverage:0.07} · steel = tex_directional_blur(fine noise) under the paint · per-plate
   paint = tex_flood_fill(plate mask) → tex_histogram_range → tex_colorize · rust runs = tex_directional_blur(rivet

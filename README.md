@@ -366,11 +366,9 @@ Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with
 (landscape bundle, `scene.glb`, `scene.usda`, `scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`.
 `splines` shows the curve toolkit: a NURBS road projected onto bumpy ground, a boardwalk with filleted corners and
 offset handrails, and a Bezier letter extruded. `street_block` is a street block built only from TopoTopo's own packages
-(see [TopoTopo's own packages](#topotopos-own-packages)). `textures` is a brick wall material made only from texture
-nodes and the props package's crate with baked AO and curvature turned into worn paint on its edges and an ORM map,
-rendered with `textures: true` next to the texture view. `texture_lab` is worn painted metal from texture nodes only:
-SDF plates and rivets, edge wear from curvature, chipped by grunge and slope blur, brushed steel under the paint, a paint
-tint per plate from flood fill, rust running from the rivets, AO and an ORM map.
+(see [TopoTopo's own packages](#topotopos-own-packages)). `material_set` is three tileable game materials made only
+from texture nodes, rough stone blocks, wood planks and worn painted metal with rust running from the rivets, each with
+colour, normal and ORM maps, shown on swatches.
 `guided_town` ([examples/guided_town](examples/guided_town), a package of its own) is a village laid out with the
 viewer's guides: a road, house footprints, a fence, woods and a clearing in its `inputs/markers.json`, built from
 TopoTopo's own packages; open it with `topotopo edit examples/guided_town` and drag them.
