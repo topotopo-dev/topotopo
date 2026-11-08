@@ -26,6 +26,8 @@ import * as cooking from '../src/viewer/app/cooking.js';
 import * as info from '../src/viewer/app/output-info.js';
 import * as pop from '../src/viewer/app/export-popover.js';
 import * as pkgs from '../src/viewer/app/packages.js';
+import { heightfieldPreviewStep } from '../src/core/heightfield.ts';
+import { HEIGHTFIELD_PREVIEW_RES } from '../src/render/preview.ts';
 import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -525,6 +527,18 @@ section('output cards: what an output is, its formats and downloads');
     'the layers a terrain shows in red: the mask first, others with their range, then none (never the height itself)');
   check(info.shownLayer(hf, undefined) === 'mask' && info.shownLayer(hf, 'flow') === 'flow' && info.shownLayer(hf, 'gone') === 'mask' && info.shownLayer(hf, 'none') === 'none'
     && info.shownLayer({ layers: [{ name: 'height', min: 0, max: 1 }] }, undefined) === 'none', 'the layer shown: the chosen one while the field has it, else the mask, else none');
+  // terrain detail: the page's step and triangle count agree with the server's preview mesh; choices that draw the same
+  // are listed once, one that draws every sample is "full", one too heavy for a browser tab is disabled
+  check(info.PREVIEW_RES === HEIGHTFIELD_PREVIEW_RES, 'the page and the server agree on the preview budget');
+  for (const [w, h, res] of [[1001, 1001, 512], [4001, 2001, 1024], [130, 70, 64], [4001, 4001, Infinity]] as const) {
+    const fake = { width: w, height: h } as any, a = info.previewStep(fake, res), b = heightfieldPreviewStep(fake, res);
+    check(a.step === b.step && a.triangles === 2 * (b.shown[0] - 1) * (b.shown[1] - 1), `step and triangles of ${w} × ${h} at ${res}: ${a.step}, ${a.triangles}`);
+  }
+  const two = info.detailChoices({ width: 1001, height: 1001, cell: 2 }), eight = info.detailChoices({ width: 4001, height: 4001, cell: 2 });
+  check(JSON.stringify(two.map((c: any) => c.label)) === JSON.stringify(['preview (4 m, 500k triangles)', 'full (every sample, 2M triangles)'])
+    && JSON.stringify(eight.map((c: any) => [c.value, c.disabled])) === JSON.stringify([['preview', false], ['1024', false], ['2048', false], ['full', true]])
+    && /too many for the viewer/.test(eight[3].label) && info.detailChoices({ width: 129, height: 129, cell: 1 }).length === 1,
+    `terrain detail choices: a 2 km field at 2 m (${two.map((c: any) => c.label).join(' | ')}), an 8 km one (full disabled), a small one (only the preview)`);
   const formats = [{ format: 'glb', label: 'GLB', extension: '.glb' }, { format: 'png16', label: 'Heightmap', extension: '.png' }];
   const glb = { format: 'glb', label: 'GLB', extension: '.glb', writes: 'binary glTF', leaves: [], oneFile: true };
   const png = { format: 'png16', label: 'Heightmap', extension: '.png', writes: '16-bit PNG + JSON sidecar', leaves: ['instances'], oneFile: false };

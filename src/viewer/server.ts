@@ -28,7 +28,7 @@ import { GeoBuilder } from '../core/geometry.ts';
 import type { Geometry } from '../core/geometry.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { exportGeometry } from '../io/export.ts';
-import { previewGLB } from '../render/preview.ts';
+import { previewGLB, heightfieldRes } from '../render/preview.ts';
 import { summarize } from '../inspect.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { STOPPED, wiringOf } from '../graph/engine.ts';
@@ -684,8 +684,9 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
         if (!r.ok || !r.geo) return send(500, JSON.stringify({ error: r.errors.map(issueText).join('\n') }), MIME['.json']);
         // info: what it is (io/kinds.ts), for the properties and their heightfield layer picker
         if (u.pathname === '/api/info') return send(200, JSON.stringify({ target: r.target, summary: summarize(r.geo), ms: r.ms, about: outputKind(r.geo) }), MIME['.json']);
-        // heightfields: the layer drawn in red (the page's layer picker; the mask by default)
-        return send(200, await previewOf(r.geo, { heightfieldLayer: u.searchParams.get('heightfield_layer') || undefined }), MIME['.glb']);
+        // heightfields: the layer drawn in red (the page's layer picker; the mask by default) and the terrain detail (the
+        // page's setting: quads per side, "preview" or "full")
+        return send(200, await previewOf(r.geo, { heightfieldLayer: u.searchParams.get('heightfield_layer') || undefined, heightfieldRes: heightfieldRes(u.searchParams.get('heightfield_res')) }), MIME['.glb']);
       }
       send(404, 'not found');
     } catch (e: any) {

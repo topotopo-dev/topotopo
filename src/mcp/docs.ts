@@ -690,8 +690,10 @@ DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise clos
 RENDER / INSPECT: render draws heightfields as a shaded grid with the mask in red; heightfield_layer:"flow" draws
   another layer in red instead ("none": none; the viewer's layer picker does the same), color_by any layer name maps
   it to colours. It draws at most 256 quads per side, so a 513 × 513 field shows at 257 × 257 (the footer and a note
-  say so); heightfield_res: "full" (CLI --heightfield-res full) draws every sample. inspect and every cook summary
-  list the grid and each layer's min/max/mean.
+  say so); heightfield_res: "full" (CLI --heightfield-res full) draws every sample. The live viewer draws at most 512
+  quads per side by default (a 2 km field at 2 m every 2nd sample) and its "terrain detail" setting draws finer, up to
+  every sample, so instances scattered on the surface sit on it exactly; it is remembered per browser. inspect and
+  every cook summary list the grid and each layer's min/max/mean.
 UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with
   height_min / height_max and the import settings. Pixel column = X, row = Z (row 0 at min Z); Unreal X = X,
   Unreal Y = Z, Unreal Z = Y, centimetres.

@@ -251,6 +251,12 @@ ctx.sceneLayer = {
   get: () => sceneLayers[sceneKey()] ?? null,
   set(v) { sceneLayers[sceneKey()] = v; local.set('scene.layers', sceneLayers); loadGeo(); },
 };
+// how finely heightfields are drawn (the "terrain detail" picker in Properties): "preview", "1024", "2048" or "full";
+// one setting, remembered in this browser
+ctx.terrainDetail = {
+  get: () => browser.get('terrain.detail', 'preview'),
+  set(v, reload = true) { browser.set('terrain.detail', v); if (reload) loadGeo(); },
+};
 
 let firstFrame = !views.placed;
 const loadGeo = ctx.coalesce(async () => {
@@ -259,7 +265,7 @@ const loadGeo = ctx.coalesce(async () => {
   if (!G.name) return;
   const graph = G.name, node = G.node ?? '';
   o.loading = true; ctx.emit('output');
-  const r = await api.geo(graph, node, ctx.sceneLayer.get());
+  const r = await api.geo(graph, node, ctx.sceneLayer.get(), ctx.terrainDetail.get());
   o.loading = false;
   if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) { ctx.emit('output'); return; }
   // the result cooked but cannot be shown (its GLB was not written, or does not load here): the cook line says so and

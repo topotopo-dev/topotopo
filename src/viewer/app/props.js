@@ -11,7 +11,7 @@ import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
 import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, widenRange, pastDeclared, snapTo, controlList, controlSections, sectionClosed, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
 import { fmtDuration } from './cooking.js';
-import { kindLine, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, layerChoices, shownLayer, detailChoices, PREVIEW_RES } from './output-info.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const $ = (id) => document.getElementById(id);
@@ -136,6 +136,15 @@ export function createProps(ctx) {
       s.value = shownLayer(o.about.heightfield, ctx.sceneLayer.get());
       s.onchange = () => { ctx.sceneLayer.set(s.value); s.blur(); };
       g.append(row('layer in red', s, 'the heightfield layer drawn in red over the terrain: 0..1 layers as they are, others from their minimum to their maximum'));
+    }
+    if (o.about?.heightfield) {
+      // how finely the terrain is drawn (this browser's setting): instances scattered on the real surface sit on it when
+      // every sample is drawn; finer draws take longer to load after each change
+      const s = el('select'), choices = detailChoices(o.about.heightfield), cur = ctx.terrainDetail.get();
+      for (const c of choices) { const op = new Option(c.label, c.value); op.disabled = c.disabled; s.append(op); }
+      s.value = choices.some((c) => c.value === cur && !c.disabled) ? cur : 'preview';
+      s.onchange = () => { ctx.terrainDetail.set(s.value); s.blur(); };
+      g.append(row('terrain detail', s, `how finely the terrain is drawn here (it cooks at full resolution either way): the preview draws at most ${PREVIEW_RES} quads per side; instances placed on the surface sit exactly on it only with every sample. Finer draws take longer to load after each change. Remembered in this browser.`));
     }
     if (o.report?.cooked) g.append(row('cook', `${fmtNum(o.report.ms, 0)} ms${o.report.ok ? '' : ' · failed'}`));
     const ec = o.mesh?.edgeCounts();

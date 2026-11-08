@@ -7,7 +7,7 @@
 import { createImageView } from './image-view.js';
 import { fmtBytes } from './units.js';
 import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
-import { kindLine, detailLine, kindBadge, kindTagsLine, liveText, layerChoices, shownLayer } from './output-info.js';
+import { kindLine, detailLine, kindBadge, kindTagsLine, liveText, layerChoices, shownLayer, detailChoices, PREVIEW_RES } from './output-info.js';
 import { inputImageURL } from './layers.js';
 
 const url = (route, item, more = {}) => `/api/output/${route}?` + new URLSearchParams({ id: item.id, rev: item.revision, ...more });
@@ -76,6 +76,16 @@ export function createOutputPanel(ctx) {
       const row = document.createElement('label'); row.className = 'layer-pick'; row.title = 'the heightfield layer drawn in red over the terrain: 0..1 layers as they are, others from their minimum to their maximum';
       row.append(text('span', 'Layer in red', 'dim'), choice);
       details.append(row);
+      // how finely terrains are drawn (one setting for this browser, the same as in the scene's Properties)
+      const detail = document.createElement('select'); detail.setAttribute('aria-label', 'Terrain detail');
+      const choices = detailChoices(item.heightfield), cur = ctx.terrainDetail?.get() ?? 'preview';
+      for (const c of choices) { const op = new Option(c.label, c.value); op.disabled = c.disabled; detail.append(op); }
+      detail.value = choices.some((c) => c.value === cur && !c.disabled) ? cur : 'preview';
+      detail.onchange = () => { detail.blur(); ctx.terrainDetail?.set(detail.value, false); P.select(item.id, true); };
+      const drow = document.createElement('label'); drow.className = 'layer-pick';
+      drow.title = `how finely terrains are drawn here (they cook at full resolution either way): the preview draws at most ${PREVIEW_RES} quads per side; instances placed on the surface sit exactly on it only with every sample. Finer draws take longer to load after each change. Remembered in this browser.`;
+      drow.append(text('span', 'Terrain detail', 'dim'), detail);
+      details.append(drow);
     }
     if (item.error) details.append(text('p', item.error, 'err'));
     else if (item.summary) { const f = document.createElement('details'); f.className = 'fold'; f.append(text('summary', 'Geometry details'), text('pre', item.summary, 'summary')); details.append(f); }
@@ -292,7 +302,8 @@ export function createOutputPanel(ctx) {
       let bytes;
       if (item.load) bytes = await item.load();
       else {
-        const r = await fetch(url('geo', item, item.heightfield ? { heightfield_layer: P.layerOf(item) } : {}));
+        const detail = ctx.terrainDetail?.get() ?? 'preview';
+        const r = await fetch(url('geo', item, item.heightfield ? { heightfield_layer: P.layerOf(item), ...(detail !== 'preview' ? { heightfield_res: detail } : {}) } : {}));
         if (!r.ok) throw new Error((await r.json()).error);
         bytes = await r.arrayBuffer();
       }

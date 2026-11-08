@@ -27,7 +27,7 @@ import { inputFileName, startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
 import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
 import { packedFromMatrices } from '../src/core/packed.ts';
-import { previewGLB } from '../src/render/preview.ts';
+import { previewGLB, heightfieldRes, HEIGHTFIELD_PREVIEW_RES } from '../src/render/preview.ts';
 import { importGeometryAsync } from '../src/io/import.ts';
 import { MeshObject, parseGLB } from '../src/viewer/app/scene.js';
 
@@ -565,6 +565,28 @@ section('a dropped PNG and an image-only graph show as textured quads');
     check(/images \(1\): "albedo" 4×2/.test(info.summary), `GET /api/input_info summarises the image (${info.summary?.split('\n')[1]})`);
     check(quad(await glbJSON('api/geo?graph=tex'), 'noise'), 'a graph whose output is only an image shows it the same way (GET /api/geo)');
   } finally { v.close(); }
+}
+
+section('GET /api/geo: the terrain detail (heightfield_res) draws a heightfield finer or coarser');
+{
+  const engine = new Engine(createNodeHost({ baseDir: path.join(tmp, 'wshf') }));
+  await engine.init();
+  const ws = new Session(path.join(tmp, 'wshf'), engine);
+  ws.load();
+  // 129 × 129 samples: the default preview (512 quads per side) draws every one; 64 quads per side every 2nd
+  ws.setGraph('land', { nodes: { hf: { type: 'heightfield', params: { size: [128, 128], resolution: 1 } }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 5 } } } });
+  const v = await startViewer(ws, 0);
+  const positions = async (q: string) => {
+    const b = new Uint8Array(await (await fetch(`${v.url}api/geo?graph=land${q}`)).arrayBuffer());
+    const j = JSON.parse(new TextDecoder().decode(b.subarray(20, 20 + new DataView(b.buffer).getUint32(12, true))));
+    return j.meshes.flatMap((m: any) => m.primitives).reduce((s: number, p: any) => s + j.accessors[p.attributes.POSITION].count, 0);
+  };
+  try {
+    const def = await positions(''), coarse = await positions('&heightfield_res=64'), full = await positions('&heightfield_res=full'), junk = await positions('&heightfield_res=nope');
+    check(def === 129 * 129 && coarse === 65 * 65 && full === def && junk === def, `the default draws every sample of a small field, 64 quads per side every 2nd, "full" every one, junk the default (${def}, ${coarse}, ${full}, ${junk})`);
+  } finally { v.close(); }
+  check(heightfieldRes(null) === HEIGHTFIELD_PREVIEW_RES && heightfieldRes('preview') === 512 && heightfieldRes('full') === Infinity && heightfieldRes('2048') === 2048 && heightfieldRes('3') === 512,
+    'the setting as quads per side: preview 512, a number, full every sample; nonsense the preview');
 }
 
 section('GET /api/geo: the preview GLB of many packed sources and their edge cases, byte for byte');
