@@ -503,8 +503,8 @@ export const EXAMPLES_PENDING = new Set([
  */
 export const CARDS_WAITING = new Set<string>([
   'asset_cleanup', 'blob_creature', 'cloth_drape', 'eroded_valley', 'forest_on_terrain', 'fracture_settle', 'growth',
-  'lsystem_tree', 'machined_bracket', 'market_street', 'ocean_surface', 'rail_along_curve', 'scifi_panel',
-  'sparks', 'town_from_lots', 'unreal_landscape',
+  'lsystem_tree', 'machined_bracket', 'ocean_surface', 'rail_along_curve', 'scifi_panel',
+  'sparks', 'unreal_landscape',
 ]);
 
 /**
