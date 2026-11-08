@@ -295,7 +295,7 @@ if (fallbackCase) {
   check(merged.detail.get('fallback_cells')?.get(0) === fallbackCase.count * 2, 'multiple-grid fallback counts sum instead of keeping the first grid');
   check(merged.detail.get('adaptive_collapses')?.get(0) === Number(fallbackCase.mesh.detail.get('adaptive_collapses')?.get(0)) * 2, 'multiple-grid adaptive counts sum');
 }
-const showcase = JSON.parse(fs.readFileSync(new URL('../examples/voxel_remesh.json', import.meta.url), 'utf8')) as GraphSpec;
+const showcase = JSON.parse(fs.readFileSync(new URL('./scenes/voxel_remesh.json', import.meta.url), 'utf8')) as GraphSpec;
 for (const output of ['dc', 'mc', 'variant']) {
   const geo = await cook(showcase.nodes, output), t = topologyReport(geo), x = selfIntersections(geo);
   check(t.closed && t.nonManifoldEdges === 0 && !x.capped && x.pairs === 0, `showcase ${output}: closed manifold without proper crossings`);

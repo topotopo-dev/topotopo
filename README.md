@@ -66,7 +66,7 @@ graph and its seeds, and the core is browser-ready.
 **Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, TopoTopo's own packages, the example
 renders and the release notes, generated from this repository (`npm run site`).
 
-![city](examples/renders/voronoi_city.png)
+![market street](examples/renders/market_street.png)
 
 ## Setup
 
@@ -354,50 +354,38 @@ there is a better way. Agents get them from the MCP `help` tool (topic `examples
 gives a card and its graph, ready to build), the command line from `topotopo --help-example <name>`, and the npm
 package ships them. [docs/examples.md](docs/examples.md) has the house rules, the card format and the list.
 
-[examples/](examples) holds the showcase graphs, each rendered by `npm run showcase` into [examples/renders](examples/renders):
-rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
-grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
-bracket, a solver growth animation (rendered at the frame named by its `meta.frame`), polygon editing (loop cuts, knife,
-bridge, quad fill, dissolve), bevels (rounded box, chamfered top edges, a star with a rounded rim), a UV toolkit demo, and a
-render-overlay demo (`render_modes`: section view, hard edges, normal glyphs, group labels, matcap). A graph's `meta.render`
-takes any `render` tool option. The forest example is the PCG chain (mask → scatter → orient → prune → packed copies of three weighted tree variants from 30,000 candidates), `pcg_scatter` puts lamp posts along a road and cluster-coloured rocks away from it, and `terrain_erosion` is an eroded
-heightfield with a road and rocks on its steep slopes. `unreal_demo` is the Unreal 5.8 demo scene: an eroded 253 × 253 heightfield that fits an
-Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with variants and materials; `npm run export:demo` writes its file set
-(landscape bundle, `scene.glb`, `scene.usda`, `scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`.
-`splines` shows the curve toolkit: a NURBS road projected onto bumpy ground, a boardwalk with filleted corners and
-offset handrails, and a Bezier letter extruded. `street_block` is a street block built only from TopoTopo's own packages
-(see [TopoTopo's own packages](#topotopos-own-packages)). `material_set` is three tileable game materials made only
-from texture nodes, rough stone blocks, wood planks and worn painted metal with rust running from the rivets, each with
-colour, normal and ORM maps, shown on swatches.
-`guided_town` ([examples/guided_town](examples/guided_town), a package of its own) is a village laid out with the
-viewer's guides: a road, house footprints, a fence, woods and a clearing in its `inputs/markers.json`, built from
-TopoTopo's own packages; open it with `topotopo edit examples/guided_town` and drag them.
-`house_city` spawns the architecture package's `house` on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
-straight-skeleton roofs (an L-shaped house, a courtyard roof around a hole, nested offsets). `deformers` (lattice,
-path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert) and `remesh_lod` (isotropic remesh,
-repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
-sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube, and
-`erosion_models` erodes one ridged terrain four ways (TypeScript and WASM droplets, virtual pipes, pipes plus stream
-power), and `terrain_tiles` bends escarpments and a river with domain-warped noise, with one tile of the map cooked on
-its own (`heightfield_crop`) floating above the area it matches. `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
-collision surface, curl noise, sliding contacts; trails coloured by age) next to a fountain bouncing on a plane.
-`rbd_settle` drops the nature package's rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
-crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of the props package's crates, a
-banner pinned between two poles in the wind, and a box inflated into a cushion.
+[examples/](examples) holds 20 examples, each rendered by `npm run showcase` into
+[examples/renders](examples/renders) (a graph's `meta.render` takes any `render` tool option, its `meta.frame` the frame
+an animation is shown at):
+- Streets and towns: `market_street` (a street with houses, lamp posts and a park, from TopoTopo's own packages),
+  `town_from_lots` (irregular lots along streets, each with a house that follows its shape) and `guided_town`
+  ([examples/guided_town](examples/guided_town), a package of its own: a village laid out along the road, plots, fence,
+  woods and clearing in its `inputs/markers.json`; open it with `topotopo edit examples/guided_town` and drag them).
+- Terrain: `forest_on_terrain`, `eroded_valley`, `terrain_tiles` (a large terrain cooked as seamless tiles) and
+  `unreal_landscape` (an eroded terrain that fits an Unreal Landscape exactly, with paint layers, a road and instances).
+- Hard surface and assets: `machined_bracket`, `scifi_panel`, `rail_along_curve` and `asset_cleanup` (a broken scan
+  turned into a game asset with UVs and levels of detail).
+- Simulation: `fracture_settle` (rigid bodies), `sparks` (particles), `growth` (a solver, frame by frame) and
+  `cloth_drape`.
+- Organic and materials: `blob_creature` (blended SDF shapes), `lsystem_tree`, `ocean_surface`, `material_set`
+  (tileable stone, wood and painted metal from texture nodes alone) and `image_cutouts` (props traced from pictures).
+
+`npm run export:demo` writes the Unreal plugin's demo file set (landscape bundle, `scene.glb`, `scene.usda`,
+`scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`, from the fixed scene in `test/scenes/unreal_demo.json`.
 
 To cook a graph from the command line:
 
 ```bash
-node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
-node src/cli.ts examples/csg_bracket.json --render out/bracket.png --section x:0.3 --wireframe hard --labels groups --shading matcap
-node src/cli.ts examples/csg_bracket.json --views front --size 1600x700 --underlay ref.png --render out/compare.png   # a reference image behind the view
-node src/cli.ts examples/street_block.json --inspect budget   # triangles per part, per LOD and per node
-node src/cli.ts examples/street_block.json --inspect scene   # what the glb export holds: nodes, sockets, materials, images
-node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
-node src/cli.ts examples/unreal_demo.json --node landscape --format unreal_landscape --export out/level   # Landscape bundle
-node src/cli.ts examples/forest.json --node forest --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
-node src/cli.ts examples/rocks_on_terrain.json --var seed=11 --var rock_count=300 --render out/rocks.png   # vars for one run
-node src/cli.ts view examples/unreal_demo.json   # live viewer at http://127.0.0.1:7341: node list, per-node geometry, re-cook on save
+node src/cli.ts examples/lsystem_tree.json --render out/tree.png --export out/tree.glb
+node src/cli.ts examples/machined_bracket.json --render out/bracket.png --section x:0.3 --wireframe hard --labels pieces --shading matcap
+node src/cli.ts examples/machined_bracket.json --views front --size 1600x700 --underlay ref.png --render out/compare.png   # a reference image behind the view
+node src/cli.ts examples/market_street.json --inspect budget   # triangles per part, per LOD and per node
+node src/cli.ts examples/market_street.json --inspect scene   # what the glb export holds: nodes, sockets, materials, images
+node src/cli.ts examples/eroded_valley.json --output terrain --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
+node src/cli.ts examples/unreal_landscape.json --output level --format unreal_landscape --export out/level   # Landscape bundle
+node src/cli.ts examples/forest_on_terrain.json --output trees --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
+node src/cli.ts examples/forest_on_terrain.json --var seed=11 --var rock_density=0.8 --render out/forest.png   # vars for one run
+node src/cli.ts view examples/unreal_landscape.json   # live viewer at http://127.0.0.1:7341: node list, per-node geometry, re-cook on save
 node src/cli.ts --help-topic export   # a help topic; --catalog ends with the list
 ```
 
@@ -429,7 +417,7 @@ Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`,
 `{frame:04}`; without a pattern, `.0001`-style frame numbers are inserted before the extension:
 
 ```bash
-node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{frame:04}.png" --export out/growth.glb
+node src/cli.ts examples/growth.json --frames 1-24 --render "out/growth_{frame:04}.png" --export out/growth.glb
 ```
 
 ## Unreal Engine 5.8
@@ -701,10 +689,10 @@ show. A built-in package's pieces build on each other (the house is the package'
 (`topotopo/nature` alone, or `topotopo/nature/lineup`) lines its outputs up. Every output has its kind pinned and tags
 a game developer searches by (`conifer`, `modular`, `masonry`, `street-furniture`): `topotopo search --tag
 street-furniture`. `assets {action: "fork", name: "topotopo/architecture/stairs"}` copies
-an output's graph into the package's assets to edit. [examples/street_block.json](examples/street_block.json) builds a
-street block from the built-in packages alone (transform, merge and copy nodes just place them):
+an output's graph into the package's assets to edit. [examples/market_street.json](examples/market_street.json) builds a
+street with the built-in packages' road, lamp posts, walls and roofs, fence, benches, trees and bushes:
 
-![street block](examples/renders/street_block.png)
+![market street](examples/renders/market_street.png)
 
 `npm run builtin` rewrites the built-in packages' line-ups, their thumbnails and the tables below. `npm run builtin -- --publish nature
 --note "..."` publishes a built-in package's next version, numbered as for any package (TopoTopo's own packages are published there

@@ -2,7 +2,7 @@
 // their coverage, not examples) and every output of TopoTopo's own packages is
 // cooked and fingerprinted (counts, bbox, attribute schema, groups, quantised hashes of positions, topology and
 // attributes). Fingerprints live in test/golden/<name>.json, one file per node, example or output, so changes show up in
-// git diffs. An example that meets its card (test/cards.ts; every example not on EXAMPLES_PENDING) must also cook
+// git diffs. Every example meets its card (test/cards.ts) and must also cook
 // cleanly, without errors or warnings, so none is frozen into its golden. An example's golden is a review aid, not its
 // contract: when its graph is rebuilt or the engine improves, its card checks say whether it still does the same job,
 // and an intended change is updated here and looked at in its render (npm run showcase).
@@ -17,7 +17,7 @@ import { allNodeDefs } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { openPackages } from '../src/packages/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { EXAMPLES_PENDING, ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, builtinFixtureGraph, examplePackageGraphs } from './fixtures.ts';
+import { ROOT, SKIP, checkGeo, createFixtureEngine, fixtureGraphFor, graphIsEnvDependent, builtinFixtureGraph, examplePackageGraphs } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff, sortedJSON } from './fingerprint.ts';
 
 const args = process.argv.slice(2);
@@ -41,19 +41,20 @@ for (const def of allNodeDefs()) {
 }
 for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json')).sort()) {
   const graph = JSON.parse(fs.readFileSync(path.join(examplesDir, f), 'utf8'));
-  cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}`, clean: !EXAMPLES_PENDING.has(path.basename(f, '.json')) });
+  cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}`, clean: true });
 }
 // the example packages (examples/<name>/ with its own .topo, inputs/ and copies of TopoTopo's packages)
 for (const ex of examplePackageGraphs()) {
   const e = new Engine(createNodeHost({ baseDir: ex.dir }));
   await e.init();
   openPackages(e, ex.dir);
-  cases.push({ name: `example.${ex.name}`, graph: JSON.parse(fs.readFileSync(ex.file, 'utf8')), engine: e, source: path.relative(ROOT, ex.file).split(path.sep).join('/'), clean: !EXAMPLES_PENDING.has(ex.name) });
+  cases.push({ name: `example.${ex.name}`, graph: JSON.parse(fs.readFileSync(ex.file, 'utf8')), engine: e, source: path.relative(ROOT, ex.file).split(path.sep).join('/'), clean: true });
 }
-// test scenes: graphs kept for their coverage that are not examples (test/scenes/*.json)
+// test scenes: graphs kept for their coverage that are not examples (test/scenes/*.json); like the examples they cook
+// TopoTopo's own packages from the examples' copies
 const scenesDir = path.join(ROOT, 'test', 'scenes');
 for (const f of fs.readdirSync(scenesDir).filter((x) => x.endsWith('.json')).sort()) {
-  cases.push({ name: `scene.${path.basename(f, '.json')}`, graph: JSON.parse(fs.readFileSync(path.join(scenesDir, f), 'utf8')), engine, source: `test/scenes/${f}`, clean: true });
+  cases.push({ name: `scene.${path.basename(f, '.json')}`, graph: JSON.parse(fs.readFileSync(path.join(scenesDir, f), 'utf8')), engine: exampleEngine, source: `test/scenes/${f}`, clean: true });
 }
 // the outputs of TopoTopo's own packages at their defaults (curve/surface outputs on their fixture inputs), and each
 // each built-in package's default output, its line-up

@@ -665,7 +665,7 @@ EROSION: droplets in metres, so the same params erode alike at any spacing (an 8
   which depends on its extent); direction E/SE/S/SW/W/NW/N/NE = 0..7, sink = 255. D8 routes one receiver,
   D-infinity splits across two downhill receivers; local pits retain flow unless fill_sinks:true routes over a
   virtually filled surface (height stays unchanged). stream_power accepts the same opt-in fill_sinks flag.
-  See help {examples:["erosion_models"]} for all four erosion methods on the same ridged terrain.
+  A whole valley eroded, then weathered, with its flow read for fans and a river: help {examples:["eroded_valley"]}.
 DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise closed depressions to their spill level.
   epsilon:0 keeps flat spill surfaces; epsilon>0 adds a strict downhill gradient (metres per neighbour step).
   max_depth:0 fills every depression; a positive limit retains each connected depression whose maximum depth exceeds
@@ -674,7 +674,6 @@ DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise clos
   mask_layer names a no-fill layer (values must be 0..1; cells at 1 stay untouched as terminal outlets).
   Protected outlets and retained lakes are exceptions to border drainage. Pipe/stream_power erosion initializes from lake and writes simulated water
   depth back to lake within that original lake footprint. Droplet water remains its legacy normalised resting mask.
-  See help {examples:["drainage"]}: unfilled massif beside shallow fills, blue retained lakes and coloured accumulation.
 RENDER / INSPECT: render draws heightfields as a shaded grid with the mask in red; heightfield_layer:"flow" draws
   another layer in red instead ("none": none; the viewer's layer picker does the same), color_by any layer name maps
   it to colours. It draws at most 256 quads per side, so a 513 × 513 field shows at 257 × 257 (the footer and a note
@@ -691,7 +690,7 @@ UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes 
   Tiles: pass the same height_min / height_max to every export.
   Whole scene: export {format: "unreal_landscape", path: "exports/level"} of a merge(heightfield, meshes, instances) →
   heightmap + every layer + landscape.json (the exact Landscape import settings and steps) + objects.glb + the instance
-  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). help {examples:["unreal_demo"]} is a complete scene.`,
+  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). help {examples:["unreal_landscape"]} is a complete scene.`,
 
   textures: `PROCEDURAL TEXTURES AND BAKES (Substance Designer / Houdini COP style; category "texture")
 An image is a volume carried in the geometry (like a heightfield): a 2D grid of float pixels with named layers of 1
@@ -891,7 +890,7 @@ IDENTITY THROUGH INSTANCES AND EXPORT (which lot, edge or source layer an instan
                 instance (strings as string[]). geo and json keep every attribute. Check: inspect lists the anchors'
                 attributes; a csv export shows the values.
 Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
-  with trees = merge of three meshes named pine/fir/oak (help {examples:["forest"]}; help topic "pcg").`,
+  with trees = merge of three meshes named pine/fir/oak (a whole forest: help {examples:["forest_on_terrain"]}; help topic "pcg").`,
 
   rbd: `RIGID BODIES: SETTLE AND STACK (Houdini RBD drop / settle, Rapier physics; category "sim")
 Use it when placed pieces must rest physically: rocks on a terrain, props on a floor, crates in a pile, a container filled.
@@ -928,7 +927,7 @@ Example: rocks on a terrain, then a crate pile on the terrain and the settled ro
   "settled": {"type":"rbd_settle","in":["rocks","terrain"],"params":{"delete_fallen":true}},
   "ground2": {"type":"merge","in":["terrain","settled"]},
   "crates": {"type":"copy_to_points","in":["crate","same_spot_x16"],"params":{"pack":true}},
-  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (help {examples:["rbd_settle"]})`,
+  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (rbd_stack in a whole scene: help {examples:["fracture_settle"]})`,
 
   pcg: `PCG: SCATTERING AND INSTANCING (Houdini scatter/copy toolkit, Unreal PCG point filters)
 THE CHAIN
@@ -969,7 +968,7 @@ copy_to_points: variants "name"/"piece" + variant_attrib (exact pick) or variant
   pack:true for anything above a few thousand copies.
 Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatter ≈ Surface/Spline/Volume Sampler; orient ≈
   Transform Points; prune ≈ Self Pruning / Density Filter / Difference; copy_to_points pack ≈ Static Mesh Spawner.
-Example: help {examples:["forest", "pcg_scatter"]} (30k candidates → pruned packed forest; road, lamps, rocks).`,
+Example: help {examples:["forest_on_terrain"]} (slope and noise masks → heightfield_scatter → packed trees and rocks, off steep ground).`,
 
   curves: `CURVES (polylines and Bezier / NURBS spline prims)
 straight_skeleton {mode skeleton|offset|roof, distance, pitch, pitch_attrib, height_cap, group}
@@ -1025,7 +1024,7 @@ Recipes:
     frame:"plane"} → sweep {radius:0.04}; posts: resample the rails {length:1.5} → copy_to_points a thin box.
   Letter / logo outline: bezier {closed:true, points} (+ inner contours for holes) → convert_curve → extrude.
   Cable with sag: nurbs {points:[a, mid lowered, b]} → resample {length:0.05} → polywire; taper with curve_attribs.
-See help {examples:["splines"]}.`,
+A railing and pipes along a filleted path: help {examples:["rail_along_curve"]}.`,
 
   particles: `PARTICLES (Houdini POP network in one node; category "sim")
 {"type":"particles","in":["emitter","collision","field"],"params":{...}}: inputs 1 and 2 are optional.
@@ -1049,8 +1048,8 @@ TIME: a cook at start_frame (default 1) runs "steps" steps; frame f runs steps +
   animate:false = always "steps" steps, time-independent. Same bits with or without the worker pool and however it is stepped.
 RECIPES: fountain = one point, speed 6, velocity_var 1.3, life 3, floor:true, collide bounce, trails 6. Runoff on terrain =
   emitters scattered on ridges (heightfield_mask_by_feature curvature convex + heightfield_scatter), the heightfield as input 1
-  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age
-  (help {examples:["particles"]}). Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1. Swarm on a mesh: attract_to surface.`,
+  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age.
+  Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1 (a burst with trails: help {examples:["sparks"]}). Swarm on a mesh: attract_to surface.`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
@@ -1733,14 +1732,14 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
  normals, group / prim attribute borders): reduce before unwrapping and compute vertex normals after lod. remesh_quad {target_faces:2000, feature_angle:45} produces field-aligned
  quad-dominant polygons with point/vertex/prim attributes; mode:"quads_only" conformingly subdivides all faces and can
  exceed target_faces, especially along hard curves. crease_group aligns explicit edges; group keeps its border fixed.
- Inspect detail quad_fraction and singularities, and the wireframe (help {examples:["quad_remesh"]}). remesh (voxel) only
- when the input is beyond repair (it drops attributes).
+ Inspect detail quad_fraction and singularities, and the wireframe. remesh (voxel) only when the input is beyond repair
+ (it drops attributes). A whole cleanup, scan to LODs: help {examples:["asset_cleanup"]}.
 14) Street from TopoTopo's own packages (help topic packages): topotopo/street/road_strip on a line →
  topotopo/street/lamp_post packed onto points_along_curve {side_offset, both_sides}; a house = four
  topotopo/architecture/wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true on the front) +
  topotopo/architecture/roof_gable or roof_hip translated to the wall top; topotopo/street/fence and bench,
  topotopo/props/crate and topotopo/nature/tree_lowpoly placed with transform or copy_to_points;
- topotopo/nature/forest_patch on a grid for a park. Whole graph: help {examples:["street_block"]}.`,
+ topotopo/nature/forest_patch on a grid for a park. Whole graph: help {examples:["market_street"]}.`,
 };
 
 /** The help topics: "examples" (generated from the example cards, src/mcp/examples.ts) and the written ones. */

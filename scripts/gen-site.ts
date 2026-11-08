@@ -29,17 +29,9 @@ import { ROOT, SITE_DIR, SIZE_LIMIT, listFiles } from './check-site.ts';
 import { readExamples } from '../src/mcp/examples.ts';
 import type { Card } from '../src/mcp/examples.ts';
 
-/** The renders on the home page, in order (the first is also the social preview image). */
-const HERO: { name: string; caption: string }[] = [
-  { name: 'street_block', caption: 'A street block assembled only from TopoTopo\'s own packages: houses, road, lamp posts, trees, fences.' },
-  { name: 'unreal_demo', caption: 'The Unreal 5.8 demo scene: an eroded heightfield that fits a Landscape exactly, a road, packed trees and rocks.' },
-  { name: 'terrain_erosion', caption: 'Hydraulic and thermal erosion on a ridged massif, a road cut along a curve, rocks on the steep slopes.' },
-  { name: 'rbd_settle', caption: 'Rigid bodies: rocks of the nature package dropped onto a terrain until they rest, crates piled one at a time.' },
-  { name: 'particles', caption: 'Particles running down an eroded massif with curl noise and sliding contacts, next to a fountain.' },
-  { name: 'textures', caption: 'A brick material from texture nodes, and a crate whose baked AO and curvature become worn paint.' },
-  { name: 'quad_remesh', caption: 'Field-aligned quad remeshing (Rust/WASM): each input on the left, its quads on the right.' },
-  { name: 'house_city', caption: 'Nested generators: the architecture package\'s house spawned on a grid of lots, varied per lot.' },
-];
+/** The examples whose renders are on the home page, in order (the first is also the social preview image); each is
+ * titled and captioned by its card. */
+const HERO = ['market_street', 'unreal_landscape', 'eroded_valley', 'town_from_lots', 'fracture_settle', 'sparks', 'material_set', 'asset_cleanup'];
 
 // ---------------------------------------------------------------------------------------------------------------------
 // repository data
@@ -316,10 +308,10 @@ const NAV = [
   ...(releases.length ? [{ key: 'releases', label: 'Release notes', to: releases[0].out }] : []),
 ];
 
-const heroExamples = HERO.filter((h) => {
-  const ok = examples.some((e) => e.name === h.name && e.render);
-  if (!ok) console.warn(`warning: hero example ${h.name} has no graph or render; left out of the home page`);
-  return ok;
+const heroExamples = HERO.flatMap((name) => {
+  const e = examples.find((x) => x.name === name && x.render && x.card);
+  if (!e) console.warn(`warning: hero example ${name} has no graph, render or card that fits; left out of the home page`);
+  return e?.card ? [{ name, title: e.card.title, caption: plain(e.card.request) }] : [];
 });
 if (!heroExamples.length) throw new Error('gen-site: none of the hero examples exists');
 const OG_IMAGE = `examples/renders/${heroExamples[0].name}.png`;
@@ -433,7 +425,7 @@ page({
   const rmd = (t: Token) => renderTokens([t], newCtx('README.md', false));
   const hero = heroExamples.map((h, i) => `<figure class="card render">
 <a href="${u(`examples/index.html#${h.name}`)}">${img(`examples/renders/${h.name}.png`, h.caption, { lazy: i > 1 })}</a>
-<figcaption><strong>${esc(humanize(h.name))}</strong>${esc(h.caption)}</figcaption>
+<figcaption><strong>${esc(h.title)}</strong>${esc(h.caption)}</figcaption>
 </figure>`).join('\n');
   const links = [
     ['nodes/index.html', 'Node reference', `${nodeDefs.length} node types in ${nodeCategories.length} categories: params, inputs, examples`],

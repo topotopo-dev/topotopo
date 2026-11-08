@@ -294,13 +294,10 @@ underflow Float32, and an epsilon gradient that exceeds the supported height
 range. Flooding uses the same arithmetic and queue logic in
 scalar and SIMD packages; it adds no runtime or Rust dependency.
 
-The [drainage example](https://github.com/topotopo-dev/topotopo/blob/main/examples/drainage.json)
-shows the demo massif twice: original drainage on the left, shallow depressions
-filled and deeper lakes retained on the right. Both use the same contributing-area
-colour scale; lake surfaces are blue. Its `filled` node is the terrain result;
-`water_surface` raises only the display mesh by `lake`, keeping water and terrain
-separate in the actual heightfield. Run `node test/showcase.ts drainage` and inspect
-`examples/renders/drainage.png`.
+The [eroded_valley example](https://github.com/topotopo-dev/topotopo/blob/main/examples/eroded_valley.json)
+reads its drainage with `heightfield_flow` (`fill_sinks: true`) to find the gully
+mouths where its sediment fans sit. Run `node test/showcase.ts eroded_valley` and
+inspect `examples/renders/eroded_valley.png`.
 
 ## API and geometry
 

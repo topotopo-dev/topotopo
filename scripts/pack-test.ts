@@ -8,8 +8,8 @@
 //   each example package's manifest, graphs and inputs: help {examples}), and nothing from src/, test/, the examples'
 //   renders and package copies, out/, the built-in packages' working folders and thumbnails, or the Rust sources is.
 // - The bin from the installed package: `npm exec --no -- topotopo --help`, and cooking an example graph copied into the
-//   temp folder with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
-//   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
+//   temp folder with a PNG render and a GLB export (examples/town_from_lots.json: straight_skeleton runs in the WASM
+//   kernels loaded from the installed kernels/pkg, and the door frames are topotopo/architecture's: `topotopo init`
 //   makes the folder a package, and the cook's first use copies the built-in package in from the installed built-in library).
 // - The cook for Godot from the installed bin: `topotopo cook <package> --for godot --progress json` on the neutral props
 //   of the cook tests in a Godot project, `topotopo godot status` reading it as current, and `topotopo godot setup`
@@ -139,7 +139,7 @@ try {
   step(`CLI: npm exec --no -- ${BIN}`);
   const help = sh(`npm exec --no -- ${BIN} --help`, app);
   check(help.startsWith(`usage: ${BIN} `) && help.includes(`${BIN} mcp`), `--help prints the usage (${help.split('\n')[0].slice(0, 60)}…)`);
-  fs.copyFileSync(path.join(ROOT, 'examples', 'skeleton_roofs.json'), path.join(app, 'roofs.json'));
+  fs.copyFileSync(path.join(ROOT, 'examples', 'town_from_lots.json'), path.join(app, 'roofs.json'));
   // the example names topotopo/architecture's outputs: only a package's graphs use packages
   const init = sh(`npm exec --no -- ${BIN} init .`, app);
   check(/^package app → /.test(init) && fs.existsSync(path.join(app, 'app.topo')), `init makes the temp folder a package (${init.split('\n')[0]})`);
@@ -150,7 +150,7 @@ try {
     && fs.existsSync(path.join(app, 'packages', 'topotopo', 'architecture', arch, 'version.json')), `the first use copies topotopo/architecture ${arch} in from the installed built-in library and locks it`);
   const png = path.join(app, 'roofs.png');
   const pngOk = fs.existsSync(png) && fs.readFileSync(png).subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && fs.statSync(png).size > 20000;
-  check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/skeleton_roofs.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
+  check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/town_from_lots.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
   check(fs.existsSync(path.join(app, 'roofs.glb')) && fs.readFileSync(path.join(app, 'roofs.glb')).subarray(0, 4).toString() === 'glTF', 'exported roofs.glb');
   console.log(cook.split('\n').filter((l) => /^(cooked|geometry|rendered|exported)/.test(l)).join('\n'));
 
@@ -288,10 +288,10 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('topotopo/nature/rock'), 'catalog lists the nodes and the installed packages of TopoTopo\'s own');
     // the examples ship with the package: help lists them and gives one's card and graph, which validates here
     const exIdx = await call('help', { topic: 'examples' });
-    const exOne = await call('help', { examples: ['skeleton_roofs'] });
+    const exOne = await call('help', { examples: ['town_from_lots'] });
     const exGraph = /\nGRAPH [^\n]*\n\n(\{[\s\S]*\})$/.exec(exOne.txt)?.[1];
     const exDry = exGraph ? await call('build', { name: 'roofs_example', graph: JSON.parse(exGraph), dry_run: true }) : null;
-    check(/\n- skeleton_roofs — /.test(exIdx.txt) && !!exDry && !exDry.isError && /^✓ valid/.test(exDry.txt),
+    check(/\n- town_from_lots — /.test(exIdx.txt) && !!exDry && !exDry.isError && /^✓ valid/.test(exDry.txt),
       `help lists the installed examples and gives one whose graph validates: ${exDry?.txt.split('\n')[0] ?? exOne.txt.slice(0, 80)}`);
     // the documented setup: a new folder, which the server made a package, so the first build that names a
     // an output of one of TopoTopo's own packages copies it in

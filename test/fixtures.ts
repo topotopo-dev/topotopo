@@ -484,19 +484,6 @@ export function isolateConfig(): string {
 isolateConfig();
 
 /**
- * The examples that do not meet a card yet (docs/examples.md; test/cards.ts): each still has no card (examples/<name>.md)
- * or fails it. The list only shrinks: test/cards.ts fails for a name here that meets its card, or that is no example.
- * test/golden.ts holds every other example to a clean cook (no errors, no warnings).
- */
-export const EXAMPLES_PENDING = new Set([
-  'bevel', 'building', 'csg_bracket', 'deformers', 'drainage', 'drape', 'engraved_sign', 'erosion_models', 'forest', 'fractured',
-  'house_city', 'measures', 'particles', 'pcg_scatter', 'polyedit', 'quad_remesh', 'rbd_settle',
-  'remesh_lod', 'rocks_on_terrain', 'sdf_creature', 'skeleton_roofs', 'solver_growth', 'splines',
-  'street_block', 'terrain_erosion', 'tree', 'unreal_demo', 'uv_noisy_rock',
-  'uv_toolkit', 'voronoi_city', 'voxel_remesh', 'wrangle_waves',
-]);
-
-/**
  * The cards whose graph is still being built (docs/examples.md, house rule 7: the card comes first): examples/<name>.md
  * without examples/<name>.json or examples/<name>/. test/cards.ts checks their form and fails for any other card without
  * a graph. The list only shrinks: a name here that has its graph, or no card, fails.

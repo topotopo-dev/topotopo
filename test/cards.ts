@@ -18,11 +18,9 @@
 //   meshes and scenes name every piece and give it a material the material table defines.
 // - Sweep (not with --no-sweep): every numeric param at its min and max, every option, every switch flipped: every
 //   output cooks without errors (so every promise holds), meshes and scenes still name and dress every piece.
-// The examples on EXAMPLES_PENDING (test/fixtures.ts) are skipped until they meet a card (the form of a card they
-// already have is checked), and the list only shrinks: a name on it that meets its card, or is no example, fails. A card
-// without a graph fails, unless it is on CARDS_WAITING (its graph is being built; its form is checked), a list that
-// only shrinks too. The help text names examples by name (help {examples:[…]}), never by a file path, and only
-// examples that exist.
+// A graph without a card fails. A card without a graph fails, unless it is on CARDS_WAITING (its graph is being built;
+// its form is checked), a list that only shrinks. The help text names examples by name (help {examples:[…]}), never by
+// a file path, and only examples that exist.
 // The checks check themselves first: a small example in a temp folder meets its card, and each way of breaking it fails.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,7 +36,7 @@ import { INSTRUCTIONS, TOPICS } from '../src/mcp/docs.ts';
 import { COOK_SECONDS, orphanCards, parseCard, readExamples } from '../src/mcp/examples.ts';
 import type { Example } from '../src/mcp/examples.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
-import { CARDS_WAITING, EXAMPLES_PENDING, ROOT } from './fixtures.ts';
+import { CARDS_WAITING, ROOT } from './fixtures.ts';
 import { NUMERIC, namingProblems, paramProblems, sweepOf } from './asset-checks.ts';
 
 const filter = process.argv.slice(2).find((a) => !a.startsWith('--'));
@@ -251,16 +249,13 @@ for (const n of CARDS_WAITING) {
   if (names.has(n)) fail(`CARDS_WAITING (test/fixtures.ts) names "${n}", which has its graph now: take it off`);
   else if (!fs.existsSync(path.join(root, `${n}.md`))) fail(`CARDS_WAITING (test/fixtures.ts) names "${n}", which has no card: take it off`);
 }
-for (const n of EXAMPLES_PENDING) if (!names.has(n)) fail(`EXAMPLES_PENDING (test/fixtures.ts) names "${n}", which is no example: take it off`);
 
 const flatEngine = new Engine(createNodeHost({ baseDir: root }));
 await flatEngine.init();
 openPackages(flatEngine, root);
-let met = 0, pending = 0;
+let met = 0;
 for (const e of examples) {
   if (filter && !e.name.includes(filter)) continue;
-  const isPending = EXAMPLES_PENDING.has(e.name);
-  if (isPending && !e.card) { pending++; continue; }
   let engine = flatEngine;
   if (e.isPackage) {
     engine = new Engine(createNodeHost({ baseDir: e.dir }));
@@ -268,15 +263,6 @@ for (const e of examples) {
     openPackages(engine, e.dir);
   }
   const r = await checkExample(e, engine, SWEEP);
-  if (isPending) {
-    pending++;
-    // the card comes before its graph: its form fails now, the graph's mismatches wait
-    for (const x of r.problems.filter((x) => x.startsWith('Card: '))) fail(`${e.name} · ${x}`);
-    if (!r.problems.length) fail(`${e.name}: meets its card, so take it off EXAMPLES_PENDING (test/fixtures.ts)`);
-    else if (filter) console.log(`pending ${e.name}: ${r.problems.length} problem(s):\n  ${r.problems.join('\n  ')}`);
-    else console.log(`pending ${e.name}: ${r.problems.length} problem(s), first: ${r.problems[0]} (node test/cards.ts ${e.name}: all)`);
-    continue;
-  }
   if (r.problems.length) for (const x of r.problems) fail(`${e.name} · ${x}`);
   else { met++; console.log(`ok   ${e.name}: default cook ${r.ms.toFixed(0)} ms, ${SWEEP ? `${r.variants} variants` : 'no sweep'}`); }
 }
@@ -289,5 +275,5 @@ const named = [...help.matchAll(/help \{examples:\s*\[([^\]]*)\]\}/g)].flatMap((
 const unknown = [...new Set(named.filter((n) => n !== 'name' && !names.has(n)))];
 if (unknown.length) fail(`the help text names examples that do not exist: ${unknown.join(', ')}`);
 
-console.log(`\ncards: ${examples.length} examples, ${met} meet their card, ${pending} pending, ${waiting} card(s) waiting for a graph, ${fails} failed${SWEEP ? '' : ' (sweep skipped: npm run test:cards runs it)'}`);
+console.log(`\ncards: ${examples.length} examples, ${met} meet their card, ${waiting} card(s) waiting for a graph, ${fails} failed${SWEEP ? '' : ' (sweep skipped: npm run test:cards runs it)'}`);
 process.exit(fails ? 1 : 0);

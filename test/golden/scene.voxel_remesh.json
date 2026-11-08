@@ -34,8 +34,8 @@
       "topology": "a142b0b73be50545"
     }
   },
-  "name": "example.voxel_remesh",
+  "name": "scene.voxel_remesh",
   "ok": true,
-  "source": "examples/voxel_remesh.json",
+  "source": "test/scenes/voxel_remesh.json",
   "warnings": []
 }

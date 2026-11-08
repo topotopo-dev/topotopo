@@ -59,8 +59,8 @@
       "topology": "f8c301ac9fbde292"
     }
   },
-  "name": "example.quad_remesh",
+  "name": "scene.quad_remesh",
   "ok": true,
-  "source": "examples/quad_remesh.json",
+  "source": "test/scenes/quad_remesh.json",
   "warnings": []
 }
