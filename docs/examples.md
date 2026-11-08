@@ -76,7 +76,8 @@ on the steepest ground, seen from above at an angle.
 
 ## What the tests check
 
-`npm test` runs `test/cards.ts`, which reads every card and checks its graph against it:
+`npm run test:cards` (`test/cards.ts`, in CI) reads every card and checks its graph against it; `npm test` runs the
+same checks without the last one, the sweep across the sliders:
 
 - every graph has a card and every card a graph; a card written before its graph waits on a list in
   `test/fixtures.ts`, and only its form is checked until the graph is built to it;

@@ -2,7 +2,9 @@
 // that says in plain words what goes in, what comes out, what it promises and how it looks, and its graph meets it.
 // The card is the contract; the graph is today's way to meet it, rebuilt whenever TopoTopo offers a better way, and
 // these checks are what tells a rebuilt graph still does the same job.
-//   node test/cards.ts [filter]
+//   node test/cards.ts [filter] [--no-sweep]
+// npm test runs it with --no-sweep (the cards and their default cooks, to keep npm test quick); npm run test:cards,
+// in CI too, runs it all.
 // Per example (a failure names the card section it breaks: "forest · Promises · slope: …"):
 // - Card: the form (title, request, the sections In, Out, Promises, Look and an optional Cook in that order, their items).
 // - In: the graph's params are the card's inputs, 3–10 of them, typed and described, a default equal to the var, numbers
@@ -12,9 +14,10 @@
 // - Promises: each key is the label of an assert node (on_fail "error") upstream of an output, so a cook that breaks the
 //   promise fails.
 // - Cook: every output cooks at the defaults (cold, at meta.frame; together within COOK_SECONDS, or the longer limit,
-//   at most MAX_COOK_SECONDS, a simulation's card gives with its reason) without errors or warnings, to its kind; meshes and scenes name every piece and give it a material the material table defines.
-// - Sweep: every numeric param at its min and max, every option, every switch flipped: every output cooks without
-//   errors (so every promise holds), meshes and scenes still name and dress every piece.
+//   at most MAX_COOK_SECONDS, a simulation's card gives with its reason) without errors or warnings, to its kind;
+//   meshes and scenes name every piece and give it a material the material table defines.
+// - Sweep (not with --no-sweep): every numeric param at its min and max, every option, every switch flipped: every
+//   output cooks without errors (so every promise holds), meshes and scenes still name and dress every piece.
 // The examples on EXAMPLES_PENDING (test/fixtures.ts) are skipped until they meet a card (the form of a card they
 // already have is checked), and the list only shrinks: a name on it that meets its card, or is no example, fails. A card
 // without a graph fails, unless it is on CARDS_WAITING (its graph is being built; its form is checked), a list that
@@ -39,6 +42,7 @@ import { CARDS_WAITING, EXAMPLES_PENDING, ROOT } from './fixtures.ts';
 import { NUMERIC, namingProblems, paramProblems, sweepOf } from './asset-checks.ts';
 
 const filter = process.argv.slice(2).find((a) => !a.startsWith('--'));
+const SWEEP = !process.argv.includes('--no-sweep');
 let fails = 0;
 const fail = (msg: string) => { fails++; console.log('FAIL ' + msg); };
 
@@ -69,7 +73,7 @@ function cardDefault(x: string | number, type: string | undefined): unknown {
 }
 
 /** What is wrong with an example against its card: messages "Section · item: …" (none: it meets its card). */
-async function checkExample(e: Example, engine: Engine): Promise<{ problems: string[]; ms: number; variants: number }> {
+async function checkExample(e: Example, engine: Engine, sweepToo = true): Promise<{ problems: string[]; ms: number; variants: number }> {
   const problems: string[] = [];
   const p = (s: string) => problems.push(s);
   if (!e.card) return { problems: ['Card: there is no card (examples/' + e.name + '.md)'], ms: 0, variants: 0 };
@@ -144,7 +148,7 @@ async function checkExample(e: Example, engine: Engine): Promise<{ problems: str
   if (ms > limit) p(`Cook: the default cook took ${ms.toFixed(0)} ms (limit ${limit}${card.cook ? ', from the card' : ''}): make the defaults lighter`);
 
   // ---- Sweep: every param at its ends, every option, every switch flipped
-  const sweep = sweepOf(graph);
+  const sweep = sweepToo ? sweepOf(graph) : [];
   for (const [label, over] of sweep) await cookAll(over, `Sweep · ${label}`, false);
   return { problems, ms, variants: sweep.length };
 }
@@ -262,7 +266,7 @@ for (const e of examples) {
     await engine.init();
     openPackages(engine, e.dir);
   }
-  const r = await checkExample(e, engine);
+  const r = await checkExample(e, engine, SWEEP);
   if (isPending) {
     pending++;
     // the card comes before its graph: its form fails now, the graph's mismatches wait
@@ -273,7 +277,7 @@ for (const e of examples) {
     continue;
   }
   if (r.problems.length) for (const x of r.problems) fail(`${e.name} · ${x}`);
-  else { met++; console.log(`ok   ${e.name}: default cook ${r.ms.toFixed(0)} ms, ${r.variants} variants`); }
+  else { met++; console.log(`ok   ${e.name}: default cook ${r.ms.toFixed(0)} ms, ${SWEEP ? `${r.variants} variants` : 'no sweep'}`); }
 }
 
 // ---- the help text names examples by name, and only examples that exist
@@ -284,5 +288,5 @@ const named = [...help.matchAll(/help \{examples:\s*\[([^\]]*)\]\}/g)].flatMap((
 const unknown = [...new Set(named.filter((n) => n !== 'name' && !names.has(n)))];
 if (unknown.length) fail(`the help text names examples that do not exist: ${unknown.join(', ')}`);
 
-console.log(`\ncards: ${examples.length} examples, ${met} meet their card, ${pending} pending, ${waiting} card(s) waiting for a graph, ${fails} failed`);
+console.log(`\ncards: ${examples.length} examples, ${met} meet their card, ${pending} pending, ${waiting} card(s) waiting for a graph, ${fails} failed${SWEEP ? '' : ' (sweep skipped: npm run test:cards runs it)'}`);
 process.exit(fails ? 1 : 0);
