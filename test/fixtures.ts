@@ -491,7 +491,7 @@ isolateConfig();
 export const EXAMPLES_PENDING = new Set([
   'bevel', 'building', 'csg_bracket', 'deformers', 'drainage', 'drape', 'engraved_sign', 'erosion_models', 'forest', 'fractured',
   'house_city', 'image_cutouts', 'measures', 'particles', 'pcg_scatter', 'polyedit', 'quad_remesh', 'rbd_settle',
-  'remesh_lod', 'render_modes', 'rocks_on_terrain', 'sdf_creature', 'skeleton_roofs', 'solver_growth', 'spiral_stairs', 'splines',
+  'remesh_lod', 'rocks_on_terrain', 'sdf_creature', 'skeleton_roofs', 'solver_growth', 'splines',
   'street_block', 'terrain_erosion', 'terrain_tiles', 'texture_lab', 'textures', 'tree', 'unreal_demo', 'uv_noisy_rock',
   'uv_toolkit', 'voronoi_city', 'voxel_remesh', 'wrangle_waves',
 ]);

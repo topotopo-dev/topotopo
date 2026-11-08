@@ -36,8 +36,8 @@
       "topology": "bd880d7777a3eb51"
     }
   },
-  "name": "example.render_modes",
+  "name": "scene.render_modes",
   "ok": true,
-  "source": "examples/render_modes.json",
+  "source": "test/scenes/render_modes.json",
   "warnings": []
 }

@@ -1,5 +1,7 @@
 // Cook and render every graph in examples/ to examples/renders/<name>.png.
 // A graph's meta.render (any render tool option: views, checker, color_by, azimuth, wireframe, section_axis, glyphs, …) overrides the default quad view.
+// meta.render.node renders that node instead of the graph's output: an example whose look needs several outputs in one
+// picture keeps a node that gathers them for the render (a merge, a terrain as a coloured mesh, a part lifted to show it).
 // examples/ is a package: the graphs that name TopoTopo's own packages cook them from its copies in examples/packages/.
 //   node test/showcase.ts [filter]
 import fs from 'node:fs';
@@ -41,7 +43,8 @@ for (const ex of examplePackageGraphs()) {
 for (const job of jobs.filter((j) => !filter || j.name.includes(filter))) {
   const name = job.name;
   const graph = JSON.parse(fs.readFileSync(job.file, 'utf8'));
-  const r = await job.engine.cook(graph, { frame: graph.meta?.frame }); // animated examples name their display frame
+  // animated examples name their display frame; meta.render.node, the node shown (default the graph's output)
+  const r = await job.engine.cook(graph, { frame: graph.meta?.frame, target: graph.meta?.render?.node });
   if (!r.ok || !r.geo) {
     failed++;
     console.log(`FAIL ${name}: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);

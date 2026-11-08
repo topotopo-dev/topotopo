@@ -1,4 +1,5 @@
-// Golden tests: every node type (on its fixture), every example graph and every output of TopoTopo's own packages is
+// Golden tests: every node type (on its fixture), every example graph, every test scene (test/scenes/: graphs kept for
+// their coverage, not examples) and every output of TopoTopo's own packages is
 // cooked and fingerprinted (counts, bbox, attribute schema, groups, quantised hashes of positions, topology and
 // attributes). Fingerprints live in test/golden/<name>.json, one file per node, example or output, so changes show up in
 // git diffs. An example that meets its card (test/cards.ts; every example not on EXAMPLES_PENDING) must also cook
@@ -48,6 +49,11 @@ for (const ex of examplePackageGraphs()) {
   await e.init();
   openPackages(e, ex.dir);
   cases.push({ name: `example.${ex.name}`, graph: JSON.parse(fs.readFileSync(ex.file, 'utf8')), engine: e, source: path.relative(ROOT, ex.file).split(path.sep).join('/'), clean: !EXAMPLES_PENDING.has(ex.name) });
+}
+// test scenes: graphs kept for their coverage that are not examples (test/scenes/*.json)
+const scenesDir = path.join(ROOT, 'test', 'scenes');
+for (const f of fs.readdirSync(scenesDir).filter((x) => x.endsWith('.json')).sort()) {
+  cases.push({ name: `scene.${path.basename(f, '.json')}`, graph: JSON.parse(fs.readFileSync(path.join(scenesDir, f), 'utf8')), engine, source: `test/scenes/${f}`, clean: true });
 }
 // the outputs of TopoTopo's own packages at their defaults (curve/surface outputs on their fixture inputs), and each
 // each built-in package's default output, its line-up

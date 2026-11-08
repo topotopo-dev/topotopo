@@ -36,8 +36,8 @@
       "topology": "cbb1e53b67641f4d"
     }
   },
-  "name": "example.spiral_stairs",
+  "name": "scene.spiral_stairs",
   "ok": true,
-  "source": "examples/spiral_stairs.json",
+  "source": "test/scenes/spiral_stairs.json",
   "warnings": []
 }
