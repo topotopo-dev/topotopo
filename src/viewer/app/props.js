@@ -1,14 +1,15 @@
 // The properties column: what the selection is (a guide's name, kind,
 // translate / rotate / scale, radius or height and the attributes the LLM reads; a layer's file, counts, bbox and
 // display mode; the output's summary; a piece's size), and below it the Controls: the graph's exposed vars as
-// sliders, fields, checkboxes, menus and colour pickers. Drags post at most every 100 ms; each control resets to its
-// default; undeclared vars are listed under "other vars". Transform fields are read-only until phase 2.
+// sliders, fields, checkboxes, menus and colour pickers, under a collapsible heading per param "group". Drags post at
+// most every 100 ms; each control resets to its default; undeclared vars are listed under "other vars" (closed when the
+// graph declares params). Transform fields are read-only until phase 2.
 import { api } from './api.js';
 import * as M from './markers.js';
 import { parseId } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
-import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, widenRange, pastDeclared, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
+import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, widenRange, pastDeclared, snapTo, controlList, controlSections, sectionClosed, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
 import { fmtDuration } from './cooking.js';
 import { kindLine, layerChoices, shownLayer } from './output-info.js';
 
@@ -217,6 +218,8 @@ function createControls(ctx) {
     // var → its value when the change being made began (the undo step's "before")
     begin: new Map(), values: new Map(),
     sub: el('div', 'sub'), none: el('div', 'none'),
+    // section key → its heading (sectionHead)
+    heads: new Map(),
   };
   addEventListener('pointerup', () => endDrag(), true);
   addEventListener('pointercancel', () => endDrag(), true);
@@ -408,7 +411,7 @@ function createControls(ctx) {
     count.textContent = declared.length + other.length || '';
     let deferred = false;
     const wanted = new Set(), els = [];
-    const place = (k, vd) => {
+    const place = (k, vd, closed) => {
       wanted.add(k);
       // a row the person is changing keeps the value it shows; the shape is the server's otherwise
       const local = ctl.rows.has(k) && holding(k, issued);
@@ -422,11 +425,18 @@ function createControls(ctx) {
       }
       if (!r) { r = controlRow(k, vd, v, shape); ctl.rows.set(k, r); }
       r.base = baseValue(ctl.mode, vd, ctl.graphVars, k);
+      r.el.hidden = closed;
       els.push(r.el);
     };
-    for (const k of declared) place(k, params[k] ?? {});
-    if (other.length) { ctl.sub.textContent = declared.length ? 'other vars' : 'vars (none declared in "params")'; els.push(ctl.sub); }
-    for (const k of other) place(k, null);
+    // declared params without a group, then a collapsible heading per group (declaration order), then the undeclared
+    // vars: behind a closed "other vars" heading when the graph declares params (vars.js controlSections)
+    const saved = sectionState(name);
+    for (const sec of controlSections(params, vars)) {
+      const closed = sectionClosed(sec, saved);
+      if (sec.group !== null) els.push(sectionHead(sec, closed).el);
+      else if (sec.other) { ctl.sub.textContent = 'vars (none declared in "params")'; els.push(ctl.sub); }
+      for (const k of sec.keys) place(k, sec.other ? null : params[k] ?? {}, closed);
+    }
     if (!els.length) { ctl.none.textContent = g ? 'none — this graph exposes no vars' : 'none'; els.push(ctl.none); }
     // in order, moving only what is out of place (the scroll position and an open menu stay)
     let prev = null;
@@ -437,10 +447,44 @@ function createControls(ctx) {
       r.el.remove(); ctl.rows.delete(k); ctl.values.delete(k);
     }
     for (const e of [ctl.sub, ctl.none]) if (!els.includes(e)) e.remove();
+    for (const [key, h] of ctl.heads) if (!els.includes(h.el)) { h.el.remove(); ctl.heads.delete(key); }
     ctl.deferred = deferred ? [g, issued] : null;
     applyValues(vars, issued);
     for (const r of ctl.rows.values()) r.sync();
     renderBar();
+  }
+
+  /** The sections a person opened or closed, per graph: remembered in this browser ({section key: closed}). */
+  const sectionState = (graph) => ctx.store?.get(`controls.closed.${graph}`, {}) ?? {};
+  /** A section's heading (kept per section key): a caret, the group's name and how many controls it holds. */
+  function sectionHead(sec, closed) {
+    let h = ctl.heads.get(sec.key);
+    if (!h) {
+      const b = el('button', 'cgroup'), caret = el('span', 'caret'), name = el('span', 'gname'), n = el('span', 'gcount');
+      b.type = 'button';
+      b.append(caret, name, n);
+      h = { el: b, keys: [], closed: false, caret, name, n };
+      b.onclick = () => {
+        b.blur();
+        h.closed = !h.closed;
+        const st = sectionState(ctl.graph);
+        st[sec.key] = h.closed;
+        ctx.store?.set(`controls.closed.${ctl.graph}`, st);
+        h.show();
+        for (const k of h.keys) { const r = ctl.rows.get(k); if (r) r.el.hidden = h.closed; }
+      };
+      h.show = () => {
+        h.caret.textContent = h.closed ? '▸' : '▾';
+        b.setAttribute('aria-expanded', String(!h.closed));
+        b.title = sec.other ? `vars the graph does not declare in "params" (${h.closed ? 'show' : 'hide'} them)` : `${h.closed ? 'show' : 'hide'} the ${h.keys.length} control${h.keys.length === 1 ? '' : 's'} of ${sec.group}`;
+      };
+      ctl.heads.set(sec.key, h);
+    }
+    h.keys = sec.keys; h.closed = closed;
+    h.name.textContent = sec.group; h.n.textContent = String(sec.keys.length);
+    h.el.classList.toggle('other', sec.other);
+    h.show();
+    return h;
   }
 
   /** The person has a change of var k on the way, is dragging it or typing in it: the server's value waits. */

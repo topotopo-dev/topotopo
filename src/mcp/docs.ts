@@ -23,7 +23,7 @@ CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
-HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
+HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step, group}}); the live viewer (preview) shows them as sliders and menus, under a heading per "group". Every declared param needs a "desc" (what it does and its unit: the control's hover text; without one the build warns). People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
@@ -184,16 +184,21 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   },
   "output": "out",
   "vars": {"rock_count": 200},
-  "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks"}}
+  "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks", "group": "Scatter"}}
 }
 - "vars": graph constants that "=expr" params and code read by their bare name ("=rock_count * 2", @P.y += height).
   Name them so code can: letters, digits and _, and not a JavaScript keyword (class, default …), a helper (noise,
   rand, length, detail …), a built-in (Math, Number, JSON …), the time (frame, time, fps, timeInc) or a wrangle name
   (ptnum, Frame …); the build says when a name is taken. "params": one entry per var a person would tune (3–8 of them):
   {type (float int bool string enum), desc, min, max, options (enum: strings or numbers; the var holds the option,
-  so [4, 8, 16] gives numbers), label (control name), step (slider step)}.
+  so [4, 8, 16] gives numbers), label (control name), step (slider step), group (a heading)}.
   The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
   for bools. They are also the parameters when the graph is saved as an asset.
+  desc: what the param does and its unit ("gap between cliffs, metres"): the control's hover text. Every declared
+  param needs one; a param without a desc is a build and cook warning. label: the control's name, short; it may carry
+  the unit ("Gap between cliffs (m)"; a long one wraps to two lines). group: the heading the Controls list the param
+  under ("group": "Scatter"): a heading a person can close, the groups in the order of their first param, params
+  without a group above them. The viewer lists undeclared vars apart, closed under "other vars".
   min/max are the slider's range, not a limit on the person: a value typed past them is kept (the slider widens to it;
   ↺ brings back the declared value and range), and a refresh keeps it. They do limit a caller: a graph that uses this
   one as an asset or package output has a value outside them clamped (below), except the graph's own value.

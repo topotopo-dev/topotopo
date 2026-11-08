@@ -359,6 +359,16 @@ section('Controls rules (section 8)');
     'a value past a declared end is marked; inside the range or with no declared end it is not');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
+  // param groups: a heading per group in the order of its first param, ungrouped params first, undeclared vars closed
+  const secs = vars.controlSections(
+    { count: { group: 'Scatter' }, size: { group: 'Rocks' }, seed: {}, gap: { group: 'Rocks' }, jitter: { group: ' Scatter ' }, blank: { group: '' } },
+    { count: 1, size: 1, seed: 1, gap: 1, jitter: 1, blank: 1, smallest: 0.2 });
+  check(JSON.stringify(secs.map((s: any) => [s.group, s.keys.join()])) === JSON.stringify([[null, 'seed,blank'], ['Scatter', 'count,jitter'], ['Rocks', 'size,gap'], ['other vars', 'smallest']]),
+    `sections: ungrouped first, then groups in declaration order holding their params, then "other vars" (${JSON.stringify(secs.map((s: any) => s.group))})`);
+  const otherSec = secs[3], rocks = secs[2], loose = vars.controlSections({}, { a: 1 });
+  check(vars.sectionClosed(otherSec) && !vars.sectionClosed(rocks) && vars.sectionClosed(rocks, { 'g:Rocks': true }) && !vars.sectionClosed(otherSec, { other: false })
+    && loose.length === 1 && loose[0].group === null && loose[0].other && !vars.sectionClosed(loose[0], { other: true }),
+    'the undeclared vars start closed when the graph declares params, groups open; the remembered state wins; with nothing declared they are listed as they are');
   // a menu of numbers wrote the picked entry as text ("8"): an entry stands for its option
   const nums = vars.menuOf({ options: [4, 8, 16] }, 8), texts = vars.menuOf({ options: ['low', 'high'] }, 'low'), idx = vars.menuOf({ options: ['low', 'high'] }, 1);
   check(vars.kindOf({ type: 'enum', options: [4, 8, 16] }, 8) === 'select' && nums.valueOf('16') === 16 && nums.textOf(8) === '8' && !nums.byIndex && nums.valueOf('5') === undefined

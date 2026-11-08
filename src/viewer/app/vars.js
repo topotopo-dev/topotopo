@@ -91,6 +91,33 @@ export function controlList(params = {}, vars = {}) {
   return { declared: Object.keys(params), other: Object.keys(vars).filter((k) => !(k in params)) };
 }
 
+/** A declared param's group heading ("group"), or null. */
+export const groupOf = (vd) => (typeof vd?.group === 'string' && vd.group.trim() ? vd.group.trim() : null);
+
+/**
+ * The Controls' sections, each {key, group, keys, other}: the declared params without a group first (no heading), then
+ * one section per group in the order of its first param, its params in declaration order, then the undeclared vars:
+ * behind a heading ("other vars") when the graph declares params, else listed as they are. `key` names the section
+ * for the collapsed state the browser remembers.
+ */
+export function controlSections(params = {}, vars = {}) {
+  const { declared, other } = controlList(params, vars);
+  const loose = [], groups = new Map();
+  for (const k of declared) {
+    const g = groupOf(params[k]);
+    if (g === null) loose.push(k);
+    else { if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); }
+  }
+  const s = [];
+  if (loose.length) s.push({ key: '', group: null, keys: loose, other: false });
+  for (const [g, keys] of groups) s.push({ key: 'g:' + g, group: g, keys, other: false });
+  if (other.length) s.push({ key: 'other', group: declared.length ? 'other vars' : null, keys: other, other: true });
+  return s;
+}
+
+/** Whether a section starts closed: the undeclared vars do when the graph declares params; `saved` wins ({key: bool}). */
+export const sectionClosed = (sec, saved = {}) => (sec.group === null ? false : typeof saved?.[sec.key] === 'boolean' ? saved[sec.key] : sec.other);
+
 /**
  * What a control's ↺ goes back to. Over a graph file ("file" mode) the graph's own value (graphVars), else its
  * declared default, else a blank of its type; in a package the declared default (undefined: no reset).

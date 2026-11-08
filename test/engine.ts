@@ -801,6 +801,20 @@ section('param ranges');
     && engine.validate({ nodes: { s: { type: 'sphere', strict: 1 as any } } }).errors.some((e) => e.node === 's' && /"strict" must be true or false/.test(e.message)), 'strict must be a boolean (graph and node)');
 }
 
+section('declared params: desc and group');
+{
+  // desc is the control's hover text: a declared param without one warns (build, dry run and cook); group is a heading
+  const g = { vars: { gap: 2, n: 3 }, params: { gap: { type: 'float', min: 0, max: 5, label: 'Gap between cliffs (m)', group: 'Layout' }, n: { type: 'int', desc: 'count', group: 'Layout' } }, nodes: { b: { type: 'box', params: { size: '=gap' } } } };
+  const v = engine.validate(g as any);
+  check(!v.errors.length && v.warnings.length === 1 && v.warnings[0].node === '(params)' && /^params "gap" has no "desc"/.test(v.warnings[0].message) && /unit/.test(v.warnings[0].hint ?? ''),
+    `a declared param without desc warns, naming it (${v.warnings.map((w) => w.message).join('; ')})`);
+  const c = await engine.cook(g as any);
+  check(c.ok && c.warnings.some((w) => /"gap" has no "desc"/.test(w.message)) && engine.dryRun(g as any).warnings.some((w) => /"gap" has no "desc"/.test(w.message)), 'the cook and the dry run carry the warning');
+  check(!engine.validate({ ...g, params: { ...g.params, gap: { ...g.params.gap, desc: 'gap between cliffs, metres' } } } as any).warnings.length, 'with a desc: no warning');
+  check(engine.validate({ ...g, params: { n: { desc: 'count', group: 3 } } } as any).errors.some((e) => /params "n": "group" must be a heading/.test(e.message))
+    && engine.validate({ ...g, params: { n: { desc: 'count', group: ' ' } } } as any).errors.some((e) => /"group" must be a heading/.test(e.message)), 'group must be a non-empty string');
+}
+
 // ------------------------------------------------------------------ CLI
 section('CLI --frames');
 {

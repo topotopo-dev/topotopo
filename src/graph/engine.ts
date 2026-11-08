@@ -721,6 +721,13 @@ export class Engine {
         const o = vd && typeof vd === 'object' ? (vd as any).options : undefined;
         if (o !== undefined && !(Array.isArray(o) && o.length && o.every((x: any) => typeof x === 'string' || (typeof x === 'number' && Number.isFinite(x)))))
           errors.push({ node: path + '(params)', message: `params "${k}": options must be a list of strings or numbers, got ${JSON.stringify(o)?.slice(0, 80)}` });
+        const grp = vd && typeof vd === 'object' ? (vd as any).group : undefined;
+        if (grp !== undefined && !(typeof grp === 'string' && grp.trim()))
+          errors.push({ node: path + '(params)', message: `params "${k}": "group" must be a heading (a non-empty string), got ${JSON.stringify(grp)?.slice(0, 40)}` });
+        // desc is the control's hover text: the place a person reads what a param does and its unit
+        const desc = vd && typeof vd === 'object' ? (vd as any).desc : undefined;
+        if (!(typeof desc === 'string' && desc.trim()))
+          warnings.push({ node: path + '(params)', message: `params "${k}" has no "desc": its control has no hover text`, hint: 'add "desc": what it does and its unit, e.g. "gap between cliffs, metres"' });
       }
     }
     // for did-you-mean, listed once a type is unknown (the package names load the scope's packages)
