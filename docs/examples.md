@@ -98,29 +98,18 @@ the example no longer does its job.
 
 ## The examples
 
-### [Guided town](../examples/guided_town.md) (`guided_town`)
-
-A village laid out along your own guides: the roads, house plots, fences, woods and clearings you draw in the viewer become a finished village, built again whenever you move one.
-
-- In: `road_width`, `lamp_spacing`, `floors`, `roof_pitch`, `tree_density`, `keep_clear`, `seed`
-- Out: `village` (scene)
-
-## Cards waiting for their graph
-
-Written first; their graphs are being built (or rebuilt) to them.
-
 ### [Asset cleanup](../examples/asset_cleanup.md) (`asset_cleanup`)
 
 A rough, broken scan turned into a game-ready asset: holes filled, tangles removed, even triangles, clean UVs and levels of detail.
 
-- In: `source`, `detail`, `lods`, `lod_ratio`, `texel_density`, `seed`
+- In: `source`, `edge_length`, `lods`, `lod_ratio`, `texel_density`, `seed`
 - Out: `asset` (mesh), `lods` (mesh)
 
 ### [Blob creature](../examples/blob_creature.md) (`blob_creature`)
 
 A cartoon creature made of smooth blended shapes: a round body, a head, legs and a tail that melt into each other, and two eyes, as a closed mesh.
 
-- In: `body_size`, `head`, `legs`, `tail`, `blend`, `bumps`, `detail`, `seed`
+- In: `body_size`, `head`, `legs`, `tail`, `blend`, `bumps`, `feature_size`, `seed`
 - Out: `creature` (mesh)
 
 ### [Cloth drape](../examples/cloth_drape.md) (`cloth_drape`)
@@ -155,8 +144,15 @@ A stone wall that breaks into pieces which fall and come to rest on the ground, 
 
 A coral-like form that grows frame by frame, for a timelapse or a growth effect: it swells unevenly into knobs and folds.
 
-- In: `seed_size`, `rate`, `lumpiness`, `detail`, `seed`
+- In: `seed_size`, `rate`, `lumpiness`, `edge_length`, `seed`
 - Out: `form` (mesh)
+
+### [Guided town](../examples/guided_town.md) (`guided_town`)
+
+A village laid out along your own guides: the roads, house plots, fences, woods and clearings you draw in the viewer become a finished village, built again whenever you move one.
+
+- In: `road_width`, `lamp_spacing`, `floors`, `roof_pitch`, `tree_density`, `keep_clear`, `seed`
+- Out: `village` (scene)
 
 ### [Image cutouts](../examples/image_cutouts.md) (`image_cutouts`)
 
@@ -183,7 +179,7 @@ A metal mounting bracket for a game prop or a print: an L-shaped plate with roun
 
 A town street ready for a level: a road with kerbs, pavements and lamp posts, a row of houses along one side and a small park with paths, trees and benches on the other.
 
-- In: `length`, `road_width`, `house_width`, `floors`, `lamp_spacing`, `park_density`, `seed`
+- In: `street_length`, `road_width`, `house_width`, `floors`, `lamp_spacing`, `park_density`, `seed`
 - Out: `street` (scene), `houses` (scene), `park` (scene), `block` (scene)
 
 ### [Material set](../examples/material_set.md) (`material_set`)
@@ -197,14 +193,14 @@ A set of tileable game materials made from scratch: rough stone blocks, wood pla
 
 An animated ocean surface for a water plane: rolling swells with smaller waves on top, moving with time, with foam where the waves crest.
 
-- In: `size`, `wave_height`, `wave_length`, `choppiness`, `wind_direction`, `detail`, `seed`
+- In: `size`, `wave_height`, `wave_length`, `choppiness`, `wind_direction`, `vertex_spacing`, `seed`
 - Out: `surface` (mesh)
 
 ### [Rail along a curve](../examples/rail_along_curve.md) (`rail_along_curve`)
 
 A railing and pipes that follow a path: posts at even spacing, a handrail and pipes bending smoothly around every corner.
 
-- In: `length`, `corner_radius`, `post_spacing`, `rail_height`, `pipes`, `pipe_radius`, `seed`
+- In: `path_length`, `corner_radius`, `post_spacing`, `rail_height`, `pipes`, `pipe_radius`, `seed`
 - Out: `railing` (mesh), `pipes` (mesh), `path` (curves)
 
 ### [Sci-fi panel](../examples/scifi_panel.md) (`scifi_panel`)
@@ -241,40 +237,3 @@ A landscape for Unreal Engine: an eroded terrain sized to fit an Unreal Landscap
 
 - In: `samples`, `spacing`, `height`, `tree_density`, `rock_density`, `road`, `seed`
 - Out: `landscape` (terrain), `trees` (instances), `rocks` (instances), `road` (mesh), `level` (scene)
-
-## Graphs without a card yet
-
-- [`bevel`](../examples/bevel.json): poly_bevel: a box with every edge rounded (divisions 3, sphere-octant corners), a box with only its top edges chamfered (edge group from "angle>80" minus the lower edges), and an extruded star whose top rim is rounded (border of the extrude's top group).
-- [`building`](../examples/building.json): Procedural building: floors stacked with foreach; walls split into window cells (grid_split), inset and recessed (poly_extrude); roof slab from an offset footprint.
-- [`csg_bracket`](../examples/csg_bracket.json): Mechanical bracket via CSG: plates unioned (boolean with one input), bolt holes copied onto points and subtracted.
-- [`deformers`](../examples/deformers.json): Deformers: a twisted column bent by a lattice cage (cage shown as wire), a chain of boxes wrapped along a spiral with path_deform, and a grid pulled up with soft_transform (coloured by its soft weight).
-- [`drainage`](../examples/drainage.json): Drainage on the demo massif: left, the original ground with D8 flow stopping in pits; right, shallow depressions filled with an epsilon slope and deeper basins retained as lakes.
-- [`drape`](../examples/drape.json): Cloth simulation (XPBD, Vellum-lite): a tarp draped over a stack of crates (topotopo/props/crate), a banner pinned between two poles and blown by the wind, and a flat box inflated into a cushion that settles on the ground.
-- [`engraved_sign`](../examples/engraved_sign.json): Rounded slab with text engraved by a boolean subtract, on a smoothed base.
-- [`erosion_models`](../examples/erosion_models.json): Identical ridged terrain in four erosion modes: back row JS droplet (left), WASM droplet (right); front row virtual pipes (left), virtual pipes plus stream power (right).
-- [`forest`](../examples/forest.json): The PCG chain with packed instancing: a slope mask times a height mask on a terrain (mask), 30,000 candidate points spread by that mask (scatter density_mask), upright random headings and sizes (orient), trees whose trunks would collide removed (prune overlap), then packed copies of three low-poly variants (pine, fir, oak) picked with weights (copy_to_points pack + variant_weights), and the whole scene rotated (instances compose the rotation).
-- [`fractured`](../examples/fractured.json): Voronoi-fractured noisy sphere, pieces slightly separated and coloured by piece.
-- [`house_city`](../examples/house_city.json): Nested generators: the house of TopoTopo's architecture package, topotopo/architecture/house (walls from its wall_segment per footprint edge + its roof_skeleton), spawned on a grid of lots, each lot varying the house's parameters from its point attributes.
-- [`measures`](../examples/measures.json): Measure nodes: a noisy sphere coloured by mean curvature (dark creases, bright bulges), a rock on the ground coloured by ambient occlusion (the ground is its occluder, so the contact darkens), and a ground grid coloured by its distance to a path curve.
-- [`particles`](../examples/particles.json): Particles: on the left, emitters scattered along the ridges of an eroded massif shed particles that run downhill (the heightfield as a gradient field), swirl with curl noise and slide over the terrain (the heightfield as the collision surface); their trails are polylines coloured by age (white at birth, through amber, to deep red after 4 s).
-- [`pcg_scatter`](../examples/pcg_scatter.json): PCG on a terrain with a road: the road curve is draped on the terrain (ray) and swept into a strip that is draped again across its width; lamp posts stand along it every 9 m on both sides (points_along_curve side_offset + both_sides → ray onto the ground → orient upright → packed copies); rocks are scattered by a mask that keeps 5 m away from the road and prefers slopes over 16° (mask distance × mask slope → scatter density_mask with an exact min_distance), aligned to the terrain normal with random yaw, tilt and scale (orient surface, align_axis y), pruned where they overlap, and coloured by k-means cluster for a debug view (cluster color) before packed copying.
-- [`polyedit`](../examples/polyedit.json): Polygon modelling with topology: a box with two loop cuts (polysplit), the band between them extruded and the result cut by a knife (both sides kept, coloured by side); a tube with a tunnel bridged between two holes (polybridge); a star-shaped hole filled with quads (polyfill); a grid whose central edges are dissolved before every face is extruded (dissolve).
-- [`quad_remesh`](../examples/quad_remesh.json): Field-aligned quad remeshing.
-- [`rbd_settle`](../examples/rbd_settle.json): Rigid-body settling: rocks (topotopo/nature/rock) dropped onto the rocks_on_terrain landscape come to rest on it (rbd_settle), then crates are dropped one at a time onto three spots and pile up on the terrain and the rocks (rbd_stack).
-- [`remesh_lod`](../examples/remesh_lod.json): Remesh, repair, LOD.
-- [`rocks_on_terrain`](../examples/rocks_on_terrain.json): Noise terrain coloured by height, with displaced rocks scattered on the flatter slopes.
-- [`sdf_creature`](../examples/sdf_creature.json): Implicit modelling: smooth-unioned SDF primitives with noise, polygonised to a watertight mesh.
-- [`skeleton_roofs`](../examples/skeleton_roofs.json): Straight-skeleton roofs: an L-shaped house using the wall layout of topotopo/architecture/house, a courtyard roof surrounding a hole, and nested inward offsets making a staircase.
-- [`solver_growth`](../examples/solver_growth.json): Frame-by-frame growth with a solver: every frame the body stacks a new slab on the previous frame's result, placed with bbox('prev').max.y, turned a little further, slightly smaller and lighter.
-- [`splines`](../examples/splines.json): Spline toolkit: a road (NURBS through waypoints) projected onto bumpy ground, a boardwalk whose linear NURBS path gets filleted corners and a 3D-offset double rail swept into handrails, and a Bezier letter outline converted to polylines and extruded.
-- [`street_block`](../examples/street_block.json): A street block assembled from TopoTopo's own packages only (topotopo/architecture, nature, props and street): a road with kerbs, sidewalks, lane markings and lamp posts on both sides; three houses (wall_segment walls with window_frame/door_frame, gable and hip roofs, one with two storeys, one behind a scaffold), a picket fence and bushes in front of them, crates, barrels and a pallet in the alley; across the street a brick garden wall with an arched gate, benches and a forest_patch park.
-- [`terrain_erosion`](../examples/terrain_erosion.json): Heightfield terrain: a ridged massif on a 20 × 20 m field (0.1 m cells), hydraulic + thermal erosion (gullies, sediment fans), a road cut along a curve, rocks scattered on steep slopes away from the road, converted to a coloured mesh.
-- [`texture_lab`](../examples/texture_lab.json): Worn painted metal from the texture nodes, every distance in metres on a 1 m texture: bolted plates from SDF shapes (tex_sdf_shape boxes with round corners, rivets kept to a band along the plate edges by tex_sdf_op and tex_sdf_boolean, bevelled by tex_sdf_to_mask), a slightly different paint per plate from tex_flood_fill and tex_histogram_range, edge wear where tex_curvature finds convex edges, broken up by tex_grunge and made ragged by tex_slope_blur, brushed steel under the paint from tex_directional_blur (its grain blended into the normal map only where the metal shows), rust running down from every rivet (a one-sided directional blur times grunge leaks), tex_ao in the seams, and an ORM map.
-- [`textures`](../examples/textures.json): Procedural textures and bakes: a brick wall material made only from texture nodes (tex_pattern bricks with a per-brick id colour, tex_noise grain, tex_normal_from_height, a roughness from tex_levels) and the crate of TopoTopo's props package (topotopo/props/crate) unwrapped with xatlas, its ambient occlusion and edge curvature baked into uv space and combined into an edge-wear mask (worn paint on convex edges, dirt in the AO), packed with roughness into an ORM map.
-- [`tree`](../examples/tree.json): L-system tree: branches swept into tapered tubes, leaf cards instanced on leaf points.
-- [`unreal_demo`](../examples/unreal_demo.json): Unreal 5.8 demo scene: a 126 × 126 m eroded massif on a 253 × 253 heightfield (an exact Unreal Landscape fit: 63 quads per section, 2×2 sections, 2×2 components), a road cut along a curve with a road ribbon on top, Unreal weight layers (grass, rock, road), and packed instances: trees of three variants (pine, fir, oak) on gentle ground away from the road, rocks of two variants on steep slopes.
-- [`uv_noisy_rock`](../examples/uv_noisy_rock.json): Clean UVs on a noisy rock: a displaced sphere roughened with fine noise and decimated to irregular triangles, like a scanned, decimated or generated rock.
-- [`uv_toolkit`](../examples/uv_toolkit.json): UV toolkit: a small house unwrapped automatically with xatlas (uv_unwrap), next to a noise-displaced open tube whose uv is deleted and re-made with LSCM along one manual seam (uv_flatten, seams as point pairs), then everything packed into one 0..1 square with uniform texel density (uv_layout).
-- [`voronoi_city`](../examples/voronoi_city.json): City blocks from relaxed 2D Voronoi cells; each block extruded to a random height by a foreach over prims.
-- [`voxel_remesh`](../examples/voxel_remesh.json): Left: sharp dual-contour voxel remesh.
-- [`wrangle_waves`](../examples/wrangle_waves.json): Interference waves written in a point wrangle, coloured by wave height, with buoys copied onto a random subset of crests.
