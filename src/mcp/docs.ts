@@ -1652,7 +1652,8 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
 5. INSPECT {detail} (CLI --inspect <detail>):
    summary (default)  one screen: counts and triangles, bbox in metres to the millimetre, parts (prim "name"),
                       materials and their maps, images, uv state (charts, in-tile overlap, tiling, utilization), closed
-                      or open edges (after welding seam splits)
+                      or open edges (after welding seam splits). Over 200,000 triangles it leaves the uv overlap test and
+                      utilization to detail "uv", and says so
    budget             triangles per part (prim "name": each exports as its own mesh), split per LOD when the names
                       end in _lod0, _lod1 …, and per node (the triangles each node adds over its inputs), sorted, with
                       totals; packed instances count expanded. json:true (CLI --json) appends it as JSON

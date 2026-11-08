@@ -265,6 +265,9 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
  * materials with their maps, images, the uv state (charts, in-tile overlap, outside 0..1, tiling, utilization) and
  * whether it is a closed solid (open edges after welding seam splits), then attributes and groups.
  */
+/** The summary tests uv overlaps up to this many polygon triangles; inspect detail "uv" tests any mesh. */
+export const SUMMARY_UV_TRIANGLES = 200_000;
+
 export function summaryLines(g: Geometry): string[] {
   const short = summarize(g).split('\n');
   const out: string[] = [];
@@ -290,12 +293,20 @@ export function summaryLines(g: Geometry): string[] {
     };
     out.push(`materials (${names.length}): ${names.slice(0, 8).map(one).join(', ')}${names.length > 8 ? `, … ${names.length - 8} more` : ''}`);
   }
-  // uv state, bounded so a summary stays quick
+  // uv state, bounded so a summary stays quick: the overlap test (and the utilization that needs it) only up to
+  // SUMMARY_UV_TRIANGLES polygon triangles, on a coarse utilization raster
   const uvA = g.findAttrib('uv', ['vertex', 'point']);
   if (uvA && g.numPrims) {
-    const r = uvReport(g, { maxPairTests: 500_000, maxExamples: 1 });
+    let polyTris = 0;
+    for (let p = 0; p < g.numPrims; p++) if (!g.primKind?.[p] && g.primClosed[p]) polyTris += Math.max(0, g.primSize(p) - 2);
+    const tested = polyTris <= SUMMARY_UV_TRIANGLES;
+    const r = uvReport(g, { maxPairTests: 500_000, maxExamples: 1, rasterSize: 256, overlaps: tested });
     const ov = r.overlap;
-    out.push(`uv: ${n(r.charts)} charts${r.tiling ? `, TILING (${n(r.tilingCharts)} charts run across tile borders)` : ''}; in-tile overlap ${n(ov.inTile.pairs)} pairs${ov.inTile.pairs && ov.examples[0] ? ` (first ${ov.examples[0].where[0]})` : ''}${ov.acrossLods.pairs ? `, across LODs ${n(ov.acrossLods.pairs)}` : ''}; ${n(r.outOfTile)} triangles outside 0..1; ${n(r.collapsed)} collapsed${r.wrapSeam.prims ? `; ${n(r.wrapSeam.prims)} faces span a wrap seam (first ${r.wrapSeam.examples[0]})` : ''}; utilization ${(r.utilization.value * 100).toFixed(1)}%${r.utilization.method === 'raster-estimate' ? ' (estimate)' : ''}${r.complete ? '' : ' (INCOMPLETE: inspect detail "uv")'}`);
+    const overlap = tested
+      ? `in-tile overlap ${n(ov.inTile.pairs)} pairs${ov.inTile.pairs && ov.examples[0] ? ` (first ${ov.examples[0].where[0]})` : ''}${ov.acrossLods.pairs ? `, across LODs ${n(ov.acrossLods.pairs)}` : ''}`
+      : `overlap not tested (over ${n(SUMMARY_UV_TRIANGLES)} triangles: inspect detail "uv" tests it)`;
+    const use = tested ? `; utilization ${(r.utilization.value * 100).toFixed(1)}%${r.utilization.method === 'raster-estimate' ? ' (estimate)' : ''}${r.complete ? '' : ' (INCOMPLETE: inspect detail "uv")'}` : '';
+    out.push(`uv: ${n(r.charts)} charts${r.tiling ? `, TILING (${n(r.tilingCharts)} charts run across tile borders)` : ''}; ${overlap}; ${n(r.outOfTile)} triangles outside 0..1; ${n(r.collapsed)} collapsed${r.wrapSeam.prims ? `; ${n(r.wrapSeam.prims)} faces span a wrap seam (first ${r.wrapSeam.examples[0]})` : ''}${use}`);
   } else if (g.numPrims) out.push('uv: none');
   if (g.numPrims && g.primClosed.some((c) => c === 1)) {
     const sr = solidReport(g, { flips: false });

@@ -49,6 +49,11 @@ export interface UVReportOptions {
   maxExamples?: number;
   /** raster estimate grid size (default 1024) */
   rasterSize?: number;
+  /**
+   * test overlaps (default true). false leaves out the overlap test and the utilization that depends on it (the slow
+   * parts on a large mesh): the report is then incomplete and says so
+   */
+  overlaps?: boolean;
 }
 
 export interface UVOverlap {
@@ -170,19 +175,57 @@ export function chartKinds(U: Float64Array, nt: number, root: (t: number) => num
 export function chartRoots(vertexPoint: ArrayLike<number>, tris: ArrayLike<number>, U: Float64Array, nt: number): (t: number) => number {
   const parent = Int32Array.from({ length: nt }, (_, i) => i);
   const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-  const cornerKey = (c: number) => `${vertexPoint[tris[c]]}:${U[c * 2]}:${U[c * 2 + 1]}`;
-  const corner = new Map<string, number>(), cid = new Int32Array(nt * 3);
-  for (let c = 0; c < nt * 3; c++) { const k = cornerKey(c); let id = corner.get(k); if (id === undefined) { id = corner.size; corner.set(k, id); } cid[c] = id; }
-  const edgeOwner = new Map<number, number>(), nc = corner.size;
-  for (let t = 0; t < nt; t++) {
-    if (!Number.isFinite(U[t * 6]) || !Number.isFinite(U[t * 6 + 2]) || !Number.isFinite(U[t * 6 + 4])) continue;
-    for (let k = 0; k < 3; k++) {
-      const x = cid[t * 3 + k], y = cid[t * 3 + ((k + 1) % 3)];
-      const key = Math.min(x, y) * nc + Math.max(x, y);
-      const other = edgeOwner.get(key);
-      if (other === undefined) edgeOwner.set(key, t); else { const ra = find(t), rb = find(other); if (ra !== rb) parent[rb] = ra; }
+  // corner ids: one per distinct (point, uv), found among the corners of each point (no string keys: a summary of a
+  // million triangles stays quick)
+  const nCorners = nt * 3, cid = new Int32Array(nCorners);
+  let np = 0;
+  for (let c = 0; c < nCorners; c++) np = Math.max(np, vertexPoint[tris[c]] + 1);
+  const start = new Int32Array(np + 1);
+  for (let c = 0; c < nCorners; c++) start[vertexPoint[tris[c]] + 1]++;
+  for (let i = 0; i < np; i++) start[i + 1] += start[i];
+  const fill = start.slice(0, np), byPoint = new Int32Array(nCorners);
+  for (let c = 0; c < nCorners; c++) byPoint[fill[vertexPoint[tris[c]]]++] = c;
+  const same = (a: number, b: number) => a === b || (a !== a && b !== b);
+  let nc = 0;
+  for (let pt = 0; pt < np; pt++) {
+    const s = start[pt], e = start[pt + 1];
+    if (e - s > 32) {
+      // a pole or fan with many corners: look the uv up instead of scanning
+      const seen = new Map<string, number>();
+      for (let i = s; i < e; i++) { const c = byPoint[i], k = `${U[c * 2]}:${U[c * 2 + 1]}`; let id = seen.get(k); if (id === undefined) seen.set(k, (id = nc++)); cid[c] = id; }
+      continue;
+    }
+    for (let i = s; i < e; i++) {
+      const c = byPoint[i];
+      let id = -1;
+      for (let j = s; j < i && id < 0; j++) { const d = byPoint[j]; if (same(U[c * 2], U[d * 2]) && same(U[c * 2 + 1], U[d * 2 + 1])) id = cid[d]; }
+      cid[c] = id >= 0 ? id : nc++;
     }
   }
+  // each triangle edge's owner: the first triangle (in order) with the same two corner ids, found among the edges
+  // listed under their lower corner id; unions then run in triangle order, as a single pass over a map would
+  const live = (t: number) => Number.isFinite(U[t * 6]) && Number.isFinite(U[t * 6 + 2]) && Number.isFinite(U[t * 6 + 4]);
+  const lower = (e: number) => Math.min(cid[e], cid[e - (e % 3) + (e % 3 + 1) % 3]);
+  const upper = (e: number) => Math.max(cid[e], cid[e - (e % 3) + (e % 3 + 1) % 3]);
+  const head = new Int32Array(nc + 1);
+  for (let t = 0; t < nt; t++) if (live(t)) for (let k = 0; k < 3; k++) head[lower(t * 3 + k) + 1]++;
+  for (let i = 0; i < nc; i++) head[i + 1] += head[i];
+  const at = head.slice(0, nc), edgeOf = new Int32Array(head[nc]);
+  for (let t = 0; t < nt; t++) if (live(t)) for (let k = 0; k < 3; k++) edgeOf[at[lower(t * 3 + k)]++] = t * 3 + k;
+  const owner = new Int32Array(nt * 3).fill(-1);
+  for (let a = 0; a < nc; a++) {
+    const s = head[a], e = head[a + 1];
+    if (e - s > 32) {
+      const first = new Map<number, number>();
+      for (let i = s; i < e; i++) { const b = upper(edgeOf[i]), f = first.get(b); if (f === undefined) first.set(b, edgeOf[i]); else owner[edgeOf[i]] = (f / 3) | 0; }
+      continue;
+    }
+    for (let i = s + 1; i < e; i++) {
+      const b = upper(edgeOf[i]);
+      for (let j = s; j < i; j++) if (upper(edgeOf[j]) === b) { owner[edgeOf[i]] = (edgeOf[j] / 3) | 0; break; }
+    }
+  }
+  for (let c = 0; c < nt * 3; c++) if (owner[c] >= 0) { const ra = find((c / 3) | 0), rb = find(owner[c]); if (ra !== rb) parent[rb] = ra; }
   return find;
 }
 
@@ -329,7 +372,9 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
   rep.perPiece = !!pieceOf;
   if (o.perPiece && !pieceOf) rep.reasons.push(`per piece: no prim string attribute "${o.pieceAttrib || 'name'}", so overlaps were tested across the whole mesh`);
   const pieceOverlaps = new Map<string, number>();
-  if (valid.length > 1) {
+  const testOverlaps = o.overlaps !== false;
+  if (!testOverlaps) { rep.complete = false; rep.reasons.push('overlaps not tested (overlaps: false)'); }
+  if (valid.length > 1 && testOverlaps) {
     const groups = new Map<string, number[]>();
     if (pieceOf) for (const t of valid) { const k = pieceOf(t); let l = groups.get(k); if (!l) groups.set(k, (l = [])); l.push(t); }
     else groups.set('', valid);
@@ -361,6 +406,7 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
 
   // utilization (per piece: set with the pieces below)
   if (pieceOf) rep.utilization = { method: 'none', value: 0, note: 'per piece' };
+  else if (!testOverlaps) rep.utilization = { method: 'none', value: 0, note: 'not measured: overlaps were not tested' };
   else if (rep.overlap.pairs === 0 && rep.outOfTile === 0 && rep.complete) {
     rep.utilization = { method: 'exact', value: rep.uvArea, note: 'sum of uv triangle areas in the unit tile (no overlaps, nothing outside)' };
   } else if (valid.length) {
