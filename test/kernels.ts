@@ -467,6 +467,39 @@ await test('a straight corner between equal pitches does not split the roof face
   const geo = await cook(footprint(collinear), { mode: 'roof', pitch: 35 });
   assert.deepStrictEqual(Array.from(geo.prims.get('edge')!.data as Int32Array).sort(), [0, 2, 3, 4], 'edges 0 and 1 share one face');
 });
+/** A 30 x 20 block cut into lots along a jittered grid: neighbouring lots share edges (and, optionally, carry rounding noise). */
+function lots(noise: number): PolygonCase {
+  const xs = [0, 7.3, 15.1, 22, 30], zs = [0, 9.7, 20], rings: number[][] = [];
+  const corner = (i: number, j: number, salt: number) => {
+    const x = xs[i] + (i % 4 ? Math.sin(i * 3 + j) : 0), z = zs[j] + (j % 2 ? Math.cos(i + j * 5) : 0);
+    return [x + noise * Math.sin(salt * 12.9898), z + noise * Math.cos(salt * 78.233)];
+  };
+  let salt = 0;
+  for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < zs.length; j++)
+    rings.push([...corner(i, j, ++salt), ...corner(i + 1, j, ++salt), ...corner(i + 1, j + 1, ++salt), ...corner(i, j + 1, ++salt)]);
+  return { name: `block of ${rings.length} lots`, outer: rings[0], holes: rings.slice(1) };
+}
+await test('lots sharing edges are separate shapes: offset, roof and skeleton treat each on its own', async () => {
+  for (const noise of [0, 1e-13]) {
+    const block = lots(noise), rings = [block.outer, ...block.holes];
+    for (const mode of ['offset', 'roof', 'skeleton']) {
+      const geo = await cook(footprint(block), { mode, distance: 0.6, pitch: 35 });
+      const source = geo.prims.get('source')!.data as Int32Array;
+      assert.deepStrictEqual([...new Set(source)].sort((a, b) => a - b), rings.map((_, i) => 100 + i), `${mode}: every lot has output`);
+      if (mode === 'offset') {
+        assert.equal(geo.numPrims, rings.length, 'one inset outline per lot');
+        for (let f = 0; f < geo.numPrims; f++) {
+          const ring = rings[source[f] - 100], outline = geo.primPoints(f).flatMap((i) => [geo.P[i * 3], geo.P[i * 3 + 2]]);
+          assert.ok(Math.abs(area(outline)) < Math.abs(area(ring)) && Math.abs(area(outline)) > 0, 'each lot shrinks inside itself');
+        }
+      }
+      if (mode === 'roof') for (let r = 0; r < rings.length; r++) {
+        const faces = Array.from({ length: geo.numPrims }, (_, f) => f).filter((f) => source[f] === 100 + r);
+        near(faces.reduce((sum, f) => sum + Math.abs(primNewell(geo, f)[1]) / 2, 0), Math.abs(area(rings[r])), `roof of lot ${r} covers it`, 1e-6);
+      }
+    }
+  }
+});
 await test('group preserves unselected primitives and their attributes unchanged', async () => {
   const p: PolygonCase = { name: 'two footprints', outer: rectangle.outer, holes: [[10, 0, 12, 0, 12, 2, 10, 2]] };
   const src = footprint(p), geo = await cook(src, { mode: 'roof', pitch: 35, group: '0' });
@@ -475,10 +508,12 @@ await test('group preserves unselected primitives and their attributes unchanged
   const points = Array.from(geo.primPoints(untouched[0])).flatMap((i) => Array.from(geo.P.slice(i * 3, i * 3 + 3)));
   assert.deepStrictEqual(points, [10, 0, 0, 12, 0, 0, 12, 0, 2, 10, 0, 2]);
 });
-await test('node rejects intersecting/touching loops and nonplanarity even at a large world origin', async () => {
+await test('node rejects crossing loops, holes touching their outer or each other, and nonplanarity even at a large world origin', async () => {
   const invalid: Geometry[] = [
     footprint({ name: 'overlap', outer: rectangle.outer, holes: [[5, 1, 7, 1, 7, 3, 5, 3]] }),
-    footprint({ name: 'touch', outer: rectangle.outer, holes: [[6, 1, 8, 1, 8, 3, 6, 3]] }),
+    footprint({ name: 'hole touching its outer', outer: rectangle.outer, holes: [[4, 1, 6, 1, 6, 3, 4, 3]] }),
+    footprint({ name: 'hole sharing a corner with its outer', outer: rectangle.outer, holes: [[6, 2, 5, 3, 4, 2, 5, 1]] }),
+    footprint({ name: 'holes touching each other', outer: courtyard.outer, holes: [[2, 2, 4, 2, 4, 6, 2, 6], [4, 3, 6, 3, 6, 5, 4, 5]] }),
   ];
   const warp = footprint(rectangle);
   for (let i = 0; i < warp.numPoints; i++) { warp.P[i * 3] += 1e9; warp.P[i * 3 + 1] = 1e9; warp.P[i * 3 + 2] += 1e9; }
@@ -486,7 +521,7 @@ await test('node rejects intersecting/touching loops and nonplanarity even at a 
   for (const src of invalid) {
     const result = await engine.cook({ nodes: { source: { type: 'input' }, kernel: { type: 'straight_skeleton', in: ['source'], params: { mode: 'roof' } } }, output: 'kernel' }, { inputs: [{ geo: src, sig: `invalid-${cookId++}` }] });
     assert.equal(result.ok, false);
-    assert.ok(result.errors.some((error) => /intersect|touch|plan|horizontal/i.test(error.message)), result.errors.map((error) => error.message).join('; '));
+    assert.ok(result.errors.some((error) => /cross|touch|plan|horizontal/i.test(error.message)), result.errors.map((error) => error.message).join('; '));
   }
 });
 await test('node preserves courtyard holes, provenance and finite unit roof normals at tiny and huge scales', async () => {

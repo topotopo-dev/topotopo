@@ -39,28 +39,67 @@ function logArea(xy: ArrayLike<number>): number {
   return Math.log(Math.abs(sum) / 2) + 2 * Math.log(scale);
 }
 
-/** Test distinct contours before containment; crossing contours cannot be independent footprints. */
-function contoursTouch(a: Float64Array, b: Float64Array): boolean {
-  const orientation = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number): number => {
-    const dx = bx - ax, dz = bz - az, qx = cx - ax, qz = cz - az;
-    const scale = Math.max(Math.abs(dx), Math.abs(dz), Math.abs(qx), Math.abs(qz));
-    return scale ? (dx / scale) * (qz / scale) - (dz / scale) * (qx / scale) : 0;
-  };
-  const between = (ax: number, az: number, bx: number, bz: number, x: number, z: number): boolean =>
-    x >= Math.min(ax, bx) && x <= Math.max(ax, bx) && z >= Math.min(az, bz) && z <= Math.max(az, bz);
-  for (let i = 0; i < a.length; i += 2) for (let j = 0; j < b.length; j += 2) {
-    const nextA = (i + 2) % a.length, nextB = (j + 2) % b.length;
-    const ax = a[i], az = a[i + 1], bx = a[nextA], bz = a[nextA + 1];
-    const cx = b[j], cz = b[j + 1], dx = b[nextB], dz = b[nextB + 1];
-    if (Math.max(ax, bx) < Math.min(cx, dx) || Math.max(cx, dx) < Math.min(ax, bx)
-      || Math.max(az, bz) < Math.min(cz, dz) || Math.max(cz, dz) < Math.min(az, bz)) continue;
-    const c = orientation(ax, az, bx, bz, cx, cz), d = orientation(ax, az, bx, bz, dx, dz);
-    const aa = orientation(cx, cz, dx, dz, ax, az), bb = orientation(cx, cz, dx, dz, bx, bz);
-    if ((c > 0 && d < 0 || c < 0 && d > 0) && (aa > 0 && bb < 0 || aa < 0 && bb > 0)) return true;
-    if (c === 0 && between(ax, az, bx, bz, cx, cz) || d === 0 && between(ax, az, bx, bz, dx, dz)
-      || aa === 0 && between(cx, cz, dx, dz, ax, az) || bb === 0 && between(cx, cz, dx, dz, bx, bz)) return true;
+/** Contours closer than this fraction of their extent touch: shared edges computed twice rarely match bit for bit. */
+const TOUCH = 1e-9;
+
+type Contact = 'none' | 'touch' | 'cross';
+
+/**
+ * How two contours meet: apart, touching (within `TOUCH` of their joint extent, as lots sharing an edge do),
+ * or crossing (an edge passes clearly through the other contour's edge).
+ */
+function contact(a: Float64Array, b: Float64Array): Contact {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const ring of [a, b]) for (let i = 0; i < ring.length; i += 2) {
+    minX = Math.min(minX, ring[i]); maxX = Math.max(maxX, ring[i]);
+    minZ = Math.min(minZ, ring[i + 1]); maxZ = Math.max(maxZ, ring[i + 1]);
   }
-  return false;
+  const size = Math.max(maxX - minX, maxZ - minZ) || 1;
+  const local = (ring: Float64Array) => ring.map((v, i) => (v - (i % 2 ? minZ : minX)) / size);
+  const p = local(a), q = local(b);
+  // Signed distance of (x, z) from the line through two corners, and distance from their segment.
+  const side = (ax: number, az: number, bx: number, bz: number, x: number, z: number) =>
+    ((bx - ax) * (z - az) - (bz - az) * (x - ax)) / (Math.hypot(bx - ax, bz - az) || 1);
+  const away = (ax: number, az: number, bx: number, bz: number, x: number, z: number) => {
+    const dx = bx - ax, dz = bz - az, length2 = dx * dx + dz * dz;
+    const t = length2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / length2)) : 0;
+    return Math.hypot(x - ax - t * dx, z - az - t * dz);
+  };
+  let touch = false;
+  for (let i = 0; i < p.length; i += 2) for (let j = 0; j < q.length; j += 2) {
+    const nextA = (i + 2) % p.length, nextB = (j + 2) % q.length;
+    const ax = p[i], az = p[i + 1], bx = p[nextA], bz = p[nextA + 1];
+    const cx = q[j], cz = q[j + 1], dx = q[nextB], dz = q[nextB + 1];
+    if (Math.max(ax, bx) + TOUCH < Math.min(cx, dx) || Math.max(cx, dx) + TOUCH < Math.min(ax, bx)
+      || Math.max(az, bz) + TOUCH < Math.min(cz, dz) || Math.max(cz, dz) + TOUCH < Math.min(az, bz)) continue;
+    const c = side(ax, az, bx, bz, cx, cz), d = side(ax, az, bx, bz, dx, dz);
+    const e = side(cx, cz, dx, dz, ax, az), f = side(cx, cz, dx, dz, bx, bz);
+    const apart = (u: number, v: number) => u > TOUCH && v < -TOUCH || u < -TOUCH && v > TOUCH;
+    if (apart(c, d) && apart(e, f)) return 'cross';
+    if (!touch && (c * d < 0 && e * f < 0 || Math.min(away(ax, az, bx, bz, cx, cz), away(ax, az, bx, bz, dx, dz),
+      away(cx, cz, dx, dz, ax, az), away(cx, cz, dx, dz, bx, bz)) <= TOUCH)) touch = true;
+  }
+  return touch ? 'touch' : 'none';
+}
+
+/** A point strictly inside a simple ring: the middle of its widest span along the line halfway across its largest gap in Z. */
+function interiorPoint(xy: Float64Array): [number, number] {
+  const levels = Array.from({ length: xy.length / 2 }, (_, i) => xy[i * 2 + 1]).sort((a, b) => a - b);
+  let z = levels[0], gap = -1;
+  for (let i = 0; i + 1 < levels.length; i++) {
+    if (levels[i + 1] - levels[i] > gap) { gap = levels[i + 1] - levels[i]; z = levels[i] + gap / 2; }
+  }
+  const xs: number[] = [];
+  for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+    const za = xy[j + 1], zb = xy[i + 1];
+    if ((za > z) !== (zb > z)) xs.push(xy[j] + (z - za) / (zb - za) * (xy[i] - xy[j]));
+  }
+  xs.sort((a, b) => a - b);
+  let x = xs[0] ?? xy[0], width = -1;
+  for (let i = 0; i + 1 < xs.length; i += 2) {
+    if (xs[i + 1] - xs[i] > width) { width = xs[i + 1] - xs[i]; x = xs[i] + width / 2; }
+  }
+  return [x, z];
 }
 
 function inside(x: number, z: number, xy: Float64Array): boolean {
@@ -149,24 +188,55 @@ function footprints(g: Geometry, selected: Uint8Array | null): Ring[] {
     }
     edgeBase += count;
   }
+  const plane = (i: number, j: number) => Math.abs(loops[i].y - loops[j].y) <= Math.max(loops[i].tolerance, loops[j].tolerance);
+  const names = (i: number, j: number) => {
+    const a = loops[i].edges[0].prim, b = loops[j].edges[0].prim;
+    return a === b ? `primitive ${a}` : `primitives ${Math.min(a, b)} and ${Math.max(a, b)}`;
+  };
+  const bounds = loops.map((loop) => {
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < loop.xy.length; i += 2) {
+      minX = Math.min(minX, loop.xy[i]); maxX = Math.max(maxX, loop.xy[i]);
+      minZ = Math.min(minZ, loop.xy[i + 1]); maxZ = Math.max(maxZ, loop.xy[i + 1]);
+    }
+    return { minX, minZ, maxX, maxZ };
+  });
+  // Each shape (an outer contour and its holes) is skeletonised on its own, so separate shapes may touch, as
+  // lots split from one block do. A contour inside another must not touch it, and no two contours may cross.
+  const samples = loops.map((loop) => interiorPoint(loop.xy));
+  const touching = new Set<number>();
   for (let i = 0; i < loops.length; i++) for (let j = i + 1; j < loops.length; j++) {
-    if (Math.abs(loops[i].y - loops[j].y) > Math.max(loops[i].tolerance, loops[j].tolerance)) continue;
-    if (contoursTouch(loops[i].xy, loops[j].xy))
-      throw new NodeError(`straight_skeleton: contours from primitives ${loops[i].edges[0].prim} and ${loops[j].edges[0].prim} intersect or touch; separate their boundaries`);
+    if (!plane(i, j)) continue;
+    const a = bounds[i], b = bounds[j];
+    const reach = TOUCH * Math.max(a.maxX, b.maxX) - TOUCH * Math.min(a.minX, b.minX) + TOUCH * Math.max(a.maxZ, b.maxZ) - TOUCH * Math.min(a.minZ, b.minZ);
+    if (a.maxX + reach < b.minX || b.maxX + reach < a.minX || a.maxZ + reach < b.minZ || b.maxZ + reach < a.minZ) continue;
+    const how = contact(loops[i].xy, loops[j].xy);
+    if (how === 'cross')
+      throw new NodeError(`straight_skeleton: contours from ${names(i, j)} cross; separate shapes may share edges and corners but must not overlap`);
+    if (how === 'touch') {
+      if (inside(samples[i][0], samples[i][1], loops[j].xy) || inside(samples[j][0], samples[j][1], loops[i].xy))
+        throw new NodeError(`straight_skeleton: contours from ${names(i, j)} touch and one lies inside the other; a hole must lie strictly inside its outer contour`);
+      touching.add(i * loops.length + j);
+    }
   }
   // A smallest containing loop is the parent. Even/odd nesting handles islands inside courtyards too.
   for (let i = 0; i < loops.length; i++) {
     let best = Infinity;
     for (let j = 0; j < loops.length; j++) {
-      if (i === j || Math.abs(loops[j].y - loops[i].y) > Math.max(loops[i].tolerance, loops[j].tolerance)) continue;
+      if (i === j || !plane(i, j)) continue;
       const size = loops[j].logArea;
-      if (size > loops[i].logArea && size < best && inside(loops[i].xy[0], loops[i].xy[1], loops[j].xy)) {
+      if (size > loops[i].logArea && size < best && inside(samples[i][0], samples[i][1], loops[j].xy)) {
         loops[i].parent = j; best = size;
       }
     }
   }
   for (const loop of loops) {
     for (let parent = loop.parent; parent >= 0; parent = loops[parent].parent) loop.depth++;
+  }
+  for (const pair of touching) {
+    const i = Math.floor(pair / loops.length), j = pair % loops.length;
+    if (loops[i].depth % 2 && loops[i].parent === loops[j].parent)
+      throw new NodeError(`straight_skeleton: holes from ${names(i, j)} touch; merge them into one hole`);
   }
   return loops;
 }
@@ -300,7 +370,7 @@ defineNode({
   type: 'straight_skeleton',
   category: 'curve',
   summary: 'Straight skeleton, polygon offsets and pitched roofs from planar footprints, including holes.',
-  description: 'Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order. Straight and doubled corners (within 1e-5 of the shape\'s extent of the line between their neighbours) are dropped before the skeleton when the edges around them have the same pitch: one roof face spans them, its eave still runs through every footprint point, and its edge number is the first of the merged edges.',
+  description: 'Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Each shape (an outer contour and its holes) is processed on its own, so separate shapes may share edges and corners, as lots split from one block do; a hole must lie strictly inside its outer contour, and no two contours may cross. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order. Straight and doubled corners (within 1e-5 of the shape\'s extent of the line between their neighbours) are dropped before the skeleton when the edges around them have the same pitch: one roof face spans them, its eave still runs through every footprint point, and its edge number is the first of the merged edges.',
   inputs: [{ name: 'footprint', desc: 'Closed planar footprints, with nested contours for holes.' }],
   params: {
     mode: { type: 'enum', default: 'skeleton', options: ['skeleton', 'offset', 'roof'], desc: 'Emit skeleton and contour arcs, offset contours, or roof faces.' },
