@@ -83,7 +83,7 @@
   "nodes": {
     "map": {
       "type": "heightfield",
-      "note": "about 256 cells a side, the side rounded to whole tiles of whole cells; the cell is a power of two in metres because warped heightfield_noise gives a tile up to 4.5 cm other heights than its map where the cell is not exact in binary (without warp they match at any cell)",
+      "note": "about 256 cells a side, the side rounded to whole tiles of whole cells; the cell is a power of two in metres because warped heightfield_noise gives a tile up to 4.5 cm other heights than its map where the cell is not exact in binary (F-123; without warp they match at any cell)",
       "params": {
         "size": [
           "=tiles * Math.round(map_size / tiles / Math.pow(2, Math.round(Math.log2(map_size / 256)))) * Math.pow(2, Math.round(Math.log2(map_size / 256)))",

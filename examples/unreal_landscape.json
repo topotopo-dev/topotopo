@@ -122,6 +122,7 @@
       "in": [
         "core"
       ],
+      "note": "the comment avoids the name of the var height: the layer-name warning also reads comments (F-118)",
       "params": {
         "expression": "// a peak with concave flanks under the ridges (0..1 here, metres further on)\nconst s = (samples - 1) * spacing, r = Math.hypot(x / 1.35, z + 0.06 * s) / s;\nreturn 1.0 * pow(clamp(1 - r / 0.45, 0, 1), 1.6);"
       }
@@ -230,7 +231,7 @@
       "in": [
         "eroded"
       ],
-      "note": "one node per layer: heightfield_layer delete takes a single layer name, and a space-separated list silently deletes nothing",
+      "note": "one node per layer: heightfield_layer delete takes a single layer name, and a list silently deletes nothing (F-119)",
       "params": {
         "operation": "delete",
         "layer": "mask"
@@ -480,7 +481,7 @@
         "tree_pts",
         "road_strip"
       ],
-      "note": "xyzdist to the road strip, not to the course: xyzdist returns NaN on an open polyline",
+      "note": "xyzdist to the road strip, not to the course: xyzdist returns NaN on an open polyline (F-116)",
       "params": {
         "run_over": "points",
         "code": "// a random size and heading; oaks low down, conifers higher up, none above the tree line\n@pscale = fit(rand(@ptnum, seed, 7), 0, 1, 0.75, 1.25);\nf@yaw = 360 * rand(@ptnum, seed, 6);\nconst up = clamp(@height / height, 0, 1), oak = 0.5 - 0.45 * up, u = rand(@ptnum, seed, 5);\nconst v = u < oak ? 'oak' : u < oak + (1 - oak) * 0.5 ? 'pine' : 'fir';\ns@variant = v;\n// whole trees on the map and clear of the road (input 1, flat at y = 0): how far the corners of each tree's box\n// reach from its trunk in X and Z, at scale 1\nconst r = { pine: 2.7, fir: 3.5, oak: 4.4 }[v] * @pscale, edge = (samples - 1) * spacing / 2 - r;\nconst onRoad = road && xyzdist(1, [@P.x, 0, @P.z]) < r;\nif (Math.abs(@P.x) > edge || Math.abs(@P.z) > edge || onRoad || up > 0.78 + 0.15 * rand(@ptnum, seed, 4)) removepoint(0, @ptnum);"
@@ -612,7 +613,7 @@
         "tree_copies",
         "ground_grid"
       ],
-      "note": "no assert compares points with a heightfield surface, so the ground under each instance is read from the grid here",
+      "note": "no assert compares points with a terrain surface, so the ground under each instance is read from the grid here (F-120)",
       "params": {
         "run_over": "points",
         "code": "// how far each tree stands above (+) or below (-) the ground under it\nconst n = Math.round(Math.sqrt(npoints(1))), o = point(1, 'P', 0), cell = point(1, 'P', 1)[0] - o[0];\nconst fx = (@P.x - o[0]) / cell, fz = (@P.z - o[2]) / cell;\nconst i = clamp(Math.floor(fx), 0, n - 2), j = clamp(Math.floor(fz), 0, n - 2), u = fx - i, v = fz - j;\nconst h = (a, b) => point(1, 'P', (j + b) * n + i + a)[1];\nconst y = u >= v ? h(0, 0) + u * (h(1, 0) - h(0, 0)) + v * (h(1, 1) - h(1, 0)) : h(0, 0) + v * (h(0, 1) - h(0, 0)) + u * (h(1, 1) - h(0, 1));\nf@ground_gap = @P.y - y;"
@@ -637,7 +638,7 @@
         "tree_grounded",
         "road_strip"
       ],
-      "note": "distance to the road strip (polygons), not to the course: xyzdist and closest return NaN / prim -1 on an open polyline, and an attrib range assert lets NaN pass",
+      "note": "distance to the road strip (polygons), not to the course: xyzdist and closest return NaN on an open polyline (F-116); the reach comes from packedbounds and transform, the exact box, as primintrinsic bounds on a packed prim is a looser one (F-125)",
       "params": {
         "run_over": "prims",
         "code": "// how far each instance keeps clear of the road (m): its distance from the centre line in X and Z, less half the\n// road's width and the reach of its box (the source's own box, turned, tilted and scaled as placed)\nconst b = primintrinsic(0, 'packedbounds', @primnum), m = primintrinsic(0, 'transform', @primnum).flat();\nlet reach = 0;\nfor (const x of [b[0], b[1]]) for (const y of [b[2], b[3]]) for (const z of [b[4], b[5]])\n  reach = Math.max(reach, Math.hypot(x * m[0] + y * m[3] + z * m[6], x * m[2] + y * m[5] + z * m[8]));\nconst p = point(0, 'P', primpoints(0, @primnum)[0]);\nf@road_gap = road ? xyzdist(1, [p[0], 0, p[2]]) - reach : 1e9; // no road: nothing to keep clear of"
@@ -684,7 +685,7 @@
         "rock_pts",
         "road_strip"
       ],
-      "note": "xyzdist to the road strip, not to the course: xyzdist returns NaN on an open polyline",
+      "note": "xyzdist to the road strip, not to the course: xyzdist returns NaN on an open polyline (F-116)",
       "params": {
         "run_over": "points",
         "code": "// three shapes, a random size and heading\n@pscale = fit(rand(@ptnum, seed, 11), 0, 1, 0.7, 1.6);\nf@yaw = 360 * rand(@ptnum, seed, 10);\nconst v = pick(['boulder', 'slab', 'stone'], rand(@ptnum, seed, 9));\ns@variant = v;\n// whole rocks on the map and clear of the road (input 1, flat at y = 0): how far the corners of each rock's box reach\n// from its centre, tilted any way, at scale 1\nconst r = { boulder: 2.75, slab: 2.7, stone: 1.85 }[v] * @pscale, edge = (samples - 1) * spacing / 2 - r;\nconst onRoad = road && xyzdist(1, [@P.x, 0, @P.z]) < r;\nif (Math.abs(@P.x) > edge || Math.abs(@P.z) > edge || onRoad) removepoint(0, @ptnum);"
@@ -791,7 +792,7 @@
         "rock_copies",
         "ground_grid"
       ],
-      "note": "no assert compares points with a heightfield surface, so the ground under each instance is read from the grid here",
+      "note": "no assert compares points with a terrain surface, so the ground under each instance is read from the grid here (F-120)",
       "params": {
         "run_over": "points",
         "code": "// how far each rock stands above (+) or below (-) the ground under it\nconst n = Math.round(Math.sqrt(npoints(1))), o = point(1, 'P', 0), cell = point(1, 'P', 1)[0] - o[0];\nconst fx = (@P.x - o[0]) / cell, fz = (@P.z - o[2]) / cell;\nconst i = clamp(Math.floor(fx), 0, n - 2), j = clamp(Math.floor(fz), 0, n - 2), u = fx - i, v = fz - j;\nconst h = (a, b) => point(1, 'P', (j + b) * n + i + a)[1];\nconst y = u >= v ? h(0, 0) + u * (h(1, 0) - h(0, 0)) + v * (h(1, 1) - h(1, 0)) : h(0, 0) + v * (h(0, 1) - h(0, 0)) + u * (h(1, 1) - h(0, 1));\nf@ground_gap = @P.y - y;"
@@ -816,7 +817,7 @@
         "rock_grounded",
         "road_strip"
       ],
-      "note": "distance to the road strip (polygons), not to the course: xyzdist and closest return NaN / prim -1 on an open polyline, and an attrib range assert lets NaN pass",
+      "note": "distance to the road strip (polygons), not to the course: xyzdist and closest return NaN on an open polyline (F-116); the reach comes from packedbounds and transform, the exact box, as primintrinsic bounds on a packed prim is a looser one (F-125)",
       "params": {
         "run_over": "prims",
         "code": "// how far each instance keeps clear of the road (m): its distance from the centre line in X and Z, less half the\n// road's width and the reach of its box (the source's own box, turned, tilted and scaled as placed)\nconst b = primintrinsic(0, 'packedbounds', @primnum), m = primintrinsic(0, 'transform', @primnum).flat();\nlet reach = 0;\nfor (const x of [b[0], b[1]]) for (const y of [b[2], b[3]]) for (const z of [b[4], b[5]])\n  reach = Math.max(reach, Math.hypot(x * m[0] + y * m[3] + z * m[6], x * m[2] + y * m[5] + z * m[8]));\nconst p = point(0, 'P', primpoints(0, @primnum)[0]);\nf@road_gap = road ? xyzdist(1, [p[0], 0, p[2]]) - reach : 1e9; // no road: nothing to keep clear of"
@@ -865,7 +866,7 @@
       "in": [
         "road_strip"
       ],
-      "note": "a ribbon swept with up +Y faces -Y: turned to face up, as Unreal draws only the front"
+      "note": "a ribbon swept with up +Y faces -Y, and Unreal draws only the front, so it is turned to face up (F-117): remove this node when F-117 lands (road_lay then reads road_strip)"
     },
     "road_lay": {
       "type": "wrangle",
