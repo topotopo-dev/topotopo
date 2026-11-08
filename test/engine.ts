@@ -715,6 +715,12 @@ section('graph version field');
   check(any.ok, 'a graph cooks whatever version it says');
   const badV = await engine.cook({ version: -1 as any, nodes: { b: { type: 'box' } } });
   check(!badV.ok && badV.errors.some((e) => /"version" must be a non-negative integer/.test(e.message)), 'a malformed version is an error');
+  // "output" names a node; a published output's name there is answered with the node to write
+  const byName = await engine.cook({ nodes: { a: { type: 'box' }, b: { type: 'sphere' } }, output: 'kit', outputs: { kit: { node: 'a' } } });
+  const typo = await engine.cook({ nodes: { box1: { type: 'box' } }, output: 'boxl' });
+  check(!byName.ok && byName.errors[0]?.message === `output "kit" is the name of a published output, not a node: "output" names the default output's node, so write "output": "a" (outputs.kit.node)`
+    && !typo.ok && typo.errors[0]?.message === 'output "boxl" is not a node' && typo.errors[0]?.hint === 'box1',
+    `"output" naming a published output says which node to write (${byName.errors[0]?.message}); any other name is not a node, with near names`);
 
   const wsDir = path.join(tmp, 'ws');
   fs.mkdirSync(path.join(wsDir, 'graphs'), { recursive: true });

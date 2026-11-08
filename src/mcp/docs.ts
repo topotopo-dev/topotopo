@@ -215,7 +215,8 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
 - The viewer shows each cook as it runs (the node, the time) and has a Stop button: a cook a person stopped fails with
   "cook stopped" at the node it stopped at. That is their decision, not an error to retry: ask before cooking it again.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
-- Output node: "output", else a node named out/OUT, else the last unconnected node.
+- Output node: "output" (a node's name; for a published output write its node, outputs.<name>.node), else a node
+  named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
   the default. Publish complete assets and useful separate parts; the viewer isolates each on click and lists
   its textures/layers. In a package that publishes versions they are its outputs; "publish": false keeps one (a viewer-only

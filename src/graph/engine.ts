@@ -698,8 +698,13 @@ export class Engine {
       errors.push({ node: path || '(graph)', message: targetError(graph.export)! });
     else if (graph.export !== undefined && targetWarning(graph.export)) warnings.push({ node: path || '(graph)', message: targetWarning(graph.export)! });
     if (!names.length) errors.push({ node: path || '(graph)', message: 'graph has no nodes' });
-    if (graph.output && !graph.nodes[graph.output])
-      errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });
+    if (graph.output && !graph.nodes[graph.output]) {
+      // "output" is a node; the name of a published output there is answered with the node to write
+      const named = graph.outputs && Object.hasOwn(graph.outputs, graph.output) ? graph.outputs[graph.output] : undefined;
+      if (named && typeof named === 'object' && typeof named.node === 'string')
+        errors.push({ node: path || '(graph)', message: `output "${graph.output}" is the name of a published output, not a node: "output" names the default output's node, so write "output": "${named.node}" (outputs.${graph.output}.node)` });
+      else errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });
+    }
     if (graph.version !== undefined && !(Number.isInteger(graph.version) && graph.version >= 0))
       errors.push({ node: path || '(graph)', message: `"version" must be a non-negative integer, got ${JSON.stringify(graph.version)}` });
     if (graph.strict !== undefined && typeof graph.strict !== 'boolean')
