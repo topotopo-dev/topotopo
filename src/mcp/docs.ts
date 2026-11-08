@@ -1512,8 +1512,18 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
-  prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
-  uncompressed GLB.
+  prims), meshes (instance rows: also write one GLB per source, default true), maps "embed" | "external" | "none"
+  (glb / gltf texture maps, MAPS below). For Unreal and Blender keep the default uncompressed GLB.
+MAPS (glb / gltf; CLI --maps, export targets and the export tool "maps"): where the images of the materials go.
+  embed (default): inside the file. Self-contained, but every module carries full copies of the maps it uses.
+  external: each distinct image is written once as <image>-<hash>.png (or .jpg) in a shared maps/ folder and the glTF
+    references it by relative URI: maps/ beside the export file, and exports/maps/ for export targets (--export-all,
+    the viewer's Export, export {all:true}), so every output of a package reuses the same files and a run writes each
+    map once. The name carries the image's content hash, so two images never overwrite each other and an unchanged map
+    is not written again; a changed map gets a new file (clear maps/ and export again to drop the old ones).
+  none: no images and no texture slots: material names and factors only (each material as if it had no maps: its own
+    base colour, roughness and metallic; the material extras still name its maps). For an engine that supplies the maps
+    by material name; the glTF stays small and nothing is read or encoded.
 SOURCE: every export (export tool, export targets and the viewer's Export and Download buttons, the CLI's --export and
   --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
   cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars

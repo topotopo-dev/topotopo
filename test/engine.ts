@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine, geoBytes, resolveTime, STOPPED } from '../src/graph/engine.ts';
@@ -895,7 +896,7 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const s = man?.source;
   check(man?.format === 'topotopo-export-source' && JSON.stringify(man.files) === '["land.glb"]' && s.graph === 'land' && s.output === 'mesh' && s.node === 'ground'
     && s.frame === 1 && s.fps === 24 && JSON.stringify(s.vars) === '{"count":10,"relief":5,"seed":3}' && JSON.stringify(s.seeds) === '{"hills":"=seed","pts":2}'
-    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y","vertex_colors":false}}'
+    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","maps":"embed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y","vertex_colors":false}}'
     && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
     `the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format and every option with its default, graph hash, version (${JSON.stringify(s?.export)})`);
   const glb = fs.readFileSync(path.join(dir, 'a', 'land.glb'));
@@ -980,6 +981,76 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const part = cli(mixed, '--output', 'bad', '--export', m('bad.glb'), '--output', 'good', '--export', m('good.glb'));
   check(part.status === 1 && fs.existsSync(m('good.glb')) && !fs.existsSync(m('bad.glb')) && /1 of 2 outputs in one run, [\d.]+ s; did not cook: bad/.test(part.stdout),
     `several --output: an output that does not cook is named, the others are still written, and the run fails (${part.stdout.split('\n').filter((l) => /outputs in one run/.test(l)).join('')})`);
+}
+
+section('CLI export maps: embed, external (a shared folder, each map once), none');
+{
+  // a package whose outputs share one textured material: export targets with maps "external" share exports/maps/
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const validator = createRequire(import.meta.url)('gltf-validator');
+  const dir = path.join(tmp, 'maps-pkg');
+  fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'maps-pkg.topo'), JSON.stringify({ title: 'maps', graph: 'kit' }));
+  const g = path.join(dir, 'graphs', 'kit.json');
+  const textured = (shape: string) => ({ [`${shape}_uv`]: { type: 'uv_project', in: [shape], params: { method: 'box' } }, [`${shape}_m`]: { type: 'material', in: [`${shape}_uv`, 'brick'], params: { from: 'brick' } } });
+  fs.writeFileSync(g, JSON.stringify({
+    nodes: {
+      col: { type: 'tex_pattern', params: { resolution: 32, name: 'brick_color' } },
+      nrm: { type: 'tex_normal_from_height', in: ['col'], params: { name: 'brick_normal' } },
+      maps: { type: 'merge', in: ['col', 'nrm'] },
+      brick: { type: 'texture_to_material', in: { images: 'maps' }, params: { material: 'brick', base_color: 'brick_color', normal: 'brick_normal', roughness_value: 0.7 } },
+      box: { type: 'box' }, ball: { type: 'sphere' }, plain: { type: 'box' },
+      ...textured('box'), ...textured('ball'), ...textured('plain'),
+    },
+    output: 'box_m',
+    outputs: {
+      crate: { node: 'box_m', export: { format: 'glb', maps: 'external' } },
+      ball: { node: 'ball_m', export: { format: 'glb', path: 'round/ball.glb', maps: 'external' } },
+      bare: { node: 'plain_m', export: { format: 'gltf', maps: 'none' } },
+    },
+  }));
+  const ex = (...f: string[]) => path.join(dir, 'exports', ...f);
+  const glbJSON = (b: Uint8Array) => JSON.parse(new TextDecoder().decode(b.subarray(20, 20 + new DataView(b.buffer, b.byteOffset).getUint32(12, true))));
+  const validate = async (file: string) => {
+    const bytes = new Uint8Array(fs.readFileSync(file));
+    const rep = await validator.validateBytes(bytes, { maxIssues: 50, writeTimestamp: false, externalResourceFunction: (uri: string) => {
+      const at = path.resolve(path.dirname(file), decodeURIComponent(uri));
+      return fs.existsSync(at) ? Promise.resolve(new Uint8Array(fs.readFileSync(at))) : Promise.reject(new Error(`no ${uri}`));
+    } });
+    return { errors: rep.issues.numErrors as number, codes: [...new Set(rep.issues.messages.filter((m: any) => m.severity === 0).map((m: any) => m.code))].join(',') };
+  };
+  const all = cli(g, '--export-all');
+  const shared = fs.existsSync(ex('maps')) ? fs.readdirSync(ex('maps')).sort() : [];
+  const crate = glbJSON(new Uint8Array(fs.readFileSync(ex('crate.glb')))), ball = glbJSON(new Uint8Array(fs.readFileSync(ex('round', 'ball.glb'))));
+  check(all.status === 0 && shared.length === 2 && shared.every((f) => /^brick_(color|normal)-[0-9a-f]{12}\.png$/.test(f))
+    && JSON.stringify(crate.images.map((i: any) => i.uri).sort()) === JSON.stringify(shared.map((f) => `maps/${f}`))
+    && JSON.stringify(ball.images.map((i: any) => i.uri).sort()) === JSON.stringify(shared.map((f) => `../maps/${f}`))
+    && crate.images.every((i: any) => i.bufferView === undefined),
+    `--export-all with maps "external": both outputs reference the 2 maps of exports/maps/ by relative URI and none is inside a GLB (${all.status ? all.stderr.trim() : shared.join(', ')})`);
+  const v1 = await validate(ex('crate.glb')), v2 = await validate(ex('round', 'ball.glb'));
+  check(v1.errors === 0 && v2.errors === 0, `the glTF validator reads the external maps: 0 errors (${v1.errors} ${v1.codes}; ${v2.errors} ${v2.codes})`);
+  const bare = JSON.parse(fs.readFileSync(ex('bare.gltf'), 'utf8'));
+  const vb = await validate(ex('bare.gltf'));
+  check(!bare.images && !bare.textures && bare.materials.some((m: any) => m.name === 'brick' && !m.normalTexture && !m.pbrMetallicRoughness.baseColorTexture && m.pbrMetallicRoughness.roughnessFactor === 0.7) && vb.errors === 0,
+    `maps "none": material names and factors, no images or texture slots, validator clean (${vb.errors} ${vb.codes})`);
+  const rec = (f: string) => JSON.parse(fs.readFileSync(f + '.source.json', 'utf8'));
+  check(rec(ex('crate.glb')).source.export.options.maps === 'external' && rec(ex('bare.gltf')).source.export.options.maps === 'none'
+    && JSON.stringify([rec(ex('crate.glb')).files[0], ...rec(ex('crate.glb')).files.slice(1).sort()]) === JSON.stringify(['crate.glb', ...crate.images.map((i: any) => i.uri).sort()])
+    && JSON.stringify([rec(ex('round', 'ball.glb')).files[0], ...rec(ex('round', 'ball.glb')).files.slice(1).sort()]) === JSON.stringify(['ball.glb', ...ball.images.map((i: any) => i.uri).sort()]),
+    `the source records say which maps mode, and list the shared maps by their path from the record (${JSON.stringify(rec(ex('round', 'ball.glb')).files)})`);
+  const stamp = shared.map((f) => fs.statSync(ex('maps', f)).mtimeMs).join();
+  const again = cli(g, '--export-all');
+  check(again.status === 0 && fs.readdirSync(ex('maps')).length === 2 && shared.map((f) => fs.statSync(ex('maps', f)).mtimeMs).join() === stamp,
+    'a second --export-all leaves the unchanged maps as they are');
+  // the CLI flag on a plain --export: maps/ beside the file; embed stays the default and is the biggest
+  const out = (f: string) => path.join(dir, 'out', f);
+  const e1 = cli(g, '--output', 'crate', '--export', out('embed.glb')), e2 = cli(g, '--output', 'crate', '--maps', 'external', '--export', out('ext.glb')), e3 = cli(g, '--output', 'crate', '--maps', 'none', '--export', out('none.glb'));
+  const size = (f: string) => fs.statSync(out(f)).size;
+  check(e1.status === 0 && e2.status === 0 && e3.status === 0 && glbJSON(new Uint8Array(fs.readFileSync(out('embed.glb')))).images.length === 2 && fs.readdirSync(out('maps')).length === 2
+    && size('ext.glb') < size('embed.glb') && size('none.glb') < size('ext.glb') && /\+ 2 maps in maps\//.test(e2.stdout),
+    `--maps embed (default, ${size('embed.glb')} B) | external (${size('ext.glb')} B + maps/ beside it) | none (${size('none.glb')} B)`);
+  const bad = cli(g, '--output', 'crate', '--maps', 'linked', '--export', out('bad.glb'));
+  check(bad.status === 1 && /--maps must be one of embed, external, none/.test(bad.stderr), `--maps with another value is refused (${bad.stderr.trim()})`);
 }
 
 section('CLI heightfield render resolution');

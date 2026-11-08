@@ -588,6 +588,24 @@ let tg: Geometry;
   check(again.byteLength > 10000 && !warns.length, 're-exporting the imported GLB embeds the textures again');
   const gltfText = new TextDecoder().decode(await exportGeometryAsync(tg, 'gltf', {}));
   check((JSON.parse(gltfText).images ?? []).length === 3 && gltfText.includes('data:image/png;base64,'), '.gltf embeds the images as data URIs (stored PNG blocks without deflate)');
+  // maps: embed (default), external (one file per distinct image, by relative URI), none (materials without images);
+  // the validator reads the external files and finds no error in any mode
+  for (const maps of ['embed', 'external', 'none'] as const) for (const format of ['glb', 'gltf'] as const) {
+    const at = path.join(tmp, 'maps', maps, `brick.${format}`);
+    const res = await exportFilesAsync(tg, format, at, { maps, deflate: (d) => zlib.deflateSync(d) });
+    const byPath = new Map(res.files.map((f) => [path.resolve(f.path), f.bytes]));
+    const rep = await validator.validateBytes(res.files[0].bytes, { maxIssues: 50, writeTimestamp: false, externalResourceFunction: (uri: string) => {
+      const b = byPath.get(path.resolve(path.dirname(at), decodeURIComponent(uri)));
+      return b ? Promise.resolve(b) : Promise.reject(new Error(`no ${uri}`));
+    } });
+    const main = res.files[0].bytes;
+    const j = JSON.parse(new TextDecoder().decode(format === 'glb' ? main.subarray(20, 20 + new DataView(main.buffer, main.byteOffset).getUint32(12, true)) : main));
+    const imgs = j.images ?? [];
+    const shape = maps === 'embed' ? imgs.length === 3 && res.files.length === 1
+      : maps === 'external' ? imgs.length === 3 && res.files.length === 4 && imgs.every((i: any) => /^maps\/brick_(color|normal|orm)-[0-9a-f]{12}\.png$/.test(i.uri) && i.bufferView === undefined)
+      : !imgs.length && !j.textures && res.files.length === 1 && !j.materials[0].normalTexture && !j.materials[0].occlusionTexture;
+    check(rep.issues.numErrors === 0 && shape, `maps ${maps}, ${format}: ${imgs.length} image(s), ${res.files.length} file(s), validator ${rep.issues.numErrors} errors${rep.issues.numErrors ? ` (${rep.issues.messages.filter((m: any) => m.severity === 0).map((m: any) => m.code).join(', ')})` : ''}`);
+  }
 
   // packed instances of a textured mesh: the images live in the source, exports find them, unpacking carries them once
   const inst = await geo({ ...textured, pts: { type: 'point_grid', params: { counts: [3, 1, 1], size: [4, 0, 0] } }, cp: { type: 'copy_to_points', in: ['mat', 'pts'], params: { pack: true } } }, 'cp');

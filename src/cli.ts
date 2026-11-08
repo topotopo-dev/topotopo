@@ -6,7 +6,7 @@
 //                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--cd auto|ignore|multiply] [--grey] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
 //                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
-//                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
+//                   [--compress meshopt] [--maps embed|external|none] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--vertex-colors] [--no-materials]
 //                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
 //                   (every option of the export tool has a flag; booleans take --name / --no-name)
@@ -164,6 +164,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           --render apply to it alone (a warning says so)',
     '         export options (every option of the export tool; booleans as --name / --no-name):',
     '                         [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '                         [--maps embed|external|none] (glb/gltf texture maps: inside the file (default), once each in a shared maps/ folder referenced by URI (--export-all: exports/maps/), or none: material names and factors only)',
     '                         [--custom-attribs | --no-custom-attribs] (extra numeric attributes; glTF and USD default off, PLY on) [--materials | --no-materials]',
     '                         [--vertex-colors | --no-vertex-colors] (glTF: also write Cd as COLOR_0 on prims with a named material; default off)',
     '                         [--split-by-name | --no-split-by-name] [--precision 32|64] (geo) [--layer height] [--height-min 0] [--height-max 100] [--heightfield 0]',

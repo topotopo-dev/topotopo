@@ -49,6 +49,9 @@
 //   Textures: the material table's texture paths (base colour, normal, roughness) are read with options.readFile and
 //   embedded (PNG / JPEG) as baseColorTexture, normalTexture and metallicRoughnessTexture (roughness = green channel);
 //   a map replaces its factor (baseColorFactor white, roughnessFactor 1). Without readFile the maps are skipped.
+//   Option maps: 'embed' (default) as above; 'external' writes each distinct image once as a file (io/files.ts names it
+//   <image>-<hash>.png in a shared maps folder) referenced by relative URI; 'none' writes no images and no texture slots,
+//   each material with its own factors as if it had no maps (its extras still name the maps).
 //   "image:<name>" paths are image volumes of the geometry (texture nodes), encoded to PNG in memory; an "orm" map is
 //   both the metallicRoughness and the occlusion texture; the material's metallic / roughness are then the factors that multiply it
 //   (texture_to_material sets them to 1, or to the values it was given).
@@ -294,6 +297,8 @@ interface MatState {
   warn?: (msg: string) => void;
   /** PNG compression for images made here (Node: zlib.deflateSync; default stored blocks) */
   deflate?: (d: Uint8Array) => Uint8Array;
+  /** maps 'external': keeps an image as a file and gives the URI to write (ExportOptions.mapFile) */
+  mapFile?: (stem: string, bytes: Uint8Array, mime: string) => string;
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => {
@@ -329,7 +334,9 @@ function textureFor(st: MatState, path: string, made?: { name: string; bytes: Ui
       const base = (made?.name ?? (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, ''))).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
       const ext = mime === 'image/png' ? '.png' : '.jpg';
       let uri = base + ext, k = 1;
-      while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
+      // maps 'external': a file of the shared maps folder, named by its content (one file per distinct image)
+      if (st.mapFile) uri = st.mapFile(base, bytes, mime);
+      else while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
       st.uris.add(uri);
       t = st.doc.createTexture(base).setImage(bytes).setMimeType(mime).setURI(uri);
       const list = st.byLength.get(bytes.length);
@@ -479,6 +486,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const st: MatState = {
     doc, table: useMaterials ? mergeMaterialTables([g, ...g.packedSources]) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material,
     data: o.textureData, textures: new Map(), byLength: new Map(), uris: new Set(), warn: o.warn, deflate: o.deflate,
+    mapFile: o.maps === 'external' ? o.mapFile : undefined,
   };
   let noUV = 0;
   const custom = o.custom === true;
@@ -1019,6 +1027,8 @@ async function exportIO(doc: Document, o: ExportOptions): Promise<HostIO> {
  */
 async function withTextures(g: Geometry, o: ExportOptions): Promise<ExportOptions> {
   if (o.materials === false || o.textureData) return o;
+  // maps 'none': the materials alone, nothing read or encoded (a material without its maps writes its own factors)
+  if (o.maps === 'none') return { ...o, textureData: new Map() };
   const paths = texturePaths(mergeMaterialTables([g, ...g.packedSources]));
   if (!paths.length) return o;
   const data = imageTextureData(g, o.deflate, o.warn, 'glTF');
@@ -1037,7 +1047,33 @@ export async function exportGLB(g: Geometry, o: ExportOptions = {}): Promise<Uin
   if (o.tangents !== 'none') await loadMikkTSpace();
   const doc = gltfDocument(g, o);
   const io = await exportIO(doc, o);
-  return io.writeBinary(doc);
+  if (o.maps !== 'external' || !o.mapFile) return io.writeBinary(doc);
+  // maps 'external': the images stay out of the binary chunk (gltf-transform embeds every image it holds in a GLB), and
+  // each image names its file by URI instead
+  const textures = doc.getRoot().listTextures(), uris = textures.map((t) => t.getURI());
+  for (const t of textures) t.setImage(null as unknown as Uint8Array);
+  return glbWithImageURIs(await io.writeBinary(doc), uris);
+}
+
+/** A GLB whose images (in texture order, written without data) reference their files by these URIs. */
+function glbWithImageURIs(glb: Uint8Array, uris: string[]): Uint8Array {
+  const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLen = dv.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLen)));
+  (json.images ?? []).forEach((im: any, i: number) => { if (uris[i]) im.uri = uris[i]; });
+  const text = new TextEncoder().encode(JSON.stringify(json));
+  const padded = (text.length + 3) & ~3;
+  const rest = glb.subarray(20 + jsonLen);
+  const out = new Uint8Array(20 + padded + rest.length);
+  const ov = new DataView(out.buffer);
+  out.set(glb.subarray(0, 12));
+  ov.setUint32(8, out.length, true);
+  ov.setUint32(12, padded, true);
+  ov.setUint32(16, 0x4e4f534a, true);
+  out.set(text, 20);
+  out.fill(0x20, 20 + text.length, 20 + padded);
+  out.set(rest, 20 + padded);
+  return out;
 }
 
 /** Self-contained .gltf JSON text (buffers embedded as data URIs). */
@@ -1053,7 +1089,8 @@ export async function exportGLTF(g: Geometry, o: ExportOptions = {}): Promise<st
     if (data) b.uri = 'data:application/octet-stream;base64,' + base64(data);
     else delete b.uri; // meshopt fallback buffer: no data
   }
-  for (const im of json.images ?? []) {
+  // maps 'external': the images keep the URIs of their files (io/files.ts writes them)
+  if (o.maps !== 'external' || !o.mapFile) for (const im of json.images ?? []) {
     if (!im.uri || im.uri.startsWith('data:')) continue;
     const data = resources[im.uri];
     if (data) im.uri = `data:${im.mimeType ?? imageMime(data) ?? 'image/png'};base64,` + base64(data);

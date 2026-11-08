@@ -162,9 +162,15 @@ export function replayArgs(s: ExportSource, exportPath: string, flags: (o: Recor
  */
 export function sourceManifestBytes(source: ExportSource, manifestPath: string, files: string[]): Uint8Array {
   const dir = dirOf(manifestPath).replace(/\\/g, '/');
+  // a file beside or below the manifest by its path from there; one elsewhere (a shared maps folder) climbs with ".."
   const rel = (p: string) => {
     const q = p.replace(/\\/g, '/');
-    return dir && q.startsWith(dir + '/') ? q.slice(dir.length + 1) : dir ? q.slice(q.lastIndexOf('/') + 1) : q;
+    if (!dir) return q;
+    if (q.startsWith(dir + '/')) return q.slice(dir.length + 1);
+    const a = dir.split('/'), b = q.split('/');
+    let i = 0;
+    while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+    return i ? [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/') : b[b.length - 1];
   };
   return new TextEncoder().encode(JSON.stringify({ format: 'topotopo-export-source', version: 1, files: files.map(rel), source }, null, 2) + '\n');
 }
