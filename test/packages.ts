@@ -2217,7 +2217,7 @@ section('exporting from a followed working folder: a sibling package with no pub
     `an export target without follow is refused, with it written (${target.split('\n')[0].slice(0, 160)})`);
 }
 
-section('a material read by name from a merge of package material outputs cooks only the outputs that hold it');
+section('a material read by name from a merge of package material outputs leaves out the outputs after the last that holds it');
 {
   // studio/paints: four material outputs, one with a map; a version records the materials each holds
   const PAINTS = path.join(dirs.lib, 'paints');
@@ -2235,16 +2235,32 @@ section('a material read by name from a merge of package material outputs cooks 
   });
   check((await publish(PAINTS, 'paints')).ok && Object.keys(readJSON(path.join(PAINTS, 'versions', '1.0', 'version.json')).outputs.brick.maps).join() === 'brick',
     'a package of four material outputs is published, its version recording the materials of each');
+  // studio/stones: two material outputs whose maps share a name, "tex", with other pixels
+  const STONES = path.join(dirs.lib, 'stones');
+  writePackage(STONES, { name: 'studio/stones' }, {
+    main: {
+      nodes: {
+        stone_tex: { type: 'tex_pattern', params: { resolution: 16, name: 'tex' } },
+        stone: { type: 'texture_to_material', in: [null, 'stone_tex'], params: { material: 'stone', base_color: 'tex' } },
+        slate_tex: { type: 'tex_pattern', params: { resolution: 16, name: 'tex', pattern: 'hex' } },
+        slate: { type: 'texture_to_material', in: [null, 'slate_tex'], params: { material: 'slate', base_color: 'tex' } },
+      },
+      output: 'stone',
+      outputs: { stone: { node: 'stone', kind: 'material' }, slate: { node: 'slate', kind: 'material' } },
+    },
+  });
+  check((await publish(STONES, 'stones')).ok, 'a package of two material outputs whose maps share a name is published');
   const SHOP = path.join(dirs.repo, 'shop');
   writePackage(SHOP, {}, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
   const o = await open(SHOP);
   o.pk.use('studio/paints');
+  o.pk.use('studio/stones');
   const { exportGeometryAsync } = await import('../src/io/export.ts');
   const { readMaterials } = await import('../src/core/materials.ts');
   const kit = (from: string, extra: Record<string, any> = {}): GraphSpec => ({
     nodes: {
       p_red: { type: 'studio/paints/red' }, p_green: { type: 'studio/paints/green' }, p_blue: { type: 'studio/paints/blue' }, p_brick: { type: 'studio/paints/brick' },
-      all: { type: 'merge', in: ['p_red', 'p_green', 'p_blue', 'p_brick'] }, more: { type: 'merge', in: ['all'] },
+      all: { type: 'merge', in: ['p_brick', 'p_red', 'p_green', 'p_blue'] }, more: { type: 'merge', in: ['all'] },
       b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
       m: { type: 'material', in: ['uv', 'more'], params: { from } }, ...extra,
     },
@@ -2256,17 +2272,33 @@ section('a material read by name from a merge of package material outputs cooks 
   const named = await o.engine.cook(kit('brick'));
   const whole = await o.engine.cook(kit('="brick"'));
   check(named.ok && cooked(named) === 'p_brick' && cooked(whole) === 'p_blue,p_brick,p_green,p_red',
-    `from "brick" through two merges cooks only the output that holds it; from as an expression cooks all four (${cooked(named)} | ${cooked(whole)})`);
+    `from "brick", the first of four, through two merges cooks only the output that holds it; from as an expression cooks all four (${cooked(named)} | ${cooked(whole)})`);
   check(named.ok && whole.ok && await glb(named) === await glb(whole) && Object.keys(readMaterials(named.geo!)).join() === 'brick',
     'the result is the same as with every output cooked: the same GLB, the one material and its map');
   const red = await o.engine.cook(kit('red'));
-  check(red.ok && cooked(red) === 'p_red' && readMaterials(red.geo!).red?.baseColor?.[0] === 0.8,
-    `another name in the same engine cooks only its own output (${cooked(red)}; base colour ${JSON.stringify(readMaterials(red.geo!).red?.baseColor)})`);
+  check(red.ok && cooked(red) === 'p_brick,p_red' && readMaterials(red.geo!).red?.baseColor?.[0] === 0.8,
+    `another name, second of four, cooks its output and the one before it, not the two after (${cooked(red)}; base colour ${JSON.stringify(readMaterials(red.geo!).red?.baseColor)})`);
   const merged = await o.engine.cook({ ...kit('red'), output: 'more' });
   check(merged.ok && cooked(merged) === 'p_blue,p_brick,p_green,p_red' && Object.keys(readMaterials(merged.geo!)).length === 4,
     `the merge as the target cooks all four (${cooked(merged)})`);
   const set = await o.engine.cook(kit('red', { p_green: { type: 'studio/paints/green', params: { shade: 0.3 } } }));
-  check(set.ok && cooked(set) === 'p_green,p_red', `an output given params is cooked, as its version's record does not say what it then holds (${cooked(set)})`);
+  check(set.ok && cooked(set) === 'p_brick,p_green,p_red', `an output given params is cooked, as its version's record does not say what it then holds (${cooked(set)})`);
+  const behind = await o.engine.cook(kit('brick', { more: { type: 'merge', in: ['all', 'wax'] }, wax: { type: 'material', params: { name: 'wax' } } }));
+  check(behind.ok && cooked(behind) === 'p_blue,p_brick,p_green,p_red', `a merge inside a merge with an input after it cooks all its outputs, as they could rename that input's maps (${cooked(behind)})`);
+  // an output left out before the one read would change its names: the slate's map is "slate_tex" after the stone's "tex"
+  const pair = (from: string): GraphSpec => ({
+    nodes: {
+      p_stone: { type: 'studio/stones/stone' }, p_slate: { type: 'studio/stones/slate' }, all: { type: 'merge', in: ['p_stone', 'p_slate'] },
+      b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } }, m: { type: 'material', in: ['uv', 'all'], params: { from } },
+    },
+    output: 'm',
+  });
+  const slate = await o.engine.cook(pair('slate')), slateAll = await o.engine.cook(pair('="slate"')), stone = await o.engine.cook(pair('stone'));
+  const maps = (r: CookReport) => (r.geo?.volumes ?? []).map((v) => v.name).join();
+  check(slate.ok && cooked(slate) === 'p_slate,p_stone' && maps(slate) === 'slate_tex' && readMaterials(slate.geo!).slate?.textures?.baseColor === 'image:slate_tex'
+    && await glb(slate) === await glb(slateAll),
+    `the output read after one whose map has its name: both cooked, and its map named as with every output cooked (${cooked(slate)}: ${maps(slate)})`);
+  check(stone.ok && cooked(stone) === 'p_stone' && maps(stone) === 'tex', `the first one read: the one after it left out, its map keeps its name (${cooked(stone)}: ${maps(stone)})`);
   const geo = await o.engine.cook(kit('red', { look: { type: 'merge', in: ['m', 'all'] } }), { target: 'look' });
   check(geo.ok && cooked(geo) === 'p_blue,p_brick,p_green,p_red', `a merge read whole elsewhere in the cook cooks all four (${cooked(geo)})`);
   const typo = await o.engine.cook(kit('brik'));

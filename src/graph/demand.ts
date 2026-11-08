@@ -3,8 +3,12 @@
 // (NodeDef.materialsRead); a merge holds its inputs' materials as they are (NodeDef.passesMaterials), so what is read of
 // it is read of each input. A node read anywhere else (as a geometry, by an expression, as the cook's target) is read
 // whole. A published version records the materials of each material output (its version.json maps: PackageOutput
-// .materials), so a merge whose readers read named materials leaves out a package output that holds none of them, and
-// the output is not cooked at all. Pure: the engine passes how it sees the graph.
+// .materials), so a merge whose readers read named materials leaves out the package outputs after the last input that
+// may hold one of them, and those outputs are not cooked at all. Only after it: a merge gives a later input's maps and
+// materials other names when an earlier input already took theirs (Geometry.merge), so leaving out an earlier input
+// could change the names of what is read; a later one never changes an earlier one's. For the same reason a merge
+// inside a merge is read for names only when every input after it there is left out. Pure: the engine passes how it
+// sees the graph.
 import { resolveParamName } from './params.ts';
 import type { GraphSpec, NodeDef } from './types.ts';
 
@@ -55,6 +59,9 @@ export function materialDemands(g: DemandGraph, target: string): Map<string, Dem
       if (!def.passesMaterials) return 'all';
       const up = demand(r.node);
       if (up === 'all') return 'all';
+      // an input that stays after this one would take its names after this one's: all of this one is then read
+      const wires = g.wiring(r.node), left = inputsNotRead(g, r.node, up);
+      for (let k = r.input + 1; k < wires.length; k++) if (wires[k] && !left.has(k)) return 'all';
       for (const x of up) names.add(x);
     }
     return names;
@@ -72,10 +79,12 @@ function rawParams(params: Record<string, unknown> | undefined, def: NodeDef): (
 }
 
 /**
- * The inputs of a node that passes materials (a merge) a cook can leave out for `demand`: package outputs whose
- * version records their materials, none of them read, cooked with the version's own values (no params set, so the
- * record holds), not bypassed. Their indices. A name read that none of them holds (a misspelt "from", or a material of
- * another input) leaves out nothing, so an error lists every material the merge holds.
+ * The inputs of a node that passes materials (a merge) a cook can leave out for `demand`: the package outputs after the
+ * last input that may hold a material read (an earlier input can rename a later one's maps and materials, so every
+ * input up to that one is cooked), each with a version that records its materials, none of them read, cooked with the
+ * version's own values (no params set, so the record holds), not bypassed. Their indices. A name read that none of the
+ * recorded inputs holds (a misspelt "from", or a material of another input) leaves out nothing, so an error lists
+ * every material the merge holds.
  */
 export function inputsNotRead(g: DemandGraph, node: string, demand: Demand): Set<number> {
   const skip = new Set<number>();
@@ -88,6 +97,12 @@ export function inputsNotRead(g: DemandGraph, node: string, demand: Demand): Set
   });
   const found = new Set([...recorded.values()].flat());
   if ([...demand].some((m) => !found.has(m))) return skip;
-  for (const [i, held] of recorded) if (!held.some((m) => demand.has(m))) skip.add(i);
+  const wires = g.wiring(node);
+  for (let i = wires.length - 1; i >= 0; i--) {
+    if (!wires[i]) continue;
+    const held = recorded.get(i);
+    if (!held || held.some((m) => demand.has(m))) break;
+    skip.add(i);
+  }
   return skip;
 }
