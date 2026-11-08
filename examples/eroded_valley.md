@@ -5,7 +5,7 @@ terrain for a game engine.
 
 ## In
 - size: 100–2000 m, default 400. Side of the square terrain.
-- height: 20–600 m, default 150. From the valley floor to the highest ridge.
+- height: 20–600 m, default 150. The highest ridges stand about this far above the valley floor.
 - erosion: 0–1, default 0.6. How long the rain wears the ground; 0 leaves it raw.
 - river_depth: 0–20 m, default 4. How deep the river cuts into the valley floor.
 - seed: 0–9999, default 1. Changes the mountains, not the look.

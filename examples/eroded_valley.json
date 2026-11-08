@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "A mountain valley worn by rain, as a terrain for a game engine. The ground is a heightfield of 257 × 257 samples over size × size metres: a valley winding along X, its floor falling from the high end (+X) to the low end (-X) between walls of ridged mountains on both sides, from 0 at the lowest point of the river bed to height at the highest ridge. Rain wears it in three steps, all scaled by erosion (0 leaves the ground raw): gullies are cut down the walls where the water gathers (heightfield_flow), sediment fans are laid on the floor where they reach it, and droplet erosion (heightfield_erode) wears the whole ground and settles what it carries. The river follows the valley's centre line on a bed that falls all the way, river_depth below the floor, in a channel of varying width (the river curve's point attribute width, in metres) cut into the floor with sloping banks. Layers: flow (0..1, the water draining through each sample, on a log scale), sediment (metres of fans and settled material) and river (1 under the water, fading up the banks). The river output is that bed as a curve; the preview is the ground as a mesh with a colour map painted from the layers: grass (fresher where water gathers), rock on the slopes, darker gullies, pale fans on the floor, wet gravel on the banks and dark water in the channel. Asserts check that the ground stays between 0 and height and that the river never rises along its course.",
+  "description": "A mountain valley worn by rain, as a terrain for a game engine. The ground is a heightfield of 257 × 257 samples over size × size metres: a valley winding along X, its floor falling from the high end (+X) to the low end (-X) between walls of ridged mountains on both sides, from 0 at the lowest point of the river bed to height at the highest ridge. Rain wears it in three steps, all scaled by erosion (0 leaves the ground raw): gullies are cut down the walls where the water gathers (heightfield_flow), sediment fans are laid on the floor where they reach it, and droplet erosion (heightfield_erode) wears the whole ground and settles what it carries. Last, frost and scree blunt the peaks: a thermal-only erode on the high ground above about half of height sheds the sharpest needles, which can leave the highest ridge a few percent below height. The river follows the valley's centre line on a bed that falls all the way, river_depth below the floor, in a channel of varying width (the river curve's point attribute width, in metres) cut into the floor with sloping banks. Layers: flow (0..1, the water draining through each sample, on a log scale), sediment (metres of fans and settled material) and river (1 under the water, fading up the banks). The river output is that bed as a curve; the preview is the ground as a mesh with a colour map painted from the layers: grass (fresher where water gathers), rock on the slopes, darker gullies, pale fans on the floor, wet gravel on the banks and dark water in the channel. Asserts check that the ground stays between 0 and height and that the river never rises along its course.",
   "params": {
     "size": {
       "type": "float",
@@ -346,7 +346,7 @@
       "in": [
         "bank_edge"
       ],
-      "note": "heightfield_project blends its radius from the cells a polygon stamp covers, which leaves cell-sized steps along the banks; this blur smooths them, and the bed mid-channel stays as stamped",
+      "note": "workaround for F-133: heightfield_project blends its radius from the cells a polygon stamp covers, which leaves cell-sized steps along the banks; this blur smooths them (the bed mid-channel stays as stamped), and can be removed once F-133 lands",
       "params": {
         "radius": "=size / 256 * 2.5",
         "mask_layer": "bank"
@@ -474,10 +474,52 @@
         "output_max": "=height"
       }
     },
+    "crests": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "fit"
+      ],
+      "params": {
+        "feature": "height",
+        "layer": "still",
+        "min_height": "=height * 0.55",
+        "max_height": "=height * 3",
+        "height_falloff": "=height * 0.15",
+        "invert": true
+      }
+    },
+    "weathered": {
+      "type": "heightfield_erode",
+      "in": [
+        "crests"
+      ],
+      "note": "frost and scree: slopes steeper than the talus angle shed material on the high ground only (layer still freezes the rest)",
+      "params": {
+        "iterations": "=Math.round(erosion * 20)",
+        "seed": "=seed",
+        "erosion_rate": 0,
+        "deposition_rate": 0,
+        "rain_density": 0,
+        "thermal_talus_angle": 40.0,
+        "thermal_rate": 0.2,
+        "erosion_radius": "=size / 256 * 3",
+        "freeze_layer": "still"
+      }
+    },
+    "peaks": {
+      "type": "heightfield_layer",
+      "in": [
+        "fit",
+        "weathered"
+      ],
+      "params": {
+        "expression": "// the weathered heights (input 1); the other layers stay as fitted, since the erode rewrites flow and water\nb_height"
+      }
+    },
     "terrain_out": {
       "type": "assert",
       "in": [
-        "fit"
+        "peaks"
       ],
       "params": {
         "label": "height",
