@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "description": "A railing with pipes along a seeded path. The path is a level polyline that winds forward (each heading within 90° of +X, so it never crosses itself), its segments sized so that, once every corner is rounded with corner_radius, it is exactly path_length long. Posts stand evenly along it, at most post_spacing apart, both ends included, each on a base plate and carrying pipe arms; the handrail (its top at rail_height) and a knee rail are swept along the rounded path. Each pipe is an offset of the sharp path on the right side, stacked in rows on the arms (a second column when the rows do not fit under the handrail), with every corner rounded concentric to the railing's (corner_radius plus or minus its distance, never tighter than two pipe radii), so it keeps its distance around the bends.",
+  "params": {
+    "path_length": { "type": "float", "default": 24, "min": 5, "max": 100, "step": 1, "label": "path length", "desc": "length of the path (m)" },
+    "corner_radius": { "type": "float", "default": 0.8, "min": 0, "max": 3, "step": 0.1, "label": "corner radius", "desc": "radius of the path's rounded corners (m); 0 = sharp corners" },
+    "post_spacing": { "type": "float", "default": 1.5, "min": 0.5, "max": 5, "step": 0.1, "label": "post spacing", "desc": "largest distance between two posts (m); the posts are spread evenly" },
+    "rail_height": { "type": "float", "default": 1, "min": 0.6, "max": 1.5, "step": 0.05, "label": "rail height", "desc": "height of the top of the handrail above the path (m)" },
+    "pipes": { "type": "int", "default": 2, "min": 0, "max": 4, "label": "pipes", "desc": "pipes running beside the railing on its right side" },
+    "pipe_radius": { "type": "float", "default": 0.05, "min": 0.02, "max": 0.2, "step": 0.01, "label": "pipe radius", "desc": "radius of every pipe (m)" },
+    "seed": { "type": "int", "default": 1, "min": 0, "max": 9999, "label": "seed", "desc": "random seed of the path's turns" }
+  },
+  "vars": { "path_length": 24, "corner_radius": 0.8, "post_spacing": 1.5, "rail_height": 1, "pipes": 2, "pipe_radius": 0.05, "seed": 1 },
+  "meta": { "render": { "node": "look", "views": ["persp"], "azimuth": 30, "elevation": 30, "size": "1600x900", "shading": "pbr" } },
+  "nodes": {
+    "nothing": { "type": "points", "params": { "positions": [] } },
+    "turns": {
+      "type": "wrangle", "in": ["nothing"],
+      "params": {
+        "run_over": "detail",
+        "code": "// a level polyline along +X: n segments, each heading within 90° of +X; segment lengths add what the rounded corners cut off\nconst R = corner_radius, n = clamp(floor(path_length / max(6, 2.4 * R + 2)), 1, 8);\nconst heading = [0], turn = [];\nfor (let k = 1; k < n; k++) {\n  const h = heading[k - 1], s = rand(k, seed, 1) < 0.5 ? -1 : 1, d = 50 + 40 * rand(k, seed, 2);\n  const h2 = abs(h + s * d) <= 90 ? h + s * d : h - s * d;\n  heading.push(h2); turn.push(h2 - h);\n}\nlet cut = 0;\nfor (const t of turn) { const a = radians(abs(t)); cut += 2 * R * Math.tan(a / 2) - R * a; }\nconst w = []; let wsum = 0;\nfor (let k = 0; k < n; k++) { w.push(0.9 + 0.2 * rand(k, seed, 3)); wsum += w[k]; }\nlet p = [0, 0, 0];\nconst pts = [addpoint(0, p)];\nfor (let k = 0; k < n; k++) {\n  const L = (path_length + cut) * w[k] / wsum, a = radians(heading[k]);\n  p = [p[0] + L * cos(a), 0, p[2] - L * sin(a)];\n  pts.push(addpoint(0, p));\n}\nfor (let k = 0; k <= n; k++) setpointattrib(0, 'turn', pts[k], k > 0 && k < n ? sign(turn[k - 1]) : 0);\naddprim(0, 'polyline', pts);"
+      }
+    },
+    "sharp": { "type": "match_size", "in": ["turns"], "params": { "justify": ["center", "none", "center"] } },
+    "rounded": { "type": "fillet_curve", "in": ["sharp"], "params": { "radius": "=max(corner_radius, 0.001)", "segments": 12 } },
+    "path_curve": { "type": "switch", "in": ["sharp", "rounded"], "params": { "index": "=corner_radius > 0 ? 1 : 0" } },
+    "path_clean": { "type": "attrib_delete", "in": ["path_curve"], "params": { "names": "turn", "groups": "fillet" } },
+    "path_named": { "type": "attrib_create", "in": ["path_clean"], "params": { "name": "name", "class": "prim", "value": "path" } },
+    "path_len": { "type": "measure", "in": ["path_named"], "params": { "measure": "length", "name": "measured_length" } },
+    "path": { "type": "attrib_delete", "in": ["path_len"], "params": { "names": "measured_length" } },
+
+    "post_sites": { "type": "points_along_curve", "in": ["path_len"], "params": { "count": "=ceil(prim('path_len', 0, 'measured_length') / post_spacing - 0.000001) + 1" } },
+    "post_gaps": { "type": "wrangle", "in": ["post_sites"], "params": { "run_over": "points", "code": "// straight distance to the next post along the path\nf@gap = @ptnum + 1 < @numpt ? distance(@P, point(0, 'P', @ptnum + 1)) : 0;" } },
+    "spacing": { "type": "assert", "in": ["post_gaps"], "params": { "label": "spacing", "attrib": "gap", "attrib_class": "point", "attrib_max": "=post_spacing + 0.000001", "min_points": 2 } },
+    "post_frames": { "type": "attrib_delete", "in": ["spacing"], "params": { "names": "gap" } },
+
+    "post": { "type": "tube", "params": { "radius": 0.024, "height": "=rail_height - 0.024", "cols": 12, "center": [0, "=(rail_height - 0.024) / 2", 0] } },
+    "post_named": { "type": "attrib_create", "in": ["post"], "params": { "name": "name", "class": "prim", "value": "post" } },
+    "base_plate": { "type": "box", "params": { "size": [0.12, 0.01, 0.12], "center": [0, 0.005, 0] } },
+    "base_plate_named": { "type": "attrib_create", "in": ["base_plate"], "params": { "name": "name", "class": "prim", "value": "base_plate" } },
+    "pipe_arm": { "type": "box", "params": { "size": ["=detail('pipe_layout', 'reach')", 0.02, 0.04], "center": ["=-detail('pipe_layout', 'reach') / 2", "=detail('pipe_layout', 'base') - 0.01", 0] } },
+    "pipe_arms": { "type": "copy_xform", "in": ["pipe_arm"], "params": { "count": "=detail('pipe_layout', 'rows')", "translate": [0, "=detail('pipe_layout', 'per')", 0], "copy_attrib": "" } },
+    "pipe_arms_named": { "type": "attrib_create", "in": ["pipe_arms"], "params": { "name": "name", "class": "prim", "value": "pipe_arm" } },
+    "post_kit": { "type": "merge", "in": ["post_named", "base_plate_named", "pipe_arms_named"] },
+    "posts": { "type": "copy_to_points", "in": ["post_kit", "post_frames"], "params": { "copy_attrib": "" } },
+
+    "handrail_line": { "type": "transform", "in": ["path_curve"], "params": { "translate": [0, "=rail_height - 0.024", 0] } },
+    "handrail_tube": { "type": "sweep", "in": ["handrail_line"], "params": { "radius": 0.024, "divisions": 16 } },
+    "height": { "type": "assert", "in": ["handrail_tube"], "params": { "label": "height", "expr": "abs(bbox.max.y - rail_height) < 0.0005 && bbox.min.y > rail_height - 0.0485" } },
+    "handrail": { "type": "attrib_create", "in": ["height"], "params": { "name": "name", "class": "prim", "value": "handrail" } },
+    "knee_rail_line": { "type": "transform", "in": ["path_curve"], "params": { "translate": [0, "=0.5 * rail_height", 0] } },
+    "knee_rail_tube": { "type": "sweep", "in": ["knee_rail_line"], "params": { "radius": 0.016, "divisions": 12 } },
+    "knee_rail": { "type": "attrib_create", "in": ["knee_rail_tube"], "params": { "name": "name", "class": "prim", "value": "knee_rail" } },
+
+    "railing_parts": { "type": "merge", "in": ["posts", "handrail", "knee_rail"] },
+    "railing_paint": { "type": "material", "in": ["railing_parts"], "params": { "name": "painted_steel", "base_color": [0.55, 0.57, 0.6], "metallic": 0.3, "roughness": 0.4 } },
+    "railing_tidy": { "type": "group_delete", "in": ["railing_paint"], "params": { "groups": "*" } },
+    "railing": { "type": "assert", "in": ["railing_tidy"], "params": { "label": "closed", "watertight": true, "no_flipped": true } },
+
+    "pipe_layout": {
+      "type": "wrangle", "in": ["sharp"],
+      "params": {
+        "run_over": "detail",
+        "code": "// pipes stacked in rows on the arms, centred below the knee rail; a further column outward when the rows do not fit\nconst r = pipe_radius, gap = max(0.03, 0.5 * r), per = 2 * r + gap;\nconst fit = max(1, floor((0.8 * rail_height - 0.1 + gap) / per)), rows = min(pipes, fit), cols = ceil(pipes / fit);\nf@per = per; i@fit = fit; i@rows = rows;\nf@base = max(0.08, 0.3 * rail_height - (rows * per - gap) / 2);\nf@d0 = 0.024 + 0.03 + r;\nf@reach = pipes > 0 ? @d0 + (cols - 1) * per + r : 0.1;"
+      }
+    },
+    "pipe_runs": {
+      "type": "foreach", "in": ["pipe_layout"],
+      "params": {
+        "mode": "count", "count": "=pipes",
+        "body": {
+          "nodes": {
+            "src": { "type": "input", "params": { "index": 1 } },
+            "beside": { "type": "offset_curve_3d", "in": ["src"], "params": { "distance": "=detail('src', 'd0') + floor(iteration / detail('src', 'fit')) * detail('src', 'per')", "lift": "=detail('src', 'base') + pipe_radius + (iteration % detail('src', 'fit')) * detail('src', 'per')", "frame": "plane" } },
+            "bends": { "type": "wrangle", "in": ["beside"], "params": { "run_over": "points", "code": "// the bend radius of a corner: outside a left turn the pipe is farther out, inside a right turn closer in\nconst D = detail(0, 'd0') + floor(iteration / detail(0, 'fit')) * detail(0, 'per');\nf@bend = @turn > 0 ? corner_radius + D : @turn < 0 ? max(corner_radius - D, 2 * pipe_radius) : 0;" } },
+            "bent": { "type": "fillet_curve", "in": ["bends"], "params": { "radius": 1, "radius_attrib": "bend", "segments": 12 } },
+            "pipe": { "type": "sweep", "in": ["bent"], "params": { "radius": "=pipe_radius", "divisions": 16 } }
+          },
+          "output": "pipe"
+        }
+      }
+    },
+    "pipes_named": { "type": "attrib_create", "in": ["pipe_runs"], "params": { "name": "name", "class": "prim", "value": "pipe" } },
+    "pipes_copper": { "type": "material", "in": ["pipes_named"], "params": { "name": "copper", "base_color": [0.93, 0.6, 0.47], "metallic": 1, "roughness": 0.28 } },
+    "pipes_tidy": { "type": "attrib_delete", "in": ["pipes_copper"], "params": { "names": "turn bend", "groups": "*" } },
+    "pipes_closed": { "type": "assert", "in": ["pipes_tidy"], "note": "assert watertight fails on empty geometry (\"no polygons\"), so with pipes 0 this checks closed through expr instead; use watertight once an empty mesh passes it.", "params": { "label": "closed", "no_flipped": true, "expr": "pipes == 0 ? nprims == 0 : closed && open_pieces == 0 && pieces == pipes" } },
+
+    "look": { "type": "merge", "in": ["railing", "pipes_closed"] }
+  },
+  "output": "railing",
+  "outputs": {
+    "railing": {
+      "node": "railing", "label": "Railing", "kind": "mesh",
+      "tags": ["railing", "handrail", "along-curve", "industrial", "steel"],
+      "description": "Posts on base plates with pipe arms, a handrail and a knee rail along the path, in painted steel."
+    },
+    "pipes": {
+      "node": "pipes_closed", "label": "Pipes", "kind": "mesh",
+      "tags": ["pipes", "copper", "along-curve", "industrial"],
+      "description": "The copper pipes on the right of the railing, bending with it at a constant distance (empty when pipes is 0)."
+    },
+    "path": {
+      "node": "path", "label": "Path", "kind": "curves",
+      "tags": ["path", "curve", "guide"],
+      "description": "The level path with rounded corners that the railing and the pipes follow, exactly path_length long."
+    }
+  }
+}

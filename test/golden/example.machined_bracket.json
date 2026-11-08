@@ -1,0 +1,89 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.075, 0.12, 0.12],
+      "min": [-0.075, 0, 0]
+    },
+    "counts": {
+      "points": 1209,
+      "prims": 1117,
+      "vertices": 4664,
+      "volumes": 3
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "0ddf8e61104d9c2f",
+      "attributes": {
+        "detail.materials": "36e2de3a08260e7c",
+        "prim.material": "6ff1baad6a591c8b",
+        "prim.name": "6abe676e6da17264",
+        "vertex.N": "7056191195d28693",
+        "vertex.uv": "f2fe90a49621206a"
+      },
+      "topology": "20f75fe3a4246021"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 256,
+          "width": 256
+        },
+        "kind": "image",
+        "layers": {
+          "C": "94674ec409607caa"
+        },
+        "name": "brushed_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 256,
+          "width": 256
+        },
+        "kind": "image",
+        "layers": {
+          "C": "3a005432091b1330"
+        },
+        "name": "brushed_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 256,
+          "width": 256
+        },
+        "kind": "image",
+        "layers": {
+          "C": "d19c4ce90b120a87"
+        },
+        "name": "brushed_rough"
+      }
+    ]
+  },
+  "name": "example.machined_bracket",
+  "ok": true,
+  "source": "examples/machined_bracket.json",
+  "warnings": []
+}

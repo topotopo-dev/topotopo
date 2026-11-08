@@ -501,10 +501,7 @@ export const EXAMPLES_PENDING = new Set([
  * without examples/<name>.json or examples/<name>/. test/cards.ts checks their form and fails for any other card without
  * a graph. The list only shrinks: a name here that has its graph, or no card, fails.
  */
-export const CARDS_WAITING = new Set<string>([
-  'asset_cleanup',
-  'machined_bracket', 'rail_along_curve', 'scifi_panel',
-]);
+export const CARDS_WAITING = new Set<string>([]);
 
 /**
  * The example packages: folders of examples/ that are packages of their own (an <id>.topo file and graphs/), such as
