@@ -688,10 +688,11 @@ section('GET /api/geo: the preview GLB of many packed sources and their edge cas
     check(!problems.length, `its chunks, buffer views and accessors are in bounds and aligned (${problems.slice(0, 3).join('; ') || `${bytes.byteLength} bytes`})`);
     const root = await parseGLB(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     const instances = instancesIn(root), pieces = new MeshObject('out', root).pieceCount();
-    // three.js instances triangle meshes only: the rail's few copies (lines) load as one plain line
+    // three.js instances triangle meshes only: the instanced meshes hold polygons, and sources of lines (the rail) or
+    // points alone are written as copies, so every instance three.js sees is an instance the importer reads back
     check(instances >= 990 && pieces > instances, `the page's parseGLB loads it: ${instances} instances, ${pieces} pieces`);
     const back = await importGeometryAsync(bytes, 'glb');
-    check(back.numPacked >= 1000 && back.volumes.length === 0, `the glTF importer reads it back (${back.numPacked} instances)`);
+    check(back.numPacked === instances && back.volumes.length === 0, `the glTF importer reads the instanced meshes back as packed prims (${back.numPacked} of ${instances})`);
     // the web app's baked preview.glb: the same result with EXT_meshopt_compression
     const r = await ws.cook('dress', 'dressed');
     const mo = await previewGLB(r.geo!, { compress: 'meshopt' }), moProblems = glbProblems(mo);
