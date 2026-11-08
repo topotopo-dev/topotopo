@@ -880,7 +880,9 @@ See them: render draws instances (an evenly spread subset above 600k triangles, 
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
 Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",
   TRANSLATION/ROTATION/SCALE per instance, with custom_attribs:true the anchor attributes as _NAME instance accessors
-  (Cd → _COLOR); shear is approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
+  (Cd → _COLOR); shear is approximated with a warning; the instanced mesh holds the source's polygons, as
+  readers instance triangle meshes only: its polylines and loose points are written as copies, its scene empties are left
+  out with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
   positions, orientations, scales, ids, velocities, with custom_attribs:true primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
   csv / points.json → one row per instance (instance stream: Position/Rotation/Scale or P/orient/scale, Mesh column)
   + <name>.meshes.json + one GLB per source; json keeps them losslessly; obj/ply/stl expand them (warned).
