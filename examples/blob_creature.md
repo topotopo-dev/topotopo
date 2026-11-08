@@ -10,7 +10,7 @@ two eyes, as a closed mesh.
 - tail: 0–2, default 0.8. Length of the tail next to the body; 0 leaves it off.
 - blend: 0.02–0.4 m, default 0.15. How softly the parts melt into each other.
 - bumps: 0–1, default 0.2. Lumps on the skin.
-- detail: 0.02–0.1 m, default 0.04. Size of the smallest feature kept.
+- feature_size: 0.02–0.1 m, default 0.04. Size of the smallest feature kept.
 - seed: 0–9999, default 1. Changes the bumps and the pose of the legs.
 
 ## Out

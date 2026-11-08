@@ -4,7 +4,7 @@ A town street ready for a level: a road with kerbs, pavements and lamp posts, a 
 small park with paths, trees and benches on the other.
 
 ## In
-- length: 40–200 m, default 80. Length of the street.
+- street_length: 40–200 m, default 80. Length of the street.
 - road_width: 5–14 m, default 8. Width of the road between the kerbs.
 - house_width: 6–16 m, default 10. Frontage of each house; as many houses as fit along the street.
 - floors: 1–4, default 2. Floors of every house.

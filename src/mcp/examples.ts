@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import type { GraphSpec } from '../graph/types.ts';
 import { KINDS } from '../graph/outputs.ts';
 import { didYouMean } from '../graph/params.ts';
+import { varNameError } from '../graph/vars.ts';
 import { graphLines } from './graphlines.ts';
 
 export interface CardIn {
@@ -110,6 +111,8 @@ export function parseCard(source: string): { card: Card; problems: string[] } {
     const m = new RegExp(`^(${NAME}): (.+)$`).exec(it);
     if (!m) { problems.push(`In: "${it.slice(0, 60)}" is not "name: what it changes, range, default"`); continue; }
     seen('In', m[1], card.inputs);
+    const reserved = varNameError(m[1]);
+    if (reserved) problems.push(`In · ${m[1]}: ${reserved.replace(/rename the var$/, 'rename it')}`);
     const x: CardIn = { name: m[1], text: m[2] };
     const r = /(-?\d+(?:\.\d+)?)\s*(?:–|—|\bto\b)\s*(-?\d+(?:\.\d+)?)/.exec(m[2]);
     if (r) { x.min = Number(r[1]); x.max = Number(r[2]); }

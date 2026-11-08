@@ -4,7 +4,7 @@ A railing and pipes that follow a path: posts at even spacing, a handrail and pi
 corner.
 
 ## In
-- length: 5–100 m, default 24. Length of the path.
+- path_length: 5–100 m, default 24. Length of the path.
 - corner_radius: 0–3 m, default 0.8. How round the path's corners are.
 - post_spacing: 0.5–5 m, default 1.5. Distance between two posts.
 - rail_height: 0.6–1.5 m, default 1. Height of the handrail.

@@ -5,7 +5,7 @@ levels of detail.
 
 ## In
 - source: one of rock or column, default rock. The made-up scan to clean: a lumpy rock or a cracked column.
-- detail: 0.02–0.2 m, default 0.05. Edge length of the cleaned mesh.
+- edge_length: 0.02–0.2 m, default 0.05. Edge length of the cleaned mesh.
 - lods: 1–4, default 3. Levels of detail after the full one.
 - lod_ratio: 0.2–0.8, default 0.5. Share of the triangles each level keeps of the one before.
 - texel_density: 128–2048, default 512. Texture pixels per metre the UVs are laid out for.
@@ -17,7 +17,7 @@ levels of detail.
 
 ## Promises
 - closed: the asset is one closed piece facing out, without holes or tangles.
-- even: no edge is shorter than a fifth of detail.
+- even: no edge is shorter than a fifth of edge_length.
 - uv: every face has uv inside the 0 to 1 square.
 
 ## Look

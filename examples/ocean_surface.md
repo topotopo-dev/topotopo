@@ -9,7 +9,7 @@ where the waves crest.
 - wave_length: 5–100 m, default 30. Distance between the largest swells.
 - choppiness: 0–1, default 0.4. How sharp the crests are.
 - wind_direction: 0–360°, default 30. Where the waves run to.
-- detail: 0.25–4 m, default 1. Distance between the surface's vertices.
+- vertex_spacing: 0.25–4 m, default 1. Distance between the surface's vertices.
 - seed: 0–9999, default 1. Changes the waves, not the sea state.
 
 ## Out

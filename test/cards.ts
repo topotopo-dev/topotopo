@@ -226,6 +226,7 @@ A light brown box standing on the ground.
   await run('no Look', g(), card.replace(/## Look[\s\S]*$/, ''), /^Card: section "## Look" is missing/);
   await run('a slider without a default', g(), card.replace(', default 0.8', ''), /^Card: In · height: no default/);
   await run('a default outside its range', g(), card.replace('default 1.', 'default 4.'), /^Card: In · width: default 4 is outside 0\.3–3/);
+  await run('a slider name the engine keeps for itself', g(), card.replace('- width:', '- length:'), /^Card: In · length: var "length" would hide the helper length/);
   await run('a longer cook with its reason', g(), card + '\n## Cook\nUp to 6 s: it settles the lid over 40 frames.\n', null);
   await run('a cook limit over the most', g(), card + '\n## Cook\nUp to 12 s: it settles the lid over 400 frames.\n', /^Card: Cook: 12 s, a limit above the usual 3 s and at most 10 s/);
   await run('a longer cook without a reason', g(), card + '\n## Cook\nUp to 6 s.\n', /^Card: Cook: say why/);
