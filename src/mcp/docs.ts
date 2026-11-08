@@ -1540,7 +1540,7 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
   packages, no published version; the export is made again only from those folders as they were, and replay passes
   --follow for each; help topic "packages", EXPORTING FROM A WORKING FOLDER),
   export: {format, options: every option the format reads, the given ones and the defaults of the rest}, topotopo (the
-  version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
+  version), engine_sha256 (SHA-256 of the engine's own code: its src/ or dist/ tree, kernels, fonts and package.json)}. png16 / r16 carry it in their .json sidecar, csv / points.json
   instance rows in <name>.meshes.json, unreal_landscape in landscape.json; every other export writes <file>.source.json
   next to the file ({format:"topotopo-export-source", version, files, source}; a textures folder: source.json inside
   it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
@@ -1557,7 +1557,8 @@ EXPORT-ALL (CLI --export-all): cooks and exports each output with an export targ
   exports, not the default output first. In a package, an output is kept as it is when its last export would be made
   the same: its receipt in exports/.outputs.json, every file it wrote still there, and the record's source block equal
   to the one an export would write now but for graph_sha256 and seeds (so its nodes, vars, frame, fps, packages, files
-  of the package, export options and the TopoTopo version). Its line says "unchanged since its last export"; --force
+  of the package, export options and the engine's code: any edit to it, as in a source checkout under one version,
+  exports again). Its line says "unchanged since its last export"; --force
   exports it anyway. A graph in no package exports every output every time (its files are not known).
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with

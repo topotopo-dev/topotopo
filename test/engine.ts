@@ -1109,7 +1109,25 @@ section('CLI --export-all: a line per output, the unchanged ones kept, --force')
   const forced = cli(g, '--var', 'h=3', '--frame', '2', '--export-all', '--force');
   check(/exported 2 of 2 outputs/.test(forced.stdout) && !/unchanged/.test(forced.stdout), '--force exports the unchanged outputs too');
   const rec = JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source;
-  check(/^[0-9a-f]{64}$/.test(rec.nodes_sha256) && /^[0-9a-f]{64}$/.test(rec.files_sha256), `the record holds the hashes it is compared by: nodes_sha256, files_sha256 (${rec.nodes_sha256.slice(0, 12)}, ${rec.files_sha256.slice(0, 12)})`);
+  check(/^[0-9a-f]{64}$/.test(rec.nodes_sha256) && /^[0-9a-f]{64}$/.test(rec.files_sha256) && /^[0-9a-f]{64}$/.test(rec.engine_sha256),
+    `the record holds the hashes it is compared by: nodes_sha256, files_sha256, engine_sha256 (${rec.nodes_sha256.slice(0, 12)}, ${rec.files_sha256.slice(0, 12)}, ${String(rec.engine_sha256).slice(0, 12)})`);
+  // the engine's code, not its version: a copy of this checkout (the same code elsewhere) keeps the exports, an edit
+  // to one of its files under the same version exports again
+  const copy = path.join(tmp, 'engine-copy');
+  fs.cpSync(path.join(root, 'src'), path.join(copy, 'src'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(copy, 'package.json'));
+  for (const d of ['node_modules', 'library', 'kernels', 'assets']) if (fs.existsSync(path.join(root, d))) fs.symlinkSync(path.join(root, d), path.join(copy, d), 'junction');
+  const copyCli = (...args: string[]) => spawnSync(process.execPath, [path.join(copy, 'src', 'cli.ts'), ...args], { cwd: copy, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const sameCode = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  fs.appendFileSync(path.join(copy, 'src', 'nodes', 'generate.ts'), '\n// an engine edit that keeps the version\n');
+  const editedCode = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  const after = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  check(/exported 0 of 2 outputs .*; 2 unchanged/.test(sameCode.stdout) && /exported 2 of 2 outputs/.test(editedCode.stdout) && !/unchanged/.test(editedCode.stdout) && /exported 0 of 2 outputs/.test(after.stdout)
+    && JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source.engine_sha256 !== rec.engine_sha256,
+    `the same engine code elsewhere keeps the exports; an engine file edited under the same version exports every output again (${[sameCode, editedCode, after].map((r) => lines(r).slice(-1)[0] ?? r.stderr.slice(0, 200)).join(' | ')})`);
+  // the links first (unlinking leaves the checkout's folders alone), then the copy
+  for (const d of ['node_modules', 'library', 'kernels', 'assets']) if (fs.lstatSync(path.join(copy, d), { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(path.join(copy, d));
+  fs.rmSync(copy, { recursive: true, force: true });
   // a graph in no package: its files are not known, so every run exports
   const loose = path.join(tmp, 'skip-loose'), lg = path.join(loose, 'one.json');
   fs.mkdirSync(loose, { recursive: true });

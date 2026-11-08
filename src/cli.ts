@@ -86,6 +86,7 @@ import { ArtifactStore } from './host/artifacts.ts';
 import { exportsFolderFor, filesShaFor, prepareTarget, serializeExport, unchangedTarget, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
+import { engineSha256 } from './host/engine-code.ts';
 import { exportOptionsFromFlags, prefixGone, publishedOutputs } from './io/targets.ts';
 import { budgetReport, inspect, nodeBudgetInput, summarize } from './inspect.ts';
 import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
@@ -134,7 +135,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
     '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder; a line per output with its',
     '           kind, time and size. In a package, an output whose last export would be made the same (its nodes, vars, packages, the',
-    '           package\'s other graphs, assets/ and inputs/, options and TopoTopo version, all its files in place) is skipped)',
+    '           package\'s other graphs, assets/ and inputs/, options and the engine code, all its files in place) is skipped)',
     '         [--force] (--export-all: export every output, the unchanged ones too)',
     '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
     '         time limits (environment, milliseconds; also for the MCP server and the viewer): TOPOTOPO_SCRIPT_TIMEOUT_MS (user code: expressions, wrangles, a whole script; default 30000), TOPOTOPO_SIM_TIMEOUT_MS (one cook of a simulation node; default 600000)',
@@ -530,7 +531,7 @@ async function cook() {
       // the export tool's options (the MCP export tool and export targets use the same names and code)
       const a = exportArgs(u);
       const x = await forExport(r);
-      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file), version: TOPOTOPO_VERSION });
+      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file), version: TOPOTOPO_VERSION, engine: engineSha256() });
       const res = await serializeExport(x.geo!, fmt, p, a, engine.host, source);
       for (const w of res.warnings) console.warn(`warning: ${w}`);
       writeExportFiles(res.files);

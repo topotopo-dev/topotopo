@@ -22,6 +22,7 @@ import { topoFiles } from '../session.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
+import { engineSha256 } from './engine-code.ts';
 
 /** The package a path lies in: the nearest folder holding a .topo file, the path's own or one above it; null for none. */
 export function packageFolderOf(p: string): string | null {
@@ -154,7 +155,7 @@ export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOu
   const dest = insideRoot(root, path.join(root, ...p.target.path.split('/')));
   const source = exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
-    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION,
+    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION, engine: engineSha256(),
   });
   // every target of the package shares exports/maps/ (maps "external")
   const r = await serializeExport(geo, p.target.format, dest, p.target.options, host, source, path.join(root, 'maps'));
@@ -176,7 +177,7 @@ export function unchangedTarget(graph: string, p: PublishedOutput & { target: Re
   if (!last || !last.files.every((f) => fs.statSync(f, { throwIfNoEntry: false })?.isFile())) return false;
   const now = withExportOptions(exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
-    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION,
+    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION, engine: engineSha256(),
   }), resolvedExportOptions(p.target.format, p.target.options));
   // the record: the file among them that holds a source block (<file>.source.json or the format's sidecar)
   for (const f of last.files) {

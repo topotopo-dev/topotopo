@@ -27,6 +27,7 @@ import { setInstall } from '../config.ts';
 import { forgetScans } from '../scan.ts';
 import { MANIFEST_EXT } from '../session.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
+import { engineSha256 } from './engine-code.ts';
 import { COOK_PROTOCOL, cachePrune, closeCookPools, cookPackage, freshness, readRecord } from './cook.ts';
 import type { CookJob, CookRecord, EngineOptions, Flavour, Freshness, PackageReport } from './cook.ts';
 import { GODOT_COMMANDS } from './godot-commands.ts';
@@ -240,7 +241,7 @@ export function godotFlavour(project: string): Flavour {
       const o = x.output;
       const options = resolvedExportOptions('glb', { instancing: x.options.instancing });
       const source = exportSource({
-        graph: o.graph, spec: o.spec, node: o.node, output: o.name, frame: 1, fps: 24, format: 'glb', options, packages: x.packages, package: x.packageName, version: TOPOTOPO_VERSION,
+        graph: o.graph, spec: o.spec, node: o.node, output: o.name, frame: 1, fps: 24, format: 'glb', options, packages: x.packages, package: x.packageName, version: TOPOTOPO_VERSION, engine: engineSha256(),
       });
       const bytes = await exportGeometryAsync(geo, 'glb', {
         upAxis: 'y', scale: 1, splitByName: true, custom: false, materials: true, vertexColors: false, compress: 'none', quantize: false, tangents: 'auto',

@@ -29,6 +29,7 @@ import { filesShaFor, prepareTarget, serializeExport, writeExportFiles, writeTar
 import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Host, StopSignal } from '../host/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
+import { engineSha256 } from '../host/engine-code.ts';
 import { program } from '../package.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
@@ -515,7 +516,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
         const source = exportSource({
           graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
-          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), files: filesShaFor(ws.graphFile(name)), version: TOPOTOPO_VERSION,
+          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), files: filesShaFor(ws.graphFile(name)), version: TOPOTOPO_VERSION, engine: engineSha256(),
         });
         const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
         return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name), follow)}`);

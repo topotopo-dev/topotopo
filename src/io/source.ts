@@ -26,6 +26,9 @@
 //                  package's publish name, else its id; the cook replaces a file at an output path only when it names
 //                  this package (or the cook record lists the file)
 //   topotopo       the version that wrote it
+//   engine_sha256  SHA-256 of the engine's own code that wrote it (src/host/engine-code.ts: its src/ or dist/ tree,
+//                  kernels, fonts and package.json), as a source checkout keeps one version through many changes;
+//                  the Node host records it, and an export is never kept as unchanged without it
 // Formats that write a sidecar or manifest carry the block there (png16 / r16: <name>.json; csv / points.json instance
 // rows: <name>.meshes.json; unreal_landscape: its landscape.json); every other export gets <file>.source.json next to
 // it (textures, a folder: source.json inside it), and glb / gltf also carry it in asset.extras.source. Nothing in the
@@ -56,6 +59,8 @@ export interface ExportSource {
   /** the package an engine cook made it for: its publish name, else its id (absent elsewhere) */
   package?: string;
   topotopo: string;
+  /** the engine's code hash (absent when the host did not give it) */
+  engine_sha256?: string;
 }
 
 export interface SourceInput {
@@ -81,6 +86,8 @@ export interface SourceInput {
   files?: string;
   /** the TopoTopo version */
   version: string;
+  /** the engine's code hash (src/host/engine-code.ts engineSha256) */
+  engine?: string;
 }
 
 /** The name of a standalone source manifest: next to the export file it describes. */
@@ -145,6 +152,7 @@ export function exportSource(i: SourceInput): ExportSource {
     export: { format: i.format, options: sorted(i.options ?? {}) },
     ...(i.package ? { package: i.package } : {}),
     topotopo: i.version,
+    ...(i.engine ? { engine_sha256: i.engine } : {}),
   };
 }
 
@@ -186,10 +194,11 @@ export function nodesSha256(spec: GraphSpec, node: string): string {
 /**
  * Whether an export recorded with the block `prev` would be made the same now, as `now`: every field the same but the
  * whole graph's hash and seeds (an edit to other nodes of the graph; its own nodes and seeds are in nodes_sha256).
- * Never without files_sha256 (a graph in no package, whose files are not known).
+ * Never without files_sha256 (a graph in no package, whose files are not known) or engine_sha256 (the engine's code,
+ * which may have changed under the same version).
  */
 export function sameSource(prev: unknown, now: ExportSource): boolean {
-  if (!now.files_sha256 || !prev || typeof prev !== 'object') return false;
+  if (!now.files_sha256 || !now.engine_sha256 || !prev || typeof prev !== 'object') return false;
   const key = (s: object) => { const { graph_sha256: _g, seeds: _s, ...rest } = s as ExportSource; return canonicalJSON(rest); };
   return key(prev) === key(now);
 }

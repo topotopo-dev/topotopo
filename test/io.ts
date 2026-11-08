@@ -31,6 +31,7 @@ import type { GraphSpec } from '../src/graph/types.ts';
 import { prepareTarget, writeTargets } from '../src/host/export-targets.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { TOPOTOPO_VERSION } from '../src/host/version.ts';
+import { engineCodeHash } from '../src/host/engine-code.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -263,11 +264,39 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   check(nodesSha256(withNode('a', { type: 'box', ui: { x: 40 }, note: 'moved' }), 'e') === nodesSha256(parts, 'e') && nodesSha256(withNode('x', { type: 'tube' }), 'e') === nodesSha256(parts, 'e')
     && nodesSha256(withNode('a', { type: 'box', params: { size: 3 } }), 'e') !== nodesSha256(parts, 'e') && nodesSha256({ ...parts, strict: true }, 'e') !== nodesSha256(parts, 'e'),
     'nodes_sha256: a node moved or noted, or one it does not read, leaves it; a param of one it reads, or strict, changes it');
-  const made = (o: Partial<Parameters<typeof exportSource>[0]>) => exportSource({ graph: 'parts', spec: parts, node: 'e', format: 'glb', version: '9.9.9', files: 'f1', ...o });
+  const made = (o: Partial<Parameters<typeof exportSource>[0]>) => exportSource({ graph: 'parts', spec: parts, node: 'e', format: 'glb', version: '9.9.9', files: 'f1', engine: 'e1', ...o });
   check(sameSource(made({}), made({ spec: withNode('x', { type: 'tube' }) })) && !sameSource(made({}), made({ spec: withNode('a', { type: 'box', params: { size: 3 } }) }))
     && !sameSource(made({}), made({ files: 'f2' })) && !sameSource(made({}), made({ spec: { ...parts, vars: { k: 1 } } })) && !sameSource(made({}), made({ version: '9.9.10' }))
     && !sameSource(made({ files: undefined }), made({ files: undefined })) && !sameSource(null, made({})),
     'sameSource: equal but for the whole graph hash (another node edited); not with another read node, files, var or version, nor without files');
+  check(Object.keys(made({})).slice(-2).join() === 'topotopo,engine_sha256' && made({}).engine_sha256 === 'e1' && !sameSource(made({}), made({ engine: 'e2' }))
+    && !sameSource(made({ engine: undefined }), made({ engine: undefined })) && !sameSource(made({ engine: undefined }), made({})),
+    'sameSource: not when the engine code changed under the same version, nor without the engine hash (engine_sha256 after topotopo)');
+  {
+    // the engine's code hash: every file of the code tree, the kernels and fonts, and package.json; links followed
+    const eroot = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-engine-')), code = path.join(eroot, 'src');
+    for (const d of ['src/nodes', 'kernels/pkg', 'assets/fonts', 'docs']) fs.mkdirSync(path.join(eroot, d), { recursive: true });
+    fs.writeFileSync(path.join(eroot, 'package.json'), '{"version":"0.5.4"}');
+    fs.writeFileSync(path.join(code, 'cli.ts'), 'export {};\n');
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 1;\n');
+    fs.writeFileSync(path.join(eroot, 'kernels', 'pkg', 'k.wasm'), new Uint8Array([0, 97, 115, 109]));
+    const h0 = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'docs', 'notes.md'), 'not engine code');
+    const docs = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 2;\n');
+    const edited = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 1;\n');
+    const back = engineCodeHash(eroot, code);
+    fs.renameSync(path.join(code, 'nodes', 'box.ts'), path.join(code, 'nodes', 'cube.ts'));
+    const renamed = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'kernels', 'pkg', 'k.wasm'), new Uint8Array([0, 97, 115, 110]));
+    const kernel = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'package.json'), '{"version":"0.5.5"}');
+    const pkg = engineCodeHash(eroot, code);
+    check(/^[0-9a-f]{64}$/.test(h0) && docs === h0 && edited !== h0 && back === h0 && new Set([h0, renamed, kernel, pkg]).size === 4,
+      'engine code hash: a code file edited, renamed, a kernel or package.json changed each give another; other files of the package and an edit undone do not');
+    fs.rmSync(eroot, { recursive: true, force: true });
+  }
 
   // --var values and overrides (src/graph/vars.ts)
   const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test((e as Error).message); } };
