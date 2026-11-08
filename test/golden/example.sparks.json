@@ -1,0 +1,52 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": [
+        "Cd:float:3",
+        "P:float:3",
+        "age:float:1",
+        "id:int:1",
+        "life:float:1",
+        "pscale:float:1",
+        "v:float:3"
+      ],
+      "prim": ["id:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.0965, 1.2049, 0.0857],
+      "min": [-0.0938, 1.0006, -0.0969]
+    },
+    "counts": {
+      "points": 129,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "d8dd0daace995604",
+      "attributes": {
+        "point.Cd": "b0ffbab7706d8aa9",
+        "point.age": "522721886c12a9b2",
+        "point.id": "71d080e50a922a1f",
+        "point.life": "805e9a7f23eb7dc5",
+        "point.pscale": "2ebcf85dcdd983e7",
+        "point.v": "d866250fc4aa4181",
+        "prim.id": "811c9dc5050c5d1f"
+      },
+      "topology": "c6aecfc4fbcb4a1e"
+    }
+  },
+  "name": "example.sparks",
+  "ok": true,
+  "source": "examples/sparks.json",
+  "warnings": []
+}

@@ -1,0 +1,76 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["class:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.1123, 1.4017, 5.9992],
+      "min": [-3.7946, -0.0032, -2.5279]
+    },
+    "counts": {
+      "points": 442,
+      "prims": 724,
+      "vertices": 2172,
+      "volumes": 2
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["inside"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "c6904a53341819cd",
+      "attributes": {
+        "detail.materials": "65063a4da6a94aeb",
+        "group.prim.inside": "d6397dfaa3739770",
+        "prim.class": "3e4deac501899fdf",
+        "prim.material": "ac39ae05da516f1f",
+        "prim.name": "816a9de5a2d68f3f",
+        "vertex.N": "be90779945970d23",
+        "vertex.uv": "226826c7f9bb29a5"
+      },
+      "topology": "ca021a77cc582f5d"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "885119a3b5e496fd"
+        },
+        "name": "grain_stone"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "c719d1554f79f747"
+        },
+        "name": "grain_raw"
+      }
+    ]
+  },
+  "name": "example.fracture_settle",
+  "ok": true,
+  "source": "examples/fracture_settle.json",
+  "warnings": []
+}

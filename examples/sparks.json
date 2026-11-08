@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "description": "A burst of sparks: count sparks fly out of a point 1 m above the floor within a cone spread degrees wide around straight up, a fifth of them at once and the rest in a burst that fades out over one second; they fall under gravity and air drag, bounce on the floor keeping bounce of their speed, and cool from white through orange and red to dark red as they reach the end of their life (each spark lives between 0.6 × life and life). Animated, 24 fps from frame 1: cook any frame. sparks: the particles with v, age, life, id, pscale and Cd; trails: each spark's path over its last four frames.",
+  "params": {
+    "count": { "type": "int", "default": 600, "min": 50, "max": 5000, "label": "count", "desc": "sparks in the burst" },
+    "speed": { "type": "float", "default": 6, "min": 1, "max": 20, "step": 0.5, "label": "speed", "desc": "how fast the fastest sparks fly out (m/s); the others are up to 30 % slower" },
+    "spread": { "type": "float", "default": 60, "min": 5, "max": 180, "step": 1, "label": "spread", "desc": "full width of the cone the sparks fly out in (degrees, around straight up)" },
+    "bounce": { "type": "float", "default": 0.4, "min": 0, "max": 1, "step": 0.05, "label": "bounce", "desc": "share of its speed a spark keeps when it hits the floor" },
+    "life": { "type": "float", "default": 2, "min": 0.5, "max": 5, "step": 0.1, "label": "life", "desc": "how long the longest-lived sparks glow (s); each lives between 0.6 × life and life" },
+    "seed": { "type": "int", "default": 1, "min": 0, "max": 9999, "label": "seed", "desc": "random seed of each spark's direction, speed, start and life" }
+  },
+  "vars": { "count": 600, "speed": 6, "spread": 60, "bounce": 0.4, "life": 2, "seed": 1 },
+  "meta": { "frame": 38, "render": { "views": ["persp"], "azimuth": 30, "elevation": 12, "size": "1600x900", "shading": "pbr", "node": "preview" } },
+  "nodes": {
+    "source": { "type": "points", "params": { "positions": [[0, 1, 0]] } },
+    "sparks_seeds": { "type": "copy_xform", "in": ["source"], "params": { "count": "=count", "copy_attrib": "" } },
+    "aim": { "type": "wrangle", "in": ["sparks_seeds"], "note": "one emitter point per spark: its direction in the cone (uniform over the cap), its speed (0.7 to 1 × speed) and the frame it is born in (a fifth at frame 1, then fewer and fewer until frame 24)", "params": { "run_over": "points", "code": "const c = 1 - rand(@ptnum, seed, 1) * (1 - cos(radians(spread / 2)));\nconst s = sqrt(max(0, 1 - c * c)), a = TAU * rand(@ptnum, seed, 2);\nconst k = speed * (0.7 + 0.3 * sqrt(rand(@ptnum, seed, 3)));\nv@v = [s * cos(a) * k, c * k, s * sin(a) * k];\ni@id = @ptnum;\ni@birth_frame = 1 + floor(24 * pow(rand(@ptnum, seed, 4), 2));" } },
+    "emit_now": { "type": "wrangle", "in": ["aim"], "note": "at each frame only the sparks born in it emit (one particle each: emit_rate 1/substeps)", "params": { "run_over": "points", "code": "if (i@birth_frame !== Math.floor(@Frame + 1e-6)) removepoint(0, @ptnum);" } },
+    "sim": { "type": "particles", "in": ["emit_now"], "params": { "steps": 2, "substeps": 2, "start_frame": 1, "emit_rate": 0.5, "life": "=life * 0.8", "life_var": "=life * 0.2", "drag": 0.25, "floor": true, "collide": "bounce", "bounce": "=bounce", "friction": 0.3, "trails": 9, "output": "both", "pscale": 0.012, "seed": "=seed" } },
+    "heat": { "type": "wrangle", "in": ["sim"], "note": "glow: 1 at birth, 0 at the end of the spark's own life, fading fast at the end", "params": { "run_over": "points", "code": "f@glow = 1 - pow(clamp(@age / max(@life, 1e-6), 0, 1), 2.5);" } },
+    "tint": { "type": "color", "in": ["heat"], "params": { "mode": "ramp", "attrib": "glow", "range": [0, 1], "ramp": [[0, "#1a0202"], [0.15, "#5c0a04"], [0.4, "#c42a0a"], [0.65, "#ff7a14"], [0.85, "#ffd05a"], [1, "#fffaf0"]] } },
+    "sparks_only": { "type": "wrangle", "in": ["tint"], "note": "the particles: the points no trail polyline uses. Workaround: removeprim(0, prim, 1) in a prim wrangle also deletes points no prim uses (every particle), so the trails cannot be removed with their points", "params": { "run_over": "points", "code": "if (pointprims(0, @ptnum).length) removepoint(0, @ptnum);" } },
+    "sparks_clean": { "type": "attrib_delete", "in": ["sparks_only"], "params": { "names": "birth_frame glow curveu" } },
+    "floor": { "type": "assert", "in": ["sparks_clean"], "params": { "label": "floor", "expr": "npoints == 0 || bbox.min.y >= 0" } },
+    "age": { "type": "assert", "in": ["floor"], "params": { "label": "age", "attrib": "age", "attrib_class": "point", "attrib_max": "=life" } },
+    "count": { "type": "assert", "in": ["age"], "params": { "label": "count", "expr": "npoints <= count" } },
+    "sparks": { "type": "null", "in": ["count"] },
+    "trails_only": { "type": "delete", "in": ["tint"], "note": "the trail polylines, without the particles", "params": { "group": "*", "class": "prim", "keep": true } },
+    "trails_clean": { "type": "attrib_delete", "in": ["trails_only"], "params": { "names": "birth_frame glow" } },
+    "trails_floor": { "type": "assert", "in": ["trails_clean"], "params": { "label": "floor", "expr": "npoints == 0 || bbox.min.y >= 0" } },
+    "trails_count": { "type": "assert", "in": ["trails_floor"], "params": { "label": "count", "expr": "nprims <= count" } },
+    "trails": { "type": "null", "in": ["trails_count"] },
+    "preview": { "type": "merge", "in": ["trails", "sparks"], "note": "both outputs in one picture, for the render" }
+  },
+  "output": "sparks",
+  "outputs": {
+    "sparks": { "node": "sparks", "label": "Sparks", "kind": "points", "tags": ["sparks", "particles", "vfx", "burst"], "description": "The sparks at the current frame: points with v (m/s), age and life (s), id and Cd from white-hot to dark red." },
+    "trails": { "node": "trails", "label": "Trails", "kind": "curves", "tags": ["sparks", "trails", "streaks", "vfx"], "description": "Each spark's path over its last four frames as a polyline (curveu 0 at the tail, 1 at the head), coloured like the spark, for streaks." }
+  }
+}
