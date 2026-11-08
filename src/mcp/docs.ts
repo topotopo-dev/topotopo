@@ -21,7 +21,7 @@ PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pa
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
 CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the floor, from pins (pin_group / input 2) and in wind; inflate {pressure} puffs a closed mesh into a cushion or balloon. See help topic "cloth".
 
-CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
+CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. An asset faces +Z (its front looks towards +Z, as in glTF and Houdini; its right side is +X): the front view looks at it from +Z, back from −Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
 HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step, group}}); the live viewer (preview) shows them as sliders and menus, under a heading per "group". Every declared param needs a "desc" (what it does and its unit: the control's hover text; without one the build warns). People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
@@ -1399,7 +1399,8 @@ Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
 overlays and notes pieces, open edges and back-facing % (also returned as text notes).
 VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
-  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>, and the three-quarter views
+  persp, front (looking from +Z, at an asset's front), back (from −Z), left (−X), right (+X), top (+Y), bottom (−Y),
+  uv, section, texture, persp@<azimuth>, and the three-quarter views
   front_left, front_right, back_left, back_right (persp at azimuth -45, 45, -135, 135).
   "texture" draws images flat (texture:"<image>" | "image/layer" | "<material>" picks; a geometry holding only images
   renders as it by default); textures:true shows base colour maps on the mesh. Help topic "textures".

@@ -270,12 +270,12 @@ const zoomFramed = (o: RenderOptions) => !!o.target || !!(o.orthoScale && o.orth
 const zoomOf = (o: RenderOptions) => { const z = Math.max(0.05, Math.min(20, o.zoom ?? 1)); return z > 1 && !zoomFramed(o) ? 1 : z; };
 
 const ORTHO: Record<string, { f: Vec3; r: Vec3; u: Vec3; label: string }> = {
-  front: { f: [0, 0, -1], r: [1, 0, 0], u: [0, 1, 0], label: 'FRONT  X> Y^' },
-  back: { f: [0, 0, 1], r: [-1, 0, 0], u: [0, 1, 0], label: 'BACK  -X> Y^' },
-  right: { f: [-1, 0, 0], r: [0, 0, -1], u: [0, 1, 0], label: 'RIGHT  -Z> Y^' },
-  left: { f: [1, 0, 0], r: [0, 0, 1], u: [0, 1, 0], label: 'LEFT  Z> Y^' },
-  top: { f: [0, -1, 0], r: [1, 0, 0], u: [0, 0, -1], label: 'TOP  X> -Z^' },
-  bottom: { f: [0, 1, 0], r: [1, 0, 0], u: [0, 0, 1], label: 'BOTTOM  X> Z^' },
+  front: { f: [0, 0, -1], r: [1, 0, 0], u: [0, 1, 0], label: 'FRONT (+Z)  X> Y^' },
+  back: { f: [0, 0, 1], r: [-1, 0, 0], u: [0, 1, 0], label: 'BACK (-Z)  -X> Y^' },
+  right: { f: [-1, 0, 0], r: [0, 0, -1], u: [0, 1, 0], label: 'RIGHT (+X)  -Z> Y^' },
+  left: { f: [1, 0, 0], r: [0, 0, 1], u: [0, 1, 0], label: 'LEFT (-X)  Z> Y^' },
+  top: { f: [0, -1, 0], r: [1, 0, 0], u: [0, 0, -1], label: 'TOP (+Y)  X> -Z^' },
+  bottom: { f: [0, 1, 0], r: [1, 0, 0], u: [0, 0, 1], label: 'BOTTOM (-Y)  X> Z^' },
 };
 
 /** persp, persp@<azimuth> and the named three-quarter views are perspective views. */

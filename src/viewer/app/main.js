@@ -3,7 +3,7 @@
 // cooking, saving and placing never frame (the one exception is the very first view, when nothing is remembered).
 import * as THREE from 'three';
 import { api, coalesce } from './api.js';
-import { createViews, CAMERA_NAMES, SHADINGS } from './camera.js';
+import { createViews, CAMERA_NAMES, SHADINGS, viewName } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
@@ -447,7 +447,7 @@ if (!KM.PRESETS.some((p) => p.id === preset)) preset = KM.DEFAULT_PRESET;
 $('preset').replaceChildren(...KM.PRESETS.map((p) => new Option(p.label, p.id)));
 $('preset').value = preset;
 $('preset').onchange = (e) => { preset = e.target.value; browser.set('keymap', preset); e.target.blur(); ctx.message(`keymap: ${KM.PRESETS.find((p) => p.id === preset).label} (? shows it)`); };
-$('view-cam').replaceChildren(...CAMERA_NAMES.map((n) => new Option(n, n)));
+$('view-cam').replaceChildren(...CAMERA_NAMES.map((n) => new Option(viewName(n), n)));
 $('view-cam').onchange = (e) => { views.setCam(views.active, e.target.value); saveViews(); e.target.blur(); syncTop(); ctx.requestRender(); };
 $('view-shading').replaceChildren(...SHADINGS.map(([v, t]) => new Option(t, v)));
 $('view-shading').onchange = (e) => { views.slots[views.active].shading = e.target.value; saveViews(); e.target.blur(); ctx.requestRender(); };
