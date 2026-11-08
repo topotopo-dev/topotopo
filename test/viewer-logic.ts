@@ -349,6 +349,14 @@ section('Controls rules (section 8)');
   const r = vars.rangeOf({ min: 0.1, max: 10 }, 1, false);
   check(r.lo === 0.1 && r.hi === 10 && r.step === 0.01 && vars.rangeOf({ default: 5 }, 5, true).hi === 20 && vars.rangeOf({}, 0, false).lo === -1,
     'slider ranges: declared, 0..4×default, −1..1 around 0');
+  // min/max are the slider's range, not a limit on the person: 5 typed into 0.3..3 stays 5 and the slider widens to it;
+  // ↺ builds the declared range again (rangeOf)
+  const wide = vars.widenRange(vars.rangeOf({ min: 0.3, max: 3 }, 1, false), 5), low = vars.widenRange(vars.rangeOf({ min: 1, max: 10 }, 2, true), -2.5);
+  check(wide.lo === 0.3 && wide.hi === 5 && wide.step === 0.01 && low.lo === -3 && low.hi === 10 && low.step === 1 && vars.rangeOf({ min: 0.3, max: 3 }, 5, false).hi === 3
+    && vars.widenRange(vars.rangeOf({ min: 0, max: 1, step: 0.25 }, 0, false), 40).step === 0.25 && vars.widenRange(vars.rangeOf({ min: 0, max: 1 }, 0, false), 40).step === 0.1,
+    'a value past a declared end widens the slider to it (an int range to whole numbers; the step follows unless declared); the declared range comes back');
+  check(vars.pastDeclared({ min: 0.3, max: 3 }, 5) && vars.pastDeclared({ min: 0.3 }, 0.1) && !vars.pastDeclared({ min: 0.3, max: 3 }, 3) && !vars.pastDeclared({}, 1e9) && !vars.pastDeclared({ max: 3 }, 'x'),
+    'a value past a declared end is marked; inside the range or with no declared end it is not');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
   // a menu of numbers wrote the picked entry as text ("8"): an entry stands for its option

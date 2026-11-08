@@ -327,9 +327,14 @@ export function graphInterface(graph: GraphSpec): { params: Record<string, Param
   const params: Record<string, ParamDef> = {};
   for (const [k, v] of Object.entries(graph.vars ?? {})) {
     const meta = graph.params?.[k] ?? {};
+    // the declared range limits what a caller passes; the graph's own value (one a person typed past the slider's
+    // range in the viewer) counts as inside it, so the graph cooks the same called as on its own
+    const own = (typeof v === 'number' ? [v] : Array.isArray(v) ? v : []).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+    const min = typeof meta.min === 'number' && own.length ? Math.min(meta.min, ...own) : meta.min;
+    const max = typeof meta.max === 'number' && own.length ? Math.max(meta.max, ...own) : meta.max;
     params[k] = {
       type: inferParamType(meta, v), default: v, desc: meta.desc ?? '',
-      min: meta.min, max: meta.max, options: meta.options,
+      min, max, options: meta.options,
     };
   }
   let nIn = 0;

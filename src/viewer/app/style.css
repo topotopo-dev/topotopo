@@ -188,6 +188,8 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .cw input { padding: 1px 4px; }
 .cw input[type=range] { flex: 1; min-width: 40px; padding: 0; border: 0; background: none; accent-color: var(--sel); }
 .cw input[type=number] { width: 64px; }
+/* a value past the declared min/max: kept, the slider widened to it; the field's title says so */
+.cw input[type=number].past { border-style: dashed; border-color: var(--sel); }
 .cw input.vec { flex: 1; width: 0; min-width: 0; }
 .cw input[type=text] { flex: 1; width: 0; min-width: 0; }
 .cw input[type=checkbox] { accent-color: var(--sel); margin: 0; }

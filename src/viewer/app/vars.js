@@ -48,7 +48,12 @@ export function blank(vd) {
   return 0;
 }
 
-/** Slider range: the VarDef's min/max, else derived from the default (0..4×default, −1..1 for 0); derived ends widen. */
+/**
+ * Slider range: the VarDef's min/max, else derived from the default (0..4×default, −1..1 for 0). min/max are the
+ * range the person is offered, not a limit on them: a value past an end (typed, or set by an agent) is kept and the
+ * slider widens to it (widenRange); ↺ brings the declared range back. They do limit callers: a graph that uses this
+ * one as an asset or package output is clamped to them (src/graph/params.ts coerce).
+ */
 export function rangeOf(vd, v, int) {
   let lo = isNum(vd.min) ? vd.min : undefined, hi = isNum(vd.max) ? vd.max : undefined;
   const fixLo = lo !== undefined, fixHi = hi !== undefined;
@@ -67,6 +72,17 @@ export function autoStep(r) {
   const s = 10 ** Math.floor(Math.log10((r.hi - r.lo) / 100));
   return r.int ? Math.max(1, s) : s;
 }
+/** The range widened to take in v (either end, declared or derived); the step follows unless declared. In place. */
+export function widenRange(r, v) {
+  if (!isNum(v)) return r;
+  const lo = v < r.lo, hi = v > r.hi;
+  if (lo) r.lo = r.int ? Math.floor(v) : v;
+  if (hi) r.hi = r.int ? Math.ceil(v) : v;
+  if ((lo || hi) && !r.fixStep) r.step = autoStep(r);
+  return r;
+}
+/** Whether v lies past a declared end (min or max) of its var: kept, and the control says so. */
+export const pastDeclared = (vd, v) => isNum(v) && ((isNum(vd?.min) && v < vd.min) || (isNum(vd?.max) && v > vd.max));
 /** A slider value snapped to its range's steps. */
 export const snapTo = (r, v) => +(r.lo + Math.round((v - r.lo) / r.step) * r.step).toFixed(Math.min(12, Math.max(decimals(r.step), decimals(r.lo))));
 

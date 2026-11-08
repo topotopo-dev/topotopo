@@ -8,7 +8,7 @@ import * as M from './markers.js';
 import { parseId } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
-import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, autoStep, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
+import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, widenRange, pastDeclared, snapTo, controlList, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
 import { fmtDuration } from './cooking.js';
 import { kindLine, layerChoices, shownLayer } from './output-info.js';
 
@@ -230,19 +230,19 @@ function createControls(ctx) {
     number(name, vd, value, cw) {
       // declared int: integer values; an undeclared whole number gets integer slider steps but takes any typed value
       const int = vd.type === 'int', intSteps = int || (vd.type === undefined && Number.isInteger(value));
-      let cur = value;
-      const r = rangeOf(vd, cur, intSteps);
+      // min/max are the slider's range, not a limit: a value past them is kept and the slider widens to it; ↺ (and
+      // Reset all) bring the declared range back (vars.js rangeOf)
+      let cur = value, r = rangeOf(vd, cur, intSteps);
       const slider = el('input'), num = el('input');
       slider.type = 'range'; num.type = 'number'; num.step = int ? String(r.step) : 'any';
-      const fit = () => { slider.min = r.lo; slider.max = r.hi; slider.step = r.step; if (r.fixLo) num.min = r.lo; if (r.fixHi) num.max = r.hi; };
-      const widen = (v) => {
-        const lo = !r.fixLo && v < r.lo, hi = !r.fixHi && v > r.hi;
-        if (lo) r.lo = v;
-        if (hi) r.hi = v;
-        if ((lo || hi) && !r.fixStep) r.step = autoStep(r);
-        if (lo || hi) fit();
+      const fit = () => { slider.min = r.lo; slider.max = r.hi; slider.step = r.step; };
+      const widen = (v) => { const [lo, hi, st] = [r.lo, r.hi, r.step]; widenRange(r, v); if (r.lo !== lo || r.hi !== hi || r.step !== st) fit(); };
+      const show = () => {
+        slider.value = cur; num.value = fmt(cur);
+        const past = pastDeclared(vd, cur);
+        num.classList.toggle('past', past);
+        num.title = past ? `past the declared range ${vd.min ?? '…'}..${vd.max ?? '…'}: kept (↺ brings back the declared value and range)` : '';
       };
-      const show = () => { slider.value = cur; num.value = fmt(cur); };
       slider.addEventListener('pointerdown', () => { ctl.active = name; });
       slider.addEventListener('input', () => { cur = snapTo(r, Number(slider.value)); num.value = fmt(cur); queueVar(name, cur); });
       // a finished change gives the keys back to the viewport
@@ -251,13 +251,16 @@ function createControls(ctx) {
         let v = Number(num.value);
         if (num.value.trim() === '' || !Number.isFinite(v)) return show();
         if (int) v = Math.round(v);
-        if (r.fixLo) v = Math.max(v, r.lo);
-        if (r.fixHi) v = Math.min(v, r.hi);
         widen(v); cur = v; show(); queueVar(name, v, true);
       });
       cw.append(slider, num);
       fit(); widen(cur); show();
-      return { set(v) { if (!isNum(v)) return; cur = v; widen(v); show(); }, get: () => cur, typing: () => document.activeElement === num };
+      return {
+        set(v) { if (!isNum(v)) return; cur = v; widen(v); show(); },
+        get: () => cur, typing: () => document.activeElement === num,
+        /** ↺: the declared range again, widened only as far as the value it goes back to needs */
+        reset(v) { if (!isNum(v)) return; r = rangeOf(vd, v, intSteps); cur = v; fit(); widen(v); show(); },
+      };
     },
     bool(name, vd, value, cw) {
       const asNum = isNum(value), b = el('input');
@@ -366,6 +369,8 @@ function createControls(ctx) {
       /** what ↺ goes back to (vars.js baseValue), undefined: nothing */
       base: undefined,
       set(v) { w.set(v); r.sync(); },
+      /** ↺: the value, and a slider's declared range */
+      reset(v) { (w.reset ?? w.set)(v); r.sync(); },
       get: () => w.get(),
       typing: () => w.typing?.() ?? false,
       /** differs from the graph file (marked) */
@@ -477,13 +482,13 @@ function createControls(ctx) {
     if (!rows.length) return;
     const graph = ctl.graph, before = new Map(rows.map((r) => [r.name, ctl.values.get(r.name)])), after = new Map(rows.map((r) => [r.name, r.base]));
     // over a graph file null drops the session value; in a package the default is stored
-    for (const r of rows) { r.set(r.base); queueVar(r.name, ctl.mode === 'file' ? null : r.base, false, true, r.base); }
-    const apply = (m) => {
+    for (const r of rows) { r.reset(r.base); queueVar(r.name, ctl.mode === 'file' ? null : r.base, false, true, r.base); }
+    const apply = (m, reset) => {
       if (ctl.graph !== graph) { api.vars(graph, Object.fromEntries(m)); return; }
-      for (const [k, v] of m) if (ctl.rows.has(k)) { ctl.rows.get(k).set(v); queueVar(k, v, false, true); }
+      for (const [k, v] of m) if (ctl.rows.has(k)) { ctl.rows.get(k)[reset ? 'reset' : 'set'](v); queueVar(k, v, false, true); }
       flushVars();
     };
-    ctx.undo.push({ label: rows.length === 1 ? `${rows[0].name} = ${short(rows[0].base)}` : `reset ${rows.length} values`, undo: () => apply(before), redo: () => apply(after) });
+    ctx.undo.push({ label: rows.length === 1 ? `${rows[0].name} = ${short(rows[0].base)}` : `reset ${rows.length} values`, undo: () => apply(before), redo: () => apply(after, true) });
     flushVars();
   }
   resetBtn.onclick = () => { resetBtn.blur(); resetVars([...ctl.rows.values()].filter((r) => r.changed()).map((r) => r.name)); };

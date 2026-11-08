@@ -194,6 +194,9 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   so [4, 8, 16] gives numbers), label (control name), step (slider step)}.
   The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
   for bools. They are also the parameters when the graph is saved as an asset.
+  min/max are the slider's range, not a limit on the person: a value typed past them is kept (the slider widens to it;
+  ↺ brings back the declared value and range), and a refresh keeps it. They do limit a caller: a graph that uses this
+  one as an asset or package output has a value outside them clamped (below), except the graph's own value.
 - People change vars at any time (the viewer's controls edit the stored graph): read it with graphs {action:"get"}
   before assuming a var's value, and edit {op:"vars"} rather than rebuilding to change one. When a person asks to
   keep a value, keep it.
@@ -235,8 +238,9 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
 - REGENERATING a graph a person works on: build mode "refresh" (or "topotopo refresh graph.json generated.json", for a
   generator outside TopoTopo; - reads stdin). The new graph's nodes, wiring, outputs and var declarations (type, range,
   options, default) win. Kept from the graph it replaces: each var value the person changed, while it still fits the
-  new declaration (same kind of value, inside min/max, a whole number for an int, one of the options; one that no
-  longer fits takes the new value and is reported); a control's label and step when the new graph gives none; a
+  new declaration (same kind of value, a whole number for an int, one of the options; a value past min/max is kept,
+  as in the viewer; one that no longer fits takes the new value and is reported); a control's label and step when
+  the new graph gives none; a
   control the person added for a var the new graph has; each node's "ui" when the new node has none; meta keys the new
   graph does not set. A value counts as the person's when it differs from what the last refresh gave: each refresh
   records the generated values in meta.generated_vars, so a value nobody touched follows the generator. Vars the new
