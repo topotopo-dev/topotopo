@@ -559,7 +559,7 @@
         "pine_needles"
       ],
       "params": {
-        "name": "variant_name",
+        "name": "name",
         "class": "prim",
         "value": "pine"
       }
@@ -570,7 +570,7 @@
         "fir_needles"
       ],
       "params": {
-        "name": "variant_name",
+        "name": "name",
         "class": "prim",
         "value": "fir"
       }
@@ -581,7 +581,7 @@
         "oak_leaves"
       ],
       "params": {
-        "name": "variant_name",
+        "name": "name",
         "class": "prim",
         "value": "oak"
       }
@@ -600,9 +600,10 @@
         "tree_kit",
         "tree_pick"
       ],
+      "note": "variants by name: each variant's prims carry the variant's name, so the exports name the meshes pine, fir and oak",
       "params": {
         "pack": true,
-        "piece_attrib": "variant_name",
+        "variants": "name",
         "variant_attrib": "variant",
         "rotate_attrib": "yaw"
       }
@@ -727,7 +728,7 @@
         "boulder_src"
       ],
       "params": {
-        "name": "variant_name",
+        "name": "name",
         "class": "prim",
         "value": "boulder"
       }
@@ -738,7 +739,7 @@
         "slab_src"
       ],
       "params": {
-        "name": "variant_name",
+        "name": "name",
         "class": "prim",
         "value": "slab"
       }
@@ -749,7 +750,7 @@
         "stone_src"
       ],
       "params": {
-        "name": "variant_name",
+        "name": "name",
         "class": "prim",
         "value": "stone"
       }
@@ -779,9 +780,10 @@
         "rock_kit",
         "rock_pick"
       ],
+      "note": "variants by name: each variant's prims carry the variant's name, so the exports name the meshes boulder, slab and stone",
       "params": {
         "pack": true,
-        "piece_attrib": "variant_name",
+        "variants": "name",
         "variant_attrib": "variant",
         "rotate_attrib": "yaw"
       }
