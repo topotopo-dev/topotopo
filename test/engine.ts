@@ -732,7 +732,7 @@ section('graph version field');
     const r = await tools.find((t) => t.name === name)!.run(a);
     return { txt: r.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'), isError: !!r.isError };
   };
-  const solverGraph = JSON.parse(fs.readFileSync(path.join(root, 'examples', 'solver_growth.json'), 'utf8'));
+  const solverGraph = JSON.parse(fs.readFileSync(path.join(root, 'test', 'scenes', 'solver_growth.json'), 'utf8'));
   const b12 = await call('build', { name: 'anim', graph: solverGraph, frame: 12 });
   check(!b12.isError && /cooked at frame 12/.test(b12.txt) && /stats: grow resumed_from=1 frames=11 body_runs=11/.test(b12.txt) && /time-dependent: .*grow/.test(b12.txt), 'MCP build frame:12 reports the frame and solver stats');
   const b1 = await call('build', { name: 'anim', graph: solverGraph });
@@ -798,7 +798,7 @@ section('param ranges');
 section('CLI --frames');
 {
   const out = path.join(tmp, 'cli');
-  const run = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), path.join(root, 'examples', 'solver_growth.json'), ...args], { cwd: root, encoding: 'utf8' });
+  const run = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), path.join(root, 'test', 'scenes', 'solver_growth.json'), ...args], { cwd: root, encoding: 'utf8' });
   const p = run('--frames', '1-3', '--export', path.join(out, 'tower.obj'), '--render', path.join(out, 'r_{frame:04}.png'), '--views', 'persp');
   check(p.status === 0, `cli exit status ${p.status}${p.status ? ': ' + p.stderr.slice(0, 300) : ''}`);
   const want = ['tower.0001.obj', 'tower.0002.obj', 'tower.0003.obj', 'r_0001.png', 'r_0002.png', 'r_0003.png'];
