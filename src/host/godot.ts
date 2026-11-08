@@ -32,6 +32,9 @@ import type { CookJob, CookRecord, EngineOptions, Flavour, Freshness, PackageRep
 import { GODOT_COMMANDS } from './godot-commands.ts';
 import type { Io } from '../packages/commands.ts';
 
+/** PNG compression for the images outputs encode: one function, so an image used by many outputs is encoded once (io/textures.ts) */
+const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
+
 export { GODOT_COMMANDS };
 
 /**
@@ -229,7 +232,6 @@ export function godotFlavour(project: string): Flavour {
     exposed: (dir) => (godotProjectOf(dir) ? GODOT_HIDDEN.filter((d) => isDir(path.join(dir, d)) && !fs.existsSync(path.join(dir, d, '.gdignore'))).map((d) => `${d}/`) : []),
     async write(geo: Geometry, x) {
       const warnings: string[] = [];
-      const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
       if (x.kind === 'textures') {
         // one PNG per image, nothing else (materials.json would be a .json in res://)
         const r = texturesExport(geo, '', { deflate });

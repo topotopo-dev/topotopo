@@ -25,7 +25,7 @@ import { exportSource } from '../io/source.ts';
 import { packageAt, packagesUsed } from '../graph/packages.ts';
 import type { ExportSource } from '../io/source.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
-import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
+import { filesShaFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Host, StopSignal } from '../host/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
@@ -286,7 +286,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     for (const p of targets) {
       const r = await ws.cook(name, p.node, a.frame, { kind: 'export', follow });
       if (!r.ok || !r.geo) return text(reportText(name, r, engine.scriptTimeoutMs), true);
-      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root) }));
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root), files: filesShaFor(ws.graphFile(name)) }));
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
@@ -515,7 +515,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
         const source = exportSource({
           graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
-          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), version: TOPOTOPO_VERSION,
+          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), files: filesShaFor(ws.graphFile(name)), version: TOPOTOPO_VERSION,
         });
         const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
         return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name), follow)}`);

@@ -1526,7 +1526,10 @@ MAPS (glb / gltf; CLI --maps, export targets and the export tool "maps"): where 
     by material name; the glTF stays small and nothing is read or encoded.
 SOURCE: every export (export tool, export targets and the viewer's Export and Download buttons, the CLI's --export and
   --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
-  cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
+  cooked: vars after overrides, keys sorted, no whitespace), nodes_sha256 (SHA-256 of the nodes the node's cook reads:
+  it, its inputs and the nodes its params name, theirs in turn, without their ui and note; an edit to another output's
+  nodes leaves it), files_sha256 (only for a graph in a package: SHA-256 of the package files its cook may read
+  besides the graph file: its other graphs, assets/ and inputs/), output (a named output, else null), node, frame, fps, vars
   (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
   packages (only when the graph uses packages: "owner/name@version" → the version's hash, every version it uses, and
   "owner/name@working" → the hash of a working folder the export followed), followed (only when it followed one: those
@@ -1545,6 +1548,13 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
       --instancing packed --materials --no-quantize --scale 100 --split-by-name --tangents auto --up-axis z --export crate.glb
   These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
   them with it (kind "metadata"), and a file node reading one says what to read instead.
+EXPORT-ALL (CLI --export-all): cooks and exports each output with an export target, one line per output (its name,
+  kind, time, size and file), then writes them all (nothing when one fails to cook). It cooks only the outputs it
+  exports, not the default output first. In a package, an output is kept as it is when its last export would be made
+  the same: its receipt in exports/.outputs.json, every file it wrote still there, and the record's source block equal
+  to the one an export would write now but for graph_sha256 and seeds (so its nodes, vars, frame, fps, packages, files
+  of the package, export options and the TopoTopo version). Its line says "unchanged since its last export"; --force
+  exports it anyway. A graph in no package exports every output every time (its files are not known).
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or

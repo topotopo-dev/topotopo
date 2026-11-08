@@ -116,6 +116,15 @@ check(getNodeDef('tilesampler')?.type === 'tex_tile_sampler' && getNodeDef('hist
   check(!bad.length, `aliases and params are unambiguous${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);
 }
 {
+  // an image is encoded once per compressor: a copy shares its layers, so a map many exports use is encoded once
+  const deflate = (d: Uint8Array) => zlib.deflateSync(d);
+  const img = new Image(16, 16, 'map').set('C', new Float32Array(16 * 16 * 4).fill(0.25));
+  const a = imagePNG(img, '', deflate), b = imagePNG(img.clone(), '', deflate), c = imagePNG(img, '', (d) => zlib.deflateSync(d, { level: 1 }));
+  const other = imagePNG(new Image(16, 16, 'map').set('C', new Float32Array(16 * 16 * 4).fill(0.75)), '', deflate);
+  check(a === b && c !== a && other !== a && decodePNG(c).data[0] === decodePNG(a).data[0] && decodePNG(other).data[0] !== decodePNG(a).data[0],
+    'imagePNG: the same layers and compressor give the encoded bytes again; another compressor or other layers encode afresh');
+}
+{
   // every node's example cooks (an example that reads a PNG, image_file's, gets one at the path it names)
   const failed: string[] = [];
   const png = imagePNG(new Image(8, 4, 'fixture').set('C', new Float32Array(8 * 4 * 4).fill(0.5)));

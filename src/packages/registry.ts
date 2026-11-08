@@ -276,6 +276,20 @@ export function workingHash(dir: string): string {
   return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? contentSha(f.rel, f.bytes) : fileSha(f.abs!, true) })));
 }
 
+/**
+ * The hash of the files of the package `dir` a cook of a graph may read besides the graph's own file `graphFile`: its
+ * other graphs (graph_ref, its own outputs), assets/ and inputs/. An export records it (io/source.ts files_sha256), so
+ * --export-all knows an output whose files are unchanged.
+ */
+export function packageFilesHash(dir: string, graphFile?: string): string {
+  const own = graphFile ? path.resolve(graphFile) : '';
+  const files: { rel: string; sha: string }[] = [];
+  for (const d of ['graphs', 'assets', 'inputs']) for (const f of filesBelow(path.join(dir, d))) {
+    if (path.resolve(f.abs) !== own) files.push({ rel: `${d}/${f.rel}`, sha: fileSha(f.abs, true) });
+  }
+  return filesHash(files);
+}
+
 /** The hash of a version folder as published: every file but its version.json. */
 export function versionHash(dir: string, cached = false): string {
   return filesHash(filesBelow(dir).filter((f) => f.rel !== 'version.json').map((f) => ({ rel: f.rel, sha: fileSha(f.abs, cached) })));

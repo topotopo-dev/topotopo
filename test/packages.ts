@@ -1017,7 +1017,7 @@ section('following a working folder for one session');
     && new RegExp(`shows studio/trees live from its working folder, for looking; the export used the published studio/trees ${inUse}`).test(o.pk.publishedNote(graph) ?? ''),
     `an export cooks with the published copies while following (width ${size(cookedPub, 0)}; ${Object.keys(usedPub)}; ${o.pk.publishedNote(graph)})`);
   const src = exportSource({ graph: 'main', spec: graph, node: 'out', format: 'glb', packages: used, version: '0' });
-  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'packages', 'followed', 'export', 'topotopo']) && src.packages!['studio/trees@working'] === used['studio/trees@working']
+  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'nodes_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'packages', 'followed', 'export', 'topotopo']) && src.packages!['studio/trees@working'] === used['studio/trees@working']
     && JSON.stringify(src.followed) === '["studio/trees"]', 'exportSource writes them as "packages", a working folder under "followed" too');
   const plain = exportSource({ graph: 'main', spec: { nodes: { b: { type: 'box' } } }, node: 'b', format: 'glb', packages: {}, version: '0' });
   check(!('packages' in plain), 'a graph without packages has no "packages" (records stay as they were)');

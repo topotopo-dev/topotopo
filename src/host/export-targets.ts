@@ -13,10 +13,11 @@ import type { Geometry } from '../core/geometry.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
 import type { ExportFile } from '../io/files.ts';
-import { exportSource, withExportOptions } from '../io/source.ts';
+import { exportSource, sameSource, withExportOptions } from '../io/source.ts';
 import { prefixGone, resolvedExportOptions } from '../io/targets.ts';
 import type { ExportSource } from '../io/source.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
+import { packageFilesHash } from '../packages/registry.ts';
 import { topoFiles } from '../session.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
@@ -42,6 +43,16 @@ export function packageFolderOf(p: string): string | null {
 export function exportsFolderFor(graphFile: string): string {
   const file = path.resolve(graphFile);
   return path.join(packageFolderOf(path.dirname(file)) ?? path.dirname(file), 'exports');
+}
+
+/**
+ * files_sha256 of an export of the graph in `graphFile` (io/source.ts): the files of its package a cook may read besides
+ * it (src/packages/registry.ts packageFilesHash); undefined for a graph in no package, or none read from a file.
+ */
+export function filesShaFor(graphFile: string | undefined): string | undefined {
+  if (!graphFile) return undefined;
+  const dir = packageFolderOf(path.dirname(path.resolve(graphFile)));
+  return dir ? packageFilesHash(dir, graphFile) : undefined;
 }
 
 /** PNG compression for the images exports encode (one function, so encoded images are found again: io/textures.ts) */
@@ -130,7 +141,7 @@ export interface PreparedTarget {
  * When a target's output was cooked: the engine's defaults (frame 1, 24 fps) unless the cook used others, and the
  * package versions the graph uses (src/graph/packages.ts packagesUsed).
  */
-export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string> }
+export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string>; files?: string }
 
 /**
  * Serialize one published output to its target inside `exportsDir` (nothing is written yet); a target still written
@@ -143,7 +154,7 @@ export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOu
   const dest = insideRoot(root, path.join(root, ...p.target.path.split('/')));
   const source = exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
-    format: p.target.format, options: p.target.options, packages: cook.packages, version: TOPOTOPO_VERSION,
+    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION,
   });
   // every target of the package shares exports/maps/ (maps "external")
   const r = await serializeExport(geo, p.target.format, dest, p.target.options, host, source, path.join(root, 'maps'));
@@ -152,6 +163,30 @@ export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOu
     graph, output: p.output, label: p.label, node: p.node, target: p.target, root, files: r.files, summary: r.summary, warnings: r.warnings,
     sourceFile: r.sourceFile, sourceManifest: r.sourceManifest,
   };
+}
+
+/**
+ * Whether a published output's last export into `exportsDir` would be made the same now (io/source.ts sameSource):
+ * its receipt there, every file it wrote still in place, and the source block its record holds the same as the one an
+ * export would record now (`cook`: its frame, fps, packages and files). Nothing is cooked.
+ */
+export function unchangedTarget(graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, cook: TargetCook): boolean {
+  if (p.target.refused || !cook.files) return false;
+  const last = new ArtifactStore(exportsDir).records().filter((a) => a.label === p.target.path && a.graph === graph && (a.output ?? '') === (p.output ?? '')).pop();
+  if (!last || !last.files.every((f) => fs.statSync(f, { throwIfNoEntry: false })?.isFile())) return false;
+  const now = withExportOptions(exportSource({
+    graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
+    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION,
+  }), resolvedExportOptions(p.target.format, p.target.options));
+  // the record: the file among them that holds a source block (<file>.source.json or the format's sidecar)
+  for (const f of last.files) {
+    if (!/\.json$/i.test(f)) continue;
+    try {
+      const prev = JSON.parse(fs.readFileSync(f, 'utf8'))?.source;
+      if (prev && typeof prev.graph_sha256 === 'string') return sameSource(prev, now);
+    } catch { /* not a record */ }
+  }
+  return false;
 }
 
 /**

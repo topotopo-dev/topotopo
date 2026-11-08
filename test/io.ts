@@ -24,7 +24,7 @@ import { heightmapExport } from '../src/io/heightmap.ts';
 import { glbSceneReport, sceneReportText } from '../src/io/inspect-scene.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { importCSV } from '../src/io/points.ts';
-import { canonicalJSON, exportSource, graphSha256 } from '../src/io/source.ts';
+import { canonicalJSON, exportSource, graphSha256, nodesRead, nodesSha256, sameSource } from '../src/io/source.ts';
 import { publishedOutputs } from '../src/io/targets.ts';
 import { parseVarArg, parseVarValue, withVars } from '../src/graph/vars.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
@@ -243,13 +243,31 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     vars: { seed: 3, relief: 6 },
   };
   const src = exportSource({ graph: 'terrain', spec, node: 'hills', format: 'glb', options: { up_axis: 'z', scale: undefined }, version: '9.9.9' });
-  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'export', 'topotopo']), 'source block: fields in a fixed order');
+  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'nodes_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'export', 'topotopo']), 'source block: fields in a fixed order');
   check(src.output === null && src.frame === 1 && src.fps === 24 && JSON.stringify(src.vars) === '{"relief":6,"seed":3}' && JSON.stringify(src.seeds) === '{"hills":"=seed","loop/pts":4}'
     && JSON.stringify(src.export) === '{"format":"glb","options":{"up_axis":"z"}}' && src.topotopo === '9.9.9',
     `source block: the engine's time defaults, sorted vars, seeds by node path as written (nested bodies too), the options given (${JSON.stringify(src)})`);
   const reordered: GraphSpec = { vars: { relief: 6, seed: 3 }, nodes: { box: { type: 'box' }, loop: spec.nodes.loop, hills: { type: 'heightfield_noise', params: { amplitude: '=relief', seed: '=seed' } } } };
   check(src.graph_sha256 === nodeSha(canonicalJSON(spec)) && graphSha256(reordered) === src.graph_sha256,
     'graph_sha256: SHA-256 of the canonical graph JSON; key order does not change it');
+  // nodes_sha256: the nodes a cook of the node reads (its inputs, the nodes its params name, theirs), without ui and note
+  const parts: GraphSpec = {
+    nodes: {
+      a: { type: 'box' }, b: { type: 'transform', in: ['a'] }, e: { type: 'merge', in: ['b'] },
+      c: { type: 'sphere', params: { radius: '=ch("../d/size") * 2' } }, d: { type: 'box', params: { size: 2 } }, x: { type: 'torus' },
+    },
+  };
+  const withNode = (n: string, spec: any): GraphSpec => ({ ...parts, nodes: { ...parts.nodes, [n]: spec } });
+  check(nodesRead(parts, 'e').join() === 'a,b,e' && nodesRead(parts, 'c').join() === 'c,d' && nodesRead(parts, 'x').join() === 'x',
+    `nodesRead: inputs and the nodes params name, in turn (e: ${nodesRead(parts, 'e').join()}; c: ${nodesRead(parts, 'c').join()})`);
+  check(nodesSha256(withNode('a', { type: 'box', ui: { x: 40 }, note: 'moved' }), 'e') === nodesSha256(parts, 'e') && nodesSha256(withNode('x', { type: 'tube' }), 'e') === nodesSha256(parts, 'e')
+    && nodesSha256(withNode('a', { type: 'box', params: { size: 3 } }), 'e') !== nodesSha256(parts, 'e') && nodesSha256({ ...parts, strict: true }, 'e') !== nodesSha256(parts, 'e'),
+    'nodes_sha256: a node moved or noted, or one it does not read, leaves it; a param of one it reads, or strict, changes it');
+  const made = (o: Partial<Parameters<typeof exportSource>[0]>) => exportSource({ graph: 'parts', spec: parts, node: 'e', format: 'glb', version: '9.9.9', files: 'f1', ...o });
+  check(sameSource(made({}), made({ spec: withNode('x', { type: 'tube' }) })) && !sameSource(made({}), made({ spec: withNode('a', { type: 'box', params: { size: 3 } }) }))
+    && !sameSource(made({}), made({ files: 'f2' })) && !sameSource(made({}), made({ spec: { ...parts, vars: { k: 1 } } })) && !sameSource(made({}), made({ version: '9.9.10' }))
+    && !sameSource(made({ files: undefined }), made({ files: undefined })) && !sameSource(null, made({})),
+    'sameSource: equal but for the whole graph hash (another node edited); not with another read node, files, var or version, nor without files');
 
   // --var values and overrides (src/graph/vars.ts)
   const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test((e as Error).message); } };
