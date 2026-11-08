@@ -246,6 +246,61 @@ export function pointPrims(g: Geometry) {
   return { start: cnt, prims };
 }
 
+/** An Int32Array of at least n entries holding a's first `used` values (a itself when it is big enough). */
+export function growInt32(a: Int32Array, n: number, used = a.length): Int32Array {
+  if (n <= a.length) return a;
+  const b = new Int32Array(Math.max(n, a.length * 2, 16));
+  b.set(a.subarray(0, used));
+  return b;
+}
+
+/**
+ * Ids 0, 1, 2… for ordered pairs of non-negative ints, in the order they are first added: an open-addressing hash over
+ * typed arrays. Use it in place of a Map keyed by edge, point or piece: a JS Map holds at most 2^24 (16.7M) entries,
+ * which a large render or export passes (RangeError "Map maximum size exceeded").
+ */
+export class PairIds {
+  /** the pairs by id; valid up to `size` */
+  a: Int32Array;
+  b: Int32Array;
+  size = 0;
+  private slots: Int32Array;
+  private mask: number;
+  constructor(expected = 16) {
+    let cap = 16;
+    while (cap < expected * 2) cap *= 2;
+    this.slots = new Int32Array(cap).fill(-1);
+    this.mask = cap - 1;
+    this.a = new Int32Array(Math.max(16, expected));
+    this.b = new Int32Array(Math.max(16, expected));
+  }
+  private slot(a: number, b: number): number {
+    let i = (Math.imul(a, 0x9e3779b1) ^ Math.imul(b + 0x7f4a7c15, 0x85ebca77)) & this.mask;
+    for (;;) {
+      const id = this.slots[i];
+      if (id < 0 || (this.a[id] === a && this.b[id] === b)) return i;
+      i = (i + 1) & this.mask;
+    }
+  }
+  /** the id of (a, b), or -1 */
+  get(a: number, b: number): number { return this.slots[this.slot(a, b)]; }
+  /** the id of (a, b), added when new (then it is size - 1) */
+  add(a: number, b: number): number {
+    let i = this.slot(a, b);
+    if (this.slots[i] >= 0) return this.slots[i];
+    if ((this.size + 1) * 2 > this.slots.length) { this.rehash(); i = this.slot(a, b); }
+    const id = this.size++;
+    if (id >= this.a.length) { this.a = growInt32(this.a, id + 1); this.b = growInt32(this.b, id + 1); }
+    this.a[id] = a; this.b[id] = b; this.slots[i] = id;
+    return id;
+  }
+  private rehash() {
+    this.slots = new Int32Array(this.slots.length * 2).fill(-1);
+    this.mask = this.slots.length - 1;
+    for (let id = 0; id < this.size; id++) this.slots[this.slot(this.a[id], this.b[id])] = id;
+  }
+}
+
 export interface EdgeInfo {
   a: Int32Array; // lower point index
   b: Int32Array; // higher point index
@@ -253,31 +308,32 @@ export interface EdgeInfo {
   firstPrim: Int32Array;
   /** second prim using the edge (-1 if none) */
   secondPrim: Int32Array;
-  map: Map<number, number>; // key(a,b) -> edge index
-  key: (a: number, b: number) => number;
+  /** the edge between points a and b (either order), or -1 */
+  find: (a: number, b: number) => number;
 }
 
-/** Unique undirected edges of all prims (polyline segments included). */
+/** Unique undirected edges of all prims (polyline segments included), numbered in the order the prims first use them. */
 export function buildEdges(g: Geometry): EdgeInfo {
-  const n = g.numPoints;
-  const key = (a: number, b: number) => (a < b ? a * n + b : b * n + a);
-  const map = new Map<number, number>();
-  const A: number[] = [], B: number[] = [], C: number[] = [], F: number[] = [], S: number[] = [];
+  const ids = new PairIds(Math.min(g.numVertices, 1 << 20));
+  let C: Int32Array = new Int32Array(16), F: Int32Array = new Int32Array(16), S: Int32Array = new Int32Array(16);
   for (let p = 0; p < g.numPrims; p++) {
     const s = g.primStart[p], e = g.primStart[p + 1];
     const last = g.primClosed[p] ? e : e - 1;
     for (let v = s; v < last; v++) {
       const a = g.vertexPoint[v], b = g.vertexPoint[v + 1 < e ? v + 1 : s];
       if (a === b) continue;
-      const k = key(a, b);
-      const ei = map.get(k);
-      if (ei === undefined) {
-        map.set(k, A.length);
-        A.push(Math.min(a, b)); B.push(Math.max(a, b)); C.push(1); F.push(p); S.push(-1);
+      const n = ids.size, ei = a < b ? ids.add(a, b) : ids.add(b, a);
+      if (ei === n) {
+        if (n >= C.length) { C = growInt32(C, n + 1, n); F = growInt32(F, n + 1, n); S = growInt32(S, n + 1, n); }
+        C[n] = 1; F[n] = p; S[n] = -1;
       } else { C[ei]++; if (S[ei] < 0 && F[ei] !== p) S[ei] = p; }
     }
   }
-  return { a: Int32Array.from(A), b: Int32Array.from(B), count: Int32Array.from(C), firstPrim: Int32Array.from(F), secondPrim: Int32Array.from(S), map, key };
+  const n = ids.size;
+  return {
+    a: ids.a.subarray(0, n), b: ids.b.subarray(0, n), count: C.subarray(0, n), firstPrim: F.subarray(0, n), secondPrim: S.subarray(0, n),
+    find: (a, b) => (a < b ? ids.get(a, b) : ids.get(b, a)),
+  };
 }
 
 /** CSR point adjacency through edges. */
@@ -569,17 +625,18 @@ export function connectivity(g: Geometry) {
       if (a !== b) parent[b] = a;
     }
   }
-  const id = new Map<number, number>();
+  // component ids by root point, numbered in point order (typed: a Map stops at 2^24 entries)
+  const id = new Int32Array(g.numPoints).fill(-1);
   const ptClass = new Int32Array(g.numPoints);
+  let count = 0;
   for (let i = 0; i < g.numPoints; i++) {
     const r = find(i);
-    let c = id.get(r);
-    if (c === undefined) { c = id.size; id.set(r, c); }
-    ptClass[i] = c;
+    if (id[r] < 0) id[r] = count++;
+    ptClass[i] = id[r];
   }
   const primClass = new Int32Array(g.numPrims);
   for (let p = 0; p < g.numPrims; p++) primClass[p] = g.primSize(p) ? ptClass[g.vertexPoint[g.primStart[p]]] : -1;
-  return { ptClass, primClass, count: id.size };
+  return { ptClass, primClass, count };
 }
 
 /**

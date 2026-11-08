@@ -593,5 +593,77 @@ const SRC: Record<string, NodeSpec> = {
   check(/int\[\] primvars:lot_id = \[/.test(usda) && /string\[\] primvars:source = \["parcels"/.test(usda) && /primvars:edge_id/.test(usda), 'identity: usda custom_attribs writes per-instance primvars');
 }
 
+// --- GLB instancing writes polygons only: glTF readers (three.js among them) instance triangle meshes alone and draw a
+// mesh with a points or lines primitive once, untransformed at the origin. A skinned figure (two meshes and a skeleton,
+// imported with its joints as scene empties) and a source mixing polygons, a polyline and a loose point.
+{
+  const { Document, NodeIO } = await import('@gltf-transform/core');
+  const { writeFileSync } = await import('node:fs');
+  const doc = new Document(), buf = doc.createBuffer();
+  const acc = (type: 'SCALAR' | 'VEC3' | 'VEC4' | 'MAT4', a: Float32Array | Uint16Array) => doc.createAccessor().setType(type).setBuffer(buf).setArray(a as any);
+  const hip = doc.createNode('hip').setTranslation([0, 1, 0]), neck = doc.createNode('neck').setTranslation([0, 0.6, 0]);
+  hip.addChild(neck);
+  const skin = doc.createSkin('rig').addJoint(hip).addJoint(neck).setSkeleton(hip)
+    .setInverseBindMatrices(acc('MAT4', new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1.6, 0, 1])));
+  const part = (name: string, c: number[], h: number, joint: number) => {
+    const p: number[] = [], idx: number[] = [];
+    for (let k = 0; k < 8; k++) p.push(c[0] + (k & 1 ? h : -h), c[1] + (k & 2 ? h : -h), c[2] + (k & 4 ? h : -h));
+    for (const [a, b, cc, d] of [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]) idx.push(a, b, cc, a, cc, d);
+    const J = new Uint16Array(32), W = new Float32Array(32);
+    for (let v = 0; v < 8; v++) { J[v * 4] = joint; W[v * 4] = 1; }
+    const prim = doc.createPrimitive().setAttribute('POSITION', acc('VEC3', new Float32Array(p))).setAttribute('JOINTS_0', acc('VEC4', J))
+      .setAttribute('WEIGHTS_0', acc('VEC4', W)).setIndices(acc('SCALAR', new Uint16Array(idx)));
+    return doc.createNode(name).setMesh(doc.createMesh(name).addPrimitive(prim)).setSkin(skin);
+  };
+  doc.createScene('scene').addChild(hip).addChild(part('body', [0, 1, 0], 0.3, 0)).addChild(part('head', [0, 1.75, 0], 0.15, 1));
+  const figPath = `${tmp}/skinned_figure.glb`;
+  writeFileSync(figPath, await new NodeIO().writeBinary(doc));
+  const glbJSON = (b: Uint8Array) => JSON.parse(new TextDecoder().decode(b.subarray(20, 20 + new DataView(b.buffer, b.byteOffset).getUint32(12, true))));
+  /** the meshes on EXT_mesh_gpu_instancing nodes: instance count, each primitive's mode (4 = TRIANGLES) and material */
+  const instanced = (j: any) => (j.nodes ?? []).filter((n: any) => n.extensions?.EXT_mesh_gpu_instancing).map((n: any) => ({
+    count: j.accessors[n.extensions.EXT_mesh_gpu_instancing.attributes.TRANSLATION].count,
+    prims: j.meshes[n.mesh].primitives.map((p: any) => ({ mode: p.mode ?? 4, mat: p.material === undefined ? null : j.materials[p.material].name ?? '' })),
+  }));
+  const crowd = await run({
+    fig: { type: 'file', params: { path: figPath } },
+    mat: { type: 'material', in: ['fig'], params: { name: 'marker', base_color: [0.9, 0.2, 0.1] } },
+    pts: { type: 'grid', params: { size: [6, 4], rows: 2, cols: 3 } },
+    out: { type: 'copy_to_points', in: ['mat', 'pts'], params: { pack: true } },
+  }, 'out');
+  const n = crowd.geo.numPacked;
+  const warns: string[] = [];
+  const fb = await exportGeometryAsync(crowd.geo, 'glb', { warn: (m) => warns.push(m) });
+  const fr = await validator.validateBytes(fb, { maxIssues: 20, writeTimestamp: false });
+  const fi = instanced(glbJSON(fb));
+  check(fr.issues.numErrors === 0 && fi.length === 1 && fi[0].count === n && fi[0].prims.length === 1 && fi[0].prims[0].mode === 4 && fi[0].prims[0].mat === 'marker',
+    `skinned figure packed onto ${n} points: one instanced mesh of triangles, every primitive with the material (${JSON.stringify(fi)})`);
+  check(warns.some((w) => /2 scene empties \(sockets\) inside packed sources not written/.test(w)), `its 2 skeleton joints (scene empties) are left out of the instanced mesh, with a warning (${warns.join(' | ')})`);
+  // a source mixing a box with a material, a box without one, a polyline and a loose point
+  const box = await cook({ b: { type: 'box', params: { size: [1, 1, 1] } }, out: { type: 'material', in: ['b'], params: { name: 'red', base_color: [1, 0, 0] } } }, 'out');
+  const plain = await cook({ out: { type: 'box', params: { size: [0.5, 0.5, 0.5], center: [0, 1, 0] } } }, 'out');
+  const mb = new GeoBuilder(new Geometry());
+  const l0 = mb.addPoint(0, 2, 0), l1 = mb.addPoint(0, 3, 0), l2 = mb.addPoint(1, 3, 0);
+  mb.addPrim([l0, l1, l2], false);
+  mb.addPoint(0, 4, 0);
+  const mixed = Geometry.merge([box, plain, mb.build()]);
+  const places = [[100, 0, 50], [110, 0, 50], [100, 0, 60]];
+  const mg = packedFromMatrices(mixed, places.map(([x, y, z]) => m4translate(x, y, z)));
+  const mbytes = await exportGeometryAsync(mg, 'glb', {});
+  const mr = await validator.validateBytes(mbytes, { maxIssues: 20, writeTimestamp: false });
+  const mi = instanced(glbJSON(mbytes));
+  const mats = (mi[0]?.prims ?? []).map((p: any) => p.mat);
+  check(mr.issues.numErrors === 0 && mi.length === 1 && mi[0].count === 3 && mi[0].prims.length === 2 && mi[0].prims.every((p: any) => p.mode === 4) && mats.includes('red') && mats.some((m: any) => m !== 'red'),
+    `mixed source: the instanced mesh holds the two boxes alone, one primitive "red" and one with the default material (${JSON.stringify(mi)})`);
+  const flat = unpacked(await importGeometryAsync(mbytes, 'glb'));
+  let lines = 0, lone = 0, near = 0;
+  const used = new Uint8Array(flat.numPoints);
+  for (let p = 0; p < flat.numPrims; p++) {
+    for (let v = flat.primStart[p]; v < flat.primStart[p + 1]; v++) used[flat.vertexPoint[v]] = 1;
+    if (!flat.primClosed[p]) lines++;
+  }
+  for (let i = 0; i < flat.numPoints; i++) { if (!used[i]) lone++; if (Math.hypot(flat.P[i * 3], flat.P[i * 3 + 2]) < 50) near++; }
+  check(lines === 3 && lone === 3 && near === 0, `mixed source: its polyline and loose point are written as a copy per instance, at the instances (${lines} polylines, ${lone} loose points, ${near} points near the origin)`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

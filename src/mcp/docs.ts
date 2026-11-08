@@ -23,7 +23,7 @@ CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the
 
 CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
-HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
+HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step, group}}); the live viewer (preview) shows them as sliders and menus, under a heading per "group". Every declared param needs a "desc" (what it does and its unit: the control's hover text; without one the build warns). People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
@@ -184,16 +184,24 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   },
   "output": "out",
   "vars": {"rock_count": 200},
-  "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks"}}
+  "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks", "group": "Scatter"}}
 }
 - "vars": graph constants that "=expr" params and code read by their bare name ("=rock_count * 2", @P.y += height).
   Name them so code can: letters, digits and _, and not a JavaScript keyword (class, default …), a helper (noise,
   rand, length, detail …), a built-in (Math, Number, JSON …), the time (frame, time, fps, timeInc) or a wrangle name
   (ptnum, Frame …); the build says when a name is taken. "params": one entry per var a person would tune (3–8 of them):
   {type (float int bool string enum), desc, min, max, options (enum: strings or numbers; the var holds the option,
-  so [4, 8, 16] gives numbers), label (control name), step (slider step)}.
+  so [4, 8, 16] gives numbers), label (control name), step (slider step), group (a heading)}.
   The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
   for bools. They are also the parameters when the graph is saved as an asset.
+  desc: what the param does and its unit ("gap between cliffs, metres"): the control's hover text. Every declared
+  param needs one; a param without a desc is a build and cook warning. label: the control's name, short; it may carry
+  the unit ("Gap between cliffs (m)"; a long one wraps to two lines). group: the heading the Controls list the param
+  under ("group": "Scatter"): a heading a person can close, the groups in the order of their first param, params
+  without a group above them. The viewer lists undeclared vars apart, closed under "other vars".
+  min/max are the slider's range, not a limit on the person: a value typed past them is kept (the slider widens to it;
+  ↺ brings back the declared value and range), and a refresh keeps it. They do limit a caller: a graph that uses this
+  one as an asset or package output has a value outside them clamped (below), except the graph's own value.
 - People change vars at any time (the viewer's controls edit the stored graph): read it with graphs {action:"get"}
   before assuming a var's value, and edit {op:"vars"} rather than rebuilding to change one. When a person asks to
   keep a value, keep it.
@@ -235,8 +243,9 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
 - REGENERATING a graph a person works on: build mode "refresh" (or "topotopo refresh graph.json generated.json", for a
   generator outside TopoTopo; - reads stdin). The new graph's nodes, wiring, outputs and var declarations (type, range,
   options, default) win. Kept from the graph it replaces: each var value the person changed, while it still fits the
-  new declaration (same kind of value, inside min/max, a whole number for an int, one of the options; one that no
-  longer fits takes the new value and is reported); a control's label and step when the new graph gives none; a
+  new declaration (same kind of value, a whole number for an int, one of the options; a value past min/max is kept,
+  as in the viewer; one that no longer fits takes the new value and is reported); a control's label and step when
+  the new graph gives none; a
   control the person added for a var the new graph has; each node's "ui" when the new node has none; meta keys the new
   graph does not set. A value counts as the person's when it differs from what the last refresh gave: each refresh
   records the generated values in meta.generated_vars, so a value nobody touched follows the generator. Vars the new
@@ -258,7 +267,9 @@ MARKERS: what a person places by clicking in the live viewer (the guides tools: 
   pscale and orient; paths open and zones closed polylines; volumes closed boxes), so describe it and read it like any
   other input. A graph meant to be directed by guides reads the file with "missing": "empty"
   ({"type":"file","params":{"path":"inputs/markers.json","missing":"empty"}}): it cooks before the first guide is
-  drawn, and again each time the guides change.
+  drawn, and again each time the guides change. One markers.json per package: every graph in it shares the guides
+  (topotopo view <graph> uses the graph's package's inputs/ too). Guides can be written: a markers.json of that geometry
+  (by hand or by a graph's export) shows in the viewer's GUIDES list, ready to drag.
 FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"; obj too: usemtl → "material",
   its .mtl (mtllib, beside it) → the material table with colours, alpha, roughness and maps), obj/stl/ply (no up axis:
   Unreal exports and Blender exports with Up = Z are Z-up, so add "up_axis":"z"), geo/bgeo (Houdini), csv and
@@ -681,8 +692,10 @@ DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise clos
 RENDER / INSPECT: render draws heightfields as a shaded grid with the mask in red; heightfield_layer:"flow" draws
   another layer in red instead ("none": none; the viewer's layer picker does the same), color_by any layer name maps
   it to colours. It draws at most 256 quads per side, so a 513 × 513 field shows at 257 × 257 (the footer and a note
-  say so); heightfield_res: "full" (CLI --heightfield-res full) draws every sample. inspect and every cook summary
-  list the grid and each layer's min/max/mean.
+  say so); heightfield_res: "full" (CLI --heightfield-res full) draws every sample. The live viewer draws at most 512
+  quads per side by default (a 2 km field at 2 m every 2nd sample) and its "terrain detail" setting draws finer, up to
+  every sample, so instances scattered on the surface sit on it exactly; it is remembered per browser. inspect and
+  every cook summary list the grid and each layer's min/max/mean.
 UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with
   height_min / height_max and the import settings. Pixel column = X, row = Z (row 0 at min Z); Unreal X = X,
   Unreal Y = Z, Unreal Z = Y, centimetres.
@@ -869,7 +882,9 @@ See them: render draws instances (an evenly spread subset above 600k triangles, 
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
 Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",
   TRANSLATION/ROTATION/SCALE per instance, with custom_attribs:true the anchor attributes as _NAME instance accessors
-  (Cd → _COLOR); shear is approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
+  (Cd → _COLOR); shear is approximated with a warning; the instanced mesh holds the source's polygons, as
+  readers instance triangle meshes only: its polylines and loose points are written as copies, its scene empties are left
+  out with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
   positions, orientations, scales, ids, velocities, with custom_attribs:true primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
   csv / points.json → one row per instance (instance stream: Position/Rotation/Scale or P/orient/scale, Mesh column)
   + <name>.meshes.json + one GLB per source; json keeps them losslessly; obj/ply/stl expand them (warned).

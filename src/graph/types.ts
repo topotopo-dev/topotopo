@@ -116,7 +116,9 @@ export interface NodeSpec {
 export interface VarDef {
   type?: string;
   default?: any;
+  /** what it does and its unit: the control's hover text (a declared param without one warns at validation) */
   desc?: string;
+  /** the slider's range; a person may go past it, a caller of the graph as an asset is clamped to it */
   min?: number;
   max?: number;
   /** choices (type enum): strings or numbers, and the var holds the option itself */
@@ -125,6 +127,8 @@ export interface VarDef {
   label?: string;
   /** slider step (default: 1 for ints, else derived from the range) */
   step?: number;
+  /** heading the viewer's Controls list this param under (a collapsible group; groups follow declaration order) */
+  group?: string;
 }
 
 /** Free-form graph metadata (showcase render presets, editor layout, …). */

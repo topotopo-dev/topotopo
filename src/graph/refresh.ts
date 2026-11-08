@@ -6,8 +6,8 @@
 // A var value is the person's when it differs from what the generator gave last time: each refresh records the
 // generator's var values in meta.generated_vars, so a value nobody touched follows the generator's new value. Without
 // that record (the first refresh) every saved value counts as the person's. A kept value must still fit the new
-// declaration (same kind of value, inside min/max, an int for an int, one of the options); one that no longer fits
-// takes the generator's value and is reported.
+// declaration (same kind of value, an int for an int, one of the options); one that no longer fits takes the
+// generator's value and is reported. min/max are no fit: they are the slider's range, and a person may go past it.
 import type { GraphSpec, VarDef } from './types.ts';
 
 /** meta key holding the var values the last refresh took from the generator */
@@ -46,8 +46,6 @@ function misfit(v: unknown, gv: unknown, vd: VarDef | undefined): string | null 
   if (vd?.options?.length && !vd.options.some((o) => same(o, v))) return `not one of the options ${vd.options.map(show).join(', ')}`;
   const nums = typeof v === 'number' ? [v] : Array.isArray(v) ? v.filter((x) => typeof x === 'number') : [];
   if (vd?.type === 'int' && nums.some((x) => !Number.isInteger(x))) return 'not a whole number (the var is an int)';
-  if (vd?.min !== undefined && nums.some((x) => x < vd.min!)) return `below the new range ${vd.min}..${vd.max ?? ''}`;
-  if (vd?.max !== undefined && nums.some((x) => x > vd.max!)) return `above the new range ${vd.min ?? ''}..${vd.max}`;
   return null;
 }
 

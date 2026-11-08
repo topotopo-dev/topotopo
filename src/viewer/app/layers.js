@@ -169,6 +169,8 @@ export function createLayers(ctx) {
     if (dw) dw.textContent = `inputs/ ${L.where}`;
     changed();
   };
+  /** A shown layer is still loading (its GLB not drawn yet). */
+  L.loading = () => [...L.shown].some((p) => { const l = L.loaded.get(p); return !!l && !l.mesh; });
   /** Bounds of the shown layers (pictures too unless `pictures` is false). */
   L.bounds = ({ pictures = true } = {}) => {
     const b = new THREE.Box3();

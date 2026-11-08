@@ -80,7 +80,7 @@ npx topotopo --help-node scatter                            # one node's params,
 npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
 npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
 npx topotopo graph.json --export-all                        # every output's export target, into its package's exports/
-npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to inputs/ beside it
+npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to its package's inputs/
 npx topotopo refresh graph.json generated.json             # a regenerated graph over graph.json, keeping the values a person tuned
 npx topotopo mcp --package /absolute/path/to/package    # the MCP server over stdio
 ```

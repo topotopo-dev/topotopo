@@ -35,6 +35,9 @@
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
 //   (TRANSLATION / ROTATION / SCALE per instance; a 3×3 with shear is written as its nearest rotation and the
 //   scale of its columns, with a warning); the rest of the geometry as above. instancing 'expand' writes real copies.
+//   The instanced mesh holds the source's polygons: readers instance triangle meshes only (three.js draws a mesh with a
+//   points or lines primitive once, at the origin), so a source's polylines and isolated points are written as real
+//   copies and its scene empties (sockets) are left out, with a warning.
 //   Per-instance attributes (custom, default off): the anchor point / packed prim attributes become extra instance
 //   accessors with the extension's "_" prefix: Cd (+ Alpha) → _COLOR (VEC3/VEC4 float), every other numeric attribute
 //   of size 1–4 → _NAME, single strings → _NAME indices into a table in the node's extras; all as 32-bit floats (exact
@@ -486,7 +489,12 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const jobs: MeshJob[] = [];
   if (!g.hasPacked()) jobs.push({ src: g, split });
   else if (o.instancing === 'expand') jobs.push({ src: expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo, split });
-  else jobs.push({ src: stripPacked(g), split }, ...instanceJobs(doc, buffer, g, o, quantize));
+  else {
+    const { inst, loose, sockets } = instanceableSources(g);
+    if (sockets) o.warn?.(`glTF instancing: ${sockets} scene empt${sockets === 1 ? 'y' : 'ies'} (sockets) inside packed sources not written: an instanced mesh carries no nodes per instance (unpack first, or instancing "expand", to keep them)`);
+    const rest = stripPacked(inst);
+    jobs.push({ src: loose ? Geometry.merge([rest, loose]) : rest, split }, ...instanceJobs(doc, buffer, inst, o, quantize));
+  }
 
   for (const job of jobs) for (const { name, geo } of pieces(job.src, { ...o, splitByName: job.split })) {
     const outs: PrimOut[] = [];
@@ -737,6 +745,50 @@ function writeEmpties(doc: Document, scene: ReturnType<Document['createScene']>,
 interface MeshJob { src: Geometry; split: boolean; onMesh?: (w: WrittenMesh) => void }
 
 /**
+ * Packed sources as an instanced mesh can carry them: polygons. glTF readers instance triangle meshes only (three.js
+ * draws a mesh with a points or lines primitive once, untransformed, at the origin, and none of its instances), so a
+ * source's polylines and isolated points are written as real copies (`loose`), and its scene empties (sockets: nodes,
+ * which an instanced mesh cannot carry per instance) are left out and counted.
+ */
+function instanceableSources(g: Geometry): { inst: Geometry; loose: Geometry | null; sockets: number } {
+  const n = g.packedSources.length, poly: (Geometry | null)[] = new Array(n).fill(null), rest: (Geometry | null)[] = new Array(n).fill(null);
+  let sockets = 0;
+  for (let s = 0; s < n; s++) {
+    const f = flattenSource(g.packedSources[s]);
+    const used = new Uint8Array(f.numPoints), byOpen = new Uint8Array(f.numPoints), empty = new Uint8Array(f.numPoints);
+    let open = 0;
+    for (let p = 0; p < f.numPrims; p++) {
+      if (!f.primClosed[p]) open++;
+      for (let v = f.primStart[p]; v < f.primStart[p + 1]; v++) { used[f.vertexPoint[v]] = 1; if (!f.primClosed[p]) byOpen[f.vertexPoint[v]] = 1; }
+    }
+    const empties = sceneEmpties(f);
+    for (const e of empties) empty[e.point] = 1;
+    let isolated = 0;
+    for (let i = 0; i < f.numPoints; i++) if (!used[i] && !empty[i]) isolated++;
+    if (!open && !isolated && !empties.length) continue;
+    sockets += empties.length;
+    poly[s] = f.subsetPrims(Uint8Array.from({ length: f.numPrims }, (_, p) => f.primClosed[p]));
+    if (open || isolated) {
+      const r = f.subsetPrims(Uint8Array.from({ length: f.numPrims }, (_, p) => (f.primClosed[p] ? 0 : 1)), false)
+        .subsetPoints(Uint8Array.from({ length: f.numPoints }, (_, i) => (byOpen[i] || (!used[i] && !empty[i]) ? 1 : 0)));
+      for (const k of [EMPTY_ATTRIB, PARENT_ATTRIB]) r.points.delete(k);
+      rest[s] = r;
+    }
+  }
+  if (!poly.some(Boolean)) return { inst: g, loose: null, sockets: 0 };
+  const inst = g.clone();
+  inst.packedSources = g.packedSources.map((src, s) => poly[s] ?? src);
+  let loose: Geometry | null = null;
+  if (rest.some(Boolean)) {
+    const S = g.packedSource!, kind = g.primKind!;
+    const sel = g.subsetPrims(Uint8Array.from({ length: g.numPrims }, (_, p) => (kind[p] === 1 && rest[S[p]] ? 1 : 0)));
+    sel.packedSources = sel.packedSources.map((src, s) => rest[s] ?? src);
+    loose = expandPacked(sel, { transfer: DEFAULT_TRANSFER }).geo;
+  }
+  return { inst, loose, sockets };
+}
+
+/**
  * One job per packed source: its geometry (nested instances expanded) as a single mesh whose node gets
  * EXT_mesh_gpu_instancing with every instance's TRS in export space (axis conversion and scale applied).
  */
@@ -768,6 +820,7 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
   let sheared = 0;
   const jobs: MeshJob[] = [];
   for (const { s, mat, prims } of bySrc.values()) {
+    if (!flatOf(s).numPrims) continue; // a source of points or lines alone: written as copies (instanceableSources)
     const n = prims.length;
     const T = new Float64Array(n * 3), L = new Float64Array(n * 9), Q = new Float32Array(n * 4), SC = new Float64Array(n * 3);
     prims.forEach((p, i) => {

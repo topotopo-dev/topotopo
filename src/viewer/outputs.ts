@@ -25,6 +25,7 @@ import { expandPacked } from '../core/packed.ts';
 import { withHeightfieldPreview } from '../core/heightfield.ts';
 import { withImagePreview, withMaterialPreview } from '../render/texview.ts';
 import { renderGeometry } from '../render/raster.ts';
+import { heightfieldRes } from '../render/preview.ts';
 import { encodePNG } from '../render/png.ts';
 import { exportGeometryAsync, exportFormatFromPath } from '../io/export.ts';
 import { SOURCE_INSIDE, stripExtension } from '../io/files.ts';
@@ -502,10 +503,10 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
           if (item.file && imageExt.test(item.file)) { send(fs.readFileSync(item.file), mime(item.file)); return true; }
           if (item.entry.view === 'file') err(400, `${item.entry.label} is not geometry to show: download it`);
           const g = await geometry(item), thumb = u.pathname.endsWith('/thumb');
-          // heightfields: the layer drawn in red (the page's layer picker; the mask by default)
-          const tint = u.searchParams.get('heightfield_layer') || 'mask';
-          const bytes = await cache(`${item.entry.id}:${item.entry.revision}:${thumb}:${thumb ? '' : tint}`, async () => {
-            if (!thumb) return exportGeometryAsync(withImagePreview(withMaterialPreview(withHeightfieldPreview(g, 256, tint))), 'glb', { custom: false, splitByName: false, readFile: (p) => ws.engine.host.readFile(p) });
+          // heightfields: the layer drawn in red (the page's layer picker; the mask by default) and the terrain detail
+          const tint = u.searchParams.get('heightfield_layer') || 'mask', res = heightfieldRes(u.searchParams.get('heightfield_res'));
+          const bytes = await cache(`${item.entry.id}:${item.entry.revision}:${thumb}:${thumb ? '' : `${tint}:${res}`}`, async () => {
+            if (!thumb) return exportGeometryAsync(withImagePreview(withMaterialPreview(withHeightfieldPreview(g, res, tint))), 'glb', { custom: false, splitByName: false, readFile: (p) => ws.engine.host.readFile(p) });
             const r = renderGeometry(g, { size: 160, views: ['persp'], viewLabels: false });
             return encodePNG(r.rgba.subarray(0, r.width * 160 * 4), r.width, 160, deflate);
           });

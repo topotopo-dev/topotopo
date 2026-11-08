@@ -486,5 +486,36 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(/camera expects \{from/.test(err(() => renderArgs({ camera: { from: [0, 0], to: [0, 0, 0] } }))), 'camera: a from without three numbers is refused');
 }
 
+// --- huge renders: a JS Map or Set holds at most 2^24 entries (RangeError "Map maximum size exceeded"), so nothing on
+// the render path may key one by edge, point, prim or piece. With the limit shrunk to 5,000, one render of ~157k packed
+// triangles (closed balls and open cards) fails where per-edge / per-point / per-piece Maps are built.
+{
+  const scene = await cook({
+    pts: { type: 'grid', params: { size: [40, 40], rows: 20, cols: 20 } },
+    ball: { type: 'sphere', params: { type: 'ico', level: 2, radius: 0.4 } },
+    card: { type: 'grid', params: { size: [0.6, 0.6], rows: 6, cols: 6, center: [0, 0.8, 0] } },
+    parts: { type: 'merge', in: ['ball', 'card'] },
+    out: { type: 'copy_to_points', in: ['parts', 'pts'], params: { pack: true } },
+  });
+  const LIMIT = 5000, RealMap = globalThis.Map, RealSet = globalThis.Set;
+  let biggest = 0;
+  class SmallMap<K, V> extends RealMap<K, V> {
+    set(k: K, v: V) { super.set(k, v); biggest = Math.max(biggest, this.size); if (this.size > LIMIT) throw new RangeError('Map maximum size exceeded'); return this; }
+  }
+  class SmallSet<T> extends RealSet<T> {
+    add(v: T) { super.add(v); biggest = Math.max(biggest, this.size); if (this.size > LIMIT) throw new RangeError('Set maximum size exceeded'); return this; }
+  }
+  const big: RenderResult[] = [];
+  let failed = '';
+  globalThis.Map = SmallMap as MapConstructor; globalThis.Set = SmallSet as SetConstructor;
+  try {
+    for (const o of [{ wireframe: true, annotate: true }, { views: ['section' as const], wireframe: 'hard' as const }, { clip: { axis: 'x' as const } }]) big.push(render(scene, { size: 200, maxTriangles: 1e6, ...o }));
+  } catch (e: any) { failed = `${e.message} ${String(e.stack).split('\n')[2]?.trim()}`; } finally { globalThis.Map = RealMap; globalThis.Set = RealSet; }
+  check(!failed && big.length === 3, `renders of ${scene.numPrims} packed instances (wire, section, clip) keep every Map and Set under ${LIMIT} entries (largest ${biggest})${failed ? `: ${failed}` : ''}`);
+  const openOf = (r?: RenderResult) => Number(/^(\d+) open edges?/.exec(r?.notes.find((n) => /open edge/.test(n)) ?? '')?.[1] ?? NaN);
+  const one = openOf(render(await cook({ out: { type: 'grid', params: { size: [0.6, 0.6], rows: 6, cols: 6 } } }), { size: 64, annotate: true }));
+  check(one > 0 && openOf(big[0]) === scene.numPrims * one, `the open edges of the ${scene.numPrims} cards are still counted: ${openOf(big[0])} = ${scene.numPrims} × ${one}`);
+}
+
 console.log(fail ? `\n${fail} render check(s) failed` : '\nrender: all checks passed');
 process.exit(fail ? 1 : 0);

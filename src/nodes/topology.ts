@@ -263,8 +263,8 @@ function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smoo
     const s = g.primStart[pr], e = g.primStart[pr + 1];
     for (let v = s; v < e; v++) {
       const a = g.vertexPoint[v], b = g.vertexPoint[v + 1 < e ? v + 1 : s];
-      const ei = E.map.get(E.key(a, b));
-      if (ei !== undefined) edgeFaces[ei].push(pr);
+      const ei = E.find(a, b);
+      if (ei >= 0) edgeFaces[ei].push(pr);
     }
   }
   const b = new GeoBuilder(g);
@@ -379,7 +379,7 @@ function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smoo
     for (let k = 0; k < n; k++) {
       const v = vs[k], vn = vs[(k + 1) % n], vp = vs[(k - 1 + n) % n];
       const a = g.vertexPoint[v];
-      const eNext = E.map.get(E.key(a, g.vertexPoint[vn]))!, ePrev = E.map.get(E.key(g.vertexPoint[vp], a))!;
+      const eNext = E.find(a, g.vertexPoint[vn]), ePrev = E.find(g.vertexPoint[vp], a);
       b.addPrim([vtxPt[a], edgePt[eNext], facePt[pr], edgePt[ePrev]], true, pr, [
         v, { i: [v, vn], w: [0.5, 0.5] }, all, { i: [vp, v], w: [0.5, 0.5] },
       ]);
@@ -913,7 +913,7 @@ defineNode({
       for (let pr = 0; pr < g.numPrims; pr++) {
         if (!isSel(pr)) continue;
         const s = g.primStart[pr], e = g.primStart[pr + 1];
-        for (let v = s; v < e; v++) edgeSel[E.map.get(E.key(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s]))!].push(pr);
+        for (let v = s; v < e; v++) edgeSel[E.find(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s])].push(pr);
       }
       for (let pr = 0; pr < g.numPrims; pr++) {
         if (!isSel(pr) || region[pr] >= 0) continue;
@@ -923,7 +923,7 @@ defineNode({
           const f = stack.pop()!;
           const s = g.primStart[f], e = g.primStart[f + 1];
           for (let v = s; v < e; v++) {
-            const ei = E.map.get(E.key(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s]))!;
+            const ei = E.find(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s]);
             for (const o of edgeSel[ei]) if (region[o] < 0) { region[o] = nreg; stack.push(o); }
           }
         }
