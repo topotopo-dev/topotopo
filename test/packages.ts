@@ -1367,6 +1367,13 @@ section('the CLI as a person runs it: a graph-file cook (first use, --follow, --
     && typeof frec.packages?.['studio/trees@working'] === 'string' && JSON.stringify(frec.followed) === '["studio/trees"]' && frec.packages?.['studio/rules@7.1']
     && /the export used the working folder of studio\/trees, not a published version/.test(followed.out),
     `a cook adds on first use and shows a working folder; with --follow its export uses it too, and says so: ${followed.out.split('\n').slice(0, 3).join(' | ')} ${JSON.stringify(frec.packages)}`);
+  // the side files of that export (its record, the GLB's copy of it, the package's receipts) name nothing of this
+  // machine: the working folder followed is a package name and a hash, the files are paths in the package
+  const glbBytes = fs.readFileSync(fexp);
+  const sides = [fs.readFileSync(fexp + '.source.json', 'utf8'), fs.readFileSync(path.join(dirs.forest, 'exports', '.outputs.json'), 'utf8'),
+    JSON.stringify(JSON.parse(glbBytes.subarray(20, 20 + glbBytes.readUInt32LE(12)).toString('utf8')).asset.extras.source)];
+  const machine = (t: string) => t.includes(tmp) || t.includes(tmp.split(path.sep).join('/')) || t.includes(tmp.split(path.sep).join('\\\\')) || /[A-Za-z]:[\\/]|"\/|\.\.\//.test(t);
+  check(sides.every((t) => !machine(t)), `the export's record, the GLB's copy and the receipts hold no machine path (${sides.map((t) => (machine(t) ? t.slice(0, 120) : 'clean')).join(' | ')})`);
   const lockedRun = spawnCli([FILE, '--follow', 'studio/trees', '--locked', '--export', fexp]);
   const lrec = fs.existsSync(fexp + '.source.json') ? readJSON(fexp + '.source.json').source : {};
   check(lockedRun.code === 0 && !Object.keys(lrec.packages ?? {}).some((k: string) => k.endsWith('@working')) && Object.keys(lrec.packages ?? {}).some((k: string) => k.startsWith('studio/trees@')) && !('followed' in lrec)
