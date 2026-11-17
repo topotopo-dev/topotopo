@@ -24,6 +24,11 @@ Thanks for your interest. A few things to know before you start.
 - **Licences.** Dependencies that ship must be permissive: MIT, Apache-2.0, BSD, ISC, MPL-2.0, Unicode-3.0, Zlib, 0BSD, Unlicense or CC0. No GPL or AGPL anywhere in the tree. LGPL is tolerated only for optional native modules that our code never calls and that load dynamically if present (today: sharp/libvips, an optional dependency of gltf-transform); `npm run notice` lists them and flags anything outside this list.
   Run `npm run notice` after adding one so `NOTICE` carries its licence text; after a change to the Rust crates of
   `kernels/` (Cargo.lock) it needs `cargo`. `npm test` checks NOTICE without Rust.
+- **The Windows launcher is committed built.** `launcher/` (Rust, no crates) builds `launcher/win32-x64/topotopo-open.exe`,
+  what a double-clicked package runs. After changing it, run `npm run launcher:build` on Windows and commit the exe;
+  `npm test` fails while the committed exe was built from other sources (see `launcher/README.md`).
+- **File icons are drawn in SVG.** The Windows icons of packages and workspaces are drawn in `assets/icons/src`;
+  `npm run icons` makes `assets/icons/*.ico` from them, and `npm test` fails while the two differ.
 
 ## Before you open a pull request
 

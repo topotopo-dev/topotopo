@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<!-- TopoTopo workspace (.topows), drawn for 64 px and up: a folder holding packages, with the terraces mark (docs/brand/mark.svg). npm run icons (scripts/gen-icons.ts) makes assets/icons/*.ico from these drawings. -->
+  <defs><linearGradient id="front" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#68727e"/><stop offset="1" stop-color="#4f5761"/></linearGradient></defs>
+  <path d="M16 50Q16 34 32 34H94Q102 34 108 40L124 56H224Q240 56 240 72V214H16Z" fill="#3b4149"/>
+  <rect x="40" y="66" width="176" height="60" rx="6" fill="#f3efea"/>
+  <path d="M16 100Q16 88 28 88H228Q240 88 240 100V214Q240 226 228 226H28Q16 226 16 214Z" fill="url(#front)"/>
+  <path d="M22 89.5H234" stroke="#8f99a5" stroke-width="5" stroke-linecap="round"/>
+  <g transform="translate(128 160) scale(0.62) translate(-128 -129)"><polygon points="128,62 235.39,124 128,186 20.61,124" fill="#f4a26c"/><polygon points="20.61,124 128,186 128,212 20.61,150" fill="#d9622b"/><polygon points="235.39,124 128,186 128,212 235.39,150" fill="#a8461a"/><polygon points="128,54 204.21,98 128,142 51.79,98" fill="#f4a26c"/><polygon points="51.79,98 128,142 128,168 51.79,124" fill="#d9622b"/><polygon points="204.21,98 128,142 128,168 204.21,124" fill="#a8461a"/><polygon points="128,46 173.03,72 128,98 82.97,72" fill="#f4a26c"/><polygon points="82.97,72 128,98 128,124 82.97,98" fill="#d9622b"/><polygon points="173.03,72 128,98 128,124 173.03,98" fill="#a8461a"/></g>
+</svg>

@@ -22,11 +22,13 @@
 //   catalog (TopoTopo's own packages too), a build that names a built-in package's output and copies the built-in package in from the installed
 //   built-in library, a build that uses sdf_grid, and the preview page with three.js served from the installed
 //   dependencies.
+// - On Windows, the launcher from the installed package (launcher/win32-x64/topotopo-open.exe): it finds the installed
+//   command line and a Node.js by itself and reports a failing open.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -81,6 +83,7 @@ try {
     ...fs.readdirSync(path.join(ROOT, 'library')).map((k) => `library/${k}/versions/${newestOf(k)}/version.json`), 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
     'kernels/pkg/topotopo_kernels.js', 'kernels/pkg/topotopo_kernels_bg.wasm', 'kernels/pkg/LICENSE',
     'kernels/pkg-simd/topotopo_kernels.js', 'kernels/pkg-simd/topotopo_kernels_bg.wasm', 'kernels/pkg-simd/LICENSE',
+    'launcher/win32-x64/topotopo-open.exe', 'assets/icons/topotopo-package.ico', 'assets/icons/topotopo-workspace.ico',
   ];
   const missing = required.filter((f) => !files.includes(f));
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
@@ -109,7 +112,8 @@ try {
   check(exampleFiles.length > 30 && !exampleMissing.length, `tarball has the examples and their cards (${exampleFiles.length} files)${exampleMissing.length ? `; missing: ${exampleMissing.slice(0, 5).join(', ')}` : ''}`);
   const shippedExample = (f: string) => /^examples\/[\w-]+\.(json|md)$/.test(f) || /^examples\/[\w-]+\/([\w-]+\.topo|(graphs|inputs)\/[^/]+)$/.test(f);
   const stray = files.filter((f) => /^(src|test|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^examples\//.test(f) && !shippedExample(f)) ||
-    (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) || (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
+    (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
+    (/^launcher\//.test(f) && f !== 'launcher/win32-x64/topotopo-open.exe') || /^assets\/icons\/src\//.test(f) || (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
   check(!stray.length, `tarball has no sources, tests, example renders or package copies, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
   // every file of every version of TopoTopo's own packages: a version has the same files wherever it is
   const versionFiles: string[] = [];
@@ -153,6 +157,24 @@ try {
   check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/town_from_lots.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
   check(fs.existsSync(path.join(app, 'roofs.glb')) && fs.readFileSync(path.join(app, 'roofs.glb')).subarray(0, 4).toString() === 'glTF', 'exported roofs.glb');
   console.log(cook.split('\n').filter((l) => /^(cooked|geometry|rendered|exported)/.test(l)).join('\n'));
+
+  // ------------------------------------------------------------------------------------------------ Windows launcher
+  const launcherFile = info.files.find((f: any) => f.path === 'launcher/win32-x64/topotopo-open.exe');
+  console.log(`launcher/win32-x64/topotopo-open.exe: ${launcherFile?.size ?? 0} bytes unpacked`);
+  if (process.platform === 'win32') {
+    step('Windows launcher from the installed package');
+    // what a double-click runs, found from where the package is installed: the installed dist/cli.js and a Node.js
+    // found without --node (none beside this prefix, so the installer's registry entry or PATH). open on a file that is
+    // not there must fail and say so, whatever open does with a real one.
+    const exe = path.join(installed, 'launcher', 'win32-x64', 'topotopo-open.exe');
+    const env = { ...process.env, TOPOTOPO_LAUNCHER_QUIET: '1' };
+    const version = execFileSync(exe, ['--version'], { env, encoding: 'utf8' }).trim();
+    check(/^topotopo-open \S+ source [0-9a-f]{16}$/.test(version), `installed launcher answers --version (${version})`);
+    const r = spawnSync(exe, [path.join(app, 'missing.topo')], { cwd: app, env, encoding: 'utf8', timeout: 60000 });
+    const said = (r.stderr ?? '').replace(/\r\n/g, '\n');
+    check(r.status !== 0 && said.startsWith('TopoTopo could not open missing.topo.\n\n') && said.trim().split('\n').length > 2 && !said.includes('src/cli.ts'),
+      `installed launcher runs the installed command line: open on a missing file fails and says why (exit ${r.status}: ${JSON.stringify(said.split('\n')[2] ?? '')})`);
+  }
 
   // ------------------------------------------------------------------------------------------------ Godot
   step(`Godot: npm exec --no -- ${BIN} cook … --for godot`);

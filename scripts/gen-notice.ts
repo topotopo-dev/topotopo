@@ -42,6 +42,8 @@ const KERNELS = path.join(ROOT, 'kernels');
 const TARGET = path.join(ROOT, 'NOTICE');
 const check = process.argv.includes('--check');
 const RUST_HEADING = 'Rust crates compiled into the WebAssembly kernels (kernels/pkg)';
+const LAUNCHER_LOCK = path.join(ROOT, 'launcher', 'Cargo.lock');
+const LAUNCHER_CRATE = 'topotopo-open';
 const SEP = '='.repeat(78);
 
 /** Licence texts for packages whose published tarball has no licence file. Keep in sync with package.json. */
@@ -268,6 +270,10 @@ function render(deps: Dep[], optional: OptionalDep[], rust: string): string {
   out.push('');
   out.push(`Rust crates in the WebAssembly kernels (kernels/pkg): see "${RUST_HEADING}" at the end.`);
   out.push('');
+  out.push("Windows launcher (launcher/win32-x64/topotopo-open.exe, built from launcher/): TopoTopo's own code with the Rust");
+  out.push('standard library (MIT OR Apache-2.0, https://github.com/rust-lang/rust) and the Microsoft C runtime linked in;');
+  out.push('it uses no other crates.');
+  out.push('');
   out.push('Licence texts');
   out.push('-------------');
   for (const b of BUNDLED) {
@@ -297,6 +303,9 @@ const SHIPS = (id: string) => /^(MIT|MIT-0|Apache-2\.0|0BSD|BSD-[1-4]-Clause|ISC
 const BUILD_TIME = SHIPS;
 
 // ---------------------------------------------------------------------------------------------------------------
+// the launcher's NOTICE lines say it uses no crates: a crate in its Cargo.lock needs its licence here first
+const launcherCrates = [...lf(fs.readFileSync(LAUNCHER_LOCK, 'utf8')).matchAll(/^name = "([^"]+)"$/gm)].map((m) => m[1]).filter((n) => n !== LAUNCHER_CRATE);
+if (launcherCrates.length) stop(`launcher/Cargo.lock has crates (${launcherCrates.join(', ')}): list them and their licence texts in NOTICE (scripts/gen-notice.ts, the launcher lines) before shipping them`);
 const { deps, optional } = npmPackages();
 const fingerprint = cargoLockFingerprint();
 const crates = cargoCrates(check);

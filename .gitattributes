@@ -2,3 +2,5 @@
 *.png binary
 *.ttf binary
 *.wasm binary
+*.exe binary
+*.ico binary
