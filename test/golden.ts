@@ -1,7 +1,11 @@
-// Golden tests: every node type (on its fixture), every example graph and every output of TopoTopo's own packages is
+// Golden tests: every node type (on its fixture), every example graph, every test scene (test/scenes/: graphs kept for
+// their coverage, not examples) and every output of TopoTopo's own packages is
 // cooked and fingerprinted (counts, bbox, attribute schema, groups, quantised hashes of positions, topology and
 // attributes). Fingerprints live in test/golden/<name>.json, one file per node, example or output, so changes show up in
-// git diffs.
+// git diffs. Every example meets its card (test/cards.ts) and must also cook
+// cleanly, without errors or warnings, so none is frozen into its golden. An example's golden is a review aid, not its
+// contract: when its graph is rebuilt or the engine improves, its card checks say whether it still does the same job,
+// and an intended change is updated here and looked at in its render (npm run showcase).
 //
 //   node test/golden.ts             compare against test/golden/*.json, print a per-field diff on mismatch
 //   node test/golden.ts --update    rewrite the golden files (and remove orphaned ones when no filter is given)
@@ -28,7 +32,8 @@ const exampleEngine = new Engine(createNodeHost({ baseDir: examplesDir }));
 await exampleEngine.init();
 openPackages(exampleEngine, examplesDir);
 
-interface Case { name: string; graph: GraphSpec; engine: Engine; source: string }
+/** clean: an example that meets its card, which must cook without errors or warnings */
+interface Case { name: string; graph: GraphSpec; engine: Engine; source: string; clean?: boolean }
 const cases: Case[] = [];
 for (const def of allNodeDefs()) {
   if (SKIP.has(def.type)) continue;
@@ -36,14 +41,20 @@ for (const def of allNodeDefs()) {
 }
 for (const f of fs.readdirSync(examplesDir).filter((x) => x.endsWith('.json')).sort()) {
   const graph = JSON.parse(fs.readFileSync(path.join(examplesDir, f), 'utf8'));
-  cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}` });
+  cases.push({ name: `example.${path.basename(f, '.json')}`, graph, engine: exampleEngine, source: `examples/${f}`, clean: true });
 }
 // the example packages (examples/<name>/ with its own .topo, inputs/ and copies of TopoTopo's packages)
 for (const ex of examplePackageGraphs()) {
   const e = new Engine(createNodeHost({ baseDir: ex.dir }));
   await e.init();
   openPackages(e, ex.dir);
-  cases.push({ name: `example.${ex.name}`, graph: JSON.parse(fs.readFileSync(ex.file, 'utf8')), engine: e, source: path.relative(ROOT, ex.file).split(path.sep).join('/') });
+  cases.push({ name: `example.${ex.name}`, graph: JSON.parse(fs.readFileSync(ex.file, 'utf8')), engine: e, source: path.relative(ROOT, ex.file).split(path.sep).join('/'), clean: true });
+}
+// test scenes: graphs kept for their coverage that are not examples (test/scenes/*.json); like the examples they cook
+// TopoTopo's own packages from the examples' copies
+const scenesDir = path.join(ROOT, 'test', 'scenes');
+for (const f of fs.readdirSync(scenesDir).filter((x) => x.endsWith('.json')).sort()) {
+  cases.push({ name: `scene.${path.basename(f, '.json')}`, graph: JSON.parse(fs.readFileSync(path.join(scenesDir, f), 'utf8')), engine: exampleEngine, source: `test/scenes/${f}`, clean: true });
 }
 // the outputs of TopoTopo's own packages at their defaults (curve/surface outputs on their fixture inputs), and each
 // each built-in package's default output, its line-up
@@ -76,6 +87,7 @@ async function record(c: Case) {
   };
   if (env) rec.env = env;
   const inv = r.geo ? checkGeo(r.geo) : [];
+  if (c.clean && (!r.ok || r.warnings.length)) inv.push(`an example that meets its card cooks without errors or warnings: ${[...rec.errors, ...rec.warnings].slice(0, 3).join('; ')}`);
   return { rec, problem: inv.length ? `invariants: ${inv.join(', ')}` : '' };
 }
 
@@ -137,5 +149,5 @@ if (!filter) {
 
 const secs = ((performance.now() - t0) / 1000).toFixed(1);
 if (update) console.log(`\ngolden: ${written} written, ${unchanged} unchanged, ${fail} failed (${selected.length} cases, ${secs}s)`);
-else console.log(`\ngolden: ${pass} passed, ${fail} failed, ${skipped} skipped (${selected.length} cases, ${secs}s)${fail ? '\nIf the change is intended: npm run test:update, then review git diff test/golden' : ''}`);
+else console.log(`\ngolden: ${pass} passed, ${fail} failed, ${skipped} skipped (${selected.length} cases, ${secs}s)${fail ? '\nIf the change is intended: npm run test:update, then review git diff test/golden (an example: its card checks, node test/cards.ts, say whether it still does the same job; look at its render, npm run showcase)' : ''}`);
 process.exit(fail ? 1 : 0);

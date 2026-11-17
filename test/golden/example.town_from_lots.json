@@ -1,0 +1,56 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": [
+        "Cd:float:3",
+        "depth:float:1",
+        "floors:float:1",
+        "gap:float:1",
+        "height:float:1",
+        "lot:float:1",
+        "material:string:1",
+        "name:string:1"
+      ],
+      "vertex": ["N:float:3"]
+    },
+    "bbox": {
+      "max": [55.4617, 15.9792, 55.464],
+      "min": [-55.1147, 0, -55.4634]
+    },
+    "counts": {
+      "points": 20866,
+      "prims": 18587,
+      "vertices": 74328,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "401d89bbcdccede5",
+      "attributes": {
+        "detail.materials": "9e5a0afe7991a5b4",
+        "prim.Cd": "5d703861a70387eb",
+        "prim.depth": "333beba54b04469f",
+        "prim.floors": "b1eede71a9fa17fb",
+        "prim.gap": "333beba54b04469f",
+        "prim.height": "16aaf43030a5f0d2",
+        "prim.lot": "4841ba326028e678",
+        "prim.material": "59bc53308c6eb64e",
+        "prim.name": "a38642c36e2ca259",
+        "vertex.N": "d0e38b89c18c447b"
+      },
+      "topology": "3a10c7b7a7261f39"
+    }
+  },
+  "name": "example.town_from_lots",
+  "ok": true,
+  "source": "examples/town_from_lots.json",
+  "warnings": []
+}

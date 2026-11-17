@@ -1,0 +1,44 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3", "kind:string:1"],
+      "prim": ["kind:string:1", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.5, 3, 0.143],
+      "min": [-1.5, 0, 0]
+    },
+    "counts": {
+      "points": 5440,
+      "prims": 5288,
+      "vertices": 21040,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "6706dd11970092bb",
+      "attributes": {
+        "detail.materials": "21e023e10671cb8b",
+        "point.kind": "81c0e805bd11f3df",
+        "prim.kind": "5b15afe9b42f258b",
+        "prim.material": "f5c9b4d9645ecac3",
+        "prim.name": "b1b42979f3be3a03",
+        "vertex.N": "95068985b4e0b4f7",
+        "vertex.uv": "6dcc9731e09cb80f"
+      },
+      "topology": "9c55f4a0b26e5c72"
+    }
+  },
+  "name": "example.scifi_panel",
+  "ok": true,
+  "source": "examples/scifi_panel.json",
+  "warnings": []
+}

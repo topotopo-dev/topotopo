@@ -1,0 +1,89 @@
+{
+  "description": "A stylised low-poly tree grown from L-system rules. The trunk splits into four, then every branch into three (now and then two), each new branch turned away from its parent by angle, a little shorter, slightly kinked at random and bent down by its weight. The skeleton is scaled to the height; branches are swept into six-sided tubes that thin smoothly by taper per level (bark, uv in metres along each branch); the tips carry clusters of eight double-sided leaf cards (leaf, uv 0..1 per card, a slightly different tint per cluster in Cd). The whole tree is then fitted to exactly height, leaves included.",
+  "params": {
+    "generations": { "type": "int", "default": 5, "min": 2, "max": 7, "desc": "how many times the branches split" },
+    "angle": { "type": "float", "default": 25, "min": 10, "max": 60, "step": 1, "desc": "angle between a branch and its parent (degrees)" },
+    "height": { "type": "float", "default": 6, "min": 2, "max": 20, "step": 0.5, "desc": "height of the tree, leaves included (m)" },
+    "taper": { "type": "float", "default": 0.7, "min": 0.4, "max": 0.95, "step": 0.05, "desc": "how much thinner each branch is than its parent (diameter ratio)" },
+    "leaf_size": { "type": "float", "default": 0.3, "min": 0, "max": 1, "step": 0.05, "desc": "length of a leaf card (m); 0 leaves the tree bare" },
+    "seed": { "type": "int", "default": 1, "min": 0, "max": 9999, "desc": "random seed of the branching, the twists and the leaves" }
+  },
+  "vars": { "generations": 5, "angle": 25, "height": 6, "taper": 0.7, "leaf_size": 0.3, "seed": 1 },
+  "meta": { "render": { "views": ["persp"], "azimuth": 30, "elevation": 12, "size": "1400x1200", "shading": "pbr", "cd": "multiply" } },
+  "nodes": {
+    "rules": {
+      "type": "lsystem",
+      "params": {
+        "axiom": "FF/(0)FB",
+        "rules": {
+          "B": "[&F/(0)&(0)FAJ]/(90)[&F/(0)&(0)FAJ]/(90)[&F/(0)&(0)FAJ]/(90)[&F/(0)&(0)FAJ]",
+          "A": [["[&F/(0)&(0)FAJ]/(137.5)[&F/(0)&(0)FAJ]/(137.5)[&F/(0)&(0)FAJ]", 0.75], ["[&F/(0)&(0)FAJ]/(180)[&F/(0)&(0)FAJ]", 0.25]]
+        },
+        "generations": "=generations",
+        "angle": "=angle",
+        "step": 1,
+        "branch_scale": 0.78,
+        "angle_variance": 9,
+        "tropism": [0, -1, 0],
+        "tropism_strength": 0.06,
+        "seed": "=seed"
+      }
+    },
+    "skeleton": { "type": "transform", "in": ["rules"], "params": { "uniform_scale": "=max(height - 0.9 * leaf_size, 0.6 * height) / bbox('rules').max.y" } },
+
+    "branch_curves": { "type": "delete", "in": ["skeleton"], "params": { "class": "point", "group": "leaves" } },
+    "along": { "type": "curve_attribs", "in": ["branch_curves"], "params": { "arclength": false, "tangent": false } },
+    "thickness": { "type": "wrangle", "in": ["along"], "params": { "run_over": "points", "code": "@pscale = height * 0.06 * pow(taper, @depth + @curveu);" } },
+    "bare_curves": { "type": "attrib_delete", "in": ["thickness"], "params": { "names": "N up width curveu" } },
+    "wood": { "type": "sweep", "in": ["bare_curves"], "params": { "shape": "circle", "radius": 0.5, "divisions": 6, "caps": true, "uv_length": true } },
+    "wood_named": { "type": "attrib_create", "in": ["wood"], "params": { "name": "name", "class": "prim", "value": "branches" } },
+    "wood_tint": { "type": "attrib_create", "in": ["wood_named"], "params": { "name": "Cd", "class": "point", "value": [1, 1, 1] } },
+    "bark": { "type": "material", "in": ["wood_tint"], "params": { "name": "bark", "base_color": "#6b4a33", "roughness": 0.9 } },
+
+    "leaf_points": { "type": "delete", "in": ["skeleton"], "params": { "class": "point", "group": "leaves", "keep": true } },
+    "tips": { "type": "delete", "in": ["leaf_points"], "params": { "class": "point", "group": "='@depth<' + generations" } },
+    "tip_size": { "type": "attrib_randomize", "in": ["tips"], "params": { "name": "pscale", "min": "=leaf_size * 0.8", "max": "=leaf_size * 1.2", "seed": "=seed" } },
+    "tip_tint": { "type": "color", "in": ["tip_size"], "params": { "mode": "random", "hue_range": [0, 0.08], "saturation": [0, 0.15], "value": [0.75, 1.1], "seed": "=seed" } },
+    "leaf": { "type": "shape2d", "params": { "shape": "ngon", "sides": 8, "radius": 0.5, "rotate": 90, "plane": "xz" } },
+    "leaf_shape": { "type": "transform", "in": ["leaf"], "params": { "scale": [0.45, 1, 1], "translate": [0, 0, 0.5] } },
+    "leaf_uv": { "type": "uv_project", "in": ["leaf_shape"], "params": { "method": "planar", "axis": "y", "offset": [0.5, 0] } },
+    "leaf_tilt": { "type": "transform", "in": ["leaf_uv"], "params": { "rotate": [-65, 0, 0] } },
+    "outer_ring": { "type": "copy_xform", "in": ["leaf_tilt"], "params": { "count": 5, "rotate": [0, 0, 72] } },
+    "leaf_tilt_inner": { "type": "transform", "in": ["leaf_uv"], "params": { "rotate": [-25, 0, 36], "scale": 0.85 } },
+    "inner_ring": { "type": "copy_xform", "in": ["leaf_tilt_inner"], "params": { "count": 3, "rotate": [0, 0, 120] } },
+    "bunch": { "type": "merge", "in": ["outer_ring", "inner_ring"] },
+    "leaf_cards": { "type": "copy_to_points", "in": ["bunch", "tip_tint"], "params": { "copy_attribs": "Cd" } },
+    "leaves_named": { "type": "attrib_create", "in": ["leaf_cards"], "params": { "name": "name", "class": "prim", "value": "leaves" } },
+    "leaves": { "type": "material", "in": ["leaves_named"], "params": { "name": "leaf", "base_color": "#4f8a35", "roughness": 0.7, "double_sided": true } },
+
+    "leafy": { "type": "merge", "in": ["bark", "leaves"] },
+    "with_leaves": { "type": "switch", "in": ["bark", "leafy"], "params": { "index": "=leaf_size > 0 ? 1 : 0" } },
+    "fit": { "type": "transform", "in": ["with_leaves"], "params": { "uniform_scale": "=height / bbox('with_leaves').max.y" } },
+    "normals": { "type": "normal", "in": ["fit"], "params": { "cusp_angle": 60 } },
+
+    "uv_area": {
+      "type": "wrangle",
+      "in": ["normals"],
+      "note": "workaround: assert has no uv check, so this counts the faces whose uv has no area for the uv promise",
+      "params": {
+        "run_over": "detail",
+        "code": "// count the faces whose uv has no area (missing or collapsed uv)\nlet v = 0, bad = 0;\nfor (let pr = 0; pr < nprims(0); pr++) {\n  const n = primvertexcount(0, pr), a = vertex(0, 'uv', v);\n  let area = 0;\n  for (let k = 1; k + 1 < n; k++) {\n    const b = vertex(0, 'uv', v + k), c = vertex(0, 'uv', v + k + 1);\n    area += (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);\n  }\n  if (!(Math.abs(area) > 1e-9)) bad++;\n  v += n;\n}\ni@faces_without_uv = bad;"
+      }
+    },
+    "uv": { "type": "assert", "in": ["uv_area"], "params": { "label": "uv", "attrib": "faces_without_uv", "attrib_class": "detail", "attrib_max": 0 } },
+    "trunk_foot": { "type": "group", "in": ["uv"], "params": { "class": "point", "name": "trunk_foot", "expr": "@P.y < 0.0001 && length([@P.x, 0, @P.z]) <= height * 0.04" } },
+    "grounded": { "type": "assert", "in": ["trunk_foot"], "note": "workaround: group and bbox checks, not expr: an assert expr measures every piece first, which takes minutes on thousands of leaf cards", "params": { "label": "grounded", "group": "trunk_foot", "bbox_min": "=[-1e9, 0, -1e9]", "bbox_max": "=[1e9, height, 1e9]", "tolerance": 0.0001 } },
+    "tidy": { "type": "attrib_delete", "in": ["grounded"], "params": { "names": "faces_without_uv depth copynum pscale" } },
+    "tree": { "type": "group_delete", "in": ["tidy"], "params": { "groups": "*" } }
+  },
+  "output": "tree",
+  "outputs": {
+    "tree": {
+      "node": "tree",
+      "label": "L-system tree",
+      "kind": "mesh",
+      "tags": ["tree", "l-system", "low-poly", "vegetation", "leaf-cards"],
+      "description": "A low-poly tree standing on the origin, exactly height tall: trunk and branches as tapered tubes in bark, clusters of double-sided leaf cards in leaf at the branch tips, uv on every face."
+    }
+  }
+}

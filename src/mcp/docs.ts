@@ -3,10 +3,13 @@ import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
 import { PACKAGE_COMMANDS } from '../packages/commands.ts';
 import { GODOT_COMMANDS } from '../host/godot-commands.ts';
+import { graphLines } from './graphlines.ts';
+import { examplesIndexText } from './examples.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
 WORKFLOW
+Start a scene, an asset or a pipeline from the closest complete example: help {topic:"examples"} lists them, each with a card (the request, what goes in, what comes out, what it promises) and today's graph; help {examples:["name"]} gives one to build and adapt.
 0. inputs {action:"list"} → the person's own files in the package inputs/ folder (guide curves, sites, zones, blockouts, PNG masks). Building a landscape or scene: look there first and build on them (help topic "inputs").
 1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…) and TopoTopo's own packages, ready-made generators by full name (topotopo/architecture/house, topotopo/nature/tree_lowpoly, topotopo/street/road_strip …).
 2. help {nodes:[...]} for exact params before using unfamiliar nodes; help {topic:"wrangle"|"graph"|"recipes"…} for concepts.
@@ -14,7 +17,7 @@ WORKFLOW
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs; overlays for specific questions: wireframe "hard"/"boundary", views "section", glyphs "N", label_groups, shading "matcap", see help topic "render"). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
-7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
+7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr, heightfields, images); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
 OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, material, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a package that publishes versions, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, material, volume, scene; a mesh with scene_null sockets is a mesh; materials alone are a material) pins what it must cook to: build warns and publishing blocks when it does not.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
@@ -63,13 +66,7 @@ export const INPUTS_EXAMPLE: GraphSpec = {
   },
 };
 
-/** A graph as JSON with one node (and one param) per line: readable in a topic page, and JSON.parse gives it back. */
-export function graphLines(g: GraphSpec): string {
-  const rows = (o: Record<string, any>) => Object.entries(o).map(([k, v]) => `   ${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(',\n');
-  const parts = Object.entries(g).map(([k, v]) =>
-    (k === 'nodes' || k === 'params') && v && typeof v === 'object' ? `${JSON.stringify(k)}: {\n${rows(v)}\n }` : `${JSON.stringify(k)}: ${JSON.stringify(v)}`);
-  return `{${parts.join(',\n ')}}`;
-}
+export { graphLines };
 
 export const TOPICS: Record<string, string> = {
   workspace: `WORKSPACE, PACKAGE, LIBRARY (the three words, and the workspace tool)
@@ -680,7 +677,7 @@ EROSION: droplets in metres, so the same params erode alike at any spacing (an 8
   which depends on its extent); direction E/SE/S/SW/W/NW/N/NE = 0..7, sink = 255. D8 routes one receiver,
   D-infinity splits across two downhill receivers; local pits retain flow unless fill_sinks:true routes over a
   virtually filled surface (height stays unchanged). stream_power accepts the same opt-in fill_sinks flag.
-  See examples/erosion_models.json for all four erosion methods on the same ridged terrain.
+  A whole valley eroded, then weathered, with its flow read for fans and a river: help {examples:["eroded_valley"]}.
 DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise closed depressions to their spill level.
   epsilon:0 keeps flat spill surfaces; epsilon>0 adds a strict downhill gradient (metres per neighbour step).
   max_depth:0 fills every depression; a positive limit retains each connected depression whose maximum depth exceeds
@@ -689,7 +686,6 @@ DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise clos
   mask_layer names a no-fill layer (values must be 0..1; cells at 1 stay untouched as terminal outlets).
   Protected outlets and retained lakes are exceptions to border drainage. Pipe/stream_power erosion initializes from lake and writes simulated water
   depth back to lake within that original lake footprint. Droplet water remains its legacy normalised resting mask.
-  See examples/drainage.json: unfilled massif beside shallow fills, blue retained lakes and coloured accumulation.
 RENDER / INSPECT: render draws heightfields as a shaded grid with the mask in red; heightfield_layer:"flow" draws
   another layer in red instead ("none": none; the viewer's layer picker does the same), color_by any layer name maps
   it to colours. It draws at most 256 quads per side, so a 513 × 513 field shows at 257 × 257 (the footer and a note
@@ -708,7 +704,7 @@ UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes 
   Tiles: pass the same height_min / height_max to every export.
   Whole scene: export {format: "unreal_landscape", path: "exports/level"} of a merge(heightfield, meshes, instances) →
   heightmap + every layer + landscape.json (the exact Landscape import settings and steps) + objects.glb + the instance
-  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). examples/unreal_demo.json is a complete scene.`,
+  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). help {examples:["unreal_landscape"]} is a complete scene.`,
 
   textures: `PROCEDURAL TEXTURES AND BAKES (Substance Designer / Houdini COP style; category "texture")
 An image is a volume carried in the geometry (like a heightfield): a 2D grid of float pixels with named layers of 1
@@ -816,14 +812,14 @@ CUTOUTS: tex_crop extracts a top-left pixel rectangle (all layers), optionally r
   validity mask (same size). Pack padding reserves empty gutters; dilate supplies the edge values.
   material {alpha_mode:"mask",alpha_cutoff:0.5,double_sided:true} BEFORE texture_to_material enables cutouts.
   Omitted/auto alpha mode blends only for scalar alpha < 1; vertex Alpha (COLOR_0.A) is data and never changes it.
-  Complete example: examples/image_cutouts.json; workflow and layout contract: docs/image-cutouts.md.
+  Complete example: help {examples:["image_cutouts"]}; workflow and layout contract: docs/image-cutouts.md.
 SEE IT: render of a geometry holding only images shows the "texture" view; render {texture:"<image>"|"image/layer"|
   "<material>"} adds the view (a material shows its maps as a labelled strip); render {textures:true} samples base
   colour maps on the mesh (texture × Cd, like glTF). inspect lists every image with size and per-layer ranges.
 EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metallicRoughnessTexture); usda writes
   <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
   <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
-RECIPE (brick wall + worn crate: examples/textures.json):
+RECIPE (brick wall + worn crate; tileable stone, wood and metal from texture nodes: help {examples:["material_set"]}):
   bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {layer:"id"}
   color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)
   normal = tex_normal_from_height(bricks) {depth:0.035, size:1.6} · crate: uv_unwrap → bake_ao + bake_curvature →
@@ -831,7 +827,7 @@ RECIPE (brick wall + worn crate: examples/textures.json):
   tex_blend(wood, paint, wear) → tex_channel(ao, rough) = ORM → texture_to_material {base_color, orm}.
   Detail on a bake: grain = tex_noise {scale:60} → grain_n = tex_normal_from_height {depth:0.0003, size:<uv span in m>}
   → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.
-RECIPE (worn painted metal from texture nodes only: examples/texture_lab.json): SDF plates and rivets → height →
+RECIPE (worn painted metal from texture nodes only; the metal of help {examples:["material_set"]}): plates and rivets → height →
   normal, tex_ao · edge wear = tex_curvature(normal) layer convex × tex_grunge chips → tex_slope_blur {mode:"max"}
   (ragged) → tex_histogram_scan {coverage:0.07} · steel = tex_directional_blur(fine noise) under the paint · per-plate
   paint = tex_flood_fill(plate mask) → tex_histogram_range → tex_colorize · rust runs = tex_directional_blur(rivet
@@ -912,7 +908,7 @@ IDENTITY THROUGH INSTANCES AND EXPORT (which lot, edge or source layer an instan
                 instance (strings as string[]). geo and json keep every attribute. Check: inspect lists the anchors'
                 attributes; a csv export shows the values.
 Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
-  with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
+  with trees = merge of three meshes named pine/fir/oak (a whole forest: help {examples:["forest_on_terrain"]}; help topic "pcg").`,
 
   rbd: `RIGID BODIES: SETTLE AND STACK (Houdini RBD drop / settle, Rapier physics; category "sim")
 Use it when placed pieces must rest physically: rocks on a terrain, props on a floor, crates in a pile, a container filled.
@@ -949,7 +945,7 @@ Example: rocks on a terrain, then a crate pile on the terrain and the settled ro
   "settled": {"type":"rbd_settle","in":["rocks","terrain"],"params":{"delete_fallen":true}},
   "ground2": {"type":"merge","in":["terrain","settled"]},
   "crates": {"type":"copy_to_points","in":["crate","same_spot_x16"],"params":{"pack":true}},
-  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (examples/rbd_settle.json)`,
+  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (rbd_stack in a whole scene: help {examples:["fracture_settle"]})`,
 
   pcg: `PCG: SCATTERING AND INSTANCING (Houdini scatter/copy toolkit, Unreal PCG point filters)
 THE CHAIN
@@ -992,7 +988,7 @@ copy_to_points: variants "name"/"piece" + variant_attrib (exact pick) or variant
   pack:true for anything above a few thousand copies.
 Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatter ≈ Surface/Spline/Volume Sampler; orient ≈
   Transform Points; prune ≈ Self Pruning / Density Filter / Difference; copy_to_points pack ≈ Static Mesh Spawner.
-Example: examples/forest.json (30k candidates → pruned packed forest) and examples/pcg_scatter.json (road, lamps, rocks).`,
+Example: help {examples:["forest_on_terrain"]} (slope and noise masks → heightfield_scatter → packed trees and rocks, off steep ground).`,
 
   curves: `CURVES (polylines and Bezier / NURBS spline prims)
 straight_skeleton {mode skeleton|offset|roof, distance, pitch, pitch_attrib, height_cap, group}
@@ -1048,7 +1044,7 @@ Recipes:
     frame:"plane"} → sweep {radius:0.04}; posts: resample the rails {length:1.5} → copy_to_points a thin box.
   Letter / logo outline: bezier {closed:true, points} (+ inner contours for holes) → convert_curve → extrude.
   Cable with sag: nurbs {points:[a, mid lowered, b]} → resample {length:0.05} → polywire; taper with curve_attribs.
-See examples/splines.json.`,
+A railing and pipes along a filleted path: help {examples:["rail_along_curve"]}.`,
 
   particles: `PARTICLES (Houdini POP network in one node; category "sim")
 {"type":"particles","in":["emitter","collision","field"],"params":{...}}: inputs 1 and 2 are optional.
@@ -1072,8 +1068,8 @@ TIME: a cook at start_frame (default 1) runs "steps" steps; frame f runs steps +
   animate:false = always "steps" steps, time-independent. Same bits with or without the worker pool and however it is stepped.
 RECIPES: fountain = one point, speed 6, velocity_var 1.3, life 3, floor:true, collide bounce, trails 6. Runoff on terrain =
   emitters scattered on ridges (heightfield_mask_by_feature curvature convex + heightfield_scatter), the heightfield as input 1
-  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age
-  (examples/particles.json). Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1. Swarm on a mesh: attract_to surface.`,
+  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age.
+  Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1 (a burst with trails: help {examples:["sparks"]}). Swarm on a mesh: attract_to surface.`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
@@ -1677,6 +1673,13 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    vars by their bare name: "npoints == count * 8"). As in every expression a var comes first: with a slider "pieces",
    pieces is the slider and geo.pieces the measurement (geo holds every measurement), so "geo.pieces == pieces" reads
    both; an expr that reads such a name bare, without geo, gets a warning naming the clash.
+   Heightfields and images have no points, so they have checks of their own: heightfields / images (names that must
+   exist; * wildcards), then for the ones named (every one when empty) samples ([x, z] or one number), height_min /
+   height_max (every height sample), match ("edges" | "all": the heightfield against the reference heightfield wired
+   to input 1, at the same world X and Z, within match_tolerance: a tile cooked on its own against its map),
+   image_size ([w, h] or one number) and image_min / image_max (every channel of every layer; NaN fails):
+   {"type":"assert","in":["tile","map"],"params":{"label":"seamless","match":"edges","height_min":0,"height_max":"=relief"}}
+   {"type":"assert","in":["maps"],"params":{"label":"maps","images":"stone_*","image_size":"=resolution","image_min":0,"image_max":1}}
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
    Every failed check names its first offender: the part (prim "name", groups) and its world position.
@@ -1774,14 +1777,14 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
  normals, group / prim attribute borders): reduce before unwrapping and compute vertex normals after lod. remesh_quad {target_faces:2000, feature_angle:45} produces field-aligned
  quad-dominant polygons with point/vertex/prim attributes; mode:"quads_only" conformingly subdivides all faces and can
  exceed target_faces, especially along hard curves. crease_group aligns explicit edges; group keeps its border fixed.
- Inspect detail quad_fraction and singularities, and the wireframe (examples/quad_remesh.json). remesh (voxel) only
- when the input is beyond repair (it drops attributes).
+ Inspect detail quad_fraction and singularities, and the wireframe. remesh (voxel) only when the input is beyond repair
+ (it drops attributes). A whole cleanup, scan to LODs: help {examples:["asset_cleanup"]}.
 14) Street from TopoTopo's own packages (help topic packages): topotopo/street/road_strip on a line →
  topotopo/street/lamp_post packed onto points_along_curve {side_offset, both_sides}; a house = four
  topotopo/architecture/wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true on the front) +
  topotopo/architecture/roof_gable or roof_hip translated to the wall top; topotopo/street/fence and bench,
  topotopo/props/crate and topotopo/nature/tree_lowpoly placed with transform or copy_to_points;
- topotopo/nature/forest_patch on a grid for a park. Whole graph: examples/street_block.json.
+ topotopo/nature/forest_patch on a grid for a park. Whole graph: help {examples:["market_street"]}.
 15) Instance a placement list (a position, yaw, scale and piece name per row, from a file) into one instanced GLB:
  placements  file {path:"inputs/placements.json"}: a JSON list of rows [{"P":[2,0,0], "yaw":45, "pscale":1.2,
              "name":"barrel"}, …], or a CSV with the columns P.x,P.y,P.z,yaw,pscale,name; every key or column is a
@@ -1804,13 +1807,15 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
   "output":"layout"}`,
 };
 
+/** The help topics: "examples" (generated from the example cards, src/mcp/examples.ts) and the written ones. */
 export function topicList() {
-  return Object.keys(TOPICS);
+  return ['examples', ...Object.keys(TOPICS)];
 }
 
 /** A help topic's text ("overview" or "instructions": the operating guide), or null for a name that is not a topic. */
 export function topicText(name: string): string | null {
   if (name === 'overview' || name === 'instructions') return INSTRUCTIONS;
+  if (name === 'examples') return examplesIndexText();
   return Object.hasOwn(TOPICS, name) ? TOPICS[name] : null;
 }
 
@@ -1869,7 +1874,7 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}${kindTags(d) ? `  (${kindTags(d)})` : ''}`);
   }
   out.push(filter?.cli
-    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ')
+    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ') + '; --help-example <name> for an example\'s card and graph'
     : '(◦ = generator, no inputs). Use help {nodes:[...]} for params. Help topics: ' + topicList().join(', '));
   if (hidden) out.push(`${hidden} deprecated node type(s) hidden (include_deprecated: true lists them).`);
   return out.join('\n');

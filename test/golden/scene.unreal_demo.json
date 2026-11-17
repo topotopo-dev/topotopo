@@ -1,0 +1,77 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": [
+        "Cd:float:3",
+        "N:float:3",
+        "P:float:3",
+        "curveu:float:1",
+        "height:float:1",
+        "hitdist:float:1",
+        "hitprim:int:1",
+        "id:int:1",
+        "mask:float:1",
+        "slope:float:1",
+        "tint:float:1"
+      ],
+      "prim": ["copynum:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [64.9201, 23.971, 66.1872],
+      "min": [-65.1276, -0.6261, -64.8576]
+    },
+    "counts": {
+      "points": 64828,
+      "prims": 64180,
+      "vertices": 255115,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["caps", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "1942ba4584746373",
+      "attributes": {
+        "detail.materials": "0395a3589848bda6",
+        "group.prim.caps": "ac92dc836921b2a9",
+        "group.prim.sides": "bce58337a4a5339d",
+        "point.Cd": "50372776c0a28efc",
+        "point.N": "79ca33c9faa1f0fb",
+        "point.curveu": "da37422142ed9a4b",
+        "point.height": "0d84159f369cead9",
+        "point.hitdist": "2858760dbacac1e7",
+        "point.hitprim": "69591d5d1259b567",
+        "point.id": "4df631fa65e257b4",
+        "point.mask": "20b87fa8d646a89e",
+        "point.slope": "ac35367c7c2cb016",
+        "point.tint": "e66612be8b265024",
+        "prim.copynum": "0bbec51ade5acb30",
+        "prim.material": "4de6b4c7eac014e1",
+        "prim.name": "96903e1c54de3b86",
+        "vertex.uv": "f2f618f1d4a109b3"
+      },
+      "topology": "c991eafcff7f586e"
+    },
+    "packed": {
+      "hash": "5250c06185820d03",
+      "instances": 535,
+      "sources": [
+        "720252836879278d",
+        "16d2c1db26db7ab1",
+        "00107554dc30cfa6",
+        "e34e0fc7543098b5",
+        "607222f6c2813110"
+      ]
+    }
+  },
+  "name": "scene.unreal_demo",
+  "ok": true,
+  "source": "test/scenes/unreal_demo.json",
+  "warnings": []
+}

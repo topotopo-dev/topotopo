@@ -19,9 +19,6 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
-import { expandPacked } from '../src/core/packed.ts';
-import { pieceReport } from '../src/core/analysis.ts';
-import { readMaterials } from '../src/core/materials.ts';
 import { initPackage, readManifest } from '../src/package.ts';
 import { openPackages } from '../src/packages/registry.ts';
 import { Session } from '../src/session.ts';
@@ -29,6 +26,7 @@ import { makeTools } from '../src/mcp/tools.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { SHOWN, checkBuiltin, lineupGraph, lineupText, readBuiltin } from '../scripts/gen-builtin.ts';
 import { BUILTIN_INPUTS, checkGeo, builtinFixtureGraph, useBuiltin } from './fixtures.ts';
+import { flat, namingProblems, paramProblems, sweepOf, watertightProblem } from './asset-checks.ts';
 
 const filter = process.argv.slice(2).find((a) => !a.startsWith('--'));
 let fails = 0, checks = 0;
@@ -46,18 +44,7 @@ const outputs = all.flatMap((k) => k.outputs);
 check(all.length >= 4 && outputs.length >= 30, `at least 4 built-in packages and 30 outputs (${all.length}, ${outputs.length})`);
 if (!filter) for (const p of checkBuiltin(all)) fail(p);
 
-const NUMERIC = new Set(['float', 'int']);
 const MAX_COOK_MS = 1000;
-
-/** Polygons of g, packed instances expanded. */
-const flat = (g: Geometry) => (g.hasPacked() ? expandPacked(g).geo : g);
-
-function watertightProblem(g: Geometry): string {
-  const pr = pieceReport(g);
-  const be = pr.pieces.reduce((s, x) => s + x.boundaryEdges, 0), nme = pr.pieces.reduce((s, x) => s + x.nonManifoldEdges, 0);
-  const lines = pr.pieces.reduce((s, x) => s + x.lines, 0);
-  return be || nme || lines ? `${be} boundary edges, ${nme} non-manifold edges, ${lines} polylines` : '';
-}
 
 /** Conventions every cooked result must keep. */
 function conventions(where: string, g0: Geometry, graph: GraphSpec, defaults: boolean) {
@@ -65,19 +52,8 @@ function conventions(where: string, g0: Geometry, graph: GraphSpec, defaults: bo
   const inv = checkGeo(g);
   check(!inv.length, `${where}: geometry invariants: ${inv.join(', ')}`);
   if (!g.numPrims) return;
-  const nm = g.prims.get('name'), mt = g.prims.get('material');
-  check(!!nm && nm.type === 'string', `${where}: prim string attribute "name"`);
-  check(!!mt && mt.type === 'string', `${where}: prim string attribute "material"`);
-  if (nm && mt) {
-    let missing = 0;
-    for (let i = 0; i < g.numPrims; i++) if (!nm.get(i) || !mt.get(i)) missing++;
-    check(!missing, `${where}: ${missing} of ${g.numPrims} prims without name or material`);
-  }
-  if (!g0.hasPacked() && mt) {
-    const table = readMaterials(g), used = new Set<string>((mt.data as string[]).filter(Boolean));
-    const undefinedMats = [...used].filter((m) => !table[m]);
-    check(!undefinedMats.length, `${where}: materials without a table entry: ${undefinedMats.join(', ')}`);
-  }
+  const naming = namingProblems(g0);
+  check(!naming.length, `${where}: ${naming.join('; ')}`);
   if (graph.meta?.watertight) {
     const w = watertightProblem(g);
     check(!w, `${where}: promised watertight pieces, found ${w}`);
@@ -135,22 +111,13 @@ for (const k of all) {
 
     // ---- documentation and typed params
     check(typeof graph.description === 'string' && graph.description.length > 40 && def.summary === /^(.+?[.!?])\s/s.exec(graph.description)?.[1], `${where}: a description, whose first sentence is the catalog's summary`);
-    const vars = graph.vars ?? {}, params = graph.params ?? {};
-    const names = Object.keys(vars);
-    check(names.length >= 3 && names.length <= 10, `${where}: 3–10 params (${names.length})`);
-    check(Object.keys(params).every((p) => p in vars), `${where}: params without a var: ${Object.keys(params).filter((p) => !(p in vars)).join(', ')}`);
+    const params = graph.params ?? {};
+    const names = Object.keys(graph.vars ?? {});
+    for (const p of paramProblems(graph)) fail(`${where}: ${p}`);
+    checks++;
     for (const p of names) {
-      const pd = params[p];
-      if (!pd) { fail(`${where}: var "${p}" has no params entry`); continue; }
-      check(!!pd.type && typeof pd.desc === 'string' && pd.desc.length > 3, `${where}: param "${p}" needs type and desc`);
-      check(JSON.stringify(pd.default) === JSON.stringify(vars[p]), `${where}: param "${p}" default ${JSON.stringify(pd.default)} differs from the var ${JSON.stringify(vars[p])}`);
-      if (NUMERIC.has(pd.type ?? '')) {
-        check(typeof pd.min === 'number' && typeof pd.max === 'number' && pd.min <= vars[p] && vars[p] <= pd.max, `${where}: numeric param "${p}" needs min ≤ default ≤ max`);
-        if (pd.type === 'int') check(Number.isInteger(vars[p]), `${where}: int param "${p}" default is not an integer`);
-      }
-      if (pd.type === 'enum') check(Array.isArray(pd.options) && pd.options.includes(vars[p]), `${where}: enum param "${p}" needs options containing the default`);
-      const dp = def.params[p];
-      check(!!dp && dp.type === pd.type, `${where}: node param "${p}" has type ${dp?.type}, expected ${pd.type}`);
+      const pd = params[p], dp = def.params[p];
+      if (pd) check(!!dp && dp.type === pd.type, `${where}: node param "${p}" has type ${dp?.type}, expected ${pd.type}`);
     }
     const nIn = def.inputs.length;
     check(nIn === (graph.meta?.inputs?.length ?? 0), `${where}: meta.inputs lists ${graph.meta?.inputs?.length ?? 0} input(s), the graph has ${nIn}`);
@@ -173,15 +140,7 @@ for (const k of all) {
     const row: Row = { name, ms: dc.ms, prims: flat(dc.r.geo).numPrims, variants: 0, worst: 0, worstAt: '' };
 
     // ---- every numeric param at both ends of its range, every enum option, every bool flipped
-    const variants: [string, Record<string, any>][] = [];
-    for (const p of names) {
-      const pd = params[p];
-      if (!pd) continue;
-      if (NUMERIC.has(pd.type ?? '')) { variants.push([`${p}=${pd.min}`, { [p]: pd.min }], [`${p}=${pd.max}`, { [p]: pd.max }]); }
-      else if (pd.type === 'enum') for (const x of pd.options ?? []) { if (x !== vars[p]) variants.push([`${p}=${x}`, { [p]: x }]); }
-      else if (pd.type === 'bool') variants.push([`${p}=${!vars[p]}`, { [p]: !vars[p] }]);
-    }
-    for (const [label, p] of variants) {
+    for (const [label, p] of sweepOf(graph)) {
       const v = await cookOf(p);
       row.variants++;
       if (v.ms > row.worst) { row.worst = v.ms; row.worstAt = label; }

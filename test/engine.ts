@@ -739,7 +739,7 @@ section('graph version field');
     const r = await tools.find((t) => t.name === name)!.run(a);
     return { txt: r.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'), isError: !!r.isError };
   };
-  const solverGraph = JSON.parse(fs.readFileSync(path.join(root, 'examples', 'solver_growth.json'), 'utf8'));
+  const solverGraph = JSON.parse(fs.readFileSync(path.join(root, 'test', 'scenes', 'solver_growth.json'), 'utf8'));
   const b12 = await call('build', { name: 'anim', graph: solverGraph, frame: 12 });
   check(!b12.isError && /cooked at frame 12/.test(b12.txt) && /stats: grow resumed_from=1 frames=11 body_runs=11/.test(b12.txt) && /time-dependent: .*grow/.test(b12.txt), 'MCP build frame:12 reports the frame and solver stats');
   const b1 = await call('build', { name: 'anim', graph: solverGraph });
@@ -826,7 +826,7 @@ section('declared params: desc and group');
 section('CLI --frames');
 {
   const out = path.join(tmp, 'cli');
-  const run = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), path.join(root, 'examples', 'solver_growth.json'), ...args], { cwd: root, encoding: 'utf8' });
+  const run = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), path.join(root, 'test', 'scenes', 'solver_growth.json'), ...args], { cwd: root, encoding: 'utf8' });
   const p = run('--frames', '1-3', '--export', path.join(out, 'tower.obj'), '--render', path.join(out, 'r_{frame:04}.png'), '--views', 'persp');
   check(p.status === 0, `cli exit status ${p.status}${p.status ? ': ' + p.stderr.slice(0, 300) : ''}`);
   const want = ['tower.0001.obj', 'tower.0002.obj', 'tower.0003.obj', 'r_0001.png', 'r_0002.png', 'r_0003.png'];
@@ -863,13 +863,13 @@ section('CLI arguments');
   check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout) && /\nin this folder: package topotopo\/architecture: this graph is in no package/.test(hn.stdout),
     '--help-node documents one, and says what naming it does in a folder that is in no package');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
-  check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, workspace, graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
+  check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, examples, workspace, graph.*; --help-example <name> for an example's card and graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
     '--catalog ends with the command line\'s help flags and the topic names');
   const topic = cli('--help-topic', 'export');
   check(topic.status === 0 && topic.stdout.trim() === TOPICS.export.trim(), '--help-topic prints an MCP help topic');
   check(/^TopoTopo: .*\n\nWORKFLOW/.test(cli('--help-topic', 'overview').stdout), '--help-topic overview prints the operating guide');
   const badTopic = cli('--help-topic', 'exprt');
-  check(badTopic.status === 1 && /unknown topic "exprt" \(did you mean export\?\); topics: overview, workspace, graph, /.test(badTopic.stderr) && !badTopic.stdout,
+  check(badTopic.status === 1 && /unknown topic "exprt" \(did you mean export\?\); topics: overview, examples, workspace, graph, /.test(badTopic.stderr) && !badTopic.stdout,
     '--help-topic: an unknown name fails and lists the topics');
 }
 

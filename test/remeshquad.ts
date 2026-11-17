@@ -338,8 +338,8 @@ try {
   hash(parity.positions, 8); hash(parity.prim_start, 4); hash(parity.vertex_point, 4);
   hash(parity.source_triangle, 4); hash(parity.barycentric, 8); hash(parity.src_prim, 4);
   console.log(`quad_parity_digest=${digest.toString(16).padStart(16, '0')}; ${parity.positions.length / 3} points, ${parity.prim_start.length - 1} faces`);
-  const example = JSON.parse(fs.readFileSync(new URL('../examples/quad_remesh.json', import.meta.url), 'utf8')) as GraphSpec;
-  // the example's rock is topotopo/nature/rock: it cooks as a graph of the examples' package, from its copy; an empty
+  const example = JSON.parse(fs.readFileSync(new URL('./scenes/quad_remesh.json', import.meta.url), 'utf8')) as GraphSpec;
+  // the scene's rock is topotopo/nature/rock: it cooks from the examples' package copy of it; an empty
   // config of its own, so the libraries registered on this machine play no part
   process.env.TOPOTOPO_CONFIG = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-config-')), 'config.json');
   delete process.env.TOPOTOPO_LIBRARIES;

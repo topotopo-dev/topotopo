@@ -4,17 +4,17 @@
     "attributes": {
       "detail": ["materials:string:1"],
       "point": ["N:float:3", "P:float:3"],
-      "prim": ["copynum:int:1", "material:string:1"],
+      "prim": ["copynum:int:1", "material:string:1", "name:string:1"],
       "vertex": ["uv:float:3"]
     },
     "bbox": {
-      "max": [3.9, 4.1107, 0.1583],
-      "min": [0.0357, 0.0268, -0.2862]
+      "max": [1.4728, 2.212, 0.216],
+      "min": [-1.912, 0.038, -0.0443]
     },
     "counts": {
-      "points": 928,
-      "prims": 28,
-      "vertices": 936,
+      "points": 2786,
+      "prims": 3656,
+      "vertices": 10968,
       "volumes": 3
     },
     "groups": {
@@ -24,15 +24,16 @@
       "vertex": []
     },
     "hashes": {
-      "P": "45fae7662ee3eaf0",
+      "P": "2247f0c6ffde9a70",
       "attributes": {
         "detail.materials": "caaf5f7b5e603365",
-        "point.N": "8507884d09213de7",
-        "prim.copynum": "328dbd656a1cbcdf",
-        "prim.material": "4fd323d5393e75cf",
-        "vertex.uv": "417e83b5e0b8a53f"
+        "point.N": "11d1851033a4fdee",
+        "prim.copynum": "b2caa2859eab729f",
+        "prim.material": "66528ba5dc93fabf",
+        "prim.name": "4a927ba52cbe9cbf",
+        "vertex.uv": "24ad72b51222562f"
       },
-      "topology": "e37bf80bddf62fdd"
+      "topology": "46489f12ebec81c8"
     },
     "volumes": [
       {
@@ -46,7 +47,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "56c77435f7ce6b3f"
+          "C": "fbf7e970bfa3a0d6"
         },
         "name": "cutouts_color"
       },
@@ -61,7 +62,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "1930ccad0181d6ff"
+          "C": "0ca9bc7a65c4b664"
         },
         "name": "cutouts_normal"
       },
@@ -76,7 +77,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "54174ff7dcc2c77d"
+          "C": "6a4b4d4b0a37465d"
         },
         "name": "cutouts_roughness"
       }

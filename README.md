@@ -66,7 +66,7 @@ graph and its seeds, and the core is browser-ready.
 **Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, TopoTopo's own packages, the example
 renders and the release notes, generated from this repository (`npm run site`).
 
-![city](examples/renders/voronoi_city.png)
+![market street](examples/renders/market_street.png)
 
 ## Setup
 
@@ -347,52 +347,46 @@ Every node's inputs, parameters (types, defaults, ranges, options, aliases) and 
 
 ## Examples
 
-[examples/](examples) holds the showcase graphs, each rendered by `npm run showcase` into [examples/renders](examples/renders):
-rocks on terrain, an L-system tree, a Voronoi-fractured sphere, an SDF creature, a procedural building (foreach,
-grid_split, inset/extrude windows), an engraved sign (text + boolean), a Voronoi city, spiral stairs (copy_xform + sweep), wrangle waves, a CSG
-bracket, a solver growth animation (rendered at the frame named by its `meta.frame`), polygon editing (loop cuts, knife,
-bridge, quad fill, dissolve), bevels (rounded box, chamfered top edges, a star with a rounded rim), a UV toolkit demo, and a
-render-overlay demo (`render_modes`: section view, hard edges, normal glyphs, group labels, matcap). A graph's `meta.render`
-takes any `render` tool option. The forest example is the PCG chain (mask → scatter → orient → prune → packed copies of three weighted tree variants from 30,000 candidates), `pcg_scatter` puts lamp posts along a road and cluster-coloured rocks away from it, and `terrain_erosion` is an eroded
-heightfield with a road and rocks on its steep slopes. `unreal_demo` is the Unreal 5.8 demo scene: an eroded 253 × 253 heightfield that fits an
-Unreal Landscape exactly, weight layers, a road, and packed trees and rocks with variants and materials; `npm run export:demo` writes its file set
-(landscape bundle, `scene.glb`, `scene.usda`, `scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`.
-`splines` shows the curve toolkit: a NURBS road projected onto bumpy ground, a boardwalk with filleted corners and
-offset handrails, and a Bezier letter extruded. `street_block` is a street block built only from TopoTopo's own packages
-(see [TopoTopo's own packages](#topotopos-own-packages)). `textures` is a brick wall material made only from texture
-nodes and the props package's crate with baked AO and curvature turned into worn paint on its edges and an ORM map,
-rendered with `textures: true` next to the texture view. `texture_lab` is worn painted metal from texture nodes only:
-SDF plates and rivets, edge wear from curvature, chipped by grunge and slope blur, brushed steel under the paint, a paint
-tint per plate from flood fill, rust running from the rivets, AO and an ORM map.
-`guided_town` ([examples/guided_town](examples/guided_town), a package of its own) is a village laid out with the
-viewer's guides: a road, house footprints, a fence, woods and a clearing in its `inputs/markers.json`, built from
-TopoTopo's own packages; open it with `topotopo edit examples/guided_town` and drag them.
-`house_city` spawns the architecture package's `house` on a grid of lots with per-lot parameters, and `skeleton_roofs` shows
-straight-skeleton roofs (an L-shaped house, a courtyard roof around a hole, nested offsets). `deformers` (lattice,
-path_deform, soft_transform), `measures` (curvature, occlusion, distance, assert) and `remesh_lod` (isotropic remesh,
-repair, LOD levels) cover their node families; `voxel_remesh` compares sharp dual contouring with marching cubes on a
-sampled SDF grid, `quad_remesh` shows field-aligned quads on a noisy sphere, a bevelled box, a rock and a tube, and
-`erosion_models` erodes one ridged terrain four ways (TypeScript and WASM droplets, virtual pipes, pipes plus stream
-power), and `terrain_tiles` bends escarpments and a river with domain-warped noise, with one tile of the map cooked on
-its own (`heightfield_crop`) floating above the area it matches. `particles` runs particles down an eroded massif from emitters on its ridges (the heightfield as gradient field and
-collision surface, curl noise, sliding contacts; trails coloured by age) next to a fountain bouncing on a plane.
-`rbd_settle` drops the nature package's rocks onto the rocks_on_terrain landscape until they rest (rigid bodies) and piles
-crates on a pad with `rbd_stack`. `drape` is the cloth family: a tarp draped over a stack of the props package's crates, a
-banner pinned between two poles in the wind, and a box inflated into a cushion.
+An example is a worked answer to a real request, complete from what goes in to a finished, exportable result. Each has
+a card, `examples/<name>.md`, that says in plain words what it does (the request, the params a person tunes, the named
+outputs and their kinds, what it promises and how it looks), and a graph, `examples/<name>.json`, that is today's way
+to do it: the card is the contract, and `npm test` checks the graph against it, so the graph can be rebuilt whenever
+there is a better way. Agents get them from the MCP `help` tool (topic `examples` lists them, `{examples: ["name"]}`
+gives a card and its graph, ready to build), the command line from `topotopo --help-example <name>`, and the npm
+package ships them. [docs/examples.md](docs/examples.md) has the house rules, the card format and the list.
+
+[examples/](examples) holds 20 examples, each rendered by `npm run showcase` into
+[examples/renders](examples/renders) (a graph's `meta.render` takes any `render` tool option, its `meta.frame` the frame
+an animation is shown at):
+- Streets and towns: `market_street` (a street with houses, lamp posts and a park, from TopoTopo's own packages),
+  `town_from_lots` (irregular lots along streets, each with a house that follows its shape) and `guided_town`
+  ([examples/guided_town](examples/guided_town), a package of its own: a village laid out along the road, plots, fence,
+  woods and clearing in its `inputs/markers.json`; open it with `topotopo edit examples/guided_town` and drag them).
+- Terrain: `forest_on_terrain`, `eroded_valley`, `terrain_tiles` (a large terrain cooked as seamless tiles) and
+  `unreal_landscape` (an eroded terrain that fits an Unreal Landscape exactly, with paint layers, a road and instances).
+- Hard surface and assets: `machined_bracket`, `scifi_panel`, `rail_along_curve` and `asset_cleanup` (a broken scan
+  turned into a game asset with UVs and levels of detail).
+- Simulation: `fracture_settle` (rigid bodies), `sparks` (particles), `growth` (a solver, frame by frame) and
+  `cloth_drape`.
+- Organic and materials: `blob_creature` (blended SDF shapes), `lsystem_tree`, `ocean_surface`, `material_set`
+  (tileable stone, wood and painted metal from texture nodes alone) and `image_cutouts` (props traced from pictures).
+
+`npm run export:demo` writes the Unreal plugin's demo file set (landscape bundle, `scene.glb`, `scene.usda`,
+`scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`, from the fixed scene in `test/scenes/unreal_demo.json`.
 
 To cook a graph from the command line:
 
 ```bash
-node src/cli.ts examples/tree.json --render out/tree.png --export out/tree.glb
-node src/cli.ts examples/csg_bracket.json --render out/bracket.png --section x:0.3 --wireframe hard --labels groups --shading matcap
-node src/cli.ts examples/csg_bracket.json --views front --size 1600x700 --underlay ref.png --render out/compare.png   # a reference image behind the view
-node src/cli.ts examples/street_block.json --inspect budget   # triangles per part, per LOD and per node
-node src/cli.ts examples/street_block.json --inspect scene   # what the glb export holds: nodes, sockets, materials, images
-node src/cli.ts examples/terrain_erosion.json --node road --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
-node src/cli.ts examples/unreal_demo.json --node landscape --format unreal_landscape --export out/level   # Landscape bundle
-node src/cli.ts examples/forest.json --node forest --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
-node src/cli.ts examples/rocks_on_terrain.json --var seed=11 --var rock_count=300 --render out/rocks.png   # vars for one run
-node src/cli.ts view examples/unreal_demo.json   # live viewer at http://127.0.0.1:7341: node list, per-node geometry, re-cook on save
+node src/cli.ts examples/lsystem_tree.json --render out/tree.png --export out/tree.glb
+node src/cli.ts examples/machined_bracket.json --render out/bracket.png --section x:0.3 --wireframe hard --labels pieces --shading matcap
+node src/cli.ts examples/machined_bracket.json --views front --size 1600x700 --underlay ref.png --render out/compare.png   # a reference image behind the view
+node src/cli.ts examples/market_street.json --inspect budget   # triangles per part, per LOD and per node
+node src/cli.ts examples/market_street.json --inspect scene   # what the glb export holds: nodes, sockets, materials, images
+node src/cli.ts examples/eroded_valley.json --output terrain --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
+node src/cli.ts examples/unreal_landscape.json --output level --format unreal_landscape --export out/level   # Landscape bundle
+node src/cli.ts examples/forest_on_terrain.json --output trees --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
+node src/cli.ts examples/forest_on_terrain.json --var seed=11 --var rock_density=0.8 --render out/forest.png   # vars for one run
+node src/cli.ts view examples/unreal_landscape.json   # live viewer at http://127.0.0.1:7341: node list, per-node geometry, re-cook on save
 node src/cli.ts --help-topic export   # a help topic; --catalog ends with the list
 ```
 
@@ -424,7 +418,7 @@ Animated graphs cook at a frame (`--frame 40`) or over a range. With `--frames`,
 `{frame:04}`; without a pattern, `.0001`-style frame numbers are inserted before the extension:
 
 ```bash
-node src/cli.ts examples/solver_growth.json --frames 1-48 --render "out/growth_{frame:04}.png" --export out/growth.glb
+node src/cli.ts examples/growth.json --frames 1-24 --render "out/growth_{frame:04}.png" --export out/growth.glb
 ```
 
 ## Unreal Engine 5.8
@@ -696,10 +690,10 @@ show. A built-in package's pieces build on each other (the house is the package'
 (`topotopo/nature` alone, or `topotopo/nature/lineup`) lines its outputs up. Every output has its kind pinned and tags
 a game developer searches by (`conifer`, `modular`, `masonry`, `street-furniture`): `topotopo search --tag
 street-furniture`. `assets {action: "fork", name: "topotopo/architecture/stairs"}` copies
-an output's graph into the package's assets to edit. [examples/street_block.json](examples/street_block.json) builds a
-street block from the built-in packages alone (transform, merge and copy nodes just place them):
+an output's graph into the package's assets to edit. [examples/market_street.json](examples/market_street.json) builds a
+street with the built-in packages' road, lamp posts, walls and roofs, fence, benches, trees and bushes:
 
-![street block](examples/renders/street_block.png)
+![market street](examples/renders/market_street.png)
 
 `npm run builtin` rewrites the built-in packages' line-ups, their thumbnails and the tables below. `npm run builtin -- --publish nature
 --note "..."` publishes a built-in package's next version, numbered as for any package (TopoTopo's own packages are published there
@@ -750,7 +744,7 @@ and nowhere else), and `npm test` fails while a built-in package's working folde
 | smoke | `npm run test:smoke [-- filter]` | every node type cooks on its fixture inputs and passes the geometry invariants (`checkGeo`) |
 | golden | `npm run test:golden [-- filter]` | every node fixture, every `examples/*.json` graph and every output of TopoTopo's own packages matches its fingerprint in `test/golden/` |
 | property | `npm run test:property` | 150 random node chains: no exception escapes the engine, invariants hold, cooks are deterministic, the cache returns the same result after a param is changed and restored; plus a wrangle fuzz (random, malformed and never-ending snippets), hostile `=expr` expressions (escapes and endless loops, pool off and on), hostile code params (`heightfield_layer`, `sdf_expr`, parametric nodes), `sdf_expr` fields that hang only when `sdf_to_mesh`/`sdf_grid` sample them, and thrown values whose message never comes back (wrangle, script; also with a poisoned realm) |
-| docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions; this README's node table lists every node type |
+| docs | `npm run test:docs` | `docs/nodes.md` matches the node definitions and `docs/examples.md` the example cards; this README's node table lists every node type |
 | examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors or warnings: a node spec on the node's fixture inputs, a graph as written |
 | io | `node test/io.ts` | export → import round trips for every format |
 | interop | `npm run test:interop` | glTF (validator), Houdini `.geo`/`.bgeo`, CSV/PCG and points JSON round trips; instance rows and their Unreal transforms, per-instance glTF/USD attributes, packed `.geo`, textures, the Unreal Landscape bundle, `export:demo` |
@@ -765,6 +759,7 @@ and nowhere else), and `npm test` fails while a built-in package's working folde
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, crops and tiles that match the whole map, erosion determinism and mass conservation, the same erosion settings at three spacings, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
+| cards | `npm run test:cards [-- filter]` | every example graph against its card (`examples/<name>.md`): the card's params and named outputs are the graph's, with its ranges, defaults and kinds; each promise is an `assert` upstream of an output; every output cooks at the defaults to its kind with no warnings, every piece named and with a material, and again across the params' ranges, options and switches ([docs/examples.md](docs/examples.md)); `npm test` runs it without that sweep, CI runs both |
 | builtin | `npm run test:builtin [-- filter]` | every output of TopoTopo's own packages, cooked as a package that uses it: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; each package's line-up, thumbnails and README table current, and its working folder its newest version; `assets` fork / list / get / delete; the catalog and help |
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
 | particles | `npm run test:particles` | the particles node: emission counts and lifetimes, attribute and group carry, determinism, pool on/off bit-identical (noise, fields, mesh and floor collisions, trails), particles never below the floor or a mesh and never inside a closed one, spheres kept pscale off a mesh, trail lengths/curveu/ages, max_particles, max_births (step cap, batched runs = one run), frames = one long run (resume, jump back, substeps, moving emitter), point/heightfield/SDF fields, wind, attraction, analytic Perlin gradients and divergence-free curl noise, 100k particles × 200 steps |

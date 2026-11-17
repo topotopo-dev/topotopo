@@ -21,7 +21,7 @@
 //   Every export records how it was made (src/io/source.ts) in its sidecar or manifest, or in <file>.source.json.
 //   With --frames, --render/--export paths may contain {frame} or {frame:04} (zero-padded);
 //   without a pattern a .0001-style frame number is inserted before the extension.
-//   node src/cli.ts --catalog | --help-node scatter | --help-topic export | --version
+//   node src/cli.ts --catalog | --help-node scatter | --help-topic export | --help-example <name> | --version
 //   node src/cli.ts mcp [--package dir] [--viewer]   the MCP server (src/mcp/server.ts) over stdio
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         guides and dropped files go to the package's inputs/
@@ -94,6 +94,7 @@ import { uvReport } from './core/uvreport.ts';
 import { didYouMean } from './graph/params.ts';
 import { parseVarArg, withVars } from './graph/vars.ts';
 import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
+import { exampleText, readExamples } from './mcp/examples.ts';
 
 const argv = process.argv.slice(2);
 const opt = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
@@ -182,7 +183,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                       in its sidecar; replay: --output/--node, --frame, --fps, --var per var, --format and each option as its flag',
     '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
-    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output)`,
+    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --help-example <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output; --help-topic examples lists the examples)`,
     `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; guides and files dropped on the page go to the package's inputs/, beside the file in no package)`,
     `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
@@ -206,6 +207,15 @@ if (argv.includes('--help-topic')) {
     const s = didYouMean(name!, topics);
     fail(`unknown topic "${name}"${s.length ? ` (did you mean ${s.join(', ')}?)` : ''}; topics: ${topics.join(', ')}`);
   }
+  console.log(text);
+  process.exit(0);
+}
+if (argv.includes('--help-example')) {
+  // an example's card and graph (src/mcp/examples.ts), the same text help {examples:[name]} returns
+  const name = opt('--help-example');
+  if (name === undefined || name.startsWith('-')) fail(`--help-example needs an example: ${readExamples().map((e) => e.name).join(', ')}`);
+  const text = exampleText(name!);
+  if (text.startsWith('unknown example')) fail(text);
   console.log(text);
   process.exit(0);
 }

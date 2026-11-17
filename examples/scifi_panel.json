@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "description": "A sci-fi wall panel that tiles: a slab (back flat on z = 0, front facing +Z) whose front face is split into columns, each inset and pushed back into a recessed section behind a raised frame, every hard edge rounded by a bevel. The recess floors are covered with thin plates whose gaps read as panel lines. Each section gets its details in a foreach: a louvred vent at the top, rubber hoses held by clamps along one side (the side is seeded) and boxes in seeded rows and columns over the rest, all sized from the section and the depth so they stay inside the recess. Bolts on the frame. Box-projected uv, 1 m per tile.",
+  "params": {
+    "width": { "type": "float", "default": 3, "min": 1, "max": 8, "step": 0.1, "label": "width", "desc": "width of the panel (m)" },
+    "height": { "type": "float", "default": 3, "min": 1, "max": 6, "step": 0.1, "label": "height", "desc": "height of the panel (m)" },
+    "sections": { "type": "int", "default": 3, "min": 1, "max": 6, "label": "sections", "desc": "recessed sections side by side across the panel" },
+    "depth": { "type": "float", "default": 0.1, "min": 0.02, "max": 0.3, "step": 0.01, "label": "depth", "desc": "how deep the sections are recessed behind the frame (m)" },
+    "greebles": { "type": "float", "default": 0.5, "min": 0, "max": 1, "step": 0.05, "label": "greebles", "desc": "how busy the details are: hoses and small boxes (0 = vents and panel lines only)" },
+    "bevel": { "type": "float", "default": 0.01, "min": 0, "max": 0.02, "step": 0.001, "label": "bevel", "desc": "rounding of the hard edges (m); small details round by at most 4 mm" },
+    "seed": { "type": "int", "default": 1, "min": 0, "max": 9999, "label": "seed", "desc": "random seed of the details; the sections stay where they are" }
+  },
+  "vars": { "width": 3, "height": 3, "sections": 3, "depth": 0.1, "greebles": 0.5, "bevel": 0.01, "seed": 1 },
+  "meta": { "render": { "views": ["persp"], "azimuth": -35, "elevation": 18, "size": "1600x900", "shading": "pbr", "exposure": 0.25, "grid": false } },
+  "nodes": {
+    "slab": { "type": "box", "params": { "size": ["=width", "=height", "=0.03 + depth"], "center": [0, "=height / 2", "=(0.03 + depth) / 2"], "divisions": ["=sections", 1, 1] } },
+    "face": { "type": "group", "in": ["slab"], "params": { "name": "face", "normal": [0, 0, 1], "spread_angle": 5 } },
+    "frame_step": { "type": "poly_extrude", "in": ["face"], "params": { "group": "face", "mode": "individual", "inset": "=min(0.08, 0.12 * min(width / sections, height))", "distance": "=-0.3 * depth" } },
+    "recess": { "type": "poly_extrude", "in": ["frame_step"], "params": { "group": "front", "mode": "individual", "inset": "=0.5 * min(0.08, 0.12 * min(width / sections, height))", "distance": "=-0.7 * depth" } },
+    "rounded": { "type": "poly_bevel", "in": ["recess"], "params": { "group": "angle>60 ^@P.z<0.001", "offset": "=max(bevel, 0.0001)", "divisions": 2 } },
+    "slab_edges": { "type": "switch", "in": ["recess", "rounded"], "params": { "index": "=bevel > 0 ? 1 : 0" } },
+    "slab_named": { "type": "attrib_create", "in": ["slab_edges"], "params": { "name": "name", "class": "prim", "value": "panel" } },
+
+    "floors": { "type": "delete", "in": ["recess"], "params": { "group": "front", "keep": true } },
+    "details": {
+      "type": "foreach", "in": ["floors"],
+      "params": {
+        "mode": "prims",
+        "body": {
+          "nodes": {
+            "floor": { "type": "input", "params": { "index": 0 } },
+            "layout": {
+              "type": "wrangle", "in": ["floor"],
+              "params": {
+                "run_over": "detail",
+                "code": "const b = primintrinsic(0, 'bounds', 0); const W = b[1] - b[0], H = b[3] - b[2];\nconst m = clamp(0.06 * min(W, H), 0.012, 0.05), r = clamp(0.3 * depth, 0.008, 0.045);\nconst n = greebles > 0 ? min(max(1, floor(greebles * 3 + 0.5)), floor(0.4 * W / (2.5 * r))) : 0;\nconst left = rand(iteration, seed) < 0.5, strip = n > 0 ? n * 2.5 * r + m : 0;\nf@zf = b[5] + 0.006; f@margin = m; i@plates = max(1, floor(H / 0.9 + 0.5)); f@pipe_r = r; i@pipes = n;\nf@pipe_x = left ? b[0] + m + 1.25 * r : b[1] - m - 1.25 * r; f@pipe_step = left ? 2.5 * r : -2.5 * r;\nf@strip_x = @pipe_x + @pipe_step * (n - 1) / 2; i@clamps = n > 0 ? max(2, floor(H / 0.6)) : 0;\nf@vent_x0 = b[0] + m + (left ? strip : 0); f@vent_x1 = b[1] - m - (left ? 0 : strip);\nf@vent_h = clamp(0.2 * H, 0.06, 0.5); f@vent_y1 = b[3] - m;\ni@vents = max(1, floor((@vent_x1 - @vent_x0) / 1.1 + 0.5)); f@vent_w = (@vent_x1 - @vent_x0 - (@vents - 1) * m) / @vents; f@vent_cx = @vent_x0 + @vent_w / 2;\nf@vent_frame = clamp(0.12 * min(@vent_w, @vent_h), 0.008, 0.035);\nf@slat = clamp(0.4 * depth, 0.012, 0.04); i@slats = max(1, floor((@vent_h - 2 * @vent_frame) / @slat));"
+              }
+            },
+
+            "hose": { "type": "tube", "params": { "radius": "=detail('layout', 'pipe_r')", "height": "=bbox('floor').size.y", "cols": 16, "center": ["=detail('layout', 'pipe_x')", "=bbox('floor').center.y", "=detail('layout', 'zf') + detail('layout', 'pipe_r') + 0.002"] } },
+            "hoses": { "type": "copy_xform", "in": ["hose"], "params": { "count": "=detail('layout', 'pipes')", "translate": ["=detail('layout', 'pipe_step')", 0, 0], "copy_attrib": "" } },
+            "hoses_named": { "type": "attrib_create", "in": ["hoses"], "params": { "name": "name", "class": "prim", "value": "hose" } },
+            "hoses_rubber": { "type": "material", "in": ["hoses_named"], "params": { "name": "dark_rubber", "base_color": [0.035, 0.037, 0.04], "roughness": 0.78 } },
+
+            "clamp": { "type": "box", "params": { "size": ["=detail('layout', 'pipes') * 2.5 * detail('layout', 'pipe_r') + 0.01", 0.04, "=2 * detail('layout', 'pipe_r') + 0.014"], "center": ["=detail('layout', 'strip_x')", "=bbox('floor').min.y + bbox('floor').size.y / max(1, detail('layout', 'clamps')) / 2", "=detail('layout', 'zf') + detail('layout', 'pipe_r') + 0.007"] } },
+            "clamps": { "type": "copy_xform", "in": ["clamp"], "params": { "count": "=detail('layout', 'clamps')", "translate": [0, "=bbox('floor').size.y / max(1, detail('layout', 'clamps'))", 0], "copy_attrib": "" } },
+            "clamps_named": { "type": "attrib_create", "in": ["clamps"], "params": { "name": "name", "class": "prim", "value": "clamp" } },
+
+            "vent_outer": { "type": "shape2d", "params": { "shape": "rect", "plane": "xy", "size": ["=detail('layout', 'vent_w')", "=detail('layout', 'vent_h')"], "center": ["=detail('layout', 'vent_cx')", "=detail('layout', 'vent_y1') - detail('layout', 'vent_h') / 2", "=detail('layout', 'zf')"] } },
+            "vent_inner": { "type": "shape2d", "params": { "shape": "rect", "plane": "xy", "size": ["=detail('layout', 'vent_w') - 2 * detail('layout', 'vent_frame')", "=detail('layout', 'vent_h') - 2 * detail('layout', 'vent_frame')"], "center": ["=detail('layout', 'vent_cx')", "=detail('layout', 'vent_y1') - detail('layout', 'vent_h') / 2", "=detail('layout', 'zf')"] } },
+            "vent_ring": { "type": "merge", "in": ["vent_outer", "vent_inner"] },
+            "vent_frame": { "type": "extrude", "in": ["vent_ring"], "params": { "height": "=0.6 * depth", "plane": "xy" } },
+            "vent_frame_named": { "type": "attrib_create", "in": ["vent_frame"], "params": { "name": "name", "class": "prim", "value": "vent" } },
+            "slat": { "type": "box", "params": { "size": ["=detail('layout', 'vent_w') - 2 * detail('layout', 'vent_frame') - 0.002", "=detail('layout', 'slat') * 1.2", 0.005] } },
+            "slat_tilt": { "type": "transform", "in": ["slat"], "params": { "rotate": [-40, 0, 0], "translate": ["=detail('layout', 'vent_cx')", "=detail('layout', 'vent_y1') - detail('layout', 'vent_frame') - detail('layout', 'slat') / 2", "=detail('layout', 'zf') + 0.3 * depth"] } },
+            "slat_column": { "type": "copy_xform", "in": ["slat_tilt"], "params": { "count": "=detail('layout', 'slats')", "translate": [0, "=-detail('layout', 'slat')", 0], "copy_attrib": "" } },
+            "slats": { "type": "copy_xform", "in": ["slat_column"], "params": { "count": "=detail('layout', 'vents')", "translate": ["=detail('layout', 'vent_w') + detail('layout', 'margin')", 0, 0], "copy_attrib": "" } },
+            "slats_named": { "type": "attrib_create", "in": ["slats"], "params": { "name": "name", "class": "prim", "value": "vent_slat" } },
+            "vent_back": { "type": "box", "params": { "size": ["=detail('layout', 'vent_w') - 2 * detail('layout', 'vent_frame')", "=detail('layout', 'vent_h') - 2 * detail('layout', 'vent_frame')", 0.004], "center": ["=detail('layout', 'vent_cx')", "=detail('layout', 'vent_y1') - detail('layout', 'vent_h') / 2", "=detail('layout', 'zf') + 0.002"] } },
+            "vent_backs": { "type": "copy_xform", "in": ["vent_back"], "params": { "count": "=detail('layout', 'vents')", "translate": ["=detail('layout', 'vent_w') + detail('layout', 'margin')", 0, 0], "copy_attrib": "" } },
+            "vent_back_named": { "type": "attrib_create", "in": ["vent_backs"], "params": { "name": "name", "class": "prim", "value": "vent_back" } },
+            "vent_back_rubber": { "type": "material", "in": ["vent_back_named"], "params": { "name": "dark_rubber", "base_color": [0.035, 0.037, 0.04], "roughness": 0.78 } },
+
+            "no_sites": { "type": "points", "params": { "positions": [] } },
+            "box_sites": { "type": "wrangle", "in": ["no_sites", "layout"], "params": { "run_over": "detail", "code": "const L = 1, b = primintrinsic(L, 'bounds', 0), zf = detail(L, 'zf'), m = detail(L, 'margin');\nconst x0 = detail(L, 'vent_x0'), x1 = detail(L, 'vent_x1'), rw = x1 - x0;\nconst y0 = b[2] + m, y1 = detail(L, 'vent_y1') - detail(L, 'vent_h') - m, range = y1 - y0;\nconst put = (x, y, sx, sy, sz, kind) => { const pt = addpoint(0, [x, y, zf]); setpointattrib(0, 'scale', pt, [sx, sy, sz]); setpointattrib(0, 'kind', pt, kind); };\nif (greebles > 0 && range > 0.08 && rw > 0.04) {\n  const cols = max(1, floor(rw / 0.7 + 0.5)), cw = rw / cols, rows = max(1, floor(range / 0.42 + 0.5)), rh = range / rows;\n  for (let c = 0; c < cols; c++) for (let j = 0; j < rows; j++) {\n    if (rand(j, c, iteration, seed) > 0.3 + 0.7 * greebles) continue;\n    const x = x0 + (c + 0.5) * cw, y = y0 + (j + 0.5) * rh, pick = rand(j, c, iteration, seed, 7);\n    if (pick < 0.4) put(x, y, 0.6 * cw, 0.6 * rh, 0.55 * depth, 'capped');\n    else if (pick < 0.75) { const n = 2 + floor(rand(j, c, iteration, seed, 9) * 3); for (let i = 0; i < n; i++) put(x - cw / 2 + (i + 0.5) * cw / n, y, 0.6 * cw / n, 0.35 * rh, 0.35 * depth, 'plain'); }\n    else { put(x, y - 0.15 * rh, 0.8 * cw, 0.2 * rh, 0.3 * depth, 'plain'); put(x - 0.2 * cw, y + 0.2 * rh, 0.3 * cw, 0.3 * rh, 0.45 * depth, 'capped'); }\n  }\n}" } },
+            "greeble_plain": { "type": "box", "params": { "size": 1, "center": [0, 0, 0.5] } },
+            "greeble_plain_kind": { "type": "attrib_create", "in": ["greeble_plain"], "params": { "name": "kind", "class": "prim", "value": "plain" } },
+            "greeble_body": { "type": "box", "params": { "size": [1, 1, 0.8], "center": [0, 0, 0.4] } },
+            "greeble_cap": { "type": "box", "params": { "size": [0.55, 0.4, 0.35], "center": [0.1, 0.1, 0.95] } },
+            "greeble_capped": { "type": "merge", "in": ["greeble_body", "greeble_cap"] },
+            "greeble_capped_kind": { "type": "attrib_create", "in": ["greeble_capped"], "params": { "name": "kind", "class": "prim", "value": "capped" } },
+            "greeble_kit": { "type": "merge", "in": ["greeble_plain_kind", "greeble_capped_kind"] },
+            "greebles_boxes": { "type": "copy_to_points", "in": ["greeble_kit", "box_sites"], "params": { "copy_attrib": "", "piece_attrib": "kind", "variant_attrib": "kind" } },
+            "greebles_named": { "type": "attrib_create", "in": ["greebles_boxes"], "params": { "name": "name", "class": "prim", "value": "greeble" } },
+
+            "plate": { "type": "box", "params": { "size": ["=bbox('floor').size.x - 2 * bevel - 0.012", "=bbox('floor').size.y / detail('layout', 'plates') - 0.012", 0.006], "center": ["=bbox('floor').center.x", "=bbox('floor').min.y + bbox('floor').size.y / detail('layout', 'plates') / 2", "=bbox('floor').max.z + 0.003"] } },
+            "plates": { "type": "copy_xform", "in": ["plate"], "params": { "count": "=detail('layout', 'plates')", "translate": [0, "=bbox('floor').size.y / detail('layout', 'plates')", 0], "copy_attrib": "" } },
+            "plates_named": { "type": "attrib_create", "in": ["plates"], "params": { "name": "name", "class": "prim", "value": "floor_plate" } },
+            "plates_rounded": { "type": "poly_bevel", "in": ["plates_named"], "params": { "offset": "=min(max(bevel, 0.0001), 0.002, 0.08 * depth)", "divisions": 1 } },
+            "plates_edges": { "type": "switch", "in": ["plates_named", "plates_rounded"], "params": { "index": "=bevel > 0 ? 1 : 0" } },
+
+            "vent_frames": { "type": "copy_xform", "in": ["vent_frame_named"], "params": { "count": "=detail('layout', 'vents')", "translate": ["=detail('layout', 'vent_w') + detail('layout', 'margin')", 0, 0], "copy_attrib": "" } },
+            "hard_parts": { "type": "merge", "in": ["clamps_named", "vent_frames", "greebles_named"] },
+            "hard_rounded": { "type": "poly_bevel", "in": ["hard_parts"], "params": { "group": "angle>60", "offset": "=min(max(bevel, 0.0001), 0.004, 0.08 * depth)", "divisions": 2 } },
+            "hard_edges": { "type": "switch", "in": ["hard_parts", "hard_rounded"], "params": { "index": "=bevel > 0 ? 1 : 0" } },
+            "metal_parts": { "type": "merge", "in": ["plates_edges", "hard_edges", "slats_named"] },
+            "metal_paint": { "type": "material", "in": ["metal_parts"], "params": { "name": "painted_metal", "base_color": [0.28, 0.29, 0.31], "metallic": 0.2, "roughness": 0.4 } },
+            "section": { "type": "merge", "in": ["metal_paint", "hoses_rubber", "vent_back_rubber"] }
+          },
+          "output": "section"
+        }
+      }
+    },
+
+    "bolt_sites": {
+      "type": "wrangle", "in": ["no_points"],
+      "params": {
+        "run_over": "detail",
+        "code": "const f = min(0.08, 0.12 * min(width / sections, height)), rows = max(2, floor(height / 0.75) + 1);\nfor (let i = 0; i <= sections; i++) {\n  const x = i == 0 ? -width / 2 + f / 2 : i == sections ? width / 2 - f / 2 : -width / 2 + i * width / sections;\n  for (let j = 0; j < rows; j++) addpoint(0, [x, f / 2 + j * (height - f) / (rows - 1), 0.03 + depth]);\n}"
+      }
+    },
+    "no_points": { "type": "points", "params": { "positions": [] } },
+    "bolt": { "type": "tube", "params": { "radius": "=0.24 * min(0.08, 0.12 * min(width / sections, height))", "height": 0.016, "cols": 6, "axis": "z", "center": [0, 0, 0.005] } },
+    "bolts": { "type": "copy_to_points", "in": ["bolt", "bolt_sites"], "params": { "copy_attrib": "" } },
+    "bolts_named": { "type": "attrib_create", "in": ["bolts"], "params": { "name": "name", "class": "prim", "value": "bolt" } },
+    "bolts_paint": { "type": "material", "in": ["bolts_named"], "params": { "name": "painted_metal", "base_color": [0.28, 0.29, 0.31], "metallic": 0.2, "roughness": 0.4 } },
+
+    "slab_paint": { "type": "material", "in": ["slab_named"], "params": { "name": "painted_metal", "base_color": [0.28, 0.29, 0.31], "metallic": 0.2, "roughness": 0.4 } },
+    "parts": { "type": "merge", "in": ["slab_paint", "bolts_paint", "details"] },
+    "uv": { "type": "uv_project", "in": ["parts"], "params": { "method": "box", "scale": [1, 1] } },
+    "shaded": { "type": "normal", "in": ["uv"], "params": { "class": "vertex", "cusp_angle": 40 } },
+    "tidy": { "type": "group_delete", "in": ["shaded"], "params": { "groups": "*" } },
+
+    "tiles": {
+      "type": "assert", "in": ["tidy"],
+      "params": { "label": "tiles", "bbox_min": ["=-width / 2", 0, -1000], "bbox_max": ["=width / 2", "=height", 1000], "tolerance": 0.00001, "expr": "abs(bbox.size.x - width) < 0.00001 && abs(bbox.size.y - height) < 0.00001" }
+    },
+    "flat_back": { "type": "assert", "in": ["tiles"], "params": { "label": "flat_back", "bbox_min": [-1000, -1000, 0], "tolerance": 0.00001 } },
+    "panel": { "type": "assert", "in": ["flat_back"], "params": { "label": "uv", "attrib": "uv", "attrib_class": "vertex" } }
+  },
+  "output": "panel",
+  "outputs": {
+    "panel": {
+      "node": "panel", "label": "Sci-fi panel", "kind": "mesh",
+      "tags": ["sci-fi", "wall-panel", "hard-surface", "tileable", "greebles"],
+      "description": "The wall panel, width by height, back flat on z = 0: painted metal frame and recessed sections with vents, panel lines, clamps and boxes, dark rubber hoses and vent backs, box-projected uv."
+    }
+  }
+}

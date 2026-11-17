@@ -11,6 +11,7 @@ import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
 import { catalogText, nodeDoc, topicList, topicText, INSTRUCTIONS } from './docs.ts';
+import { exampleText } from './examples.ts';
 import { nodeBudgetInput, summarize, inspect } from '../inspect.ts';
 import { glbSceneReport, sceneReportText } from '../io/inspect-scene.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
@@ -317,11 +318,12 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'help',
-      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its params, inputs, version and note, also one search found that the package does not use yet) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
-      inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` } } },
+      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its params, inputs, version and note, also one search found that the package does not use yet), complete worked examples (topic "examples" lists them; examples:[name] gives one's card and graph to build and adapt) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
+      inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` }, examples: { type: 'array', items: { type: 'string' }, description: 'example names (help topic "examples" lists them): each one\'s card (what goes in, what comes out, what it promises) and its graph' } } },
       run: async (a) => {
         const out: string[] = [];
         if (a.topic) out.push(topicText(String(a.topic)) ?? `unknown topic "${a.topic}". Topics: overview, ${topicList().join(', ')}`);
+        for (const n of a.examples ?? []) out.push(exampleText(String(n)));
         for (const n of a.nodes ?? []) {
           const d = engine.resolveDef(n);
           if (!d && String(n).includes('/')) {

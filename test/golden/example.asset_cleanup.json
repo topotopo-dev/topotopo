@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1", "texture_size:int:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.591, 0.7539, 0.5147],
+      "min": [-0.591, 0, -0.5147]
+    },
+    "counts": {
+      "points": 1678,
+      "prims": 3352,
+      "vertices": 10056,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "3f768e541e89218a",
+      "attributes": {
+        "detail.materials": "46d5d260ef2bfdbe",
+        "detail.texture_size": "ca8bfd7926f8fff3",
+        "point.N": "ae0e00eb58c15409",
+        "prim.material": "35143f85e6bebbdf",
+        "prim.name": "d8baaf35d618888f",
+        "vertex.uv": "9d6203440b4c4012"
+      },
+      "topology": "9047f1770ad66499"
+    }
+  },
+  "name": "example.asset_cleanup",
+  "ok": true,
+  "source": "examples/asset_cleanup.json",
+  "warnings": []
+}
