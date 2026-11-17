@@ -39,28 +39,67 @@ function logArea(xy: ArrayLike<number>): number {
   return Math.log(Math.abs(sum) / 2) + 2 * Math.log(scale);
 }
 
-/** Test distinct contours before containment; crossing contours cannot be independent footprints. */
-function contoursTouch(a: Float64Array, b: Float64Array): boolean {
-  const orientation = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number): number => {
-    const dx = bx - ax, dz = bz - az, qx = cx - ax, qz = cz - az;
-    const scale = Math.max(Math.abs(dx), Math.abs(dz), Math.abs(qx), Math.abs(qz));
-    return scale ? (dx / scale) * (qz / scale) - (dz / scale) * (qx / scale) : 0;
-  };
-  const between = (ax: number, az: number, bx: number, bz: number, x: number, z: number): boolean =>
-    x >= Math.min(ax, bx) && x <= Math.max(ax, bx) && z >= Math.min(az, bz) && z <= Math.max(az, bz);
-  for (let i = 0; i < a.length; i += 2) for (let j = 0; j < b.length; j += 2) {
-    const nextA = (i + 2) % a.length, nextB = (j + 2) % b.length;
-    const ax = a[i], az = a[i + 1], bx = a[nextA], bz = a[nextA + 1];
-    const cx = b[j], cz = b[j + 1], dx = b[nextB], dz = b[nextB + 1];
-    if (Math.max(ax, bx) < Math.min(cx, dx) || Math.max(cx, dx) < Math.min(ax, bx)
-      || Math.max(az, bz) < Math.min(cz, dz) || Math.max(cz, dz) < Math.min(az, bz)) continue;
-    const c = orientation(ax, az, bx, bz, cx, cz), d = orientation(ax, az, bx, bz, dx, dz);
-    const aa = orientation(cx, cz, dx, dz, ax, az), bb = orientation(cx, cz, dx, dz, bx, bz);
-    if ((c > 0 && d < 0 || c < 0 && d > 0) && (aa > 0 && bb < 0 || aa < 0 && bb > 0)) return true;
-    if (c === 0 && between(ax, az, bx, bz, cx, cz) || d === 0 && between(ax, az, bx, bz, dx, dz)
-      || aa === 0 && between(cx, cz, dx, dz, ax, az) || bb === 0 && between(cx, cz, dx, dz, bx, bz)) return true;
+/** Contours closer than this fraction of their extent touch: shared edges computed twice rarely match bit for bit. */
+const TOUCH = 1e-9;
+
+type Contact = 'none' | 'touch' | 'cross';
+
+/**
+ * How two contours meet: apart, touching (within `TOUCH` of their joint extent, as lots sharing an edge do),
+ * or crossing (an edge passes clearly through the other contour's edge).
+ */
+function contact(a: Float64Array, b: Float64Array): Contact {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const ring of [a, b]) for (let i = 0; i < ring.length; i += 2) {
+    minX = Math.min(minX, ring[i]); maxX = Math.max(maxX, ring[i]);
+    minZ = Math.min(minZ, ring[i + 1]); maxZ = Math.max(maxZ, ring[i + 1]);
   }
-  return false;
+  const size = Math.max(maxX - minX, maxZ - minZ) || 1;
+  const local = (ring: Float64Array) => ring.map((v, i) => (v - (i % 2 ? minZ : minX)) / size);
+  const p = local(a), q = local(b);
+  // Signed distance of (x, z) from the line through two corners, and distance from their segment.
+  const side = (ax: number, az: number, bx: number, bz: number, x: number, z: number) =>
+    ((bx - ax) * (z - az) - (bz - az) * (x - ax)) / (Math.hypot(bx - ax, bz - az) || 1);
+  const away = (ax: number, az: number, bx: number, bz: number, x: number, z: number) => {
+    const dx = bx - ax, dz = bz - az, length2 = dx * dx + dz * dz;
+    const t = length2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / length2)) : 0;
+    return Math.hypot(x - ax - t * dx, z - az - t * dz);
+  };
+  let touch = false;
+  for (let i = 0; i < p.length; i += 2) for (let j = 0; j < q.length; j += 2) {
+    const nextA = (i + 2) % p.length, nextB = (j + 2) % q.length;
+    const ax = p[i], az = p[i + 1], bx = p[nextA], bz = p[nextA + 1];
+    const cx = q[j], cz = q[j + 1], dx = q[nextB], dz = q[nextB + 1];
+    if (Math.max(ax, bx) + TOUCH < Math.min(cx, dx) || Math.max(cx, dx) + TOUCH < Math.min(ax, bx)
+      || Math.max(az, bz) + TOUCH < Math.min(cz, dz) || Math.max(cz, dz) + TOUCH < Math.min(az, bz)) continue;
+    const c = side(ax, az, bx, bz, cx, cz), d = side(ax, az, bx, bz, dx, dz);
+    const e = side(cx, cz, dx, dz, ax, az), f = side(cx, cz, dx, dz, bx, bz);
+    const apart = (u: number, v: number) => u > TOUCH && v < -TOUCH || u < -TOUCH && v > TOUCH;
+    if (apart(c, d) && apart(e, f)) return 'cross';
+    if (!touch && (c * d < 0 && e * f < 0 || Math.min(away(ax, az, bx, bz, cx, cz), away(ax, az, bx, bz, dx, dz),
+      away(cx, cz, dx, dz, ax, az), away(cx, cz, dx, dz, bx, bz)) <= TOUCH)) touch = true;
+  }
+  return touch ? 'touch' : 'none';
+}
+
+/** A point strictly inside a simple ring: the middle of its widest span along the line halfway across its largest gap in Z. */
+function interiorPoint(xy: Float64Array): [number, number] {
+  const levels = Array.from({ length: xy.length / 2 }, (_, i) => xy[i * 2 + 1]).sort((a, b) => a - b);
+  let z = levels[0], gap = -1;
+  for (let i = 0; i + 1 < levels.length; i++) {
+    if (levels[i + 1] - levels[i] > gap) { gap = levels[i + 1] - levels[i]; z = levels[i] + gap / 2; }
+  }
+  const xs: number[] = [];
+  for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+    const za = xy[j + 1], zb = xy[i + 1];
+    if ((za > z) !== (zb > z)) xs.push(xy[j] + (z - za) / (zb - za) * (xy[i] - xy[j]));
+  }
+  xs.sort((a, b) => a - b);
+  let x = xs[0] ?? xy[0], width = -1;
+  for (let i = 0; i + 1 < xs.length; i += 2) {
+    if (xs[i + 1] - xs[i] > width) { width = xs[i + 1] - xs[i]; x = xs[i] + width / 2; }
+  }
+  return [x, z];
 }
 
 function inside(x: number, z: number, xy: Float64Array): boolean {
@@ -149,18 +188,44 @@ function footprints(g: Geometry, selected: Uint8Array | null): Ring[] {
     }
     edgeBase += count;
   }
+  const plane = (i: number, j: number) => Math.abs(loops[i].y - loops[j].y) <= Math.max(loops[i].tolerance, loops[j].tolerance);
+  const names = (i: number, j: number) => {
+    const a = loops[i].edges[0].prim, b = loops[j].edges[0].prim;
+    return a === b ? `primitive ${a}` : `primitives ${Math.min(a, b)} and ${Math.max(a, b)}`;
+  };
+  const bounds = loops.map((loop) => {
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < loop.xy.length; i += 2) {
+      minX = Math.min(minX, loop.xy[i]); maxX = Math.max(maxX, loop.xy[i]);
+      minZ = Math.min(minZ, loop.xy[i + 1]); maxZ = Math.max(maxZ, loop.xy[i + 1]);
+    }
+    return { minX, minZ, maxX, maxZ };
+  });
+  // Each shape (an outer contour and its holes) is skeletonised on its own, so separate shapes may touch, as
+  // lots split from one block do. A contour inside another must not touch it, and no two contours may cross.
+  const samples = loops.map((loop) => interiorPoint(loop.xy));
+  const touching = new Set<number>();
   for (let i = 0; i < loops.length; i++) for (let j = i + 1; j < loops.length; j++) {
-    if (Math.abs(loops[i].y - loops[j].y) > Math.max(loops[i].tolerance, loops[j].tolerance)) continue;
-    if (contoursTouch(loops[i].xy, loops[j].xy))
-      throw new NodeError(`straight_skeleton: contours from primitives ${loops[i].edges[0].prim} and ${loops[j].edges[0].prim} intersect or touch; separate their boundaries`);
+    if (!plane(i, j)) continue;
+    const a = bounds[i], b = bounds[j];
+    const reach = TOUCH * Math.max(a.maxX, b.maxX) - TOUCH * Math.min(a.minX, b.minX) + TOUCH * Math.max(a.maxZ, b.maxZ) - TOUCH * Math.min(a.minZ, b.minZ);
+    if (a.maxX + reach < b.minX || b.maxX + reach < a.minX || a.maxZ + reach < b.minZ || b.maxZ + reach < a.minZ) continue;
+    const how = contact(loops[i].xy, loops[j].xy);
+    if (how === 'cross')
+      throw new NodeError(`straight_skeleton: contours from ${names(i, j)} cross; separate shapes may share edges and corners but must not overlap`);
+    if (how === 'touch') {
+      if (inside(samples[i][0], samples[i][1], loops[j].xy) || inside(samples[j][0], samples[j][1], loops[i].xy))
+        throw new NodeError(`straight_skeleton: contours from ${names(i, j)} touch and one lies inside the other; a hole must lie strictly inside its outer contour`);
+      touching.add(i * loops.length + j);
+    }
   }
   // A smallest containing loop is the parent. Even/odd nesting handles islands inside courtyards too.
   for (let i = 0; i < loops.length; i++) {
     let best = Infinity;
     for (let j = 0; j < loops.length; j++) {
-      if (i === j || Math.abs(loops[j].y - loops[i].y) > Math.max(loops[i].tolerance, loops[j].tolerance)) continue;
+      if (i === j || !plane(i, j)) continue;
       const size = loops[j].logArea;
-      if (size > loops[i].logArea && size < best && inside(loops[i].xy[0], loops[i].xy[1], loops[j].xy)) {
+      if (size > loops[i].logArea && size < best && inside(samples[i][0], samples[i][1], loops[j].xy)) {
         loops[i].parent = j; best = size;
       }
     }
@@ -168,7 +233,64 @@ function footprints(g: Geometry, selected: Uint8Array | null): Ring[] {
   for (const loop of loops) {
     for (let parent = loop.parent; parent >= 0; parent = loops[parent].parent) loop.depth++;
   }
+  for (const pair of touching) {
+    const i = Math.floor(pair / loops.length), j = pair % loops.length;
+    if (loops[i].depth % 2 && loops[i].parent === loops[j].parent)
+      throw new NodeError(`straight_skeleton: holes from ${names(i, j)} touch; merge them into one hole`);
+  }
   return loops;
+}
+
+/** Corners nearer than this fraction of the shape's extent to the line between their neighbours are straight. */
+const STRAIGHT = 1e-5;
+
+/** One kernel contour: its corners, and per kernel edge the input edges it stands for. */
+interface Contour {
+  xy: Float64Array;
+  runs: Edge[][];
+}
+
+/**
+ * Drop straight and doubled corners before the skeleton: an almost straight corner makes the wavefront
+ * numerically ambiguous. A run of corners goes when every one lies within `STRAIGHT` of the shape's extent
+ * from the segment between the corners kept around it, and edges with different pitches never merge.
+ * Kept corners stay in input order, so a contour without straight corners reaches the kernel unchanged.
+ */
+function straighten(ring: Ring, frame: { x: number; z: number; size: number }, pitch: Float64Array | null): Contour {
+  const n = ring.edges.length, x = (i: number) => (ring.xy[i * 2] - frame.x) / frame.size, z = (i: number) => (ring.xy[i * 2 + 1] - frame.z) / frame.size;
+  const off = (i: number, a: number, c: number): number => {
+    const dx = x(c) - x(a), dz = z(c) - z(a), length2 = dx * dx + dz * dz;
+    const t = length2 > 0 ? Math.max(0, Math.min(1, ((x(i) - x(a)) * dx + (z(i) - z(a)) * dz) / length2)) : 0;
+    return Math.hypot(x(i) - x(a) - t * dx, z(i) - z(a) - t * dz);
+  };
+  const same = (i: number, j: number) => !pitch || pitch.length === 1 || pitch[i] === pitch[j];
+  // Start at the sharpest corner: it is always kept.
+  let start = 0, sharpest = -1;
+  for (let i = 0; i < n; i++) {
+    const d = off(i, (i + n - 1) % n, (i + 1) % n);
+    if (d > sharpest) { sharpest = d; start = i; }
+  }
+  const kept = [start];
+  for (let step = 1, a = start; step < n; step++) {
+    const j = (start + step) % n, c = (j + 1) % n;
+    let drop = same(a, j);
+    for (let k = (a + 1) % n; drop; k = (k + 1) % n) {
+      if (off(k, a, c) > STRAIGHT) drop = false;
+      if (k === j) break;
+    }
+    if (!drop) { kept.push(j); a = j; }
+  }
+  if (kept.length < 3)
+    throw new NodeError(`straight_skeleton: primitive ${ring.edges[0].prim} has fewer than three corners that are not straight or doubled, so it encloses no area`);
+  kept.sort((a, b) => a - b);
+  const xy = new Float64Array(kept.length * 2), runs: Edge[][] = [];
+  kept.forEach((corner, k) => {
+    xy[k * 2] = ring.xy[corner * 2]; xy[k * 2 + 1] = ring.xy[corner * 2 + 1];
+    const run: Edge[] = [];
+    for (let i = corner; i !== kept[(k + 1) % kept.length]; i = (i + 1) % n) run.push(ring.edges[i]);
+    runs.push(run);
+  });
+  return { xy, runs };
 }
 
 function projection(g: Geometry, edge: Edge, x: number, z: number): { t: number; d: number } {
@@ -248,7 +370,7 @@ defineNode({
   type: 'straight_skeleton',
   category: 'curve',
   summary: 'Straight skeleton, polygon offsets and pitched roofs from planar footprints, including holes.',
-  description: 'Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order.',
+  description: 'Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Each shape (an outer contour and its holes) is processed on its own, so separate shapes may share edges and corners, as lots split from one block do; a hole must lie strictly inside its outer contour, and no two contours may cross. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order. Straight and doubled corners (within 1e-5 of the shape\'s extent of the line between their neighbours) are dropped before the skeleton when the edges around them have the same pitch: one roof face spans them, its eave still runs through every footprint point, and its edge number is the first of the merged edges.',
   inputs: [{ name: 'footprint', desc: 'Closed planar footprints, with nested contours for holes.' }],
   params: {
     mode: { type: 'enum', default: 'skeleton', options: ['skeleton', 'offset', 'roof'], desc: 'Emit skeleton and contour arcs, offset contours, or roof faces.' },
@@ -284,37 +406,68 @@ defineNode({
         if (outer.depth % 2) continue;
         const holes = loops.filter((loop) => loop.parent === i);
         const edges = [outer, ...holes].flatMap((loop) => loop.edges);
-        const holeXY = holes.map((loop) => loop.xy);
+        // Straight corners are dropped for the kernel; `runs[k]` lists the input edges kernel edge k stands for.
+        let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+        for (let v = 0; v < outer.xy.length; v += 2) {
+          minX = Math.min(minX, outer.xy[v]); maxX = Math.max(maxX, outer.xy[v]);
+          minZ = Math.min(minZ, outer.xy[v + 1]); maxZ = Math.max(maxZ, outer.xy[v + 1]);
+        }
+        const frame = { x: minX, z: minZ, size: Math.max(maxX - minX, maxZ - minZ) || 1 };
+        const contours = [outer, ...holes].map((loop) => straighten(loop, frame, p.mode === 'roof' && p.pitch_attrib ? pitches(g, loop.edges, p.pitch_attrib, p.pitch) : null));
+        const runs = contours.flatMap((contour) => contour.runs);
+        const next: number[] = [];
+        for (const contour of contours) {
+          const base = next.length;
+          for (let j = 0; j < contour.runs.length; j++) next.push(base + (j + 1) % contour.runs.length);
+        }
+        const holeXY = contours.slice(1).map((contour) => contour.xy);
         const addPoint = (x: number, z: number, height = 0, sourcePoint = -1): number => {
           const y = outer.y + height;
           if (![x, y, z].every(Number.isFinite))
             throw new NodeError('straight_skeleton: output exceeds the finite numeric range; rescale the footprint or lower its elevation');
-          if (sourcePoint >= 0) return builder.addPoint(x, y, z, edges[sourcePoint].a);
+          if (sourcePoint >= 0) return builder.addPoint(x, y, z, runs[sourcePoint][0].a);
           const from = nearest(g, edges, x, z);
           return builder.addPoint(x, y, z, source(from.edge, from.t));
         };
+        // Dropped corners come back on the footprint outline, so the output still meets it at every input point.
+        const dropped = new Map<number, number>();
+        const droppedPoint = (edge: Edge): number => {
+          if (!dropped.has(edge.a)) dropped.set(edge.a, builder.addPoint(g.P[edge.a * 3], outer.y, g.P[edge.a * 3 + 2], edge.a));
+          return dropped.get(edge.a)!;
+        };
         if (p.mode === 'skeleton') {
-          const result = kernels.straight_skeleton(outer.xy, holeXY);
+          const result = kernels.straight_skeleton(contours[0].xy, holeXY);
           const kind = builder.attrib('prim', 'kind', 1, 'int');
-          const points = new Map<string, number>();
+          const points = new Map<string, number>(), corner = new Map<string, number>();
           for (let v = 0; v < result.vertices.length; v += 2) {
-            const x = result.vertices[v], z = result.vertices[v + 1];
-            points.set(`${x},${z}`, addPoint(x, z, 0, result.src_point[v / 2]));
+            const x = result.vertices[v], z = result.vertices[v + 1], src = result.src_point[v / 2];
+            points.set(`${x},${z}`, addPoint(x, z, 0, src));
+            if (src >= 0) corner.set(`${x},${z}`, src);
           }
           const pointAt = (x: number, z: number): number => {
             const key = `${x},${z}`;
             if (!points.has(key)) points.set(key, addPoint(x, z));
             return points.get(key)!;
           };
-          for (let arc = 0; arc < result.arc_kind.length; arc++) {
-            const a = arc * 4, x = result.arcs[a], z = result.arcs[a + 1], xx = result.arcs[a + 2], zz = result.arcs[a + 3];
+          const addArc = (x: number, z: number, xx: number, zz: number, arcKind: number) => {
             const from = nearest(g, edges, x / 2 + xx / 2, z / 2 + zz / 2).edge;
             const prim = builder.addPrim([pointAt(x, z), pointAt(xx, zz)], false, from.prim,
               [source(from, projection(g, from, x, z).t, true), source(from, projection(g, from, xx, zz).t, true)]);
-            kind.set(prim, [result.arc_kind[arc]]);
+            kind.set(prim, [arcKind]);
+          };
+          for (let arc = 0; arc < result.arc_kind.length; arc++) {
+            const a = arc * 4, x = result.arcs[a], z = result.arcs[a + 1], xx = result.arcs[a + 2], zz = result.arcs[a + 3];
+            const from = corner.get(`${x},${z}`), to = corner.get(`${xx},${zz}`);
+            const run = from === undefined || to === undefined ? null : next[from] === to ? runs[from] : next[to] === from ? runs[to] : null;
+            if (!result.arc_kind[arc] || !run || run.length === 1) { addArc(x, z, xx, zz, result.arc_kind[arc]); continue; }
+            // A contour arc over dropped corners follows the input edges.
+            const path = run.map((edge) => edge.a).concat(run[run.length - 1].b);
+            if (next[from!] !== to) path.reverse();
+            for (let s = 0; s + 1 < path.length; s++)
+              addArc(g.P[path[s] * 3], g.P[path[s] * 3 + 2], g.P[path[s + 1] * 3], g.P[path[s + 1] * 3 + 2], 1);
           }
         } else if (p.mode === 'offset') {
-          const result = kernels.offset_polygon(outer.xy, holeXY, p.distance);
+          const result = kernels.offset_polygon(contours[0].xy, holeXY, p.distance);
           const points: number[] = [];
           for (let v = 0; v < result.vertices.length; v += 2) points.push(addPoint(result.vertices[v], result.vertices[v + 1]));
           for (let poly = 0; poly + 1 < result.polygon_start.length; poly++) {
@@ -324,25 +477,38 @@ defineNode({
               from.map((item) => source(item.edge, item.t, true)));
           }
         } else {
-          const result = kernels.roof(outer.xy, holeXY, pitches(g, edges, p.pitch_attrib, p.pitch), p.height_cap > 0 ? p.height_cap : undefined);
+          const result = kernels.roof(contours[0].xy, holeXY, pitches(g, runs.map((run) => run[0]), p.pitch_attrib, p.pitch), p.height_cap > 0 ? p.height_cap : undefined);
           const points: number[] = [];
           for (let v = 0; v < result.vertices.length; v += 3)
             points.push(addPoint(result.vertices[v], result.vertices[v + 1], result.vertices[v + 2], result.src_point[v / 3]));
           const attr = builder.attrib('prim', 'edge', 1, 'int', [-1]);
           for (let face = 0; face + 1 < result.face_start.length; face++) {
             const ids = Array.from(result.face_vertex_index.slice(result.face_start[face], result.face_start[face + 1])).reverse();
-            const edge = edges[result.face_edge[face]];
+            const run = runs[result.face_edge[face]], edge = run?.[0];
+            const corners = ids.map((id) => points[id]);
             const provenance = ids.map((id) => {
               const x = result.vertices[id * 3], z = result.vertices[id * 3 + 1];
-              const from = edge ? { edge, t: projection(g, edge, x, z).t } : nearest(g, edges, x, z);
+              const from = run ? nearest(g, run, x, z) : nearest(g, edges, x, z);
               return source(from.edge, from.t, true);
             });
-            const prim = builder.addPrim(ids.map((id) => points[id]), true, edge?.prim ?? outer.edges[0].prim, provenance);
+            if (run && run.length > 1) {
+              // Put the dropped corners back on this face's eave, between the two kept corners of its run.
+              const k = result.face_edge[face], src = (at: number) => result.src_point[ids[at % ids.length]];
+              const at = ids.findIndex((_, j) => src(j) === k && src(j + 1) === next[k] || src(j) === next[k] && src(j + 1) === k);
+              if (at >= 0) {
+                const between = run.slice(1);
+                if (src(at) !== k) between.reverse();
+                corners.splice(at + 1, 0, ...between.map(droppedPoint));
+                provenance.splice(at + 1, 0, ...between.map((item) => item.va));
+              }
+            }
+            const prim = builder.addPrim(corners, true, edge?.prim ?? outer.edges[0].prim, provenance);
             attr.set(prim, [edge?.id ?? -1]);
           }
         }
       }
     } catch (error) {
+      if (error instanceof NodeError) throw error;
       throw new NodeError(`straight_skeleton: ${error instanceof Error ? error.message : String(error)}`);
     }
     const out = builder.build();

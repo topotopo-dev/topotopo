@@ -8,7 +8,7 @@ import { GeoBuilder } from '../src/core/geometry.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import { uvReport } from '../src/core/uvreport.ts';
 import { uvOverlapPairs } from '../src/core/uvoverlap.ts';
-import { inspect } from '../src/inspect.ts';
+import { SUMMARY_UV_TRIANGLES, inspect } from '../src/inspect.ts';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -189,6 +189,24 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   for (let t = 0; t < n; t++) U.set([0, 0, 1, 0, 0, 1], t * 6);
   const scan = uvOverlapPairs(U, valid, signed, () => {});
   check(scan.stopped && /too many to compare/.test(scan.reason ?? '') && scan.testedPairs === 0, `a uv grid too deep to list stops the scan with a reason (${scan.reason})`);
+}
+
+{
+  // inspect summary stays quick on a large mesh: the overlap test (and the utilization that needs it) runs up to
+  // SUMMARY_UV_TRIANGLES; past that the line says it was not tested and where to get it. Small meshes keep it.
+  const small = mesh([quad(0, 0, 0, 0, 0.5, 0.5), quad(5, 0, 0.25, 0, 0.75, 0.5)]);
+  check(/uv: 2 charts; in-tile overlap [1-9]\d* pairs.*utilization/.test(inspect(small)), 'summary of a small mesh tests overlaps and gives utilization');
+  const side = Math.ceil(Math.sqrt(SUMMARY_UV_TRIANGLES / 2)) + 1, polys: { P: number[][]; uv: number[][] }[] = [];
+  // every quad on the whole tile: as many overlaps as a mesh can have
+  for (let i = 0; i < side; i++) for (let j = 0; j < side; j++)
+    polys.push({ P: [[i, 0, j], [i + 1, 0, j], [i + 1, 0, j + 1], [i, 0, j + 1]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+  const big = mesh(polys), start = performance.now(), text = inspect(big), ms = performance.now() - start;
+  const line = text.split('\n').find((l) => l.startsWith('uv:')) ?? '';
+  check(/overlap not tested \(over 200,000 triangles: inspect detail "uv" tests it\)/.test(line) && !/utilization/.test(line),
+    `summary of ${(side * side * 2).toLocaleString('en-US')} triangles leaves the overlap test to detail "uv" and says so (${ms.toFixed(0)} ms): ${line}`);
+  const off = uvReport(big, { overlaps: false });
+  check(off.reasons.includes('overlaps not tested (overlaps: false)') && !off.complete && off.utilization.method === 'none',
+    'uvReport overlaps: false is incomplete, says why, and measures no utilization');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

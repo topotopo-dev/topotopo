@@ -179,6 +179,17 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   check(!exprF.ok && /"pieces == 2 \|\| npoints > 100" is false \(npoints 8, pieces 1\)/.test(exprF.errors[0]?.message ?? ''), `expr false lists the values it read: ${exprF.errors[0]?.message}`);
   const exprBad = await cook({ ...box, a: { type: 'assert', in: ['b'], params: { expr: 'volme > 1' } } });
   check(!exprBad.ok && /volme is not defined/.test(exprBad.errors[0]?.message ?? '') && /volume/.test(exprBad.errors[0]?.hint ?? ''), `bad expr is a node error with the names in the hint: ${exprBad.errors[0]?.message}`);
+  // a graph var named like a measurement (a slider "pieces"): the var comes first, as in every expression; geo.pieces is
+  // the measurement, so one expression reads both, and reading the bare name alone warns instead of choosing silently
+  const withVar = (expr: string) => engine.cook({ nodes: { ...box, a: { type: 'assert', in: ['b'], params: { expr } } }, output: 'a', vars: { pieces: 3 } });
+  const both = await withVar('geo.pieces == 1 && pieces == 3');
+  check(both.ok && !both.warnings.length, `assert expr reads both: geo.pieces (measured) and pieces (the graph var) ${both.errors[0]?.message ?? ''}${both.warnings[0]?.message ?? ''}`);
+  const clash = await withVar('pieces == 3');
+  check(clash.ok && clash.warnings.some((w) => /pieces is the graph var pieces \(3\), not the measured pieces \(1\); write geo\.pieces/.test(w.message)), `a name that is both a var and a measurement warns: ${clash.warnings[0]?.message}`);
+  const bothFalse = await withVar('geo.pieces == pieces');
+  check(!bothFalse.ok && /is false \(pieces 3, geo\.pieces 1\)/.test(bothFalse.errors[0]?.message ?? ''), `a false expr lists both values: ${bothFalse.errors[0]?.message}`);
+  const noVar = await cook({ ...box, a: { type: 'assert', in: ['b'], params: { expr: 'geo.volume > 1.9 && volume > 1.9 && geo.bbox.size.y == 2' } } });
+  check(noVar.ok && !noVar.warnings.length, `without such a var both spellings read the measurement ${noVar.errors[0]?.message ?? ''}`);
   const rev = await cook({ ...box, r: { type: 'reverse', in: ['b'] }, a: { type: 'assert', in: ['r'], params: { no_flipped: true } } });
   check(!rev.ok && /facing inward/.test(rev.errors[0]?.message ?? ''), 'no_flipped catches an inside-out box');
   const hollow = await cook({ o: { type: 'box' }, i: { type: 'box', params: { size: 0.8 } }, h: { type: 'boolean', in: ['o', 'i'], params: { operation: 'subtract' } }, a: { type: 'assert', in: ['h'], params: { no_flipped: true, watertight: true, expr: 'pieces == 2 && volume > 0.48 && volume < 0.49' } } }, 'a');

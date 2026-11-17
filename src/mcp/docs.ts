@@ -967,7 +967,9 @@ scatter: generate_by count (exactly count) | density (density × density_scale p
   density, else count). weight = density_attrib (point/vertex/prim, ≥ 0) × density_mask (0..1). relax (blue noise, follows
   the weights), relax_iterations (Lloyd-style push-apart on the surface), min_distance (exact), max_per_prim,
   emit_attributes ("*": point/vertex attributes interpolated, prim attributes copied; "^uv" excludes), write_primuv
-  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume.
+  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume. The input N is carried; write_normals
+  writes the surface normal (curve tangent) when the input has none.
+  N on points orients copies (+Z along N), so delete it or set orient/up when instances should stand upright.
   backend auto (default) uses WASM when already loaded, otherwise JS; kernel loads WASM, js forces the reference path.
   Elimination, ordered minimum-distance rejection (including per-prim caps), and surface relaxation have Rust kernels.
   min_distance can reduce the count; blue-noise elimination alone is not a hard separation constraint.
@@ -1647,7 +1649,9 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    (BVH, stops after max_tests candidate pairs and says so), attrib (must exist; attrib_min/attrib_max bound its first
    component; attrib_class), group (exists and is non-empty), expr (JS over npoints nprims nvertices npolys nlines
    bbox.min/.max/.size/.center (.x .y .z) volume area pieces open_pieces genus closed boundary_edges, and the graph
-   vars by their bare name: "npoints == count * 8").
+   vars by their bare name: "npoints == count * 8"). As in every expression a var comes first: with a slider "pieces",
+   pieces is the slider and geo.pieces the measurement (geo holds every measurement), so "geo.pieces == pieces" reads
+   both; an expr that reads such a name bare, without geo, gets a warning naming the clash.
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
    Every failed check names its first offender: the part (prim "name", groups) and its world position.
@@ -1667,7 +1671,8 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
 5. INSPECT {detail} (CLI --inspect <detail>):
    summary (default)  one screen: counts and triangles, bbox in metres to the millimetre, parts (prim "name"),
                       materials and their maps, images, uv state (charts, in-tile overlap, tiling, utilization), closed
-                      or open edges (after welding seam splits)
+                      or open edges (after welding seam splits). Over 200,000 triangles it leaves the uv overlap test and
+                      utilization to detail "uv", and says so
    budget             triangles per part (prim "name": each exports as its own mesh), split per LOD when the names
                       end in _lod0, _lod1 …, and per node (the triangles each node adds over its inputs), sorted, with
                       totals; packed instances count expanded. json:true (CLI --json) appends it as JSON

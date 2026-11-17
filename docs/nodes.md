@@ -1025,7 +1025,7 @@ category: `curve` · aliases: `linear_extrude`, `extrude2d`
 
 Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.
 
-A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids.
+A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids. Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.
 
 **Inputs**
 
@@ -1045,7 +1045,7 @@ A shape that lies inside another shape of the same input is a hole, and a shape 
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis) |
 | `caps` | bool | `true` |  |  |  | add top/bottom caps |
 
-**Writes:** prim groups top, bottom, side
+**Writes:** prim groups top, bottom, side; the attributes and groups of the input (see above)
 
 **Example**
 
@@ -1872,7 +1872,7 @@ category: `curve`
 
 Straight skeleton, polygon offsets and pitched roofs from planar footprints, including holes.
 
-Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order.
+Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Each shape (an outer contour and its holes) is processed on its own, so separate shapes may share edges and corners, as lots split from one block do; a hole must lie strictly inside its outer contour, and no two contours may cross. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order. Straight and doubled corners (within 1e-5 of the shape's extent of the line between their neighbours) are dropped before the skeleton when the edges around them have the same pitch: one roof face spans them, its eave still runs through every footprint point, and its edge number is the first of the merged edges.
 
 **Inputs**
 
@@ -3768,7 +3768,7 @@ category: `measure` · aliases: `expect`, `check`, `verify`
 
 Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression) and fail, warn or mark when a check fails. Passes the geometry through.
 
-Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first). Each cook records stats checks and failed.
+Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement). Each cook records stats checks and failed.
 
 **Inputs**
 
@@ -3801,7 +3801,7 @@ Every check is off by default; enable the ones that express what the graph must 
 | `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of its first component (null = off) |
 | `attrib_max` | json | `null` |  |  |  | attrib: largest allowed value of its first component (null = off) |
 | `group` | string | `""` |  |  |  | group name (any class) that must exist and be non-empty ("" = off) |
-| `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first); e.g. "volume > 1 && pieces == 1" |
+| `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement); e.g. "volume > 1 && pieces == 1" |
 | `tolerance` | float | `0.000001` | 0.. |  |  | distance tolerance for bbox_min/max and duplicate points *(advanced)* |
 
 **Writes:** passes geometry through; mark: detail int assert_failed, detail string assert_report, point/prim group assert_fail
@@ -6034,7 +6034,7 @@ category: `copy` · aliases: `scatter_points`, `distribute`
 
 Scatter points on surfaces (area-weighted, blue-noise spacing; by count or per m²; density attribute and 0..1 mask; relaxation; exact minimum distance), along curves, or inside volumes.
 
-Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or prim attribute, Houdini's density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; "^name" excludes). Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").
+Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or prim attribute, Houdini's density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; "^name" excludes). N: the input N is always carried (point or vertex N interpolated and normalised, prim N copied; attrib_delete removes it); scatter computes none of its own unless write_normals is on (the surface normal, or the tangent along curves), as the Houdini scatter does, because copy_to_points turns each copy so its +Z follows N and an N pointing up lays upright models on their side. Packed input is unpacked first. A heightfield or an SDF has no polygons and is refused: use heightfield_scatter, or heightfield_to_mesh / sdf_to_mesh first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").
 
 **Inputs**
 
@@ -6066,8 +6066,9 @@ Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sample
 | `write_sourceprim` | bool | `true` |  |  | `source_prim`, `sourceprim` | write int sourceprim (the source prim of each point) |
 | `write_primuv` | bool | `false` |  |  | `prim_uv`, `sourceprimuv` | write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention) |
 | `write_seed` | bool | `false` |  |  | `seed_attrib`, `pcg_seed` | write int seed per point (PCG $Seed; a hash of seed and the point number) |
+| `write_normals` | bool | `false` |  |  | `compute_normals`, `output_normals` | write N when no input N is carried: the surface normal (surface mode) or the curve tangent (curve mode); off leaves the points without N so copy_to_points stands copies upright |
 
-**Writes:** point N (surface normal), sourceprim; optional sourceprimuv, seed; source attributes (emit_attributes)
+**Writes:** point sourceprim; N when the input has N (carried) or write_normals is on; optional sourceprimuv, seed; source attributes (emit_attributes)
 
 **Example**
 
@@ -6442,7 +6443,7 @@ Shatter a closed solid into convex Voronoi pieces (sites from input 2 or scatter
 | `count` | int | `12` | 1..10000 |  |  | number of pieces when no site points are given |
 | `seed` | float | `0` |  |  |  | random seed |
 | `gap` | float | `0` | 0.. |  |  | shrink each piece toward its centre by this distance (visual separation) |
-| `neighbors` | int | `24` | 4..1024 |  |  | nearest sites considered per cell (raise if cells look wrong) |
+| `neighbors` | int | `24` | 4..1024 |  |  | nearest sites that cut each cell first; farther sites that can still reach the cell cut it too, so cells are exact and pieces never overlap |
 
 **Writes:** prim name ("piece0"...), class (int), group inside; point/prim attributes from the source
 
@@ -11386,6 +11387,7 @@ Unreal PCG: Self Pruning (overlap), Density Filter (density), Attribute Filter (
         "s"
       ],
       "params": {
+        "mode": "direction",
         "scale_min": 0.5,
         "scale_max": 1.5
       }

@@ -2,6 +2,7 @@
 //   node test/bugs.ts [--verbose]
 import { allNodeDefs } from '../src/graph/registry.ts';
 import type { GraphSpec, NodeDef, NodeSpec } from '../src/graph/types.ts';
+import type { Geometry } from '../src/core/geometry.ts';
 import { SKIP, checkGeo, createFixtureEngine, fixtureGraphFor } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff } from './fingerprint.ts';
 
@@ -426,6 +427,154 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(/dest has 49 points and source 25: copied by index, so only the first 25 pair up/.test(short.w) && short.ys.filter((y) => Math.abs(y - 1) < 1e-12).length === 25, `attrib_copy P onto more points copies the first 25 and warns: ${short.w}`);
   const wrong = await cook({ type: 'attrib_copy', in: ['g', 'uv'], params: { names: 'uv' } });
   check(/no point attribute "uv" \(it has a vertex "uv": set class to vertex\)/.test(wrong.w), `attrib_copy names a vertex attribute with class point: the warning says which class has it (${wrong.w})`);
+}
+
+// ------------------------------------------------------------------ 5h. extrude carries its input's attributes
+// extrude used to drop every attribute. Like polyextrude: caps and side walls take their contour prim's attributes,
+// new points their source point's, corners their source corner's; a vertex uv gets its own layout up the walls.
+
+{
+  const nodes: Record<string, NodeSpec> = {
+    plate: { type: 'shape2d', params: { shape: 'rect', size: [4, 2] } },
+    hole: { type: 'circle', params: { radius: 0.5, divisions: 12 } },
+    both: { type: 'merge', in: ['plate', 'hole'] },
+    tag: { type: 'wrangle', in: ['both'], params: { run_over: 'prims', code: "s@name = 'part' + @primnum; i@lot = 7 + @primnum;" } },
+    paint: { type: 'wrangle', in: ['tag'], params: { run_over: 'points', code: 'f@height = @ptnum; @Cd = [1, 0.5, 0];' } },
+    uv: { type: 'uv_project', in: ['paint'] },
+    group: { type: 'group', in: ['uv'], params: { name: 'chosen', class: 'prim', expr: '@primnum == 1' } },
+  };
+  for (const params of [{ height: 0.5 }, { height: -0.5, divisions: 3, twist: 20, scale_top: [0.8, 0.8] }]) {
+    const r = await engine.cook({ nodes: { ...nodes, e: { type: 'extrude', in: ['group'], params } }, output: 'e' });
+    const g = r.geo, label = `extrude ${JSON.stringify(params)}`;
+    check(r.ok && g, `${label} cooks`, errs(r));
+    if (!g) continue;
+    const name = (pr: number) => g.prims.get('name')?.get(pr), lot = (pr: number) => g.prims.get('lot')?.get(pr);
+    const sideHole = Array.from({ length: g.numPrims }, (_, pr) => pr).filter((pr) => g.primGroups.get('side')![pr] && name(pr) === 'part1');
+    const caps = Array.from({ length: g.numPrims }, (_, pr) => pr).filter((pr) => !g.primGroups.get('side')![pr]);
+    check(sideHole.length === 12 * (params.divisions ?? 1) && sideHole.every((pr) => lot(pr) === 8 && g.primGroups.get('chosen')![pr]),
+      `${label}: the hole's side walls keep the hole prim's name, lot and group`);
+    check(caps.length > 0 && caps.every((pr) => name(pr) === 'part0' && lot(pr) === 7 && !g.primGroups.get('chosen')![pr]), `${label}: the caps (with the hole cut) keep the plate's attributes`);
+    const height = g.points.get('height'), Cd = g.points.get('Cd');
+    check(!!height && !!Cd && Array.from({ length: g.numPoints }, (_, i) => Cd.get(i)).every((c) => JSON.stringify(c) === '[1,0.5,0]'), `${label}: every point keeps Cd`);
+    check(!g.points.has('N') && !g.vertices.has('N'), `${label}: no stale N`);
+    const uv = g.vertices.get('uv')!, side = g.primGroups.get('side')!;
+    let wallArea = 0;
+    for (let pr = 0; pr < g.numPrims; pr++) if (side[pr]) {
+      const c = Array.from({ length: 4 }, (_, k) => uv.get(g.primStart[pr] + k) as number[]);
+      wallArea += Math.abs((c[1][0] - c[0][0]) * (c[3][1] - c[0][1]) - (c[3][0] - c[0][0]) * (c[1][1] - c[0][1]));
+    }
+    check(Math.abs(wallArea - 2) < 1e-9, `${label}: side walls get a 0..1 uv layout per contour (uv area ${wallArea}, plate and hole 1 each)`);
+  }
+}
+
+// ------------------------------------------------------------------ 5i. removeprim andpoints removes only the prim's own points
+// removeprim(0, pr, 1) used to delete every point no prim used, the ones it never touched included, and a removepoint
+// in the same run then took its numbers after that renumbering. Houdini removes only the removed prim's points that no
+// other prim uses.
+
+{
+  const pts = 'for (let i = 0; i < 5; i++) addpoint(0, [i, 0, 0]);\naddprim(0, [0, 1, 2], false);\naddprim(0, [2, 3], false);';
+  const run = async (code: string) => {
+    const r = await engine.cook({ nodes: {
+      e: { type: 'null' },
+      a: { type: 'wrangle', in: ['e'], params: { run_over: 'detail', code: pts } },
+      b: { type: 'wrangle', in: ['a'], params: { run_over: 'detail', code } },
+    }, output: 'b' });
+    const g = r.geo;
+    return { r, xs: g ? Array.from({ length: g.numPoints }, (_, i) => g.P[i * 3]).join(',') : '', prims: g?.numPrims ?? -1 };
+  };
+  // 5 points: polyline 0-1-2 and segment 2-3; point 4 belongs to no prim
+  const cases: [string, string, string, number][] = [
+    ['removeprim(0, 0, 1)', 'removeprim(0, 0, 1);', '2,3,4', 1],
+    ['removeprim(0, 0, 0)', 'removeprim(0, 0, 0);', '0,1,2,3,4', 1],
+    ['removeprim(0, 1, 1)', 'removeprim(0, 1, 1);', '0,1,2,4', 1],
+    ['removeprim both with andpoints', 'removeprim(0, 0, 1); removeprim(0, 1, 1);', '4', 0],
+    ['removeprim with and without andpoints', 'removeprim(0, 0, 0); removeprim(0, 1, 1);', '0,1,4', 0],
+    ['removeprim andpoints and removepoint', 'removeprim(0, 1, 1); removepoint(0, 1);', '0,2,4', 1],
+    ['removepoint', 'removepoint(0, 4);', '0,1,2,3', 2],
+  ];
+  for (const [label, code, want, prims] of cases) {
+    const { r, xs, prims: np } = await run(code);
+    check(r.ok && xs === want && np === prims, `wrangle ${label}: points at x = ${want}, ${prims} prim(s) (got ${xs || 'none'}, ${np})`, errs(r));
+  }
+}
+
+// ------------------------------------------------------------------ 5j. voronoi_fracture pieces never overlap
+// voronoi_fracture cut each cell by its 24 nearest sites only, so with more pieces some cells came out too big and
+// overlapped their neighbours by centimetres; rbd_settle then (rightly) found pieces inside each other and pushed them
+// apart. Now every site that can reach a cell cuts it. Touching pieces are contact, not overlap; real overlap warns.
+
+{
+  const block = (count: number): Record<string, NodeSpec> => ({
+    b: { type: 'box', params: { size: [1, 1, 1], center: [0, 0.5, 0] } },
+    f: { type: 'voronoi_fracture', in: ['b'], params: { count, gap: 0, seed: 2 } },
+    s: { type: 'rbd_settle', in: ['f'] },
+  });
+  // volume of the pieces: their closed shells, by the divergence theorem over the triangulated polygons
+  const volumeOf = (g: Geometry) => {
+    let v = 0;
+    for (let p = 0; p < g.numPrims; p++) {
+      const q = g.primPoints(p);
+      for (let k = 1; k + 1 < q.length; k++) {
+        const a = q[0] * 3, b = q[k] * 3, c = q[k + 1] * 3, P = g.P;
+        v += (P[a] * (P[b + 1] * P[c + 2] - P[b + 2] * P[c + 1]) - P[a + 1] * (P[b] * P[c + 2] - P[b + 2] * P[c]) + P[a + 2] * (P[b] * P[c + 1] - P[b + 1] * P[c])) / 6;
+      }
+    }
+    return v;
+  };
+  const centres = (g: Geometry) => {
+    const nm = g.prims.get('name')!.data as string[], m = new Map<string, number[]>();
+    for (let p = 0; p < g.numPrims; p++) for (const q of g.primPoints(p)) {
+      const a = m.get(nm[p]) ?? [0, 0, 0, 0];
+      a[0] += g.P[q * 3]; a[1] += g.P[q * 3 + 1]; a[2] += g.P[q * 3 + 2]; a[3]++;
+      m.set(nm[p], a);
+    }
+    return m;
+  };
+  const fr = await engine.cook({ nodes: block(60), output: 'f' });
+  const vol = fr.geo ? volumeOf(fr.geo) : NaN;
+  check(fr.ok && fr.geo!.prims.get('name') && Math.abs(vol - 1) < 1e-6, `voronoi_fracture of a 1 m box into 60 pieces: the pieces fill it once (volume ${vol.toFixed(6)})`, errs(fr));
+  const st = await engine.cook({ nodes: block(60), output: 's' });
+  const before = centres(fr.geo!), after = st.geo ? centres(st.geo) : new Map();
+  const moved = [...before].map(([k, a]) => { const b = after.get(k)!; return Math.hypot(a[0] / a[3] - b[0] / b[3], a[1] / a[3] - b[1] / b[3], a[2] / a[3] - b[2] / b[3]); }).sort((x, y) => x - y);
+  check(st.ok && !st.warnings.some((w) => /started inside/.test(w.message)) && moved[moved.length >> 1] < 0.01,
+    `rbd_settle of the fractured box: no piece starts inside another, the pieces stay together (median move ${(moved[moved.length >> 1] ?? NaN).toFixed(4)} m)`, st.warnings.map((w) => w.message).join('; '));
+  // two boxes sharing a face rest as they are; two boxes overlapping by 30 cm are pushed apart, with a warning
+  const pair = (x: number): Record<string, NodeSpec> => ({
+    l: { type: 'box', params: { size: [1, 1, 1], center: [-x, 0.5, 0] } },
+    r: { type: 'box', params: { size: [1, 1, 1], center: [x, 0.5, 0] } },
+    m: { type: 'merge', in: ['l', 'r'] },
+    s: { type: 'rbd_settle', in: ['m'], params: { jitter: 0 } },
+  });
+  const touch = await engine.cook({ nodes: pair(0.5), output: 's' });
+  const tb = touch.geo?.bbox();
+  check(touch.ok && !touch.warnings.length && !!tb && Math.abs(tb.min[0] + 1) < 1e-3 && Math.abs(tb.max[0] - 1) < 1e-3,
+    `rbd_settle: boxes sharing a face are in contact, not overlapping (no warning, x ${tb?.min[0].toFixed(4)} .. ${tb?.max[0].toFixed(4)})`, touch.warnings.map((w) => w.message).join('; '));
+  const deep = await engine.cook({ nodes: pair(0.35), output: 's' });
+  check(deep.ok && deep.warnings.some((w) => /2 pieces started inside/.test(w.message)), 'rbd_settle: boxes overlapping by 30 cm still warn', deep.warnings.map((w) => w.message).join('; '));
+}
+
+// ------------------------------------------------------------------ 5k. scatter never scatters at the origin
+// A heightfield (or an SDF) has no prims and no points: scatter fell back to volume mode over an empty box and put
+// every point at the origin, without a word. It now names what works; an empty input gives no points and says so.
+
+{
+  const terrain: Record<string, NodeSpec> = {
+    h: { type: 'heightfield', params: { size: [20, 20] } },
+    n: { type: 'heightfield_noise', in: ['h'], params: { height: 4 } },
+  };
+  for (const mode of ['auto', 'surface', 'volume']) {
+    const r = await engine.cook({ nodes: { ...terrain, s: { type: 'scatter', in: ['n'], params: { count: 50, mode } } }, output: 's' });
+    check(!r.ok && /heightfield, which has no polygons/.test(r.errors[0]?.message ?? '') && /heightfield_scatter/.test(r.errors[0]?.hint ?? '') && /heightfield_to_mesh/.test(r.errors[0]?.hint ?? ''),
+      `scatter mode ${mode} on a heightfield: an error naming heightfield_scatter and heightfield_to_mesh (${r.errors[0]?.message})`);
+  }
+  const meshed = await engine.cook({ nodes: { ...terrain, m: { type: 'heightfield_to_mesh', in: ['n'] }, s: { type: 'scatter', in: ['m'], params: { count: 50 } } }, output: 's' });
+  const mb = meshed.geo?.bbox();
+  check(meshed.ok && meshed.geo!.numPoints === 50 && !!mb && mb.max[0] - mb.min[0] > 10 && mb.max[2] - mb.min[2] > 10, `scatter after heightfield_to_mesh spreads over the terrain (${mb ? (mb.max[0] - mb.min[0]).toFixed(1) : '?'} m wide)`, errs(meshed));
+  const sdf = await engine.cook({ nodes: { b: { type: 'sphere' }, v: { type: 'sdf_from_mesh', in: ['b'] }, s: { type: 'scatter', in: ['v'], params: { count: 20 } } }, output: 's' });
+  check(!sdf.ok && /SDF volume/.test(sdf.errors[0]?.message ?? '') && /sdf_to_mesh/.test(sdf.errors[0]?.hint ?? ''), `scatter on an SDF: an error naming sdf_to_mesh (${sdf.errors[0]?.message})`);
+  const empty = await engine.cook({ nodes: { e: { type: 'null' }, s: { type: 'scatter', in: ['e'], params: { count: 20 } } }, output: 's' });
+  check(empty.ok && empty.geo!.numPoints === 0 && empty.warnings.some((w) => /no points/.test(w.message)), 'scatter on an empty input: no points, with a warning', errs(empty));
 }
 
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests

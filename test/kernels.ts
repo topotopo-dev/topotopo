@@ -428,6 +428,78 @@ await test('one bridged primitive encodes the same courtyard as separate opposit
   assertWatertight(geo, courtyard);
   near(Array.from({ length: geo.numPrims }, (_, f) => Math.abs(primNewell(geo, f)[1]) / 2).reduce((a, b) => a + b, 0), 48, 'bridged courtyard roof excludes the hole');
 });
+/** Split edge `edge` of a ring with a corner at parameter t, `offset` (a fraction of the ring's extent) off the edge's line. */
+function splitEdge(ring: number[], edge: number, t: number, offset: number): number[] {
+  const n = ring.length / 2, a = edge * 2, c = ((edge + 1) % n) * 2;
+  const xs = ring.filter((_, i) => i % 2 === 0), zs = ring.filter((_, i) => i % 2 === 1);
+  const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
+  const dx = ring[c] - ring[a], dz = ring[c + 1] - ring[a + 1], l = Math.hypot(dx, dz);
+  const out = ring.slice();
+  out.splice(a + 2, 0, ring[a] + dx * t - dz / l * offset * size, ring[a + 1] + dz * t + dx / l * offset * size);
+  return out;
+}
+// The reported footprint: its fourth corner lies about 1e-8 m off the line between its neighbours.
+const reported = [-12.223, 1.311, -8.934, 4.736, -6.589, 4.338, -7.64, -1.867];
+const nearlyStraight: PolygonCase[] = [
+  { name: 'reported near-straight corner', holes: [], outer: splitEdge(reported, 2, 0.3, 1e-8 / 8.6) },
+  ...[1e-7, -1e-8, 1e-9, -1e-10, 1e-11].map((offset, i) => ({ name: `noisy polygon with a corner ${offset} off its edge`, holes: [], outer: splitEdge(noisy.outer, 17 + 41 * i, 0.3 + 0.1 * i, offset) })),
+  { name: 'near-duplicate corner', holes: [], outer: [0, 0, 6, 0, 6, 4, 6 + 1e-13, 4 + 1e-13, 0, 4] },
+  { name: 'exactly straight corner', holes: [], outer: collinear.outer },
+  { name: 'near-parallel opposite edges', holes: [], outer: [0, 0, 10, 1e-9, 9, 2, 1, 2] },
+  { name: 'courtyard hole with a near-straight corner', outer: courtyard.outer, holes: [splitEdge(courtyard.holes[0], 1, 0.4, -1e-9)] },
+];
+for (const p of nearlyStraight) {
+  await test(`node ${p.name}: straight corners do not stop the skeleton, the roof still meets every footprint point`, async () => {
+    const src = footprint(p), pitch = src.points.add('pitch', 'float', 1);
+    for (let i = 0; i < src.numPoints; i++) pitch.set(i, 35);
+    const roof = await cook(src, { mode: 'roof', pitch_attrib: 'pitch' });
+    // A footprint cap over two points 1e-13 apart has a zero-area triangle, so that case checks the outline only.
+    if (p.name === 'near-duplicate corner') assert.equal(topologyReport(roof).boundaryEdges, src.numPoints, 'the roof eave runs through every footprint point');
+    else assertWatertight(roof, p);
+    near(Array.from({ length: roof.numPrims }, (_, f) => Math.abs(primNewell(roof, f)[1]) / 2).reduce((a, b) => a + b, 0), inputArea(p), 'roof covers the footprint', 1e-6 * inputArea(p));
+    const skeleton = await cook(src, { mode: 'skeleton' });
+    const kind = skeleton.prims.get('kind')!.data as Int32Array;
+    assert.equal(Array.from(kind).filter((value) => value === 1).length, src.numPoints, 'contour arcs follow every footprint edge');
+    await cook(src, { mode: 'offset', distance: 0.1 });
+  });
+}
+await test('a straight corner between equal pitches does not split the roof face', async () => {
+  const geo = await cook(footprint(collinear), { mode: 'roof', pitch: 35 });
+  assert.deepStrictEqual(Array.from(geo.prims.get('edge')!.data as Int32Array).sort(), [0, 2, 3, 4], 'edges 0 and 1 share one face');
+});
+/** A 30 x 20 block cut into lots along a jittered grid: neighbouring lots share edges (and, optionally, carry rounding noise). */
+function lots(noise: number): PolygonCase {
+  const xs = [0, 7.3, 15.1, 22, 30], zs = [0, 9.7, 20], rings: number[][] = [];
+  const corner = (i: number, j: number, salt: number) => {
+    const x = xs[i] + (i % 4 ? Math.sin(i * 3 + j) : 0), z = zs[j] + (j % 2 ? Math.cos(i + j * 5) : 0);
+    return [x + noise * Math.sin(salt * 12.9898), z + noise * Math.cos(salt * 78.233)];
+  };
+  let salt = 0;
+  for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < zs.length; j++)
+    rings.push([...corner(i, j, ++salt), ...corner(i + 1, j, ++salt), ...corner(i + 1, j + 1, ++salt), ...corner(i, j + 1, ++salt)]);
+  return { name: `block of ${rings.length} lots`, outer: rings[0], holes: rings.slice(1) };
+}
+await test('lots sharing edges are separate shapes: offset, roof and skeleton treat each on its own', async () => {
+  for (const noise of [0, 1e-13]) {
+    const block = lots(noise), rings = [block.outer, ...block.holes];
+    for (const mode of ['offset', 'roof', 'skeleton']) {
+      const geo = await cook(footprint(block), { mode, distance: 0.6, pitch: 35 });
+      const source = geo.prims.get('source')!.data as Int32Array;
+      assert.deepStrictEqual([...new Set(source)].sort((a, b) => a - b), rings.map((_, i) => 100 + i), `${mode}: every lot has output`);
+      if (mode === 'offset') {
+        assert.equal(geo.numPrims, rings.length, 'one inset outline per lot');
+        for (let f = 0; f < geo.numPrims; f++) {
+          const ring = rings[source[f] - 100], outline = geo.primPoints(f).flatMap((i) => [geo.P[i * 3], geo.P[i * 3 + 2]]);
+          assert.ok(Math.abs(area(outline)) < Math.abs(area(ring)) && Math.abs(area(outline)) > 0, 'each lot shrinks inside itself');
+        }
+      }
+      if (mode === 'roof') for (let r = 0; r < rings.length; r++) {
+        const faces = Array.from({ length: geo.numPrims }, (_, f) => f).filter((f) => source[f] === 100 + r);
+        near(faces.reduce((sum, f) => sum + Math.abs(primNewell(geo, f)[1]) / 2, 0), Math.abs(area(rings[r])), `roof of lot ${r} covers it`, 1e-6);
+      }
+    }
+  }
+});
 await test('group preserves unselected primitives and their attributes unchanged', async () => {
   const p: PolygonCase = { name: 'two footprints', outer: rectangle.outer, holes: [[10, 0, 12, 0, 12, 2, 10, 2]] };
   const src = footprint(p), geo = await cook(src, { mode: 'roof', pitch: 35, group: '0' });
@@ -436,10 +508,12 @@ await test('group preserves unselected primitives and their attributes unchanged
   const points = Array.from(geo.primPoints(untouched[0])).flatMap((i) => Array.from(geo.P.slice(i * 3, i * 3 + 3)));
   assert.deepStrictEqual(points, [10, 0, 0, 12, 0, 0, 12, 0, 2, 10, 0, 2]);
 });
-await test('node rejects intersecting/touching loops and nonplanarity even at a large world origin', async () => {
+await test('node rejects crossing loops, holes touching their outer or each other, and nonplanarity even at a large world origin', async () => {
   const invalid: Geometry[] = [
     footprint({ name: 'overlap', outer: rectangle.outer, holes: [[5, 1, 7, 1, 7, 3, 5, 3]] }),
-    footprint({ name: 'touch', outer: rectangle.outer, holes: [[6, 1, 8, 1, 8, 3, 6, 3]] }),
+    footprint({ name: 'hole touching its outer', outer: rectangle.outer, holes: [[4, 1, 6, 1, 6, 3, 4, 3]] }),
+    footprint({ name: 'hole sharing a corner with its outer', outer: rectangle.outer, holes: [[6, 2, 5, 3, 4, 2, 5, 1]] }),
+    footprint({ name: 'holes touching each other', outer: courtyard.outer, holes: [[2, 2, 4, 2, 4, 6, 2, 6], [4, 3, 6, 3, 6, 5, 4, 5]] }),
   ];
   const warp = footprint(rectangle);
   for (let i = 0; i < warp.numPoints; i++) { warp.P[i * 3] += 1e9; warp.P[i * 3 + 1] = 1e9; warp.P[i * 3 + 2] += 1e9; }
@@ -447,7 +521,7 @@ await test('node rejects intersecting/touching loops and nonplanarity even at a 
   for (const src of invalid) {
     const result = await engine.cook({ nodes: { source: { type: 'input' }, kernel: { type: 'straight_skeleton', in: ['source'], params: { mode: 'roof' } } }, output: 'kernel' }, { inputs: [{ geo: src, sig: `invalid-${cookId++}` }] });
     assert.equal(result.ok, false);
-    assert.ok(result.errors.some((error) => /intersect|touch|plan|horizontal/i.test(error.message)), result.errors.map((error) => error.message).join('; '));
+    assert.ok(result.errors.some((error) => /cross|touch|plan|horizontal/i.test(error.message)), result.errors.map((error) => error.message).join('; '));
   }
 });
 await test('node preserves courtyard holes, provenance and finite unit roof normals at tiny and huge scales', async () => {

@@ -4,7 +4,7 @@
     "attributes": {
       "detail": [],
       "point": ["P:float:3", "uv:float:3"],
-      "prim": [],
+      "prim": ["class:int:1"],
       "vertex": ["Cd:float:3"]
     },
     "bbox": {
@@ -30,6 +30,7 @@
         "group.prim.side": "e7fa72a1642a257b",
         "group.prim.top": "4ae9441429a5e38e",
         "point.uv": "71c2db6537f9845f",
+        "prim.class": "6d6c7b78da92dfa2",
         "vertex.Cd": "9c52e42d05ac4397"
       },
       "topology": "2507b21f7f066c59"

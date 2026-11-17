@@ -3,7 +3,7 @@
   "fingerprint": {
     "attributes": {
       "detail": [],
-      "point": ["N:float:3", "P:float:3", "sourceprim:int:1", "uv:float:3"],
+      "point": ["P:float:3", "sourceprim:int:1", "uv:float:3"],
       "prim": [],
       "vertex": []
     },
@@ -26,7 +26,6 @@
     "hashes": {
       "P": "4f30b0d01f743312",
       "attributes": {
-        "point.N": "79d9ca0517223f9f",
         "point.sourceprim": "0b0b34b5b73b936f",
         "point.uv": "999d7901d2ac009f"
       },

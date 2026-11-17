@@ -550,7 +550,9 @@ defineNode({
       if (!s) throw new NodeError('orient curve_tangent: connect the curves as the second input', '"in": ["points", "road"]');
       curves = new CurveFrames(s, upP);
     } else if (mode === 'direction' && !(dirP[0] || dirP[1] || dirP[2])) throw new NodeError('orient: direction is the zero vector');
-    if (mode === 'normal_up' && !ownN && n) warn('points have no N (and no polygons): N defaults to the direction param');
+    // upright with a full random yaw: N would only give the heading, which the yaw replaces, so a missing N changes nothing
+    const anyHeading = p.upright && Math.abs(p.random_yaw[1] - p.random_yaw[0]) >= 360;
+    if (mode === 'normal_up' && !ownN && n && !anyHeading) warn('points have no N (and no polygons): N defaults to the direction param');
     const scA = p.scale_attrib ? g.points.get(p.scale_attrib) : null;
     if (p.scale_attrib && (!scA || scA.type === 'string' || scA.isArray)) throw new NodeError(`orient: scale_attrib "${p.scale_attrib}" is not a numeric point attribute`);
     const smin = p.scale_min as number[], smax = p.scale_max as number[];
@@ -881,7 +883,7 @@ defineNode({
     group: P.group('point', 'points to test ("" = all); the others are kept'),
   },
   outputs: 'the kept points (and the prims whose points all survive)',
-  example: { nodes: { g: { type: 'grid', params: { size: [10, 10] } }, s: { type: 'scatter', in: ['g'], params: { count: 300, relax: false } }, o: { type: 'orient', in: ['s'], params: { scale_min: 0.5, scale_max: 1.5 } }, p: { type: 'prune', in: ['o'], params: { mode: 'overlap', radius: 0.3 } } }, output: 'p' },
+  example: { nodes: { g: { type: 'grid', params: { size: [10, 10] } }, s: { type: 'scatter', in: ['g'], params: { count: 300, relax: false } }, o: { type: 'orient', in: ['s'], params: { mode: 'direction', scale_min: 0.5, scale_max: 1.5 } }, p: { type: 'prune', in: ['o'], params: { mode: 'overlap', radius: 0.3 } } }, output: 'p' },
   cook: ({ input, hasInput, p, stat }) => {
     const g = input(0);
     const n = g.numPoints, Pd = g.P;
