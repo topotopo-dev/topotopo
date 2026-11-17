@@ -15,6 +15,7 @@ import * as km from '../src/viewer/app/keymap.js';
 import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
+import * as pt from '../src/viewer/app/pointer.js';
 import { createUndo } from '../src/viewer/app/undo.js';
 import { createGuides } from '../src/viewer/app/guides.js';
 import { api, coalesce } from '../src/viewer/app/api.js';
@@ -46,9 +47,9 @@ const throws = (f: () => unknown) => { try { f(); return null; } catch (e: any) 
 
 section('keymap presets (section 9)');
 {
-  check(km.PRESETS.map((p: any) => p.id).join() === 'topotopo,maya,houdini,blender' && km.DEFAULT_PRESET === 'topotopo', 'four presets, TopoTopo the default');
+  check(km.PRESETS.map((p: any) => p.id).join() === 'houdini,topotopo,maya,blender' && km.DEFAULT_PRESET === 'houdini', 'four presets, Houdini the default (G-4)');
   const ids = km.PRESETS.map((p: any) => p.id);
-  check(km.ROWS.length === 24 && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
+  check(km.ROWS.length === 23 + pt.SELECTION_ROWS.length && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
     `every row of the table has binding text in every preset (${km.ROWS.length} rows)`);
   const later = km.ROWS.filter((r: any) => r.phase === 2);
   check(later.map((r: any) => r.label).join(' | ') === 'move / rotate / scale | snap to grid (held) | snap to surface or curve (held) | snap to point (held) | snapping on / off'
@@ -141,7 +142,7 @@ section('guides: perspective insertion and drag cancellation');
   const ctx: any = {
     store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} },
     objects: new Map(), guidesRoot: new THREE.Group(), hover: null, isolated: false,
-    selection: { has: () => false, prune: () => {}, apply: () => {} },
+    selection: sel.createSelection(() => 0),
     pxWorld: () => 0.01, requestRender: () => {}, message: () => {},
     coalesce: () => () => {}, emit: (event: string) => events.push(event), undo: { push: (step: any) => undo.push(step) },
     views: {
@@ -180,7 +181,7 @@ section('guides: cancellation while a prior save is queued');
   try {
     const ctx: any = {
       store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
-      selection: { has: () => false, prune: () => {} }, undo: { push: () => {} }, requestRender: () => {},
+      selection: sel.createSelection(() => 0), undo: { push: () => {} }, requestRender: () => {},
       message: () => {}, emit: () => {}, pxWorld: () => 0.01, layers: {}, surfacePoint: () => null, coalesce,
       views: { cam: () => ({ name: 'top' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
     };
@@ -219,7 +220,7 @@ section('guides: placing while the scene loads');
     let hit: any = { point: new THREE.Vector3(5, 0, 5), surface: false };
     const ctx: any = {
       store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
-      selection: { has: () => false, prune: () => {}, apply: () => {} }, undo: { push: () => {} }, requestRender: () => {},
+      selection: sel.createSelection(() => 0), undo: { push: () => {} }, requestRender: () => {},
       message: (m: string) => said.push(m), emit: () => {}, pxWorld: () => 0.01, coalesce, surfacePoint: () => hit,
       output: { loading: true }, layers: { loading: () => false },
       views: { cam: () => ({ name: 'persp' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
@@ -350,6 +351,117 @@ section('selection (section 5)');
   s.apply(['guide:a'], 'remove');
   s.prune((id: string) => id !== 'out#1');
   check(s.items.join() === 'out#2' && (s.clear(), s.size === 0), 'remove, prune of vanished objects, clear');
+}
+
+section('selection model (section 5, G-4): what a left press does');
+{
+  const P = (target: string, mods: Record<string, boolean> = {}, movable = target === 'edit') => pt.pressPlan({ target, movable, ...mods });
+  const plan = (p: any) => `${p.click}/${p.drag}${p.box ? ':' + p.box : ''}`;
+  // the table, row by row: things you edit | results | empty space
+  check(plan(P('edit')) === 'replace/move' && plan(P('result')) === 'none/tumble' && plan(P('empty')) === 'clear/tumble',
+    'plain: a click selects what you edit, selects nothing on a result, clears on empty space; a drag moves what you edit, else tumbles');
+  check(plan(P('edit', {}, false)) === 'replace/tumble', 'an input (no move until the gizmo) selects on a click and tumbles on a drag');
+  const shift = { shiftKey: true }, ctrl = { ctrlKey: true };
+  check(plan(P('edit', shift)) === 'add/box:add' && plan(P('result', shift)) === 'add/box:add' && plan(P('empty', shift)) === 'none/box:add',
+    'Shift: a click adds what you edit and adds a result (to read it); empty space does nothing; a drag box-selects wherever it starts');
+  check(plan(P('edit', ctrl)) === 'remove/box:remove' && plan(P('result', ctrl)) === 'remove/box:remove' && plan(P('empty', ctrl)) === 'none/box:remove',
+    'Ctrl: a click takes out, a drag box-subtracts wherever it starts');
+  check(plan(P('result', { ctrlKey: true, shiftKey: true })) === 'add/box:add' && plan(P('edit', { metaKey: true })) === 'remove/box:remove',
+    'Ctrl+Shift adds (Shift wins, as opOf); Cmd is Ctrl');
+  check(pt.targetKind('guide:m1') === 'edit' && pt.targetKind('guide:m1#2') === 'edit' && pt.targetKind('layer:scans/a#b.obj#3') === 'edit'
+    && pt.targetKind('out') === 'result' && pt.targetKind('out#4') === 'result' && pt.targetKind(null) === 'empty',
+    'target kinds: guides, their CVs and input layers are things you edit; "out" and its pieces are results; no id is empty space');
+  // a click from a selection of a guide, per target and modifier
+  const after = (target: string, id: string | null, mods: Record<string, boolean> = {}, start = ['guide:a', 'out#1']) => {
+    const s = sel.createSelection(() => 9);
+    s.apply(start);
+    const c = pt.clickChange(P(target, mods).click, id);
+    if (c) s.apply(c.ids, c.op);
+    return s.items.join();
+  };
+  check(after('result', 'out#2') === 'guide:a,out#1' && after('empty', null) === '' && after('edit', 'guide:b') === 'guide:b',
+    'clicks: on a result the selection stays as it is, on empty space it clears, on a guide it becomes that guide');
+  check(after('result', 'out#2', shift) === 'guide:a,out#1,out#2' && after('result', 'out#1', ctrl) === 'guide:a' && after('empty', null, shift) === 'guide:a,out#1'
+    && after('edit', 'guide:c#3', shift) === 'guide:a,out#1,guide:c#3' && after('edit', 'guide:a', ctrl) === 'out#1',
+    'Shift-click adds a result (the lead, which Properties shows) or a CV; Ctrl-click takes either out; Shift on empty space changes nothing');
+  check(pt.clickChange('none', 'out') === null && !!throws(() => pt.clickChange('toggle', 'out')), 'no click change for "none"; unknown clicks are refused');
+  check(pt.boxTakes('add', 'edit') && !pt.boxTakes('add', 'result') && pt.boxTakes('remove', 'result') && pt.boxTakes('remove', 'edit'),
+    'a Shift box takes things you edit, never results; a Ctrl box takes out results too');
+  const g = { id: 'guide:a' }, l = { id: 'layer:t.obj', dist: 20 }, r = { id: 'out', dist: 12 }, far = { id: 'out', dist: 30 };
+  check(pt.pickWinner(g, l, r) === g && pt.pickWinner(null, l, r) === r && pt.pickWinner(null, l, far) === l && pt.pickWinner(null, l, { id: 'out', dist: 20 }) === l
+    && pt.pickWinner(null, null, r) === r && pt.pickWinner(null, l, null) === l && pt.pickWinner(null, null, null) === null,
+    'picking: a guide or CV within its pixels beats an input and a result in front of it; between an input and a result the nearer wins (the input on a tie)');
+  check(!pt.isDrag(3, 2) && pt.isDrag(4, 3) && pt.DRAG_PX === 4, 'a press is a click until it travels more than 4 px');
+  check(pt.dragSelects(['out'], 'guide:a') && !pt.dragSelects(['guide:a', 'out'], 'guide:a') && !pt.dragSelects(['guide:a'], 'guide:a#2') && pt.dragSelects(['guide:a#1'], 'guide:a#2'),
+    'a drag selects what it moves, unless it is selected already or its guide is selected whole');
+  // the same in every preset: the left button without a navigation chord is the model's
+  const ids = km.PRESETS.map((p: any) => p.id);
+  check(ids.every((p: string) => km.matchDrag(p, { button: 0 }) === null && km.matchDrag(p, { button: 0, shiftKey: true }) === null && km.matchDrag(p, { button: 0, ctrlKey: true }) === null),
+    'every preset leaves plain, Shift and Ctrl left presses to the selection model');
+  const rows = (p: string) => km.overlayRows(p).filter((r: any) => pt.SELECTION_ROWS.some(([label]: string[]) => label === r.label)).map((r: any) => `${r.label}=${r.text}`).join('|');
+  check(rows('houdini').split('|').length === pt.SELECTION_ROWS.length && ids.every((p: string) => rows(p) === rows('houdini')), 'the keymap overlay prints the model\'s rows, the same in every preset');
+}
+
+section('selection model: Houdini navigation is the default');
+{
+  check(km.DEFAULT_PRESET === 'houdini' && km.PRESETS[0].id === 'houdini', 'Houdini is the default preset (the first in the menu); saved choices stay (main.js reads them first)');
+  const d = (p: string, o: any) => km.matchDrag(p, o);
+  check(d('houdini', { button: 1 }) === 'track' && d('houdini', { button: 2 }) === 'dolly' && d('houdini', { button: 0, space: true }) === 'tumble'
+    && d('houdini', { button: 1, space: true }) === 'track' && d('houdini', { button: 2, space: true }) === 'dolly' && d('houdini', { button: 0 }) === null,
+    'Houdini: middle drag pans, right drag zooms, Space + L / M / R as before; a plain left drag tumbles through the model (on a result or empty space)');
+  check(km.surfacePivot('houdini') && km.surfacePivot('topotopo') && !km.surfacePivot('maya') && !km.surfacePivot('blender'),
+    'Houdini takes TopoTopo\'s pivot rules (surface under the cursor, zoom toward it, pan in orthographic views); Maya and Blender orbit the selection');
+  check(info.resultName({ output: 'Rotor', node: 'rotor_final' }) === 'Rotor' && info.resultName({ node: 'house', part: 'roof' }) === 'house › roof'
+    && info.resultName({ output: 'house', part: 'house' }) === 'house' && info.resultName({}) === 'result',
+    'a hovered result shows its output\'s name, else its node\'s, and a part\'s own name after it');
+  check(info.partName('mesh_3', 'mesh') === null && info.partName('source_0_1', 'source_0') === null && info.partName('bush', 'scene') === 'bush'
+    && info.partName('house_2', 'house') === 'house' && info.partName('roof.v2_1', 'roof.v2') === 'roof.v2' && info.partName('', 'x') === null,
+    'a part\'s own name: a numbered primitive goes by its mesh, the preview\'s names for unnamed parts are none');
+  check(info.countsLine('1,234 points, 56 prims: 56 polygons\nattributes …') === '1,234 points, 56 prims: 56 polygons' && info.countsLine(undefined) === '',
+    'a result\'s counts are its summary\'s first line');
+}
+
+section('selection model: CVs, boxes and the guides');
+{
+  // a top view: x right, z down, 10 px a metre, centred at (500, 500)
+  const project = (_slot: number, p: THREE.Vector3) => ({ x: 500 + p.x * 10, y: 500 + p.z * 10 });
+  const undo: any[] = [];
+  const ctx: any = {
+    store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, objects: new Map(), guidesRoot: new THREE.Group(), hover: null, isolated: false,
+    pxWorld: () => 0.01, requestRender: () => {}, message: () => {}, coalesce: () => () => {}, emit: () => {}, undo: { push: (step: any) => undo.push(step) },
+    views: {
+      camera: () => null, project,
+      ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3((x - 500) / 10, 100, (y - 500) / 10), new THREE.Vector3(0, -1, 0)),
+    },
+  };
+  const guides = createGuides(ctx);
+  ctx.selection = sel.createSelection((obj: string) => (obj.startsWith('guide:') ? guides.pieceCount(obj.slice(6)) : 0));
+  guides.list = [
+    { id: 'c', kind: 'path', name: 'road', points: [[0, 0, 0], [10, 0, 0], [20, 0, 0]] },
+    { id: 'z', kind: 'zone', name: 'park', points: [[0, 0, 10], [4, 0, 10], [4, 0, 14]] },
+    { id: 'n', kind: 'site', name: 'village', points: [[30, 0, 0]], radius: 5 },
+    { id: 'v', kind: 'volume', name: 'keep', points: [[40, 0, 0], [44, 0, 4]], height: 3 },
+  ];
+  const at = (p: number[]) => project(0, new THREE.Vector3(...p));
+  const idAt = (p: number[]) => { const h = guides.handleAt(0, at(p).x, at(p).y); return h && guides.idOf(h); };
+  check(idAt([10, 0, 0]) === 'guide:c#1' && idAt([5, 0, 0]) === 'guide:c' && idAt([30, 0, 0]) === 'guide:n' && idAt([40, 0, 0]) === 'guide:v' && idAt([4, 0, 14]) === 'guide:z#2',
+    'a click on a CV of a curve or an area selects that CV, on a line the guide; a null and a volume select whole');
+  check(guides.pieceCount('c') === 3 && guides.pieceCount('n') === 1 && guides.pieceCount('v') === 1 && sel.normalize(['guide:n#0', 'guide:c#1'], (o: string) => guides.pieceCount(o.slice(6))).join() === 'guide:n,guide:c#1',
+    'a guide\'s pieces are its CVs (curves and areas), one for a null or a volume');
+  const box = (x0: number, x1: number, z0: number, z1: number) => guides.boxSelect((pts: THREE.Vector3[]) => pts.every((p) => p.x >= x0 && p.x <= x1 && p.z >= z0 && p.z <= z1)).join();
+  check(box(-1, 11, -1, 1) === 'guide:c#0,guide:c#1' && box(-1, 21, -1, 15) === 'guide:c,guide:z' && box(29, 45, -1, 5) === 'guide:n,guide:v',
+    'a box takes the CVs inside it, a guide wholly inside it whole, nulls and volumes whole');
+  check(!!guides.cvBounds(guides.list[0], 2) && guides.cvBounds(guides.list[0], 2).min.x === 20 && guides.cvBounds(guides.list[2], 0) === null, 'a CV has bounds (F frames it); a null has no CVs');
+  // a change of the list keeps the CVs that are still there
+  ctx.selection.apply(['guide:c#2', 'guide:z#0']);
+  guides.change('move', (list: any[]) => { list[0].points[2] = [21, 0, 0]; });
+  check(ctx.selection.items.join() === 'guide:c#2,guide:z#0', 'an edit of a guide keeps its selected CVs');
+  const steps = undo.length, r = guides.removeCVs(new Map([['c', [2, 0]], ['z', [0]]]));
+  check(r.removed === 1 && r.kept === 2 && JSON.stringify(guides.list[0].points) === '[[0,0,0],[10,0,0]]' && guides.list[1].points.length === 3 && undo.length === steps + 1,
+    'Delete on CVs removes them as one undo step; a curve keeps 2 and an area 3 (those are kept and counted)');
+  check(ctx.selection.items.join() === 'guide:z#0', 'the CVs of a changed curve leave the selection (they renumber); those of an unchanged area stay');
+  guides.remove(['z']);
+  check(ctx.selection.size === 0 && !guides.byId('z'), 'the CVs of a deleted guide leave the selection');
 }
 
 section('undo stack');
