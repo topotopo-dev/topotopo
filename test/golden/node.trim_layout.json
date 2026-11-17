@@ -1,0 +1,44 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["trim_sheets:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["trim_band:string:1", "trim_sheet:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [2, 2, 0],
+      "min": [0, 0.75, 0]
+    },
+    "counts": {
+      "points": 12,
+      "prims": 3,
+      "vertices": 12,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["cap", "coping", "course"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "80c414518f0e2a7b",
+      "attributes": {
+        "detail.trim_sheets": "be80bad94e981be7",
+        "group.prim.cap": "e301dd040a94c8fe",
+        "group.prim.coping": "fb25fa673d87e43d",
+        "group.prim.course": "9dc49b46659bc4dc",
+        "prim.trim_band": "3ddef97f891e8db9",
+        "prim.trim_sheet": "02de565ef7b75248",
+        "vertex.uv": "6ae9d88582b276ef"
+      },
+      "topology": "6fac29cf8a916435"
+    }
+  },
+  "name": "node.trim_layout",
+  "ok": true,
+  "source": "fixture for node type \"trim_layout\" (test/fixtures.ts)",
+  "warnings": []
+}

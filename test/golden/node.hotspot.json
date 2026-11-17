@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["trim_sheets:string:1"],
+      "point": ["P:float:3", "uv:float:3"],
+      "prim": ["trim_band:string:1", "trim_sheet:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1, 0, 0.25],
+      "min": [-1, 0, -0.25]
+    },
+    "counts": {
+      "points": 6,
+      "prims": 2,
+      "vertices": 8,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["hotspot_unmatched"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "77bd65f2748728b8",
+      "attributes": {
+        "detail.trim_sheets": "be80bad94e981be7",
+        "group.prim.hotspot_unmatched": "56a42fa7a6194b1d",
+        "point.uv": "1d3bb23877ccc236",
+        "prim.trim_band": "2a5df7c1fa06119b",
+        "prim.trim_sheet": "5f31b5b5deff286f",
+        "vertex.uv": "eeff709d7ee2cff7"
+      },
+      "topology": "c6cc40247ed6901e"
+    }
+  },
+  "name": "node.hotspot",
+  "ok": true,
+  "source": "fixture for node type \"hotspot\" (test/fixtures.ts)",
+  "warnings": []
+}

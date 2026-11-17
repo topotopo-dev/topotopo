@@ -1,0 +1,54 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1", "trim_sheets:string:1"],
+      "point": ["P:float:3"],
+      "prim": [
+        "N:float:3",
+        "material:string:1",
+        "name:string:1",
+        "trim_band:string:1",
+        "trim_sheet:string:1"
+      ],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [2, 2.5, 0.06],
+      "min": [0, 0, -0.04]
+    },
+    "counts": {
+      "points": 72,
+      "prims": 56,
+      "vertices": 232,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["caps", "hotspot_unmatched", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "a39f405d3dabee17",
+      "attributes": {
+        "detail.materials": "1031f7756540d5bf",
+        "detail.trim_sheets": "708fc790622f016e",
+        "group.prim.caps": "6a0176bc33c326e6",
+        "group.prim.hotspot_unmatched": "092e409de0ac2ba7",
+        "group.prim.sides": "7cbedcdd6b52d7a7",
+        "prim.N": "45a3c8055671163f",
+        "prim.material": "2fde8eade8ff499f",
+        "prim.name": "ed6f6be4e5bbb976",
+        "prim.trim_band": "1ae1181c6f4e3e66",
+        "prim.trim_sheet": "7056d0a5472001ff",
+        "vertex.uv": "aeae04c14eebee93"
+      },
+      "topology": "f9c18878774998e2"
+    }
+  },
+  "name": "example.corridor_panels",
+  "ok": true,
+  "source": "examples/corridor_panels.json",
+  "warnings": []
+}

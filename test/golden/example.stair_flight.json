@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1", "trim_sheets:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["material:string:1", "name:string:1", "trim_band:string:1", "trim_sheet:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1.145, 1.6514, 1.175],
+      "min": [-0.025, 0, -0.06]
+    },
+    "counts": {
+      "points": 168,
+      "prims": 132,
+      "vertices": 552,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["caps", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "9a88462f4f67feb9",
+      "attributes": {
+        "detail.materials": "060c1c7619547150",
+        "detail.trim_sheets": "f05af986c19a9ccc",
+        "group.prim.caps": "8bb1c68089f52eda",
+        "group.prim.sides": "6c5262617bcc669b",
+        "prim.material": "a5553ad54986e707",
+        "prim.name": "e1f017e57bb8de3f",
+        "prim.trim_band": "072b91916ec4565b",
+        "prim.trim_sheet": "e3fe400591549b3f",
+        "vertex.uv": "deab41c4b8215be6"
+      },
+      "topology": "5ad532c0655a044a"
+    }
+  },
+  "name": "example.stair_flight",
+  "ok": true,
+  "source": "examples/stair_flight.json",
+  "warnings": []
+}

@@ -114,6 +114,12 @@ export const SRC: Record<string, NodeSpec> = {
   RBD_CRATES: { type: 'copy_to_points', in: ['RBD_CRATE', 'RBD_SPOTS'], params: { pack: true } },
   // cloth: a sheet above BOX for drape; inflate takes MESH (closed)
   CLOTH: { type: 'grid', params: { size: [2, 2], divisions: [12, 12], center: [0, 1.2, 0] } },
+  // trim sheets: a small stone sheet (a course band, a coping and a cap band) and a wall extruded from a plan
+  TRIMSHEET: { type: 'trim_sheet', params: { name: 'stone', resolution: [256, 256], texels_per_metre: 128, bands: [{ name: 'course', height: 0.5 }, { name: 'coping', height: 0.25, kind: 'edge' }, { name: 'cap', height: 0.5, kind: 'cap', tile: false }] } },
+  TRIMPLAN: { type: 'shape2d', params: { shape: 'rect', size: [3, 0.4] } },
+  TRIMWALL: { type: 'extrude', in: ['TRIMPLAN'], params: { height: 1.6 } },
+  // a floor the height of the course band, for hotspot
+  HOTSPOT: { type: 'grid', params: { size: [2, 0.5], divisions: [2, 1] } },
 };
 
 /**
@@ -188,6 +194,9 @@ export const INPUTS: Record<string, string[]> = {
   bake_vertex_color: ['UVCOLOR'],
   rbd_settle: ['RBD_DROP', 'GRID'], rbd_stack: ['RBD_CRATES'],
   drape: ['CLOTH', 'BOX'],
+  trim_map: ['TRIMWALL', 'TRIMSHEET'],
+  trim_layout: ['TRIMSHEET'],
+  hotspot: ['HOTSPOT', 'TRIMSHEET'],
 };
 
 /** Fixture params per node type (everything else cooks with defaults). `file` is filled in by createFixtureEngine(). */
@@ -324,6 +333,7 @@ export const PARAMS: Record<string, any> = {
   rbd_stack: { interval: 10, duration: 3 },
   drape: { steps: 60 },
   inflate: { steps: 12, pressure: 1.3 },
+  trim_map: { group: 'side', band: 'course', fit: 'courses', stagger: 0.3 },
 };
 
 /** Node types that cannot cook standalone (subgraph input, references to package graphs). */

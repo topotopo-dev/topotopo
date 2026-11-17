@@ -30,6 +30,9 @@ import { triangulate } from './topology.ts';
 import { primWhere } from './report.ts';
 import { COLLAPSED_Q, uvOverlapPairs } from './uvoverlap.ts';
 import type { Triangulation } from './topology.ts';
+import { readTrimSheets } from './trim.ts';
+import { trimUvReport } from './trimreport.ts';
+import type { TrimUVReport } from './trimreport.ts';
 
 export interface UVReportOptions {
   /** uv attribute (vertex or point; default "uv") */
@@ -134,6 +137,8 @@ export interface UVReport {
   /** overlaps were tested within each piece only (options.perPiece with a piece attribute): pieces each have their own uv space */
   perPiece: boolean;
   resolution?: [number, number];
+  /** trim sheets: per band, and faces outside every band or straddling two. Absent without trim bands. */
+  trim?: TrimUVReport;
 }
 
 /**
@@ -248,7 +253,8 @@ export function primLods(g: Geometry): Int32Array | null {
 export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulation = triangulate(g)): UVReport {
   const name = o.attribute || 'uv';
   const maxEx = Math.max(0, Math.floor(o.maxExamples ?? 16)), maxTests = Math.max(0, Math.floor(o.maxPairTests ?? 4_000_000));
-  const res: [number, number] | undefined = o.resolution === undefined ? undefined : Array.isArray(o.resolution) ? [o.resolution[0], o.resolution[1]] : [o.resolution, o.resolution];
+  let res: [number, number] | undefined = o.resolution === undefined ? undefined : Array.isArray(o.resolution) ? [o.resolution[0], o.resolution[1]] : [o.resolution, o.resolution];
+  if (!res) { const sheets = Object.values(readTrimSheets(g)); if (sheets.length === 1) res = sheets[0].resolution; }
   const { tris, triPrim } = tri, nt = tris.length / 3;
   const rep: UVReport = {
     attribute: name, tiling: false, tilingCharts: 0, complete: true, reasons: [], missing: false, triangles: nt, nonFinite: 0, collapsed: 0, collapsedTriangles: [], firstCollapsed: null, firstOutOfTile: null, mirrored: 0, wrapSeam: { triangles: 0, prims: 0, examples: [] },
@@ -482,6 +488,8 @@ export function uvReport(g: Geometry, o: UVReportOptions = {}, tri: Triangulatio
       };
     }
   }
+  const trim = trimUvReport(g, tri, maxEx);
+  if (trim) rep.trim = trim;
   return rep;
 }
 
@@ -514,6 +522,13 @@ export function uvReportText(r: UVReport): string[] {
       const hidden = r.pieces.slice(shown.length), bad = hidden.filter((p) => p.overlapPairs);
       out.push(`    … ${hidden.length} more${r.perPiece ? `; ${bad.length ? `with overlaps: ${bad.slice(0, 12).map((p) => `${p.name} (${p.overlapPairs})`).join(', ')}` : 'none with overlaps'}` : ''}`);
     }
+  }
+  const trim = r.trim;
+  if (trim) {
+    out.push(`  trim sheet (${trim.resolution[0]}×${trim.resolution[1]}):`);
+    for (const b of trim.bands) out.push(`    ${b.sheet}/${b.band}: ${b.prims} faces, ${b.triangles} tris, ${f(b.area)} m², v ${f(b.v[0])}..${f(b.v[1])} of ${f(b.bandV[0])}..${f(b.bandV[1])}, ${f(b.texelsPerMetreU)} × ${f(b.texelsPerMetreV)} texels/m (sheet ${f(b.sheetTexelsPerMetre)}), stretch ${f(b.stretch)}`);
+    if (trim.outside.triangles) out.push(`    OUTSIDE every band: ${trim.outside.triangles} triangles${trim.outside.examples.length ? `; ${trim.outside.examples.slice(0, 4).join('; ')}` : ''}`);
+    if (trim.straddle.triangles) out.push(`    STRADDLE two bands: ${trim.straddle.triangles} triangles${trim.straddle.examples.length ? `; ${trim.straddle.examples.slice(0, 4).join('; ')}` : ''}`);
   }
   return out;
 }
