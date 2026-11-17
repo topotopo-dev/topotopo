@@ -23,7 +23,9 @@ defineNode({
     'geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. ' +
     'Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): ' +
     'its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map ' +
-    'params here are not used. With nothing in input 0 the result is the material alone: a material output.',
+    'params here are not used; with from, a merge of published package material outputs in input 1 does not cook the ' +
+    'outputs after the last one that holds that material (the ones before it are cooked: a merge renames the maps of a ' +
+    'later output after those of an earlier one). With nothing in input 0 the result is the material alone: a material output.',
   aliases: ['material_assign', 'shop', 'assign_material', 'materialassign'],
   inputs: [
     { name: 'geo', desc: 'geometry (none: the material alone, for a material output)', optional: true },
@@ -48,6 +50,12 @@ defineNode({
     roughness_map: { type: 'path', default: '', desc: 'roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel', aliases: ['roughness_texture', 'rough_map'] },
   },
   example: { type: 'material', params: { name: 'brick', base_color: '#a5462e', roughness: 0.9, group: '@P.y<0.5' } },
+  // with "from", input 1 is read for that one material: a merge of material outputs there leaves out the ones after
+  // the last that holds it (src/graph/demand.ts)
+  materialsRead: (raw) => {
+    const from = raw('from');
+    return typeof from === 'string' && from.trim() && !from.startsWith('=') ? { input: 1, names: [from.trim()] } : null;
+  },
   cook: ({ input, hasInput, p }) => {
     const g = hasInput(0) ? input(0).clone() : new Geometry();
     let name = String(p.name ?? '').trim();

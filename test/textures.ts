@@ -116,6 +116,15 @@ check(getNodeDef('tilesampler')?.type === 'tex_tile_sampler' && getNodeDef('hist
   check(!bad.length, `aliases and params are unambiguous${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);
 }
 {
+  // an image is encoded once per compressor: a copy shares its layers, so a map many exports use is encoded once
+  const deflate = (d: Uint8Array) => zlib.deflateSync(d);
+  const img = new Image(16, 16, 'map').set('C', new Float32Array(16 * 16 * 4).fill(0.25));
+  const a = imagePNG(img, '', deflate), b = imagePNG(img.clone(), '', deflate), c = imagePNG(img, '', (d) => zlib.deflateSync(d, { level: 1 }));
+  const other = imagePNG(new Image(16, 16, 'map').set('C', new Float32Array(16 * 16 * 4).fill(0.75)), '', deflate);
+  check(a === b && c !== a && other !== a && decodePNG(c).data[0] === decodePNG(a).data[0] && decodePNG(other).data[0] !== decodePNG(a).data[0],
+    'imagePNG: the same layers and compressor give the encoded bytes again; another compressor or other layers encode afresh');
+}
+{
   // every node's example cooks (an example that reads a PNG, image_file's, gets one at the path it names)
   const failed: string[] = [];
   const png = imagePNG(new Image(8, 4, 'fixture').set('C', new Float32Array(8 * 4 * 4).fill(0.5)));
@@ -201,6 +210,21 @@ section('generators: deterministic, seeded, tileable');
   const plain = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab', weight: 700 } } });
   const plain400 = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab' } } });
   check(plain.warnings.some((w) => /no weight axis \(wght\)/.test(w)) && !plain400.warnings.length && JSON.stringify(fingerprint(plain.geo)) === JSON.stringify(fingerprint(plain400.geo)), 'a static font is drawn at its own weight: weight 700 warns, 400 does not');
+  // a solid stands out towards +Z from its back face at center z; back false leaves that face off; 2 segments per curve
+  const { primNormals } = await import('../src/core/topology.ts');
+  const { catalogText } = await import('../src/mcp/docs.ts');
+  const sign = (params: Record<string, unknown>) => cookOn(engine, { t: { type: 'text', params: { text: 'EXIT', size: 0.5, depth: 0.1, center: [0, 0, 2], ...params } } });
+  const solid = await sign({}), open = await sign({ back: false });
+  const facingBack = (g: any) => { const n = primNormals(g); let k = 0; for (let p = 0; p < g.numPrims; p++) if (n[p * 3 + 2] < -0.99) k++; return k; };
+  const sb = solid.geo.bbox(), ob = open.geo.bbox();
+  check(Math.abs(sb.min[2] - 2) < 1e-6 && Math.abs(sb.max[2] - 2.1) < 1e-6 && facingBack(solid.geo) > 0 && facingBack(open.geo) === 0
+    && open.geo.numPrims === solid.geo.numPrims - facingBack(solid.geo) && Math.abs(ob.min[2] - 2) < 1e-6 && Math.abs(ob.max[2] - 2.1) < 1e-6,
+    `text solid: back face at center z (${f3(sb.min[2])}), front at center z + depth (${f3(sb.max[2])}); back false leaves the ${facingBack(solid.geo)} back triangles off`);
+  const o = async (params: Record<string, unknown>) => (await cookOn(engine, { t: { type: 'text', params: { text: 'O', depth: 0.1, ...params } } })).geo;
+  const [o0, o2, o6] = [await o({}), await o({ curve_segments: 2 }), await o({ curve_segments: 6 })];
+  check(JSON.stringify(fingerprint(o0)) === JSON.stringify(fingerprint(o2)) && o6.numPrims > o2.numPrims * 1.5, `text curve_segments is 2 by default (O: ${o2.numPrims} triangles; ${o6.numPrims} at 6)`);
+  const found = ['sign', 'lettering', 'label', 'font', 'engrave'].filter((w) => / {2}text\b/.test(catalogText(allNodeDefs(), { search: w })));
+  check(found.length === 5, `the catalog finds text by sign, lettering, label, font and engrave (${found.join(', ')})`);
   const cover = async (weight: number) => {
     const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, size: 0.8 } } });
     return { c: mean(findImage(r.geo, '')!.layer('C')!), warnings: r.warnings };
@@ -588,6 +612,24 @@ let tg: Geometry;
   check(again.byteLength > 10000 && !warns.length, 're-exporting the imported GLB embeds the textures again');
   const gltfText = new TextDecoder().decode(await exportGeometryAsync(tg, 'gltf', {}));
   check((JSON.parse(gltfText).images ?? []).length === 3 && gltfText.includes('data:image/png;base64,'), '.gltf embeds the images as data URIs (stored PNG blocks without deflate)');
+  // maps: embed (default), external (one file per distinct image, by relative URI), none (materials without images);
+  // the validator reads the external files and finds no error in any mode
+  for (const maps of ['embed', 'external', 'none'] as const) for (const format of ['glb', 'gltf'] as const) {
+    const at = path.join(tmp, 'maps', maps, `brick.${format}`);
+    const res = await exportFilesAsync(tg, format, at, { maps, deflate: (d) => zlib.deflateSync(d) });
+    const byPath = new Map(res.files.map((f) => [path.resolve(f.path), f.bytes]));
+    const rep = await validator.validateBytes(res.files[0].bytes, { maxIssues: 50, writeTimestamp: false, externalResourceFunction: (uri: string) => {
+      const b = byPath.get(path.resolve(path.dirname(at), decodeURIComponent(uri)));
+      return b ? Promise.resolve(b) : Promise.reject(new Error(`no ${uri}`));
+    } });
+    const main = res.files[0].bytes;
+    const j = JSON.parse(new TextDecoder().decode(format === 'glb' ? main.subarray(20, 20 + new DataView(main.buffer, main.byteOffset).getUint32(12, true)) : main));
+    const imgs = j.images ?? [];
+    const shape = maps === 'embed' ? imgs.length === 3 && res.files.length === 1
+      : maps === 'external' ? imgs.length === 3 && res.files.length === 4 && imgs.every((i: any) => /^maps\/brick_(color|normal|orm)-[0-9a-f]{12}\.png$/.test(i.uri) && i.bufferView === undefined)
+      : !imgs.length && !j.textures && res.files.length === 1 && !j.materials[0].normalTexture && !j.materials[0].occlusionTexture;
+    check(rep.issues.numErrors === 0 && shape, `maps ${maps}, ${format}: ${imgs.length} image(s), ${res.files.length} file(s), validator ${rep.issues.numErrors} errors${rep.issues.numErrors ? ` (${rep.issues.messages.filter((m: any) => m.severity === 0).map((m: any) => m.code).join(', ')})` : ''}`);
+  }
 
   // packed instances of a textured mesh: the images live in the source, exports find them, unpacking carries them once
   const inst = await geo({ ...textured, pts: { type: 'point_grid', params: { counts: [3, 1, 1], size: [4, 0, 0] } }, cp: { type: 'copy_to_points', in: ['mat', 'pts'], params: { pack: true } } }, 'cp');

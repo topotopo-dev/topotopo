@@ -12,9 +12,9 @@
       "min": [-24.0017, -0.05, -20.5915]
     },
     "counts": {
-      "points": 27502,
-      "prims": 24987,
-      "vertices": 94338,
+      "points": 26798,
+      "prims": 23579,
+      "vertices": 90114,
       "volumes": 0
     },
     "groups": {
@@ -24,24 +24,24 @@
       "vertex": []
     },
     "hashes": {
-      "P": "3ab8023afafea2fc",
+      "P": "ebe852113e79625b",
       "attributes": {
         "detail.materials": "f768ab4e11955da8",
-        "point.curve_id": "46f60885dd86fc1f",
-        "point.curveu": "da51c635a554d66f",
-        "point.side": "80ff89e5abe8595f",
-        "point.tangent": "502db685f233591f",
-        "prim.Cd": "792c78061814d7f0",
-        "prim.copynum": "3b040566b0d8d25c",
-        "prim.material": "5ae48db2cc13ad74",
-        "prim.name": "74e61dad5a4dd98b",
-        "vertex.N": "0357e1b61f1282d0",
-        "vertex.uv": "18584c58711bdb0a"
+        "point.curve_id": "fd919085eed89c1f",
+        "point.curveu": "30a4ce35b04a766f",
+        "point.side": "767a11e50ae3f95f",
+        "point.tangent": "1cd04e85ef00391f",
+        "prim.Cd": "80c3b40649361df0",
+        "prim.copynum": "3b1515667044125c",
+        "prim.material": "6b7c8eb2619f0c74",
+        "prim.name": "0700b2ad4dab2e8b",
+        "vertex.N": "cf1fb1b682e082d0",
+        "vertex.uv": "7071dc5893f91b0a"
       },
-      "topology": "6a58d29ab93747b4"
+      "topology": "ba22a440e0401a6e"
     },
     "packed": {
-      "hash": "326b324460bd05fa",
+      "hash": "5dd7f67d2da6d9d7",
       "instances": 56,
       "sources": [
         "ad5d1df65e472efc",

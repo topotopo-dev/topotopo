@@ -941,6 +941,16 @@ section('copies: edited by hand, missing, one version with two contents');
   check(o.pk.verifyCopies().some((p) => /edited by hand/.test(p)), 'checked now as well');
   const blocked = await publish(dirs.forest, 'with an edited copy');
   check(!blocked.ok && blocked.blocks.some((b) => /edited by hand/.test(b)), 'publishing a package with a copy edited by hand is refused');
+  // a file Git LFS never fetched (a clone without git lfs): said as such, with what to run, not as an edit
+  const pointer = `version https://git-lfs.github.com/spec/v1
+oid sha256:${'0'.repeat(64)}
+size 1234
+`;
+  fs.writeFileSync(crownFile, pointer);
+  const lfs = await open(dirs.forest), lfsSaid = lfs.pk.check();
+  check(lfsSaid.some((p) => p === 'the copy of studio/trees 1.1 (packages/studio/trees/1.1) holds Git LFS pointers, not its files (graphs/crown.json): Git never fetched them; run git lfs pull in its repository')
+    && !lfsSaid.some((p) => /edited by hand/.test(p)) && lfs.pk.verifyCopies().some((p) => /holds Git LFS pointers.*run git lfs pull in its repository/.test(p)),
+    `a copy holding Git LFS pointers says so and what to run (${lfsSaid.find((p) => /LFS/.test(p))})`);
   fs.writeFileSync(crownFile, before);
   check(!(await open(dirs.forest)).pk.check().some((p) => /edited by hand/.test(p)), 'restored, it is fine again');
   check(!o.pk.check().some((p) => /edited by hand/.test(p)) && !(await o.engine.cook({ nodes: { t: { type: 'studio/trees/pine' } } })).warnings.some((w) => /edited by hand/.test(w.message)),
@@ -968,6 +978,9 @@ section('copies: edited by hand, missing, one version with two contents');
   check((await publish(TAMPER, 'tamper')).ok, 'studio/tamper 1.0');
   setGraph(path.join(TAMPER, 'versions', '1.0'), 'main', { nodes: { b: { type: 'sphere' } }, output: 'b' });
   check(/studio\/tamper 1\.0 in .* \(library "lib"\) was changed after publishing/.test(errorText(() => m.pk.use('studio/tamper'))), 'a version whose files no longer give its hash is not copied');
+  write(path.join(TAMPER, 'versions', '1.0', 'graphs', 'main.json'), pointer);
+  check(/studio\/tamper 1\.0 in .* \(library "lib"\) holds Git LFS pointers, not its files \(graphs\/main\.json\): Git never fetched them; run git lfs pull in its repository, so it is not copied/.test(errorText(() => m.pk.use('studio/tamper'))),
+    `a library version holding Git LFS pointers says so (${errorText(() => m.pk.use('studio/tamper')).replace(/.* holds/, 'holds')})`);
   // the same name in two places: the first place that has it gives it (game comes before lib); the other is not used, said
   const twin = path.join(dirs.game, 'rocks-twin');
   fs.cpSync(ROCKS, twin, { recursive: true });
@@ -1017,7 +1030,7 @@ section('following a working folder for one session');
     && new RegExp(`shows studio/trees live from its working folder, for looking; the export used the published studio/trees ${inUse}`).test(o.pk.publishedNote(graph) ?? ''),
     `an export cooks with the published copies while following (width ${size(cookedPub, 0)}; ${Object.keys(usedPub)}; ${o.pk.publishedNote(graph)})`);
   const src = exportSource({ graph: 'main', spec: graph, node: 'out', format: 'glb', packages: used, version: '0' });
-  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'packages', 'followed', 'export', 'topotopo']) && src.packages!['studio/trees@working'] === used['studio/trees@working']
+  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'nodes_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'packages', 'followed', 'export', 'topotopo']) && src.packages!['studio/trees@working'] === used['studio/trees@working']
     && JSON.stringify(src.followed) === '["studio/trees"]', 'exportSource writes them as "packages", a working folder under "followed" too');
   const plain = exportSource({ graph: 'main', spec: { nodes: { b: { type: 'box' } } }, node: 'b', format: 'glb', packages: {}, version: '0' });
   check(!('packages' in plain), 'a graph without packages has no "packages" (records stay as they were)');
@@ -1367,6 +1380,13 @@ section('the CLI as a person runs it: a graph-file cook (first use, --follow, --
     && typeof frec.packages?.['studio/trees@working'] === 'string' && JSON.stringify(frec.followed) === '["studio/trees"]' && frec.packages?.['studio/rules@7.1']
     && /the export used the working folder of studio\/trees, not a published version/.test(followed.out),
     `a cook adds on first use and shows a working folder; with --follow its export uses it too, and says so: ${followed.out.split('\n').slice(0, 3).join(' | ')} ${JSON.stringify(frec.packages)}`);
+  // the side files of that export (its record, the GLB's copy of it, the package's receipts) name nothing of this
+  // machine: the working folder followed is a package name and a hash, the files are paths in the package
+  const glbBytes = fs.readFileSync(fexp);
+  const sides = [fs.readFileSync(fexp + '.source.json', 'utf8'), fs.readFileSync(path.join(dirs.forest, 'exports', '.outputs.json'), 'utf8'),
+    JSON.stringify(JSON.parse(glbBytes.subarray(20, 20 + glbBytes.readUInt32LE(12)).toString('utf8')).asset.extras.source)];
+  const machine = (t: string) => t.includes(tmp) || t.includes(tmp.split(path.sep).join('/')) || t.includes(tmp.split(path.sep).join('\\\\')) || /[A-Za-z]:[\\/]|"\/|\.\.\//.test(t);
+  check(sides.every((t) => !machine(t)), `the export's record, the GLB's copy and the receipts hold no machine path (${sides.map((t) => (machine(t) ? t.slice(0, 120) : 'clean')).join(' | ')})`);
   const lockedRun = spawnCli([FILE, '--follow', 'studio/trees', '--locked', '--export', fexp]);
   const lrec = fs.existsSync(fexp + '.source.json') ? readJSON(fexp + '.source.json').source : {};
   check(lockedRun.code === 0 && !Object.keys(lrec.packages ?? {}).some((k: string) => k.endsWith('@working')) && Object.keys(lrec.packages ?? {}).some((k: string) => k.startsWith('studio/trees@')) && !('followed' in lrec)
@@ -2195,6 +2215,95 @@ section('exporting from a followed working folder: a sibling package with no pub
   const targetRefused = await exportSaid({ graph: 'main' }), target = await exportSaid({ graph: 'main', follow: ['fx/mat'] });
   check(/^ERR export: fx\/mat has no published version in use/.test(targetRefused) && !/^ERR/.test(target) && /the export used the working folder of fx\/mat/.test(target),
     `an export target without follow is refused, with it written (${target.split('\n')[0].slice(0, 160)})`);
+}
+
+section('a material read by name from a merge of package material outputs leaves out the outputs after the last that holds it');
+{
+  // studio/paints: four material outputs, one with a map; a version records the materials each holds
+  const PAINTS = path.join(dirs.lib, 'paints');
+  const paint = (name: string) => ({ type: 'material', params: { name, base_color: `=[shade, ${name === 'red' ? 0.1 : 0.5}, 0.2]` } });
+  writePackage(PAINTS, { name: 'studio/paints' }, {
+    main: {
+      nodes: {
+        red: paint('red'), green: paint('green'), blue: paint('blue'),
+        bricks: { type: 'tex_pattern', params: { resolution: 16 } },
+        brick: { type: 'texture_to_material', in: [null, 'bricks'], params: { material: 'brick', base_color: 'bricks' } },
+      },
+      output: 'red', vars: { shade: 0.8 }, params: { shade: { type: 'float', min: 0, max: 1, desc: 'red channel' } },
+      outputs: { red: { node: 'red', kind: 'material' }, green: { node: 'green', kind: 'material' }, blue: { node: 'blue', kind: 'material' }, brick: { node: 'brick', kind: 'material' } },
+    },
+  });
+  check((await publish(PAINTS, 'paints')).ok && Object.keys(readJSON(path.join(PAINTS, 'versions', '1.0', 'version.json')).outputs.brick.maps).join() === 'brick',
+    'a package of four material outputs is published, its version recording the materials of each');
+  // studio/stones: two material outputs whose maps share a name, "tex", with other pixels
+  const STONES = path.join(dirs.lib, 'stones');
+  writePackage(STONES, { name: 'studio/stones' }, {
+    main: {
+      nodes: {
+        stone_tex: { type: 'tex_pattern', params: { resolution: 16, name: 'tex' } },
+        stone: { type: 'texture_to_material', in: [null, 'stone_tex'], params: { material: 'stone', base_color: 'tex' } },
+        slate_tex: { type: 'tex_pattern', params: { resolution: 16, name: 'tex', pattern: 'hex' } },
+        slate: { type: 'texture_to_material', in: [null, 'slate_tex'], params: { material: 'slate', base_color: 'tex' } },
+      },
+      output: 'stone',
+      outputs: { stone: { node: 'stone', kind: 'material' }, slate: { node: 'slate', kind: 'material' } },
+    },
+  });
+  check((await publish(STONES, 'stones')).ok, 'a package of two material outputs whose maps share a name is published');
+  const SHOP = path.join(dirs.repo, 'shop');
+  writePackage(SHOP, {}, { main: { nodes: { b: { type: 'box' } }, output: 'b' } });
+  const o = await open(SHOP);
+  o.pk.use('studio/paints');
+  o.pk.use('studio/stones');
+  const { exportGeometryAsync } = await import('../src/io/export.ts');
+  const { readMaterials } = await import('../src/core/materials.ts');
+  const kit = (from: string, extra: Record<string, any> = {}): GraphSpec => ({
+    nodes: {
+      p_red: { type: 'studio/paints/red' }, p_green: { type: 'studio/paints/green' }, p_blue: { type: 'studio/paints/blue' }, p_brick: { type: 'studio/paints/brick' },
+      all: { type: 'merge', in: ['p_brick', 'p_red', 'p_green', 'p_blue'] }, more: { type: 'merge', in: ['all'] },
+      b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } },
+      m: { type: 'material', in: ['uv', 'more'], params: { from } }, ...extra,
+    },
+    output: 'm',
+  });
+  const cooked = (r: CookReport) => [...r.results.keys()].filter((n) => n.startsWith('p_')).sort().join();
+  const glb = async (r: CookReport) => (r.ok && r.geo ? sha(await exportGeometryAsync(r.geo, 'glb')) : `failed: ${errorOf(r)}`);
+
+  const named = await o.engine.cook(kit('brick'));
+  const whole = await o.engine.cook(kit('="brick"'));
+  check(named.ok && cooked(named) === 'p_brick' && cooked(whole) === 'p_blue,p_brick,p_green,p_red',
+    `from "brick", the first of four, through two merges cooks only the output that holds it; from as an expression cooks all four (${cooked(named)} | ${cooked(whole)})`);
+  check(named.ok && whole.ok && await glb(named) === await glb(whole) && Object.keys(readMaterials(named.geo!)).join() === 'brick',
+    'the result is the same as with every output cooked: the same GLB, the one material and its map');
+  const red = await o.engine.cook(kit('red'));
+  check(red.ok && cooked(red) === 'p_brick,p_red' && readMaterials(red.geo!).red?.baseColor?.[0] === 0.8,
+    `another name, second of four, cooks its output and the one before it, not the two after (${cooked(red)}; base colour ${JSON.stringify(readMaterials(red.geo!).red?.baseColor)})`);
+  const merged = await o.engine.cook({ ...kit('red'), output: 'more' });
+  check(merged.ok && cooked(merged) === 'p_blue,p_brick,p_green,p_red' && Object.keys(readMaterials(merged.geo!)).length === 4,
+    `the merge as the target cooks all four (${cooked(merged)})`);
+  const set = await o.engine.cook(kit('red', { p_green: { type: 'studio/paints/green', params: { shade: 0.3 } } }));
+  check(set.ok && cooked(set) === 'p_brick,p_green,p_red', `an output given params is cooked, as its version's record does not say what it then holds (${cooked(set)})`);
+  const behind = await o.engine.cook(kit('brick', { more: { type: 'merge', in: ['all', 'wax'] }, wax: { type: 'material', params: { name: 'wax' } } }));
+  check(behind.ok && cooked(behind) === 'p_blue,p_brick,p_green,p_red', `a merge inside a merge with an input after it cooks all its outputs, as they could rename that input's maps (${cooked(behind)})`);
+  // an output left out before the one read would change its names: the slate's map is "slate_tex" after the stone's "tex"
+  const pair = (from: string): GraphSpec => ({
+    nodes: {
+      p_stone: { type: 'studio/stones/stone' }, p_slate: { type: 'studio/stones/slate' }, all: { type: 'merge', in: ['p_stone', 'p_slate'] },
+      b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'], params: { method: 'box' } }, m: { type: 'material', in: ['uv', 'all'], params: { from } },
+    },
+    output: 'm',
+  });
+  const slate = await o.engine.cook(pair('slate')), slateAll = await o.engine.cook(pair('="slate"')), stone = await o.engine.cook(pair('stone'));
+  const maps = (r: CookReport) => (r.geo?.volumes ?? []).map((v) => v.name).join();
+  check(slate.ok && cooked(slate) === 'p_slate,p_stone' && maps(slate) === 'slate_tex' && readMaterials(slate.geo!).slate?.textures?.baseColor === 'image:slate_tex'
+    && await glb(slate) === await glb(slateAll),
+    `the output read after one whose map has its name: both cooked, and its map named as with every output cooked (${cooked(slate)}: ${maps(slate)})`);
+  check(stone.ok && cooked(stone) === 'p_stone' && maps(stone) === 'tex', `the first one read: the one after it left out, its map keeps its name (${cooked(stone)}: ${maps(stone)})`);
+  const geo = await o.engine.cook(kit('red', { look: { type: 'merge', in: ['m', 'all'] } }), { target: 'look' });
+  check(geo.ok && cooked(geo) === 'p_blue,p_brick,p_green,p_red', `a merge read whole elsewhere in the cook cooks all four (${cooked(geo)})`);
+  const typo = await o.engine.cook(kit('brik'));
+  check(!typo.ok && cooked(typo) === 'p_blue,p_brick,p_green,p_red' && /input 1 has no material "brik".*its materials: blue, brick, green, red\)/.test(errorOf(typo)),
+    `a name no output holds cooks all, so the error lists every material (${errorOf(typo).slice(0, 140)})`);
 }
 
 await engines[0]?.host.pool?.close();

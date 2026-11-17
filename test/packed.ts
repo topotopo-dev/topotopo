@@ -665,5 +665,105 @@ const SRC: Record<string, NodeSpec> = {
   check(lines === 3 && lone === 3 && near === 0, `mixed source: its polyline and loose point are written as a copy per instance, at the instances (${lines} polylines, ${lone} loose points, ${near} points near the origin)`);
 }
 
+// --- A placement list into an instanced GLB (help recipe "instance a placement list"): exported piece GLBs (with
+// their .source.json sidecars beside them) and a list of rows, P, yaw, pscale and a piece name, read from JSON or CSV.
+{
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const dir = `${tmp}/placements`;
+  mkdirSync(`${dir}/pieces`, { recursive: true });
+  const piece = async (nodes: Record<string, NodeSpec>, name: string) => {
+    writeFileSync(`${dir}/pieces/${name}.glb`, await exportGeometryAsync(await cook(nodes, 'out'), 'glb'));
+    writeFileSync(`${dir}/pieces/${name}.glb.source.json`, JSON.stringify({ format: 'topotopo-export-source', version: 1, output: name }));
+  };
+  await piece({
+    body: { type: 'box', params: { size: [1, 0.8, 1], center: [0, 0.4, 0] } },
+    body_n: { type: 'attrib_create', in: ['body'], params: { name: 'name', class: 'prim', value: 'body' } },
+    body_m: { type: 'material', in: ['body_n'], params: { name: 'wood', base_color: [0.5, 0.3, 0.1] } },
+    lid: { type: 'box', params: { size: [1.05, 0.1, 1.05], center: [0, 0.85, 0] } },
+    lid_n: { type: 'attrib_create', in: ['lid'], params: { name: 'name', class: 'prim', value: 'lid' } },
+    lid_m: { type: 'material', in: ['lid_n'], params: { name: 'metal', base_color: [0.5, 0.5, 0.5] } },
+    out: { type: 'merge', in: ['body_m', 'lid_m'] },
+  }, 'crate');
+  await piece({
+    b: { type: 'tube', params: { radius: 0.35, height: 1, center: [0, 0.5, 0], cols: 12, caps: true } },
+    out: { type: 'material', in: ['b'], params: { name: 'red', base_color: [0.7, 0.1, 0.1] } },
+  }, 'barrel');
+  const rows = [
+    { P: [0, 0, 0], yaw: 0, pscale: 1, name: 'crate' },
+    { P: [2, 0, 0], yaw: 45, pscale: 1.2, name: 'barrel' },
+    { P: [4, 0, 1], yaw: 90, pscale: 0.8, name: 'crate' },
+    { P: [-2, 0, 1], yaw: 30, pscale: 1, name: 'barrel' },
+  ];
+  writeFileSync(`${dir}/placements.json`, JSON.stringify(rows));
+  writeFileSync(`${dir}/placements.points.json`, JSON.stringify(rows));
+  writeFileSync(`${dir}/placements.csv`, 'P.x,P.y,P.z,yaw,pscale,name\n' + rows.map((r) => [...r.P, r.yaw, r.pscale, r.name].join(',')).join('\n') + '\n');
+  const list = async (file: string) => cook({ out: { type: 'file', params: { path: `${dir}/${file}` } } }, 'out');
+  const json = await list('placements.json'), csv = await list('placements.csv'), pj = await list('placements.points.json');
+  const att = (g: Geometry) => ({ P: Array.from(g.P), yaw: Array.from((g.points.get('yaw')?.data ?? []) as ArrayLike<number>), pscale: Array.from((g.points.get('pscale')?.data ?? []) as ArrayLike<number>), name: Array.from({ length: g.numPoints }, (_, i) => g.points.get('name')?.get(i)) });
+  check(json.numPoints === 4 && eq(att(json), att(csv)) && eq(att(pj), att(json)) && json.points.get('name')?.type === 'string',
+    `a JSON list of rows reads as points, the same as the CSV with those columns (and as .points.json): ${JSON.stringify(att(json))}`);
+  const bad = async (file: string, text: string) => {
+    writeFileSync(`${dir}/${file}`, text);
+    const r = await engine.cook({ nodes: { out: { type: 'file', params: { path: `${dir}/${file}` } } }, output: 'out' });
+    return r.ok ? 'cooked' : r.errors.map((e) => e.message).join('; ');
+  };
+  const noP = await bad('nop.json', '[{"yaw": 3, "name": "crate"}]'), nested = await bad('nested.json', '[{"P": [0, 0, 0], "at": {"x": 1}}]');
+  check(/point rows need a position: "P": \[x, y, z\]/.test(noP) && /"at" in row 1 is an object/.test(nested), `rows without P, or with an object value, say so (${noP} | ${nested})`);
+  const folder = await cook({ out: { type: 'file', params: { path: `${dir}/pieces` } } }, 'out');
+  const names = [...new Set(Array.from({ length: folder.numPrims }, (_, i) => folder.prims.get('name')?.get(i)))].sort();
+  check(eq(names, ['barrel', 'crate/body', 'crate/lid']), `a folder of exported pieces skips their .source.json sidecars (${names.join(', ')})`);
+  const layout = (pieces: Record<string, NodeSpec>, list = 'placements.json', extra: Record<string, unknown> = { variant_attrib: 'name' }): Record<string, NodeSpec> => ({
+    ...pieces,
+    spots: { type: 'file', params: { path: `${dir}/${list}` } },
+    layout: { type: 'copy_to_points', in: ['pieces', 'spots'], params: { pack: true, variants: 'name', rotate_attrib: 'yaw', ...extra } },
+  });
+  const byFile: Record<string, NodeSpec> = {
+    crate: { type: 'file', params: { path: `${dir}/pieces/crate.glb` } },
+    crate_n: { type: 'attrib_create', in: ['crate'], params: { name: 'name', class: 'prim', value: 'crate' } },
+    barrel: { type: 'file', params: { path: `${dir}/pieces/barrel.glb` } },
+    barrel_n: { type: 'attrib_create', in: ['barrel'], params: { name: 'name', class: 'prim', value: 'barrel' } },
+    pieces: { type: 'merge', in: ['crate_n', 'barrel_n'] },
+  };
+  const byFolder: Record<string, NodeSpec> = {
+    kit: { type: 'file', params: { path: `${dir}/pieces` } },
+    pieces: { type: 'wrangle', in: ['kit'], params: { run_over: 'prims', code: "s@name = @name.split('/')[0];" } },
+  };
+  const glb = async (nodes: Record<string, NodeSpec>) => {
+    const bytes = await exportGeometryAsync(await cook(nodes, 'layout'), 'glb');
+    const jsonLen = new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true), binAt = 20 + jsonLen + 8;
+    const j = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLen)));
+    const read = (i: number) => {
+      const a = j.accessors[i], v = j.bufferViews[a.bufferView], n = a.count * ({ VEC3: 3, VEC4: 4 } as Record<string, number>)[a.type];
+      return Array.from(new Float32Array(bytes.slice(binAt + (v.byteOffset ?? 0) + (a.byteOffset ?? 0)).buffer, 0, n), (x) => Math.round(x * 1e4) / 1e4 || 0);
+    };
+    const meshes: Record<string, any> = {};
+    for (const nd of j.nodes ?? []) {
+      const at = nd.extensions?.EXT_mesh_gpu_instancing?.attributes;
+      if (at) meshes[j.meshes[nd.mesh].name] = { prims: j.meshes[nd.mesh].primitives.length, T: read(at.TRANSLATION), R: read(at.ROTATION), S: read(at.SCALE) };
+    }
+    const report = await validator.validateBytes(bytes, { maxIssues: 20, writeTimestamp: false });
+    return { meshes, errors: report.issues.numErrors, used: j.extensionsUsed ?? [] };
+  };
+  const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+  const want = {
+    crate: { prims: 2, T: [0, 0, 0, 4, 0, 1], R: [0, 0, 0, 1, 0, r4(Math.SQRT1_2), 0, r4(Math.SQRT1_2)], S: [1, 1, 1, 0.8, 0.8, 0.8] },
+    barrel: { prims: 1, T: [2, 0, 0, -2, 0, 1], R: [0, r4(Math.sin(Math.PI / 8)), 0, r4(Math.cos(Math.PI / 8)), 0, r4(Math.sin(Math.PI / 12)), 0, r4(Math.cos(Math.PI / 12))], S: [1.2, 1.2, 1.2, 1, 1, 1] },
+  };
+  const sameMeshes = (a: Record<string, any>) => eq(Object.keys(a).sort(), ['barrel', 'crate']) && eq(a.crate, want.crate) && eq(a.barrel, want.barrel);
+  for (const [label, pieces] of [['one file node per piece', byFile], ['a folder of pieces', byFolder]] as const) {
+    const out = await glb(layout(pieces));
+    check(out.errors === 0 && out.used.includes('EXT_mesh_gpu_instancing') && sameMeshes(out.meshes),
+      `placement list, ${label}: one instanced mesh per piece, at each row's P, turned by its yaw, scaled by its pscale (${JSON.stringify(out.meshes)})`);
+  }
+  check(sameMeshes((await glb(layout(byFile, 'placements.csv'))).meshes), 'placement list from the CSV: the same instances');
+  const hint = await run(layout(byFile, 'placements.json', {}), 'layout');
+  check(hint.warnings.some((w) => /\[layout\] the template points have "name" with the variants' names, but no "variant" \(variant_attrib\): the variants cycle; set variant_attrib "name"/.test(w)),
+    `rows naming their pieces while variant_attrib is left at "variant": a warning says to set it (${hint.warnings.join(' | ')})`);
+  writeFileSync(`${dir}/typo.json`, JSON.stringify([...rows, { P: [6, 0, 0], yaw: 0, pscale: 1, name: 'barel' }, { P: [7, 0, 0], yaw: 0, pscale: 1, name: 'barel' }]));
+  const typo = await run(layout(byFile, 'typo.json'), 'layout');
+  check(typo.geo.numPacked === 4 && typo.warnings.some((w) => /2 template point\(s\) get no copy: their "name" names no variant \("barel" ×2; variants: barrel, crate\)/.test(w)),
+    `rows naming no piece get no copy and a warning that names them (${typo.geo.numPacked} instances; ${typo.warnings.join(' | ')})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

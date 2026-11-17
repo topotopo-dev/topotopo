@@ -53,6 +53,7 @@ import type { GraphSpec, NodeDef } from '../graph/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
 import { readMaterials } from '../core/materials.ts';
+import { lfsPointerNote } from '../io/png-decode.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { imageRef, referenceableImages } from '../core/image.ts';
 import { graphFiles, registerAssets } from '../session.ts';
@@ -160,6 +161,24 @@ const missingCopy = (pkg: string, v: string, at: string, direct?: string) =>
   `the copy of ${pkg} ${v} is missing: ${at}${direct ? `; restore it, or run ${program()} use ${direct}, which copies what is missing` : ''}`;
 const editedCopy = (pkg: string, v: string, at: string, direct?: string) =>
   `the copy of ${pkg} ${v} (${at}) was edited by hand: its files no longer match the hash packages/lock.json records; restore it, or delete it and run ${program()} use ${direct ?? pkg}, which copies what is missing`;
+
+/**
+ * When files below `dir` are Git LFS pointers (the small text files Git leaves in place of large files it never
+ * fetched), what to say of `what` instead of "edited by hand" or "changed after publishing": they are why its hash does
+ * not match. '' when it holds none.
+ */
+function lfsSaid(what: string, dir: string): string {
+  const files: string[] = [];
+  try {
+    for (const f of filesBelow(dir)) {
+      const size = fs.statSync(f.abs, { throwIfNoEntry: false })?.size ?? 0;
+      if (size > 0 && size <= 1024 && lfsPointerNote(fs.readFileSync(f.abs))) files.push(f.rel);
+    }
+  } catch { return ''; }
+  if (!files.length) return '';
+  const named = files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', ');
+  return `${what} holds Git LFS pointers, not its files (${named}): Git never fetched them; run git lfs pull in its repository`;
+}
 
 /**
  * Every file below `dir`, dot-files and dot-folders skipped, and the files an engine writes beside ours (*.import,
@@ -274,6 +293,20 @@ export function filesHash(files: { rel: string; sha: string }[]): string {
 export function workingHash(dir: string): string {
   const m = readManifest(dir), lock = readLock(dir);
   return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? contentSha(f.rel, f.bytes) : fileSha(f.abs!, true) })));
+}
+
+/**
+ * The hash of the files of the package `dir` a cook of a graph may read besides the graph's own file `graphFile`: its
+ * other graphs (graph_ref, its own outputs), assets/ and inputs/. An export records it (io/source.ts files_sha256), so
+ * --export-all knows an output whose files are unchanged.
+ */
+export function packageFilesHash(dir: string, graphFile?: string): string {
+  const own = graphFile ? path.resolve(graphFile) : '';
+  const files: { rel: string; sha: string }[] = [];
+  for (const d of ['graphs', 'assets', 'inputs']) for (const f of filesBelow(path.join(dir, d))) {
+    if (path.resolve(f.abs) !== own) files.push({ rel: `${d}/${f.rel}`, sha: fileSha(f.abs, true) });
+  }
+  return filesHash(files);
 }
 
 /** The hash of a version folder as published: every file but its version.json. */
@@ -1230,7 +1263,7 @@ export class PackageUses implements SessionPackages {
       // the same version held in a second place (a followed folder's copies) must hold the same files
       let hash = '';
       try { hash = copyHash(dir, ctx.packages); } catch (e: any) { return { error: `${pkg} ${v} in ${dir}: ${e.message}` }; }
-      return hash === have.hash ? have : { error: `${pkg} ${v} has different files in ${have.dir} and in ${dir}: one of them was changed after publishing, and TopoTopo never picks one` };
+      return hash === have.hash ? have : { error: lfsSaid(`${pkg} ${v} in ${dir}`, dir) || lfsSaid(`${pkg} ${v} in ${have.dir}`, have.dir) || `${pkg} ${v} has different files in ${have.dir} and in ${dir}: one of them was changed after publishing, and TopoTopo never picks one` };
     }
     if (this.loading.has(key)) return { error: `${pkg} ${v} uses itself (through ${[...this.loading].join(' → ')})` };
     this.loading.add(key);
@@ -1253,7 +1286,7 @@ export class PackageUses implements SessionPackages {
     const expected = ctx.lock.packages[pkg]?.[v]?.hash;
     let warning: string | undefined;
     if (expected === undefined) warning = `${this.shown(ctx.packages)}/lock.json does not list ${pkg} ${v}: ${program()} use ${direct ?? pkg} records it`;
-    else if (expected !== hash) warning = editedCopy(pkg, v, this.shown(dir), direct);
+    else if (expected !== hash) warning = lfsSaid(`the copy of ${pkg} ${v} (${this.shown(dir)})`, dir) || editedCopy(pkg, v, this.shown(dir), direct);
     const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: ctx.packages, lock: ctx.lock, follows: false };
     // the scope is the files' too: a copy restored after an edit is another scope, with results of its own
     return this.build({ pkg, version: v, dir, hash, signature: hash, info, warning, manifest: m, ctx: vctx, scope: `${pkg}@${v}${warning ? `#${hash.slice(0, 16)}` : ''}` });
@@ -1267,7 +1300,7 @@ export class PackageUses implements SessionPackages {
     if (expected === undefined || !this.dir || !this.root.lock.packages[pkg]?.[v] || !fs.existsSync(path.join(copyAt(this.root.packages, pkg, v), 'version.json'))) return null;
     const own = this.loadCopy(this.root, pkg, v);
     if ('error' in own) return null;
-    return own.hash === expected ? own : { error: `${pkg} ${v} has different files in ${own.dir} and in ${elsewhere}: one of them was changed after publishing, and TopoTopo never picks one` };
+    return own.hash === expected ? own : { error: lfsSaid(`${pkg} ${v} in ${own.dir}`, own.dir) || lfsSaid(`${pkg} ${v} in ${elsewhere}`, elsewhere) || `${pkg} ${v} has different files in ${own.dir} and in ${elsewhere}: one of them was changed after publishing, and TopoTopo never picks one` };
   }
 
   /**
@@ -1290,7 +1323,7 @@ export class PackageUses implements SessionPackages {
       else {
         const info = readVersionInfo(dir), m = readManifest(dir);
         const hash = place ? versionHash(dir, true) : copyHash(dir, ctx.packages);
-        if (hash !== expected) r = { error: `${pkg} ${v} in ${dir} was changed after publishing: its files do not match the hash it was published with` };
+        if (hash !== expected) r = { error: lfsSaid(`${pkg} ${v} in ${dir}`, dir) || `${pkg} ${v} in ${dir} was changed after publishing: its files do not match the hash it was published with` };
         else {
           const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: place ? path.join(dir, 'packages') : ctx.packages, lock: place ? readLock(dir) : ctx.lock, follows: false, apart: true };
           r = this.build({ pkg, version: v, dir, hash, signature: `${hash}|${dir}`, info, manifest: m, ctx: vctx, scope: `${pkg}@${v}|${dir}` });
@@ -1364,6 +1397,7 @@ export class PackageUses implements SessionPackages {
         rootPath: this.rootPath,
         ...(o.info?.note ? { note: o.info.note } : {}), ...(x.label ? { label: x.label } : {}), ...(kind ? { kind } : {}), ...(tags?.length ? { tags } : {}),
         ...(o.warning ? { warning: o.warning } : {}),
+        ...(rec?.maps && !o.warning ? { materials: Object.keys(rec.maps) } : {}),
       });
     };
     const loaded: Loaded = {
@@ -1428,7 +1462,7 @@ export class PackageUses implements SessionPackages {
     for (const [pkg, v] of closure) {
       const at = copyAt(packages, pkg, v);
       if (!fs.existsSync(path.join(at, 'version.json'))) out.push(missingCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
-      else if (copyHash(at, packages) !== lock.packages[pkg][v].hash) out.push(editedCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
+      else if (copyHash(at, packages) !== lock.packages[pkg][v].hash) out.push(lfsSaid(`the copy of ${pkg} ${v} (${this.shown(at)})`, at) || editedCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
     }
     return out;
   }
@@ -1557,7 +1591,7 @@ export class PackageUses implements SessionPackages {
   private copyIn(pkg: string, v: string, place: Place): string[] {
     const store = this.store!, packages = store.packages;
     if (versionHash(place.dir) !== place.info.hash)
-      throw new Error(`${pkg} ${v} in ${place.dir} (${place.place}) was changed after publishing: its files do not match the hash in its version.json, so it is not copied`);
+      throw new Error(`${lfsSaid(`${pkg} ${v} in ${place.dir} (${place.place})`, place.dir) || `${pkg} ${v} in ${place.dir} (${place.place}) was changed after publishing: its files do not match the hash in its version.json`}, so it is not copied`);
     // Godot imports none of the copies: the .gdignore is there before the first copy lands
     if (store.workspace) { fs.mkdirSync(packages, { recursive: true }); gdignore(packages); }
     else godotIgnore(store.root, ['packages']);
@@ -1583,7 +1617,7 @@ export class PackageUses implements SessionPackages {
       if (!fs.existsSync(path.join(w.from, 'version.json'))) throw new Error(`${pkg} ${v} in ${place.place} lists ${w.pkg} ${w.v} in its packages/lock.json but holds no copy of it (${w.from})`);
       const to = copyAt(packages, w.pkg, w.v), have = lock.packages[w.pkg]?.[w.v];
       if (have && have.hash !== w.hash)
-        throw new Error(`${w.pkg} ${w.v} has different files in ${this.shown(to)} (from ${libraryText(have.library)}) and in ${w.from} (${place.place}): one of them was changed after publishing, and TopoTopo never picks one`);
+        throw new Error(lfsSaid(`${w.pkg} ${w.v} in ${w.from} (${place.place})`, w.from) || lfsSaid(`the copy of ${w.pkg} ${w.v} (${this.shown(to)})`, to) || `${w.pkg} ${w.v} has different files in ${this.shown(to)} (from ${libraryText(have.library)}) and in ${w.from} (${place.place}): one of them was changed after publishing, and TopoTopo never picks one`);
       if (fs.existsSync(path.join(to, 'version.json'))) {
         // already here (another package uses it too): it must be this version
         if (!have && copyHash(to, packages) !== w.hash) throw new Error(`${this.shown(to)} holds other files than ${w.pkg} ${w.v} as published: move it away, then try again`);

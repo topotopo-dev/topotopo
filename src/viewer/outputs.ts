@@ -14,7 +14,7 @@ import type http from 'node:http';
 import { zipSync } from 'fflate';
 import { ArtifactStore, artifactId } from '../host/artifacts.ts';
 import type { Artifact } from '../host/artifacts.ts';
-import { prepareTarget, writeTargets } from '../host/export-targets.ts';
+import { filesShaFor, prepareTarget, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import { sidecarFile } from '../host/sidecars.ts';
 import type { Session } from '../session.ts';
@@ -359,7 +359,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     const r = await ws.cook(graph, p.node, undefined, { kind: 'export' });
     if (r.stopped) err(409, `${p.label} (${graph}): the export was stopped at ${r.stopped}; nothing was written`);
     if (!r.ok || !r.geo) err(422, `${p.label} (${graph}): ` + (r.errors.map((e) => `${e.node}: ${e.message}`).join('; ') || 'no geometry'));
-    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(ws.engine, p.spec, ws.packages?.published?.() ?? ws.engine.root) });
+    return prepareTarget(r.geo!, graph, p, ws.exportDir, ws.engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(ws.engine, p.spec, ws.packages?.published?.() ?? ws.engine.root), files: filesShaFor(ws.graphFile(graph)) });
   };
   /** One export at a time, so two clicks never interleave their writes. */
   const exclusive = async <T>(work: () => Promise<T>): Promise<T> => {

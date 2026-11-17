@@ -6,7 +6,7 @@
 //                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--cd auto|ignore|multiply] [--grey] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
 //                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
-//                   [--compress meshopt] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
+//                   [--compress meshopt] [--maps embed|external|none] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--vertex-colors] [--no-materials]
 //                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
 //                   (every option of the export tool has a flag; booleans take --name / --no-name)
@@ -59,7 +59,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import './nodes/index.ts';
-import { Engine } from './graph/engine.ts';
+import { Engine, resolveTime } from './graph/engine.ts';
 import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { KINDS } from './graph/outputs.ts';
@@ -73,6 +73,7 @@ import { encodePNG } from './render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { exportSource } from './io/source.ts';
+import { outputKind } from './io/kinds.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { PACKAGE_COMMANDS } from './packages/commands.ts';
 import { GODOT_COMMANDS } from './host/godot-commands.ts';
@@ -82,9 +83,10 @@ import { isGraph } from './graph/types.ts';
 import type { GraphSpec } from './graph/types.ts';
 import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
-import { exportsFolderFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from './host/export-targets.ts';
+import { exportsFolderFor, filesShaFor, prepareTarget, serializeExport, unchangedTarget, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
+import { engineSha256 } from './host/engine-code.ts';
 import { exportOptionsFromFlags, prefixGone, publishedOutputs } from './io/targets.ts';
 import { budgetReport, inspect, nodeBudgetInput, summarize } from './inspect.ts';
 import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
@@ -131,7 +133,10 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           its packages and shared nodes (a material package\'s maps) load and cook once:',
     '           --scale 100 --output wall --export wall.glb --output gate --export gate.glb --render gate.png',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
-    '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder)',
+    '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder; a line per output with its',
+    '           kind, time and size. In a package, an output whose last export would be made the same (its nodes, vars, packages, the',
+    '           package\'s other graphs, assets/ and inputs/, options and the engine code, all its files in place) is skipped)',
+    '         [--force] (--export-all: export every output, the unchanged ones too)',
     '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
     '         time limits (environment, milliseconds; also for the MCP server and the viewer): TOPOTOPO_SCRIPT_TIMEOUT_MS (user code: expressions, wrangles, a whole script; default 30000), TOPOTOPO_SIM_TIMEOUT_MS (one cook of a simulation node; default 600000)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
@@ -164,6 +169,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           --render apply to it alone (a warning says so)',
     '         export options (every option of the export tool; booleans as --name / --no-name):',
     '                         [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
+    '                         [--maps embed|external|none] (glb/gltf texture maps: inside the file (default), once each in a shared maps/ folder referenced by URI (--export-all: exports/maps/), or none: material names and factors only)',
     '                         [--custom-attribs | --no-custom-attribs] (extra numeric attributes; glTF and USD default off, PLY on) [--materials | --no-materials]',
     '                         [--vertex-colors | --no-vertex-colors] (glTF: also write Cd as COLOR_0 on prims with a named material; default off)',
     '                         [--split-by-name | --no-split-by-name] [--precision 32|64] (geo) [--layer height] [--height-min 0] [--height-max 100] [--heightfield 0]',
@@ -525,7 +531,7 @@ async function cook() {
       // the export tool's options (the MCP export tool and export targets use the same names and code)
       const a = exportArgs(u);
       const x = await forExport(r);
-      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), version: TOPOTOPO_VERSION });
+      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file), version: TOPOTOPO_VERSION, engine: engineSha256() });
       const res = await serializeExport(x.geo!, fmt, p, a, engine.host, source);
       for (const w of res.warnings) console.warn(`warning: ${w}`);
       writeExportFiles(res.files);
@@ -559,7 +565,9 @@ async function cook() {
     if (res.failed.length) fail(`failed frames: ${res.failed.join(', ')}`);
   } else {
     const failed: string[] = [], t0 = performance.now();
-    for (const u of units) {
+    // --export-all alone cooks the outputs it exports, not the default output first
+    const onlyExportAll = argv.includes('--export-all') && !['--output', '--node', '--export', '--render', '--inspect'].some((f) => argv.includes(f));
+    for (const u of onlyExportAll ? [] : units) {
       const r = await engine.cook(graph, { target: u.target, frame: single, fps });
       report(r);
       if (!r.ok || !r.geo) {
@@ -593,17 +601,28 @@ async function cook() {
     if (refused) fail(`--export-all: "${refused.label}": ${prefixGone(refused.target!.refused!)}; nothing was written`);
     const blocked = exportScope ? exportBlocked() : null;
     if (blocked) fail(`--export-all: ${blocked}; nothing was written`);
-    for (const p of published) {
-      if (!p.target) continue;
+    // paths as the person finds them from where they ran the command
+    const rel = (f: string) => path.relative(process.cwd(), f) || f;
+    const targets = published.filter((p): p is typeof p & { target: NonNullable<typeof p.target> } => !!p.target);
+    const time = resolveTime({ frame: single, fps });
+    const cook = { frame: time.frame, fps: time.fps, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file) };
+    const force = argv.includes('--force'), unchanged: string[] = [], t0 = performance.now();
+    for (const [i, p] of targets.entries()) {
+      const at = `[${i + 1}/${targets.length}] ${p.output ?? p.label}`, dest = rel(path.join(exportsDir, ...p.target.path.split('/')));
+      // its last export would be made the same: left as it is (--force exports it anyway)
+      if (!force && unchangedTarget(name, p, exportsDir, cook)) { unchanged.push(p.label); console.log(`${at}: unchanged since its last export, ${dest} kept`); continue; }
+      const t = performance.now();
       const r = await engine.cook(graph, { target: p.node, frame: single, fps, ...(exportScope ? { scope: exportScope } : {}) });
       report(r);
       if (!r.ok || !r.geo) fail(`--export-all: "${p.label}" did not cook${exportScope ? ' with the published copies' : ''}; nothing was written`);
-      prepared.push(await prepareTarget(r.geo!, name, p as typeof p & { target: NonNullable<typeof p.target> }, exportsDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, graph, exportScope ?? engine.root) }));
+      const x = await prepareTarget(r.geo!, name, p, exportsDir, engine.host, cook);
+      prepared.push(x);
+      const kb = x.files.reduce((n, f) => n + f.bytes.byteLength, 0) / 1024;
+      console.log(`${at}, ${outputKind(r.geo!).published ?? 'nothing'}: ${((performance.now() - t) / 1000).toFixed(1)} s, ${kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`} → ${dest} — ${x.summary}${x.sourceFile ? `; source: ${rel(x.sourceFile)}` : ''}`);
     }
     writeTargets(prepared, exportsDir);
-    // paths as the person finds them from where they ran the command
-    const rel = (f: string) => path.relative(process.cwd(), f) || f;
-    for (const p of prepared) console.log(`exported ${p.label} → ${rel(path.join(p.root, ...p.target.path.split('/')))} — ${p.summary}${p.sourceFile ? `; source: ${rel(p.sourceFile)}` : ''}`);
+    console.log(`exported ${prepared.length} of ${targets.length} output${targets.length === 1 ? '' : 's'} into ${rel(exportsDir)} in ${((performance.now() - t0) / 1000).toFixed(1)} s`
+      + `${unchanged.length ? `; ${unchanged.length} unchanged since their last export, kept (--force exports them too)` : ''}`);
     const skipped = published.filter((p) => !p.target).map((p) => p.label);
     if (skipped.length) console.log(`no export target (skipped): ${skipped.join(', ')}`);
     if (exportNote) console.log(exportNote);

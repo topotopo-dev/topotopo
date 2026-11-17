@@ -3,6 +3,11 @@
 //   graph          the graph's name (for the CLI, the graph file's name without .json)
 //   graph_sha256   SHA-256 of the graph JSON as cooked: vars after overrides, format version stamped, keys sorted,
 //                  no whitespace (canonicalJSON), so a reformatted file hashes the same
+//   nodes_sha256   SHA-256 of the part of the graph the node's cook reads (nodesRead: the node, the nodes its inputs
+//                  and its params' strings name, theirs in turn; without their ui and note) and the graph's strict, so
+//                  an edit to another output's nodes leaves it as it was
+//   files_sha256   only for a graph in a package: SHA-256 of the package files its cook may read besides the graph
+//                  file (its other graphs, assets/ and inputs/: src/packages/registry.ts packageFilesHash)
 //   output         the named output exported (graph.outputs), or null (a node, or the default output)
 //   node           the node that was cooked
 //   frame, fps     the cook time
@@ -21,6 +26,9 @@
 //                  package's publish name, else its id; the cook replaces a file at an output path only when it names
 //                  this package (or the cook record lists the file)
 //   topotopo       the version that wrote it
+//   engine_sha256  SHA-256 of the engine's own code that wrote it (src/host/engine-code.ts: its src/ or dist/ tree,
+//                  kernels, fonts and package.json), as a source checkout keeps one version through many changes;
+//                  the Node host records it, and an export is never kept as unchanged without it
 // Formats that write a sidecar or manifest carry the block there (png16 / r16: <name>.json; csv / points.json instance
 // rows: <name>.meshes.json; unreal_landscape: its landscape.json); every other export gets <file>.source.json next to
 // it (textures, a folder: source.json inside it), and glb / gltf also carry it in asset.extras.source. Nothing in the
@@ -34,6 +42,9 @@ import { dirOf } from './common.ts';
 export interface ExportSource {
   graph: string;
   graph_sha256: string;
+  nodes_sha256: string;
+  /** the package files the cook may read (absent for a graph in no package) */
+  files_sha256?: string;
   output: string | null;
   node: string;
   frame: number;
@@ -48,6 +59,8 @@ export interface ExportSource {
   /** the package an engine cook made it for: its publish name, else its id (absent elsewhere) */
   package?: string;
   topotopo: string;
+  /** the engine's code hash (absent when the host did not give it) */
+  engine_sha256?: string;
 }
 
 export interface SourceInput {
@@ -69,8 +82,12 @@ export interface SourceInput {
   packages?: Record<string, string>;
   /** an engine cook: the package it cooks for (ExportSource.package) */
   package?: string;
+  /** the hash of the package files the cook may read besides the graph (ExportSource.files_sha256), if in a package */
+  files?: string;
   /** the TopoTopo version */
   version: string;
+  /** the engine's code hash (src/host/engine-code.ts engineSha256) */
+  engine?: string;
 }
 
 /** The name of a standalone source manifest: next to the export file it describes. */
@@ -122,6 +139,8 @@ export function exportSource(i: SourceInput): ExportSource {
   return {
     graph: i.graph,
     graph_sha256: sha256Hex(canonicalJSON(spec)),
+    nodes_sha256: nodesSha256(spec, i.node),
+    ...(i.files ? { files_sha256: i.files } : {}),
     output: i.output ?? null,
     node: i.node,
     frame: i.frame ?? 1,
@@ -133,7 +152,55 @@ export function exportSource(i: SourceInput): ExportSource {
     export: { format: i.format, options: sorted(i.options ?? {}) },
     ...(i.package ? { package: i.package } : {}),
     topotopo: i.version,
+    ...(i.engine ? { engine_sha256: i.engine } : {}),
   };
+}
+
+/**
+ * The nodes of a graph a cook of `node` may read: the node, the nodes its inputs name and those any string of its
+ * params names as a word (an "=expr" reference such as ch("../box/size"), a nested graph's), then theirs in turn.
+ * What the engine pulls, and maybe more. Sorted.
+ */
+export function nodesRead(spec: GraphSpec, node: string): string[] {
+  const nodes = spec.nodes ?? {}, seen = new Set<string>(), todo = [node];
+  const words = (v: unknown, out: Set<string>, depth: number) => {
+    if (depth > 64) return;
+    if (typeof v === 'string') {
+      for (const w of v.match(/[\w.-]+/g) ?? []) { out.add(w); for (const part of w.split(/[.-]+/)) out.add(part); }
+    } else if (v && typeof v === 'object') for (const x of Object.values(v)) words(x, out, depth + 1);
+  };
+  while (todo.length) {
+    const n = todo.pop()!;
+    if (seen.has(n) || !Object.hasOwn(nodes, n)) continue;
+    seen.add(n);
+    const named = new Set<string>();
+    words(nodes[n]?.in, named, 0);
+    words(nodes[n]?.params, named, 0);
+    for (const w of named) if (!seen.has(w) && Object.hasOwn(nodes, w)) todo.push(w);
+  }
+  return [...seen].sort();
+}
+
+/** nodes_sha256: the nodes a cook of `node` reads (nodesRead) without their ui and note, and the graph's strict. */
+export function nodesSha256(spec: GraphSpec, node: string): string {
+  const nodes: Record<string, unknown> = {};
+  for (const n of nodesRead(spec, node)) {
+    const { ui: _ui, note: _note, ...rest } = spec.nodes[n] ?? {};
+    nodes[n] = rest;
+  }
+  return sha256Hex(canonicalJSON({ nodes, strict: spec.strict ?? false }));
+}
+
+/**
+ * Whether an export recorded with the block `prev` would be made the same now, as `now`: every field the same but the
+ * whole graph's hash and seeds (an edit to other nodes of the graph; its own nodes and seeds are in nodes_sha256).
+ * Never without files_sha256 (a graph in no package, whose files are not known) or engine_sha256 (the engine's code,
+ * which may have changed under the same version).
+ */
+export function sameSource(prev: unknown, now: ExportSource): boolean {
+  if (!now.files_sha256 || !now.engine_sha256 || !prev || typeof prev !== 'object') return false;
+  const key = (s: object) => { const { graph_sha256: _g, seeds: _s, ...rest } = s as ExportSource; return canonicalJSON(rest); };
+  return key(prev) === key(now);
 }
 
 /** The source block with these export options (an export records the options it used, defaults included). */
@@ -162,9 +229,15 @@ export function replayArgs(s: ExportSource, exportPath: string, flags: (o: Recor
  */
 export function sourceManifestBytes(source: ExportSource, manifestPath: string, files: string[]): Uint8Array {
   const dir = dirOf(manifestPath).replace(/\\/g, '/');
+  // a file beside or below the manifest by its path from there; one elsewhere (a shared maps folder) climbs with ".."
   const rel = (p: string) => {
     const q = p.replace(/\\/g, '/');
-    return dir && q.startsWith(dir + '/') ? q.slice(dir.length + 1) : dir ? q.slice(q.lastIndexOf('/') + 1) : q;
+    if (!dir) return q;
+    if (q.startsWith(dir + '/')) return q.slice(dir.length + 1);
+    const a = dir.split('/'), b = q.split('/');
+    let i = 0;
+    while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+    return i ? [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/') : b[b.length - 1];
   };
   return new TextEncoder().encode(JSON.stringify({ format: 'topotopo-export-source', version: 1, files: files.map(rel), source }, null, 2) + '\n');
 }

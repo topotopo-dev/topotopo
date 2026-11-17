@@ -251,7 +251,16 @@ function flattenPath(cmds: any[], segs: number): number[][][] {
 defineNode({
   type: 'text',
   category: 'generate',
-  summary: 'Text from a TrueType/OpenType font: filled faces, outlines, or extruded solid. Lies in the XY plane facing +Z.',
+  summary: 'Text from a TrueType/OpenType font: filled faces, outlines, or an extruded solid, in the XY plane facing +Z (a solid stands out towards +Z from its back face).',
+  description:
+    'Lettering for signs, signage, labels, plaques and logos. The letters lie in the XY plane and face +Z, placed by ' +
+    'center: x and y where align and valign put the text, z the plane of the faces and outlines, and of the back face ' +
+    'of a solid (depth > 0), whose front face is at center z + depth. So letters on a wall at z = 0 stand out from it ' +
+    'towards +Z; turn and move the result to face elsewhere. back false leaves the back face of a solid off (letters ' +
+    'mounted on a wall, whose back is never seen: fewer triangles, an open solid). To engrave, set center z to minus ' +
+    'half the depth (the letters straddle the surface) and subtract the text from the surface with boolean; to emboss, ' +
+    'merge it onto the surface or union it. curve_segments 2 (the default) suits signs; 4 to 8 for large lettering ' +
+    'seen up close (each step adds about a third more triangles).',
   aliases: ['font', 'type', 'lettering'],
   inputs: [],
   params: {
@@ -264,8 +273,9 @@ defineNode({
     depth: { type: 'float', default: 0, min: 0, desc: 'extrusion depth (> 0 makes a solid)' },
     output: { type: 'enum', options: ['auto', 'faces', 'outlines', 'solid'], default: 'auto', desc: 'auto = solid if depth > 0, else faces' },
     line_spacing: { type: 'float', default: 1.2, desc: 'line height as a multiple of size' },
-    curve_segments: { type: 'int', default: 6, min: 1, max: 32, desc: 'segments per glyph curve' },
-    center: P.center(),
+    curve_segments: { type: 'int', default: 2, min: 1, max: 32, desc: 'segments per glyph curve: 2 suits signs; 4 to 8 for large lettering seen up close' },
+    back: { type: 'bool', default: true, desc: 'solid: its back face at center z (false leaves it off: letters on a wall, whose back is never seen; the solid is then open)', aliases: ['back_face'] },
+    center: { ...P.center(), desc: 'position: x and y where align and valign put the text; z the plane of faces and outlines, and the back face of a solid' },
   },
   // a font path reads the scope's folder
   signatureExtra: (p, scope) => scope.files.findFont(p.font || undefined) ?? 'nofont',
@@ -313,10 +323,22 @@ defineNode({
     const mode = p.output === 'auto' ? (p.depth > 0 ? 'solid' : 'faces') : p.output;
     let g: Geometry;
     if (mode === 'solid') {
-      const m = cs.extrude(Math.max(p.depth, 1e-4));
-      const mt = m.translate([0, 0, p.center[2] - p.depth / 2]);
+      // from its back face at center z to its front face at center z + depth
+      const depth = Math.max(p.depth, 1e-4);
+      const m = cs.extrude(depth);
+      const mt = m.translate([0, 0, p.center[2]]);
       g = fromManifold(mt, propLayout([])).geo;
       m.delete(); mt.delete();
+      if (!p.back) {
+        // the back face: the prims whose points all lie on the back plane
+        const keep = new Uint8Array(g.numPrims), z = p.center[2], eps = depth * 1e-6 + 1e-9;
+        for (let pr = 0; pr < g.numPrims; pr++) {
+          let back = true;
+          for (let v = g.primStart[pr]; v < g.primStart[pr + 1] && back; v++) back = Math.abs(g.P[g.vertexPoint[v] * 3 + 2] - z) <= eps;
+          keep[pr] = back ? 0 : 1;
+        }
+        g = g.subsetPrims(keep, true);
+      }
     } else if (mode === 'outlines') g = polygonsToGeo(cs.toPolygons(), 'xy', p.center[2]);
     else g = crossSectionFaces(cs, 'xy', p.center[2]);
     cs.delete();

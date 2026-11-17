@@ -15,7 +15,7 @@
     "slab": { "type": "extrude", "in": ["slab_shape"], "params": { "height": 0.5, "center": true } },
     "words": {
       "type": "text",
-      "params": { "text": "=label", "size": 0.9, "depth": 0.4, "valign": "center", "center": [0, 0, 0.25] }
+      "params": { "text": "=label", "size": 0.9, "depth": 0.4, "valign": "center", "curve_segments": 6, "center": [0, 0, 0.05] }
     },
     "engraved": { "type": "boolean", "in": ["slab", "words"], "params": { "operation": "subtract" } },
     "paint": { "type": "color", "in": ["engraved"], "params": { "class": "prim", "color": "#b9b3a6" } },

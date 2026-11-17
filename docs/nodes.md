@@ -509,7 +509,9 @@ None (generator).
 
 category: `generate` · aliases: `font`, `type`, `lettering`
 
-Text from a TrueType/OpenType font: filled faces, outlines, or extruded solid. Lies in the XY plane facing +Z.
+Text from a TrueType/OpenType font: filled faces, outlines, or an extruded solid, in the XY plane facing +Z (a solid stands out towards +Z from its back face).
+
+Lettering for signs, signage, labels, plaques and logos. The letters lie in the XY plane and face +Z, placed by center: x and y where align and valign put the text, z the plane of the faces and outlines, and of the back face of a solid (depth > 0), whose front face is at center z + depth. So letters on a wall at z = 0 stand out from it towards +Z; turn and move the result to face elsewhere. back false leaves the back face of a solid off (letters mounted on a wall, whose back is never seen: fewer triangles, an open solid). To engrave, set center z to minus half the depth (the letters straddle the surface) and subtract the text from the surface with boolean; to emboss, merge it onto the surface or union it. curve_segments 2 (the default) suits signs; 4 to 8 for large lettering seen up close (each step adds about a third more triangles).
 
 **Inputs**
 
@@ -528,8 +530,9 @@ None (generator).
 | `depth` | float | `0` | 0.. |  |  | extrusion depth (> 0 makes a solid) |
 | `output` | enum | `"auto"` |  | `auto`, `faces`, `outlines`, `solid` |  | auto = solid if depth > 0, else faces |
 | `line_spacing` | float | `1.2` |  |  |  | line height as a multiple of size |
-| `curve_segments` | int | `6` | 1..32 |  |  | segments per glyph curve |
-| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
+| `curve_segments` | int | `2` | 1..32 |  |  | segments per glyph curve: 2 suits signs; 4 to 8 for large lettering seen up close |
+| `back` | bool | `true` |  |  | `back_face` | solid: its back face at center z (false leaves it off: letters on a wall, whose back is never seen; the solid is then open) |
+| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | position: x and y where align and valign put the text; z the plane of faces and outlines, and the back face of a solid |
 
 **Example**
 
@@ -3682,7 +3685,7 @@ category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, 
 
 Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims, or one from a material output; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the package folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used. With nothing in input 0 the result is the material alone: a material output.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the package folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used; with from, a merge of published package material outputs in input 1 does not cook the outputs after the last one that holds that material (the ones before it are cooked: a merge renames the maps of a later output after those of an earlier one). With nothing in input 0 the result is the material alone: a material output.
 
 **Inputs**
 
@@ -5821,7 +5824,7 @@ category: `copy` · aliases: `copytopoints`, `instance`, `copy_to_pts`
 
 Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over. pack:true makes packed instances (cheap at millions).
 
-pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner.
+pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner. Pieces placed from a list in a file (P, yaw, pscale, name per row): help topic "recipes", "instance a placement list".
 
 **Inputs**
 
@@ -5946,6 +5949,8 @@ pack:false (default) makes real copies. pack:true makes one packed prim per temp
 category: `copy` · aliases: `copy`, `copyxform`, `array`, `duplicate`
 
 Make N copies, each transformed cumulatively (Houdini Copy and Transform): stairs, radial arrays, stacks.
+
+Copies placed from a list instead (positions, yaw, scale and a piece name per row, from a CSV or JSON file): read the list with file and instance the pieces onto it with copy_to_points {pack, variants "name", variant_attrib "name", rotate_attrib "yaw"}, exported as one instanced GLB: help topic "recipes", "instance a placement list".
 
 **Inputs**
 
@@ -9633,7 +9638,7 @@ Pass through one of several inputs by index (use "=expr" to drive it from vars).
 
 category: `io` · aliases: `import`, `load`, `read`
 
-Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON; a PNG becomes an image volume named after the file, as image_file reads it with its defaults (image_file has the layer and colour options). .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively: name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points); its PNGs become images. copy_to_points {variants: 'name'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.
+Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON, a JSON list of point rows (a placement list) or topotopo JSON; a PNG becomes an image volume named after the file, as image_file reads it with its defaults (image_file has the layer and colour options). .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively (export sidecars such as crate.glb.source.json are skipped): name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points); its PNGs become images. copy_to_points {variants: 'name'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.
 
 **Inputs**
 
@@ -9644,7 +9649,7 @@ None (generator).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a .topo file at or above the graph), else from the graph's folder (MCP: the package); folder mode needs directory support in the host |
-| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
+| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams, point rows ([{"P": [x, y, z], "yaw": 30, "name": "crate"}, …], each key an attribute as a CSV column) and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
 | `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances) |

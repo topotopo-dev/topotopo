@@ -12,9 +12,9 @@
       "min": [0, -0.05, -7.9194]
     },
     "counts": {
-      "points": 4492,
-      "prims": 5665,
-      "vertices": 19566,
+      "points": 3724,
+      "prims": 4129,
+      "vertices": 14958,
       "volumes": 0
     },
     "groups": {
@@ -24,16 +24,16 @@
       "vertex": []
     },
     "hashes": {
-      "P": "547a04eb15b58f11",
+      "P": "fe3b1c43af825511",
       "attributes": {
         "detail.materials": "52d42fbdb4e79d3f",
-        "prim.Cd": "9100b883f6449d1d",
-        "prim.material": "042e6538ece7ca8a",
-        "prim.name": "7e8fb6eb7a482849",
-        "vertex.N": "fb7ae1a90fb12e4b",
-        "vertex.uv": "28114ed14aa3aafb"
+        "prim.Cd": "da20b0834210051d",
+        "prim.material": "e2b84138d94b6e8a",
+        "prim.name": "dee12aeb4f9c9c49",
+        "vertex.N": "be3821a92cb92e4b",
+        "vertex.uv": "c5188ed1befdaafb"
       },
-      "topology": "36246a55fff8ca5f"
+      "topology": "49d7c74f115bc34d"
     }
   },
   "name": "package.topotopo.street",

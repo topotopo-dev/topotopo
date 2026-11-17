@@ -24,13 +24,14 @@ import { heightmapExport } from '../src/io/heightmap.ts';
 import { glbSceneReport, sceneReportText } from '../src/io/inspect-scene.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { importCSV } from '../src/io/points.ts';
-import { canonicalJSON, exportSource, graphSha256 } from '../src/io/source.ts';
+import { canonicalJSON, exportSource, graphSha256, nodesRead, nodesSha256, sameSource } from '../src/io/source.ts';
 import { publishedOutputs } from '../src/io/targets.ts';
 import { parseVarArg, parseVarValue, withVars } from '../src/graph/vars.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { prepareTarget, writeTargets } from '../src/host/export-targets.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { TOPOTOPO_VERSION } from '../src/host/version.ts';
+import { engineCodeHash } from '../src/host/engine-code.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -243,13 +244,59 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     vars: { seed: 3, relief: 6 },
   };
   const src = exportSource({ graph: 'terrain', spec, node: 'hills', format: 'glb', options: { up_axis: 'z', scale: undefined }, version: '9.9.9' });
-  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'export', 'topotopo']), 'source block: fields in a fixed order');
+  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'nodes_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'export', 'topotopo']), 'source block: fields in a fixed order');
   check(src.output === null && src.frame === 1 && src.fps === 24 && JSON.stringify(src.vars) === '{"relief":6,"seed":3}' && JSON.stringify(src.seeds) === '{"hills":"=seed","loop/pts":4}'
     && JSON.stringify(src.export) === '{"format":"glb","options":{"up_axis":"z"}}' && src.topotopo === '9.9.9',
     `source block: the engine's time defaults, sorted vars, seeds by node path as written (nested bodies too), the options given (${JSON.stringify(src)})`);
   const reordered: GraphSpec = { vars: { relief: 6, seed: 3 }, nodes: { box: { type: 'box' }, loop: spec.nodes.loop, hills: { type: 'heightfield_noise', params: { amplitude: '=relief', seed: '=seed' } } } };
   check(src.graph_sha256 === nodeSha(canonicalJSON(spec)) && graphSha256(reordered) === src.graph_sha256,
     'graph_sha256: SHA-256 of the canonical graph JSON; key order does not change it');
+  // nodes_sha256: the nodes a cook of the node reads (its inputs, the nodes its params name, theirs), without ui and note
+  const parts: GraphSpec = {
+    nodes: {
+      a: { type: 'box' }, b: { type: 'transform', in: ['a'] }, e: { type: 'merge', in: ['b'] },
+      c: { type: 'sphere', params: { radius: '=ch("../d/size") * 2' } }, d: { type: 'box', params: { size: 2 } }, x: { type: 'torus' },
+    },
+  };
+  const withNode = (n: string, spec: any): GraphSpec => ({ ...parts, nodes: { ...parts.nodes, [n]: spec } });
+  check(nodesRead(parts, 'e').join() === 'a,b,e' && nodesRead(parts, 'c').join() === 'c,d' && nodesRead(parts, 'x').join() === 'x',
+    `nodesRead: inputs and the nodes params name, in turn (e: ${nodesRead(parts, 'e').join()}; c: ${nodesRead(parts, 'c').join()})`);
+  check(nodesSha256(withNode('a', { type: 'box', ui: { x: 40 }, note: 'moved' }), 'e') === nodesSha256(parts, 'e') && nodesSha256(withNode('x', { type: 'tube' }), 'e') === nodesSha256(parts, 'e')
+    && nodesSha256(withNode('a', { type: 'box', params: { size: 3 } }), 'e') !== nodesSha256(parts, 'e') && nodesSha256({ ...parts, strict: true }, 'e') !== nodesSha256(parts, 'e'),
+    'nodes_sha256: a node moved or noted, or one it does not read, leaves it; a param of one it reads, or strict, changes it');
+  const made = (o: Partial<Parameters<typeof exportSource>[0]>) => exportSource({ graph: 'parts', spec: parts, node: 'e', format: 'glb', version: '9.9.9', files: 'f1', engine: 'e1', ...o });
+  check(sameSource(made({}), made({ spec: withNode('x', { type: 'tube' }) })) && !sameSource(made({}), made({ spec: withNode('a', { type: 'box', params: { size: 3 } }) }))
+    && !sameSource(made({}), made({ files: 'f2' })) && !sameSource(made({}), made({ spec: { ...parts, vars: { k: 1 } } })) && !sameSource(made({}), made({ version: '9.9.10' }))
+    && !sameSource(made({ files: undefined }), made({ files: undefined })) && !sameSource(null, made({})),
+    'sameSource: equal but for the whole graph hash (another node edited); not with another read node, files, var or version, nor without files');
+  check(Object.keys(made({})).slice(-2).join() === 'topotopo,engine_sha256' && made({}).engine_sha256 === 'e1' && !sameSource(made({}), made({ engine: 'e2' }))
+    && !sameSource(made({ engine: undefined }), made({ engine: undefined })) && !sameSource(made({ engine: undefined }), made({})),
+    'sameSource: not when the engine code changed under the same version, nor without the engine hash (engine_sha256 after topotopo)');
+  {
+    // the engine's code hash: every file of the code tree, the kernels and fonts, and package.json; links followed
+    const eroot = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-engine-')), code = path.join(eroot, 'src');
+    for (const d of ['src/nodes', 'kernels/pkg', 'assets/fonts', 'docs']) fs.mkdirSync(path.join(eroot, d), { recursive: true });
+    fs.writeFileSync(path.join(eroot, 'package.json'), '{"version":"0.5.4"}');
+    fs.writeFileSync(path.join(code, 'cli.ts'), 'export {};\n');
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 1;\n');
+    fs.writeFileSync(path.join(eroot, 'kernels', 'pkg', 'k.wasm'), new Uint8Array([0, 97, 115, 109]));
+    const h0 = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'docs', 'notes.md'), 'not engine code');
+    const docs = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 2;\n');
+    const edited = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 1;\n');
+    const back = engineCodeHash(eroot, code);
+    fs.renameSync(path.join(code, 'nodes', 'box.ts'), path.join(code, 'nodes', 'cube.ts'));
+    const renamed = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'kernels', 'pkg', 'k.wasm'), new Uint8Array([0, 97, 115, 110]));
+    const kernel = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'package.json'), '{"version":"0.5.5"}');
+    const pkg = engineCodeHash(eroot, code);
+    check(/^[0-9a-f]{64}$/.test(h0) && docs === h0 && edited !== h0 && back === h0 && new Set([h0, renamed, kernel, pkg]).size === 4,
+      'engine code hash: a code file edited, renamed, a kernel or package.json changed each give another; other files of the package and an edit undone do not');
+    fs.rmSync(eroot, { recursive: true, force: true });
+  }
 
   // --var values and overrides (src/graph/vars.ts)
   const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test((e as Error).message); } };
@@ -318,6 +365,19 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
       `an export target records its source from the graph it is published from, every option the format reads with its default (${JSON.stringify(man.export)})`);
     writeTargets([prepared], dir);
     check(fs.existsSync(path.join(dir, 'parts', 'b.obj.source.json')) && new ArtifactStore(dir).records()[0].files.length === 2, 'writeTargets writes the manifest with the export and records both');
+    // the receipts and the record name files by their paths in the package: nothing of this machine; a file outside the
+    // package is named by its absolute path, not by a path that climbs out of it
+    const exportsDir = path.join(dir, 'exports'), inside = path.join(exportsDir, 'a.glb'), outside = path.join(path.dirname(dir), `${path.basename(dir)}-elsewhere.glb`);
+    const store = new ArtifactStore(exportsDir);
+    store.record([inside], { label: 'in' });
+    store.record([outside], { label: 'out' });
+    const receipts = JSON.parse(fs.readFileSync(path.join(exportsDir, '.outputs.json'), 'utf8')).map((a: any) => a.files[0]);
+    const back = new ArtifactStore(exportsDir).records().map((a) => a.files[0]);
+    check(JSON.stringify(receipts) === JSON.stringify(['exports/a.glb', outside]) && JSON.stringify(back) === JSON.stringify([inside, outside]),
+      `receipts: a file in the package by its package path, one outside by its absolute path, both read back (${JSON.stringify(receipts)})`);
+    const record = fs.readFileSync(path.join(dir, 'parts', 'b.obj.source.json'), 'utf8');
+    check(!record.includes(dir) && !record.includes(dir.split(path.sep).join('/')) && !/[A-Za-z]:[\\/]|"\/|\.\.\//.test(record),
+      'the source record names no machine path: the graph by name, packages by name and hash, files from its folder');
     // a target path written as the export tool's (exports/…) lands in exports/, not exports/exports/, and the graph is told
     const ge: GraphSpec = { nodes: { b: { type: 'box' } }, output: 'b', outputs: { rock: { node: 'b', export: { format: 'obj', path: 'exports/rocks/rock.obj' } } } };
     const rock = publishedOutputs('g', ge, 'b').find((p) => p.output === 'rock')!;

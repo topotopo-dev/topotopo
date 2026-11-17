@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine, geoBytes, resolveTime, STOPPED } from '../src/graph/engine.ts';
@@ -714,6 +715,12 @@ section('graph version field');
   check(any.ok, 'a graph cooks whatever version it says');
   const badV = await engine.cook({ version: -1 as any, nodes: { b: { type: 'box' } } });
   check(!badV.ok && badV.errors.some((e) => /"version" must be a non-negative integer/.test(e.message)), 'a malformed version is an error');
+  // "output" names a node; a published output's name there is answered with the node to write
+  const byName = await engine.cook({ nodes: { a: { type: 'box' }, b: { type: 'sphere' } }, output: 'kit', outputs: { kit: { node: 'a' } } });
+  const typo = await engine.cook({ nodes: { box1: { type: 'box' } }, output: 'boxl' });
+  check(!byName.ok && byName.errors[0]?.message === `output "kit" is the name of a published output, not a node: "output" names the default output's node, so write "output": "a" (outputs.kit.node)`
+    && !typo.ok && typo.errors[0]?.message === 'output "boxl" is not a node' && typo.errors[0]?.hint === 'box1',
+    `"output" naming a published output says which node to write (${byName.errors[0]?.message}); any other name is not a node, with near names`);
 
   const wsDir = path.join(tmp, 'ws');
   fs.mkdirSync(path.join(wsDir, 'graphs'), { recursive: true });
@@ -895,7 +902,7 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const s = man?.source;
   check(man?.format === 'topotopo-export-source' && JSON.stringify(man.files) === '["land.glb"]' && s.graph === 'land' && s.output === 'mesh' && s.node === 'ground'
     && s.frame === 1 && s.fps === 24 && JSON.stringify(s.vars) === '{"count":10,"relief":5,"seed":3}' && JSON.stringify(s.seeds) === '{"hills":"=seed","pts":2}'
-    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y","vertex_colors":false}}'
+    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","maps":"embed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y","vertex_colors":false}}'
     && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
     `the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format and every option with its default, graph hash, version (${JSON.stringify(s?.export)})`);
   const glb = fs.readFileSync(path.join(dir, 'a', 'land.glb'));
@@ -982,6 +989,155 @@ section('CLI --output, --var and export sources (replay from the manifest)');
     `several --output: an output that does not cook is named, the others are still written, and the run fails (${part.stdout.split('\n').filter((l) => /outputs in one run/.test(l)).join('')})`);
 }
 
+section('CLI export maps: embed, external (a shared folder, each map once), none');
+{
+  // a package whose outputs share one textured material: export targets with maps "external" share exports/maps/
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const validator = createRequire(import.meta.url)('gltf-validator');
+  const dir = path.join(tmp, 'maps-pkg');
+  fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'maps-pkg.topo'), JSON.stringify({ title: 'maps', graph: 'kit' }));
+  const g = path.join(dir, 'graphs', 'kit.json');
+  const textured = (shape: string) => ({ [`${shape}_uv`]: { type: 'uv_project', in: [shape], params: { method: 'box' } }, [`${shape}_m`]: { type: 'material', in: [`${shape}_uv`, 'brick'], params: { from: 'brick' } } });
+  fs.writeFileSync(g, JSON.stringify({
+    nodes: {
+      col: { type: 'tex_pattern', params: { resolution: 32, name: 'brick_color' } },
+      nrm: { type: 'tex_normal_from_height', in: ['col'], params: { name: 'brick_normal' } },
+      maps: { type: 'merge', in: ['col', 'nrm'] },
+      brick: { type: 'texture_to_material', in: { images: 'maps' }, params: { material: 'brick', base_color: 'brick_color', normal: 'brick_normal', roughness_value: 0.7 } },
+      box: { type: 'box' }, ball: { type: 'sphere' }, plain: { type: 'box' },
+      ...textured('box'), ...textured('ball'), ...textured('plain'),
+    },
+    output: 'box_m',
+    outputs: {
+      crate: { node: 'box_m', export: { format: 'glb', maps: 'external' } },
+      ball: { node: 'ball_m', export: { format: 'glb', path: 'round/ball.glb', maps: 'external' } },
+      bare: { node: 'plain_m', export: { format: 'gltf', maps: 'none' } },
+    },
+  }));
+  const ex = (...f: string[]) => path.join(dir, 'exports', ...f);
+  const glbJSON = (b: Uint8Array) => JSON.parse(new TextDecoder().decode(b.subarray(20, 20 + new DataView(b.buffer, b.byteOffset).getUint32(12, true))));
+  const validate = async (file: string) => {
+    const bytes = new Uint8Array(fs.readFileSync(file));
+    const rep = await validator.validateBytes(bytes, { maxIssues: 50, writeTimestamp: false, externalResourceFunction: (uri: string) => {
+      const at = path.resolve(path.dirname(file), decodeURIComponent(uri));
+      return fs.existsSync(at) ? Promise.resolve(new Uint8Array(fs.readFileSync(at))) : Promise.reject(new Error(`no ${uri}`));
+    } });
+    return { errors: rep.issues.numErrors as number, codes: [...new Set(rep.issues.messages.filter((m: any) => m.severity === 0).map((m: any) => m.code))].join(',') };
+  };
+  const all = cli(g, '--export-all');
+  const shared = fs.existsSync(ex('maps')) ? fs.readdirSync(ex('maps')).sort() : [];
+  const crate = glbJSON(new Uint8Array(fs.readFileSync(ex('crate.glb')))), ball = glbJSON(new Uint8Array(fs.readFileSync(ex('round', 'ball.glb'))));
+  check(all.status === 0 && shared.length === 2 && shared.every((f) => /^brick_(color|normal)-[0-9a-f]{12}\.png$/.test(f))
+    && JSON.stringify(crate.images.map((i: any) => i.uri).sort()) === JSON.stringify(shared.map((f) => `maps/${f}`))
+    && JSON.stringify(ball.images.map((i: any) => i.uri).sort()) === JSON.stringify(shared.map((f) => `../maps/${f}`))
+    && crate.images.every((i: any) => i.bufferView === undefined),
+    `--export-all with maps "external": both outputs reference the 2 maps of exports/maps/ by relative URI and none is inside a GLB (${all.status ? all.stderr.trim() : shared.join(', ')})`);
+  const v1 = await validate(ex('crate.glb')), v2 = await validate(ex('round', 'ball.glb'));
+  check(v1.errors === 0 && v2.errors === 0, `the glTF validator reads the external maps: 0 errors (${v1.errors} ${v1.codes}; ${v2.errors} ${v2.codes})`);
+  const bare = JSON.parse(fs.readFileSync(ex('bare.gltf'), 'utf8'));
+  const vb = await validate(ex('bare.gltf'));
+  check(!bare.images && !bare.textures && bare.materials.some((m: any) => m.name === 'brick' && !m.normalTexture && !m.pbrMetallicRoughness.baseColorTexture && m.pbrMetallicRoughness.roughnessFactor === 0.7) && vb.errors === 0,
+    `maps "none": material names and factors, no images or texture slots, validator clean (${vb.errors} ${vb.codes})`);
+  const rec = (f: string) => JSON.parse(fs.readFileSync(f + '.source.json', 'utf8'));
+  check(rec(ex('crate.glb')).source.export.options.maps === 'external' && rec(ex('bare.gltf')).source.export.options.maps === 'none'
+    && JSON.stringify([rec(ex('crate.glb')).files[0], ...rec(ex('crate.glb')).files.slice(1).sort()]) === JSON.stringify(['crate.glb', ...crate.images.map((i: any) => i.uri).sort()])
+    && JSON.stringify([rec(ex('round', 'ball.glb')).files[0], ...rec(ex('round', 'ball.glb')).files.slice(1).sort()]) === JSON.stringify(['ball.glb', ...ball.images.map((i: any) => i.uri).sort()]),
+    `the source records say which maps mode, and list the shared maps by their path from the record (${JSON.stringify(rec(ex('round', 'ball.glb')).files)})`);
+  const stamp = shared.map((f) => fs.statSync(ex('maps', f)).mtimeMs).join();
+  const again = cli(g, '--export-all');
+  check(again.status === 0 && fs.readdirSync(ex('maps')).length === 2 && shared.map((f) => fs.statSync(ex('maps', f)).mtimeMs).join() === stamp,
+    'a second --export-all leaves the unchanged maps as they are');
+  // the CLI flag on a plain --export: maps/ beside the file; embed stays the default and is the biggest
+  const out = (f: string) => path.join(dir, 'out', f);
+  const e1 = cli(g, '--output', 'crate', '--export', out('embed.glb')), e2 = cli(g, '--output', 'crate', '--maps', 'external', '--export', out('ext.glb')), e3 = cli(g, '--output', 'crate', '--maps', 'none', '--export', out('none.glb'));
+  const size = (f: string) => fs.statSync(out(f)).size;
+  check(e1.status === 0 && e2.status === 0 && e3.status === 0 && glbJSON(new Uint8Array(fs.readFileSync(out('embed.glb')))).images.length === 2 && fs.readdirSync(out('maps')).length === 2
+    && size('ext.glb') < size('embed.glb') && size('none.glb') < size('ext.glb') && /\+ 2 maps in maps\//.test(e2.stdout),
+    `--maps embed (default, ${size('embed.glb')} B) | external (${size('ext.glb')} B + maps/ beside it) | none (${size('none.glb')} B)`);
+  const bad = cli(g, '--output', 'crate', '--maps', 'linked', '--export', out('bad.glb'));
+  check(bad.status === 1 && /--maps must be one of embed, external, none/.test(bad.stderr), `--maps with another value is refused (${bad.stderr.trim()})`);
+}
+
+section('CLI --export-all: a line per output, the unchanged ones kept, --force');
+{
+  const root = path.join(import.meta.dirname, '..');
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  // a package with two outputs: a box of its own nodes, a triangle read from inputs/
+  const dir = path.join(tmp, 'skip-pkg'), g = path.join(dir, 'graphs', 'parts.json'), ex = (f: string) => path.join(dir, 'exports', f);
+  fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'inputs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'skip-pkg.topo'), JSON.stringify({ title: 'parts', graph: 'parts' }));
+  fs.writeFileSync(path.join(dir, 'inputs', 'tri.obj'), 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
+  const graph = (height: number, ui?: unknown): any => ({
+    nodes: {
+      b: { type: 'box', params: { size: [1, '=h', 1] }, ...(ui ? { ui } : {}) }, lift: { type: 'transform', in: ['b'], params: { translate: [0, 1, 0] } },
+      tri: { type: 'file', params: { path: 'inputs/tri.obj' } }, big: { type: 'transform', in: ['tri'], params: { scale: height } },
+    },
+    output: 'lift', vars: { h: 2 },
+    outputs: { crate: { node: 'lift', export: 'glb' }, sign: { node: 'big', export: { format: 'obj' } }, look: { node: 'b' } },
+  });
+  fs.writeFileSync(g, JSON.stringify(graph(2)));
+  const mtimes = () => ['crate.glb', 'sign.obj'].map((f) => fs.statSync(ex(f)).mtimeMs).join();
+  const lines = (r: ReturnType<typeof cli>) => r.stdout.split('\n').filter((l) => /^\[\d+\/\d+\]|^exported/.test(l));
+  const first = cli(g, '--export-all');
+  check(first.status === 0 && /^\[1\/2\] crate, mesh: \d+\.\d s, [\d.]+ KB → \S*crate\.glb — glb, /.test(lines(first)[0] ?? '') && /^\[2\/2\] sign, mesh: .* → \S*sign\.obj/.test(lines(first)[1] ?? '')
+    && /^exported 2 of 2 outputs into \S*exports in \d+\.\d s$/.test(lines(first)[2] ?? '') && !/^cooked /m.test(first.stdout),
+    `a line per output (name, kind, time, size, file), then the count; the default output is not cooked first (${lines(first).join(' | ')})`);
+  const stamp = mtimes();
+  const second = cli(g, '--export-all');
+  check(second.status === 0 && /^\[1\/2\] crate: unchanged since its last export, \S*crate\.glb kept$/.test(lines(second)[0] ?? '') && /^\[2\/2\] sign: unchanged/.test(lines(second)[1] ?? '')
+    && /exported 0 of 2 outputs .*; 2 unchanged since their last export, kept \(--force exports them too\)/.test(second.stdout) && mtimes() === stamp,
+    `run again, both are kept as they are (${lines(second).join(' | ')})`);
+  // moving a node in an editor changes nothing it cooks; another value of a node only crate reads re-exports crate alone
+  fs.writeFileSync(g, JSON.stringify(graph(2, { x: 40, y: 80 })));
+  const moved = cli(g, '--export-all');
+  fs.writeFileSync(g, JSON.stringify({ ...graph(2), nodes: { ...graph(2).nodes, lift: { type: 'transform', in: ['b'], params: { translate: [0, 2, 0] } } } }));
+  const edited = cli(g, '--export-all');
+  check(/exported 0 of 2/.test(moved.stdout) && /^\[1\/2\] crate, mesh: /.test(lines(edited)[0] ?? '') && /^\[2\/2\] sign: unchanged/.test(lines(edited)[1] ?? '') && /exported 1 of 2 outputs .*; 1 unchanged/.test(edited.stdout),
+    `a node moved: nothing exported; a node only crate reads changed: crate alone (${lines(edited).join(' | ')})`);
+  // a file of inputs/, a var, a missing export file, another option: exported again
+  fs.writeFileSync(path.join(dir, 'inputs', 'tri.obj'), 'v 0 0 0\nv 2 0 0\nv 0 2 0\nf 1 2 3\n');
+  const input = cli(g, '--export-all');
+  const withVar = cli(g, '--var', 'h=3', '--export-all');
+  fs.rmSync(ex('sign.obj'));
+  const missing = cli(g, '--var', 'h=3', '--export-all');
+  const frame = cli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  check(/exported 2 of 2/.test(input.stdout) && /exported 2 of 2/.test(withVar.stdout) && /^\[1\/2\] crate: unchanged/.test(lines(missing)[0] ?? '') && /^\[2\/2\] sign, mesh/.test(lines(missing)[1] ?? '')
+    && /exported 2 of 2/.test(frame.stdout),
+    `an inputs/ file, a var, a deleted export file, another frame: exported again (${[input, withVar, missing, frame].map((r) => lines(r).slice(-1)[0]).join(' | ')})`);
+  const forced = cli(g, '--var', 'h=3', '--frame', '2', '--export-all', '--force');
+  check(/exported 2 of 2 outputs/.test(forced.stdout) && !/unchanged/.test(forced.stdout), '--force exports the unchanged outputs too');
+  const rec = JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source;
+  check(/^[0-9a-f]{64}$/.test(rec.nodes_sha256) && /^[0-9a-f]{64}$/.test(rec.files_sha256) && /^[0-9a-f]{64}$/.test(rec.engine_sha256),
+    `the record holds the hashes it is compared by: nodes_sha256, files_sha256, engine_sha256 (${rec.nodes_sha256.slice(0, 12)}, ${rec.files_sha256.slice(0, 12)}, ${String(rec.engine_sha256).slice(0, 12)})`);
+  // the engine's code, not its version: a copy of this checkout (the same code elsewhere) keeps the exports, an edit
+  // to one of its files under the same version exports again
+  const copy = path.join(tmp, 'engine-copy');
+  fs.cpSync(path.join(root, 'src'), path.join(copy, 'src'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(copy, 'package.json'));
+  for (const d of ['node_modules', 'library', 'kernels', 'assets']) if (fs.existsSync(path.join(root, d))) fs.symlinkSync(path.join(root, d), path.join(copy, d), 'junction');
+  const copyCli = (...args: string[]) => spawnSync(process.execPath, [path.join(copy, 'src', 'cli.ts'), ...args], { cwd: copy, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const sameCode = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  fs.appendFileSync(path.join(copy, 'src', 'nodes', 'generate.ts'), '\n// an engine edit that keeps the version\n');
+  const editedCode = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  const after = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  check(/exported 0 of 2 outputs .*; 2 unchanged/.test(sameCode.stdout) && /exported 2 of 2 outputs/.test(editedCode.stdout) && !/unchanged/.test(editedCode.stdout) && /exported 0 of 2 outputs/.test(after.stdout)
+    && JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source.engine_sha256 !== rec.engine_sha256,
+    `the same engine code elsewhere keeps the exports; an engine file edited under the same version exports every output again (${[sameCode, editedCode, after].map((r) => lines(r).slice(-1)[0] ?? r.stderr.slice(0, 200)).join(' | ')})`);
+  // the links first (unlinking leaves the checkout's folders alone), then the copy
+  for (const d of ['node_modules', 'library', 'kernels', 'assets']) if (fs.lstatSync(path.join(copy, d), { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(path.join(copy, d));
+  fs.rmSync(copy, { recursive: true, force: true });
+  // a graph in no package: its files are not known, so every run exports
+  const loose = path.join(tmp, 'skip-loose'), lg = path.join(loose, 'one.json');
+  fs.mkdirSync(loose, { recursive: true });
+  fs.writeFileSync(lg, JSON.stringify({ nodes: { b: { type: 'box' } }, output: 'b', export: 'glb' }));
+  cli(lg, '--export-all');
+  const looseAgain = cli(lg, '--export-all');
+  check(/exported 1 of 1/.test(looseAgain.stdout) && !JSON.parse(fs.readFileSync(path.join(loose, 'exports', 'one.glb.source.json'), 'utf8')).source.files_sha256,
+    `a graph in no package exports every time (${lines(looseAgain).slice(-1)[0]})`);
+}
+
 section('CLI heightfield render resolution');
 {
   const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
@@ -1037,7 +1193,8 @@ section('relative paths read from the package folder');
   const g = path.join(proj, 'graphs', 'piece.json');
   fs.writeFileSync(g, JSON.stringify({ nodes: { f: { type: 'file', params: { path: 'inputs/tri.obj' } } }, output: 'f', export: 'obj' }));
   const r = cli(g, '--export-all');
-  check(init.status === 0 && r.status === 0 && /3 points, 1 prims/.test(r.stdout) && fs.existsSync(path.join(proj, 'exports', 'piece.obj')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
+  const obj = path.join(proj, 'exports', 'piece.obj');
+  check(init.status === 0 && r.status === 0 && fs.existsSync(obj) && fs.readFileSync(obj, 'utf8').match(/^v /gm)?.length === 3 && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
     `a graph in graphs/ reads inputs/ of its package, and --export-all writes the package's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
   check(packageBaseDir(path.join(proj, 'graphs')) === proj && packageBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'packageBaseDir: the nearest folder with a .topo file, else the folder itself');
   const e = new Engine(createNodeHost({ baseDir: path.join(proj, 'graphs') }));

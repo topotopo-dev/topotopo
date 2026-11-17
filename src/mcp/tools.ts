@@ -25,10 +25,11 @@ import { exportSource } from '../io/source.ts';
 import { packageAt, packagesUsed } from '../graph/packages.ts';
 import type { ExportSource } from '../io/source.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
-import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
+import { filesShaFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Host, StopSignal } from '../host/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
+import { engineSha256 } from '../host/engine-code.ts';
 import { program } from '../package.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
@@ -286,7 +287,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     for (const p of targets) {
       const r = await ws.cook(name, p.node, a.frame, { kind: 'export', follow });
       if (!r.ok || !r.geo) return text(reportText(name, r, engine.scriptTimeoutMs), true);
-      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root) }));
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root), files: filesShaFor(ws.graphFile(name)) }));
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
@@ -470,7 +471,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the package. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]). Every export records how it was made (graph, vars, seeds, frame, version) in its sidecar or in <file>.source.json next to it (help topic "export").',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the package. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG (maps: external writes them once into a shared maps/ folder, none leaves them out), usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]). Every export records how it was made (graph, vars, seeds, frame, version) in its sidecar or in <file>.source.json next to it (help topic "export").',
       inputSchema: {
         type: 'object',
         properties: {
@@ -491,6 +492,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: include extra numeric attributes (glTF _NAME vertex and per-instance accessors, PLY properties, USD primvars; default false for glb/gltf/usda, true for ply). The CLI flag is --custom-attribs / --no-custom-attribs' },
           materials: { type: 'boolean', description: 'glTF: write materials from the prim "material" attribute + table (default true)' },
           vertex_colors: { type: 'boolean', description: 'glTF: also write Cd as COLOR_0 on prims that have a named material (default false: the material decides their colour; prims without one keep their Cd)' },
+          maps: { type: 'string', enum: ['embed', 'external', 'none'], description: 'glTF texture maps: embed (default) = the images inside the file; external = each image written once into a shared maps/ folder (beside the export; export targets share exports/maps/) and referenced by relative URI; none = material names and factors only, no images (an engine that supplies the maps by material name). CLI --maps' },
           compress: { type: 'string', enum: ['none', 'meshopt', 'draco'], description: 'glTF: meshopt = EXT_meshopt_compression + quantization; draco needs the optional draco3dgltf package' },
           quantize: { type: 'boolean', description: 'glTF: KHR_mesh_quantization (smaller, lossy) without compression' },
           tangents: { type: 'string', enum: ['auto', 'preserve', 'none'], description: 'glTF TANGENT: auto (default) = MikkTSpace for normal-mapped materials, a valid supplied "tangent" attribute elsewhere; preserve = the supplied attribute wherever it exists (malformed = error); none = never' },
@@ -514,7 +516,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
         const source = exportSource({
           graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
-          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), version: TOPOTOPO_VERSION,
+          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), files: filesShaFor(ws.graphFile(name)), version: TOPOTOPO_VERSION, engine: engineSha256(),
         });
         const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
         return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name), follow)}`);

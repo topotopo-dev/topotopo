@@ -270,6 +270,7 @@ works in that package's folder. The first reply the agent gets says which of the
 ```
 
 The conventions are Houdini's: Y-up, metres, degrees, and attributes such as `P N Cd uv pscale orient up width name class`.
+An asset faces +Z, as in glTF and Houdini: the front view looks at it from +Z, the back view from −Z.
 
 Any param can be an expression: a string starting with `=` is evaluated as JavaScript with the graph `vars`
 (`"=count * 2"`), the cook time (`frame`, `time`, `fps`, `timeInc`) and functions that read other nodes of the same

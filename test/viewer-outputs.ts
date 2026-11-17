@@ -31,7 +31,7 @@ import { startViewer } from '../src/viewer/server.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { createOutputs, outputZip } from '../src/viewer/outputs.ts';
-import { createViews } from '../src/viewer/app/camera.js';
+import { CAMERA_NAMES, createViews, viewLabel, viewName } from '../src/viewer/app/camera.js';
 import * as km from '../src/viewer/app/keymap.js';
 import { channelPixels, zoomImage } from '../src/viewer/app/image-view.js';
 
@@ -311,6 +311,11 @@ check(v.anchor(1, null).distanceTo(c.pivot) < 1e-12, 'empty space retains pivot'
 const anchor = c.pivot.clone(), before = v.project(1, anchor); v.zoomAt(1, .5, anchor); const projected = v.project(1, anchor);
 check(Math.hypot(before.x - projected.x, before.y - projected.y) < 1e-8, 'cursor zoom holds surface anchor on screen');
 for (const r of [0.001, 1e6]) { v.frame(1, new THREE.Box3(new THREE.Vector3(-r, -r, -r), new THREE.Vector3(r, r, r))); v.zoomAt(1, 0.01, c.pivot.clone()); check(Number.isFinite(c.dist) && c.dist > 0, `navigation handles scene scale ${r}`); }
+// the axis views say the side they look from: an asset faces +Z, so the front view looks from +Z
+const front = v.cam(2), frontOrtho = viewLabel(front); v.toggleOrtho(2); const frontPersp = viewLabel(front); v.toggleOrtho(2);
+check(front.name === 'front' && frontOrtho === 'front (+Z)' && frontPersp === 'front (+Z, persp)' && viewLabel(v.cam(1)) === 'persp',
+  `view labels name the axis: ${frontOrtho}, ${frontPersp}`);
+check(CAMERA_NAMES.map(viewName).join(', ') === 'persp, top (+Y), front (+Z), right (+X), bottom (−Y), back (−Z), left (−X)', `the view menu: ${CAMERA_NAMES.map(viewName).join(', ')}`);
 const reload = createViews(() => ({ center: new THREE.Vector3(), radius: 1 })); reload.load(v.toJSON());
 check(reload.cam(1).pivot.distanceTo(c.pivot) === 0, 'camera pivot survives stored view reload');
 check(km.matchDrag('topotopo', { button: 2 }) === 'tumble' && km.matchDrag('topotopo', { button: 1 }) === 'track' && km.matchDrag('topotopo', { button: 0 }) === null, 'TopoTopo mouse binds preserve selection');

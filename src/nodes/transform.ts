@@ -420,6 +420,10 @@ defineNode({
   packed: 'keep',
   summary: 'Make N copies, each transformed cumulatively (Houdini Copy and Transform): stairs, radial arrays, stacks.',
   aliases: ['copy', 'copyxform', 'array', 'duplicate'],
+  description:
+    'Copies placed from a list instead (positions, yaw, scale and a piece name per row, from a CSV or JSON file): read ' +
+    'the list with file and instance the pieces onto it with copy_to_points {pack, variants "name", variant_attrib ' +
+    '"name", rotate_attrib "yaw"}, exported as one instanced GLB: help topic "recipes", "instance a placement list".',
   inputs: [{ name: 'geo', desc: 'geometry to copy' }],
   params: {
     count: { type: 'int', default: 4, min: 0, max: 100000, desc: 'total copies (including the original)', aliases: ['ncy', 'copies', 'n'] },

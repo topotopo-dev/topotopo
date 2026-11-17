@@ -18,10 +18,21 @@ import { baseOf, dirOf, joinPath } from './common.ts';
  * per channel). deflate compresses (Node: zlib.deflateSync); without it the PNG uses stored (uncompressed) blocks.
  */
 export function imagePNG(img: Image, layer = '', deflate?: (d: Uint8Array) => Uint8Array): Uint8Array {
+  const a = img.layer(layer || img.mainLayer), key = `${img.width}x${img.height}`;
+  const known = a && encoded.get(a)?.find((e) => e.key === key && e.deflate === deflate);
+  if (known) return known.bytes;
   const { bytes, channels } = imageToBytes(img, layer, true);
-  if (channels === 1) return encodeGreyPNG(bytes, img.width, img.height, 8, deflate);
-  return encodePNG(bytes, img.width, img.height, deflate ?? zlibStored);
+  const png = channels === 1 ? encodeGreyPNG(bytes, img.width, img.height, 8, deflate) : encodePNG(bytes, img.width, img.height, deflate ?? zlibStored);
+  if (a) { let list = encoded.get(a); if (!list) encoded.set(a, list = []); list.push({ key, deflate, bytes: png }); }
+  return png;
 }
+
+/**
+ * PNGs encoded, by the layer they encode and the compressor: a cooked image is never written again (cooked geometry is
+ * immutable; a copy shares its layers), so the maps of a package's materials, used by many exports of one run, are
+ * encoded once. Callers pass one compressor function throughout (src/host/export-targets.ts) for this to find them.
+ */
+const encoded = new WeakMap<Float32Array, { key: string; deflate?: (d: Uint8Array) => Uint8Array; bytes: Uint8Array }[]>();
 
 /** How a PNG's channels become layers: see ImageFromPNGOptions. */
 export const PNG_LAYERS = ['auto', 'grey', 'rgba'] as const;

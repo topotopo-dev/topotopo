@@ -21,7 +21,7 @@ PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pa
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
 CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the floor, from pins (pin_group / input 2) and in wind; inflate {pressure} puffs a closed mesh into a cushion or balloon. See help topic "cloth".
 
-CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
+CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. An asset faces +Z (its front looks towards +Z, as in glTF and Houdini; its right side is +X): the front view looks at it from +Z, back from −Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
 HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step, group}}); the live viewer (preview) shows them as sliders and menus, under a heading per "group". Every declared param needs a "desc" (what it does and its unit: the control's hover text; without one the build warns). People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
@@ -215,7 +215,8 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
 - The viewer shows each cook as it runs (the node, the time) and has a Stop button: a cook a person stopped fails with
   "cook stopped" at the node it stopped at. That is their decision, not an error to retry: ask before cooking it again.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
-- Output node: "output", else a node named out/OUT, else the last unconnected node.
+- Output node: "output" (a node's name; for a published output write its node, outputs.<name>.node), else a node
+  named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
   the default. Publish complete assets and useful separate parts; the viewer isolates each on click and lists
   its textures/layers. In a package that publishes versions they are its outputs; "publish": false keeps one (a viewer-only
@@ -861,6 +862,8 @@ Make them:
   pack {by: connectivity|name|attrib|all, pivot}   pieces → instances; identical pieces share one source;
                                constant name/Cd/material per piece move onto the instance.
   file *.glb                   EXT_mesh_gpu_instancing comes in packed (instancing:"expand" for real geometry).
+  file *.csv / *.json          a placement list (P, yaw, pscale, a piece name per row) as the template points: help
+                               topic "recipes", 15 (instance a placement list).
 Nodes that KEEP instances (work on anchors / packed prims): transform (also rotates/scales each instance), match_size,
   copy_xform, copy_to_points, merge, switch, null, foreach (pieces/prims/points: one iteration per instance), solver,
   graph_ref, file, delete (not edge dissolve), group, group_*, attrib_* (create, randomize, promote, delete, rename,
@@ -1398,7 +1401,8 @@ Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
 overlays and notes pieces, open edges and back-facing % (also returned as text notes).
 VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
-  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>, and the three-quarter views
+  persp, front (looking from +Z, at an asset's front), back (from −Z), left (−X), right (+X), top (+Y), bottom (−Y),
+  uv, section, texture, persp@<azimuth>, and the three-quarter views
   front_left, front_right, back_left, back_right (persp at azimuth -45, 45, -135, 135).
   "texture" draws images flat (texture:"<image>" | "image/layer" | "<material>" picks; a geometry holding only images
   renders as it by default); textures:true shows base colour maps on the mesh. Help topic "textures".
@@ -1514,18 +1518,31 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
-  prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
-  uncompressed GLB.
+  prims), meshes (instance rows: also write one GLB per source, default true), maps "embed" | "external" | "none"
+  (glb / gltf texture maps, MAPS below). For Unreal and Blender keep the default uncompressed GLB.
+MAPS (glb / gltf; CLI --maps, export targets and the export tool "maps"): where the images of the materials go.
+  embed (default): inside the file. Self-contained, but every module carries full copies of the maps it uses.
+  external: each distinct image is written once as <image>-<hash>.png (or .jpg) in a shared maps/ folder and the glTF
+    references it by relative URI: maps/ beside the export file, and exports/maps/ for export targets (--export-all,
+    the viewer's Export, export {all:true}), so every output of a package reuses the same files and a run writes each
+    map once. The name carries the image's content hash, so two images never overwrite each other and an unchanged map
+    is not written again; a changed map gets a new file (clear maps/ and export again to drop the old ones).
+  none: no images and no texture slots: material names and factors only (each material as if it had no maps: its own
+    base colour, roughness and metallic; the material extras still name its maps). For an engine that supplies the maps
+    by material name; the glTF stays small and nothing is read or encoded.
 SOURCE: every export (export tool, export targets and the viewer's Export and Download buttons, the CLI's --export and
   --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
-  cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
+  cooked: vars after overrides, keys sorted, no whitespace), nodes_sha256 (SHA-256 of the nodes the node's cook reads:
+  it, its inputs and the nodes its params name, theirs in turn, without their ui and note; an edit to another output's
+  nodes leaves it), files_sha256 (only for a graph in a package: SHA-256 of the package files its cook may read
+  besides the graph file: its other graphs, assets/ and inputs/), output (a named output, else null), node, frame, fps, vars
   (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
   packages (only when the graph uses packages: "owner/name@version" → the version's hash, every version it uses, and
   "owner/name@working" → the hash of a working folder the export followed), followed (only when it followed one: those
   packages, no published version; the export is made again only from those folders as they were, and replay passes
   --follow for each; help topic "packages", EXPORTING FROM A WORKING FOLDER),
   export: {format, options: every option the format reads, the given ones and the defaults of the rest}, topotopo (the
-  version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
+  version), engine_sha256 (SHA-256 of the engine's own code: its src/ or dist/ tree, kernels, fonts and package.json)}. png16 / r16 carry it in their .json sidecar, csv / points.json
   instance rows in <name>.meshes.json, unreal_landscape in landscape.json; every other export writes <file>.source.json
   next to the file ({format:"topotopo-export-source", version, files, source}; a textures folder: source.json inside
   it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
@@ -1537,6 +1554,14 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
       --instancing packed --materials --no-quantize --scale 100 --split-by-name --tangents auto --up-axis z --export crate.glb
   These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
   them with it (kind "metadata"), and a file node reading one says what to read instead.
+EXPORT-ALL (CLI --export-all): cooks and exports each output with an export target, one line per output (its name,
+  kind, time, size and file), then writes them all (nothing when one fails to cook). It cooks only the outputs it
+  exports, not the default output first. In a package, an output is kept as it is when its last export would be made
+  the same: its receipt in exports/.outputs.json, every file it wrote still there, and the record's source block equal
+  to the one an export would write now but for graph_sha256 and seeds (so its nodes, vars, frame, fps, packages, files
+  of the package, export options and the engine's code: any edit to it, as in a source checkout under one version,
+  exports again). Its line says "unchanged since its last export"; --force
+  exports it anyway. A graph in no package exports every output every time (its files are not known).
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or
@@ -1756,7 +1781,27 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
  topotopo/architecture/wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true on the front) +
  topotopo/architecture/roof_gable or roof_hip translated to the wall top; topotopo/street/fence and bench,
  topotopo/props/crate and topotopo/nature/tree_lowpoly placed with transform or copy_to_points;
- topotopo/nature/forest_patch on a grid for a park. Whole graph: examples/street_block.json.`,
+ topotopo/nature/forest_patch on a grid for a park. Whole graph: examples/street_block.json.
+15) Instance a placement list (a position, yaw, scale and piece name per row, from a file) into one instanced GLB:
+ placements  file {path:"inputs/placements.json"}: a JSON list of rows [{"P":[2,0,0], "yaw":45, "pscale":1.2,
+             "name":"barrel"}, …], or a CSV with the columns P.x,P.y,P.z,yaw,pscale,name; every key or column is a
+             point attribute (orient.x…w or N and up in place of yaw, scale for a per-axis scale; yaw in degrees,
+             counter-clockwise seen from above, so a list from Unreal, clockwise, needs its sign flipped).
+ pieces      one file node per piece (pieces/crate.glb, or a package output in its place) + attrib_create
+             {name:"name", class:"prim", value:"crate"}, merged; or a folder, file {path:"pieces"}, whose files
+             are named after their stems ("<stem>/<part>" for a file with several named parts: wrangle
+             {run_over:"prims", code:"s@name = @name.split('/')[0];"} makes each file one piece again).
+ instance    copy_to_points {pack:true, variants:"name", variant_attrib:"name", rotate_attrib:"yaw"} (in: pieces,
+             placements); rows naming no piece get no copy and a warning that lists them.
+ export      glb: one mesh per piece with EXT_mesh_gpu_instancing (help topic "instancing").
+ {"nodes":{"crate":{"type":"file","params":{"path":"pieces/crate.glb"}},
+  "crate_n":{"type":"attrib_create","in":["crate"],"params":{"name":"name","class":"prim","value":"crate"}},
+  "barrel":{"type":"file","params":{"path":"pieces/barrel.glb"}},
+  "barrel_n":{"type":"attrib_create","in":["barrel"],"params":{"name":"name","class":"prim","value":"barrel"}},
+  "pieces":{"type":"merge","in":["crate_n","barrel_n"]},
+  "spots":{"type":"file","params":{"path":"inputs/placements.json"}},
+  "layout":{"type":"copy_to_points","in":["pieces","spots"],"params":{"pack":true,"variants":"name","variant_attrib":"name","rotate_attrib":"yaw"}}},
+  "output":"layout"}`,
 };
 
 export function topicList() {
