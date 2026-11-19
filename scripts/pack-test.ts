@@ -24,6 +24,8 @@
 //   dependencies.
 // - `topotopo open <package>` from the installed bin: it starts the web app of the installed dist/ unseen, on a folder and
 //   a config of its own, records the address instead of opening a browser, the address answers, and a second open reuses it.
+// - On Windows, `topotopo setup` from the installed bin against a scratch registry key and Start menu folder (never the real ones):
+//   the file links name the installed launcher, Node.js and icons, and `setup --remove` leaves the scratch key as it was.
 // - On Windows, the launcher from the installed package (launcher/win32-x64/topotopo-open.exe): it finds the installed
 //   command line and a Node.js by itself and reports a failing open.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
@@ -176,6 +178,37 @@ try {
     const said = (r.stderr ?? '').replace(/\r\n/g, '\n');
     check(r.status !== 0 && said.startsWith('TopoTopo could not open missing.topo.\n\n') && said.trim().split('\n').length > 2 && !said.includes('src/cli.ts'),
       `installed launcher runs the installed command line: open on a missing file fails and says why (exit ${r.status}: ${JSON.stringify(said.split('\n')[2] ?? '')})`);
+  }
+
+  // ------------------------------------------------------------------------------------------------ setup
+  if (process.platform === 'win32') {
+    step(`setup: npm exec --no -- ${BIN} setup, against a scratch registry key and Start menu folder`);
+    // the installed command line writes the file links against a scratch key (never HKCU\Software\Classes) and a temporary
+    // Start menu folder, they point at the installed launcher and icons, and setup --remove leaves the key as it was
+    const scratch = `HKCU\\Software\\TopoTopoTest-pack-${process.pid}`;
+    const startMenu = path.join(tmp, 'start menu');
+    const setupEnv = { ...process.env, TOPOTOPO_SETUP_CLASSES: `${scratch}\\Classes`, TOPOTOPO_SETUP_FILEEXTS: `${scratch}\\FileExts`, TOPOTOPO_SETUP_START_MENU: startMenu, TOPOTOPO_SETUP_NO_NOTIFY: '1', TOPOTOPO_HOME: path.join(tmp, 'setup-home') };
+    const reg = (...a: string[]) => spawnSync('reg.exe', a, { encoding: 'utf8', windowsHide: true });
+    const exportKey = (key: string) => { const f = path.join(tmp, `${Math.random().toString(36).slice(2)}.reg`); return reg('export', key, f, '/y').status === 0 ? fs.readFileSync(f).toString('utf16le') : null; };
+    const valueOf = (key: string, name?: string) => { const m = /REG_SZ\s+(.*)\r?$/m.exec(reg('query', key, ...(name ? ['/v', name] : ['/ve'])).stdout ?? ''); return m?.[1] ?? ''; };
+    try {
+      check(reg('add', `${scratch}\\Classes\\.topo`, '/ve', '/d', 'Other.App', '/f').status === 0, 'the scratch registry key is made');
+      const before = exportKey(`${scratch}\\Classes`);
+      const said = sh(`npm exec --no -- ${BIN} setup`, app, setupEnv);
+      const open = valueOf(`${scratch}\\Classes\\TopoTopo.Package\\shell\\open\\command`);
+      const launcherPath = path.join(installed, 'launcher', 'win32-x64', 'topotopo-open.exe');
+      const node = /--node "([^"]+)" "%1"$/.exec(open)?.[1];
+      check(open.startsWith(`"${launcherPath}" --node "`) && !!node && fs.existsSync(node), `setup from the installed package links the files to the installed launcher and the Node.js it runs with (${open})`);
+      const icons = ['Package', 'Workspace'].map((k) => valueOf(`${scratch}\\Classes\\TopoTopo.${k}\\DefaultIcon`));
+      check(icons[0] === path.join(installed, 'assets', 'icons', 'topotopo-package.ico') && icons[1] === path.join(installed, 'assets', 'icons', 'topotopo-workspace.ico') && icons.every((f) => fs.existsSync(f)),
+        'the icons are the installed package\'s and exist');
+      check(valueOf(`${scratch}\\Classes\\.topo`) === 'TopoTopo.Package' && valueOf(`${scratch}\\Classes\\.topows`) === 'TopoTopo.Workspace' && fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')) && /setup --remove/.test(said),
+        'the .topo and .topows links and the Start menu entry are made');
+      const removed = sh(`npm exec --no -- ${BIN} setup --remove`, app, setupEnv);
+      check(exportKey(`${scratch}\\Classes`) === before && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')) && /everything is as it was/.test(removed), 'setup --remove leaves the scratch key as it was and the Start menu entry gone');
+    } finally {
+      reg('delete', scratch, '/f');
+    }
   }
 
   // ------------------------------------------------------------------------------------------------ open

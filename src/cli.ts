@@ -29,6 +29,8 @@
 //   node src/cli.ts open [<file.topo | file.topows | folder>]   open a package or workspace in the browser (what a
 //                                                         double-click runs); starts the web app unseen when none runs;
 //                                                         open --stop stops that web app
+//   node src/cli.ts setup [--remove]                      Windows: file links so a double-click opens a package or
+//                                                         workspace, a folder menu entry, the Start menu; --remove undoes it
 //   node src/cli.ts library add|remove|list|new|bake …    registered libraries and packages; edit [folder] opens the
 //                                                         live viewer on a package
 // The workspace around packages (src/workspace.ts), a package and the packages it uses (src/packages/commands.ts,
@@ -192,6 +194,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
     `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: the registered workspaces and every library's packages, stable links for a board)`,
     `       ${prog} open [<file.topo | file.topows | folder>]   (open a package or workspace in the browser, starting the web app unseen when none runs: what double-clicking the file runs; no path: the home page; open --stop stops that web app; $TOPOTOPO_HOME names the TopoTopo folder, $TOPOTOPO_BROWSER_LOG a file to write the address to instead of opening a browser)`,
+    `       ${prog} setup [--remove]   (Windows: after this, double-clicking a .topo package or .topows workspace opens it in TopoTopo with its icon, folders get "Open in TopoTopo" in the right-click menu and TopoTopo is in the Start menu; per user, no administrator rights; setup --remove puts the registry and the Start menu back as they were; $TOPOTOPO_HOME names the TopoTopo folder, which holds the record setup undoes from)`,
     `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
     '       a package and the packages it uses (a folder named must exist; default: the current folder\'s package; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
@@ -280,6 +283,11 @@ if (argv[0] === 'view') {
   const { openCommand } = await import('./host/open.ts');
   const { consoleIo } = await import('./packages/commands.ts');
   process.exit(await openCommand(argv.slice(1), prog, consoleIo));
+} else if (argv[0] === 'setup') {
+  // `topotopo setup [--remove]`: the Windows file links, folder menu entry and Start menu entry (src/host/setup.ts)
+  const { setupCommand } = await import('./host/setup.ts');
+  const { consoleIo } = await import('./packages/commands.ts');
+  process.exit(await setupCommand(argv.slice(1), prog, consoleIo));
 } else if (['web', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'check', 'update'].includes(argv[0])) {
   // the web app, its libraries and its editor; a package and the packages it uses (src/packages/commands.ts). A command that ends
   // gives its exit code; the web app and the editor keep running
