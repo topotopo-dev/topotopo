@@ -70,10 +70,26 @@ function dump(root: string): Map<string, Map<string, [string, string]>> {
   return keys;
 }
 
-const lnkInfo = (lnk: string) => {
-  const r = spawnSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:TT_LNK); $s.TargetPath; $s.Arguments; $s.IconLocation"], { windowsHide: true, encoding: 'utf8', env: { ...process.env, TT_LNK: lnk } });
-  const [target, args, icon] = (r.stdout ?? '').split(/\r?\n/);
-  return { target, args, icon };
+/** What a .lnk file holds, read from the file itself (the shell link format: target, arguments, icon as Unicode strings). */
+const lnkInfo = (file: string) => {
+  const b = fs.readFileSync(file);
+  const flags = b.readUInt32LE(0x14);
+  let p = 0x4c;
+  if (flags & 0x1) p += 2 + b.readUInt16LE(p); // the target's item list
+  let target = '';
+  if (flags & 0x2) { // link info: the local base path, in Unicode when the header says so
+    const size = b.readUInt32LE(p), header = b.readUInt32LE(p + 4);
+    const at = header >= 0x24 ? p + b.readUInt32LE(p + 28) : p + b.readUInt32LE(p + 16);
+    let end = at;
+    if (header >= 0x24) { while (b.readUInt16LE(end) !== 0) end += 2; target = b.toString('utf16le', at, end); } else { while (b[end] !== 0) end++; target = b.toString('latin1', at, end); }
+    p += size;
+  }
+  const str = () => { const n = b.readUInt16LE(p); const t = b.toString('utf16le', p + 2, p + 2 + n * 2); p += 2 + n * 2; return t; };
+  if (flags & 0x4) str();
+  if (flags & 0x8) str();
+  if (flags & 0x10) str();
+  const args = flags & 0x20 ? str() : '', icon = flags & 0x40 ? str() : '';
+  return { target, args, icon: `${icon},${b.readInt32LE(0x38)}` };
 };
 
 /** The real keys setup would write and the real files, read only: they must be as they were when this test is over. */
@@ -134,6 +150,14 @@ try {
     check(noDist.code === 1 && noDist.err.length === 1 && /^this is a source checkout that was never built \(dist\/cli\.js is missing\): run npm run build once, then topotopo setup again$/.test(noDist.err[0]), `a source checkout that was never built: one sentence (${noDist.err[0]})`);
     check(exportText(CLASSES) === before0 && !fs.existsSync(path.join(home, 'setup.json')) && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')), 'none of those messages changed the registry, the Start menu or the TopoTopo folder');
 
+    // ---- a Start menu override that is empty or not a full path is refused, never the real Start menu
+    for (const bad of ['', 'Programs', 'C:']) {
+      process.env.TOPOTOPO_SETUP_START_MENU = bad;
+      const refused = await say([], opts);
+      check(refused.code === 1 && refused.err.length === 1 && /^TOPOTOPO_SETUP_START_MENU must be the full path of a folder/.test(refused.err[0]) && exportText(CLASSES) === before0 && !fs.existsSync(path.join(home, 'setup.json')), `TOPOTOPO_SETUP_START_MENU="${bad}" is refused (${refused.err[0]})`);
+    }
+    process.env.TOPOTOPO_SETUP_START_MENU = startMenu;
+
     // ---- --remove without a setup
     const nothing = await say(['--remove'], opts);
     check(nothing.code === 0 && nothing.out.length === 1 && /^nothing to remove: setup has not been run/.test(nothing.out[0]) && !nothing.err.length && exportText(CLASSES) === before0, `--remove without a setup is one sentence and a no-op (${nothing.out[0]})`);
@@ -159,7 +183,7 @@ try {
     put('applications\\topotopo-open.exe\\supportedtypes', '.topo', 'REG_SZ', ''); put('applications\\topotopo-open.exe\\supportedtypes', '.topows', 'REG_SZ', '');
     put('applications\\topotopo-open.exe\\shell\\open\\command', '', 'REG_SZ', cmd('%1'));
     put('directory\\shell\\mine', '', 'REG_SZ', 'my entry');
-    for (const [k, arg] of [['directory\\shell\\topotopo', '%1'], ['directory\\background\\shell\\topotopo', '%V']]) {
+    for (const [k, arg] of [['directory\\shell\\topotopo', '%1'], ['directory\\background\\shell\\topotopo', '%V\\.']]) {
       put(k, '', 'REG_SZ', 'Open in TopoTopo'); put(k, 'Icon', 'REG_SZ', icon('package')); put(`${k}\\command`, '', 'REG_SZ', cmd(arg));
     }
     const expectedKeys = new Set([...[...expected.keys()].flatMap((k) => k.split('\\').map((_, i, p) => p.slice(0, i + 1).join('\\')))]);
@@ -195,13 +219,18 @@ try {
     check(second.code === 0 && /^already in place, nothing changed: /.test(second.out[0] ?? '') && exportText(CLASSES) === after1 && fs.readFileSync(path.join(home, 'setup.json'), 'utf8') === recordText
       && fs.statSync(lnk).mtimeMs === lnkBefore.mtimeMs, 'a second setup changes nothing: the keys, the record and the Start menu file are as they were');
 
-    // ---- a protected user choice for another program: the links are written, the person is told
+    // ---- a protected user choice for another program: the links are written, the message does not claim what is not so
     regRun('add', `${FILEEXTS}\\.topows\\UserChoice`, '/v', 'ProgId', '/d', 'Applications\\other.exe', '/f');
     const chosen = await say([], opts);
-    check(chosen.code === 0 && chosen.out.length === 4 && /^note: Windows already has your own choice of program for \.topows files \(Applications\\other\.exe\).*Open with.*TopoTopo/.test(chosen.out[3]) && exportText(CLASSES) === after1,
-      `a user choice for another program is told how to pick TopoTopo in Open with, and never written (${chosen.out[3]?.slice(0, 80)})`);
+    check(chosen.code === 0 && chosen.out.length === 3 && /^already in place, nothing changed: the TopoTopo links are written, but Windows keeps your own choice of program for \.topows files \(Applications\\other\.exe\).*Open with, then TopoTopo, then Always; \.topo files open in TopoTopo when double-clicked$/.test(chosen.out[0]) && !/now have/.test(chosen.out[0]) && exportText(CLASSES) === after1,
+      `a user choice for another program: the links are written and the person is told what to pick, not that files open in TopoTopo (${chosen.out[0]?.slice(0, 110)})`);
     check(regRun('query', `${FILEEXTS}\\.topows\\UserChoice`).stdout.includes('Applications\\other.exe') && !regRun('query', `${FILEEXTS}\\.topo\\UserChoice`).stdout.includes('TopoTopo'), 'the user choice key is as it was');
-    regRun('delete', `${FILEEXTS}\\.topows`, '/f');
+    regRun('delete', `${FILEEXTS}\\.topows\\UserChoice`, '/f');
+    regRun('add', `${FILEEXTS}\\.topo\\UserChoice`, '/v', 'ProgId', '/d', 'Applications\\topotopo-open.exe', '/f');
+    regRun('add', `${FILEEXTS}\\.topows\\UserChoice`, '/v', 'ProgId', '/d', 'TopoTopo.Workspace', '/f');
+    const ours = await say([], opts);
+    check(ours.code === 0 && /^already in place, nothing changed: \.topo packages and \.topows workspaces now have the TopoTopo icons and open in TopoTopo when double-clicked$/.test(ours.out[0]), `a user choice of TopoTopo's own (the exe or a ProgID) counts as ours (${ours.out[0]?.slice(0, 60)})`);
+    regRun('delete', `${FILEEXTS}`, '/f');
 
     // ---- remove
     const removed = await say(['--remove'], opts);
@@ -213,15 +242,74 @@ try {
     const again = await say(['--remove'], opts);
     check(again.code === 0 && /^nothing to remove/.test(again.out[0] ?? '') && exportText(CLASSES) === before0, 'a second --remove is a no-op');
 
+    // ---- --remove looks before it writes: what something else changed since setup is left alone
+    await say([], opts);
+    regRun('add', `${CLASSES}\\.topo`, '/ve', '/d', 'Another.Program', '/f'); // another program took .topo
+    regRun('add', `${CLASSES}\\TopoTopo.Package`, '/v', 'Foreign', '/d', 'x', '/f'); // and put its own value in TopoTopo's ProgID
+    const careful = await say(['--remove'], opts);
+    const kept = dump(CLASSES);
+    check(careful.code === 0 && careful.out.length === 1 && /^removed what setup wrote, except what something else has changed since and is left as it is: .*\.topo \(default value\)/.test(careful.out[0]) && kept.get('.topo')?.get('')?.[1] === 'Another.Program' && kept.get('.topo')?.get('Keep')?.[1] === 'mine',
+      `a value another program changed since setup is left alone, in one line (${careful.out[0]?.slice(0, 120)})`);
+    check(kept.get('topotopo.package')?.size === 1 && kept.get('topotopo.package')?.get('Foreign')?.[1] === 'x' && !kept.has('topotopo.package\\defaulticon') && !kept.has('topotopo.package\\shell') && !kept.has('topotopo.workspace') && !kept.has('applications') && !kept.has('directory\\shell\\topotopo') && !kept.has('.topo\\openwithprogids'),
+      'a key setup made that now holds something else keeps only that; the rest of setup\'s keys and values are removed');
+    check(!fs.existsSync(path.join(home, 'setup.json')) && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')), 'the record and the Start menu entry are gone');
+    regRun('add', `${CLASSES}\\.topo`, '/ve', '/d', 'Other.App', '/f');
+    regRun('delete', `${CLASSES}\\TopoTopo.Package`, '/f');
+    check(exportText(CLASSES) === before0, 'with the leftovers put away, the scratch key is as it was before setup');
+
+    // ---- a lost record does not poison the next setup
+    regRun('delete', `${CLASSES}\\.topo`, '/ve', '/f');
+    const before1 = exportText(CLASSES);
+    await say([], opts);
+    fs.rmSync(path.join(home, 'setup.json'));
+    const orphans = await say(['--remove'], opts);
+    check(orphans.code === 1 && orphans.err.length === 1 && /^TopoTopo file links exist but .*setup\.json is missing, so what they replaced is not known: run topotopo setup once, and then topotopo setup --remove clears them$/.test(orphans.err[0]) && dump(CLASSES).has('topotopo.package'),
+      `--remove with links but no record says so in one sentence and changes nothing (${orphans.err[0]?.slice(0, 90)})`);
+    await say([], opts);
+    const rebuilt = JSON.parse(fs.readFileSync(path.join(home, 'setup.json'), 'utf8'));
+    check(rebuilt.values.every((v: any) => v.before === null) && rebuilt.keys.some((k: any) => k.key === 'Applications' && !k.existed) && rebuilt.keys.some((k: any) => k.key === '.topo' && k.existed) && !rebuilt.shortcut.replaced && !fs.existsSync(path.join(home, 'setup-backup')),
+      'a setup that finds TopoTopo\'s own links without a record records that nothing was there before (the shortcut too)');
+    const cleared = await say(['--remove'], opts);
+    check(cleared.code === 0 && exportText(CLASSES) === before1 && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')), 'setup once more and --remove clear the links a lost record left');
+    regRun('add', `${CLASSES}\\.topo`, '/ve', '/d', 'Other.App', '/f');
+
     // ---- a Start menu file that was there is put back; paths with letters beyond ASCII survive
     fs.writeFileSync(lnk, 'someone else\'s shortcut');
     const odd = install(path.join(tmp, 'Lietuvių įdiegimas č'));
     const uni = await say([], { ...opts, root: odd });
     const text = exportText(CLASSES) ?? '';
+    const oddLnk = lnkInfo(lnk), oddLauncher = path.join(odd, 'launcher', 'win32-x64', 'topotopo-open.exe');
+    check(oddLnk.target === oddLauncher && oddLnk.args === `--node "${node}"` && oddLnk.icon === `${path.join(odd, 'assets', 'icons', 'topotopo-package.ico')},0`, `the shortcut's target and icon keep the letters of an install path beyond ASCII (${oddLnk.target})`);
     check(uni.code === 0 && text.includes(odd.replaceAll('\\', '\\\\')) && fs.statSync(lnk).size !== 'someone else\'s shortcut'.length, 'a path with Lithuanian letters is written as it is');
     const uniRemoved = await say(['--remove'], opts);
     check(uniRemoved.code === 0 && fs.readFileSync(lnk, 'utf8') === 'someone else\'s shortcut' && exportText(CLASSES) === before0 && !fs.existsSync(path.join(home, 'setup-backup')), 'a Start menu file that setup replaced is put back by --remove');
     fs.rmSync(lnk, { force: true });
+
+    // ---- "Open in TopoTopo" on a folder's background, a drive root too: the command line Explorer runs, through the launcher
+    const recorder = install(path.join(tmp, 'argv recorder'));
+    fs.writeFileSync(path.join(recorder, 'dist', 'package.json'), '{"type":"commonjs"}');
+    fs.writeFileSync(path.join(recorder, 'dist', 'cli.js'), "require('fs').appendFileSync(process.env.TT_ARGV, JSON.stringify(process.argv.slice(2)) + '\\n');\n");
+    await say([], { ...opts, root: recorder, node: process.execPath });
+    const bg = dump(CLASSES).get('directory\\background\\shell\\topotopo\\command')?.get('')?.[1] ?? '';
+    const argvLog = path.join(tmp, 'argv.log');
+    const launchWith = (commandLine: string, folder: string) => {
+      spawnSync('cmd.exe', ['/d', '/s', '/c', `"${commandLine.replace('%V', () => folder)}"`], { windowsVerbatimArguments: true, env: { ...process.env, TT_ARGV: argvLog, TOPOTOPO_LAUNCHER_QUIET: '1' }, windowsHide: true, timeout: 60_000 });
+      const lines = fs.existsSync(argvLog) ? fs.readFileSync(argvLog, 'utf8').trim().split('\n').filter(Boolean) : [];
+      return lines.length ? (JSON.parse(lines.at(-1)!) as string[]) : null;
+    };
+    const driveRoot = path.parse(tmp).root, ordinary = path.join(tmp, 'ordinary folder');
+    fs.mkdirSync(ordinary);
+    const same = (a: string | undefined, b: string) => !!a && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+    check(/^"[^"]+topotopo-open\.exe" --node "[^"]+" "%V\\\."$/.test(bg), `the background command ends its folder in \\. inside the quotes (${bg.slice(-30)})`);
+    fs.rmSync(argvLog, { force: true });
+    const atRoot = launchWith(bg, driveRoot);
+    check(atRoot?.[0] === 'open' && atRoot.length === 2 && !atRoot[1].includes('"') && same(atRoot[1], driveRoot), `the command line for a drive root (${driveRoot}) gives open that drive root (${JSON.stringify(atRoot)})`);
+    const atFolder = launchWith(bg, ordinary);
+    check(atFolder?.[0] === 'open' && atFolder.length === 2 && !atFolder[1].includes('"') && same(atFolder[1], ordinary), `the same command line for an ordinary folder gives open that folder (${JSON.stringify(atFolder)})`);
+    const plain = launchWith(bg.replace('%V\\.', '%V'), driveRoot);
+    check(plain === null || !same(plain[1], driveRoot), `the plain "%V" form would not have (${JSON.stringify(plain)}): the test can tell`);
+    await say(['--remove'], opts);
+    check(exportText(CLASSES) === before0, 'and --remove puts the scratch key back');
 
     // ---- through the command line (a source checkout without dist/ is the one-sentence message; with dist/ the whole round trip)
     const env = { ...process.env, TOPOTOPO_SETUP_CLASSES: CLASSES, TOPOTOPO_SETUP_FILEEXTS: FILEEXTS, TOPOTOPO_SETUP_START_MENU: startMenu, TOPOTOPO_SETUP_NO_NOTIFY: '1', TOPOTOPO_HOME: path.join(tmp, 'cli home') };
