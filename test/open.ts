@@ -17,6 +17,7 @@ import { initWorkspace } from '../src/workspace.ts';
 import { engineSha256 } from '../src/host/engine-code.ts';
 import { TOPOTOPO_VERSION } from '../src/host/version.ts';
 import { lockFile, openCommand, probe, resolveTarget } from '../src/host/open.ts';
+import type { OpenOptions } from '../src/host/open.ts';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -68,18 +69,30 @@ const fake = async (health: object, delay = 0) => {
 let home = '';
 const spawnedPids: number[] = [];
 const urls: string[] = [];
+let callOptions: Partial<OpenOptions> = {};
 const opened = async (...argv: string[]) => {
   const out: string[] = [], err: string[] = [];
-  const code = await openCommand(argv, 'topotopo', { out: (s) => out.push(s), err: (s) => err.push(s) }, { browser: async (u) => { urls.push(u); }, spawned: (pid) => { spawnedPids.push(pid); own.add(pid); } });
+  const code = await openCommand(argv, 'topotopo', { out: (s) => out.push(s), err: (s) => err.push(s) }, { browser: async (u) => { urls.push(u); }, spawned: (pid) => { spawnedPids.push(pid); own.add(pid); }, ...callOptions });
   return { code, out, err, url: urls.at(-1) };
 };
+/** the same with options for this call only (a shorter deadline, a shorter wait for a web app that does not answer) */
+const openedWith = async (options: Partial<OpenOptions>, ...argv: string[]) => { callOptions = options; try { return await opened(...argv); } finally { callOptions = {}; } };
+/** a POST as it is sent: its status */
+const post = (port: number, p: string, headers: Record<string, string>) => new Promise<number>((resolve, reject) => {
+  const q = http.request({ host: '127.0.0.1', port, path: p, method: 'POST', headers: { connection: 'close', ...headers } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+  q.on('error', reject); q.end('{}');
+});
+const connects = (port: number) => new Promise<boolean>((resolve) => { const c = net.connect(port, '127.0.0.1'); c.once('connect', () => { c.destroy(); resolve(true); }); c.once('error', () => resolve(false)); });
 const hereHealth = (pid: number) => ({ web: true, pid, version: TOPOTOPO_VERSION, engine: engineSha256(), open: true });
 
 try {
   home = path.join(tmp, 'home');
   fs.mkdirSync(home);
   const cfgFile = path.join(home, 'config.json');
-  const cfgText = JSON.stringify({ web: { port: await freePort() }, libraries: [{ name: 'shared', path: path.join(tmp, 'shared') }] });
+  const cfgWs = path.join(tmp, 'cfgws', 'file-name');
+  fs.mkdirSync(cfgWs, { recursive: true });
+  fs.writeFileSync(path.join(cfgWs, 'file-name.topows'), JSON.stringify({ engine: 'none' }));
+  const cfgText = JSON.stringify({ web: { port: await freePort() }, libraries: [{ name: 'shared', path: path.join(tmp, 'shared') }], workspaces: [{ name: 'cfg-name', path: cfgWs }] });
   fs.writeFileSync(cfgFile, cfgText);
   process.env.TOPOTOPO_HOME = home;
   process.env.TOPOTOPO_CONFIG = cfgFile;
@@ -194,19 +207,85 @@ try {
   check(spacedOpen.code === 0 && (await get(spacedOpen.url!)).status === 200 && wsSpacedOpen.code === 0 && (await get(wsSpacedOpen.url!)).status === 200,
     `paths with spaces and non-ASCII letters open (${spacedOpen.url}, ${wsSpacedOpen.url})`);
 
+  // ---- a name some listed workspace has in its pages (its file's, not its config name) is taken
+  const clashPkg = mkPkg('namesake', 'file-name');
+  const namesake = await opened(path.join(clashPkg, 'file-name.topo'));
+  check(namesake.code === 0 && namesake.url === `${base}/l/file-name-2/` && (await get(namesake.url!)).status === 200 && (await get(`${base}/w/file-name/`)).status === 200 && !(await get(`${base}/w/file-name/`)).text.includes('namesake'),
+    `a package opened by itself does not take the name a listed workspace shows under (${namesake.url ?? namesake.err[0]})`);
+
+  // ---- a root that goes away while the web app runs: dropped, the web app stays up
+  const bakedIn = async (d: string) => { for (let i = 0; i < 240 && !fs.existsSync(path.join(d, '.web', 'bake.json')); i++) await sleep(250); };
+  const up = async () => { const h = await probe(lock1!.port, 5000); return h.state === 'live' && h.health.pid === lock1!.pid && alive(lock1!.pid); };
+  const gone3 = ['gone-a', 'gone-b', 'gone-c'].map((id) => mkPkg('vanish', id));
+  for (const d of gone3) { const o = await opened(path.join(d, `${path.basename(d)}.topo`)); check(o.code === 0 && (await get(o.url!)).status === 200, `${path.basename(d)} is listed by itself`); }
+  const wsGone = ['ws-ren', 'ws-del'].map((n) => {
+    const d = path.join(tmp, 'vanishws', n);
+    fs.mkdirSync(path.join(d, 'inner'), { recursive: true });
+    initWorkspace(d, { engine: 'none' });
+    initPackage(path.join(d, 'inner'));
+    return d;
+  });
+  for (const d of wsGone) { const o = await opened(d); check(o.code === 0 && (await get(o.url!)).status === 200, `${path.basename(d)} is listed for the run`); }
+  for (const d of [...gone3, ...wsGone.map((w) => path.join(w, 'inner'))]) await bakedIn(d);
+  fs.renameSync(gone3[0], `${gone3[0]}-renamed`);
+  fs.mkdirSync(path.join(tmp, 'vanish-moved'));
+  fs.renameSync(gone3[1], path.join(tmp, 'vanish-moved', 'gone-b'));
+  fs.rmSync(gone3[2], { recursive: true, force: true });
+  fs.renameSync(wsGone[0], `${wsGone[0]}-renamed`);
+  fs.rmSync(wsGone[1], { recursive: true, force: true });
+  let listedAfter: string[] = [];
+  for (let i = 0; i < 80; i++) { await sleep(250); listedAfter = await ownPackages(); if (!listedAfter.some((p) => /gone-|ws-ren|ws-del/.test(p))) break; }
+  check(await up() && !listedAfter.some((p) => /gone-/.test(p)) && !listedAfter.some((p) => /^ws-(ren|del)\//.test(p)), `a lone package renamed, moved or deleted, and a workspace opened for the run renamed or deleted: dropped, the web app stays up (${listedAfter.join(', ')})`);
+  const pagesGone = await Promise.all(['/l/gone-a/', '/l/gone-b/', '/l/gone-c/', '/w/ws-ren/', '/w/ws-del/'].map((x) => get(`${base}${x}`).then((g) => g.status)));
+  check(pagesGone.every((c) => c === 404) && (await get(`${base}/`)).status === 200, `their pages say they are not there (${pagesGone.join(' ')}), the home page answers`);
+  const weblog = fs.readFileSync(path.join(home, 'web.log'), 'utf8');
+  check(/is gone: no longer listed/.test(weblog) && !/Error|ENOENT|at .*\.ts/.test(weblog), 'web.log says so in a line and holds no error');
+
+  // ---- TopoTopo changed since the web app started: it is used all the same, and its pages say so, with a button that stops it
+  const quiet = (await get(`${base}/`)).text;
+  check(!quiet.includes('has changed since this server started'), 'no line at the top while the version and engine code of open are the web app\'s');
+  const forged = await fetch(`${base}/api/open`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-topotopo-open': '1', connection: 'close' }, body: JSON.stringify({ kind: 'workspace', dir: ws, version: TOPOTOPO_VERSION, engine: 'another engine' }) });
+  const loud = (await get(`${base}/`)).text, loudFolder = (await get(`${base}/w/my-world/`)).text;
+  check(forged.status === 200 && [loud, loudFolder].every((t) => t.includes('TopoTopo has changed since this server started.') && t.includes('data-stop-topotopo') && t.includes('then open your file again')) && alive(lock1!.pid), 'a web app asked by another engine code says so at the top of the front page and a folder page, and runs on');
+  check(await post(lock1!.port, '/api/stop', {}) === 403 && await post(lock1!.port, '/api/stop', { 'x-topotopo-open': '1', origin: 'http://evil.example' }) === 403 && await post(lock1!.port, '/api/open', {}) === 403 && alive(lock1!.pid), '/api/stop and /api/open are refused without the header, and from another origin');
+
+  // ---- a stop lets a bake finish and ends an editor the way it ends itself
+  const stopBake = mkPkg('stoppers', 'stop-bake'), stopBake2 = mkPkg('stoppers', 'stop-bake-two');
+  await opened(path.join(stopBake, 'stop-bake.topo'));
+  const edit = await fetch(`${base}/p/stop-bake/stop-bake/edit`, { redirect: 'manual', headers: { connection: 'close' }, signal: AbortSignal.timeout(60_000) });
+  const editorUrl = edit.headers.get('location') ?? '';
+  const editorPort = editorUrl ? Number(new URL(editorUrl).port) : 0;
+  check(edit.status === 302 && editorPort > 0 && await connects(editorPort), `the editor of the opened package runs (${editorUrl})`);
+  await opened(path.join(stopBake2, 'stop-bake-two.topo'));
+
   // ---- --stop ends the web app this call started, and only it
   const stopped = await opened('--stop');
   const gone = await probe(lock1!.port, 3000);
   check(stopped.code === 0 && /^stopped the web app \(process \d+, port \d+\)$/.test(stopped.out[0] ?? '') && !alive(lock1!.pid) && !lockOf(home) && gone.state === 'closed', `open --stop: stops the web app, removes the lock, the port is closed (${stopped.out[0]})`);
   own.delete(lock1!.pid);
+  const states = [stopBake, stopBake2].map((d) => { try { return JSON.parse(fs.readFileSync(path.join(d, '.web', 'bake.json'), 'utf8')); } catch { return null; } });
+  check(states.every((x) => x === null || x.ok === true) && states[0]?.ok === true && !(await connects(editorPort)), `the stop let the bake that was running finish (no bake cut short: ${states.map((x) => (x ? (x.ok ? 'ok' : x.error) : 'not started')).join(', ')}) and the editor is gone (port ${editorPort} closed)`);
   const none = await opened('--stop');
   check(none.code === 0 && /^no web app of yours is running$/.test(none.out[0] ?? ''), 'open --stop with none running says so and succeeds');
   const bystander = sleeper();
   const liar = await fake({ web: true, pid: bystander + 1_000_000, version: TOPOTOPO_VERSION, engine: engineSha256(), open: true });
   fs.writeFileSync(lockFile(home), JSON.stringify({ port: liar.port, pid: bystander }));
   const refused = await opened('--stop');
-  check(refused.code === 0 && alive(bystander) && !lockOf(home) && /left alone/.test(refused.out[0] ?? ''), 'open --stop does not end a process whose web app health does not confirm the lock\'s pid');
-  liar.close(); killOwn(bystander);
+  check(refused.code === 0 && alive(bystander) && !lockOf(home) && /nothing was ended/.test(refused.out[0] ?? ''), 'open --stop does not end a process whose web app health does not confirm the lock\'s pid');
+  liar.close();
+  // a lock whose process lives but whose port does not answer at all: --stop removes it and ends nothing; open starts normally
+  const silent = net.createServer((c) => { c.on('error', () => {}); });
+  const silentPort = await freePort();
+  await new Promise<void>((r2) => silent.listen(silentPort, '127.0.0.1', r2));
+  fs.writeFileSync(lockFile(home), JSON.stringify({ port: silentPort, pid: bystander }));
+  const unconfirmed = await openedWith({ busyMs: 1500 }, '--stop');
+  check(unconfirmed.code === 0 && /nothing was ended/.test(unconfirmed.out[0] ?? '') && alive(bystander) && !lockOf(home), 'open --stop with a lock whose process lives and whose port never answers: the lock is removed, nothing is ended');
+  fs.writeFileSync(lockFile(home), JSON.stringify({ port: silentPort, pid: bystander }));
+  const beforeUnconfirmed = spawnedPids.length;
+  const startedAnyway = await openedWith({ busyMs: 1500 }, path.join(loose, 'demo-kit.topo'));
+  check(startedAnyway.code === 0 && spawnedPids.length === beforeUnconfirmed + 1 && alive(bystander) && lockOf(home)?.pid === spawnedPids.at(-1) && (await get(startedAnyway.url!)).status === 200, 'open with such a lock starts a web app as usual instead of failing, and ends nothing');
+  killOwn(spawnedPids.at(-1)!); await waitGone(spawnedPids.at(-1)!);
+  silent.close(); killOwn(bystander);
 
   // ---- stale lock: a process that ended
   const gonePid = await new Promise<number>((resolve) => { const g = spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' }); g.once('exit', () => resolve(g.pid!)); });
@@ -235,26 +314,28 @@ try {
     `a web app that answers its health check after 8 s is waited for: no other is started and its lock stays (${Date.now() - tb} ms, ${busyOpen.url ?? busyOpen.err[0]})`);
   busy.close();
 
-  // ---- a web app of another TopoTopo (another engine code) is stopped and replaced
-  const old = sleeper();
-  const oldApp = await fake({ web: true, pid: old, version: TOPOTOPO_VERSION, engine: 'another engine', open: true });
-  fs.writeFileSync(lockFile(home), JSON.stringify({ port: oldApp.port, pid: old }) + '\n');
+  // ---- a web app of another version or engine code is used as it is, and not ended
+  const other1 = sleeper();
+  const otherApp = await fake({ web: true, pid: other1, version: TOPOTOPO_VERSION, engine: 'another engine', open: true });
+  fs.writeFileSync(lockFile(home), JSON.stringify({ port: otherApp.port, pid: other1 }) + '\n');
   const before6 = spawnedPids.length;
-  const replaced = await opened(path.join(loose, 'demo-kit.topo'));
-  const lock6 = lockOf(home);
-  await waitGone(old);
-  check(replaced.code === 0 && !alive(old) && !!lock6 && lock6.pid !== old && spawnedPids.length === before6 + 1 && lock6.pid === spawnedPids.at(-1) && (await get(replaced.url!)).status === 200,
-    `a running web app with another engine code is stopped (its health confirmed the pid) and a fresh one started (pid ${lock6?.pid})`);
-  own.delete(old); oldApp.close();
-  const old2 = sleeper();
-  const oldApp2 = await fake({ web: true, pid: old2, version: '0.0.1', engine: engineSha256() });
-  killOwn(lock6!.pid); await waitGone(lock6!.pid);
-  fs.writeFileSync(lockFile(home), JSON.stringify({ port: oldApp2.port, pid: old2 }) + '\n');
-  const replaced2 = await opened(path.join(loose, 'demo-kit.topo'));
-  await waitGone(old2);
-  check(replaced2.code === 0 && !alive(old2) && lockOf(home)?.pid === spawnedPids.at(-1), 'a web app of another version, without /api/open, is replaced the same way');
-  own.delete(old2); oldApp2.close();
-  killOwn(lockOf(home)!.pid); await waitGone(lockOf(home)!.pid);
+  const usedAsIs = await opened(path.join(loose, 'demo-kit.topo'));
+  check(usedAsIs.code === 0 && usedAsIs.url === `http://127.0.0.1:${otherApp.port}/fake/` && alive(other1) && spawnedPids.length === before6 && lockOf(home)?.pid === other1, 'a running web app with another engine code is used, not ended, and no other is started');
+  const noOpen = await fake({ web: true, pid: other1, version: '0.0.1', engine: engineSha256() });
+  otherApp.close();
+  fs.writeFileSync(lockFile(home), JSON.stringify({ port: noOpen.port, pid: other1 }) + '\n');
+  const used2 = await opened(path.join(loose, 'demo-kit.topo'));
+  check(used2.code === 0 && alive(other1) && spawnedPids.length === before6, 'nor is one of another version');
+  noOpen.close(); killOwn(other1);
+  fs.rmSync(lockFile(home), { force: true });
+
+  // ---- one deadline for every wait: a web app that stays busy past it fails with one sentence
+  const slow = await fake(hereHealth(process.pid), 20_000);
+  fs.writeFileSync(lockFile(home), JSON.stringify({ port: slow.port, pid: process.pid }) + '\n');
+  const tl = Date.now();
+  const late = await openedWith({ timeoutMs: 3000 }, path.join(loose, 'demo-kit.topo'));
+  check(late.code === 1 && late.err.length === 1 && /^gave up after 3 seconds waiting for /.test(late.err[0]) && Date.now() - tl < 8000 && spawnedPids.length === before6, `every wait shares one deadline: past it, one sentence (${late.err[0]}, ${Date.now() - tl} ms)`);
+  slow.close();
   fs.rmSync(lockFile(home), { force: true });
 
   // ---- two open at the same moment (two processes, as two double-clicks): one web app

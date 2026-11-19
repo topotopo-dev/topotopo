@@ -209,7 +209,9 @@ function scanNow(name: string, rootDir: string, o: ScanOptions): Scan {
 export function scanSingle(name: string, dir: string): Scan {
   const root = path.resolve(dir);
   const out: Scan = { name, root, packages: [], problems: [], workspaces: [] };
-  const files = fs.readdirSync(root).filter((f) => f.endsWith(MANIFEST_EXT) && f.length > MANIFEST_EXT.length).sort();
+  let files: string[];
+  try { files = fs.readdirSync(root).filter((f) => f.endsWith(MANIFEST_EXT) && f.length > MANIFEST_EXT.length).sort(); }
+  catch { out.problems.push(`no folder ${root}`); return out; }
   if (files.length !== 1) { out.problems.push(`${root} holds ${files.length ? files.join(', ') : `no ${MANIFEST_EXT} file`}: a package has one ${MANIFEST_EXT} file, whose name is its id`); return out; }
   const id = files[0].slice(0, -MANIFEST_EXT.length), abs = path.join(root, files[0]);
   if (!ID_RE.test(id)) { out.problems.push(`${abs}: the file's name is the package id: lower-case letters, digits, - and _, starting with a letter or digit ("${slugify(id) || 'package'}${MANIFEST_EXT}")`); return out; }

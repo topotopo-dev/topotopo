@@ -28,7 +28,7 @@ import { folderKey, forgetScans, forgetScansOf, scanSingle, scanTree, unscanned 
 import { engineTypeOf } from '../engines.ts';
 import { graphFiles } from '../session.ts';
 import type { BakeState, LibraryScan, Package } from './library.ts';
-import type { WebConfig } from '../config.ts';
+import type { LibraryRef, WebConfig } from '../config.ts';
 import { builtinLibrary, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion, workingHash } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 import { engineSha256 } from '../host/engine-code.ts';
@@ -62,6 +62,10 @@ const PAGE_CSP = "default-src 'self'; img-src 'self' data:; media-src 'self'; fr
  */
 const viewCsp = (map: string, framed: boolean) => `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-${crypto.createHash('sha256').update(map).digest('base64')}'; img-src 'self' data: blob:; connect-src 'self' data: blob:; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'${framed ? '' : "; frame-ancestors 'self'"}`;
 /** A note named so is shown first among the boxes of its folder. */
+/** What every page says once a `topotopo open` of another version or engine code has asked this web app for a page. */
+const CHANGED_BANNER = '<div class="changed" role="status">TopoTopo has changed since this server started. <button type="button" data-stop-topotopo>Stop TopoTopo</button> then open your file again.</div>';
+/** How long a bake that is running is given to finish when the web app is stopped, and an editor to leave. */
+const BAKE_STOP_MS = 20_000, EDITOR_STOP_MS = 5000;
 const README = /^(readme|index)\.(md|txt)$/i;
 
 class HttpError extends Error {
@@ -78,6 +82,8 @@ export interface WebOptions {
   log?: (msg: string) => void;
   /** how far the audits walk (tests make them short) */
   walkLimits?: Partial<WalkLimits>;
+  /** what ends the process after POST /api/stop has shut the web app down (`topotopo web`); without it the request is refused */
+  onStop?: () => void;
 }
 
 export interface WebServer {
@@ -155,6 +161,31 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const runNames = new Map<string, string>();
   /** the packages `topotopo open` listed one by one for this run: each a root of itself, nothing around it read */
   const singles: { name: string; dir: string }[] = [];
+  /** the workspaces `topotopo open` added to the config's list in memory for this run */
+  const runListed = new Set<LibraryRef>();
+  /** the folders being watched (a root that is gone is let go) */
+  const watched = new Map<string, fs.FSWatcher>();
+  const stopWatching = (dir: string) => { watched.get(dir)?.close(); watched.delete(dir); };
+  const isDir = (d: string) => !!fs.statSync(d, { throwIfNoEntry: false })?.isDirectory();
+  /** a root `topotopo open` listed whose folder has gone (moved, renamed, deleted) is dropped from memory, quietly */
+  const dropGone = () => {
+    for (let i = singles.length - 1; i >= 0; i--) {
+      if (isDir(singles[i].dir)) continue;
+      log(`${singles[i].dir} is gone: no longer listed`);
+      stopWatching(singles[i].dir);
+      singles.splice(i, 1);
+    }
+    for (const w of [...runListed]) {
+      if (isDir(w.path)) continue;
+      log(`${w.path} is gone: no longer listed`);
+      stopWatching(path.resolve(w.path));
+      cfg.workspaces.splice(cfg.workspaces.indexOf(w), 1);
+      runListed.delete(w);
+      runNames.delete(folderKey(w.path));
+    }
+  };
+  /** what no timer, watcher or rescan lets take the process down: one line in the log */
+  const safe = (what: string, f: () => void) => { try { f(); } catch (e: any) { try { log(`${what}: ${e?.message ?? e}`); } catch { /* no log */ } } };
   const indexPackages = () => {
     packages.clear();
     byDir.clear();
@@ -195,6 +226,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
    * audits stay: what changed decides which go (forget()).
    */
   const rescanPackages = (changed?: string[]) => {
+    dropGone();
     if (changed) for (const d of changed) forgetScansOf(d);
     else forgetScans();
     // the libraries (but those inside a registered workspace) and the workspaces, then the packages opened one by one;
@@ -280,6 +312,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const forget = (key: string) => { audits.delete(key); changes.set(key, (changes.get(key) ?? 0) + 1); };
   const forgetAll = () => { for (const r of roots) forget(rootKey(r)); };
   let warm: ReturnType<typeof setTimeout> | undefined, closed = false;
+  /** a `topotopo open` came from another version or engine code than this web app's: the pages say so */
+  let changedSince = false;
   const rewarm = () => {
     clearTimeout(warm);
     warm = setTimeout(async () => { for (const r of roots) { if (closed) return; try { await auditOf(r); } catch { /* its page says it */ } } }, 200);
@@ -299,7 +333,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   const onChange = () => {
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => {
+    changeTimer = setTimeout(() => safe('rescan after a change', () => {
       const before = [...packages.keys()].join('\n');
       rescanPackages([...changedRoots]);
       for (const k of staleAudits) forget(k);
@@ -311,16 +345,14 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       changedFolders.clear();
       changedRoots.clear();
       staleAudits.clear();
-    }, 500);
+    }), 500);
   };
   const watchers: fs.FSWatcher[] = [];
-  const watched = new Set<string>();
   /** Watch the folders of the scans not watched yet (those at the start, and those a request opened later). */
   const watchRoots = () => { for (const s of scans) {
     if (s.name === BUILTIN_LIBRARY.name || watched.has(s.root)) continue; // nothing of it is baked here: read again at each rescan
-    watched.add(s.root);
     try {
-      const w = fs.watch(s.root, { recursive: true }, (_ev, f) => {
+      const w = fs.watch(s.root, { recursive: true }, (_ev, f) => safe('watch', () => {
         const rel = f ? String(f).split(path.sep).join('/') : '';
         if (path.isAbsolute(rel)) return; // the root itself went away: the periodic rescan notices
         const parts = rel.split('/');
@@ -336,20 +368,22 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           if (p || !(engine || parts.slice(0, -1).some((x) => plumbing(x, [])))) staleAudits.add(rootKey(r));
         }
         onChange();
-      });
-      w.on('error', () => w.close());
+      }));
+      w.on('error', () => { w.close(); if (watched.get(s.root) === w) watched.delete(s.root); });
       w.unref();
+      watched.set(s.root, w);
       watchers.push(w);
     } catch { /* no folder (a problem on the page) or no recursive watch: the periodic rescan covers it */ }
   } };
   watchRoots();
-  const periodic = setInterval(() => { rescan(); for (const p of packages.values()) bakeIfStale(p); rewarm(); }, RESCAN_MS);
+  const periodic = setInterval(() => safe('periodic rescan', () => { rescan(); for (const p of packages.values()) bakeIfStale(p); rewarm(); }), RESCAN_MS);
   periodic.unref();
 
   // ---------------------------------------------------------------- pages for what topotopo open asks for
   /** The name a workspace, library or package opened by itself takes: the wanted one, else it with -2, -3 … (one set of names). */
   const freeName = (wanted: string): string => {
-    const taken = (n: string) => [...cfg.workspaces, ...cfg.libraries, ...singles, BUILTIN_LIBRARY].some((x) => x.name === n);
+    // every name in use: the config's, those of this run, the pages' (a workspace's own name is its file's) and the scans'
+    const taken = (n: string) => [...cfg.workspaces, ...cfg.libraries, ...singles, ...roots, ...games, ...scans, BUILTIN_LIBRARY].some((x) => x.name === n);
     let name = wanted;
     for (let n = 2; taken(name); n++) name = `${wanted}-${n}`;
     return name;
@@ -374,7 +408,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const addWorkspaceRoot = (dir: string, fileName: string): string => {
     const name = freeName(fileName);
     if (name !== fileName) runNames.set(folderKey(dir), name);
-    cfg.workspaces.push({ name, path: dir });
+    const ref = { name, path: dir };
+    cfg.workspaces.push(ref);
+    runListed.add(ref);
     forgetScansOf(dir);
     addScan(scanLibrary({ name, path: dir, workspace: true }));
     return name;
@@ -424,7 +460,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const editorFor = (p: Package) => {
     const have = editors.get(p.dir);
     if (have && have.child.exitCode === null) return have.url;
-    const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    child.stdin!.on('error', () => {});
     const url = new Promise<string>((resolve, reject) => {
       let out = '', err = '';
       const t = setTimeout(() => { child.kill(); reject(new Error('the editor did not start within a minute')); }, EDITOR_START_MS);
@@ -440,6 +477,30 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     editors.set(p.dir, { child, url });
     return url;
   };
+
+  /**
+   * Stop the way a person would: no timer or watch runs on, a bake that is running gets time to finish (nothing queued
+   * starts), each editor is asked to end (its stdin is closed: its viewer closes and it leaves; only one that does not is
+   * ended), the pages' event streams close and the server stops listening.
+   */
+  let stopping: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => stopping ??= (async () => {
+    clearInterval(periodic); clearTimeout(changeTimer); clearTimeout(warm);
+    closed = true;
+    for (const w of watchers) w.close();
+    await Promise.all([
+      queue.stop(BAKE_STOP_MS),
+      ...[...editors.values()].map(({ child }) => new Promise<void>((resolve) => {
+        if (child.exitCode !== null) return resolve();
+        const t = setTimeout(() => { child.kill(); resolve(); }, EDITOR_STOP_MS);
+        child.once('exit', () => { clearTimeout(t); resolve(); });
+        child.stdin?.end();
+      })),
+    ]);
+    for (const c of clients) c.end();
+    server.close();
+    server.closeAllConnections?.();
+  })();
 
   const reveal = (dir: string) => {
     const [cmd, args] = process.platform === 'win32' ? ['explorer.exe', [dir]] : process.platform === 'darwin' ? ['open', [dir]] : ['xdg-open', [dir]];
@@ -845,7 +906,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     // pages may only be framed by the web app itself; the embed page is made to be framed by a board; the 3D views
     // load three.js through an inline import map (allowed by its hash) and nothing from other sites
     const map = importMap(urls);
-    const html = (body: string, framable: boolean | 'view' = false, code = 200) => send(code, body, MIME['.html'], { 'content-security-policy': framable === true ? viewCsp(map, true) : framable === 'view' ? viewCsp(map, false) : PAGE_CSP });
+    const html = (page: string, framable: boolean | 'view' = false, code = 200) => send(code, changedSince && framable !== true ? page.replace(/(<body[^>]*>)/, `$1${CHANGED_BANNER}`) : page, MIME['.html'], { 'content-security-policy': framable === true ? viewCsp(map, true) : framable === 'view' ? viewCsp(map, false) : PAGE_CSP });
     const json = (code: number, body: unknown, extra: Record<string, string> = {}) => send(code, JSON.stringify(body), MIME['.json'], extra);
     const redirect = (code: number, location: string) => { res.writeHead(code, { location, 'cache-control': 'no-store' }); res.end(); };
     try {
@@ -875,17 +936,27 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream', { 'cache-control': 'max-age=3600' }) : send(404, 'not found');
       }
       if (u.pathname === '/api/health') return json(200, { web: true, pid: process.pid, version: TOPOTOPO_VERSION, engine, open: true, libraries: scans.length, packages: packages.size, baking: queue.size });
-      if (u.pathname === '/api/open') {
-        // `topotopo open`: the page of a package or workspace, which the web app lists for this run when it does not yet
-        // (nothing is written to the config). Only the program that starts the web app asks: a page of another origin
-        // cannot send the header without a preflight, which is refused
-        if (req.method !== 'POST') throw new HttpError(405, 'POST {"kind": "package" | "workspace", "dir": folder}');
-        if (req.headers.origin || req.headers['x-topotopo-open'] !== '1') throw new HttpError(403, 'only topotopo open may ask for this');
+      if (u.pathname === '/api/open' || u.pathname === '/api/stop') {
+        // what only the program that starts the web app (and the page's own button) asks: a POST with a header that a page
+        // of another origin cannot send without a preflight, which is refused (the Host and Origin checks above apply too)
+        if (req.method !== 'POST') throw new HttpError(405, 'POST');
+        if (req.headers['x-topotopo-open'] !== '1') throw new HttpError(403, 'only topotopo open and this page may ask for this');
         let text = '';
         for await (const c of req) { text += c; if (text.length > 100_000) throw new HttpError(413, 'too long'); }
+        if (u.pathname === '/api/stop') {
+          // a request to stop: the answer first, then a stop the way a person would (bakes finish, editors end), then the process
+          if (!o.onStop) throw new HttpError(501, 'this web app was not started by topotopo web: it cannot be stopped from a request');
+          json(200, { ok: true });
+          setTimeout(() => { shutdown().then(() => o.onStop!(), (e) => { log(`stop: ${e?.message ?? e}`); o.onStop!(); }); }, 50);
+          return;
+        }
+        // `topotopo open`: the page of a package or workspace, which the web app lists for this run when the config does not
+        // (nothing is written to the config). The program tells its version and engine code: when they are not this web
+        // app's, every page says so (changedSince)
         let ask: any;
         try { ask = JSON.parse(text); } catch { throw new HttpError(400, 'a JSON body {"kind", "dir"} is expected'); }
         if ((ask?.kind !== 'package' && ask?.kind !== 'workspace') || typeof ask.dir !== 'string') throw new HttpError(400, 'a JSON body {"kind": "package" | "workspace", "dir": folder} is expected');
+        if ((typeof ask.version === 'string' && ask.version !== TOPOTOPO_VERSION) || (typeof ask.engine === 'string' && ask.engine !== engine)) changedSince = true;
         return json(200, { url: openPage(ask.kind, path.resolve(ask.dir)) });
       }
       if (u.pathname === '/api/events') {

@@ -140,7 +140,11 @@ export async function webCommand(argv: string[], prog: string, io: Io = consoleI
     const port = a.opt('--port') !== undefined ? Number(a.opt('--port')) : cfg.web.port;
     const { startWeb, runningWeb } = await import('../web/server.ts');
     try {
-      const g = await startWeb({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
+      const g = await startWeb({
+        config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m),
+        // POST /api/stop: the web app has shut down; this process removes its lock (when `topotopo open` made it) and ends
+        onStop: async () => { const { removeLockIfMine } = await import('../host/open.ts'); removeLockIfMine(); process.exit(0); },
+      });
       const n = cfg.libraries.length, w = cfg.workspaces.length;
       io.out(`web app: ${g.url}  (${w ? `${w} workspace${w === 1 ? '' : 's'}: ${cfg.workspaces.map((x) => x.name).join(', ')}; ` : ''}${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
       if (g.queue.size) io.out(`baking ${g.queue.size} package(s) in the background`);
@@ -235,6 +239,9 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
     if (a.has('--json')) {
       // started by the web app: report the URL, and stop once no page has been open for a while
       io.out(JSON.stringify({ url: v.url }));
+      // the web app ends the editor by closing its stdin: the viewer closes and the process leaves, as it would at its own end
+      process.stdin.on('end', () => { v.close(); process.exit(0); });
+      process.stdin.resume();
       let idleSince = Date.now();
       setInterval(() => {
         if (v.clients() > 0) idleSince = Date.now();
