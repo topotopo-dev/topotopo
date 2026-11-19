@@ -157,8 +157,11 @@ section('the cook');
   check(!fs.existsSync(path.join(dir, 'outputs')) && fs.existsSync(path.join(game, ...below.split('/'), 'crate', 'crate.glb')), 'cooked files go below Saved/, nothing beside the package');
   check(fs.readFileSync(path.join(game, ...below.split('/'), 'crate', 'crate.glb')).subarray(0, 4).toString() === 'glTF', 'a mesh is a GLB');
   check(out('crate').import[0].as === 'static_mesh' && out('crate').import[0].lods?.length === 1 && !!out('crate').import[0].sockets, `the crate has a LOD and sockets (${out('crate').files.length} files)`);
+  const nodeNames = (f: string) => { const b = fs.readFileSync(path.join(game, ...below.split('/'), 'crate', f)); return JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)).toString('utf8')).nodes.map((n: any) => n.name); };
+  check([...nodeNames('crate.glb'), ...nodeNames('crate_lod1.glb')].every((n: string) => !/_lod\d+$/i.test(n)), `each level's names drop _lod<n>, so Interchange does not take them for LOD names (${nodeNames('crate_lod1.glb')})`);
   check(out('scatter').kind === 'instances' && out('scatter').import.map((s: any) => s.as).join() === 'static_mesh,static_mesh,static_mesh,instances,points', 'scatter has its meshes, instances and points');
   check(out('panels').import[0].as === 'texture' && out('island').import[0].as === 'landscape', 'panels are textures and island a landscape');
+  check((out('island').warnings ?? []).some((w: string) => /does not fit Unreal's landscape grid/.test(w)), 'a terrain off the landscape grid warns that it will not be placed');
   const rec = readJson(path.join(dir, '.topotopo', 'unreal.json'));
   check(rec.schema === RECORD_SCHEMA && rec.for === 'unreal' && rec.options.folder === '/Game/props/outputs', 'the record is for Unreal, with the content path');
   check(Object.keys(rec.outputs.crate.files).every((f) => f.startsWith(`${below}/crate/`)) && !JSON.stringify(rec).includes(posix(tmp)), 'it names files below the project, no machine paths');
@@ -256,6 +259,27 @@ section('the cook');
   check(p.code === 2 && /topotopo unreal setup /.test(p.text) && !/Godot/.test(p.text), `another protocol asks for setup (${p.text.slice(0, 90)})`);
   write(jobs, JSON.stringify({ for: 'other', protocol: COOK_PROTOCOL, jobs: [] }));
   check((await cook(['--jobs', jobs])).code === 2, 'another engine exits 2');
+
+  // collision pieces by name: Unreal's UCX_ for TopoTopo's -convcolonly / -colonly
+  const hulls = path.join(game, 'Content', 'hulls');
+  write(path.join(hulls, 'hulls.topo'), JSON.stringify({ title: 'Hulls', graph: 'hulls', created: '2026-01-01', name: 'studio/hulls' }));
+  const named = (node: string, input: string, value: string) => ({ [node]: { type: 'attrib_create', in: [input], params: { name: 'name', class: 'prim', value } } });
+  write(path.join(hulls, 'graphs', 'hulls.json'), JSON.stringify({
+    nodes: {
+      body: { type: 'box', params: { size: [1, 0.5, 0.5] } }, ...named('body_n', 'body', 'body'),
+      a: { type: 'box', params: { size: [0.6, 0.6, 0.6], center: [-0.3, 0, 0] } }, ...named('a_n', 'a', 'left-convcolonly'),
+      b: { type: 'box', params: { size: [0.6, 0.6, 0.6], center: [0.3, 0, 0] } }, ...named('b_n', 'b', 'right-colonly'),
+      all: { type: 'merge', in: ['body_n', 'a_n', 'b_n'] },
+    },
+    output: 'all', outputs: { hulls: { node: 'all', kind: 'mesh' } },
+  }));
+  const hr = path.join(tmp, 'hulls.json');
+  check((await cook([hulls, '--for', 'unreal', '--report', hr])).code === 0, 'a mesh with collision pieces cooks');
+  const hb = fs.readFileSync(path.join(game, 'Saved', 'TopoTopo', 'Game', 'hulls', 'outputs', 'hulls', 'hulls.glb'));
+  const hn = JSON.parse(hb.subarray(20, 20 + hb.readUInt32LE(12)).toString('utf8')).nodes.map((n: any) => n.name).sort().join();
+  check(hn === 'UCX_body_00,UCX_body_01,body', `-convcolonly and -colonly pieces become UCX_<mesh>_<nn> (${hn})`);
+  const hw: string[] = readJson(hr).outputs[0].warnings ?? [];
+  check(hw.some((w) => /right-colonly becomes a convex hull/.test(w)) && !hw.some((w) => /left-convcolonly/.test(w)), 'a -colonly piece says it becomes convex');
 }
 
 // ---------------------------------------------------------------------------------------------------- the commands

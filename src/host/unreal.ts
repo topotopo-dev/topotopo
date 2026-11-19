@@ -7,12 +7,14 @@
 // those are what a repository commits. So the cooked files are the plugin's intermediate files, kept out of Content/ under
 // Saved/TopoTopo/<the output folder's content path>/, where Auto Reimport does not see them; a checkout without them is
 // still current (cook.ts freshness, localOutputs). The flavour:
-//   mesh           <id>.glb, one static mesh; _lod<n> pieces go to <id>_lod<n>.glb (its LODs), sockets to <id>.sockets.json
+//   mesh           <id>.glb, one static mesh; _lod<n> pieces go to <id>_lod<n>.glb (its LODs), sockets to <id>.sockets.json;
+//                  -convcolonly / -colonly pieces are renamed UCX_<mesh>_<nn>, its convex collision
 //   instances      one GLB per packed source in <id>_meshes/, the rows as <id>.instances.csv (Unreal centimetres, the
 //                  PCG columns), plus <id>.glb when it also has plain meshes; with instancing expand one GLB
 //   points         <id>.points.csv (the PCG columns)
 //   textures       one PNG per image
-//   terrain        the unreal_landscape bundle of src/io/unreal.ts, which TopoTopoPCG places in a level
+//   terrain        the unreal_landscape bundle of src/io/unreal.ts, which TopoTopoPCG places in a level; a warning when
+//                  it does not fit Unreal's landscape grid, since TopoTopoPCG refuses that
 //   curves, material, volume   not imported yet: listed as skipped, with why
 //   scene          by what it holds: a heightfield makes it a terrain bundle, else as mesh + instances
 // Options come from <id>.topo.import [params], written by the plugin, as in Godot; folder is a content path (/Game/...).
@@ -230,7 +232,8 @@ const LOD_NAME = /_lod(\d+)$/i;
 
 /**
  * A mesh by its levels of detail: prims named *_lod<n> at each level, the first level found with every prim of no level.
- * One entry when it has fewer than two levels.
+ * One entry when it has fewer than two levels. Each level's prims lose the _lod<n> suffix: the file says the level, and
+ * Interchange warns about any node name that looks like a LOD name but is not LODxx_Name.
  */
 function splitLods(g: Geometry): { level: number; geo: Geometry }[] {
   const names = g.prims.get('name');
@@ -242,7 +245,38 @@ function splitLods(g: Geometry): { level: number; geo: Geometry }[] {
   }
   if (levels.size < 2) return [{ level: 0, geo: g }];
   const order = [...levels].sort((a, b) => a - b);
-  return order.map((level, i) => ({ level, geo: g.subsetPrims(Uint8Array.from(of, (l) => (l === level || (i === 0 && l < 0) ? 1 : 0)), true) }));
+  return order.map((level, i) => {
+    const geo = g.subsetPrims(Uint8Array.from(of, (l) => (l === level || (i === 0 && l < 0) ? 1 : 0)), true);
+    const own = geo.prims.get('name')!;
+    for (let p = 0; p < geo.numPrims; p++) own.set(p, String(own.get(p) ?? '').replace(LOD_NAME, ''));
+    return { level, geo };
+  });
+}
+
+const COLLISION_NAME = /-(conv)?colonly$/i;
+
+/**
+ * TopoTopo's collision names (Godot's) in Unreal's: every piece named <x>-convcolonly or <x>-colonly becomes UCX_<mesh>_<nn>,
+ * which Interchange makes the static mesh's convex collision instead of drawing it. <mesh> is the first visible piece's
+ * name; visible pieces without a name take the output id. Unreal's collision pieces are convex, so a -colonly piece
+ * (concave in Godot) becomes its convex hull, and that is said.
+ */
+function unrealCollision(g: Geometry, id: string, warn: (m: string) => void): Geometry {
+  const names = g.prims.get('name');
+  if (!names || names.type !== 'string') return g;
+  const all = Array.from({ length: g.numPrims }, (_, p) => String(names.get(p) ?? ''));
+  const hulls = [...new Set(all.filter((n) => COLLISION_NAME.test(n)))];
+  if (!hulls.length) return g;
+  const mesh = all.find((n) => n && !COLLISION_NAME.test(n)) ?? id;
+  const out = g.clone(), own = out.prims.get('name')!;
+  for (let p = 0; p < all.length; p++) {
+    const h = hulls.indexOf(all[p]);
+    if (h >= 0) own.set(p, `UCX_${mesh}_${String(h).padStart(2, '0')}`);
+    else if (!all[p]) own.set(p, mesh);
+  }
+  const concave = hulls.filter((n) => !/-convcolonly$/i.test(n));
+  if (concave.length) warn(`Unreal's collision pieces are convex: ${concave.join(', ')} becomes a convex hull; split it into -convcolonly pieces to keep its shape`);
+  return out;
 }
 
 /**
@@ -295,6 +329,12 @@ export function unrealFlavour(project: string): Flavour {
       });
       if (x.kind === 'terrain' || (x.kind === 'scene' && heightfieldsOf(geo).length)) {
         const bundle = await exportFilesAsync(geo, 'unreal_landscape', 'bundle', { materials: true, custom: false, deflate, readFile, warn, source: sourceFor('unreal_landscape') });
+        const manifest = bundle.files.find((f) => f.path === 'bundle/landscape.json');
+        const fit = manifest ? JSON.parse(new TextDecoder().decode(manifest.bytes)) : null;
+        if (fit?.landscape && fit.landscape.exact_fit !== true) {
+          const [w, h] = fit.heightmap?.resolution ?? [];
+          warn(`the terrain (${w}×${h} samples) does not fit Unreal's landscape grid, so Place Terrain in Level refuses it: resample it to 127, 253, 505, 1009, 2017 or 4033 samples per side (heightfield_resample)`);
+        }
         return { files: bundle.files.map((f) => ({ name: f.path.replace(/^bundle\//, ''), bytes: f.bytes })), warnings };
       }
       const glb = async (g: Geometry, instancing: 'packed' | 'expand'): Promise<Uint8Array> => {
@@ -311,8 +351,8 @@ export function unrealFlavour(project: string): Flavour {
       const files: { name: string; bytes: Uint8Array }[] = [];
       const addMesh = async (g: Geometry, instancing: 'packed' | 'expand') => {
         const levels = splitLods(g);
-        files.push({ name: `${x.id}.glb`, bytes: await glb(levels[0].geo, instancing) });
-        for (let i = 1; i < levels.length; i++) files.push({ name: `${x.id}_lod${i}.glb`, bytes: await glb(levels[i].geo, instancing) });
+        files.push({ name: `${x.id}.glb`, bytes: await glb(unrealCollision(levels[0].geo, x.id, warn), instancing) });
+        for (let i = 1; i < levels.length; i++) files.push({ name: `${x.id}_lod${i}.glb`, bytes: await glb(unrealCollision(levels[i].geo, x.id, warn), instancing) });
         const sockets = socketsFile(g);
         if (sockets) files.push({ name: `${x.id}.sockets.json`, bytes: new TextEncoder().encode(sockets) });
       };
