@@ -259,6 +259,40 @@ const straight = { type: 'curve', params: { points: [[0, 0, 0], [1.5, 0, 0], [3,
   const cols = (img: Float32Array, i0: number, i1: number) => { let s = 0, n = 0; for (let j = 0; j < 32; j++) for (let i = i0; i <= i1; i++) { s += img[j * 32 + i]; n++; } return s / n; };
   const openEnds = (cols(open, 0, 1) + cols(open, 30, 31)) / 2, shutEnds = (cols(shut, 0, 1) + cols(shut, 30, 31)) / 2;
   check(shutEnds < openEnds - 0.02, `tiling: the open ends of a tube darken once the next period is there (${openEnds.toFixed(3)} → ${shutEnds.toFixed(3)})`);
+  // A closed tube with unlimited rays is dark everywhere once tiled: no ray can leave an endless tube, so the dark
+  // map is the right answer there, not a flattened one. It cannot show a feature: that takes a limited distance.
+  const tubeMean = (() => { let t = 0, n = 0; for (let j = 0; j < 16; j++) for (let i = 0; i < 32; i++) { t += shut[j * 32 + i]; n++; } return t / n; })();
+  check(tubeMean < 0.02, `tiling: an endless closed tube with unlimited rays reads occluded everywhere (mean ${tubeMean.toFixed(4)})`);
+
+  // A grooved strip, 1 m long on a 1 m period. Reference: the same strip 3 m long on a 3 m period, which has no open
+  // end within reach of its middle metre (rays reach 0.2 m).
+  const N = 48;
+  const groove = (x0: number, x1: number) => [[x0, 0, 0], [x0 + 0.02, -0.06, 0], [x1 - 0.02, -0.06, 0], [x1, 0, 0]];
+  const profile = [[-0.5, 0, 0], ...groove(-0.35, -0.2), ...groove(-0.05, 0.1), ...groove(0.25, 0.4), [0.5, 0, 0]];
+  const grooved = async (length: number, tile: boolean) => {
+    const g = await cook({
+      sheet: { type: 'trim_sheet', params: { name: 'g', resolution: [N, N], texels_per_metre: N, bands: [{ name: 'wall', height: 1, period: length }] } },
+      path: { type: 'line', params: { direction: [1, 0, 0], length, points: 2 } },
+      profile: { type: 'curve', params: { points: profile, closed: false } },
+      strip: { type: 'sweep', in: ['path', 'profile', 'sheet'], params: { trim_band: 'wall', caps: false } },
+      out: { type: 'bake_ao', in: ['strip'], params: { resolution: N, samples: 96, padding: 0, tile, max_distance: 0.2, name: 'ao' } },
+    }, 'out');
+    return imagesOf(g)[0].layer('C')!;
+  };
+  /** The mean of each row over the columns i0..i1. */
+  const rowMeans = (img: Float32Array, i0: number, i1: number) => Array.from({ length: N }, (_, j) => { let s = 0; for (let i = i0; i <= i1; i++) s += img[j * N + i]; return s / (i1 - i0 + 1); });
+  const worst = (a: number[], b: number[]) => Math.max(...a.map((x, i) => Math.abs(x - b[i])));
+  const gOpen = await grooved(1, false), gTiled = await grooved(1, true), gLong = await grooved(3, false);
+  const tiledMid = rowMeans(gTiled, 20, 27), tiledEnds = [rowMeans(gTiled, 0, 1), rowMeans(gTiled, N - 2, N - 1)];
+  const openMid = rowMeans(gOpen, 20, 27), gOpenEnds = [rowMeans(gOpen, 0, 1), rowMeans(gOpen, N - 2, N - 1)];
+  const longMid = rowMeans(gLong, N / 3 + 2, 2 * N / 3 - 3);
+  const dOpen = Math.max(worst(gOpenEnds[0], openMid), worst(gOpenEnds[1], openMid)), dTiled = Math.max(worst(tiledEnds[0], tiledMid), worst(tiledEnds[1], tiledMid));
+  check(dOpen > 0.1, `tiling: the ends of a grooved strip differ from its middle when it does not tile (largest row difference ${dOpen.toFixed(3)})`);
+  check(dTiled < 0.06, `tiling: the ends of a grooved strip match its middle when it tiles (largest row difference ${dTiled.toFixed(3)})`);
+  const dLong = worst(tiledMid, longMid);
+  check(dLong < 0.06, `tiling: a tiled 1 m strip bakes the same as the middle of a 3 m one (largest row difference ${dLong.toFixed(3)})`);
+  const lo = Math.min(...tiledMid), hi = Math.max(...tiledMid);
+  check(lo < 0.65 && hi > 0.99, `tiling: the grooves stay in the tiled bake (rows run ${lo.toFixed(2)} to ${hi.toFixed(2)})`);
 }
 
 // ---------------------------------------------------------------- the example meshes have no coplanar overlapping faces
