@@ -153,7 +153,16 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #controls { padding: 4px 6px 8px; }
 .ctl { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 1px 2px; }
 .ctl:hover { background: var(--hover-bg); }
-.ctl > .cl { flex: 0 0 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* labels carry units ("Gap between cliffs (m)"): a wider column that wraps to a second line; the row's title has it all */
+.ctl > .cl { flex: 0 0 clamp(100px, 38%, 200px); overflow: hidden; line-height: 1.2; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+/* a group heading (a param's "group"; "other vars" for undeclared ones): click to show or hide its controls */
+.cgroup { display: flex; align-items: center; gap: 5px; width: 100%; margin-top: 4px; padding: 3px 2px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; color: var(--text); font-weight: 600; text-align: left; cursor: pointer; }
+.cgroup:first-child { margin-top: 0; }
+.cgroup:hover { background: var(--hover-bg); }
+.cgroup .caret { flex: 0 0 10px; color: var(--dim); font-size: 10px; }
+.cgroup .gname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cgroup .gcount { color: var(--faint); font-weight: 400; font-size: 11px; }
+.cgroup.other { color: var(--dim); font-weight: 400; font-size: 11px; }
 /* a value that differs from the graph file: a bar before its name, the name in the accent colour */
 .ctl > .cmark { flex: 0 0 3px; width: 3px; height: 16px; border-radius: 1px; }
 .ctl.changed > .cmark { background: var(--sel); }
@@ -188,6 +197,8 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .cw input { padding: 1px 4px; }
 .cw input[type=range] { flex: 1; min-width: 40px; padding: 0; border: 0; background: none; accent-color: var(--sel); }
 .cw input[type=number] { width: 64px; }
+/* a value past the declared min/max: kept, the slider widened to it; the field's title says so */
+.cw input[type=number].past { border-style: dashed; border-color: var(--sel); }
 .cw input.vec { flex: 1; width: 0; min-width: 0; }
 .cw input[type=text] { flex: 1; width: 0; min-width: 0; }
 .cw input[type=checkbox] { accent-color: var(--sel); margin: 0; }

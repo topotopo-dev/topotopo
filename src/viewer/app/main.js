@@ -3,11 +3,11 @@
 // cooking, saving and placing never frame (the one exception is the very first view, when nothing is remembered).
 import * as THREE from 'three';
 import { api, coalesce } from './api.js';
-import { createViews, CAMERA_NAMES, SHADINGS } from './camera.js';
+import { createViews, CAMERA_NAMES, SHADINGS, viewName } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
-import { createGuides, PLACE_KINDS, guideId } from './guides.js';
+import { createGuides, PLACE_KINDS } from './guides.js';
 import { createSelect } from './select.js';
 import { createOutliner } from './outliner.js';
 import { createProps } from './props.js';
@@ -21,7 +21,8 @@ import { fmtStep, fmtSize, fmtNum } from './units.js';
 import { DISCONNECTED_LINE, RECONNECTED_LINE, messageLife } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
 import { pageTitle, defaultGraph, renderWelcome } from './welcome.js';
-import { kindLine } from './output-info.js';
+import { kindLine, resultName } from './output-info.js';
+import * as PT from './pointer.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -158,9 +159,11 @@ ctx.pxWorld = (camera, at) => {
 };
 
 // ------------------------------------------------------------------------------------------- selection, undo, parts
-ctx.selection = createSelection((obj) => ctx.objects.get(obj)?.mesh?.pieceCount() ?? 0);
+// pieces: a mesh's connected parts, a curve's or an area's CVs (guides.js)
+ctx.selection = createSelection((obj) => (obj.startsWith('guide:') ? ctx.guides.pieceCount(obj.slice(6)) : ctx.objects.get(obj)?.mesh?.pieceCount() ?? 0));
 ctx.undo = createUndo();
-ctx.setHover = (id) => { if (ctx.hover === id) return; ctx.hover = id; ctx.emit('hover'); };
+/** The hover (an id, or null); true when it changed. */
+ctx.setHover = (id) => { if (ctx.hover === id) return false; ctx.hover = id; ctx.emit('hover'); return true; };
 
 // the output: the node being shown, its display mode and visibility remembered
 ctx.output = {
@@ -176,6 +179,18 @@ const outEntry = () => {
   ctx.objects.set('out', { id: 'out', kind: 'output', label: 'output', mesh: o.mesh, visible: o.visible, display: o.display, pickable: true, surface: true });
 };
 outEntry();
+/**
+ * What a result is ("out", or a piece "out#k"), for its hover name and its properties: the published output it is
+ * (an output alone in the view, or the one whose node the scene shows), its graph and node, and of a piece its own
+ * name and materials. {output, graph, node, piece, part, materials}.
+ */
+ctx.resultInfo = (id) => {
+  const { piece } = parseId(id), mesh = ctx.output.mesh, alone = ctx.outputs?.active;
+  let graph = ctx.graph.name, node = ctx.graph.shownNode(), output = null;
+  if (alone) { graph = alone.graph ?? null; node = alone.node ?? null; output = alone.label ?? null; }
+  else output = ctx.outputs?.list().find((v) => v.origin === 'published' && v.graph === graph && v.node === node)?.label ?? null;
+  return { output, graph, node, piece, part: piece === null ? null : mesh?.pieceName(piece) ?? null, materials: mesh?.materials(piece) ?? [] };
+};
 
 ctx.layers = createLayers(ctx);
 ctx.guides = createGuides(ctx);
@@ -251,6 +266,12 @@ ctx.sceneLayer = {
   get: () => sceneLayers[sceneKey()] ?? null,
   set(v) { sceneLayers[sceneKey()] = v; local.set('scene.layers', sceneLayers); loadGeo(); },
 };
+// how finely heightfields are drawn (the "terrain detail" picker in Properties): "preview", "1024", "2048" or "full";
+// one setting, remembered in this browser
+ctx.terrainDetail = {
+  get: () => browser.get('terrain.detail', 'preview'),
+  set(v, reload = true) { browser.set('terrain.detail', v); if (reload) loadGeo(); },
+};
 
 let firstFrame = !views.placed;
 const loadGeo = ctx.coalesce(async () => {
@@ -259,7 +280,7 @@ const loadGeo = ctx.coalesce(async () => {
   if (!G.name) return;
   const graph = G.name, node = G.node ?? '';
   o.loading = true; ctx.emit('output');
-  const r = await api.geo(graph, node, ctx.sceneLayer.get());
+  const r = await api.geo(graph, node, ctx.sceneLayer.get(), ctx.terrainDetail.get());
   o.loading = false;
   if (graph !== G.name || node !== (G.node ?? '') || ctx.outputs?.active) { ctx.emit('output'); return; }
   // the result cooked but cannot be shown (its GLB was not written, or does not load here): the cook line says so and
@@ -355,6 +376,7 @@ const cursor = { slot: -1, x: 0, y: 0 };
 let queued = false, overlayQueued = false, lastSize = '', inDraw = false;
 ctx.requestRender = () => { if (!queued && !inDraw) { queued = true; requestAnimationFrame(draw); } };
 const requestOverlays = () => { if (!overlayQueued && !queued) { overlayQueued = true; requestAnimationFrame(() => { overlayQueued = false; if (!queued) drawOverlays(); }); } };
+ctx.requestOverlays = requestOverlays;
 const modeOf = (display, shading) => (display === 'view' ? shading : display);
 const steps = [1, 1, 1, 1];
 
@@ -396,6 +418,8 @@ function drawOverlays() {
   const selSize = selBox && !selBox.isEmpty() ? fmtSize(selBox.getSize(new THREE.Vector3()).toArray()) : '';
   const pivot = selBox && !selBox.isEmpty() ? selBox.getCenter(new THREE.Vector3()) : null;
   const labels = ctx.guides.labels();
+  // the name of the result under the cursor, beside it (only in the view the cursor is in)
+  const spot = ctx.select.hoverSpot, hoverName = spot && PT.targetKind(ctx.hover) === 'result' ? resultName(ctx.resultInfo(ctx.hover)) : '';
   for (let i = 0; i < 4; i++) {
     const s = views.slots[i], ov = overlays[i], visible = views.visible().includes(s);
     if (!visible) { ov.update({ visible: false }); continue; }
@@ -417,6 +441,13 @@ function drawOverlays() {
       if (e.textContent !== l.text) e.textContent = l.text;
       e.className = l.cls;
       e.style.left = `${q.x - s.rect.x}px`; e.style.top = `${q.y - s.rect.y}px`;
+    }
+    if (hoverName && spot.slot === i) {
+      let e = ov.labels.querySelector('[data-k="hover"]');
+      if (!e) { e = document.createElement('div'); e.dataset.k = 'hover'; e.className = 'lbl hover'; ov.labels.append(e); }
+      seen.add('hover');
+      if (e.textContent !== hoverName) e.textContent = hoverName;
+      e.style.left = `${spot.x - s.rect.x + 6}px`; e.style.top = `${spot.y - s.rect.y + 14}px`;
     }
     for (const e of [...ov.labels.children]) if (!seen.has(e.dataset.k)) e.remove();
     // the pivot of the selection: a small cross
@@ -441,7 +472,7 @@ if (!KM.PRESETS.some((p) => p.id === preset)) preset = KM.DEFAULT_PRESET;
 $('preset').replaceChildren(...KM.PRESETS.map((p) => new Option(p.label, p.id)));
 $('preset').value = preset;
 $('preset').onchange = (e) => { preset = e.target.value; browser.set('keymap', preset); e.target.blur(); ctx.message(`keymap: ${KM.PRESETS.find((p) => p.id === preset).label} (? shows it)`); };
-$('view-cam').replaceChildren(...CAMERA_NAMES.map((n) => new Option(n, n)));
+$('view-cam').replaceChildren(...CAMERA_NAMES.map((n) => new Option(viewName(n), n)));
 $('view-cam').onchange = (e) => { views.setCam(views.active, e.target.value); saveViews(); e.target.blur(); syncTop(); ctx.requestRender(); };
 $('view-shading').replaceChildren(...SHADINGS.map(([v, t]) => new Option(t, v)));
 $('view-shading').onchange = (e) => { views.slots[views.active].shading = e.target.value; saveViews(); e.target.blur(); ctx.requestRender(); };
@@ -536,16 +567,28 @@ function run(action) {
     case 'finish': case 'removeLast': ctx.guides.key(action); return;
     case 'cancel': {
       if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body, preset);
-      if (ctx.select.press) return ctx.select.cancel();
-      if (drag?.kind === 'guide') { const d = drag; drag = null; ctx.guides.dragEnd(true); try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } return; }
+      // Esc during a drag ends it where it began; during a press that is still a click, it clears as ever
+      const d = drag, release = () => { try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } };
+      if (d?.kind === 'box') { drag = null; ctx.select.cancel(); release(); return; }
+      if (d?.kind === 'guide') { drag = null; ctx.guides.dragEnd(true); release(); return; }
+      if (d?.kind === 'press') { drag = null; release(); }
       if (ctx.guides.key('cancel')) return;
       ctx.guides.setMode(null); ctx.selection.clear(); return syncTop();
     }
     case 'delete': {
       const ids = selectedOf('guide').map((id) => id.slice(6));
-      const n = ctx.guides.remove(ids);
-      if (n) ctx.message(`deleted ${n} guide${n === 1 ? '' : 's'} · ${undoKeys()} brings ${n === 1 ? 'it' : 'them'} back`, '', 2000);
-      else if (ctx.selection.size) ctx.message('Delete removes guides; the output and reference layers are files and stay (hide them with H)');
+      // CVs selected on their own, by guide (not those of a guide deleted whole)
+      const cvs = new Map();
+      for (const id of ctx.selection.items) {
+        const { obj, piece } = parseId(id), g = obj.slice(6);
+        if (piece !== null && obj.startsWith('guide:') && !ids.includes(g)) cvs.set(g, [...(cvs.get(g) ?? []), piece]);
+      }
+      const n = ctx.guides.remove(ids), c = cvs.size ? ctx.guides.removeCVs(cvs) : { removed: 0, kept: 0 };
+      const done = [n ? `deleted ${n} guide${n === 1 ? '' : 's'}` : '', c.removed ? `removed ${c.removed} CV${c.removed === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
+      const kept = c.kept ? `${c.kept} CV${c.kept === 1 ? '' : 's'} kept: a curve needs 2, an area 3` : '';
+      if (done) ctx.message(`${done}${kept ? ` · ${kept}` : ''} · ${undoKeys()} brings ${n + c.removed === 1 ? 'it' : 'them'} back`, '', 2000);
+      else if (kept) ctx.message(kept, '', 2000);
+      else if (ctx.selection.size) ctx.message('Delete removes guides and CVs; the output and reference layers are files and stay (hide them with H)');
       return;
     }
     case 'undo': case 'redo': {
@@ -601,9 +644,21 @@ addEventListener('keyup', (e) => {
 });
 addEventListener('blur', () => { space.down = false; });
 
-// the mouse in the viewport
+// the mouse in the viewport: a preset's navigation chords first (keymap.js), then the left button by the selection
+// model (pointer.js): what is under the press and the modifier held decide what a click and a drag do
 let drag = null;
 const at = (e) => { const r = viewport.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+/** A camera drag from (x, y) in a slot (tumble, track or dolly) with the preset's pivot rule (section 3). */
+function navDrag(nav, slot, x, y, id) {
+  const surface = KM.surfacePivot(preset);
+  let pivot = null;
+  if (surface) pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
+  else { const sel = ctx.select.selectionBounds(); if (!sel.isEmpty()) pivot = sel.getCenter(new THREE.Vector3()); }
+  viewport.classList.add('nav');
+  // no hover while the camera moves: it is picked again where the drag ends
+  ctx.select.hover(-1);
+  return { kind: 'nav', nav: surface && nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id, pivot, surface };
+}
 canvas.addEventListener('pointerdown', (e) => {
   layoutViews();
   const { x, y } = at(e), slot = views.slotAt(x, y);
@@ -615,34 +670,40 @@ canvas.addEventListener('pointerdown', (e) => {
   const nav = KM.matchDrag(preset, { button: e.button, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, space: space.down && KM.spaceIsModifier(preset) });
   try { canvas.setPointerCapture(e.pointerId); } catch { /* a pointer the browser does not track */ }
   e.preventDefault();
-  if (nav) {
-    const sel = ctx.select.selectionBounds();
-    const topo = preset === 'topotopo', hit = topo ? ctx.select.navigationPoint(slot, x, y) : null;
-    const pivot = topo ? views.anchor(slot, hit) : sel.isEmpty() ? null : sel.getCenter(new THREE.Vector3());
-    drag = { kind: 'nav', nav: topo && nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id: e.pointerId, pivot, topo };
-    viewport.classList.add('nav');
-    return;
-  }
+  if (nav) { drag = navDrag(nav, slot, x, y, e.pointerId); return; }
   if (e.button !== 0) return;
   if (ctx.guides.mode) { drag = { kind: 'place', slot, id: e.pointerId }; ctx.guides.pointerDown(slot, x, y); return; }
-  // a plain press on a guide grabs it (Shift and Ctrl presses add to and take from the selection, as ever)
-  const h = !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey ? ctx.guides.handleAt(slot, x, y) : null;
-  if (h) { drag = { kind: 'guide', slot, x, y, id: e.pointerId, h }; ctx.guides.dragStart(slot, x, y, h); return; }
-  drag = { kind: 'select', slot, id: e.pointerId }; ctx.select.down(slot, x, y, e);
+  // nothing happens until the release (a click) or a few pixels of travel (a drag): pointermove decides which
+  const hit = ctx.select.pick(slot, x, y);
+  const plan = PT.pressPlan({ target: hit?.kind ?? 'empty', shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, movable: !!hit?.handle });
+  drag = { kind: 'press', slot, x, y, id: e.pointerId, hit, plan };
 });
 canvas.addEventListener('pointermove', (e) => {
   const { x, y } = at(e);
   if (drag && e.pointerId === drag.id) {
+    if (drag.kind === 'press') {
+      // a press that travels becomes its plan's drag, from where it began
+      if (!PT.isDrag(x - drag.x, y - drag.y)) return;
+      const { slot, x: x0, y: y0, id, hit, plan } = drag;
+      if (plan.drag === 'move') {
+        // what you drag is what you have selected (the gizmo builds on this)
+        if (PT.dragSelects(ctx.selection.items, hit.id)) ctx.selection.apply([hit.id]);
+        drag = { kind: 'guide', slot, id, h: hit.handle };
+        ctx.guides.dragStart(slot, x0, y0, hit.handle);
+      } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); }
+      else drag = navDrag('tumble', slot, x0, y0, id);
+    }
     if (drag.kind === 'nav') {
       const dx = x - drag.x, dy = y - drag.y;
       drag.x = x; drag.y = y;
       if (drag.nav === 'tumble') views.tumble(drag.slot, dx, dy, drag.pivot);
-      else if (drag.nav === 'track') views.track(drag.slot, dx, dy, drag.topo ? views.cam(drag.slot).pivot : undefined);
+      else if (drag.nav === 'track') views.track(drag.slot, dx, dy, drag.surface ? views.cam(drag.slot).pivot : undefined);
+      // right or up zooms in, left or down out
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
     } else if (drag.kind === 'place') ctx.guides.pointerMove(drag.slot, x, y);
     else if (drag.kind === 'guide') ctx.guides.dragMove(drag.slot, x, y);
-    else ctx.select.move(x, y);
+    else if (drag.kind === 'box') ctx.select.move(x, y);
     return;
   }
   layoutViews();
@@ -663,13 +724,16 @@ const endDrag = (e, cancel = false) => {
   drag = null;
   viewport.classList.remove('nav');
   const { x, y } = at(e);
-  if (d.kind === 'nav') saveViews();
+  // what is under the cursor now that the camera has moved
+  if (d.kind === 'nav') { saveViews(); if (!cancel) ctx.select.hover(views.slotAt(x, y), x, y); }
   else if (d.kind === 'place') { if (!cancel) ctx.guides.pointerUp(d.slot, x, y); }
-  else if (d.kind === 'guide') {
-    // a press that did not move is a click: it selects the guide
-    if (!ctx.guides.dragEnd(cancel) && !cancel) ctx.selection.apply([guideId(d.h.id)]);
+  else if (d.kind === 'guide') ctx.guides.dragEnd(cancel);
+  else if (d.kind === 'box') { if (cancel) ctx.select.cancel(); else ctx.select.up(x, y); }
+  else if (d.kind === 'press' && !cancel) {
+    // a press that did not travel is a click: the model says what it does with what was under it
+    const c = PT.clickChange(d.plan.click, d.hit?.id);
+    if (c) ctx.selection.apply(c.ids, c.op);
   }
-  else if (cancel) ctx.select.cancel(); else ctx.select.up(x, y);
 };
 canvas.addEventListener('dblclick', (e) => {
   if (ctx.guides.mode || drag) return;
@@ -689,11 +753,12 @@ canvas.addEventListener('wheel', (e) => {
   if (slot < 0) return;
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
   const factor = Math.exp(Math.max(-1, Math.min(1, dy * 0.0015)));
-  if (preset === 'topotopo') {
+  if (KM.surfacePivot(preset)) {
     const hit = ctx.select.navigationPoint(slot, x, y); if (hit) views.anchor(slot, hit);
     views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
   } else views.dolly(slot, factor, views.targetPlanePoint(slot, x, y));
   clearTimeout(canvas.wheelTimer); canvas.wheelTimer = setTimeout(saveViews, 300);
+  ctx.select.hover(slot, x, y);
   ctx.requestRender();
 }, { passive: false });
 

@@ -4,7 +4,7 @@
     "attributes": {
       "detail": [],
       "point": ["P:float:3"],
-      "prim": ["N:float:3", "class:int:1", "sourceprim:int:1", "uv:float:3"],
+      "prim": ["class:int:1", "sourceprim:int:1", "uv:float:3"],
       "vertex": []
     },
     "bbox": {
@@ -26,7 +26,6 @@
     "hashes": {
       "P": "61e249d32212fb99",
       "attributes": {
-        "prim.N": "79d9ca0517223f9f",
         "prim.class": "afc55805439c91bf",
         "prim.sourceprim": "0b0b34b5b73b936f",
         "prim.uv": "999d7901d2ac009f"

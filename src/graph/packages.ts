@@ -57,6 +57,11 @@ export interface PackageOutput {
   /** a problem every cook repeats (a copy edited by hand) */
   warning?: string;
   /**
+   * the materials a material output holds, as its published version records them (its maps); absent for a working
+   * folder or a copy edited by hand. A merge whose readers read other materials leaves it out (src/graph/demand.ts).
+   */
+  materials?: string[];
+  /**
    * How the root names a file of the version, given its absolute path: relative to the root's folder when the version
    * lies inside the root's package, so exports stay portable, else the absolute path. The registry gives it (the core
    * has no paths); absent, texture paths are absolute.

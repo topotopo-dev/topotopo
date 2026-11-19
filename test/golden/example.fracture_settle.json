@@ -1,0 +1,91 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["class:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.3572, 1.0791, 5.2875],
+      "min": [-2.8671, -0.0015, -1.4326]
+    },
+    "counts": {
+      "points": 496,
+      "prims": 832,
+      "vertices": 2496,
+      "volumes": 3
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["inside"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "b52d37761008c05c",
+      "attributes": {
+        "detail.materials": "621f9447c228d605",
+        "group.prim.inside": "955cd50f4f58fef1",
+        "prim.class": "5c91f2c502d3b25f",
+        "prim.material": "5e7b70c5e0d4962f",
+        "prim.name": "9586a35d0d133b37",
+        "vertex.N": "22e68d8947ff858b",
+        "vertex.uv": "944ddf28b359d89a"
+      },
+      "topology": "d9b9bf86cb608768"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "6d0553b4c5c85df2"
+        },
+        "name": "grain_stone"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "385785fcce57656e"
+        },
+        "name": "grain_raw"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "4af1393277b55638"
+        },
+        "name": "grit_relief"
+      }
+    ]
+  },
+  "name": "example.fracture_settle",
+  "ok": true,
+  "source": "examples/fracture_settle.json",
+  "warnings": []
+}

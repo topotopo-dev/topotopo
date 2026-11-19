@@ -132,6 +132,12 @@ export function genPattern(o: PatternOptions, w: number, h: number): { C: Float3
       switch (o.pattern) {
         case 'checker': v = (cx + cy) & 1 ? 1 : 0; break;
         case 'stripes': {
+          // vertical stripes by the u count; with a u count of 1 the v count makes horizontal stripes
+          if (nx === 1 && ny > 1) {
+            cid = cellRand(cy, 0, o.seed);
+            v = aa(Math.min(fy, 1 - fy) * chh) * vary(cy, 0);
+            break;
+          }
           const sx = u * nx, scx = Math.floor(sx), sf = sx - scx;
           cid = cellRand(wrapI(scx, nx), 0, o.seed);
           v = aa(Math.min(sf, 1 - sf) * cw) * vary(wrapI(scx, nx), 0);
@@ -746,12 +752,14 @@ export function sampleBilinear(a: Float32Array, ch: number, w: number, h: number
 
 /**
  * Transform a layer: the result at (u, v) samples the source at the inverse of (repeat `tile` times, scale, rotate
- * by `rotate` degrees about the centre, offset). wrap = repeat the source; otherwise outside the source is 0.
+ * by `rotate` degrees about the centre, offset; the tile cells start at the lower-left corner). wrap = repeat the source; otherwise outside the source is 0.
  */
 export function transformLayer(a: Float32Array, ch: number, w: number, h: number, offset: [number, number], rotate: number, scale: [number, number], tile: [number, number], wrap: boolean): Float32Array {
   const out = new Float32Array(a.length);
   const th = (-rotate * Math.PI) / 180, c = Math.cos(th), s = Math.sin(th);
-  const sx = (scale[0] || 1e-6) / Math.max(1e-6, tile[0] || 1), sy = (scale[1] || 1e-6) / Math.max(1e-6, tile[1] || 1);
+  const sx = scale[0] || 1e-6, sy = scale[1] || 1e-6;
+  const tx = Math.max(1e-6, tile[0] || 1), ty = Math.max(1e-6, tile[1] || 1);
+  const tiled = tx !== 1 || ty !== 1;
   const tmp = new Float32Array(ch);
   const aspect = h / w;
   for (let j = 0; j < h; j++)
@@ -761,7 +769,8 @@ export function transformLayer(a: Float32Array, ch: number, w: number, h: number
       const rx = x * c - y * s, ry = x * s + y * c;
       x = rx / sx + 0.5; y = (ry / aspect) / sy + 0.5;
       if (!wrap && (x < 0 || x > 1 || y < 0 || y > 1)) continue;
-      sampleBilinear(a, ch, w, h, x * w, (1 - y) * h, tmp, wrap);
+      // tiling is about the lower-left corner of the transformed image: cell 0 starts at uv (0, 0)
+      sampleBilinear(a, ch, w, h, x * tx * w, (1 - y * ty) * h, tmp, wrap || tiled);
       out.set(tmp, (j * w + i) * ch);
     }
   return out;

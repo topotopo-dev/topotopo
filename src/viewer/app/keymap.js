@@ -1,15 +1,24 @@
-// The keymap: one table of actions, four presets (TopoTopo, the default;
-// Maya, Houdini, Blender). Each row carries the text the overlay prints per preset and the built actions' bindings:
+// The keymap: one table of actions, four presets (Houdini, the default;
+// TopoTopo, Maya, Blender). Each row carries the text the overlay prints per preset and the built actions' bindings:
 // chord → action. Transform and snapping rows (phase 2) ship their text but no bindings, so a preset never changes
-// shape later. Plain data and functions: the overlay is the only DOM code, and it runs only when called.
+// shape later. The left button without a navigation chord is the selection model's in every preset (pointer.js:
+// click selects, a drag moves what you edit or tumbles); its rows are the same text everywhere. Plain data and
+// functions: the overlay is the only DOM code, and it runs only when called.
+import { SELECTION_ROWS } from './pointer.js';
 
 export const PRESETS = [
+  { id: 'houdini', label: 'Houdini' },
   { id: 'topotopo', label: 'TopoTopo' },
   { id: 'maya', label: 'Maya' },
-  { id: 'houdini', label: 'Houdini' },
   { id: 'blender', label: 'Blender' },
 ];
-export const DEFAULT_PRESET = 'topotopo';
+export const DEFAULT_PRESET = 'houdini';
+/**
+ * The presets whose camera turns about the surface under the cursor (design/viewer.md section 3): the pivot is picked
+ * on press and held for the drag, a miss keeps the last one, wheel zoom anchors to the hit, and tumble pans in
+ * orthographic views. The others orbit the selection.
+ */
+export const surfacePivot = (presetId) => presetId === 'topotopo' || presetId === 'houdini';
 
 const place = { 'Shift+1': 'placeNull', 'Shift+2': 'placeCurve', 'Shift+3': 'placeArea', 'Shift+4': 'placeVolume' };
 const curve = { Enter: 'finish', Backspace: 'removeLast', Esc: 'cancel' };
@@ -19,9 +28,10 @@ const curve = { Enter: 'finish', Backspace: 'removeLast', Esc: 'cancel' };
  * without bindings for a preset is not built yet (phase 2) or has none in that application.
  */
 export const ROWS = [
-  { label: 'tumble', maya: ['Alt + L drag', { drag: { 'Alt+L': 'tumble' } }], houdini: ['Space + L drag', { drag: { 'Space+L': 'tumble' } }], blender: ['M drag', { drag: { M: 'tumble' } }] },
-  { label: 'track', maya: ['Alt + M drag', { drag: { 'Alt+M': 'track' } }], houdini: ['Space + M drag', { drag: { 'Space+M': 'track' } }], blender: ['Shift + M drag', { drag: { 'Shift+M': 'track' } }] },
-  { label: 'dolly', maya: ['Alt + R drag, wheel', { drag: { 'Alt+R': 'dolly' } }], houdini: ['Space + R drag, wheel', { drag: { 'Space+R': 'dolly' } }], blender: ['Ctrl + M drag, wheel', { drag: { 'Ctrl+M': 'dolly' } }] },
+  // Houdini: L drag tumbles through the selection model (on a result or empty space); Space + L tumbles over anything
+  { label: 'tumble', maya: ['Alt + L drag', { drag: { 'Alt+L': 'tumble' } }], houdini: ['L drag, Space + L drag', { drag: { 'Space+L': 'tumble' } }], blender: ['M drag', { drag: { M: 'tumble' } }] },
+  { label: 'track', maya: ['Alt + M drag', { drag: { 'Alt+M': 'track' } }], houdini: ['M drag, Space + M drag', { drag: { M: 'track', 'Space+M': 'track' } }], blender: ['Shift + M drag', { drag: { 'Shift+M': 'track' } }] },
+  { label: 'dolly', maya: ['Alt + R drag, wheel', { drag: { 'Alt+R': 'dolly' } }], houdini: ['R drag (up or right zooms in), wheel, Space + R drag', { drag: { R: 'dolly', 'Space+R': 'dolly' } }], blender: ['Ctrl + M drag, wheel', { drag: { 'Ctrl+M': 'dolly' } }] },
   { label: 'frame selection', maya: ['F', { keys: { F: 'frameSelection' } }], houdini: ['Space+G', { keys: { 'Space+G': 'frameSelection' } }], blender: ['Numpad .', { keys: { 'Numpad.': 'frameSelection' } }] },
   { label: 'frame all', maya: ['A', { keys: { A: 'frameAll' } }], houdini: ['Space+H', { keys: { 'Space+H': 'frameAll' } }], blender: ['Home', { keys: { Home: 'frameAll' } }] },
   { label: 'single / quad view', maya: ['Space (tap)', { keys: { Space: 'quad' } }], houdini: ['Space+B', { keys: { 'Space+B': 'quad' } }], blender: ['Ctrl+Alt+Q', { keys: { 'Ctrl+Alt+Q': 'quad' } }] },
@@ -47,8 +57,8 @@ export const ROWS = [
   },
   { label: 'place a null / curve / area / volume', maya: ['Shift+1 / 2 / 3 / 4', { keys: place }], houdini: ['Shift+1 / 2 / 3 / 4', { keys: place }], blender: ['Shift+1 / 2 / 3 / 4', { keys: place }] },
   { label: 'finish a curve / remove its last point / cancel', maya: ['Enter / Backspace / Esc', { keys: curve }], houdini: ['Enter / Backspace / Esc', { keys: curve }], blender: ['Enter / Backspace / Esc', { keys: curve }] },
-  // the mouse in select mode (main.js and guides.js handle these; no chords to bind)
-  { label: 'move a guide / one of its points', maya: ['L drag its line / the point'], houdini: ['L drag its line / the point'], blender: ['L drag its line / the point'] },
+  // the selection model (pointer.js), the same in every preset: main.js handles the left button, no chords to bind
+  ...SELECTION_ROWS.map(([label, text]) => ({ label, model: true, maya: [text], houdini: [text], blender: [text] })),
   { label: 'add a CV to a curve or area / remove one', maya: ['double-click its line / the CV'], houdini: ['double-click its line / the CV'], blender: ['double-click its line / the CV'] },
   { label: 'delete the selection', maya: ['Delete', { keys: { Delete: 'delete' } }], houdini: ['Delete', { keys: { Delete: 'delete' } }], blender: ['X, Delete', { keys: { X: 'delete', Delete: 'delete' } }] },
   {
@@ -193,7 +203,7 @@ export function toggleOverlay(host, presetId) {
   }
   const foot = doc.createElement('div');
   foot.className = 'km-foot';
-  foot.textContent = 'click selects, Shift-click adds, Ctrl-click removes, a drag selects what lies wholly inside its box, Esc clears · ? or Esc closes';
+  foot.textContent = 'results (cooked geometry) never select on a plain click: Shift-click one to read it · guides and CVs win a click within a few pixels, even behind geometry · ? or Esc closes';
   panel.append(head, table, foot);
   box.append(panel);
   box.addEventListener('pointerdown', (e) => { if (e.target === box) box.remove(); });

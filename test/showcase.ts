@@ -1,5 +1,7 @@
 // Cook and render every graph in examples/ to examples/renders/<name>.png.
 // A graph's meta.render (any render tool option: views, checker, color_by, azimuth, wireframe, section_axis, glyphs, …) overrides the default quad view.
+// meta.render.node renders that node instead of the graph's output: an example whose look needs several outputs in one
+// picture keeps a node that gathers them for the render (a merge, a terrain as a coloured mesh, a part lifted to show it).
 // examples/ is a package: the graphs that name TopoTopo's own packages cook them from its copies in examples/packages/.
 //   node test/showcase.ts [filter]
 import fs from 'node:fs';
@@ -10,7 +12,7 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { openPackages } from '../src/packages/registry.ts';
-import { renderGeometry } from '../src/render/raster.ts';
+import { renderGeometryAsync } from '../src/render/raster.ts';
 import { renderArgs } from '../src/render/options.ts';
 import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
@@ -41,7 +43,8 @@ for (const ex of examplePackageGraphs()) {
 for (const job of jobs.filter((j) => !filter || j.name.includes(filter))) {
   const name = job.name;
   const graph = JSON.parse(fs.readFileSync(job.file, 'utf8'));
-  const r = await job.engine.cook(graph, { frame: graph.meta?.frame }); // animated examples name their display frame
+  // animated examples name their display frame; meta.render.node, the node shown (default the graph's output)
+  const r = await job.engine.cook(graph, { frame: graph.meta?.frame, target: graph.meta?.render?.node });
   if (!r.ok || !r.geo) {
     failed++;
     console.log(`FAIL ${name}: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
@@ -49,7 +52,7 @@ for (const job of jobs.filter((j) => !filter || j.name.includes(filter))) {
   }
   const t0 = performance.now();
   const ro = graph.meta?.render ?? {};
-  const img = renderGeometry(r.geo, { ...renderArgs(ro), title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name, views: ro.views, checker: !!ro.checker, colorBy: ro.color_by ?? null, azimuth: ro.azimuth, elevation: ro.elevation, zoom: ro.zoom });
+  const img = await renderGeometryAsync(r.geo, { ...renderArgs(ro), title: r.frame !== 1 ? `${name} @ frame ${r.frame}` : name, views: ro.views, checker: !!ro.checker, colorBy: ro.color_by ?? null, azimuth: ro.azimuth, elevation: ro.elevation, zoom: ro.zoom });
   fs.writeFileSync(path.join(outDir, name + '.png'), encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
   console.log(`ok   ${name}: cook ${r.ms.toFixed(0)} ms, render ${(performance.now() - t0).toFixed(0)} ms${r.warnings.length ? `, ${r.warnings.length} warnings: ${r.warnings.slice(0, 2).map((w) => `[${w.node}] ${w.message}`).join('; ')}` : ''}`);
   console.log('     ' + summarize(r.geo).split('\n').slice(0, 2).join('\n     '));

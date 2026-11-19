@@ -6,7 +6,7 @@ import {
   m4applyDir, m4apply, m4determinant3, m4invert, m4mul, m4normalMatrix, m4trs, qFromMat, qMul, normalize, cross, dot,
 } from '../core/math.ts';
 import type { Mat4, Vec3 } from '../core/math.ts';
-import { pointNeighbors, reversePrims, buildEdges, refreshNormals } from '../core/topology.ts';
+import { relaxPoints, reversePrims, refreshNormals } from '../core/topology.ts';
 import { rng, rand } from '../core/random.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { primNormals } from '../core/topology.ts';
@@ -97,13 +97,13 @@ defineNode({
   inputs: [{ name: 'geo', desc: 'geometry to transform' }],
   params: {
     translate: { type: 'vec3', default: [0, 0, 0], desc: 'translation', aliases: ['t', 'move', 'offset', 'position'] },
-    rotate: { type: 'vec3', default: [0, 0, 0], desc: 'rotation in degrees about X, Y, Z', aliases: ['r', 'rot', 'rotation'] },
+    rotate: { type: 'vec3', default: [0, 0, 0], desc: 'rotation in degrees about the world X, Y and Z axes, right-handed (counter-clockwise seen from the + end of the axis), X first, then Y, then Z (rotate_order xyz): [0, 0, 40] turns +Y to (-0.64, 0.77, 0), [0, 90, 0] turns +X to -Z', aliases: ['r', 'rot', 'rotation'] },
     scale: { type: 'vec3', default: [1, 1, 1], desc: 'scale (a single number = uniform)', aliases: ['s'] },
     uniform_scale: { type: 'float', default: 1, desc: 'extra uniform scale multiplier', aliases: ['uniformscale', 'scale_uniform'] },
     pivot: { type: 'vec3', default: [0, 0, 0], desc: 'pivot for rotation and scale', aliases: ['p'] },
     pivot_mode: { type: 'enum', options: ['param', 'centroid', 'bbox_min', 'bbox_center_bottom'], default: 'param', desc: 'where the pivot comes from' },
     order: { type: 'enum', options: ['srt', 'str', 'rst', 'rts', 'tsr', 'trs'], default: 'srt', desc: 'transform order (srt = scale, then rotate, then translate)', aliases: ['xord'] },
-    rotate_order: { type: 'enum', options: ['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'], default: 'xyz', desc: 'rotation order', aliases: ['rord'] },
+    rotate_order: { type: 'enum', options: ['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'], default: 'xyz', desc: 'order the three rotations apply in, each about a world axis: xyz = X first, then Y, then Z', aliases: ['rord'] },
     group: P.group('point', 'point group to transform ("" = all)'),
   },
   example: { type: 'transform', params: { translate: [0, 1, 0], rotate: [0, 45, 0], uniform_scale: 2 } },
@@ -420,6 +420,10 @@ defineNode({
   packed: 'keep',
   summary: 'Make N copies, each transformed cumulatively (Houdini Copy and Transform): stairs, radial arrays, stacks.',
   aliases: ['copy', 'copyxform', 'array', 'duplicate'],
+  description:
+    'Copies placed from a list instead (positions, yaw, scale and a piece name per row, from a CSV or JSON file): read ' +
+    'the list with file and instance the pieces onto it with copy_to_points {pack, variants "name", variant_attrib ' +
+    '"name", rotate_attrib "yaw"}, exported as one instanced GLB: help topic "recipes", "instance a placement list".',
   inputs: [{ name: 'geo', desc: 'geometry to copy' }],
   params: {
     count: { type: 'int', default: 4, min: 0, max: 100000, desc: 'total copies (including the original)', aliases: ['ncy', 'copies', 'n'] },
@@ -641,35 +645,7 @@ defineNode({
   cook: ({ input, p }) => {
     const g = input(0).clone();
     const sel = mask(g, 'point', p.group);
-    const { start, nb } = pointNeighbors(g);
-    const pin = new Uint8Array(g.numPoints);
-    if (p.preserve_boundary) {
-      const E = buildEdges(g);
-      for (let e = 0; e < E.a.length; e++) if (E.count[e] === 1 && g.primClosed[E.firstPrim[e]]) { pin[E.a[e]] = 1; pin[E.b[e]] = 1; }
-      for (let pr = 0; pr < g.numPrims; pr++) if (!g.primClosed[pr]) {
-        pin[g.vertexPoint[g.primStart[pr]]] = 1;
-        pin[g.vertexPoint[g.primStart[pr + 1] - 1]] = 1;
-      }
-    }
-    const Pd = g.P, tmp = new Float64Array(Pd.length);
-    const pass = (lam: number) => {
-      tmp.set(Pd);
-      for (let i = 0; i < g.numPoints; i++) {
-        if (pin[i] || (sel && !sel[i])) continue;
-        const s = start[i], e = start[i + 1];
-        if (e === s) continue;
-        let x = 0, y = 0, z = 0;
-        for (let k = s; k < e; k++) { const j = nb[k]; x += tmp[j * 3]; y += tmp[j * 3 + 1]; z += tmp[j * 3 + 2]; }
-        const c = e - s;
-        Pd[i * 3] += (x / c - tmp[i * 3]) * lam;
-        Pd[i * 3 + 1] += (y / c - tmp[i * 3 + 1]) * lam;
-        Pd[i * 3 + 2] += (z / c - tmp[i * 3 + 2]) * lam;
-      }
-    };
-    for (let it = 0; it < p.iterations; it++) {
-      pass(p.strength);
-      if (p.method === 'taubin') pass(-p.strength * 1.04);
-    }
+    relaxPoints(g, { iterations: p.iterations, strength: p.strength, method: p.method === 'laplacian' ? 'laplacian' : 'taubin', preserveBoundary: !!p.preserve_boundary, sel });
     return refreshNormals(g);
   },
 });

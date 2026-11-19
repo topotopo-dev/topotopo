@@ -53,6 +53,7 @@ import type { GraphSpec, NodeDef } from '../graph/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
 import { readMaterials } from '../core/materials.ts';
+import { lfsPointerNote } from '../io/png-decode.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { imageRef, referenceableImages } from '../core/image.ts';
 import { graphFiles, registerAssets } from '../session.ts';
@@ -160,6 +161,24 @@ const missingCopy = (pkg: string, v: string, at: string, direct?: string) =>
   `the copy of ${pkg} ${v} is missing: ${at}${direct ? `; restore it, or run ${program()} use ${direct}, which copies what is missing` : ''}`;
 const editedCopy = (pkg: string, v: string, at: string, direct?: string) =>
   `the copy of ${pkg} ${v} (${at}) was edited by hand: its files no longer match the hash packages/lock.json records; restore it, or delete it and run ${program()} use ${direct ?? pkg}, which copies what is missing`;
+
+/**
+ * When files below `dir` are Git LFS pointers (the small text files Git leaves in place of large files it never
+ * fetched), what to say of `what` instead of "edited by hand" or "changed after publishing": they are why its hash does
+ * not match. '' when it holds none.
+ */
+function lfsSaid(what: string, dir: string): string {
+  const files: string[] = [];
+  try {
+    for (const f of filesBelow(dir)) {
+      const size = fs.statSync(f.abs, { throwIfNoEntry: false })?.size ?? 0;
+      if (size > 0 && size <= 1024 && lfsPointerNote(fs.readFileSync(f.abs))) files.push(f.rel);
+    }
+  } catch { return ''; }
+  if (!files.length) return '';
+  const named = files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', ');
+  return `${what} holds Git LFS pointers, not its files (${named}): Git never fetched them; run git lfs pull in its repository`;
+}
 
 /**
  * Every file below `dir`, dot-files and dot-folders skipped, and the files an engine writes beside ours (*.import,
@@ -274,6 +293,20 @@ export function filesHash(files: { rel: string; sha: string }[]): string {
 export function workingHash(dir: string): string {
   const m = readManifest(dir), lock = readLock(dir);
   return filesHash(versionFiles(dir, m, lock).map((f) => ({ rel: f.rel, sha: f.bytes ? contentSha(f.rel, f.bytes) : fileSha(f.abs!, true) })));
+}
+
+/**
+ * The hash of the files of the package `dir` a cook of a graph may read besides the graph's own file `graphFile`: its
+ * other graphs (graph_ref, its own outputs), assets/ and inputs/. An export records it (io/source.ts files_sha256), so
+ * --export-all knows an output whose files are unchanged.
+ */
+export function packageFilesHash(dir: string, graphFile?: string): string {
+  const own = graphFile ? path.resolve(graphFile) : '';
+  const files: { rel: string; sha: string }[] = [];
+  for (const d of ['graphs', 'assets', 'inputs']) for (const f of filesBelow(path.join(dir, d))) {
+    if (path.resolve(f.abs) !== own) files.push({ rel: `${d}/${f.rel}`, sha: fileSha(f.abs, true) });
+  }
+  return filesHash(files);
 }
 
 /** The hash of a version folder as published: every file but its version.json. */
@@ -680,8 +713,11 @@ interface Context {
   uses: Record<string, string>;
   packages: string;
   lock: Lock;
-  /** followed packages resolve to their working folders (in the package and in followed folders, never in a version) */
-  follows: boolean;
+  /**
+   * followed packages resolve to their working folders (in the package and in followed folders, never in a version);
+   * a set: only the followed packages in it (an export that names the working folders it uses, the others' published copies)
+   */
+  follows: boolean | ReadonlySet<string>;
   /** the package the scope is (a version, a working folder, the package that publishes versions): its own outputs by full name */
   self?: { package: string; get: () => Loaded | PackageIssue };
   /**
@@ -696,6 +732,9 @@ interface Context {
    */
   unavailable?: Map<string, string>;
 }
+
+/** Whether a context resolves `pkg` to its working folder, when the session follows it. */
+const followsIn = (ctx: Context, pkg: string) => ctx.follows === true || (ctx.follows !== false && ctx.follows.has(pkg));
 
 /** A package version (or a followed working folder) loaded into the engine: its scope and its output node types. */
 export interface Loaded {
@@ -998,39 +1037,69 @@ export class PackageUses implements SessionPackages {
 
   /**
    * What exports and publishing resolve package names with: the published copies, whatever this session follows
-   * (following a working folder is for looking: the viewer, renders). The package's own resolver while nothing is
-   * followed.
+   * (following a working folder is for looking: the viewer, renders), but for the followed packages in `follow` (an
+   * export told to use their working folders). The package's own resolver while every followed package is in it.
    */
-  publishedResolver(): PackageResolver {
-    if (!this.followed.size) return this.resolver;
-    return { resolve: (name) => this.resolveIn({ ...this.root, follows: false }, name), names: () => this.namesIn({ ...this.root, follows: false }) };
+  publishedResolver(follow: readonly string[] = []): PackageResolver {
+    const kept = this.kept(follow);
+    if (kept.length === this.followed.size) return this.resolver;
+    // the root as it is when asked (its uses change with use and update)
+    const follows = kept.length ? new Set(kept) : false, ctx = (): Context => ({ ...this.root, follows });
+    return { resolve: (name) => this.resolveIn(ctx(), name), names: () => this.namesIn(ctx()) };
   }
 
-  private publishedAt: Scope | null = null;
+  /** The followed packages among `follow`, sorted. */
+  private kept(follow: readonly string[]): string[] { return [...new Set(follow)].filter((p) => this.followed.has(p)).sort(); }
+
+  private publishedAt = new Map<string, Scope>();
   /**
    * SessionPackages.published: while this session follows working folders, the scope exports cook in, like the root
-   * (its assets, graphs and folder) but resolving packages to their published copies; null while nothing is followed
-   * (exports cook in the root, as everything else).
+   * (its assets, graphs and folder) but resolving packages to their published copies, the followed packages in `follow`
+   * to their working folders; null while every followed package is in `follow` (or nothing is followed): exports then
+   * cook in the root, as everything else.
    */
-  published(): Scope | null {
-    if (!this.followed.size) return null;
+  published(follow: readonly string[] = []): Scope | null {
+    const kept = this.kept(follow);
+    if (kept.length === this.followed.size) return null;
+    const key = kept.join(','), have = this.publishedAt.get(key);
+    if (have) return have;
     const root = this.engine.root;
-    this.publishedAt ??= this.engine.createScope(`published copies ${sha(this.dir ?? '').slice(0, 12)}`, {
-      folder: root.files.resolvePath('.'), assets: root.assets, graphs: (n) => root.graphs?.(n), packages: this.publishedResolver(),
+    const scope = this.engine.createScope(`published copies ${sha(`${this.dir ?? ''}|${key}`).slice(0, 12)}`, {
+      folder: root.files.resolvePath('.'), assets: root.assets, graphs: (n) => root.graphs?.(n), packages: this.publishedResolver(kept),
     });
-    return this.publishedAt;
+    this.publishedAt.set(key, scope);
+    return scope;
+  }
+
+  /**
+   * SessionPackages.unpublished: the followed packages `graph` names that an export would cook from published copies
+   * (those not in `follow`) while the package uses no published version of them: such an export cannot cook, and is
+   * refused, saying to publish them or to export from their working folders.
+   */
+  unpublished(graph: GraphSpec, follow: readonly string[] = []): { package: string; dir: string }[] {
+    const named = new Set(packagesNamedIn(graph)), kept = new Set(follow);
+    return [...this.followed.values()].filter((f) => named.has(f.package) && !kept.has(f.package) && this.root.uses[f.package] === undefined)
+      .map((f) => ({ package: f.package, dir: f.dir }));
   }
 
   /**
    * What an export of `graph` made while following says (null when the graph names no followed package): the
-   * published versions it used, the working folders being for looking only.
+   * working folders it used (those in `follow`: no published version, which its source record states under
+   * "followed"), and the published versions it used for the others, their working folders being for looking only.
    */
-  publishedNote(graph: GraphSpec): string | null {
-    const named = new Set(packagesNamedIn(graph));
+  publishedNote(graph: GraphSpec, follow: readonly string[] = []): string | null {
+    const named = new Set(packagesNamedIn(graph)), kept = new Set(this.kept(follow));
     const live = [...this.followed.values()].filter((f) => named.has(f.package));
     if (!live.length) return null;
-    const used = live.map((f) => (this.root.uses[f.package] ? `${f.package} ${this.root.uses[f.package]}` : `${f.package} (no published version in use: publish one, and use it)`));
-    return `this session shows ${live.map((f) => f.package).join(', ')} live from ${live.length === 1 ? 'its working folder' : 'their working folders'}, for looking; the export used the published ${used.join(', ')}`;
+    const working = live.filter((f) => kept.has(f.package)), shown = live.filter((f) => !kept.has(f.package));
+    const notes: string[] = [];
+    if (working.length)
+      notes.push(`the export used the working folder of ${working.map((f) => f.package).join(', ')}, not a published version: its source record lists ${working.length === 1 ? 'it' : 'them'} under "followed"`);
+    if (shown.length) {
+      const used = shown.map((f) => (this.root.uses[f.package] ? `${f.package} ${this.root.uses[f.package]}` : `${f.package} (no published version in use: publish one, and use it)`));
+      notes.push(`this session shows ${shown.map((f) => f.package).join(', ')} live from ${shown.length === 1 ? 'its working folder' : 'their working folders'}, for looking; the export used the published ${used.join(', ')}`);
+    }
+    return notes.join('\n');
   }
 
   /** SessionPackages: why the graphs cannot use packages (a folder in no package, a manifest that is not valid). */
@@ -1150,7 +1219,7 @@ export class PackageUses implements SessionPackages {
 
   private namesIn(ctx: Context): string[] {
     const pkgs = new Set(Object.keys(ctx.uses));
-    if (ctx.follows) for (const k of this.followed.keys()) pkgs.add(k);
+    for (const k of this.followed.keys()) if (followsIn(ctx, k)) pkgs.add(k);
     if (ctx.self) pkgs.add(ctx.self.package);
     const out: string[] = [];
     for (const pkg of pkgs) {
@@ -1165,7 +1234,7 @@ export class PackageUses implements SessionPackages {
   private packageIn(ctx: Context, pkg: string): Loaded | PackageIssue {
     // the package's own outputs: the same version (or working folder), with no entry in its uses
     if (ctx.self?.package === pkg) return ctx.self.get();
-    if (ctx.follows && this.followed.has(pkg)) return this.loadFollowed(pkg);
+    if (this.followed.has(pkg) && followsIn(ctx, pkg)) return this.loadFollowed(pkg);
     const v = ctx.uses[pkg];
     if (v !== undefined) return this.loadCopy(ctx, pkg, v);
     if (ctx !== this.root && !ctx.unavailable) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
@@ -1194,7 +1263,7 @@ export class PackageUses implements SessionPackages {
       // the same version held in a second place (a followed folder's copies) must hold the same files
       let hash = '';
       try { hash = copyHash(dir, ctx.packages); } catch (e: any) { return { error: `${pkg} ${v} in ${dir}: ${e.message}` }; }
-      return hash === have.hash ? have : { error: `${pkg} ${v} has different files in ${have.dir} and in ${dir}: one of them was changed after publishing, and TopoTopo never picks one` };
+      return hash === have.hash ? have : { error: lfsSaid(`${pkg} ${v} in ${dir}`, dir) || lfsSaid(`${pkg} ${v} in ${have.dir}`, have.dir) || `${pkg} ${v} has different files in ${have.dir} and in ${dir}: one of them was changed after publishing, and TopoTopo never picks one` };
     }
     if (this.loading.has(key)) return { error: `${pkg} ${v} uses itself (through ${[...this.loading].join(' → ')})` };
     this.loading.add(key);
@@ -1217,7 +1286,7 @@ export class PackageUses implements SessionPackages {
     const expected = ctx.lock.packages[pkg]?.[v]?.hash;
     let warning: string | undefined;
     if (expected === undefined) warning = `${this.shown(ctx.packages)}/lock.json does not list ${pkg} ${v}: ${program()} use ${direct ?? pkg} records it`;
-    else if (expected !== hash) warning = editedCopy(pkg, v, this.shown(dir), direct);
+    else if (expected !== hash) warning = lfsSaid(`the copy of ${pkg} ${v} (${this.shown(dir)})`, dir) || editedCopy(pkg, v, this.shown(dir), direct);
     const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: ctx.packages, lock: ctx.lock, follows: false };
     // the scope is the files' too: a copy restored after an edit is another scope, with results of its own
     return this.build({ pkg, version: v, dir, hash, signature: hash, info, warning, manifest: m, ctx: vctx, scope: `${pkg}@${v}${warning ? `#${hash.slice(0, 16)}` : ''}` });
@@ -1231,7 +1300,7 @@ export class PackageUses implements SessionPackages {
     if (expected === undefined || !this.dir || !this.root.lock.packages[pkg]?.[v] || !fs.existsSync(path.join(copyAt(this.root.packages, pkg, v), 'version.json'))) return null;
     const own = this.loadCopy(this.root, pkg, v);
     if ('error' in own) return null;
-    return own.hash === expected ? own : { error: `${pkg} ${v} has different files in ${own.dir} and in ${elsewhere}: one of them was changed after publishing, and TopoTopo never picks one` };
+    return own.hash === expected ? own : { error: lfsSaid(`${pkg} ${v} in ${own.dir}`, own.dir) || lfsSaid(`${pkg} ${v} in ${elsewhere}`, elsewhere) || `${pkg} ${v} has different files in ${own.dir} and in ${elsewhere}: one of them was changed after publishing, and TopoTopo never picks one` };
   }
 
   /**
@@ -1254,7 +1323,7 @@ export class PackageUses implements SessionPackages {
       else {
         const info = readVersionInfo(dir), m = readManifest(dir);
         const hash = place ? versionHash(dir, true) : copyHash(dir, ctx.packages);
-        if (hash !== expected) r = { error: `${pkg} ${v} in ${dir} was changed after publishing: its files do not match the hash it was published with` };
+        if (hash !== expected) r = { error: lfsSaid(`${pkg} ${v} in ${dir}`, dir) || `${pkg} ${v} in ${dir} was changed after publishing: its files do not match the hash it was published with` };
         else {
           const vctx: Context = { label: `${pkg} ${v}`, uses: m.uses, packages: place ? path.join(dir, 'packages') : ctx.packages, lock: place ? readLock(dir) : ctx.lock, follows: false, apart: true };
           r = this.build({ pkg, version: v, dir, hash, signature: `${hash}|${dir}`, info, manifest: m, ctx: vctx, scope: `${pkg}@${v}|${dir}` });
@@ -1328,6 +1397,7 @@ export class PackageUses implements SessionPackages {
         rootPath: this.rootPath,
         ...(o.info?.note ? { note: o.info.note } : {}), ...(x.label ? { label: x.label } : {}), ...(kind ? { kind } : {}), ...(tags?.length ? { tags } : {}),
         ...(o.warning ? { warning: o.warning } : {}),
+        ...(rec?.maps && !o.warning ? { materials: Object.keys(rec.maps) } : {}),
       });
     };
     const loaded: Loaded = {
@@ -1392,7 +1462,7 @@ export class PackageUses implements SessionPackages {
     for (const [pkg, v] of closure) {
       const at = copyAt(packages, pkg, v);
       if (!fs.existsSync(path.join(at, 'version.json'))) out.push(missingCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
-      else if (copyHash(at, packages) !== lock.packages[pkg][v].hash) out.push(editedCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
+      else if (copyHash(at, packages) !== lock.packages[pkg][v].hash) out.push(lfsSaid(`the copy of ${pkg} ${v} (${this.shown(at)})`, at) || editedCopy(pkg, v, this.shown(at), this.directUser(pkg, v)));
     }
     return out;
   }
@@ -1405,7 +1475,9 @@ export class PackageUses implements SessionPackages {
    */
   locked(graph: GraphSpec): string[] {
     const adds = this.dryRun(graph).adds.map((a) => `the graph names ${a.package}, which ${this.usesFileName} does not use: ${program()} use ${a.package} adds it (a cook without --locked adds it)`);
-    return [...adds, ...(this.dir && this.manifest ? this.verifyCopies() : [])];
+    // a working folder followed for this run is no version: a build machine cooks published versions alone
+    const working = this.unpublished(graph).map((u) => `the graph names ${u.package}, which ${this.usesFileName} does not use, and its working folder (followed) is no published version: publish ${u.package} (${program()} publish ${u.dir} --note "...") and use it`);
+    return [...adds, ...working, ...(this.dir && this.manifest ? this.verifyCopies() : [])];
   }
 
   /** The packages a graph names that the package does not use yet (nor follows, nor is). */
@@ -1479,7 +1551,7 @@ export class PackageUses implements SessionPackages {
   private versionToAdd(pkg: string, v?: string, scanned?: Scanned): { version: string; place: Place } {
     const found = this.find(pkg, scanned);
     if (!found.versions.size)
-      throw new Error(`${pkg} is in ${found.place} (${found.dir}) but has no published version yet: publish one in its folder (${program()} publish ${found.working ? `${found.dir} ` : ''}--note "...")`);
+      throw new Error(`${pkg} is in ${found.place} (${found.dir}) but has no published version yet: publish one in its folder (${program()} publish ${found.working ? `${found.dir} ` : ''}--note "...")${found.working ? `, or pass --follow ${pkg} to cook and export from its working folder, unpublished (MCP: workspace {action:"follow", package:"${pkg}", on:true}, then export {follow:["${pkg}"]})` : ''}`);
     const version = v ?? newestOf(found.versions.keys())!;
     const place = found.versions.get(version);
     if (!place) throw new Error(`${found.place} has no ${pkg} ${version}: it has ${[...found.versions.keys()].sort(compareVersions).join(', ')}`);
@@ -1519,7 +1591,7 @@ export class PackageUses implements SessionPackages {
   private copyIn(pkg: string, v: string, place: Place): string[] {
     const store = this.store!, packages = store.packages;
     if (versionHash(place.dir) !== place.info.hash)
-      throw new Error(`${pkg} ${v} in ${place.dir} (${place.place}) was changed after publishing: its files do not match the hash in its version.json, so it is not copied`);
+      throw new Error(`${lfsSaid(`${pkg} ${v} in ${place.dir} (${place.place})`, place.dir) || `${pkg} ${v} in ${place.dir} (${place.place}) was changed after publishing: its files do not match the hash in its version.json`}, so it is not copied`);
     // Godot imports none of the copies: the .gdignore is there before the first copy lands
     if (store.workspace) { fs.mkdirSync(packages, { recursive: true }); gdignore(packages); }
     else godotIgnore(store.root, ['packages']);
@@ -1545,7 +1617,7 @@ export class PackageUses implements SessionPackages {
       if (!fs.existsSync(path.join(w.from, 'version.json'))) throw new Error(`${pkg} ${v} in ${place.place} lists ${w.pkg} ${w.v} in its packages/lock.json but holds no copy of it (${w.from})`);
       const to = copyAt(packages, w.pkg, w.v), have = lock.packages[w.pkg]?.[w.v];
       if (have && have.hash !== w.hash)
-        throw new Error(`${w.pkg} ${w.v} has different files in ${this.shown(to)} (from ${libraryText(have.library)}) and in ${w.from} (${place.place}): one of them was changed after publishing, and TopoTopo never picks one`);
+        throw new Error(lfsSaid(`${w.pkg} ${w.v} in ${w.from} (${place.place})`, w.from) || lfsSaid(`the copy of ${w.pkg} ${w.v} (${this.shown(to)})`, to) || `${w.pkg} ${w.v} has different files in ${this.shown(to)} (from ${libraryText(have.library)}) and in ${w.from} (${place.place}): one of them was changed after publishing, and TopoTopo never picks one`);
       if (fs.existsSync(path.join(to, 'version.json'))) {
         // already here (another package uses it too): it must be this version
         if (!have && copyHash(to, packages) !== w.hash) throw new Error(`${this.shown(to)} holds other files than ${w.pkg} ${w.v} as published: move it away, then try again`);
@@ -1657,7 +1729,7 @@ export class PackageUses implements SessionPackages {
     this.restamp();
     this.rewatch();
     const v = this.root.uses[pkg];
-    return `following ${pkg} for this session: its working folder ${found.dir} (${found.place}) instead of ${v ? `the copy of ${v}` : 'a copy (the package does not use it yet)'}; its edits re-cook, for looking: exports and publishing use the published copy`;
+    return `following ${pkg} for this session: its working folder ${found.dir} (${found.place}) instead of ${v ? `the copy of ${v}` : 'a copy (the package does not use it yet)'}; its edits re-cook, for looking: exports and publishing use the published copy, but an export told to follow it (CLI --follow ${pkg}, MCP export {follow:["${pkg}"]}) exports from the working folder`;
   }
 
   /**

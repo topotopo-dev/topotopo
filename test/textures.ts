@@ -116,6 +116,15 @@ check(getNodeDef('tilesampler')?.type === 'tex_tile_sampler' && getNodeDef('hist
   check(!bad.length, `aliases and params are unambiguous${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);
 }
 {
+  // an image is encoded once per compressor: a copy shares its layers, so a map many exports use is encoded once
+  const deflate = (d: Uint8Array) => zlib.deflateSync(d);
+  const img = new Image(16, 16, 'map').set('C', new Float32Array(16 * 16 * 4).fill(0.25));
+  const a = imagePNG(img, '', deflate), b = imagePNG(img.clone(), '', deflate), c = imagePNG(img, '', (d) => zlib.deflateSync(d, { level: 1 }));
+  const other = imagePNG(new Image(16, 16, 'map').set('C', new Float32Array(16 * 16 * 4).fill(0.75)), '', deflate);
+  check(a === b && c !== a && other !== a && decodePNG(c).data[0] === decodePNG(a).data[0] && decodePNG(other).data[0] !== decodePNG(a).data[0],
+    'imagePNG: the same layers and compressor give the encoded bytes again; another compressor or other layers encode afresh');
+}
+{
   // every node's example cooks (an example that reads a PNG, image_file's, gets one at the path it names)
   const failed: string[] = [];
   const png = imagePNG(new Image(8, 4, 'fixture').set('C', new Float32Array(8 * 4 * 4).fill(0.5)));
@@ -177,6 +186,51 @@ section('generators: deterministic, seeded, tileable');
   check(maxDiff(sp1.layer('C')!, sp2.layer('C')!) === 0 && mean(sp1.layer('C')!) > 0.01, 'tex_splatter deterministic and non-empty');
   const txt = await image({ n: { type: 'tex_text', params: { resolution: [128, 32], text: 'AB', size: 0.8 } } });
   check(mean(txt.layer('C')!) > 0.03 && mean(txt.layer('C')!) < 0.6, `tex_text fills glyphs (coverage ${f3(mean(txt.layer('C')!))})`);
+
+  // weight: the wght axis of a variable font (a generated test font whose bar is 20, 100 and 300 units wide at 100,
+  // 400 and 900); a static font is drawn as it is and warns at any weight but regular
+  const { variableTestFont, varFontBarWidth } = await import('./varfont.ts');
+  const vf = path.join(tmp, 'testvar.ttf');
+  fs.writeFileSync(vf, variableTestFont());
+  const bar = async (weight: number) => {
+    const r = await cookOn(engine, { t: { type: 'text', params: { text: 'I', font: vf, weight } } });
+    const b = r.geo.bbox();
+    return { w: b.max[0] - b.min[0], warnings: r.warnings };
+  };
+  const widths: string[] = [];
+  let weightsOk = true;
+  for (const w of [100, 250, 400, 650, 900]) {
+    const r = await bar(w);
+    widths.push(`${w}: ${f3(r.w)}`);
+    weightsOk &&= Math.abs(r.w - varFontBarWidth(w) / 1000) < 1e-6 && !r.warnings.length;
+  }
+  check(weightsOk, `text weight sets the wght axis of a variable font (bar width ${widths.join(', ')})`);
+  const over = await bar(1000);
+  check(Math.abs(over.w - 0.3) < 1e-6 && over.warnings.some((w) => /weight 1000 is outside the font's wght range 100\.\.900: drawn at 900/.test(w)), 'text weight outside the font\'s wght range is clamped to it, with a warning');
+  const plain = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab', weight: 700 } } });
+  const plain400 = await cookOn(engine, { t: { type: 'text', params: { text: 'Ab' } } });
+  check(plain.warnings.some((w) => /no weight axis \(wght\)/.test(w)) && !plain400.warnings.length && JSON.stringify(fingerprint(plain.geo)) === JSON.stringify(fingerprint(plain400.geo)), 'a static font is drawn at its own weight: weight 700 warns, 400 does not');
+  // a solid stands out towards +Z from its back face at center z; back false leaves that face off; 2 segments per curve
+  const { primNormals } = await import('../src/core/topology.ts');
+  const { catalogText } = await import('../src/mcp/docs.ts');
+  const sign = (params: Record<string, unknown>) => cookOn(engine, { t: { type: 'text', params: { text: 'EXIT', size: 0.5, depth: 0.1, center: [0, 0, 2], ...params } } });
+  const solid = await sign({}), open = await sign({ back: false });
+  const facingBack = (g: any) => { const n = primNormals(g); let k = 0; for (let p = 0; p < g.numPrims; p++) if (n[p * 3 + 2] < -0.99) k++; return k; };
+  const sb = solid.geo.bbox(), ob = open.geo.bbox();
+  check(Math.abs(sb.min[2] - 2) < 1e-6 && Math.abs(sb.max[2] - 2.1) < 1e-6 && facingBack(solid.geo) > 0 && facingBack(open.geo) === 0
+    && open.geo.numPrims === solid.geo.numPrims - facingBack(solid.geo) && Math.abs(ob.min[2] - 2) < 1e-6 && Math.abs(ob.max[2] - 2.1) < 1e-6,
+    `text solid: back face at center z (${f3(sb.min[2])}), front at center z + depth (${f3(sb.max[2])}); back false leaves the ${facingBack(solid.geo)} back triangles off`);
+  const o = async (params: Record<string, unknown>) => (await cookOn(engine, { t: { type: 'text', params: { text: 'O', depth: 0.1, ...params } } })).geo;
+  const [o0, o2, o6] = [await o({}), await o({ curve_segments: 2 }), await o({ curve_segments: 6 })];
+  check(JSON.stringify(fingerprint(o0)) === JSON.stringify(fingerprint(o2)) && o6.numPrims > o2.numPrims * 1.5, `text curve_segments is 2 by default (O: ${o2.numPrims} triangles; ${o6.numPrims} at 6)`);
+  const found = ['sign', 'lettering', 'label', 'font', 'engrave'].filter((w) => / {2}text\b/.test(catalogText(allNodeDefs(), { search: w })));
+  check(found.length === 5, `the catalog finds text by sign, lettering, label, font and engrave (${found.join(', ')})`);
+  const cover = async (weight: number) => {
+    const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, size: 0.8 } } });
+    return { c: mean(findImage(r.geo, '')!.layer('C')!), warnings: r.warnings };
+  };
+  const thin = await cover(100), heavy = await cover(900), clampedTex = await cover(950);
+  check(heavy.c > thin.c * 5 && clampedTex.warnings.some((w) => /outside the font's wght range/.test(w)), `tex_text weight reaches the font (coverage ${f3(thin.c)} at 100, ${f3(heavy.c)} at 900; its warnings are passed on)`);
   const grad = await image({ n: { type: 'tex_gradient', params: { resolution: [64, 8] } } });
   check(grad.layer('C')![0] < 0.05 && grad.layer('C')![63] > 0.95, 'tex_gradient linear runs 0 → 1 left to right');
   const k = await image({ k: { type: 'tex_constant', params: { resolution: [8, 4], value: 0.65 } } });
@@ -274,6 +328,18 @@ section('filters: blend modes, levels, blur, normals');
   const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { offset: [0.5, 0] } } }, 't');
   const p0 = genPattern({ pattern: 'checker', count: [2, 2], offset: 0.5, gap: 0, bevel: 0, variation: 0, seed: 0 }, 64, 64).C;
   check(maxDiff(tr.layer('C')!, p0.map((x) => 1 - x)) < 1e-6, 'tex_transform: half an image offset of a 2 × 2 checker inverts it');
+  const grad = { g: { type: 'tex_gradient', params: { resolution: 32 } } };
+  const g1 = (await image({ ...grad, t: { type: 'tex_transform', in: ['g'] } }, 't')).layer('C')!;
+  const gt = (await image({ ...grad, t: { type: 'tex_transform', in: ['g'], params: { tile: [1, 2] } } }, 't')).layer('C')!;
+  // tile [1, 2] stacks two whole copies: the top half and the bottom half each equal the image squeezed to half height
+  let tileOk = true;
+  for (let j = 0; j < 32; j++) for (let i = 0; i < 32; i++) if (Math.abs(gt[j * 32 + i] - g1[((2 * j) % 32) * 32 + i]) > 0.05) tileOk = false;
+  check(tileOk, 'tex_transform tile [1, 2] repeats from the lower-left corner (no offset needed)');
+  const st = (await image({ n: { type: 'tex_pattern', params: { resolution: 64, pattern: 'stripes', count: [1, 8], gap: 0.5, bevel: 0 } } })).layer('C')!;
+  let rowConst = true, colVaries = false;
+  for (let j = 0; j < 64; j++) for (let i = 1; i < 64; i++) if (st[j * 64 + i] !== st[j * 64]) rowConst = false;
+  for (let j = 1; j < 64; j++) if (Math.abs(st[j * 64] - st[0]) > 0.5) colVaries = true;
+  check(rowConst && colVaries, 'tex_pattern stripes with count [1, 8] make horizontal stripes');
   const ts = await image({ s: { type: 'tex_shape', params: { resolution: 32, falloff: 0.5 } }, t: { type: 'tex_tile_sampler', in: ['s'], params: { resolution: 64, count: [4, 4] } } }, 't');
   check(mean(ts.layer('C')!) > 0.05, 'tex_tile_sampler stamps the source');
   const out = await geo({ p: { type: 'tex_pattern', params: { resolution: 16 } }, o: { type: 'tex_output', in: ['p'], params: { name: 'brick_ids', layer: 'id' } } }, 'o');
@@ -506,6 +572,31 @@ let tg: Geometry;
   check(json.images.length === 3 && json.images.every((i: any) => i.mimeType === 'image/png') && json.textures.length === 3, `glTF embeds 3 PNG images (${json.images.map((i: any) => i.name).join(', ')})`);
   check(m0.pbrMetallicRoughness.baseColorTexture && m0.normalTexture && m0.occlusionTexture && m0.pbrMetallicRoughness.metallicRoughnessTexture.index === m0.occlusionTexture.index && (m0.pbrMetallicRoughness.metallicFactor ?? 1) === 1, 'ORM is both the occlusion and the metallicRoughness texture');
   check(!warns.length, `no export warnings${warns.length ? ': ' + warns.join('; ') : ''}`);
+  // an orm map with a material on input 0: the glTF factors are 1 (or roughness_value / metallic_value), never the input material's scalars
+  for (const [extra, wantM, wantR] of [[{}, 1, 1], [{ roughness_value: 0.8 }, 1, 0.8], [{ roughness_value: 0.6, metallic_value: 0.5 }, 0.5, 0.6]] as const) {
+    const ormG = await geo({
+      ...UVBOX, pat: { type: 'tex_pattern', params: { resolution: 16, name: 'packed' } },
+      m0: { type: 'material', in: ['uv'], params: { name: 'wall', metallic: 0, roughness: 0.5 } },
+      mm: { type: 'texture_to_material', in: ['m0', 'pat'], params: { material: 'wall', orm: 'packed', ...extra } },
+    }, 'mm');
+    const gl = await exportGeometryAsync(ormG, 'glb', {});
+    const pj = JSON.parse(new TextDecoder().decode(gl.subarray(20, 20 + new DataView(gl.buffer, gl.byteOffset).getUint32(12, true)))).materials[0].pbrMetallicRoughness;
+    const mj = JSON.parse(new TextDecoder().decode((await exportFilesAsync(ormG, 'textures', path.join(tmp, 'orm'), {})).files.find((f) => f.path.endsWith('materials.json'))!.bytes)).materials.wall;
+    check((pj.metallicFactor ?? 1) === wantM && (pj.roughnessFactor ?? 1) === wantR && mj.metallic === wantM && mj.roughness === wantR,
+      `orm + input material ${JSON.stringify(extra)}: glTF factors ${pj.metallicFactor ?? 1} / ${pj.roughnessFactor ?? 1} = materials.json ${mj.metallic} / ${mj.roughness}`);
+  }
+  // thin triangles (the sides and back of a card with planar uvs) are not collapsed uvs; a genuinely collapsed uv still warns
+  {
+    const maps = { pat: { type: 'tex_pattern', params: { resolution: 16, name: 'h' } }, nm: { type: 'tex_normal_from_height', in: ['pat'], params: { name: 'n' } } };
+    const tm = (src: string) => ({ ...maps, mm: { type: 'texture_to_material', in: [src, 'nm'], params: { material: 'card', normal: 'n' } } });
+    const exportWarns = async (g: Geometry) => { const w: string[] = []; await exportGeometryAsync(g, 'glb', { warn: (m) => w.push(m) }); return w.filter((m) => /collapsed uvs/.test(m)); };
+    const card = await geo({ ...tm('uv'), b: { type: 'box', params: { size: [1, 0.001, 1], divisions: [6, 1, 6] } }, uv: { type: 'uv_project', in: ['b'], params: { method: 'planar', axis: 'y' } } }, 'mm');
+    const cw = await exportWarns(card);
+    check(cw.length === 0, `a 1 m × 1 m × 1 mm card with planar uvs exports without the collapsed-uv warning${cw.length ? ': ' + cw[0] : ''}`);
+    const flat = await geo({ ...tm('z'), b: { type: 'box', params: { divisions: [2, 2, 2] } }, z: { type: 'attrib_create', in: ['b'], params: { name: 'uv', class: 'vertex', value: [0, 0] } } }, 'mm');
+    const fw = await exportWarns(flat);
+    check(fw.length === 1 && /have collapsed uvs/.test(fw[0]), `a mesh whose uvs are genuinely collapsed still warns (${fw[0]?.slice(0, 80)})`);
+  }
   // the embedded base colour PNG holds the image's bytes
   const bufView = json.bufferViews[json.images.find((i: any) => i.name === 'brick_color').bufferView];
   const binStart = 20 + dv.getUint32(12, true) + 8;
@@ -521,6 +612,24 @@ let tg: Geometry;
   check(again.byteLength > 10000 && !warns.length, 're-exporting the imported GLB embeds the textures again');
   const gltfText = new TextDecoder().decode(await exportGeometryAsync(tg, 'gltf', {}));
   check((JSON.parse(gltfText).images ?? []).length === 3 && gltfText.includes('data:image/png;base64,'), '.gltf embeds the images as data URIs (stored PNG blocks without deflate)');
+  // maps: embed (default), external (one file per distinct image, by relative URI), none (materials without images);
+  // the validator reads the external files and finds no error in any mode
+  for (const maps of ['embed', 'external', 'none'] as const) for (const format of ['glb', 'gltf'] as const) {
+    const at = path.join(tmp, 'maps', maps, `brick.${format}`);
+    const res = await exportFilesAsync(tg, format, at, { maps, deflate: (d) => zlib.deflateSync(d) });
+    const byPath = new Map(res.files.map((f) => [path.resolve(f.path), f.bytes]));
+    const rep = await validator.validateBytes(res.files[0].bytes, { maxIssues: 50, writeTimestamp: false, externalResourceFunction: (uri: string) => {
+      const b = byPath.get(path.resolve(path.dirname(at), decodeURIComponent(uri)));
+      return b ? Promise.resolve(b) : Promise.reject(new Error(`no ${uri}`));
+    } });
+    const main = res.files[0].bytes;
+    const j = JSON.parse(new TextDecoder().decode(format === 'glb' ? main.subarray(20, 20 + new DataView(main.buffer, main.byteOffset).getUint32(12, true)) : main));
+    const imgs = j.images ?? [];
+    const shape = maps === 'embed' ? imgs.length === 3 && res.files.length === 1
+      : maps === 'external' ? imgs.length === 3 && res.files.length === 4 && imgs.every((i: any) => /^maps\/brick_(color|normal|orm)-[0-9a-f]{12}\.png$/.test(i.uri) && i.bufferView === undefined)
+      : !imgs.length && !j.textures && res.files.length === 1 && !j.materials[0].normalTexture && !j.materials[0].occlusionTexture;
+    check(rep.issues.numErrors === 0 && shape, `maps ${maps}, ${format}: ${imgs.length} image(s), ${res.files.length} file(s), validator ${rep.issues.numErrors} errors${rep.issues.numErrors ? ` (${rep.issues.messages.filter((m: any) => m.severity === 0).map((m: any) => m.code).join(', ')})` : ''}`);
+  }
 
   // packed instances of a textured mesh: the images live in the source, exports find them, unpacking carries them once
   const inst = await geo({ ...textured, pts: { type: 'point_grid', params: { counts: [3, 1, 1], size: [4, 0, 0] } }, cp: { type: 'copy_to_points', in: ['mat', 'pts'], params: { pack: true } } }, 'cp');
@@ -693,6 +802,16 @@ section('image_file and the file node: PNG files as images');
   const tHuge = performance.now() - t0;
   check(missing.includes('cannot read "inputs/missing.png"'), `a missing file: ${missing.slice(0, 100)}…`);
   check(fake.includes('"inputs/fake.png"') && fake.includes('bad signature'), `not a PNG: ${fake}`);
+  // a large file Git LFS never fetched is a short text pointer: say that, not "bad signature"
+  const pointer = 'version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 1254331\n';
+  put('inputs/lfs.png', pointer);
+  const lfs = await errOf({ path: 'inputs/lfs.png' });
+  check(lfs.includes('"inputs/lfs.png"') && lfs.includes('Git LFS pointer') && lfs.includes('git lfs pull') && !lfs.includes('bad signature'), `a Git LFS pointer says so: ${lfs}`);
+  {
+    const { readUnderlay } = await import('../src/render/raster.ts');
+    const ul = await readUnderlay('ref/lfs.png', async () => new TextEncoder().encode(pointer)).then(() => 'read', (e) => String(e?.message ?? e));
+    check(ul.includes('Git LFS pointer'), `a render underlay that is a Git LFS pointer says so: ${ul}`);
+  }
   check(cut.includes('"inputs/cut.png"') && cut.includes('truncated'), `a truncated PNG: ${cut}`);
   check(huge.includes('"inputs/huge.png"') && huge.includes('5000 × 5000') && tHuge < 1000, `an image over 4096 × 4096 pixels is refused before decoding (${tHuge.toFixed(0)} ms): ${huge}`);
   check((await errOf({ path: '' })).includes('path is empty'), 'an empty path says so');

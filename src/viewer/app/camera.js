@@ -14,6 +14,10 @@ export const AXIS_VIEWS = {
 };
 /** The axis view that looks from the + or − side of an axis (the axis gizmo's ends). */
 export const VIEW_OF_AXIS = { '+x': 'right', '-x': 'left', '+y': 'top', '-y': 'bottom', '+z': 'front', '-z': 'back' };
+/** The side each axis view looks from, said with its name: an asset faces +Z (glTF's and Houdini's front). */
+export const VIEW_SIDE = { top: '+Y', bottom: '−Y', front: '+Z', back: '−Z', right: '+X', left: '−X' };
+/** A camera's name with the side it looks from: "front (+Z)"; persp as it is. */
+export const viewName = (name) => (VIEW_SIDE[name] ? `${name} (${VIEW_SIDE[name]})` : name);
 export const SHADINGS = [['wire', 'wire'], ['shaded', 'shaded'], ['shadedWire', 'shaded + wire']];
 /** The render tool's persp: 32° across the narrower side, from azimuth 35°, elevation 25°. */
 const FOV = 32, AZ = 35, EL = 25;
@@ -243,8 +247,8 @@ export function createViews(scene) {
   return v;
 }
 
-/** The view name a slot prints: the camera's name, "(ortho)" / "(persp)" when it is not its own projection. */
+/** The view name a slot prints: the camera's name and side, "(ortho)" / "persp" when it is not its own projection. */
 export function viewLabel(c) {
   if (c.name === 'persp') return c.ortho ? 'persp (ortho)' : 'persp';
-  return c.ortho ? c.name : `${c.name} (persp)`;
+  return c.ortho ? viewName(c.name) : `${c.name} (${VIEW_SIDE[c.name]}, persp)`;
 }

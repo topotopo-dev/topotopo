@@ -12,7 +12,7 @@ import { exportCSV, exportPointsJSON } from './points.ts';
 import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, decomposeXform, expandForExport, isolatedMask, packedPrims, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, stripPacked } from '../core/packed.ts';
-import { mergeMaterialTables, primMaterials } from '../core/materials.ts';
+import { mergeMaterialTables, normalizeMaterial, primMaterials } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { heightmapBytes } from './heightmap.ts';
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
@@ -38,9 +38,69 @@ function isolatedPoints(g: Geometry, o: ExportOptions) {
 
 // ---------------------------------------------------------------- OBJ
 
+/** The OBJ text (with mtllib when o.mtllib is given and a prim has a material); see objText for the .mtl. */
 export function exportOBJ(g: Geometry, o: ExportOptions = {}): string {
+  return objText(g, o).obj;
+}
+
+/**
+ * An OBJ export's files: the .obj and, when a prim has a material (and o.materials is not false), the .mtl named by
+ * o.mtllib, which the .obj references. Spline prims are written as polylines.
+ */
+export function exportOBJFiles(g: Geometry, o: ExportOptions = {}): { obj: Uint8Array; mtl: Uint8Array | null; materials: number } {
+  const enc = new TextEncoder();
+  const r = objText(splinesForExport(g, o, 'obj'), o);
+  return { obj: enc.encode(r.obj), mtl: r.mtl !== null && o.mtllib ? enc.encode(r.mtl) : null, materials: r.materials };
+}
+
+/** A unique name for prims without a material among prims with one (OBJ has no "no material" once usemtl is set). */
+function freeMaterialName(table: MaterialTable, used: Set<string>): string {
+  let n = 'default', k = 1;
+  while (n in table || used.has(n)) n = `default_${k++}`;
+  return n;
+}
+
+/** sRGB display value ↔ linear: Kd and Ke in a .mtl are linear (as Blender writes and reads them), TopoTopo colours display values. */
+const mtlLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const mtlRGB = (c: readonly number[]) => c.slice(0, 3).map((x) => mtlLinear(Math.max(0, x)).toFixed(6)).join(' ');
+
+/**
+ * The .mtl of the materials prims use, in order of first use: Kd / Ke (linear), d (alpha), Pr / Pm (roughness,
+ * metallic: the PBR extension Blender reads) and Ns from the roughness for readers without it, map_Kd / norm / map_Pr
+ * (texture paths through o.texturePath, else as the table writes them). A name missing from the table is written with
+ * the default material.
+ */
+function mtlText(used: string[], table: MaterialTable, o: ExportOptions): string {
+  const tex = (t: string | undefined) => (t ? (o.texturePath ? o.texturePath(t) : t) : '');
+  const out = ['# topotopo MTL'];
+  for (const name of used) {
+    const m = table[name] ?? normalizeMaterial({});
+    out.push('', `newmtl ${name}`, `Kd ${mtlRGB(m.baseColor)}`);
+    if (m.emissive.some((x) => x > 0)) out.push(`Ke ${mtlRGB(m.emissive)}`);
+    const r = Math.max(0, Math.min(1, m.roughness));
+    out.push(`Ns ${((1 - r) ** 2 * 1000).toFixed(3)}`, `Pr ${r.toFixed(6)}`, `Pm ${Math.max(0, Math.min(1, m.metallic)).toFixed(6)}`, `d ${Math.max(0, Math.min(1, m.alpha)).toFixed(6)}`, 'illum 2');
+    if (m.textures?.baseColor) out.push(`map_Kd ${tex(m.textures.baseColor)}`);
+    if (m.textures?.normal) out.push(`norm ${tex(m.textures.normal)}`);
+    if (m.textures?.roughness) out.push(`map_Pr ${tex(m.textures.roughness)}`);
+    if (m.textures?.orm) o.warn?.(`obj: material "${name}": its orm map is not written (a .mtl has no packed occlusion/roughness/metallic map; glb and usda keep it)`);
+  }
+  return out.join('\n') + '\n';
+}
+
+function objText(g: Geometry, o: ExportOptions): { obj: string; mtl: string | null; materials: number } {
   g = expandForExport(g, o, 'obj');
+  // prim materials: usemtl per run of prims (again after each object line), the .mtl with the ones used
+  const mats = o.materials !== false ? primMaterials(g) : null;
+  const withMat = !!mats && mats.some((m) => m);
+  const table = withMat ? mergeMaterialTables([g]) : {};
+  const used: string[] = [], seen = new Set<string>();
+  const none = withMat && mats!.some((m) => !m) ? freeMaterialName(table, new Set(mats!)) : '';
+  const matOf = (p: number) => (mats![p] || none);
   const lines: string[] = ['# topotopo OBJ'];
+  if (withMat) {
+    for (let p = 0; p < g.numPrims; p++) { const m = matOf(p); if (!seen.has(m)) { seen.add(m); used.push(m); } }
+    if (o.mtllib) lines.push(`mtllib ${o.mtllib}`);
+  }
   const Pd = g.P;
   const cd = g.points.get('Cd');
   for (let i = 0; i < g.numPoints; i++) {
@@ -48,28 +108,38 @@ export function exportOBJ(g: Geometry, o: ExportOptions = {}): string {
     const c = cd ? (cd.get(i) as number[]) : null;
     lines.push(`v ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)}${c ? ` ${c[0].toFixed(4)} ${c[1].toFixed(4)} ${c[2].toFixed(4)}` : ''}`);
   }
+  // vt and vn of the face corners, each distinct value written once (a smooth mesh shares them between corners)
   const uvA = g.vertices.get('uv') ?? g.points.get('uv');
   const uvVtx = !!g.vertices.get('uv');
-  if (uvA) for (let v = 0; v < g.numVertices; v++) { const t = uvA.get(uvVtx ? v : g.vertexPoint[v]) as number[]; lines.push(`vt ${t[0].toFixed(6)} ${t[1].toFixed(6)}`); }
-  const N = resolveVertexNormals(g, o.cuspAngle ?? 60);
   const hasPoly = g.primClosed.some((c) => c === 1);
-  if (hasPoly) for (let v = 0; v < g.numVertices; v++) {
-    const n = [N[v * 3], N[v * 3 + 1], N[v * 3 + 2]];
-    const nn = o.upAxis === 'z' ? [n[0], -n[2], n[1]] : n;
-    lines.push(`vn ${nn[0].toFixed(5)} ${nn[1].toFixed(5)} ${nn[2].toFixed(5)}`);
-  }
-  const na = g.prims.get('name');
-  let cur: string | null = null;
+  const N = hasPoly ? resolveVertexNormals(g, o.cuspAngle ?? 60) : null;
+  const vtOf = new Int32Array(g.numVertices), vnOf = new Int32Array(g.numVertices);
+  const vtIds = new Map<string, number>(), vnIds = new Map<string, number>();
+  const idOf = (ids: Map<string, number>, line: string) => { let i = ids.get(line); if (i === undefined) ids.set(line, (i = ids.size + 1)); return i; };
   for (let p = 0; p < g.numPrims; p++) {
-    if (na && na.type === 'string') { const n = (na.data as string[])[p] || 'unnamed'; if (n !== cur) { lines.push(`o ${n}`); cur = n; } }
+    if (!g.primClosed[p]) continue;
+    for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) {
+      if (uvA) { const t = uvA.get(uvVtx ? v : g.vertexPoint[v]) as number[]; vtOf[v] = idOf(vtIds, `vt ${t[0].toFixed(6)} ${t[1].toFixed(6)}`); }
+      const n = [N![v * 3], N![v * 3 + 1], N![v * 3 + 2]];
+      const nn = o.upAxis === 'z' ? [n[0], -n[2], n[1]] : n;
+      vnOf[v] = idOf(vnIds, `vn ${nn[0].toFixed(5)} ${nn[1].toFixed(5)} ${nn[2].toFixed(5)}`);
+    }
+  }
+  for (const l of vtIds.keys()) lines.push(l);
+  for (const l of vnIds.keys()) lines.push(l);
+  const na = g.prims.get('name');
+  let cur: string | null = null, curMat: string | null = null;
+  for (let p = 0; p < g.numPrims; p++) {
+    if (na && na.type === 'string') { const n = (na.data as string[])[p] || 'unnamed'; if (n !== cur) { lines.push(`o ${n}`); cur = n; curMat = null; } }
+    if (withMat && matOf(p) !== curMat) { curMat = matOf(p); lines.push(`usemtl ${curMat}`); }
     const refs: string[] = [];
     for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) {
       const pi = g.vertexPoint[v] + 1;
-      refs.push(g.primClosed[p] ? `${pi}/${uvA ? v + 1 : ''}/${v + 1}` : String(pi));
+      refs.push(g.primClosed[p] ? `${pi}/${uvA ? vtOf[v] : ''}/${vnOf[v]}` : String(pi));
     }
     lines.push((g.primClosed[p] ? 'f ' : 'l ') + refs.join(' '));
   }
-  return lines.join('\n') + '\n';
+  return { obj: lines.join('\n') + '\n', mtl: withMat ? mtlText(used, table, o) : null, materials: used.length };
 }
 
 // ---------------------------------------------------------------- STL

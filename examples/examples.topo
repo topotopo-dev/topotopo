@@ -1,8 +1,8 @@
 {
-  "graph": "street_block",
+  "graph": "market_street",
   "bake": {},
   "title": "Examples",
-  "description": "The showcase graphs: npm run showcase renders each into renders/, npm test checks each against its golden fingerprint. Some use TopoTopo's own packages, whose copies are in packages/.",
+  "description": "The examples: each graph does the job its card (<name>.md) describes, in plain words. npm test checks each graph against its card and its golden fingerprint, npm run showcase renders each into renders/. Some use TopoTopo's own packages, whose copies are in packages/.",
   "tags": [],
   "links": [],
   "created": "2026-10-28",

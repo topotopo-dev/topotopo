@@ -1,0 +1,43 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["Cd:float:3", "P:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [3.038, 6, 2.7335],
+      "min": [-2.9064, 0, -3.1617]
+    },
+    "counts": {
+      "points": 21734,
+      "prims": 7046,
+      "vertices": 37208,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "59dbae82e990de18",
+      "attributes": {
+        "detail.materials": "f5e7c6bf11be4679",
+        "point.Cd": "1aa129e5293a20df",
+        "prim.material": "87b12e85b4cdd90f",
+        "prim.name": "3c58ae4539a3fbef",
+        "vertex.N": "1b10284246d02788",
+        "vertex.uv": "6c460a821f81c568"
+      },
+      "topology": "989bfeba6ffe7ff0"
+    }
+  },
+  "name": "example.lsystem_tree",
+  "ok": true,
+  "source": "examples/lsystem_tree.json",
+  "warnings": []
+}

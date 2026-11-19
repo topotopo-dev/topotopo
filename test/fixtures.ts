@@ -26,6 +26,9 @@ export const SRC: Record<string, NodeSpec> = {
   SMALLSPHERE: { type: 'sphere', params: { type: 'ico', level: 1, radius: 0.1 } },
   // boolean cutter: bites the +x+y+z corner off BOX (the unit MESH sphere would enclose the box and leave nothing)
   CUTTER: { type: 'sphere', params: { type: 'ico', level: 2, radius: 0.6, center: [0.5, 0.5, 0.5] } },
+  // a cutter of two overlapping pieces (the sphere and a bar through it): boolean unions them before cutting
+  CUTTERBAR: { type: 'box', params: { size: [0.3, 0.3, 1.6], center: [0.5, 0.5, 0] } },
+  CUTTERS: { type: 'merge', in: ['CUTTER', 'CUTTERBAR'] },
   // remove_interior: the small sphere sits inside the box, so all of it is hidden
   OVERLAP: { type: 'merge', in: ['BOX', 'SMALLSPHERE'] },
   GRID: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
@@ -92,6 +95,15 @@ export const SRC: Record<string, NodeSpec> = {
   TEXSDF: { type: 'tex_sdf_shape', params: { resolution: 64, shape: 'star', radius: 0.35, sides: 5 } },
   TEXSDF2: { type: 'tex_sdf_shape', params: { resolution: 48, shape: 'disc', radius: 0.2, center: [0.7, 0.6] } },
   UVBOX: { type: 'uv_unwrap', in: ['BOX'] },
+  // a noisy, decimated rock (as scanned or generated models come): irregular triangles that shatter uv_unwrap's charts
+  // (chart_smoothing); and a noisy quad rock, whose polygons the straddling split turns into triangles
+  ROCK_BALL: { type: 'sphere', params: { type: 'ico', level: 4 } },
+  ROCK_SHAPE: { type: 'noise_displace', in: ['ROCK_BALL'], params: { amplitude: 0.35, frequency: 1.2 } },
+  ROCK_ROUGH: { type: 'noise_displace', in: ['ROCK_SHAPE'], params: { amplitude: 0.06, frequency: 9 } },
+  NOISY_ROCK: { type: 'decimate', in: ['ROCK_ROUGH'], params: { ratio: 0.4 } },
+  QUAD_BALL: { type: 'sphere', params: { type: 'quad', divisions: 10 } },
+  QUAD_SHAPE: { type: 'noise_displace', in: ['QUAD_BALL'], params: { amplitude: 0.35, frequency: 1.2 } },
+  NOISY_QUAD_ROCK: { type: 'noise_displace', in: ['QUAD_SHAPE'], params: { amplitude: 0.06, frequency: 9 } },
   UVCOLOR: { type: 'color', in: ['UVBOX'], params: { mode: 'random' } },
   HIGHBOX: { type: 'subdivide', in: ['BOX'], params: { levels: 2 } },
   // rigid bodies: 25 packed small spheres 3 m above the bumpy grid; six packed crates on one spot for stacking
@@ -131,7 +143,7 @@ export const INPUTS: Record<string, string[]> = {
   resample: ['CURVE'], carve: ['CURVE'], ends: ['CIRCLE'], sweep: ['CURVE', 'PROFILEXY'], polywire: ['CURVE'], revolve: ['PROFILE'],
   extrude: ['SHAPE'], offset_curve: ['SHAPE'], boolean2d: ['SHAPE', 'CIRCLE'], fill: ['SHAPE'], loft: ['LOFT'],
   copy_to_points: ['MESH', 'PTS'], ray: ['PTS_ABOVE', 'MESH'], attrib_copy: ['MESH', 'COLORED'], attrib_transfer: ['MESH', 'COLORED'],
-  boolean: ['BOX', 'CUTTER'], remove_interior: ['OVERLAP'], material: ['MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
+  boolean: ['BOX', 'CUTTERS'], remove_interior: ['OVERLAP'], material: ['MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],
   sdf_grid: ['SDF'], grid_combine: ['SDFGRID', 'SDFGRID2'], grid_offset: ['SDFGRID'], grid_blur: ['SDFGRID'],
   grid_dilate: ['SDFGRID'], grid_erode: ['SDFGRID'], grid_resample: ['SDFGRID'], grid_to_mesh: ['SDFGRID'],
@@ -470,6 +482,13 @@ export function isolateConfig(): string {
   return file;
 }
 isolateConfig();
+
+/**
+ * The cards whose graph is still being built (docs/examples.md, house rule 7: the card comes first): examples/<name>.md
+ * without examples/<name>.json or examples/<name>/. test/cards.ts checks their form and fails for any other card without
+ * a graph. The list only shrinks: a name here that has its graph, or no card, fails.
+ */
+export const CARDS_WAITING = new Set<string>([]);
 
 /**
  * The example packages: folders of examples/ that are packages of their own (an <id>.topo file and graphs/), such as

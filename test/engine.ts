@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine, geoBytes, resolveTime, STOPPED } from '../src/graph/engine.ts';
@@ -24,6 +25,7 @@ import { SNIPPET_LIB_NAMES } from '../src/core/snippet-lib.ts';
 import { JS_GLOBALS } from '../src/core/usercode.ts';
 import { renderNodeReference } from '../scripts/gen-docs.ts';
 import { Session } from '../src/session.ts';
+import { refreshGraph, refreshNotes } from '../src/graph/refresh.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Image } from '../src/core/image.ts';
@@ -713,6 +715,12 @@ section('graph version field');
   check(any.ok, 'a graph cooks whatever version it says');
   const badV = await engine.cook({ version: -1 as any, nodes: { b: { type: 'box' } } });
   check(!badV.ok && badV.errors.some((e) => /"version" must be a non-negative integer/.test(e.message)), 'a malformed version is an error');
+  // "output" names a node; a published output's name there is answered with the node to write
+  const byName = await engine.cook({ nodes: { a: { type: 'box' }, b: { type: 'sphere' } }, output: 'kit', outputs: { kit: { node: 'a' } } });
+  const typo = await engine.cook({ nodes: { box1: { type: 'box' } }, output: 'boxl' });
+  check(!byName.ok && byName.errors[0]?.message === `output "kit" is the name of a published output, not a node: "output" names the default output's node, so write "output": "a" (outputs.kit.node)`
+    && !typo.ok && typo.errors[0]?.message === 'output "boxl" is not a node' && typo.errors[0]?.hint === 'box1',
+    `"output" naming a published output says which node to write (${byName.errors[0]?.message}); any other name is not a node, with near names`);
 
   const wsDir = path.join(tmp, 'ws');
   fs.mkdirSync(path.join(wsDir, 'graphs'), { recursive: true });
@@ -731,7 +739,7 @@ section('graph version field');
     const r = await tools.find((t) => t.name === name)!.run(a);
     return { txt: r.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'), isError: !!r.isError };
   };
-  const solverGraph = JSON.parse(fs.readFileSync(path.join(root, 'examples', 'solver_growth.json'), 'utf8'));
+  const solverGraph = JSON.parse(fs.readFileSync(path.join(root, 'test', 'scenes', 'solver_growth.json'), 'utf8'));
   const b12 = await call('build', { name: 'anim', graph: solverGraph, frame: 12 });
   check(!b12.isError && /cooked at frame 12/.test(b12.txt) && /stats: grow resumed_from=1 frames=11 body_runs=11/.test(b12.txt) && /time-dependent: .*grow/.test(b12.txt), 'MCP build frame:12 reports the frame and solver stats');
   const b1 = await call('build', { name: 'anim', graph: solverGraph });
@@ -771,13 +779,54 @@ section('param ranges');
   check(engine.dryRun(g).warnings.some((w) => w.node === 's' && /clamped to 7/.test(w.message)), 'dryRun reports the clamp');
   const vec = await engine.cook({ nodes: { b: { type: 'box', params: { divisions: [1, 600, 1] } } } });
   check(vec.ok && vec.warnings.some((w) => /^param "divisions"\[1\] 600 clamped to 512/.test(w.message)), 'vector components clamp with the index');
+
+  // strict: a value outside the range fails the node instead (graph-wide, or per node; the node's own strict wins)
+  const sg = { strict: true, nodes: { s: { type: 'sphere', params: { type: 'ico', level: 9 } } } };
+  const sr = await engine.cook(sg);
+  const se = sr.errors.find((e) => e.node === 's');
+  check(!sr.ok && !!se && /^param "level" 9 is above its range 0\.\.7 \(strict: not clamped\)$/.test(se.message) && /strict/.test(se.hint ?? ''), `strict graph: the out-of-range value is the node's error (${se?.message})`);
+  check(engine.dryRun(sg).errors.some((e) => e.node === 's' && /above its range/.test(e.message)) && !engine.dryRun(sg).warnings.some((w) => w.node === 's'), 'strict: dryRun reports it as an error, not a warning');
+  const loose = await engine.cook({ strict: true, nodes: { s: { type: 'sphere', strict: false, params: { type: 'ico', level: 9 } } } });
+  check(loose.ok && loose.warnings.some((w) => /clamped to 7/.test(w.message)), 'strict: false on a node clamps it with a warning in a strict graph');
+  const one = await engine.cook({ nodes: { b: { type: 'box', strict: true, params: { divisions: [1, 600, 1] } }, s: { type: 'sphere', params: { level: 9 } }, m: { type: 'merge', in: ['b', 's'] } }, output: 'm' });
+  check(!one.ok && one.errors.some((e) => e.node === 'b' && /^param "divisions"\[1\] 600 is above its range/.test(e.message)) && !one.errors.some((e) => e.node === 's'), 'strict on one node: that node fails, the others clamp');
+  const inRange = await engine.cook({ strict: true, nodes: { s: { type: 'sphere', params: { level: 3 } } } });
+  check(inRange.ok && !inRange.warnings.length, 'strict: values inside the range cook as usual');
+  // an asset whose var range is narrower than what its caller passes: the caller's strict catches it
+  const narrow = { vars: { floors: 2 }, params: { floors: { type: 'int', min: 1, max: 4 } }, nodes: { b: { type: 'box', params: { size: [1, '=floors', 1] } } } };
+  engine.registerAsset('test_strict_floors', narrow);
+  const caller = await engine.cook({ strict: true, nodes: { h: { type: 'test_strict_floors', params: { floors: 6 } } } });
+  check(!caller.ok && caller.errors.some((e) => e.node === 'h' && /"floors" 6 is above its range 1\.\.4/.test(e.message)), 'strict: an asset range narrower than its caller fails the caller');
+  // the asset's own value past its declared range (typed past the slider in the viewer) is no caller's mistake: it cooks
+  // as it does on its own, while a caller's value past the range still clamps
+  engine.registerAsset('test_own_floors', { ...narrow, vars: { floors: 6 } });
+  const own = await engine.cook({ strict: true, nodes: { h: { type: 'test_own_floors' } } });
+  check(own.ok && !own.warnings.length && size3(own.geo)[1] === 6, `an asset's own value past its range is not clamped (${own.errors.map((e) => e.message).join('; ')})`);
+  const past = await engine.cook({ nodes: { h: { type: 'test_own_floors', params: { floors: 9 } } } });
+  check(past.ok && past.warnings.some((w) => /"floors" 9 clamped to 6 \(range 1\.\.6\)/.test(w.message)), `a caller's value past it still clamps, to the widened end (${past.warnings.map((w) => w.message).join('; ')})`);
+  check(engine.validate({ strict: 'yes' as any, nodes: { s: { type: 'sphere' } } }).errors.some((e) => /"strict" must be true or false/.test(e.message))
+    && engine.validate({ nodes: { s: { type: 'sphere', strict: 1 as any } } }).errors.some((e) => e.node === 's' && /"strict" must be true or false/.test(e.message)), 'strict must be a boolean (graph and node)');
+}
+
+section('declared params: desc and group');
+{
+  // desc is the control's hover text: a declared param without one warns (build, dry run and cook); group is a heading
+  const g = { vars: { gap: 2, n: 3 }, params: { gap: { type: 'float', min: 0, max: 5, label: 'Gap between cliffs (m)', group: 'Layout' }, n: { type: 'int', desc: 'count', group: 'Layout' } }, nodes: { b: { type: 'box', params: { size: '=gap' } } } };
+  const v = engine.validate(g as any);
+  check(!v.errors.length && v.warnings.length === 1 && v.warnings[0].node === '(params)' && /^params "gap" has no "desc"/.test(v.warnings[0].message) && /unit/.test(v.warnings[0].hint ?? ''),
+    `a declared param without desc warns, naming it (${v.warnings.map((w) => w.message).join('; ')})`);
+  const c = await engine.cook(g as any);
+  check(c.ok && c.warnings.some((w) => /"gap" has no "desc"/.test(w.message)) && engine.dryRun(g as any).warnings.some((w) => /"gap" has no "desc"/.test(w.message)), 'the cook and the dry run carry the warning');
+  check(!engine.validate({ ...g, params: { ...g.params, gap: { ...g.params.gap, desc: 'gap between cliffs, metres' } } } as any).warnings.length, 'with a desc: no warning');
+  check(engine.validate({ ...g, params: { n: { desc: 'count', group: 3 } } } as any).errors.some((e) => /params "n": "group" must be a heading/.test(e.message))
+    && engine.validate({ ...g, params: { n: { desc: 'count', group: ' ' } } } as any).errors.some((e) => /"group" must be a heading/.test(e.message)), 'group must be a non-empty string');
 }
 
 // ------------------------------------------------------------------ CLI
 section('CLI --frames');
 {
   const out = path.join(tmp, 'cli');
-  const run = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), path.join(root, 'examples', 'solver_growth.json'), ...args], { cwd: root, encoding: 'utf8' });
+  const run = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), path.join(root, 'test', 'scenes', 'solver_growth.json'), ...args], { cwd: root, encoding: 'utf8' });
   const p = run('--frames', '1-3', '--export', path.join(out, 'tower.obj'), '--render', path.join(out, 'r_{frame:04}.png'), '--views', 'persp');
   check(p.status === 0, `cli exit status ${p.status}${p.status ? ': ' + p.stderr.slice(0, 300) : ''}`);
   const want = ['tower.0001.obj', 'tower.0002.obj', 'tower.0003.obj', 'r_0001.png', 'r_0002.png', 'r_0003.png'];
@@ -814,13 +863,13 @@ section('CLI arguments');
   check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout) && /\nin this folder: package topotopo\/architecture: this graph is in no package/.test(hn.stdout),
     '--help-node documents one, and says what naming it does in a folder that is in no package');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
-  check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, workspace, graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
+  check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, examples, workspace, graph.*; --help-example <name> for an example's card and graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
     '--catalog ends with the command line\'s help flags and the topic names');
   const topic = cli('--help-topic', 'export');
   check(topic.status === 0 && topic.stdout.trim() === TOPICS.export.trim(), '--help-topic prints an MCP help topic');
   check(/^TopoTopo: .*\n\nWORKFLOW/.test(cli('--help-topic', 'overview').stdout), '--help-topic overview prints the operating guide');
   const badTopic = cli('--help-topic', 'exprt');
-  check(badTopic.status === 1 && /unknown topic "exprt" \(did you mean export\?\); topics: overview, workspace, graph, /.test(badTopic.stderr) && !badTopic.stdout,
+  check(badTopic.status === 1 && /unknown topic "exprt" \(did you mean export\?\); topics: overview, examples, workspace, graph, /.test(badTopic.stderr) && !badTopic.stdout,
     '--help-topic: an unknown name fails and lists the topics');
 }
 
@@ -853,7 +902,7 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   const s = man?.source;
   check(man?.format === 'topotopo-export-source' && JSON.stringify(man.files) === '["land.glb"]' && s.graph === 'land' && s.output === 'mesh' && s.node === 'ground'
     && s.frame === 1 && s.fps === 24 && JSON.stringify(s.vars) === '{"count":10,"relief":5,"seed":3}' && JSON.stringify(s.seeds) === '{"hills":"=seed","pts":2}'
-    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y","vertex_colors":false}}'
+    && JSON.stringify(s.export) === '{"format":"glb","options":{"compress":"none","custom_attribs":false,"instancing":"packed","maps":"embed","materials":true,"quantize":false,"scale":1,"split_by_name":true,"tangents":"auto","up_axis":"y","vertex_colors":false}}'
     && /^[0-9a-f]{64}$/.test(s.graph_sha256) && s.topotopo === pkg.version,
     `the export writes land.glb.source.json: graph, output, node, frame, fps, every var after overrides, seeds, format and every option with its default, graph hash, version (${JSON.stringify(s?.export)})`);
   const glb = fs.readFileSync(path.join(dir, 'a', 'land.glb'));
@@ -916,6 +965,177 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   check(/not valid JSON/.test(cli(g, '--var', 'relief=[1,').stderr) && /name=value/.test(cli(g, '--var', 'relief').stderr) && /name=value/.test(cli(g, '--var').stderr),
     '--var: malformed values fail with a plain message');
   check(/either --node or --output/.test(cli(g, '--node', 'ground', '--output', 'mesh').stderr), '--node and --output together are refused');
+
+  // several outputs in one run: each --output takes the options after it; options before the first apply to all; the
+  // graph loads once and the nodes the outputs share cook once
+  const m = (f: string) => path.join(dir, 'm', f);
+  const many = cli(g, '--var', 'relief=5', '--var', 'seed=3', '--output', 'mesh', '--export', m('land.glb'), '--output', 'field', '--export', m('field.png'), '--views', 'top', '--size', '128', '--render', m('field_top.png'));
+  check(many.status === 0 && sha(m('land.glb')) === sha(path.join(dir, 'a', 'land.glb')) && JSON.parse(fs.readFileSync(m('field.json'), 'utf8')).source.output === 'field'
+    && fs.existsSync(m('field_top.png')) && /2 of 2 outputs in one run/.test(many.stdout),
+    `several --output: each output exported as its own run would (the same land.glb bytes), the field exported and rendered (${many.status ? many.stderr.trim() : many.stdout.split('\n').filter((l) => /outputs in one run/.test(l)).join('')})`);
+  check(/output "field" \(hills\) with relief=5, seed=3 in \d+ ms \(2 nodes reused from the outputs before\)/.test(many.stdout), `several --output: the second output reuses the nodes the first cooked (${many.stdout.split('\n').find((l) => /output "field"/.test(l))})`);
+  const scaled = cli(g, '--scale', '100', '--output', 'mesh', '--export', m('x100.glb'), '--output', 'mesh', '--scale', '1', '--export', m('x1.glb'));
+  const recScale = (f: string) => JSON.parse(fs.readFileSync(m(f + '.source.json'), 'utf8')).source.export.options.scale;
+  check(scaled.status === 0 && recScale('x100.glb') === 100 && recScale('x1.glb') === 1 && sha(m('x1.glb')) === sha(path.join(dir, 'c', 'land.glb')),
+    'several --output: an option before the first --output applies to every output, an output\'s own option wins');
+  check(/--export before the first --output would write every output to one file/.test(cli(g, '--export', m('one.glb'), '--output', 'mesh', '--output', 'field').stderr)
+    && /--var applies to the whole run: put it before the first --output/.test(cli(g, '--output', 'mesh', '--var', 'relief=3', '--output', 'field').stderr)
+    && /use --frame N, not --frames/.test(cli(g, '--frames', '1-2', '--output', 'mesh', '--output', 'field').stderr),
+    'several --output: options that cannot be split per output are refused with what to do');
+  const mixed = path.join(dir, 'mixed.json');
+  fs.writeFileSync(mixed, JSON.stringify({ nodes: { b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P = ;' } } }, output: 'b', outputs: { good: { node: 'b' }, bad: { node: 'w' } } }));
+  const part = cli(mixed, '--output', 'bad', '--export', m('bad.glb'), '--output', 'good', '--export', m('good.glb'));
+  check(part.status === 1 && fs.existsSync(m('good.glb')) && !fs.existsSync(m('bad.glb')) && /1 of 2 outputs in one run, [\d.]+ s; did not cook: bad/.test(part.stdout),
+    `several --output: an output that does not cook is named, the others are still written, and the run fails (${part.stdout.split('\n').filter((l) => /outputs in one run/.test(l)).join('')})`);
+}
+
+section('CLI export maps: embed, external (a shared folder, each map once), none');
+{
+  // a package whose outputs share one textured material: export targets with maps "external" share exports/maps/
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const validator = createRequire(import.meta.url)('gltf-validator');
+  const dir = path.join(tmp, 'maps-pkg');
+  fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'maps-pkg.topo'), JSON.stringify({ title: 'maps', graph: 'kit' }));
+  const g = path.join(dir, 'graphs', 'kit.json');
+  const textured = (shape: string) => ({ [`${shape}_uv`]: { type: 'uv_project', in: [shape], params: { method: 'box' } }, [`${shape}_m`]: { type: 'material', in: [`${shape}_uv`, 'brick'], params: { from: 'brick' } } });
+  fs.writeFileSync(g, JSON.stringify({
+    nodes: {
+      col: { type: 'tex_pattern', params: { resolution: 32, name: 'brick_color' } },
+      nrm: { type: 'tex_normal_from_height', in: ['col'], params: { name: 'brick_normal' } },
+      maps: { type: 'merge', in: ['col', 'nrm'] },
+      brick: { type: 'texture_to_material', in: { images: 'maps' }, params: { material: 'brick', base_color: 'brick_color', normal: 'brick_normal', roughness_value: 0.7 } },
+      box: { type: 'box' }, ball: { type: 'sphere' }, plain: { type: 'box' },
+      ...textured('box'), ...textured('ball'), ...textured('plain'),
+    },
+    output: 'box_m',
+    outputs: {
+      crate: { node: 'box_m', export: { format: 'glb', maps: 'external' } },
+      ball: { node: 'ball_m', export: { format: 'glb', path: 'round/ball.glb', maps: 'external' } },
+      bare: { node: 'plain_m', export: { format: 'gltf', maps: 'none' } },
+    },
+  }));
+  const ex = (...f: string[]) => path.join(dir, 'exports', ...f);
+  const glbJSON = (b: Uint8Array) => JSON.parse(new TextDecoder().decode(b.subarray(20, 20 + new DataView(b.buffer, b.byteOffset).getUint32(12, true))));
+  const validate = async (file: string) => {
+    const bytes = new Uint8Array(fs.readFileSync(file));
+    const rep = await validator.validateBytes(bytes, { maxIssues: 50, writeTimestamp: false, externalResourceFunction: (uri: string) => {
+      const at = path.resolve(path.dirname(file), decodeURIComponent(uri));
+      return fs.existsSync(at) ? Promise.resolve(new Uint8Array(fs.readFileSync(at))) : Promise.reject(new Error(`no ${uri}`));
+    } });
+    return { errors: rep.issues.numErrors as number, codes: [...new Set(rep.issues.messages.filter((m: any) => m.severity === 0).map((m: any) => m.code))].join(',') };
+  };
+  const all = cli(g, '--export-all');
+  const shared = fs.existsSync(ex('maps')) ? fs.readdirSync(ex('maps')).sort() : [];
+  const crate = glbJSON(new Uint8Array(fs.readFileSync(ex('crate.glb')))), ball = glbJSON(new Uint8Array(fs.readFileSync(ex('round', 'ball.glb'))));
+  check(all.status === 0 && shared.length === 2 && shared.every((f) => /^brick_(color|normal)-[0-9a-f]{12}\.png$/.test(f))
+    && JSON.stringify(crate.images.map((i: any) => i.uri).sort()) === JSON.stringify(shared.map((f) => `maps/${f}`))
+    && JSON.stringify(ball.images.map((i: any) => i.uri).sort()) === JSON.stringify(shared.map((f) => `../maps/${f}`))
+    && crate.images.every((i: any) => i.bufferView === undefined),
+    `--export-all with maps "external": both outputs reference the 2 maps of exports/maps/ by relative URI and none is inside a GLB (${all.status ? all.stderr.trim() : shared.join(', ')})`);
+  const v1 = await validate(ex('crate.glb')), v2 = await validate(ex('round', 'ball.glb'));
+  check(v1.errors === 0 && v2.errors === 0, `the glTF validator reads the external maps: 0 errors (${v1.errors} ${v1.codes}; ${v2.errors} ${v2.codes})`);
+  const bare = JSON.parse(fs.readFileSync(ex('bare.gltf'), 'utf8'));
+  const vb = await validate(ex('bare.gltf'));
+  check(!bare.images && !bare.textures && bare.materials.some((m: any) => m.name === 'brick' && !m.normalTexture && !m.pbrMetallicRoughness.baseColorTexture && m.pbrMetallicRoughness.roughnessFactor === 0.7) && vb.errors === 0,
+    `maps "none": material names and factors, no images or texture slots, validator clean (${vb.errors} ${vb.codes})`);
+  const rec = (f: string) => JSON.parse(fs.readFileSync(f + '.source.json', 'utf8'));
+  check(rec(ex('crate.glb')).source.export.options.maps === 'external' && rec(ex('bare.gltf')).source.export.options.maps === 'none'
+    && JSON.stringify([rec(ex('crate.glb')).files[0], ...rec(ex('crate.glb')).files.slice(1).sort()]) === JSON.stringify(['crate.glb', ...crate.images.map((i: any) => i.uri).sort()])
+    && JSON.stringify([rec(ex('round', 'ball.glb')).files[0], ...rec(ex('round', 'ball.glb')).files.slice(1).sort()]) === JSON.stringify(['ball.glb', ...ball.images.map((i: any) => i.uri).sort()]),
+    `the source records say which maps mode, and list the shared maps by their path from the record (${JSON.stringify(rec(ex('round', 'ball.glb')).files)})`);
+  const stamp = shared.map((f) => fs.statSync(ex('maps', f)).mtimeMs).join();
+  const again = cli(g, '--export-all');
+  check(again.status === 0 && fs.readdirSync(ex('maps')).length === 2 && shared.map((f) => fs.statSync(ex('maps', f)).mtimeMs).join() === stamp,
+    'a second --export-all leaves the unchanged maps as they are');
+  // the CLI flag on a plain --export: maps/ beside the file; embed stays the default and is the biggest
+  const out = (f: string) => path.join(dir, 'out', f);
+  const e1 = cli(g, '--output', 'crate', '--export', out('embed.glb')), e2 = cli(g, '--output', 'crate', '--maps', 'external', '--export', out('ext.glb')), e3 = cli(g, '--output', 'crate', '--maps', 'none', '--export', out('none.glb'));
+  const size = (f: string) => fs.statSync(out(f)).size;
+  check(e1.status === 0 && e2.status === 0 && e3.status === 0 && glbJSON(new Uint8Array(fs.readFileSync(out('embed.glb')))).images.length === 2 && fs.readdirSync(out('maps')).length === 2
+    && size('ext.glb') < size('embed.glb') && size('none.glb') < size('ext.glb') && /\+ 2 maps in maps\//.test(e2.stdout),
+    `--maps embed (default, ${size('embed.glb')} B) | external (${size('ext.glb')} B + maps/ beside it) | none (${size('none.glb')} B)`);
+  const bad = cli(g, '--output', 'crate', '--maps', 'linked', '--export', out('bad.glb'));
+  check(bad.status === 1 && /--maps must be one of embed, external, none/.test(bad.stderr), `--maps with another value is refused (${bad.stderr.trim()})`);
+}
+
+section('CLI --export-all: a line per output, the unchanged ones kept, --force');
+{
+  const root = path.join(import.meta.dirname, '..');
+  const cli = (...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
+  // a package with two outputs: a box of its own nodes, a triangle read from inputs/
+  const dir = path.join(tmp, 'skip-pkg'), g = path.join(dir, 'graphs', 'parts.json'), ex = (f: string) => path.join(dir, 'exports', f);
+  fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'inputs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'skip-pkg.topo'), JSON.stringify({ title: 'parts', graph: 'parts' }));
+  fs.writeFileSync(path.join(dir, 'inputs', 'tri.obj'), 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
+  const graph = (height: number, ui?: unknown): any => ({
+    nodes: {
+      b: { type: 'box', params: { size: [1, '=h', 1] }, ...(ui ? { ui } : {}) }, lift: { type: 'transform', in: ['b'], params: { translate: [0, 1, 0] } },
+      tri: { type: 'file', params: { path: 'inputs/tri.obj' } }, big: { type: 'transform', in: ['tri'], params: { scale: height } },
+    },
+    output: 'lift', vars: { h: 2 },
+    outputs: { crate: { node: 'lift', export: 'glb' }, sign: { node: 'big', export: { format: 'obj' } }, look: { node: 'b' } },
+  });
+  fs.writeFileSync(g, JSON.stringify(graph(2)));
+  const mtimes = () => ['crate.glb', 'sign.obj'].map((f) => fs.statSync(ex(f)).mtimeMs).join();
+  const lines = (r: ReturnType<typeof cli>) => r.stdout.split('\n').filter((l) => /^\[\d+\/\d+\]|^exported/.test(l));
+  const first = cli(g, '--export-all');
+  check(first.status === 0 && /^\[1\/2\] crate, mesh: \d+\.\d s, [\d.]+ KB → \S*crate\.glb — glb, /.test(lines(first)[0] ?? '') && /^\[2\/2\] sign, mesh: .* → \S*sign\.obj/.test(lines(first)[1] ?? '')
+    && /^exported 2 of 2 outputs into \S*exports in \d+\.\d s$/.test(lines(first)[2] ?? '') && !/^cooked /m.test(first.stdout),
+    `a line per output (name, kind, time, size, file), then the count; the default output is not cooked first (${lines(first).join(' | ')})`);
+  const stamp = mtimes();
+  const second = cli(g, '--export-all');
+  check(second.status === 0 && /^\[1\/2\] crate: unchanged since its last export, \S*crate\.glb kept$/.test(lines(second)[0] ?? '') && /^\[2\/2\] sign: unchanged/.test(lines(second)[1] ?? '')
+    && /exported 0 of 2 outputs .*; 2 unchanged since their last export, kept \(--force exports them too\)/.test(second.stdout) && mtimes() === stamp,
+    `run again, both are kept as they are (${lines(second).join(' | ')})`);
+  // moving a node in an editor changes nothing it cooks; another value of a node only crate reads re-exports crate alone
+  fs.writeFileSync(g, JSON.stringify(graph(2, { x: 40, y: 80 })));
+  const moved = cli(g, '--export-all');
+  fs.writeFileSync(g, JSON.stringify({ ...graph(2), nodes: { ...graph(2).nodes, lift: { type: 'transform', in: ['b'], params: { translate: [0, 2, 0] } } } }));
+  const edited = cli(g, '--export-all');
+  check(/exported 0 of 2/.test(moved.stdout) && /^\[1\/2\] crate, mesh: /.test(lines(edited)[0] ?? '') && /^\[2\/2\] sign: unchanged/.test(lines(edited)[1] ?? '') && /exported 1 of 2 outputs .*; 1 unchanged/.test(edited.stdout),
+    `a node moved: nothing exported; a node only crate reads changed: crate alone (${lines(edited).join(' | ')})`);
+  // a file of inputs/, a var, a missing export file, another option: exported again
+  fs.writeFileSync(path.join(dir, 'inputs', 'tri.obj'), 'v 0 0 0\nv 2 0 0\nv 0 2 0\nf 1 2 3\n');
+  const input = cli(g, '--export-all');
+  const withVar = cli(g, '--var', 'h=3', '--export-all');
+  fs.rmSync(ex('sign.obj'));
+  const missing = cli(g, '--var', 'h=3', '--export-all');
+  const frame = cli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  check(/exported 2 of 2/.test(input.stdout) && /exported 2 of 2/.test(withVar.stdout) && /^\[1\/2\] crate: unchanged/.test(lines(missing)[0] ?? '') && /^\[2\/2\] sign, mesh/.test(lines(missing)[1] ?? '')
+    && /exported 2 of 2/.test(frame.stdout),
+    `an inputs/ file, a var, a deleted export file, another frame: exported again (${[input, withVar, missing, frame].map((r) => lines(r).slice(-1)[0]).join(' | ')})`);
+  const forced = cli(g, '--var', 'h=3', '--frame', '2', '--export-all', '--force');
+  check(/exported 2 of 2 outputs/.test(forced.stdout) && !/unchanged/.test(forced.stdout), '--force exports the unchanged outputs too');
+  const rec = JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source;
+  check(/^[0-9a-f]{64}$/.test(rec.nodes_sha256) && /^[0-9a-f]{64}$/.test(rec.files_sha256) && /^[0-9a-f]{64}$/.test(rec.engine_sha256),
+    `the record holds the hashes it is compared by: nodes_sha256, files_sha256, engine_sha256 (${rec.nodes_sha256.slice(0, 12)}, ${rec.files_sha256.slice(0, 12)}, ${String(rec.engine_sha256).slice(0, 12)})`);
+  // the engine's code, not its version: a copy of this checkout (the same code elsewhere) keeps the exports, an edit
+  // to one of its files under the same version exports again
+  const copy = path.join(tmp, 'engine-copy');
+  fs.cpSync(path.join(root, 'src'), path.join(copy, 'src'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(copy, 'package.json'));
+  for (const d of ['node_modules', 'library', 'kernels', 'assets']) if (fs.existsSync(path.join(root, d))) fs.symlinkSync(path.join(root, d), path.join(copy, d), 'junction');
+  const copyCli = (...args: string[]) => spawnSync(process.execPath, [path.join(copy, 'src', 'cli.ts'), ...args], { cwd: copy, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const sameCode = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  fs.appendFileSync(path.join(copy, 'src', 'nodes', 'generate.ts'), '\n// an engine edit that keeps the version\n');
+  const editedCode = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  const after = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
+  check(/exported 0 of 2 outputs .*; 2 unchanged/.test(sameCode.stdout) && /exported 2 of 2 outputs/.test(editedCode.stdout) && !/unchanged/.test(editedCode.stdout) && /exported 0 of 2 outputs/.test(after.stdout)
+    && JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source.engine_sha256 !== rec.engine_sha256,
+    `the same engine code elsewhere keeps the exports; an engine file edited under the same version exports every output again (${[sameCode, editedCode, after].map((r) => lines(r).slice(-1)[0] ?? r.stderr.slice(0, 200)).join(' | ')})`);
+  // the links first (unlinking leaves the checkout's folders alone), then the copy
+  for (const d of ['node_modules', 'library', 'kernels', 'assets']) if (fs.lstatSync(path.join(copy, d), { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(path.join(copy, d));
+  fs.rmSync(copy, { recursive: true, force: true });
+  // a graph in no package: its files are not known, so every run exports
+  const loose = path.join(tmp, 'skip-loose'), lg = path.join(loose, 'one.json');
+  fs.mkdirSync(loose, { recursive: true });
+  fs.writeFileSync(lg, JSON.stringify({ nodes: { b: { type: 'box' } }, output: 'b', export: 'glb' }));
+  cli(lg, '--export-all');
+  const looseAgain = cli(lg, '--export-all');
+  check(/exported 1 of 1/.test(looseAgain.stdout) && !JSON.parse(fs.readFileSync(path.join(loose, 'exports', 'one.glb.source.json'), 'utf8')).source.files_sha256,
+    `a graph in no package exports every time (${lines(looseAgain).slice(-1)[0]})`);
 }
 
 section('CLI heightfield render resolution');
@@ -973,7 +1193,8 @@ section('relative paths read from the package folder');
   const g = path.join(proj, 'graphs', 'piece.json');
   fs.writeFileSync(g, JSON.stringify({ nodes: { f: { type: 'file', params: { path: 'inputs/tri.obj' } } }, output: 'f', export: 'obj' }));
   const r = cli(g, '--export-all');
-  check(init.status === 0 && r.status === 0 && /3 points, 1 prims/.test(r.stdout) && fs.existsSync(path.join(proj, 'exports', 'piece.obj')) && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
+  const obj = path.join(proj, 'exports', 'piece.obj');
+  check(init.status === 0 && r.status === 0 && fs.existsSync(obj) && fs.readFileSync(obj, 'utf8').match(/^v /gm)?.length === 3 && !fs.existsSync(path.join(proj, 'graphs', 'exports')),
     `a graph in graphs/ reads inputs/ of its package, and --export-all writes the package's exports/ (${r.status ? r.stderr.trim().slice(0, 160) : 'ok'})`);
   check(packageBaseDir(path.join(proj, 'graphs')) === proj && packageBaseDir(path.join(tmp, 'cli')) === path.resolve(tmp, 'cli'), 'packageBaseDir: the nearest folder with a .topo file, else the folder itself');
   const e = new Engine(createNodeHost({ baseDir: path.join(proj, 'graphs') }));
@@ -1085,6 +1306,151 @@ section('CLI view');
       check(Array.isArray(listed) && !listed.length && !fs.existsSync(path.join(tmp, 'inputs')), 'a view run without drops makes no inputs/ folder beside the graph');
     }
   } finally { proc.kill(); }
+}
+
+section('time limits from the environment in every host, and where the time went');
+{
+  const { limitsFromEnv } = await import('../src/host/node.ts');
+  const { timingLines } = await import('../src/graph/timing.ts');
+  check(JSON.stringify(limitsFromEnv({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '120000', TOPOTOPO_SIM_TIMEOUT_MS: '5000' })) === '{"scriptMs":120000,"simMs":5000}'
+    && JSON.stringify(limitsFromEnv({})) === '{}' && JSON.stringify(limitsFromEnv({ TOPOTOPO_SCRIPT_TIMEOUT_MS: ' ' })) === '{}', 'limits: read from the environment, unset ones absent');
+  let bad = '';
+  try { limitsFromEnv({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '2min' }); } catch (e: any) { bad = e.message; }
+  check(/TOPOTOPO_SCRIPT_TIMEOUT_MS must be a positive number of milliseconds .*got "2min"/.test(bad), `limits: a value that is not a positive number fails (${bad})`);
+  const limited = new Engine({ ...createNodeHost({ baseDir: tmp }), limits: { scriptMs: 1234, simMs: 5678 } });
+  check(limited.scriptTimeoutMs === 1234 && limited.simTimeoutMs === 5678 && new Engine(createNodeHost({ baseDir: tmp })).scriptTimeoutMs === 30000, 'an engine starts with its host\'s limits (default 30 s without)');
+
+  // a script whose lib.run calls take time: the report keeps their time by node type, the timing text names them
+  const busy = (ms: number) => `const parts = [];\nfor (let i = 0; i < 3; i++) parts.push(await lib.run('box', { size: i + 1 }));\nparts.push(await lib.run('sphere', { type: 'ico', level: 3 }));\nconst t0 = Date.now(); while (Date.now() - t0 < ${ms}) {}\nreturn lib.merge(parts);`;
+  const e = new Engine(createNodeHost({ baseDir: tmp }));
+  await e.init();
+  const r = await e.cook({ nodes: { s: { type: 'script', params: { code: busy(80) } }, n: { type: 'noise', in: ['s'] } }, output: 'n' });
+  const st = res(r, 's').stages;
+  check(r.ok && st?.['lib.run box']?.calls === 3 && st?.['lib.run sphere']?.calls === 1 && st['lib.run box'].ms >= 0, `a script's lib.run time is kept by node type (${JSON.stringify(st)})`);
+  const lines = timingLines(r, e.scriptTimeoutMs, { minMs: 0, nodes: Infinity });
+  check(/^timing \(\d+ ms in all\): s \d+ ms, n \d+ ms/.test(lines[0] ?? '') && /^  s: lib\.run (box 3×|sphere) /.test(lines[1] ?? '') && !/script time limit/.test(lines[0]), `timing lines: nodes slowest first, the script's stages under it (${lines.join(' | ')})`);
+  check(/the script time limit is 100 ms \(TOPOTOPO_SCRIPT_TIMEOUT_MS\)/.test(timingLines(r, 100)[0] ?? ''), 'timing lines say the script limit when the slowest node took half of it or more');
+  const again = await e.cook({ nodes: { s: { type: 'script', params: { code: busy(80) } }, n: { type: 'noise', in: ['s'] } }, output: 'n' });
+  check(!timingLines(again, e.scriptTimeoutMs, { minMs: 0 }).length, 'a cook from the cache has no timing lines');
+
+  // the CLI: the limit from the environment, its hint, and --timing
+  const gfile = path.join(tmp, 'busy_script.json');
+  fs.writeFileSync(gfile, JSON.stringify({ nodes: { s: { type: 'script', params: { code: busy(600) } } } }));
+  const cli = (env: Record<string, string>, ...args: string[]) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), gfile, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ...env } });
+  const short = cli({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '250' });
+  check(short.status === 1 && /error \[s\] script exceeded 250 ms \(infinite loop\?\) \(hint: the script time limit is 250 ms: .*TOPOTOPO_SCRIPT_TIMEOUT_MS/.test(short.stderr), `CLI: TOPOTOPO_SCRIPT_TIMEOUT_MS stops the script, and the error says how to raise it (${short.stderr.trim().split('\n')[0]})`);
+  const timed = cli({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '20000' }, '--timing');
+  check(timed.status === 0 && /^timing \(.* in all\): s /m.test(timed.stdout) && /^  s: lib\.run box 3× .*lib\.run sphere|^  s: lib\.run sphere .*lib\.run box 3×/m.test(timed.stdout), `CLI --timing lists the nodes and the script's lib.run time (${timed.stdout.split('\n').filter((l) => /timing|lib\.run/.test(l)).join(' | ')})`);
+  const nonsense = cli({ TOPOTOPO_SCRIPT_TIMEOUT_MS: 'abc' });
+  check(nonsense.status === 1 && /TOPOTOPO_SCRIPT_TIMEOUT_MS must be a positive number/.test(nonsense.stderr) && !/at .*\.ts:\d+/.test(nonsense.stderr), 'CLI: a timeout that is not a number fails with a plain message');
+
+  // the live viewer (topotopo view) honours the same variable
+  const { spawn } = await import('node:child_process');
+  const proc = spawn(process.execPath, [path.join(root, 'src', 'cli.ts'), 'view', gfile, '--port', '0'], { cwd: root, env: { ...process.env, TOPOTOPO_SCRIPT_TIMEOUT_MS: '250' } });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += d; });
+  proc.stderr.on('data', (d) => { out += d; });
+  const until = async (pred: () => boolean, ms: number) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 100)); return pred(); };
+  try {
+    const up = await until(() => /view: http:\/\/127\.0\.0\.1:\d+\//.test(out), 30000);
+    const url = up ? /view: (http:\/\/127\.0\.0\.1:\d+)\//.exec(out)![1] : '';
+    const info = up ? await (await fetch(`${url}/api/info?graph=busy_script`)).json() as any : null;
+    check(up && /script exceeded 250 ms/.test(String(info?.error)), `the viewer cooks under TOPOTOPO_SCRIPT_TIMEOUT_MS (${String(info?.error).split('\n')[0]})`);
+  } finally { proc.kill(); }
+}
+
+section('refresh: a regenerated graph keeps what a person tuned on it');
+{
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  // a generator's graph: three controls, an enum, a var without a control
+  const gen = (o: { height?: number; hmax?: number; style?: string[]; floors?: 'int' | 'float' } = {}): GraphSpec => ({
+    nodes: { b: { type: 'box', params: { size: ['=width', '=height', 1] } }, out: { type: 'transform', in: ['b'], params: { t: [0, 0, 0] } } },
+    output: 'out',
+    vars: { width: 2, height: o.height ?? 3, floors: 4, style: 'flat', seed: 1 },
+    params: {
+      width: { type: 'float', min: 0.5, max: 10, desc: 'width' },
+      height: { type: 'float', min: 1, max: o.hmax ?? 20, desc: 'height' },
+      floors: { type: o.floors ?? 'int', min: 1, max: 9 },
+      style: { type: 'enum', options: o.style ?? ['flat', 'gable', 'hip'] },
+    },
+    meta: { render: { views: 'persp' } },
+  });
+  const first = refreshGraph({ nodes: {} }, gen());
+  check(same(first.graph.meta?.generated_vars, { width: 2, height: 3, floors: 4, style: 'flat', seed: 1 }) && !first.kept.length && !first.reset.length, 'refresh: the first write records the generated values');
+
+  // the person tunes it: values, a label and step, a control for seed, node ui, an editor meta key
+  const tuned: GraphSpec = structuredClone(first.graph);
+  Object.assign(tuned.vars!, { width: 4.5, floors: 7, style: 'hip', seed: 9 });
+  tuned.params!.width = { ...tuned.params!.width, label: 'Width (m)', step: 0.25 };
+  tuned.params!.seed = { type: 'int', min: 0, max: 99, label: 'Seed' };
+  tuned.nodes.b.ui = { x: 120, y: 40 };
+  tuned.meta!.layout = { zoom: 2 };
+
+  // the generator runs again: height's value changed, nothing else
+  const r = refreshGraph(tuned, gen({ height: 5 }));
+  const g = r.graph;
+  check(g.vars!.width === 4.5 && g.vars!.floors === 7 && g.vars!.style === 'hip' && g.vars!.seed === 9, `refresh keeps the values the person changed (${JSON.stringify(g.vars)})`);
+  check(g.vars!.height === 5, 'refresh: a value nobody touched follows the generator');
+  check(g.params!.width.label === 'Width (m)' && g.params!.width.step === 0.25 && g.params!.width.desc === 'width' && g.params!.seed?.label === 'Seed', 'refresh keeps control labels, steps and a control the person added');
+  check(same(g.nodes.b.ui, { x: 120, y: 40 }) && same(g.meta?.layout, { zoom: 2 }) && same(g.meta?.render, { views: 'persp' }), 'refresh keeps node ui and the meta keys the generator does not set');
+  check(r.kept.length === 4 && r.kept.includes('width=4.5 (generator: 2)') && !r.reset.length && !r.dropped.length, `refresh reports what it kept (${r.kept.join('; ')})`);
+  check(same(g.meta?.generated_vars, { width: 2, height: 5, floors: 4, style: 'flat', seed: 1 }), 'refresh records what the generator gave this time');
+  check(refreshNotes(r).some((n) => /^refresh kept 4 value\(s\) the person changed: /.test(n)) && refreshNotes(r).some((n) => /^refresh carried over: .*width label.*b ui.*meta\.layout/.test(n)), 'refresh notes say what was kept and carried over');
+
+  // a kept value that no longer fits takes the generator's value; untouched values follow the generator either way
+  const r2 = refreshGraph(g, { ...gen({ style: ['flat', 'gable'] }), vars: { ...gen().vars, width: 'wide' } });
+  check(r2.graph.vars!.style === 'flat' && r2.reset.some((x) => /^style="hip" → "flat": not one of the options/.test(x)), `refresh resets a value that is no longer an option (${r2.reset.join('; ')})`);
+  check(r2.graph.vars!.width === 'wide' && r2.reset.some((x) => /^width=4\.5 → "wide": a number where the generator gives a string/.test(x)), 'refresh resets a value of another kind');
+  const r3 = refreshGraph(g, gen({ hmax: 4 }));
+  check(r3.graph.vars!.floors === 7 && r3.graph.vars!.height === 3, 'refresh: an untouched value follows the generator back');
+  const tall = structuredClone(g); tall.vars!.height = 8;
+  const r4 = refreshGraph(tall, gen({ hmax: 6 }));
+  check(r4.graph.vars!.height === 8 && !r4.reset.length, `refresh keeps a value past the new range: min/max are the slider's range, not a limit (${r4.reset.join('; ')})`);
+  const frac = structuredClone(g); frac.params!.floors.type = 'float'; frac.vars!.floors = 6.5;
+  const r5 = refreshGraph(frac, gen());
+  check(r5.graph.vars!.floors === 4 && r5.reset.some((x) => /^floors=6\.5 → 4: not a whole number/.test(x)), `refresh resets a fraction for an int var (${r5.reset.join('; ')})`);
+  const noSeed = gen(); delete noSeed.vars!.seed;
+  const lr = refreshGraph(g, noSeed);
+  check(!('seed' in lr.graph.vars!) && !lr.graph.params!.seed && same(lr.dropped, ['seed']), `refresh drops the vars the generator no longer has (${lr.dropped.join(', ')})`);
+
+  // MCP build mode "refresh": the person's values stay, the report says so, and the graph cooks
+  const rdir = path.join(tmp, 'refresh_ws');
+  fs.mkdirSync(path.join(rdir, 'graphs'), { recursive: true });
+  const rws = new Session(rdir, await newEngine());
+  rws.load();
+  const rtools = makeTools(rws);
+  const rcall = async (name: string, a: any) => {
+    const res = await rtools.find((t) => t.name === name)!.run(a);
+    return { txt: res.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'), isError: !!res.isError };
+  };
+  const rb0 = await rcall('build', { name: 'lot', graph: gen(), mode: 'refresh' });
+  const saved = structuredClone(rws.getGraph('lot'));
+  saved.vars!.width = 6;
+  rws.setGraph('lot', saved);
+  const rb = await rcall('build', { name: 'lot', graph: gen({ height: 5 }), mode: 'refresh' });
+  const after = rws.getGraph('lot');
+  check(!rb0.isError && !rb.isError && after.vars!.width === 6 && after.vars!.height === 5 && /note: refresh kept 1 value\(s\) the person changed: width=6 \(generator: 2\)/.test(rb.txt), `MCP build mode "refresh" keeps the person's values and says so (${rb.txt.split('\n').find((l) => /refresh|✗/.test(l))})`);
+  const rd = await rcall('build', { name: 'lot', graph: gen({ hmax: 4 }), mode: 'refresh', dry_run: true });
+  check(!rd.isError && /✓ valid/.test(rd.txt) && /note: refresh kept 1 value/.test(rd.txt) && rws.getGraph('lot').vars!.height === 5, 'a refresh dry run reports what it would keep and saves nothing');
+  const plain = await rcall('build', { name: 'lot', graph: gen() });
+  check(!plain.isError && rws.getGraph('lot').vars!.width === 2, 'build without mode "refresh" still replaces the values');
+
+  // CLI: topotopo refresh graph.json generated.json | -
+  const gfile = path.join(tmp, 'refresh_lot.json'), genFile = path.join(tmp, 'refresh_gen.json');
+  const cli = (args: string[], input?: string) => spawnSync(process.execPath, [path.join(root, 'src', 'cli.ts'), 'refresh', ...args], { cwd: root, encoding: 'utf8', input });
+  fs.writeFileSync(genFile, JSON.stringify(gen()));
+  const w = cli([gfile, genFile]);
+  check(w.status === 0 && /^wrote /.test(w.stdout) && JSON.parse(fs.readFileSync(gfile, 'utf8')).meta.generated_vars.height === 3, `CLI refresh writes a new graph file (${w.stdout.trim() || w.stderr.trim()})`);
+  const onDisk = JSON.parse(fs.readFileSync(gfile, 'utf8'));
+  onDisk.vars.style = 'gable';
+  fs.writeFileSync(gfile, JSON.stringify(onDisk));
+  const piped = cli([gfile, '-'], JSON.stringify(gen({ height: 5 })));
+  const back = JSON.parse(fs.readFileSync(gfile, 'utf8'));
+  check(piped.status === 0 && back.vars.style === 'gable' && back.vars.height === 5 && /refresh kept 1 value\(s\) the person changed: style="gable"/.test(piped.stdout), `CLI refresh from stdin keeps the person's values (${piped.stdout.trim().split('\n').join(' | ') || piped.stderr.trim()})`);
+  const cooked = await (await newEngine()).cook(back);
+  check(cooked.ok, 'the refreshed graph file cooks');
+  const notGraph = cli([gfile, '-'], '{"vars": {}}');
+  check(notGraph.status === 1 && /is not a graph/.test(notGraph.stderr) && JSON.parse(fs.readFileSync(gfile, 'utf8')).vars.style === 'gable', 'CLI refresh refuses input that is not a graph and leaves the file');
 }
 
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);

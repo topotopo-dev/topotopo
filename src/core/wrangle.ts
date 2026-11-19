@@ -498,6 +498,8 @@ export class WrangleAPI {
   newPrims: { pts: number[]; closed: boolean }[] = [];
   delPts = new Set<number>();
   delPrims = new Set<number>();
+  /** prims removed with andpoints: their points go too when no remaining prim uses them */
+  delPrimPts = new Set<number>();
   sets: { cls: AttribClass; idx: number; name: string; value: any }[] = [];
   groupSets: { cls: 'point' | 'prim' | 'vertex'; name: string; idx: number; value: number }[] = [];
   edgeSets: { name: string; a: number; b: number; value: number }[] = [];
@@ -588,7 +590,7 @@ export class WrangleAPI {
   removepoint(pt: number) { this.delPts.add(pt); }
   removeprim(p: number, andPoints: boolean) {
     this.delPrims.add(p);
-    if (andPoints) (this as any).delPrimPts = true;
+    if (andPoints) this.delPrimPts.add(p);
   }
   // argument order of the snippet-lib callers: setpointattrib(0, name, idx, value) → setattr('point', name, idx, value)
   setattr(cls: AttribClass, name: string, idx: number, value: any) { this.sets.push({ cls, idx: Number(idx), name: String(name), value: Array.isArray(value) ? value.slice() : value }); }
@@ -622,14 +624,25 @@ export class WrangleAPI {
       if (!(s.a >= 0 && s.b >= 0 && s.a < g.numPoints && s.b < g.numPoints)) continue;
       if (s.value) set.add(s.a, s.b); else set.delete(s.a, s.b);
     }
+    // point numbers stay as the run saw them until the points go, last
+    const delPts = new Set(this.delPts);
     if (this.delPrims.size) {
       const keep = new Uint8Array(g.numPrims).fill(1);
       for (const p of this.delPrims) if (p >= 0 && p < keep.length) keep[p] = 0;
-      g = g.subsetPrims(keep, !!(this as any).delPrimPts);
+      // andpoints (Houdini): the removed prim's own points that no remaining prim uses; points no prim used stay
+      if (this.delPrimPts.size) {
+        const used = new Uint8Array(g.numPoints);
+        for (let p = 0; p < g.numPrims; p++) if (keep[p]) for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) used[g.vertexPoint[v]] = 1;
+        for (const p of this.delPrimPts) {
+          if (!(p >= 0 && p < g.numPrims)) continue;
+          for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) if (!used[g.vertexPoint[v]]) delPts.add(g.vertexPoint[v]);
+        }
+      }
+      g = g.subsetPrims(keep, false);
     }
-    if (this.delPts.size) {
+    if (delPts.size) {
       const keep = new Uint8Array(g.numPoints).fill(1);
-      for (const p of this.delPts) if (p >= 0 && p < keep.length) keep[p] = 0;
+      for (const p of delPts) if (p >= 0 && p < keep.length) keep[p] = 0;
       g = g.subsetPoints(keep);
     }
     return g;

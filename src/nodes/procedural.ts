@@ -175,10 +175,13 @@ const fontFailed = new Map<string, string>();
  * parses lazily and rejects for some fonts (DejaVu: "lookupType 6 substFormat 2 is not yet supported"), so when
  * shaping throws we lay the glyphs out ourselves: character → glyph, advance widths, kerning when available.
  */
-function layoutLine(font: any, line: string, y: number, size: number): { commands: any[]; width: number } {
+function layoutLine(font: any, line: string, y: number, size: number, variation?: Record<string, number>): { commands: any[]; width: number } {
+  // a variable font's outlines and advances follow the variation; opentype.js sets a glyph's varied advance while it
+  // makes the glyph's path, so the width is read after the path
+  const opts = variation ? { kerning: true, variation } : { kerning: true };
   try {
-    const path = font.getPath(line, 0, y, size, { kerning: true });
-    return { commands: path.commands, width: font.getAdvanceWidth(line, size, { kerning: true }) };
+    const path = font.getPath(line, 0, y, size, opts);
+    return { commands: path.commands, width: font.getAdvanceWidth(line, size, opts) };
   } catch {
     const scale = size / font.unitsPerEm;
     const commands: any[] = [];
@@ -186,12 +189,36 @@ function layoutLine(font: any, line: string, y: number, size: number): { command
     for (const ch of line) {
       const glyph = font.charToGlyph(ch);
       if (prev) { try { x += font.getKerningValue(prev, glyph) * scale; } catch { /* no kerning */ } }
-      commands.push(...glyph.getPath(x, y, size).commands);
+      commands.push(...(variation ? glyph.getPath(x, y, size, { variation, drawLayers: false, drawSVG: false }, font) : glyph.getPath(x, y, size)).commands);
       x += (glyph.advanceWidth ?? 0) * scale;
       prev = glyph;
     }
     return { commands, width: x };
   }
+}
+
+/** Regular in CSS and OpenType terms: the weight a static font is taken to have, so it warns at no other. */
+const REGULAR_WEIGHT = 400;
+
+/**
+ * The variation a weight asks of a font: its axes at their defaults with wght at the weight (clamped to the font's wght
+ * range, with a warning), or undefined for a font without a wght axis (it is drawn as it is; a weight other than
+ * regular warns).
+ */
+function fontVariation(font: any, weight: number, warn: (msg: string) => void): Record<string, number> | undefined {
+  const axes: { tag: string; minValue: number; maxValue: number; defaultValue: number }[] = font.tables?.fvar?.axes ?? [];
+  const wght = axes.find((a) => a.tag === 'wght');
+  if (!font.variation || !wght) {
+    if (weight !== REGULAR_WEIGHT) warn(`the font has no weight axis (wght), so it is drawn at its own weight, not ${weight}: use a variable font, or the font file of that weight (e.g. NotoSans-Bold.ttf)`);
+    return undefined;
+  }
+  let w = weight;
+  if (w < wght.minValue || w > wght.maxValue) {
+    const c = Math.min(Math.max(w, wght.minValue), wght.maxValue);
+    warn(`weight ${w} is outside the font's wght range ${wght.minValue}..${wght.maxValue}: drawn at ${c}`);
+    w = c;
+  }
+  return { ...Object.fromEntries(axes.map((a) => [a.tag, a.defaultValue])), wght: w };
 }
 const fontCache = new Map<string, any>();
 
@@ -224,20 +251,31 @@ function flattenPath(cmds: any[], segs: number): number[][][] {
 defineNode({
   type: 'text',
   category: 'generate',
-  summary: 'Text from a TrueType/OpenType font: filled faces, outlines, or extruded solid. Lies in the XY plane facing +Z.',
+  summary: 'Text from a TrueType/OpenType font: filled faces, outlines, or an extruded solid, in the XY plane facing +Z (a solid stands out towards +Z from its back face).',
+  description:
+    'Lettering for signs, signage, labels, plaques and logos. The letters lie in the XY plane and face +Z, placed by ' +
+    'center: x and y where align and valign put the text, z the plane of the faces and outlines, and of the back face ' +
+    'of a solid (depth > 0), whose front face is at center z + depth. So letters on a wall at z = 0 stand out from it ' +
+    'towards +Z; turn and move the result to face elsewhere. back false leaves the back face of a solid off (letters ' +
+    'mounted on a wall, whose back is never seen: fewer triangles, an open solid). To engrave, set center z to minus ' +
+    'half the depth (the letters straddle the surface) and subtract the text from the surface with boolean; to emboss, ' +
+    'merge it onto the surface or union it. curve_segments 2 (the default) suits signs; 4 to 8 for large lettering ' +
+    'seen up close (each step adds about a third more triangles).',
   aliases: ['font', 'type', 'lettering'],
   inputs: [],
   params: {
     text: { type: 'string', default: 'TopoTopo', desc: 'text (use \\n for new lines)' },
     font: { type: 'string', default: '', desc: 'font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine)' },
     size: { type: 'float', default: 1, desc: 'font size (em height in units)' },
+    weight: { type: 'float', default: 400, min: 1, max: 1000, desc: 'font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold, 900 black (clamped to the range the font has, with a warning). A font without a wght axis (the bundled DejaVu Sans, a static file) is drawn at its own weight; any weight but 400 then warns', aliases: ['wght', 'font_weight'] },
     align: { type: 'enum', options: ['left', 'center', 'right'], default: 'center', desc: 'horizontal alignment' },
     valign: { type: 'enum', options: ['baseline', 'center', 'bottom', 'top'], default: 'bottom', desc: 'vertical alignment' },
     depth: { type: 'float', default: 0, min: 0, desc: 'extrusion depth (> 0 makes a solid)' },
     output: { type: 'enum', options: ['auto', 'faces', 'outlines', 'solid'], default: 'auto', desc: 'auto = solid if depth > 0, else faces' },
     line_spacing: { type: 'float', default: 1.2, desc: 'line height as a multiple of size' },
-    curve_segments: { type: 'int', default: 6, min: 1, max: 32, desc: 'segments per glyph curve' },
-    center: P.center(),
+    curve_segments: { type: 'int', default: 2, min: 1, max: 32, desc: 'segments per glyph curve: 2 suits signs; 4 to 8 for large lettering seen up close' },
+    back: { type: 'bool', default: true, desc: 'solid: its back face at center z (false leaves it off: letters on a wall, whose back is never seen; the solid is then open)', aliases: ['back_face'] },
+    center: { ...P.center(), desc: 'position: x and y where align and valign put the text; z the plane of faces and outlines, and the back face of a solid' },
   },
   // a font path reads the scope's folder
   signatureExtra: (p, scope) => scope.files.findFont(p.font || undefined) ?? 'nofont',
@@ -262,11 +300,12 @@ defineNode({
     }
     if (!font) throw new NodeError(`cannot parse any font for "${p.font || '(default)'}"`, failures.join('; '));
     if (failures.length && !name) warn(`skipped unparsable font(s): ${failures.map((f) => f.split(':')[0]).join(', ')}`);
+    const variation = fontVariation(font, p.weight, warn);
     const lines = String(p.text).split(/\\n|\n/);
     let polys: number[][][] = [];
     const lineH = p.size * p.line_spacing;
     lines.forEach((line, li) => {
-      const { commands, width } = layoutLine(font, line, li * lineH, p.size);
+      const { commands, width } = layoutLine(font, line, li * lineH, p.size, variation);
       let cs = flattenPath(commands, p.curve_segments);
       if (p.align !== 'left' && cs.length) {
         const dx = p.align === 'center' ? -width / 2 : -width;
@@ -284,10 +323,22 @@ defineNode({
     const mode = p.output === 'auto' ? (p.depth > 0 ? 'solid' : 'faces') : p.output;
     let g: Geometry;
     if (mode === 'solid') {
-      const m = cs.extrude(Math.max(p.depth, 1e-4));
-      const mt = m.translate([0, 0, p.center[2] - p.depth / 2]);
+      // from its back face at center z to its front face at center z + depth
+      const depth = Math.max(p.depth, 1e-4);
+      const m = cs.extrude(depth);
+      const mt = m.translate([0, 0, p.center[2]]);
       g = fromManifold(mt, propLayout([])).geo;
       m.delete(); mt.delete();
+      if (!p.back) {
+        // the back face: the prims whose points all lie on the back plane
+        const keep = new Uint8Array(g.numPrims), z = p.center[2], eps = depth * 1e-6 + 1e-9;
+        for (let pr = 0; pr < g.numPrims; pr++) {
+          let back = true;
+          for (let v = g.primStart[pr]; v < g.primStart[pr + 1] && back; v++) back = Math.abs(g.P[g.vertexPoint[v] * 3 + 2] - z) <= eps;
+          keep[pr] = back ? 0 : 1;
+        }
+        g = g.subsetPrims(keep, true);
+      }
     } else if (mode === 'outlines') g = polygonsToGeo(cs.toPolygons(), 'xy', p.center[2]);
     else g = crossSectionFaces(cs, 'xy', p.center[2]);
     cs.delete();

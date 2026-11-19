@@ -179,6 +179,17 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   check(!exprF.ok && /"pieces == 2 \|\| npoints > 100" is false \(npoints 8, pieces 1\)/.test(exprF.errors[0]?.message ?? ''), `expr false lists the values it read: ${exprF.errors[0]?.message}`);
   const exprBad = await cook({ ...box, a: { type: 'assert', in: ['b'], params: { expr: 'volme > 1' } } });
   check(!exprBad.ok && /volme is not defined/.test(exprBad.errors[0]?.message ?? '') && /volume/.test(exprBad.errors[0]?.hint ?? ''), `bad expr is a node error with the names in the hint: ${exprBad.errors[0]?.message}`);
+  // a graph var named like a measurement (a slider "pieces"): the var comes first, as in every expression; geo.pieces is
+  // the measurement, so one expression reads both, and reading the bare name alone warns instead of choosing silently
+  const withVar = (expr: string) => engine.cook({ nodes: { ...box, a: { type: 'assert', in: ['b'], params: { expr } } }, output: 'a', vars: { pieces: 3 } });
+  const both = await withVar('geo.pieces == 1 && pieces == 3');
+  check(both.ok && !both.warnings.length, `assert expr reads both: geo.pieces (measured) and pieces (the graph var) ${both.errors[0]?.message ?? ''}${both.warnings[0]?.message ?? ''}`);
+  const clash = await withVar('pieces == 3');
+  check(clash.ok && clash.warnings.some((w) => /pieces is the graph var pieces \(3\), not the measured pieces \(1\); write geo\.pieces/.test(w.message)), `a name that is both a var and a measurement warns: ${clash.warnings[0]?.message}`);
+  const bothFalse = await withVar('geo.pieces == pieces');
+  check(!bothFalse.ok && /is false \(pieces 3, geo\.pieces 1\)/.test(bothFalse.errors[0]?.message ?? ''), `a false expr lists both values: ${bothFalse.errors[0]?.message}`);
+  const noVar = await cook({ ...box, a: { type: 'assert', in: ['b'], params: { expr: 'geo.volume > 1.9 && volume > 1.9 && geo.bbox.size.y == 2' } } });
+  check(noVar.ok && !noVar.warnings.length, `without such a var both spellings read the measurement ${noVar.errors[0]?.message ?? ''}`);
   const rev = await cook({ ...box, r: { type: 'reverse', in: ['b'] }, a: { type: 'assert', in: ['r'], params: { no_flipped: true } } });
   check(!rev.ok && /facing inward/.test(rev.errors[0]?.message ?? ''), 'no_flipped catches an inside-out box');
   const hollow = await cook({ o: { type: 'box' }, i: { type: 'box', params: { size: 0.8 } }, h: { type: 'boolean', in: ['o', 'i'], params: { operation: 'subtract' } }, a: { type: 'assert', in: ['h'], params: { no_flipped: true, watertight: true, expr: 'pieces == 2 && volume > 0.48 && volume < 0.49' } } }, 'a');
@@ -196,6 +207,15 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   const attr = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'h', value: 2 } }, a: { type: 'assert', in: ['c'], params: { attrib: 'h', attrib_class: 'point', attrib_max: 1.5, group: 'nope' } } }, 'a');
   const am = attr.errors[0]?.message ?? '';
   check(!attr.ok && /8 point value\(s\) of "h" outside -inf \.\. 1\.5/.test(am) && /group: "nope" does not exist/.test(am), `attrib range and missing group: ${am}`);
+  // every component counts: a uv whose u is in 0..1 but whose v is not fails, and says which component
+  const uvOut = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'uv', value: [0.5, 1.25] } }, a: { type: 'assert', in: ['c'], params: { attrib: 'uv', attrib_class: 'point', attrib_min: 0, attrib_max: 1 } } }, 'a');
+  const um = uvOut.errors[0]?.message ?? '';
+  check(!uvOut.ok && /8 point value\(s\) of "uv" outside 0 \.\. 1 \(\[1\] 8 value\(s\), range 1\.25 \.\. 1\.25\)/.test(um) && !/\[0\]/.test(um), `attrib range checks every component and names the one out of range: ${um}`);
+  // NaN is outside every range: a promise measured as NaN never passes
+  const nan = await cook({ ...box, w: { type: 'wrangle', in: ['b'], params: { run_over: 'points', code: '@gap = NaN;' } }, a: { type: 'assert', in: ['w'], params: { attrib: 'gap', attrib_class: 'point', attrib_min: 0 } } }, 'a');
+  check(!nan.ok && /8 point value\(s\) of "gap" outside 0 \.\. inf \(8 NaN\)/.test(nan.errors[0]?.message ?? ''), `attrib range fails NaN and says so: ${nan.errors[0]?.message}`);
+  const uvIn = await cook({ ...box, c: { type: 'attrib_create', in: ['b'], params: { name: 'uv', value: [0.5, 0.75] } }, a: { type: 'assert', in: ['c'], params: { attrib: 'uv', attrib_class: 'point', attrib_min: 0, attrib_max: 1 } } }, 'a');
+  check(uvIn.ok, `attrib range: every component inside passes (${uvIn.errors[0]?.message ?? 'ok'})`);
   const short = await cook({ ...box, a: { type: 'assert', in: ['b'], params: { min_edge_length: 1.5 } } });
   check(!short.ok && /8 edge\(s\) shorter than 1\.5 \(shortest 1\)/.test(short.errors[0]?.message ?? ''), `min_edge_length: ${short.errors[0]?.message}`);
   const none = await cook({ ...box, a: { type: 'assert', in: ['b'] } });
@@ -204,6 +224,51 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   check(!badBox.ok && /bbox_max/.test(badBox.errors[0]?.message ?? ''), 'malformed bbox_max is a param error');
   const alias = await cook({ ...box, a: { type: 'expect', in: ['b'], params: { closed: true } } });
   check(alias.ok && alias.results.get('a')?.stats?.checks === 1, 'aliases: expect, closed → watertight');
+}
+
+// ---------------------------------------------------------------- assert: heightfields and images
+{
+  const err = (r: { errors: { message: string }[] }) => r.errors[0]?.message ?? '';
+  const land = {
+    hf: { type: 'heightfield', params: { size: [40, 40], resolution: 0.5, name: 'map' } },
+    map: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 4, element_size: 8, range: 'positive', seed: 1 } },
+  };
+  const ok = await cook({ ...land, a: { type: 'assert', in: ['map'], params: { heightfields: 'map', samples: 81, height_min: 0, height_max: 4.001 } } }, 'a');
+  check(ok.ok && ok.results.get('a')?.stats?.checks === 3, `a heightfield that exists, with 81 × 81 samples and heights in 0 .. 4: 3 checks pass (${err(ok)})`);
+  const wrong = await cook({ ...land, a: { type: 'assert', in: ['map'], params: { heightfields: 'terrain ma*', samples: [129, 81], height_max: 1 } } }, 'a');
+  const wm = err(wrong);
+  check(!wrong.ok && /no heightfield named "terrain" \(heightfields: map\)/.test(wm) && /"map" has 81 × 81 samples \(want 129 × 81\)/.test(wm) && /samples of "map" outside -inf \.\. 1 \(range 0(\.\d+)? \.\. [34]\.\d+\); first at x/.test(wm),
+    `a missing heightfield, the wrong sample count and heights over the top each fail, with the measured values: ${wm}`);
+  const noField = await cook({ b: { type: 'box' }, a: { type: 'assert', in: ['b'], params: { height_max: 1 } } }, 'a');
+  check(!noField.ok && /heightfields: no heightfield to check/.test(err(noField)), `height checks on geometry without a heightfield fail: ${err(noField)}`);
+
+  // a tile cooked from the map matches it; a tile of other ground does not, and one elsewhere lies outside it
+  const tile = { tile: { type: 'heightfield_crop', in: ['map'], params: { tiles: [4, 4], tile: [1, 2] } } };
+  const same = await cook({ ...land, ...tile, a: { type: 'assert', in: ['tile', 'map'], params: { match: 'all', match_tolerance: 0 } } }, 'a');
+  check(same.ok, `match all: a tile cropped from its map matches it sample for sample (${err(same)})`);
+  const other = await cook({ ...land, ...tile,
+    hf2: { type: 'heightfield', params: { size: [40, 40], resolution: 0.5 } },
+    map2: { type: 'heightfield_noise', in: ['hf2'], params: { amplitude: 4, element_size: 8, range: 'positive', seed: 2 } },
+    tile2: { type: 'heightfield_crop', in: ['map2'], params: { tiles: [4, 4], tile: [1, 2] } },
+    a: { type: 'assert', in: ['tile2', 'map'], params: { match: 'edges' } } }, 'a');
+  check(!other.ok && /of 80 edge samples of "heightfield" differ from "map" by more than 0\.0001 \(largest \d/.test(err(other)), `match edges: a tile of other ground fails on its 80 edge samples: ${err(other)}`);
+  const away = await cook({ ...land, far: { type: 'heightfield', params: { size: [10, 10], resolution: 0.5, center: [100, 0, 0] } }, a: { type: 'assert', in: ['far', 'map'], params: { match: 'edges' } } }, 'a');
+  check(!away.ok && /80 of 80 edge samples of "heightfield" lie outside the reference "map"/.test(err(away)), `match: a field beside the map lies outside it: ${err(away)}`);
+  const noRef = await cook({ ...land, a: { type: 'assert', in: ['map'], params: { match: 'edges' } } }, 'a');
+  check(!noRef.ok && /match needs a reference heightfield as its second input/.test(err(noRef)), `match without a reference says what to wire: ${err(noRef)}`);
+
+  // images
+  const pic = { n: { type: 'tex_noise', params: { resolution: 64, name: 'grain' } } };
+  const imOk = await cook({ ...pic, a: { type: 'assert', in: ['n'], params: { images: 'gr*', image_size: 64, image_min: 0, image_max: 1 } } }, 'a');
+  check(imOk.ok && imOk.results.get('a')?.stats?.checks === 3, `an image that exists, 64 × 64 px, values in 0 .. 1: 3 checks pass (${err(imOk)})`);
+  const imBad = await cook({ ...pic, a: { type: 'assert', in: ['n'], params: { images: 'grain normal', image_size: [128, 64], image_max: 0.5 } } }, 'a');
+  const im = err(imBad);
+  check(!imBad.ok && /no image named "normal" \(images: grain\)/.test(im) && /"grain" is 64 × 64 px \(want 128 × 64\)/.test(im) && /values of "grain" layer "\w+" outside -inf \.\. 0\.5 \(range/.test(im),
+    `a missing image, the wrong size and values over the top each fail: ${im}`);
+  const noImage = await cook({ b: { type: 'box' }, a: { type: 'assert', in: ['b'], params: { image_size: 64 } } }, 'a');
+  check(!noImage.ok && /images: no image to check/.test(err(noImage)), `image checks on geometry without an image fail: ${err(noImage)}`);
+  const badSize = await cook({ ...pic, a: { type: 'assert', in: ['n'], params: { image_size: [64, 0.5] } } }, 'a');
+  check(!badSize.ok && /image_size/.test(err(badSize)), 'a malformed image_size is a param error');
 }
 
 // ---------------------------------------------------------------- core helpers

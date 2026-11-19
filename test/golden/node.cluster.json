@@ -5,7 +5,6 @@
       "detail": [],
       "point": [
         "Cd:float:3",
-        "N:float:3",
         "P:float:3",
         "cluster:int:1",
         "cluster_center:float:3",
@@ -35,7 +34,6 @@
       "P": "4f30b0d01f743312",
       "attributes": {
         "point.Cd": "623a9772eefbb094",
-        "point.N": "79d9ca0517223f9f",
         "point.cluster": "f2836cc7908b691d",
         "point.cluster_center": "2a26811434a5053a",
         "point.sourceprim": "0b0b34b5b73b936f",

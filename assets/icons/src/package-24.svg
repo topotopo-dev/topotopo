@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+<!-- TopoTopo package (.topo), drawn for 24 px. -->
+  <path d="M3.5 0.5H15L20.5 6V23.5H3.5Z" fill="#ffffff" stroke="#8f8780"/>
+  <path d="M14.5 0.5V6.5H20.5" fill="#e4ddd6" stroke="#8f8780"/>
+  <polygon points="12,11 18,14 12,17 6,14" fill="#f4a26c"/><polygon points="6,14 12,17 12,19 6,16" fill="#d9622b"/><polygon points="18,14 12,17 12,19 18,16" fill="#a8461a"/>
+  <polygon points="12,10 16,12 12,14 8,12" fill="#f4a26c"/><polygon points="8,12 12,14 12,16 8,14" fill="#d9622b"/><polygon points="16,12 12,14 12,16 16,14" fill="#a8461a"/>
+  <polygon points="12,9 14,10 12,11 10,10" fill="#f4a26c"/><polygon points="10,10 12,11 12,13 10,12" fill="#d9622b"/><polygon points="14,10 12,11 12,13 14,12" fill="#a8461a"/>
+</svg>

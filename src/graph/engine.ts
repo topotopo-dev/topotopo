@@ -53,6 +53,8 @@ import type { AssetEntry, PackageIssue, PackageResolver, Scope } from './scope.t
 import { NodeError, STOPPED } from './types.ts';
 import type { CookContext, GraphSpec, InputDef, NodeDef, NodeSpec, ParamDef } from './types.ts';
 import { VAR_NAME_HINT, varNameError } from './vars.ts';
+import { inputsNotRead, materialDemands } from './demand.ts';
+import type { Demand, DemandGraph } from './demand.ts';
 import { codeVarNames, pickVars } from '../core/usercode.ts';
 
 export type { TimeState } from './params.ts';
@@ -73,6 +75,8 @@ export interface NodeResult {
   timeDependent: boolean;
   /** numbers recorded by the node while cooking (e.g. solver steps); absent on cache hits */
   stats?: Record<string, number>;
+  /** where the node's time went, by named stage (CookContext.stage: a script's lib.run calls by node type); absent on cache hits */
+  stages?: Record<string, { ms: number; calls: number }>;
 }
 
 export interface CookReport {
@@ -325,9 +329,14 @@ export function graphInterface(graph: GraphSpec): { params: Record<string, Param
   const params: Record<string, ParamDef> = {};
   for (const [k, v] of Object.entries(graph.vars ?? {})) {
     const meta = graph.params?.[k] ?? {};
+    // the declared range limits what a caller passes; the graph's own value (one a person typed past the slider's
+    // range in the viewer) counts as inside it, so the graph cooks the same called as on its own
+    const own = (typeof v === 'number' ? [v] : Array.isArray(v) ? v : []).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+    const min = typeof meta.min === 'number' && own.length ? Math.min(meta.min, ...own) : meta.min;
+    const max = typeof meta.max === 'number' && own.length ? Math.max(meta.max, ...own) : meta.max;
     params[k] = {
       type: inferParamType(meta, v), default: v, desc: meta.desc ?? '',
-      min: meta.min, max: meta.max, options: meta.options,
+      min, max, options: meta.options,
     };
   }
   let nIn = 0;
@@ -340,6 +349,20 @@ export function graphInterface(graph: GraphSpec): { params: Record<string, Param
     }
   }
   return { params, inputs: Array.from({ length: nIn }, (_, i) => ({ name: `input${i}`, desc: inputDescs[i] || `subgraph input ${i}`, optional: true })) };
+}
+
+/** What a node stopped by the script time limit is told: the limit, and how to raise it for a cook that needs longer. */
+export function scriptLimitHint(ms: number): string {
+  return `the script time limit is ${ms} ms: fix an endless loop, or raise the limit with TOPOTOPO_SCRIPT_TIMEOUT_MS (milliseconds; CLI, MCP server and viewer) for a cook that needs longer`;
+}
+
+/** A strict node's param values outside their range (GraphSpec.strict, NodeSpec.strict) as its error. */
+function strictIssue(node: string, outOfRange: string[]): Issue {
+  return {
+    node,
+    message: `${outOfRange.join('; ')} (strict: not clamped)`,
+    hint: 'give a value inside the range, or set "strict": false on this node to clamp it with a warning',
+  };
 }
 
 type ChParams = Map<string, { def: NodeDef; values: Record<string, any> }>;
@@ -458,6 +481,10 @@ interface CookSession {
   pdone: Map<string, NodeParams>;
   /** results that shared another result's in-flight cook */
   shared: { leader: NodeResult; waiter: NodeResult }[];
+  /** what the cook reads of each node it reaches (src/graph/demand.ts), worked out when a merge first asks */
+  demand?: Map<string, Demand>;
+  /** the inputs of a merge the cook leaves out: package material outputs holding no material read */
+  notRead: Map<string, Set<number>>;
 }
 
 /** What an in-flight cook hands to the cooks that wait for it. */
@@ -482,11 +509,15 @@ export class Engine {
   /** manifold-3d wasm module, loaded by init() */
   manifold: any = null;
   maxDepth = 24;
+  /**
+   * Wall-clock limit of user code: "=expr" params, wrangles, scripts (a whole script with its lib.run calls), the
+   * parametric and sdf_expr nodes. Set from the host (Host.limits: the Node host reads TOPOTOPO_SCRIPT_TIMEOUT_MS).
+   */
   scriptTimeoutMs = 30000;
   /**
    * Wall-clock limit of one cook of a long-running node (rbd_settle, rbd_stack, drape, inflate, particles,
    * heightfield_erode, remesh_quad): past it the node fails with an error that names it (src/nodes/util.ts
-   * simBudget). Generous by default; the MCP server reads TOPOTOPO_SIM_TIMEOUT_MS.
+   * simBudget). Generous by default; set from the host (Host.limits: the Node host reads TOPOTOPO_SIM_TIMEOUT_MS).
    */
   simTimeoutMs = 600000;
   /** pull the inputs of a node concurrently (default: when the host has a worker pool) */
@@ -500,6 +531,8 @@ export class Engine {
     this.host = host;
     this.root = { id: '', assets: new Map(), files: host };
     this.concurrent = !!host.pool && host.pool.size > 0;
+    if (host.limits?.scriptMs) this.scriptTimeoutMs = host.limits.scriptMs;
+    if (host.limits?.simMs) this.simTimeoutMs = host.limits.simMs;
   }
 
   async init() {
@@ -665,10 +698,17 @@ export class Engine {
       errors.push({ node: path || '(graph)', message: targetError(graph.export)! });
     else if (graph.export !== undefined && targetWarning(graph.export)) warnings.push({ node: path || '(graph)', message: targetWarning(graph.export)! });
     if (!names.length) errors.push({ node: path || '(graph)', message: 'graph has no nodes' });
-    if (graph.output && !graph.nodes[graph.output])
-      errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });
+    if (graph.output && !graph.nodes[graph.output]) {
+      // "output" is a node; the name of a published output there is answered with the node to write
+      const named = graph.outputs && Object.hasOwn(graph.outputs, graph.output) ? graph.outputs[graph.output] : undefined;
+      if (named && typeof named === 'object' && typeof named.node === 'string')
+        errors.push({ node: path || '(graph)', message: `output "${graph.output}" is the name of a published output, not a node: "output" names the default output's node, so write "output": "${named.node}" (outputs.${graph.output}.node)` });
+      else errors.push({ node: path || '(graph)', message: `output "${graph.output}" is not a node`, hint: didYouMean(graph.output, names).join(', ') });
+    }
     if (graph.version !== undefined && !(Number.isInteger(graph.version) && graph.version >= 0))
       errors.push({ node: path || '(graph)', message: `"version" must be a non-negative integer, got ${JSON.stringify(graph.version)}` });
+    if (graph.strict !== undefined && typeof graph.strict !== 'boolean')
+      errors.push({ node: path || '(graph)', message: `"strict" must be true or false, got ${JSON.stringify(graph.strict)?.slice(0, 40)}` });
     if (graph.vars && typeof graph.vars === 'object') {
       for (const [k, v] of Object.entries(graph.vars)) {
         const r = scanValue(v);
@@ -692,6 +732,13 @@ export class Engine {
         const o = vd && typeof vd === 'object' ? (vd as any).options : undefined;
         if (o !== undefined && !(Array.isArray(o) && o.length && o.every((x: any) => typeof x === 'string' || (typeof x === 'number' && Number.isFinite(x)))))
           errors.push({ node: path + '(params)', message: `params "${k}": options must be a list of strings or numbers, got ${JSON.stringify(o)?.slice(0, 80)}` });
+        const grp = vd && typeof vd === 'object' ? (vd as any).group : undefined;
+        if (grp !== undefined && !(typeof grp === 'string' && grp.trim()))
+          errors.push({ node: path + '(params)', message: `params "${k}": "group" must be a heading (a non-empty string), got ${JSON.stringify(grp)?.slice(0, 40)}` });
+        // desc is the control's hover text: the place a person reads what a param does and its unit
+        const desc = vd && typeof vd === 'object' ? (vd as any).desc : undefined;
+        if (!(typeof desc === 'string' && desc.trim()))
+          warnings.push({ node: path + '(params)', message: `params "${k}" has no "desc": its control has no hover text`, hint: 'add "desc": what it does and its unit, e.g. "gap between cliffs, metres"' });
       }
     }
     // for did-you-mean, listed once a type is unknown (the package names load the scope's packages)
@@ -715,6 +762,8 @@ export class Engine {
         errors.push({ node: nm, message: `unknown node type "${spec.type}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`, hint: 'use the catalog tool to list node types' });
         continue;
       }
+      if (spec.strict !== undefined && typeof spec.strict !== 'boolean')
+        errors.push({ node: nm, message: `"strict" must be true or false, got ${JSON.stringify(spec.strict)?.slice(0, 40)}` });
       const w = wiringOf(spec, def);
       for (const e of w.errors) errors.push({ node: nm, message: e });
       const multi = def.inputs.some((i) => i.multi);
@@ -836,7 +885,8 @@ export class Engine {
         const def = this.resolveDef(spec.type, scope)!;
         const r = resolveParams(def, spec.params, allVars, { fns: deferred, host: this.host, timeoutMs: this.scriptTimeoutMs });
         for (const e of r.errors) if (!e.startsWith('unknown param')) v.errors.push({ node: name, message: e });
-        for (const w of r.warnings) v.warnings.push({ node: name, message: w });
+        if (r.outOfRange.length && (spec.strict ?? graph.strict)) v.errors.push(strictIssue(name, r.outOfRange));
+        else for (const w of r.warnings) v.warnings.push({ node: name, message: w });
         for (const n of r.notes) notes.push(`${name}: ${n}`);
         if (r.deferred.length) notes.push(`${name}: ${r.deferred.join(', ')} read other nodes (evaluated when cooked)`);
         if (def.deprecated) notes.push(`${name}: "${def.type}" is deprecated — ${def.deprecated}`);
@@ -893,7 +943,7 @@ export class Engine {
     const memo = new Map<string, Promise<NodeResult>>();
     const pmemo = new Map<string, Promise<NodeParams>>();
     const s: CookSession = {
-      graph, opts, scope, time, depth, report, memo, pmemo, pdone: new Map(), shared: [],
+      graph, opts, scope, time, depth, report, memo, pmemo, pdone: new Map(), shared: [], notRead: new Map(),
       vars: { ...(graph.vars ?? {}), ...(opts.vars ?? {}) },
       pull: (name) => {
         let pr = memo.get(name);
@@ -967,7 +1017,7 @@ export class Engine {
       return { rp, refSig: '', usesTime: rp.usesTime, depsTimeDependent: false };
     }
     const fail = (error: string, upstream = false): NodeParams => ({
-      rp: { values: {}, errors: [], notes: [], warnings: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
+      rp: { values: {}, errors: [], notes: [], warnings: [], outOfRange: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
     });
     const geo = new Map<string, Geometry>();
     const parts: string[] = [];
@@ -997,6 +1047,22 @@ export class Engine {
     return { rp, refSig: parts.join(','), usesTime: usesTime || rp.usesTime, depsTimeDependent: depTime };
   }
 
+  /** The inputs of a merge (NodeDef.passesMaterials) this cook leaves out: src/graph/demand.ts. */
+  private inputsNotRead(s: CookSession, name: string): Set<number> {
+    let skip = s.notRead.get(name);
+    if (skip) return skip;
+    const view: DemandGraph = {
+      graph: s.graph,
+      def: (n) => (Object.hasOwn(s.graph.nodes, n) ? this.resolveDef(s.graph.nodes[n].type, s.scope) : undefined),
+      wiring: (n) => { const d = view.def(n); return d ? wiringOf(s.graph.nodes[n], d).list : []; },
+      refs: (n) => { const d = view.def(n); if (!d) return []; const r = scanNodeRefs(d, s.graph.nodes[n].params); return [...r.geo, ...r.ch.map((c) => c.node)]; },
+    };
+    s.demand ??= materialDemands(view, s.report.target);
+    skip = inputsNotRead(view, name, s.demand.get(name) ?? 'all');
+    s.notRead.set(name, skip);
+    return skip;
+  }
+
   /** Cook a single node of a graph (pulling inputs and referenced nodes through the session). */
   private async cookOne(s: CookSession, name: string): Promise<NodeResult> {
     const { graph, vars, opts, scope, time, depth, report } = s;
@@ -1018,7 +1084,9 @@ export class Engine {
       const np0 = await s.paramsOf(name);
       if (!np0.error && !np0.rp.errors.length) used = def.inputsUsed!(np0.rp.values, wiring.length);
     }
-    const wanted = (i: number) => !!wiring[i] && (!lazy || !!used?.[i]);
+    // a merge read for named materials leaves out the package material outputs that hold none of them
+    const notRead = def.passesMaterials && !spec.bypass ? this.inputsNotRead(s, name) : null;
+    const wanted = (i: number) => !!wiring[i] && (!lazy || !!used?.[i]) && !notRead?.has(i);
     // concurrent: start every input, and the params with the nodes they reference, at once
     const started = this.concurrent ? wiring.map((ref, i) => (wanted(i) ? s.pull(ref!) : null)) : null;
     if (this.concurrent && !lazy && def.type !== 'input') s.paramsOf(name);
@@ -1058,7 +1126,12 @@ export class Engine {
       result.error = { node: name, message: rp.errors.join('; ') };
       return result;
     }
-    result.warnings.push(...rp.warnings); // values clamped to a param range: said every cook, cache hits included
+    // values clamped to a param range: said every cook, cache hits included; a strict node fails on them instead
+    if (rp.outOfRange.length && (spec.strict ?? graph.strict)) {
+      result.error = strictIssue(name, rp.outOfRange);
+      return result;
+    }
+    result.warnings.push(...rp.warnings);
     depTime ||= np.depsTimeDependent;
 
     if (spec.bypass) {
@@ -1190,6 +1263,7 @@ export class Engine {
         return { geo: r.geo, sig: rr.sig, timeDependent: true };
       },
       stat: (k, v) => { (result.stats ??= {})[k] = v; },
+      stage: (k, ms) => { const st = ((result.stages ??= {})[k] ??= { ms: 0, calls: 0 }); st.ms += ms; st.calls++; },
       // the node's pool tasks stop with the cook
       parallelMap: (kernel, job, o) => runKernel(engine.host.pool, kernel, job, opts.signal ? { ...o, signal: opts.signal } : o, engine.poolStats),
       async checkpoint() {
@@ -1223,7 +1297,9 @@ export class Engine {
       this.cache.set(sig, out);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      result.error = { node: name, message: msg, hint: e?.hint };
+      // user code stopped by the script time limit says what the limit is and where it is set
+      const hint = e?.hint ?? (/exceeded \d+ ms \(infinite loop\?\)/.test(msg) ? scriptLimitHint(this.scriptTimeoutMs) : undefined);
+      result.error = { node: name, message: msg, ...(hint ? { hint } : {}) };
     }
     result.ms = now() - t0;
     if (this.inflight.get(key) === mine) this.inflight.delete(key);
@@ -1283,9 +1359,10 @@ export class Engine {
         if (!params(n)) return;
         used = def.inputsUsed!(s.pdone.get(n)!.rp.values, wiring.length);
       }
+      const notRead = def.passesMaterials && !spec.bypass ? s.notRead.get(n) : undefined;
       for (let i = 0; i < wiring.length; i++) {
         const ref = wiring[i];
-        if (!ref || (used && !used[i])) continue;
+        if (!ref || (used && !used[i]) || notRead?.has(i)) continue;
         pull(ref);
         if (!res.has(ref) || res.get(ref)!.error) return;
       }

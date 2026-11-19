@@ -8,7 +8,7 @@ import { GeoBuilder } from '../src/core/geometry.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import { uvReport } from '../src/core/uvreport.ts';
 import { uvOverlapPairs } from '../src/core/uvoverlap.ts';
-import { inspect } from '../src/inspect.ts';
+import { SUMMARY_UV_TRIANGLES, inspect } from '../src/inspect.ts';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -69,7 +69,7 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   check(stacked.overlap.pairs > 0 && near(stacked.overlap.area, 0.25, 1e-12), `a mirrored copy stacked on its twin overlaps it fully (area ${stacked.overlap.area})`);
   // one connected strip whose third quad folds back over the first in uv
   const fold = uvReport(mesh([quad(0, 0, 0, 0, 0.3, 0.3), quad(1, 0, 0.3, 0, 0.6, 0.3), { P: [[2, 0, 0], [3, 0, 0], [3, 0, 1], [2, 0, 1]], uv: [[0.6, 0], [0.1, 0.02], [0.1, 0.28], [0.6, 0.3]] }]));
-  check(fold.charts === 1 && fold.overlap.sameChartPairs > 0 && fold.overlap.sameChartPairs === fold.overlap.pairs, `a fold inside one chart is reported as same-chart overlap (${fold.overlap.sameChartPairs} pairs)`);
+  check(fold.charts === 1 && fold.overlap.sameChartPairs > 0 && fold.overlap.sameChartPairs === fold.overlap.pairs && fold.wrapSeam.prims === 0, `a fold inside one chart is reported as same-chart overlap, not as a wrap seam (${fold.overlap.sameChartPairs} pairs)`);
 }
 
 // ---------------------------------------------------------------- collapsed, missing, non-finite, out of tile
@@ -161,6 +161,27 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   check(one.tileUtilization.length === 0, 'one tile: no per-tile list (utilization says it)');
 }
 
+// ---------------------------------------------------------------- per piece: each prim name has its own uv space
+{
+  // two rocks of one OBJ, each laid out in its own 0..1; rockB folds over itself
+  const clean = mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'rockA'), quad(5, 0, 0, 0, 1, 1, 'rockB')]);
+  const all = uvReport(clean), per = uvReport(clean, { perPiece: true });
+  check(!all.perPiece && all.overlap.inTile.pairs > 0, `whole mesh: the two rocks overlap each other (${all.overlap.inTile.pairs} pairs)`);
+  check(per.perPiece && per.complete && per.overlap.pairs === 0 && per.pieces.every((p) => p.overlapPairs === 0),
+    'per piece: rocks laid out on the same uv space are not overlaps');
+  check(per.utilization.method === 'exact' && near(per.utilization.value, (0.25 + 1) / 2) && near(per.pieces[0].utilization!, 0.25) && near(per.pieces[1].utilization!, 1),
+    `per piece utilization: each piece's covered share, the mean over pieces (${per.utilization.value})`);
+  const folded = mesh([quad(0, 0, 0, 0, 0.5, 0.5, 'rockA'), quad(5, 0, 0.25, 0, 0.75, 0.5, 'rockB'), quad(7, 0, 0.5, 0, 1, 0.5, 'rockB')]);
+  const f = uvReport(folded, { perPiece: true });
+  const fa = f.pieces.find((p) => p.name === 'rockA')!, fb = f.pieces.find((p) => p.name === 'rockB')!;
+  check(fa.overlapPairs === 0 && fb.overlapPairs! > 0 && f.overlap.inTile.pairs === fb.overlapPairs && f.utilization.method === 'none',
+    `per piece: rockB's own overlap is found and named, the overlap with rockA is not counted (${fb.overlapPairs} pairs; whole mesh ${uvReport(folded).overlap.inTile.pairs})`);
+  const t = inspect(folded, { detail: 'uv', uvPerPiece: true });
+  check(/tested within each of 2 pieces/.test(t) && /rockB: 4 tris, .*, [1-9]\d* overlapping pairs/.test(t) && /rockA: 2 tris, .*, 0 overlapping pairs/.test(t), 'inspect uv per piece says so and lists the overlaps per piece');
+  const unnamed = uvReport(mesh([quad(0, 0, 0, 0, 0.5, 0.5), quad(5, 0, 0.25, 0, 0.75, 0.5)]), { perPiece: true });
+  check(!unnamed.perPiece && unnamed.overlap.inTile.pairs > 0 && /no prim string attribute "name"/.test(unnamed.reasons.join()), 'per piece without a name attribute: tested as one mesh, and it says so');
+}
+
 {
   // many large triangles on one uv (instanced copies of a mesh, cooked out): the candidate grid would list each in
   // thousands of cells and overflow; the scan stops and says so, the report is marked incomplete
@@ -168,6 +189,24 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
   for (let t = 0; t < n; t++) U.set([0, 0, 1, 0, 0, 1], t * 6);
   const scan = uvOverlapPairs(U, valid, signed, () => {});
   check(scan.stopped && /too many to compare/.test(scan.reason ?? '') && scan.testedPairs === 0, `a uv grid too deep to list stops the scan with a reason (${scan.reason})`);
+}
+
+{
+  // inspect summary stays quick on a large mesh: the overlap test (and the utilization that needs it) runs up to
+  // SUMMARY_UV_TRIANGLES; past that the line says it was not tested and where to get it. Small meshes keep it.
+  const small = mesh([quad(0, 0, 0, 0, 0.5, 0.5), quad(5, 0, 0.25, 0, 0.75, 0.5)]);
+  check(/uv: 2 charts; in-tile overlap [1-9]\d* pairs.*utilization/.test(inspect(small)), 'summary of a small mesh tests overlaps and gives utilization');
+  const side = Math.ceil(Math.sqrt(SUMMARY_UV_TRIANGLES / 2)) + 1, polys: { P: number[][]; uv: number[][] }[] = [];
+  // every quad on the whole tile: as many overlaps as a mesh can have
+  for (let i = 0; i < side; i++) for (let j = 0; j < side; j++)
+    polys.push({ P: [[i, 0, j], [i + 1, 0, j], [i + 1, 0, j + 1], [i, 0, j + 1]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+  const big = mesh(polys), start = performance.now(), text = inspect(big), ms = performance.now() - start;
+  const line = text.split('\n').find((l) => l.startsWith('uv:')) ?? '';
+  check(/overlap not tested \(over 200,000 triangles: inspect detail "uv" tests it\)/.test(line) && !/utilization/.test(line),
+    `summary of ${(side * side * 2).toLocaleString('en-US')} triangles leaves the overlap test to detail "uv" and says so (${ms.toFixed(0)} ms): ${line}`);
+  const off = uvReport(big, { overlaps: false });
+  check(off.reasons.includes('overlaps not tested (overlaps: false)') && !off.complete && off.utilization.method === 'none',
+    'uvReport overlaps: false is incomplete, says why, and measures no utilization');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

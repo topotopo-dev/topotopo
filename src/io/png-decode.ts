@@ -165,11 +165,25 @@ export interface PngImage {
 
 const SIG = [137, 80, 78, 71, 13, 10, 26, 10];
 
+const LFS_HEAD = 'version https://git-lfs.github.com/spec/';
+
+/**
+ * When `bytes` are a Git LFS pointer (the small text file Git leaves in place of a large file it has not fetched),
+ * what to say about it; null for anything else.
+ */
+export function lfsPointerNote(bytes: Uint8Array): string | null {
+  if (bytes.length < LFS_HEAD.length || bytes.length > 1024) return null;
+  for (let i = 0; i < LFS_HEAD.length; i++) if (bytes[i] !== LFS_HEAD.charCodeAt(i)) return null;
+  return 'it is a Git LFS pointer, not the image (Git never fetched the file: run git lfs pull in its repository)';
+}
+
 /**
  * Decode a PNG file. Throws a readable Error for unsupported or corrupt files, and for images of more than maxPixels
  * pixels before any pixel memory is allocated.
  */
 export function decodePNG(bytes: Uint8Array, maxPixels = Infinity): PngImage {
+  const lfs = lfsPointerNote(bytes);
+  if (lfs) throw new Error(lfs);
   for (let i = 0; i < 8; i++) if (bytes[i] !== SIG[i]) throw new Error('not a PNG file (bad signature)');
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let pos = 8, width = 0, height = 0, depth = 0, ctype = -1, interlace = 0;

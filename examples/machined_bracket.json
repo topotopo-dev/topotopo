@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "description": "A machined steel L-bracket: an L profile extruded across the width, every edge rounded by a bevel, then drilled and engraved in one boolean: a row of countersunk bolt holes in each leg (the bore radius is set once, in base_bore, and shrinks only where the holes would not fit their leg) and the label scaled to fit the upright face below its holes. A fine brushed-steel texture on box-projected uv, the drilled and engraved faces in plain machined steel.",
+  "params": {
+    "width": { "type": "float", "default": 0.15, "min": 0.05, "max": 0.5, "step": 0.005, "label": "width", "desc": "width of the bracket across both legs (m)" },
+    "leg": { "type": "float", "default": 0.12, "min": 0.05, "max": 0.5, "step": 0.005, "label": "leg", "desc": "outside length of each leg of the L (m)" },
+    "thickness": { "type": "float", "default": 0.01, "min": 0.004, "max": 0.03, "step": 0.001, "label": "thickness", "desc": "thickness of the plate (m)" },
+    "holes": { "type": "int", "default": 2, "min": 1, "max": 6, "label": "holes", "desc": "bolt holes in a row across each leg" },
+    "hole_size": { "type": "float", "default": 0.008, "min": 0.004, "max": 0.02, "step": 0.001, "label": "hole size", "desc": "diameter of every bolt hole (m), smaller only where the holes would not fit" },
+    "bevel": { "type": "float", "default": 0.001, "min": 0, "max": 0.002, "step": 0.0002, "label": "bevel", "desc": "radius of the rounded edges (m)" },
+    "label": { "type": "string", "default": "TT-12", "label": "label", "desc": "text engraved on the upright face" }
+  },
+  "vars": { "width": 0.15, "leg": 0.12, "thickness": 0.01, "holes": 2, "hole_size": 0.008, "bevel": 0.001, "label": "TT-12" },
+  "meta": { "render": { "views": ["persp"], "azimuth": 25, "elevation": 22, "size": "1600x900", "shading": "pbr", "grid": false } },
+  "nodes": {
+    "profile": {
+      "type": "curve",
+      "params": {
+        "points": [[0, 0, 0], [0, 0, "=leg"], [0, "=thickness", "=leg"], [0, "=thickness", "=thickness"], [0, "=leg", "=thickness"], [0, "=leg", 0]],
+        "closed": true
+      }
+    },
+    "plate": { "type": "extrude", "in": ["profile"], "params": { "height": "=width", "center": true, "plane": "yz" } },
+    "rounded": { "type": "poly_bevel", "in": ["plate"], "params": { "offset": "=max(bevel, 0.00005)", "divisions": 3 } },
+    "edges": { "type": "switch", "in": ["plate", "rounded"], "params": { "index": "=bevel > 0 ? 1 : 0" } },
+
+    "base_bore": { "type": "tube", "params": { "radius": "=min(hole_size, 0.6 * width / holes, 0.36 * (leg - thickness)) / 2", "height": "=thickness * 3", "cols": 32, "center": [0, "=thickness / 2", 0] } },
+    "base_sink": { "type": "tube", "params": { "radius": "=ch('base_bore', 'radius')", "radius_top": "=ch('base_bore', 'radius') * 2.2", "height": "=ch('base_bore', 'radius') * 1.2", "cols": 32, "center": [0, "=thickness", 0] } },
+    "base_hole": { "type": "merge", "in": ["base_bore", "base_sink"] },
+    "base_first": { "type": "transform", "in": ["base_hole"], "params": { "translate": ["=-width / 2 + width / holes / 2", 0, "=(thickness + leg) / 2 + 0.08 * (leg - thickness)"] } },
+    "base_holes": { "type": "copy_xform", "in": ["base_first"], "params": { "count": "=holes", "translate": ["=width / holes", 0, 0] } },
+
+    "up_bore": { "type": "tube", "params": { "radius": "=ch('base_bore', 'radius')", "height": "=thickness * 3", "cols": 32, "axis": "z", "center": [0, 0, "=thickness / 2"] } },
+    "up_sink": { "type": "tube", "params": { "radius": "=ch('base_bore', 'radius')", "radius_top": "=ch('base_bore', 'radius') * 2.2", "height": "=ch('base_bore', 'radius') * 1.2", "cols": 32, "axis": "z", "center": [0, 0, "=thickness"] } },
+    "up_hole": { "type": "merge", "in": ["up_bore", "up_sink"] },
+    "up_first": { "type": "transform", "in": ["up_hole"], "params": { "translate": ["=-width / 2 + width / holes / 2", "=thickness + 0.68 * (leg - thickness)", 0] } },
+    "up_holes": { "type": "copy_xform", "in": ["up_first"], "params": { "count": "=holes", "translate": ["=width / holes", 0, 0] } },
+
+    "words": { "type": "text", "params": { "text": "=label", "size": 1, "depth": 1, "align": "center", "valign": "center", "curve_segments": 8 } },
+    "words_fit": {
+      "type": "transform", "in": ["words"],
+      "params": {
+        "scale": [
+          "=bbox('words').empty ? 1 : min(0.8 * width / bbox('words').size.x, 0.2 * (leg - thickness) / bbox('words').size.y)",
+          "=bbox('words').empty ? 1 : min(0.8 * width / bbox('words').size.x, 0.2 * (leg - thickness) / bbox('words').size.y)",
+          "=(min(0.25 * thickness, 0.0015) + 0.002) / max(bbox('words').size.z, 0.000001)"
+        ]
+      }
+    },
+    "words_place": { "type": "match_size", "in": ["words_fit"], "params": { "justify": ["center", "center", "max"], "target": [0, "=thickness + 0.27 * (leg - thickness)", "=thickness + 0.002"] } },
+
+    "cutters": { "type": "merge", "in": ["base_holes", "up_holes", "words_place"] },
+    "machined": { "type": "boolean", "in": ["edges", "cutters"], "params": { "operation": "subtract" } },
+    "named": { "type": "attrib_create", "in": ["machined"], "params": { "name": "name", "class": "prim", "value": "bracket" } },
+    "uv": { "type": "uv_project", "in": ["named"], "params": { "method": "box", "scale": [0.1, 0.1] } },
+    "steel": { "type": "material", "in": ["uv"], "params": { "name": "brushed_steel", "base_color": [0.72, 0.73, 0.75], "metallic": 1, "roughness": 0.32 } },
+
+    "grain": { "type": "tex_noise", "params": { "resolution": 256, "scale": 64, "octaves": 3, "seed": 6 } },
+    "brushed": { "type": "tex_directional_blur", "in": ["grain"], "params": { "length": 0.02, "angle": 0, "size": 0.1 } },
+    "brushed_color": { "type": "tex_colorize", "in": ["brushed"], "params": { "ramp": [[0, "#a9abae"], [1, "#d2d4d6"]] } },
+    "brushed_rough": { "type": "tex_histogram_range", "in": ["brushed"], "params": { "range": 0.3, "position": 0.42 } },
+    "brushed_normal": { "type": "tex_normal_from_height", "in": ["brushed"], "params": { "depth": 0.00002, "size": 0.1 } },
+    "brushed_maps": { "type": "merge", "in": ["brushed_color", "brushed_rough", "brushed_normal"] },
+    "brushed_steel": { "type": "texture_to_material", "in": ["steel", "brushed_maps"], "params": { "material": "brushed_steel", "base_color": "brushed_color", "roughness": "brushed_rough", "normal": "brushed_normal" } },
+
+    "cut_steel": { "type": "material", "in": ["brushed_steel"], "params": { "name": "machined_steel", "group": "from_b", "base_color": [0.42, 0.43, 0.45], "metallic": 1, "roughness": 0.6 } },
+    "shaded": { "type": "normal", "in": ["cut_steel"], "params": { "class": "vertex", "cusp_angle": 40 } },
+    "tidy_groups": { "type": "group_delete", "in": ["shaded"], "params": { "groups": "from_a from_b bevel bevel_corner bevel_edges top bottom side" } },
+    "tidy": { "type": "attrib_delete", "in": ["tidy_groups"], "params": { "names": "copynum" } },
+
+    "closed": { "type": "assert", "in": ["tidy"], "params": { "label": "closed", "watertight": true, "no_flipped": true, "expr": "pieces == 1" } },
+    "holes_through": { "type": "assert", "in": ["closed"], "params": { "label": "holes", "expr": "genus == 2 * holes" } },
+    "size": {
+      "type": "assert", "in": ["holes_through"],
+      "params": {
+        "label": "size",
+        "bbox_min": ["=-width / 2", 0, 0],
+        "bbox_max": ["=width / 2", "=leg", "=leg"],
+        "tolerance": 0.00001,
+        "expr": "volume <= width * thickness * (2 * leg - thickness) * 1.0001 && volume >= 0.7 * width * thickness * (2 * leg - thickness)"
+      }
+    }
+  },
+  "output": "size",
+  "outputs": {
+    "bracket": {
+      "node": "size", "label": "Bracket", "kind": "mesh",
+      "tags": ["bracket", "hard-surface", "metal", "mechanical", "prop"],
+      "description": "The L-bracket as one closed piece in brushed steel, with countersunk bolt holes in both legs and the engraved label."
+    }
+  }
+}

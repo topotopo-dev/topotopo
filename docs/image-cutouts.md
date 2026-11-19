@@ -111,7 +111,7 @@ Create the material first:
 ```
 
 Then assign maps with `texture_to_material`. Explicit `opaque`, `mask`, and `blend` modes survive JSON and
-standard GLB import/export. `auto` is the legacy scalar/vertex-alpha inference, including its opaque default.
+standard GLB import/export. `auto` blends only when the scalar alpha is below 1 (opaque otherwise); vertex alpha never changes the mode.
 Masking multiplies material opacity, base-color texture alpha and vertex `Alpha`, discarding below the cutoff.
 The headless renderer discards masked samples before depth writes; the live viewer uses the GLB material.
 Headless preview still samples image volumes rather than external texture paths: load PNGs with `image_file`.

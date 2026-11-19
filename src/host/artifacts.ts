@@ -1,7 +1,9 @@
 // Persistent output receipts shared by the CLI, MCP and viewer. Paths are registered by trusted host code;
 // HTTP callers only receive identifiers, never a route that reads an arbitrary absolute path. The receipts file
 // (exports/.outputs.json) holds the paths relative to the package, the folder exports/ is in ("exports/crate.glb"),
-// never a machine's absolute paths: the package folder can move, or be checked out elsewhere.
+// never a machine's absolute paths: the package folder can move, or be checked out elsewhere. A file outside the
+// package (an MCP export to another folder) is the one exception: it is named by its absolute path, not by a path that
+// climbs out of the package.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -28,17 +30,17 @@ export class ArtifactStore {
   get manifest() { return path.join(this.dir, '.outputs.json'); }
   /** the folder the receipts' paths are relative to: the package (exports/'s folder) */
   private get base() { return path.dirname(this.dir); }
-  /** A path as the receipts file holds it: relative to the package, with "/" (absolute only on another drive). */
+  /** A path as the receipts file holds it: relative to the package, with "/" (absolute only outside the package). */
   private stored(p: string) {
     const rel = path.relative(this.base, path.resolve(p));
-    return path.isAbsolute(rel) ? path.resolve(p) : rel.split(path.sep).join('/');
+    return !rel || rel.startsWith('..') || path.isAbsolute(rel) ? path.resolve(p) : rel.split(path.sep).join('/');
   }
   /** The receipts, their paths absolute on this machine. */
   records(): Artifact[] {
     try {
       const j = JSON.parse(fs.readFileSync(this.manifest, 'utf8'));
       return Array.isArray(j) ? j.filter((a) => a && typeof a.id === 'string' && Array.isArray(a.files) && a.files.every((p: unknown) => typeof p === 'string'))
-        .map((a) => ({ ...a, files: a.files.map((p: string) => path.resolve(this.base, ...p.split('/'))) })) : [];
+        .map((a) => ({ ...a, files: a.files.map((p: string) => (path.isAbsolute(p) ? path.resolve(p) : path.resolve(this.base, ...p.split('/')))) })) : [];
     } catch { return []; }
   }
   record(files: string[], info: Partial<Omit<Artifact, 'id' | 'files'>> = {}): Artifact {

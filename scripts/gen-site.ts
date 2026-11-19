@@ -26,18 +26,12 @@ import type { NodeDef, ParamDef } from '../src/graph/types.ts';
 import { anchorOf, builtinDefs, thumbOf } from './gen-docs.ts';
 import { builtinText, readBuiltin, typesUsed } from './gen-builtin.ts';
 import { ROOT, SITE_DIR, SIZE_LIMIT, listFiles } from './check-site.ts';
+import { readExamples } from '../src/mcp/examples.ts';
+import type { Card } from '../src/mcp/examples.ts';
 
-/** The renders on the home page, in order (the first is also the social preview image). */
-const HERO: { name: string; caption: string }[] = [
-  { name: 'street_block', caption: 'A street block assembled only from TopoTopo\'s own packages: houses, road, lamp posts, trees, fences.' },
-  { name: 'unreal_demo', caption: 'The Unreal 5.8 demo scene: an eroded heightfield that fits a Landscape exactly, a road, packed trees and rocks.' },
-  { name: 'terrain_erosion', caption: 'Hydraulic and thermal erosion on a ridged massif, a road cut along a curve, rocks on the steep slopes.' },
-  { name: 'rbd_settle', caption: 'Rigid bodies: rocks of the nature package dropped onto a terrain until they rest, crates piled one at a time.' },
-  { name: 'particles', caption: 'Particles running down an eroded massif with curl noise and sliding contacts, next to a fountain.' },
-  { name: 'textures', caption: 'A brick material from texture nodes, and a crate whose baked AO and curvature become worn paint.' },
-  { name: 'quad_remesh', caption: 'Field-aligned quad remeshing (Rust/WASM): each input on the left, its quads on the right.' },
-  { name: 'house_city', caption: 'Nested generators: the architecture package\'s house spawned on a grid of lots, varied per lot.' },
-];
+/** The examples whose renders are on the home page, in order (the first is also the social preview image); each is
+ * titled and captioned by its card. */
+const HERO = ['market_street', 'unreal_landscape', 'eroded_valley', 'town_from_lots', 'fracture_settle', 'sparks', 'material_set', 'asset_cleanup'];
 
 // ---------------------------------------------------------------------------------------------------------------------
 // repository data
@@ -85,14 +79,15 @@ const builtinOutputs = builtin.flatMap((k) => k.outputs);
 /** docs/nodes.md anchors of the node types (a full name loses its slashes there) */
 const byAnchor = new Map(defs.map((d) => [anchorOf(d.type), d.type]));
 
-interface Example { name: string; graph: any; description: string; types: string[]; nodes: number; render: string | null }
-const examples: Example[] = fs.readdirSync(path.join(ROOT, 'examples')).filter((f) => f.endsWith('.json')).sort().map((f) => {
-  const name = f.slice(0, -'.json'.length);
-  const graph = JSON.parse(read(`examples/${f}`));
+/** An example (src/mcp/examples.ts): its graph file in the repository, its card when it has one, its render. */
+interface Example { name: string; file: string; graph: any; card: Card | null; description: string; types: string[]; nodes: number; render: string | null }
+const examples: Example[] = readExamples(path.join(ROOT, 'examples')).map((e) => {
+  const name = e.name, graph = e.graph;
   const render = exists(`examples/renders/${name}.png`) ? `examples/renders/${name}.png` : null;
   if (!render) console.warn(`warning: examples/renders/${name}.png is missing (npm run showcase)`);
   const types = [...new Set([...typesUsed(graph)].map((t) => resolveType(t) ?? t))].sort();
-  return { name, graph, description: String(graph.meta?.description ?? graph.description ?? ''), types, nodes: Object.keys(graph.nodes ?? {}).length, render };
+  const file = path.relative(ROOT, e.graphFile).split(path.sep).join('/');
+  return { name, file, graph, card: e.fits ? e.card : null, description: String(graph.meta?.description ?? graph.description ?? ''), types, nodes: Object.keys(graph.nodes ?? {}).length, render };
 });
 const usedIn = new Map<string, string[]>();
 for (const e of examples) for (const t of e.types) usedIn.set(t, [...(usedIn.get(t) ?? []), e.name]);
@@ -313,10 +308,10 @@ const NAV = [
   ...(releases.length ? [{ key: 'releases', label: 'Release notes', to: releases[0].out }] : []),
 ];
 
-const heroExamples = HERO.filter((h) => {
-  const ok = examples.some((e) => e.name === h.name && e.render);
-  if (!ok) console.warn(`warning: hero example ${h.name} has no graph or render; left out of the home page`);
-  return ok;
+const heroExamples = HERO.flatMap((name) => {
+  const e = examples.find((x) => x.name === name && x.render && x.card);
+  if (!e) console.warn(`warning: hero example ${name} has no graph, render or card that fits; left out of the home page`);
+  return e?.card ? [{ name, title: e.card.title, caption: plain(e.card.request) }] : [];
 });
 if (!heroExamples.length) throw new Error('gen-site: none of the hero examples exists');
 const OG_IMAGE = `examples/renders/${heroExamples[0].name}.png`;
@@ -430,7 +425,7 @@ page({
   const rmd = (t: Token) => renderTokens([t], newCtx('README.md', false));
   const hero = heroExamples.map((h, i) => `<figure class="card render">
 <a href="${u(`examples/index.html#${h.name}`)}">${img(`examples/renders/${h.name}.png`, h.caption, { lazy: i > 1 })}</a>
-<figcaption><strong>${esc(humanize(h.name))}</strong>${esc(h.caption)}</figcaption>
+<figcaption><strong>${esc(h.title)}</strong>${esc(h.caption)}</figcaption>
 </figure>`).join('\n');
   const links = [
     ['nodes/index.html', 'Node reference', `${nodeDefs.length} node types in ${nodeCategories.length} categories: params, inputs, examples`],
@@ -632,7 +627,7 @@ offline and every package finds them without listing a library. A package's grap
 first use copies the package's version into the package and locks it, as for any package, and a newer version a TopoTopo
 release brings shows as an update. Each output documents its typed parameters, puts its pivot at the base and tags every
 piece with <code>name</code> and <code>material</code>; it says what it is (its kind) and carries tags a search finds it by
-(<code>topotopo search --tag street-furniture</code>, or the MCP <code>library</code> tool's <code>search</code>, across
+(<code>topotopo search --tag street-furniture</code>, or the MCP <code>workspace</code> tool's <code>search</code> action, across
 every library). Parameters, inputs and examples are in the
 <a href="${u('nodes/package.html')}">node reference</a>.</p>
 ${builtinJson ? codeBlock(builtinJson.text, builtinJson.lang) : ''}
@@ -648,20 +643,26 @@ page({
   out: 'examples/index.html',
   title: 'Examples',
   nav: 'examples',
-  description: `${examples.length} TopoTopo example graphs, each cooked and rendered by the test suite: terrain, PCG, instancing, remeshing, textures, simulation.`,
+  description: `${examples.length} TopoTopo examples, each a worked answer to a real request with a card that says what goes in and what comes out: terrain, PCG, instancing, remeshing, textures, simulation.`,
 }, () => `<h1>Examples</h1>
-<p class="intro">${examples.length} example graphs from <a href="${esc(repoUrl('examples'))}">examples/</a>, each rendered by <code>npm run showcase</code>
-and checked against a golden fingerprint by <code>npm test</code>. Download a graph and cook it yourself, for example
-<code>npx topotopo ${esc(heroExamples[0].name)}.json --render out.png --export out.glb</code>. A graph's <code>meta.render</code> holds the render options used here.</p>
+<p class="intro">${examples.length} examples from <a href="${esc(repoUrl('examples'))}">examples/</a>, each a worked answer to a real request.
+An example's card says in plain words what goes in (the params a person tunes), what comes out (its named results) and
+what it promises; its graph is today's way to meet the card, and <code>npm test</code> checks the one against the other
+(<a href="${esc(repoUrl('docs/examples.md'))}">docs/examples.md</a>). Each is rendered by <code>npm run showcase</code> and
+fingerprinted by <code>npm test</code>. Agents get the same examples from the MCP <code>help</code> tool
+(<code>help {topic:"examples"}</code>); or download a graph and cook it yourself, for example
+<code>npx topotopo ${esc(heroExamples[0].name)}.json --render out.png --export out.glb</code>.</p>
 <ul class="chips">${examples.map((e) => `<li><a href="#${esc(e.name)}">${esc(e.name)}</a></li>`).join('')}</ul>
 <div class="grid wide">
 ${examples.map((e) => `<article class="card render example" id="${esc(e.name)}">
-${e.render ? `<a href="${u(useFile(e.render))}">${img(e.render, `${humanize(e.name)}: render of examples/${e.name}.json`)}</a>` : ''}
+${e.render ? `<a href="${u(useFile(e.render))}">${img(e.render, `${humanize(e.name)}: render of ${e.file}`)}</a>` : ''}
 <div class="body">
-<h2><a href="#${esc(e.name)}">${esc(humanize(e.name))}</a></h2>
-${e.description ? `<p>${inline(e.description)}</p>` : ''}
+<h2><a href="#${esc(e.name)}">${esc(e.card?.title ?? humanize(e.name))}</a></h2>
+${e.card ? `<p>${inline(e.card.request)}</p>
+<p class="meta">In: ${e.card.inputs.map((x) => `<code>${esc(x.name)}</code>`).join(', ')} · Out: ${e.card.outputs.map((x) => `<code>${esc(x.name)}</code> (${esc(x.kind)})`).join(', ')}</p>
+<p class="meta">Promises: ${e.card.promises.map((x) => esc(x.text)).join(' ')}</p>` : e.description ? `<p>${inline(e.description)}</p>` : ''}
 <ul class="chips types">${e.types.map((t) => `<li>${nodeLink(t)}</li>`).join('')}</ul>
-<p class="meta"><a href="${u(useFile(`examples/${e.name}.json`))}">${esc(e.name)}.json</a> · ${e.nodes} node${e.nodes === 1 ? '' : 's'} · ${e.types.length} node type${e.types.length === 1 ? '' : 's'}</p>
+<p class="meta"><a href="${u(useFile(e.file))}">${esc(path.basename(e.file))}</a>${e.card ? ` · <a href="${u(useFile(`examples/${e.name}.md`))}">card</a>` : ''} · ${e.nodes} node${e.nodes === 1 ? '' : 's'} · ${e.types.length} node type${e.types.length === 1 ? '' : 's'}</p>
 </div>
 </article>`).join('\n')}
 </div>`);

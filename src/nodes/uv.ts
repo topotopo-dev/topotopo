@@ -3,7 +3,7 @@
 import type { Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
-import { primArea, primNormals, triangulate } from '../core/topology.ts';
+import { primArea, primNormals, relaxPoints, triangulate } from '../core/topology.ts';
 import {
   buildCharts, chartNeedsCut, cutGraph, edgeGroupTest, findIslands, lscm, normaliseCharts,
   pairsWhere, pointPairTest, polygonSides, primComponents, cornerClasses, readUV, uvSeamPairs, writeUV,
@@ -204,11 +204,13 @@ defineNode({
     '`resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile ' +
     '(fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big ' +
     'smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger ' +
-    'charts (less padding). Writes prim chart (and atlas with fit stack).',
+    'charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the ' +
+      'weights: chart_smoothing cuts and flattens the charts on a smoothed copy and keeps the uv on the real shape. Writes prim chart (and atlas with fit stack).',
   aliases: ['uvunwrap', 'autouv', 'xatlas', 'uv_auto', 'unwrap'],
   inputs: [{ name: 'geo', desc: 'polygon geometry (polylines are skipped)' }],
   params: {
     use_seams: { type: 'bool', default: false, desc: 'keep existing seams: edges where uv is discontinuous, and a "seams" edge group, become chart borders xatlas never crosses (seams that do not cut a region apart are hints only)' },
+    chart_smoothing: { type: 'int', default: 0, min: 0, max: 1000, desc: 'smoothing passes (taubin, as smooth) on a copy that the charts are cut and flattened on; the uv goes onto the real shape and packs by its areas. Noisy surfaces (scans, decimated or generated models) shatter into hundreds of ragged charts; 30 to 100 passes make a few smooth ones. 0 = off' },
     max_chart_area: { type: 'float', default: -1, min: -1, desc: 'largest chart area in world units²; 0 = unlimited (xatlas default), -1 = auto (unlimited below ~1000 triangles, then total area * 1000 / triangles to keep charting fast)' },
     max_boundary_length: { type: 'float', default: 0, min: 0, desc: 'longest chart boundary in world units (0 = unlimited)' },
     normal_deviation: { type: 'float', default: 2, min: 0, desc: 'weight of the angle between a face and the chart average normal', aliases: ['normal_deviation_weight'] },
@@ -230,13 +232,27 @@ defineNode({
     iterations: { type: 'int', default: 4, min: 1, max: 64, desc: 'chart orders the packer tries; the densest wins' },
   },
   outputs: 'vertex uv, prim chart, prim atlas (fit stack with several atlases)',
-  example: { type: 'uv_unwrap', in: ['geo'], params: { padding: 4, resolution: 1024 } },
+  example: {
+    nodes: {
+      // a noisy, decimated rock: unwrapped as it is it shatters into ~30 charts; chart_smoothing makes 6
+      ball: { type: 'sphere', params: { type: 'ico', level: 4 } },
+      shape: { type: 'noise_displace', in: ['ball'], params: { amplitude: 0.35, frequency: 1.2 } },
+      rough: { type: 'noise_displace', in: ['shape'], params: { amplitude: 0.06, frequency: 9 } },
+      rock: { type: 'decimate', in: ['rough'], params: { ratio: 0.4 } },
+      out: { type: 'uv_unwrap', in: ['rock'], params: { chart_smoothing: 60, padding: 4, resolution: 1024 } },
+    },
+    output: 'out',
+  },
   cook: async ({ input, p, warn, stat }) => {
     const src = input(0);
     const g = src.clone();
     if (!g.numPrims) return g;
     const X = await loadXatlas();
     const nv = g.numVertices;
+    // chart_smoothing: cut and flatten the charts on a smoothed copy (g, from here to unwrapMesh), the uv kept on the real shape (realP)
+    const smoothing = Math.max(0, Math.floor(p.chart_smoothing) || 0);
+    const realP = smoothing ? g.P.slice() : null;
+    if (smoothing) relaxPoints(g, { iterations: smoothing, strength: 0.5, method: 'taubin', preserveBoundary: true });
     let vertexKey: Int32Array | null = null, faceGroup: Int32Array | null = null;
     if (p.use_seams) {
       const S = polygonSides(g);
@@ -256,7 +272,7 @@ defineNode({
     const r = unwrapMesh(X, g, {
       chart, vertexKey, faceGroup, straddling: p.straddling === 'unfold' ? 'unfold' : 'split', resolution: Math.max(16, p.resolution || 1024),
       padding: Math.max(0, p.padding), texelsPerUnit: Math.max(0, p.texels_per_unit), fit: p.fit, orient: p.orient, cutLong: !!p.cut_long, mergeThin: !!p.merge_thin,
-      texelWeight: String(p.texel_weight ?? ''), iterations: Math.max(1, Math.min(64, Math.floor(p.iterations) || 1)),
+      texelWeight: String(p.texel_weight ?? ''), iterations: Math.max(1, Math.min(64, Math.floor(p.iterations) || 1)), realP,
     });
     const out = r.geo;
     writeUV(out, r.uv);

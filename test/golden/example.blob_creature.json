@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["N:float:3", "P:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.7699, 1.1128, 0.379],
+      "min": [-0.9395, 0, -0.3793]
+    },
+    "counts": {
+      "points": 2012,
+      "prims": 3756,
+      "vertices": 11524,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "c76709fce801b1d6",
+      "attributes": {
+        "detail.materials": "5a95f8dd1adcbe67",
+        "point.N": "24e764a573b2b54f",
+        "prim.material": "911646a5fe39613f",
+        "prim.name": "fba4f0a5c493c02f",
+        "vertex.uv": "7a01664e3e422964"
+      },
+      "topology": "f243c1415152ad1b"
+    }
+  },
+  "name": "example.blob_creature",
+  "ok": true,
+  "source": "examples/blob_creature.json",
+  "warnings": []
+}

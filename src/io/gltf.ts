@@ -35,6 +35,9 @@
 //   Packed instances (instancing 'packed', the default): one mesh + node per packed source with EXT_mesh_gpu_instancing
 //   (TRANSLATION / ROTATION / SCALE per instance; a 3×3 with shear is written as its nearest rotation and the
 //   scale of its columns, with a warning); the rest of the geometry as above. instancing 'expand' writes real copies.
+//   The instanced mesh holds the source's polygons: readers instance triangle meshes only (three.js draws a mesh with a
+//   points or lines primitive once, at the origin), so a source's polylines and isolated points are written as real
+//   copies and its scene empties (sockets) are left out, with a warning.
 //   Per-instance attributes (custom, default off): the anchor point / packed prim attributes become extra instance
 //   accessors with the extension's "_" prefix: Cd (+ Alpha) → _COLOR (VEC3/VEC4 float), every other numeric attribute
 //   of size 1–4 → _NAME, single strings → _NAME indices into a table in the node's extras; all as 32-bit floats (exact
@@ -46,8 +49,12 @@
 //   Textures: the material table's texture paths (base colour, normal, roughness) are read with options.readFile and
 //   embedded (PNG / JPEG) as baseColorTexture, normalTexture and metallicRoughnessTexture (roughness = green channel);
 //   a map replaces its factor (baseColorFactor white, roughnessFactor 1). Without readFile the maps are skipped.
+//   Option maps: 'embed' (default) as above; 'external' writes each distinct image once as a file (io/files.ts names it
+//   <image>-<hash>.png in a shared maps folder) referenced by relative URI; 'none' writes no images and no texture slots,
+//   each material with its own factors as if it had no maps (its extras still name the maps).
 //   "image:<name>" paths are image volumes of the geometry (texture nodes), encoded to PNG in memory; an "orm" map is
-//   both the metallicRoughness and the occlusion texture (metallicFactor 1).
+//   both the metallicRoughness and the occlusion texture; the material's metallic / roughness are then the factors that multiply it
+//   (texture_to_material sets them to 1, or to the values it was given).
 //   options.source (how the export was made, io/source.ts) → asset.extras.source.
 //
 // Import
@@ -74,7 +81,7 @@ import { resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { TANGENT_ATTRIB, cornerTangents, loadMikkTSpace, tangentProblem, transformTangents, vertexUV } from '../core/tangents.ts';
 import { gltfV } from '../core/texcoord.ts';
 import { posText, primWhere } from '../core/report.ts';
-import { DEFAULT_MATERIAL, materialAlphaMode, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
+import { DEFAULT_MATERIAL, exportFactors, materialAlphaMode, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
 import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4invert, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
 import { EMPTY_ATTRIB, PARENT_ATTRIB, sceneEmpties } from '../core/scene.ts';
@@ -85,7 +92,9 @@ import type { AnchorAttrib, ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, packedFromMatrices, stripPacked, xform3 } from '../core/packed.ts';
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
 import { imageFromPNG, imageTextureData } from './textures.ts';
-import { decodePNG } from './png-decode.ts';
+import { decodePNG, lfsPointerNote } from './png-decode.ts';
+import { encodePNG } from '../render/png.ts';
+import { zlibStored } from './heightmap.ts';
 import { imageRef } from '../core/image.ts';
 import type { Image } from '../core/image.ts';
 
@@ -286,6 +295,10 @@ interface MatState {
   byLength: Map<number, { bytes: Uint8Array; tex: Texture }[]>;
   uris: Set<string>;
   warn?: (msg: string) => void;
+  /** PNG compression for images made here (Node: zlib.deflateSync; default stored blocks) */
+  deflate?: (d: Uint8Array) => Uint8Array;
+  /** maps 'external': keeps an image as a file and gives the URI to write (ExportOptions.mapFile) */
+  mapFile?: (stem: string, bytes: Uint8Array, mime: string) => string;
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => {
@@ -306,22 +319,24 @@ export function imageMime(b: Uint8Array): string | null {
  * The glTF texture for an image path (created once per path, and once per distinct image: a path whose bytes equal an
  * earlier one's, e.g. each LOD's copy of a map, shares its texture), or null when its bytes are missing or not PNG/JPEG.
  */
-function textureFor(st: MatState, path: string): Texture | null {
+function textureFor(st: MatState, path: string, made?: { name: string; bytes: Uint8Array | null }): Texture | null {
   if (!st.data) return null;
   let t = st.textures.get(path);
   if (t !== undefined) return t;
   t = null;
-  const bytes = st.data.get(path);
+  const bytes = made ? made.bytes : st.data.get(path);
   const mime = bytes ? imageMime(bytes) : null;
-  if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image; material exported without it`);
+  if (bytes && !mime) st.warn?.(`glTF: texture "${path}" is not a PNG or JPEG image${lfsPointerNote(bytes) ? ` (${lfsPointerNote(bytes)})` : ''}; material exported without it`);
   if (bytes && mime) {
     const same = st.byLength.get(bytes.length)?.find((c) => sameBytes(c.bytes, bytes));
     if (same) t = same.tex;
     else {
-      const base = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
+      const base = (made?.name ?? (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, ''))).replace(/[^A-Za-z0-9_-]+/g, '_') || 'texture';
       const ext = mime === 'image/png' ? '.png' : '.jpg';
       let uri = base + ext, k = 1;
-      while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
+      // maps 'external': a file of the shared maps folder, named by its content (one file per distinct image)
+      if (st.mapFile) uri = st.mapFile(base, bytes, mime);
+      else while (st.uris.has(uri)) uri = `${base}_${k++}${ext}`;
       st.uris.add(uri);
       t = st.doc.createTexture(base).setImage(bytes).setMimeType(mime).setURI(uri);
       const list = st.byLength.get(bytes.length);
@@ -330,6 +345,29 @@ function textureFor(st: MatState, path: string): Texture | null {
   }
   st.textures.set(path, t);
   return t;
+}
+
+/**
+ * A separate roughness map beside a metallic above 0: glTF reads roughness from the green and metallic from the blue
+ * channel of one image, so a grey roughness map would also scale the metallic. It is repacked (green = its green,
+ * blue = 1) so the metallicFactor alone is the metallic; once per map. null when the map is not a readable PNG.
+ */
+function roughnessBesideMetallic(st: MatState, path: string): Texture | null {
+  const src = st.data?.get(path);
+  if (!src || imageMime(src) !== 'image/png') return null;
+  const stem = path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '');
+  return textureFor(st, `${path}\u0000roughness_metallic`, { name: `${stem}_roughness_metallic`, bytes: (() => {
+    let png;
+    try { png = decodePNG(src); } catch { return null; }
+    const n = png.width * png.height, c = png.channels, k = 255 / png.maxValue, out = new Uint8Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      out[i * 4] = 255;
+      out[i * 4 + 1] = Math.round(png.data[i * c + (c >= 3 ? 1 : 0)] * k);
+      out[i * 4 + 2] = 255;
+      out[i * 4 + 3] = 255;
+    }
+    return encodePNG(out, png.width, png.height, st.deflate ?? zlibStored);
+  })() });
 }
 
 function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: boolean, tint?: number[]): GMaterial {
@@ -342,16 +380,23 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   const baseTex = tex('baseColor'), normalTex = tex('normal'), ormTex = tex('orm');
   // an ORM map (occlusion R, roughness G, metallic B) is glTF's own layout: it is both the metallicRoughness and the
   // occlusion texture, and replaces a separate roughness map
-  const roughTex = ormTex ?? tex('roughness');
+  let roughTex = ormTex ?? tex('roughness');
   if (ormTex && mat.textures?.roughness) st.warn?.(`glTF: material "${name}" has an orm and a roughness map; the orm map's green channel is used`);
-  // a map replaces its factor: white base colour under a base colour map, roughness 1 under a roughness map,
-  // metallic 1 under an ORM map
-  // a folded constant vertex colour multiplies a base colour map exactly as COLOR_0 would have
-  const rgb = tint ?? (vertexColors || baseTex ? [1, 1, 1] : mat.baseColor);
+  // a separate roughness map is glTF's metallicRoughness texture too: beside a metallic above 0 its blue channel is
+  // made 1 so the metallic stays the material's (with metallic 0 the map is written as it is)
+  if (roughTex && !ormTex && mat.metallic > 0) {
+    const packed = roughnessBesideMetallic(st, mat.textures!.roughness!);
+    if (packed) roughTex = packed;
+    else st.warn?.(`glTF: material "${name}": the roughness map "${mat.textures!.roughness}" is not a PNG, so it cannot be repacked: glTF reads metallic from its blue channel, and metallic ${mat.metallic} varies with the roughness (use a PNG roughness map, or an orm map with the metallic in blue)`);
+  }
+  // a map replaces its factor (exportFactors); a folded constant vertex colour multiplies a base colour map exactly as
+  // COLOR_0 would have
+  const f = exportFactors(mat, (slot) => (slot === 'baseColor' ? !!baseTex : slot === 'roughness' ? !!roughTex && !ormTex : slot === 'orm' ? !!ormTex : false));
+  const rgb = tint ?? (vertexColors ? [1, 1, 1] : f.baseColor);
   m = st.doc.createMaterial(isDefault ? 'default' : name)
     .setBaseColorFactor([toLinear(rgb[0]), toLinear(rgb[1]), toLinear(rgb[2]), mat.alpha]) // glTF factors are linear
-    .setMetallicFactor(ormTex ? 1 : mat.metallic)
-    .setRoughnessFactor(roughTex ? 1 : mat.roughness)
+    .setMetallicFactor(f.metallic)
+    .setRoughnessFactor(f.roughness)
     .setDoubleSided(mat.doubleSided);
   if (baseTex) m.setBaseColorTexture(baseTex);
   if (normalTex) m.setNormalTexture(normalTex);
@@ -363,7 +408,7 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
     const ext = st.doc.createExtension(KHRMaterialsEmissiveStrength);
     m.setExtension('KHR_materials_emissive_strength', ext.createEmissiveStrength().setEmissiveStrength(emax));
   } else m.setEmissiveFactor([toLinear(mat.emissive[0]), toLinear(mat.emissive[1]), toLinear(mat.emissive[2])]);
-  m.setAlphaMode(materialAlphaMode(mat, blend));
+  m.setAlphaMode(materialAlphaMode(mat));
   if (mat.alphaMode === 'MASK') m.setAlphaCutoff(mat.alphaCutoff ?? 0.5);
   if (mat.unlit) m.setExtension('KHR_materials_unlit', st.doc.createExtension(KHRMaterialsUnlit).createUnlit());
   m.setExtras({ topotopo: isDefault ? { default: true } : { material: mat } });
@@ -440,7 +485,8 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const useMaterials = o.materials !== false;
   const st: MatState = {
     doc, table: useMaterials ? mergeMaterialTables([g, ...g.packedSources]) : {}, cache: new Map(), defaultMat: DEFAULT_MATERIAL as Material,
-    data: o.textureData, textures: new Map(), byLength: new Map(), uris: new Set(), warn: o.warn,
+    data: o.textureData, textures: new Map(), byLength: new Map(), uris: new Set(), warn: o.warn, deflate: o.deflate,
+    mapFile: o.maps === 'external' ? o.mapFile : undefined,
   };
   let noUV = 0;
   const custom = o.custom === true;
@@ -451,7 +497,12 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
   const jobs: MeshJob[] = [];
   if (!g.hasPacked()) jobs.push({ src: g, split });
   else if (o.instancing === 'expand') jobs.push({ src: expandPacked(g, { transfer: DEFAULT_TRANSFER }).geo, split });
-  else jobs.push({ src: stripPacked(g), split }, ...instanceJobs(doc, buffer, g, o, quantize));
+  else {
+    const { inst, loose, sockets } = instanceableSources(g);
+    if (sockets) o.warn?.(`glTF instancing: ${sockets} scene empt${sockets === 1 ? 'y' : 'ies'} (sockets) inside packed sources not written: an instanced mesh carries no nodes per instance (unpack first, or instancing "expand", to keep them)`);
+    const rest = stripPacked(inst);
+    jobs.push({ src: loose ? Geometry.merge([rest, loose]) : rest, split }, ...instanceJobs(doc, buffer, inst, o, quantize));
+  }
 
   for (const job of jobs) for (const { name, geo } of pieces(job.src, { ...o, splitByName: job.split })) {
     const outs: PrimOut[] = [];
@@ -534,7 +585,7 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
       if (diag.uvNonFinite || diag.uvDegenerate) {
         // where the first one is: its prim's part and position (core/report.ts)
         const first = diag.firstBad >= 0 ? `, first ${primWhere(geo, geo.vertexPrims()[tris[diag.firstBad * 3]])}` : '';
-        o.warn?.(`glTF: ${where}: ${diag.uvDegenerate} of ${diag.triangles} triangles have collapsed uvs${diag.uvNonFinite ? ` and ${diag.uvNonFinite} non-finite uvs` : ''}${first}; their ${diag.fallbackCorners} corners get a fallback tangent (the normal map has no orientation there): unwrap them (uv_unwrap) or give them uv area`);
+        o.warn?.(`glTF: ${where}: ${diag.uvDegenerate} of ${diag.triangles} triangles have collapsed uvs${diag.uvNonFinite ? ` and ${diag.uvNonFinite} non-finite uvs` : ''}${first}; their ${diag.fallbackCorners} corners get a fallback tangent (the normal map has no orientation there): unwrap them (uv_unwrap) or give them uv area${diag.uvThin ? `; ${diag.uvThin} thin triangles skipped` : ''}`);
       } else if (diag.fallbackCorners) o.warn?.(`glTF: ${where}: MikkTSpace left ${diag.fallbackCorners} corners without a tangent; a fallback was written`);
       return {
         semantic: 'TANGENT', size: 4, int: false, perPoint: false,
@@ -702,6 +753,50 @@ function writeEmpties(doc: Document, scene: ReturnType<Document['createScene']>,
 interface MeshJob { src: Geometry; split: boolean; onMesh?: (w: WrittenMesh) => void }
 
 /**
+ * Packed sources as an instanced mesh can carry them: polygons. glTF readers instance triangle meshes only (three.js
+ * draws a mesh with a points or lines primitive once, untransformed, at the origin, and none of its instances), so a
+ * source's polylines and isolated points are written as real copies (`loose`), and its scene empties (sockets: nodes,
+ * which an instanced mesh cannot carry per instance) are left out and counted.
+ */
+function instanceableSources(g: Geometry): { inst: Geometry; loose: Geometry | null; sockets: number } {
+  const n = g.packedSources.length, poly: (Geometry | null)[] = new Array(n).fill(null), rest: (Geometry | null)[] = new Array(n).fill(null);
+  let sockets = 0;
+  for (let s = 0; s < n; s++) {
+    const f = flattenSource(g.packedSources[s]);
+    const used = new Uint8Array(f.numPoints), byOpen = new Uint8Array(f.numPoints), empty = new Uint8Array(f.numPoints);
+    let open = 0;
+    for (let p = 0; p < f.numPrims; p++) {
+      if (!f.primClosed[p]) open++;
+      for (let v = f.primStart[p]; v < f.primStart[p + 1]; v++) { used[f.vertexPoint[v]] = 1; if (!f.primClosed[p]) byOpen[f.vertexPoint[v]] = 1; }
+    }
+    const empties = sceneEmpties(f);
+    for (const e of empties) empty[e.point] = 1;
+    let isolated = 0;
+    for (let i = 0; i < f.numPoints; i++) if (!used[i] && !empty[i]) isolated++;
+    if (!open && !isolated && !empties.length) continue;
+    sockets += empties.length;
+    poly[s] = f.subsetPrims(Uint8Array.from({ length: f.numPrims }, (_, p) => f.primClosed[p]));
+    if (open || isolated) {
+      const r = f.subsetPrims(Uint8Array.from({ length: f.numPrims }, (_, p) => (f.primClosed[p] ? 0 : 1)), false)
+        .subsetPoints(Uint8Array.from({ length: f.numPoints }, (_, i) => (byOpen[i] || (!used[i] && !empty[i]) ? 1 : 0)));
+      for (const k of [EMPTY_ATTRIB, PARENT_ATTRIB]) r.points.delete(k);
+      rest[s] = r;
+    }
+  }
+  if (!poly.some(Boolean)) return { inst: g, loose: null, sockets: 0 };
+  const inst = g.clone();
+  inst.packedSources = g.packedSources.map((src, s) => poly[s] ?? src);
+  let loose: Geometry | null = null;
+  if (rest.some(Boolean)) {
+    const S = g.packedSource!, kind = g.primKind!;
+    const sel = g.subsetPrims(Uint8Array.from({ length: g.numPrims }, (_, p) => (kind[p] === 1 && rest[S[p]] ? 1 : 0)));
+    sel.packedSources = sel.packedSources.map((src, s) => rest[s] ?? src);
+    loose = expandPacked(sel, { transfer: DEFAULT_TRANSFER }).geo;
+  }
+  return { inst, loose, sockets };
+}
+
+/**
  * One job per packed source: its geometry (nested instances expanded) as a single mesh whose node gets
  * EXT_mesh_gpu_instancing with every instance's TRS in export space (axis conversion and scale applied).
  */
@@ -733,6 +828,7 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
   let sheared = 0;
   const jobs: MeshJob[] = [];
   for (const { s, mat, prims } of bySrc.values()) {
+    if (!flatOf(s).numPrims) continue; // a source of points or lines alone: written as copies (instanceableSources)
     const n = prims.length;
     const T = new Float64Array(n * 3), L = new Float64Array(n * 9), Q = new Float32Array(n * 4), SC = new Float64Array(n * 3);
     prims.forEach((p, i) => {
@@ -931,6 +1027,8 @@ async function exportIO(doc: Document, o: ExportOptions): Promise<HostIO> {
  */
 async function withTextures(g: Geometry, o: ExportOptions): Promise<ExportOptions> {
   if (o.materials === false || o.textureData) return o;
+  // maps 'none': the materials alone, nothing read or encoded (a material without its maps writes its own factors)
+  if (o.maps === 'none') return { ...o, textureData: new Map() };
   const paths = texturePaths(mergeMaterialTables([g, ...g.packedSources]));
   if (!paths.length) return o;
   const data = imageTextureData(g, o.deflate, o.warn, 'glTF');
@@ -949,7 +1047,33 @@ export async function exportGLB(g: Geometry, o: ExportOptions = {}): Promise<Uin
   if (o.tangents !== 'none') await loadMikkTSpace();
   const doc = gltfDocument(g, o);
   const io = await exportIO(doc, o);
-  return io.writeBinary(doc);
+  if (o.maps !== 'external' || !o.mapFile) return io.writeBinary(doc);
+  // maps 'external': the images stay out of the binary chunk (gltf-transform embeds every image it holds in a GLB), and
+  // each image names its file by URI instead
+  const textures = doc.getRoot().listTextures(), uris = textures.map((t) => t.getURI());
+  for (const t of textures) t.setImage(null as unknown as Uint8Array);
+  return glbWithImageURIs(await io.writeBinary(doc), uris);
+}
+
+/** A GLB whose images (in texture order, written without data) reference their files by these URIs. */
+function glbWithImageURIs(glb: Uint8Array, uris: string[]): Uint8Array {
+  const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLen = dv.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLen)));
+  (json.images ?? []).forEach((im: any, i: number) => { if (uris[i]) im.uri = uris[i]; });
+  const text = new TextEncoder().encode(JSON.stringify(json));
+  const padded = (text.length + 3) & ~3;
+  const rest = glb.subarray(20 + jsonLen);
+  const out = new Uint8Array(20 + padded + rest.length);
+  const ov = new DataView(out.buffer);
+  out.set(glb.subarray(0, 12));
+  ov.setUint32(8, out.length, true);
+  ov.setUint32(12, padded, true);
+  ov.setUint32(16, 0x4e4f534a, true);
+  out.set(text, 20);
+  out.fill(0x20, 20 + text.length, 20 + padded);
+  out.set(rest, 20 + padded);
+  return out;
 }
 
 /** Self-contained .gltf JSON text (buffers embedded as data URIs). */
@@ -965,7 +1089,8 @@ export async function exportGLTF(g: Geometry, o: ExportOptions = {}): Promise<st
     if (data) b.uri = 'data:application/octet-stream;base64,' + base64(data);
     else delete b.uri; // meshopt fallback buffer: no data
   }
-  for (const im of json.images ?? []) {
+  // maps 'external': the images keep the URIs of their files (io/files.ts writes them)
+  if (o.maps !== 'external' || !o.mapFile) for (const im of json.images ?? []) {
     if (!im.uri || im.uri.startsWith('data:')) continue;
     const data = resources[im.uri];
     if (data) im.uri = `data:${im.mimeType ?? imageMime(data) ?? 'image/png'};base64,` + base64(data);

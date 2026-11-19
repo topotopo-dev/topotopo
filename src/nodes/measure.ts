@@ -2,7 +2,7 @@
 // distance (to a surface, curves or points) and assert (in-graph checks an agent can rely on).
 // The algorithms live in core/analysis.ts, shared with the explain / diff MCP tools.
 import { Geometry } from '../core/geometry.ts';
-import type { AttribClass } from '../core/geometry.ts';
+import type { AttribClass, HeightfieldVolume, ImageVolume } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { evalExpr, vecOut } from '../graph/params.ts';
@@ -18,6 +18,7 @@ import {
 import type { PieceReport, RayMode } from '../core/analysis.ts';
 import { P, getPointNormals, mask } from './util.ts';
 import { andThen } from '../graph/parallel.ts';
+import { namePattern } from './copy.ts';
 
 const hasPolygons = (g: Geometry) => {
   for (let p = 0; p < g.numPrims; p++) if (g.primClosed[p] && g.primSize(p) >= 3) return true;
@@ -262,6 +263,105 @@ function attribList(g: Geometry): string {
   return out.join('; ') || 'none';
 }
 
+/** A json param that is off (null/"") or a positive integer pair (a number gives both). */
+function optPair(name: string, v: any): [number, number] | null {
+  if (v === null || v === undefined || v === '' || v === false) return null;
+  const pair = typeof v === 'number' ? [v, v] : v;
+  if (Array.isArray(pair) && pair.length === 2 && pair.every((x) => Number.isInteger(x) && x > 0)) return pair as [number, number];
+  throw new NodeError(`param "${name}" expects [x, z] (or one number for both) in whole samples or pixels, or null (off); got ${JSON.stringify(v)}`);
+}
+
+/**
+ * assert's checks of heightfields and images, which have no points: the named ones exist (each name, each wildcard
+ * at least one), and the ones checked (the named, or every one) have the samples, heights, match, size and channel
+ * values asked. Reports through fail; returns how many checks ran. The reference is read only when match is on.
+ */
+function volumeChecks(g: Geometry, p: Record<string, any>, fail: (name: string, msg: string) => void, reference: () => Geometry | null): number {
+  let checks = 0;
+  const near = (x: number) => fmt(Math.round(x * 1000) / 1000);
+  /** The fields of one kind a pattern picks, after checking that each of its names is there. */
+  const pick = <T extends { name: string }>(label: string, kind: string, pattern: string, all: T[]): T[] => {
+    if (!pattern.trim()) return all;
+    checks++;
+    const listed = all.map((x) => x.name).join(', ') || 'none';
+    for (const tok of pattern.split(/[\s,]+/).filter((t) => t && !t.startsWith('^')))
+      if (!all.some((x) => namePattern(tok)(x.name))) fail(label, `no ${kind} ${/[*?]/.test(tok) ? 'matches' : 'named'} "${tok}" (${kind}s: ${listed})`);
+    return all.filter((x) => namePattern(pattern)(x.name));
+  };
+
+  // ---- heightfields
+  const fields = pick('heightfields', 'heightfield', String(p.heightfields ?? ''), g.volumes.filter((v): v is HeightfieldVolume => v.kind === 'heightfield'));
+  const samples = optPair('samples', p.samples), hmin = optNumber('height_min', p.height_min), hmax = optNumber('height_max', p.height_max);
+  const hfAsked = samples || hmin !== null || hmax !== null || p.match !== 'off';
+  if (hfAsked && !fields.length) { checks++; fail('heightfields', 'no heightfield to check'); }
+  if (samples && fields.length) {
+    checks++;
+    for (const f of fields) if (f.width !== samples[0] || f.height !== samples[1]) fail('samples', `"${f.name}" has ${f.width} × ${f.height} samples (want ${samples[0]} × ${samples[1]})`);
+  }
+  if ((hmin !== null || hmax !== null) && fields.length) {
+    checks++;
+    for (const f of fields) {
+      const h = f.layers.get('height');
+      if (!h) { fail('height', `"${f.name}" has no height layer`); continue; }
+      let bad = 0, first = -1, lo = Infinity, hi = -Infinity;
+      for (let k = 0; k < h.length; k++) {
+        const y = h[k];
+        if (y < lo) lo = y;
+        if (y > hi) hi = y;
+        if ((hmin !== null && !(y >= hmin)) || (hmax !== null && !(y <= hmax))) { bad++; if (first < 0) first = k; }
+      }
+      if (bad) {
+        const i = first % f.width, j = Math.floor(first / f.width);
+        fail('height', `${bad} of ${h.length} samples of "${f.name}" outside ${hmin !== null ? fmt(hmin) : '-inf'} .. ${hmax !== null ? fmt(hmax) : 'inf'} (range ${near(lo)} .. ${near(hi)}); first at x ${near(f.origin[0] + i * f.cellSize)}, z ${near(f.origin[1] + j * f.cellSize)}`);
+      }
+    }
+  }
+  if (p.match !== 'off' && fields.length) {
+    checks++;
+    const ref = reference()?.volumes.find((v): v is HeightfieldVolume => v.kind === 'heightfield');
+    if (!ref) throw new NodeError('assert match needs a reference heightfield as its second input', '"in": ["tile", "map"]');
+    const tolM = Number(p.match_tolerance), rb = ref.bounds, eps = ref.cellSize * 1e-3;
+    for (const f of fields) {
+      const h = f.layers.get('height');
+      if (!h) { fail('match', `"${f.name}" has no height layer`); continue; }
+      let bad = 0, outside = 0, worst = 0, firstX = 0, firstZ = 0, tested = 0;
+      for (let j = 0; j < f.height; j++) for (let i = 0; i < f.width; i++) {
+        if (p.match === 'edges' && i > 0 && j > 0 && i < f.width - 1 && j < f.height - 1) continue;
+        tested++;
+        const x = f.origin[0] + i * f.cellSize, z = f.origin[1] + j * f.cellSize;
+        if (x < rb.min[0] - eps || x > rb.max[0] + eps || z < rb.min[2] - eps || z > rb.max[2] + eps) { outside++; continue; }
+        const d = Math.abs(h[j * f.width + i] - ref.sample(x, z));
+        if (!(d <= tolM)) { if (!bad) { firstX = x; firstZ = z; } bad++; worst = Math.max(worst, d); }
+      }
+      if (outside) fail('match', `${outside} of ${tested} ${p.match === 'edges' ? 'edge ' : ''}samples of "${f.name}" lie outside the reference "${ref.name}"`);
+      if (bad) fail('match', `${bad} of ${tested} ${p.match === 'edges' ? 'edge ' : ''}samples of "${f.name}" differ from "${ref.name}" by more than ${fmt(tolM)} (largest ${near(worst)}); first at x ${near(firstX)}, z ${near(firstZ)}`);
+    }
+  }
+
+  // ---- images
+  const images = pick('images', 'image', String(p.images ?? ''), g.volumes.filter((v): v is ImageVolume => v.kind === 'image'));
+  const size = optPair('image_size', p.image_size), imin = optNumber('image_min', p.image_min), imax = optNumber('image_max', p.image_max);
+  if ((size || imin !== null || imax !== null) && !images.length) { checks++; fail('images', 'no image to check'); }
+  if (size && images.length) {
+    checks++;
+    for (const im of images) if (im.width !== size[0] || im.height !== size[1]) fail('image_size', `"${im.name}" is ${im.width} × ${im.height} px (want ${size[0]} × ${size[1]})`);
+  }
+  if ((imin !== null || imax !== null) && images.length) {
+    checks++;
+    for (const im of images) for (const [layer, a] of im.layers) {
+      let bad = 0, lo = Infinity, hi = -Infinity;
+      for (let k = 0; k < a.length; k++) {
+        const x = a[k];
+        if (x < lo) lo = x;
+        if (x > hi) hi = x;
+        if ((imin !== null && !(x >= imin)) || (imax !== null && !(x <= imax))) bad++;
+      }
+      if (bad) fail('image_range', `${bad} of ${a.length} values of "${im.name}" layer "${layer}" outside ${imin !== null ? fmt(imin) : '-inf'} .. ${imax !== null ? fmt(imax) : 'inf'} (range ${near(lo)} .. ${near(hi)})`);
+    }
+  }
+  return checks;
+}
+
 /** The values assert's expr can read. */
 export function assertScope(g: Geometry, pr: PieceReport): Record<string, any> {
   let polys = 0, lines = 0;
@@ -281,22 +381,30 @@ export function assertScope(g: Geometry, pr: PieceReport): Record<string, any> {
   };
 }
 
-const EXPR_NAMES = 'npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first)';
+const EXPR_NAMES = 'npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement)';
 
 defineNode({
   type: 'assert',
   category: 'measure',
   packed: 'keep',
-  summary: 'Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression) and fail, warn or mark when a check fails. Passes the geometry through.',
+  summary: 'Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression, heightfields, images) and fail, warn or mark when a check fails. Passes the geometry through.',
   description:
     'Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the ' +
     'node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit ' +
     'reports a broken invariant right away. warn passes through with that message as a warning. mark passes through ' +
     'and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim ' +
     'groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). ' +
-    `expr is a JS expression over ${EXPR_NAMES}. Each cook records stats checks and failed.`,
+    `expr is a JS expression over ${EXPR_NAMES}. ` +
+    'Heightfields and images (which have no points) have checks of their own: heightfields / images name the ones that ' +
+    'must exist, and the checks after each read those (every one when the name is empty): samples, height_min / ' +
+    'height_max and match for heightfields (match compares with the heightfield of the reference input at the same ' +
+    'world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size and ' +
+    'image_min / image_max (every channel of every layer) for images. Each cook records stats checks and failed.',
   aliases: ['expect', 'check', 'verify'],
-  inputs: [{ name: 'geo', desc: 'geometry to check (passed through)' }],
+  inputs: [
+    { name: 'geo', desc: 'geometry to check (passed through)' },
+    { name: 'reference', desc: 'optional: geometry with the heightfield match compares against', optional: true },
+  ],
   params: {
     on_fail: { type: 'enum', options: ['error', 'warn', 'mark'], default: 'error', desc: 'error = fail the node; warn = pass through with a warning; mark = pass through and write assert_failed / assert_report / group assert_fail', aliases: ['onfail', 'action'] },
     label: { type: 'string', default: '', desc: 'what this assert guards, prefixed to the message', aliases: ['message', 'msg'] },
@@ -316,11 +424,21 @@ defineNode({
     max_tests: { type: 'int', default: 2000000, min: 1000, max: 1000000000, desc: 'self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped)', advanced: true },
     attrib: { type: 'string', default: '', desc: 'attribute that must exist ("" = off)', aliases: ['attribute'] },
     attrib_class: { type: 'enum', options: ['auto', 'point', 'vertex', 'prim', 'detail'], default: 'auto', desc: 'where attrib must live (auto = any class: vertex, point, prim, detail)' },
-    attrib_min: { type: 'json', default: null, desc: 'attrib: smallest allowed value of its first component (null = off)' },
-    attrib_max: { type: 'json', default: null, desc: 'attrib: largest allowed value of its first component (null = off)' },
+    attrib_min: { type: 'json', default: null, desc: 'attrib: smallest allowed value of every component (null = off)' },
+    attrib_max: { type: 'json', default: null, desc: 'attrib: largest allowed value of every component (null = off)' },
     group: { type: 'string', default: '', desc: 'group name (any class) that must exist and be non-empty ("" = off)' },
     expr: { type: 'code', default: '', desc: `JS expression that must be true ("" = off) over ${EXPR_NAMES}; e.g. "volume > 1 && pieces == 1"`, aliases: ['expression', 'condition'] },
     tolerance: { type: 'float', default: 1e-6, min: 0, desc: 'distance tolerance for bbox_min/max and duplicate points', advanced: true },
+    heightfields: { type: 'string', default: '', desc: 'heightfield names that must exist (space-separated, * wildcards, ^name excludes; "" = off); the heightfield checks read these, or every heightfield when empty', aliases: ['heightfield'] },
+    samples: { type: 'json', default: null, desc: '[x, z] samples (or one number for both) every heightfield checked must have, e.g. an Unreal Landscape size (null = off)' },
+    height_min: { type: 'json', default: null, desc: 'no height sample of a heightfield checked may lie below this (null = off)' },
+    height_max: { type: 'json', default: null, desc: 'no height sample of a heightfield checked may lie above this (null = off)' },
+    match: { type: 'enum', options: ['off', 'edges', 'all'], default: 'off', desc: 'compare every heightfield checked with the first heightfield of input 1 at the same world X and Z: edges = its border samples (tiles join without seams), all = every sample' },
+    match_tolerance: { type: 'float', default: 1e-4, min: 0, desc: 'match: largest height difference allowed (m)', advanced: true },
+    images: { type: 'string', default: '', desc: 'image names that must exist (space-separated, * wildcards, ^name excludes; "" = off); the image checks read these, or every image when empty', aliases: ['image'] },
+    image_size: { type: 'json', default: null, desc: '[width, height] in pixels (or one number for both) every image checked must have (null = off)' },
+    image_min: { type: 'json', default: null, desc: 'no channel value of an image checked may lie below this, in any layer; NaN fails (null = off)' },
+    image_max: { type: 'json', default: null, desc: 'no channel value of an image checked may lie above this, in any layer; NaN fails (null = off)' },
   },
   outputs: 'passes geometry through; mark: detail int assert_failed, detail string assert_report, point/prim group assert_fail',
   usesVars: (p) => String(p.expr ?? ''),
@@ -331,7 +449,7 @@ defineNode({
     },
     output: 'check',
   },
-  cook: ({ input, p, warn, stat, engine, vars }) => {
+  cook: ({ input, hasInput, p, warn, stat, engine, vars }) => {
     const src = input(0);
     const g = src;
     const fails: string[] = [];
@@ -458,14 +576,21 @@ defineNode({
       else if (lo !== null || hi !== null) {
         if (f.attr.type === 'string') fail('attrib', `"${p.attrib}" is a string attribute: attrib_min/max need numbers`);
         else {
+          // every component of every element: a uv whose v leaves the range fails like one whose u does
           const a = f.attr, d = a.data as Float64Array, s = a.size, n = a.count;
-          let bad = 0, mn = Infinity, mx = -Infinity, firstBad = -1;
+          let bad = 0, firstBad = -1;
+          const badOf = new Array<number>(s).fill(0), nanOf = new Array<number>(s).fill(0), mn = new Array<number>(s).fill(Infinity), mx = new Array<number>(s).fill(-Infinity);
           const vp = f.cls === 'vertex' ? g.vertexPrims() : null;
           for (let i = 0; i < n; i++) {
-            const x = d[i * s];
-            if (x < mn) mn = x;
-            if (x > mx) mx = x;
-            if ((lo !== null && !(x >= lo)) || (hi !== null && !(x <= hi))) {
+            let out = false;
+            for (let c = 0; c < s; c++) {
+              const x = d[i * s + c];
+              if (x !== x) nanOf[c]++; // NaN is outside every range
+              if (x < mn[c]) mn[c] = x;
+              if (x > mx[c]) mx[c] = x;
+              if ((lo !== null && !(x >= lo)) || (hi !== null && !(x <= hi))) { badOf[c]++; out = true; }
+            }
+            if (out) {
               bad++;
               if (firstBad < 0) firstBad = i;
               if (f.cls === 'point') ptFail[i] = 1;
@@ -474,7 +599,10 @@ defineNode({
             }
           }
           const where = firstBad < 0 || f.cls === 'detail' ? '' : `; first ${f.cls === 'point' ? pointWhere(g, firstBad) : primWhere(g, f.cls === 'prim' ? firstBad : vp![firstBad])}`;
-          if (bad) fail('attrib', `${bad} ${f.cls} value(s) of "${p.attrib}"${s > 1 ? '[0]' : ''} outside ${lo !== null ? fmt(lo) : '-inf'} .. ${hi !== null ? fmt(hi) : 'inf'} (range ${fmt(mn)} .. ${fmt(mx)})${where}`);
+          const range = `${lo !== null ? fmt(lo) : '-inf'} .. ${hi !== null ? fmt(hi) : 'inf'}`;
+          const spread = (c: number) => [mn[c] <= mx[c] ? `range ${fmt(mn[c])} .. ${fmt(mx[c])}` : '', nanOf[c] ? `${nanOf[c]} NaN` : ''].filter(Boolean).join(', ');
+          const comps = s === 1 ? spread(0) : badOf.map((b, c) => (b ? `[${c}] ${b} value(s), ${spread(c)}` : '')).filter(Boolean).join('; ');
+          if (bad) fail('attrib', `${bad} ${f.cls} value(s) of "${p.attrib}" outside ${range} (${comps})${where}`);
         }
       }
     }
@@ -490,11 +618,22 @@ defineNode({
       if (!found) fail('group', `"${name}" does not exist (groups: ${groupList(g)})`);
       else if (!size) fail('group', `${found} group "${name}" is empty`);
     }
+    checks += volumeChecks(g, p, fail, () => (hasInput(1) ? input(1) : null));
     if (String(p.expr ?? '').trim()) {
       checks++;
       const src = String(p.expr).trim();
-      // the measurements, over the graph vars the expression names
-      const scope: Record<string, any> = { ...pickVars(vars, codeVarNames(src, vars)), ...assertScope(g, pieces()) };
+      // the measurements and the graph vars the expression names; as in every expression a var comes first, and geo
+      // always holds the measurements, so one expression can read both ("geo.pieces == pieces")
+      const measured = assertScope(g, pieces());
+      const named = pickVars(vars, codeVarNames(src, vars));
+      const scope: Record<string, any> = { ...measured, ...named, geo: measured };
+      const bare = (k: string) => new RegExp(`(?<![\\w$.])${k}(?![\\w$])`).test(src);
+      const viaGeo = (k: string) => new RegExp(`(?<![\\w$.])geo\\s*\\.\\s*${k}(?![\\w$])`).test(src);
+      for (const k of Object.keys(named)) {
+        if (k === 'geo') warn('assert expr: geo holds the measurements here, so the graph var geo cannot be read; rename the var');
+        else if (Object.hasOwn(measured, k) && bare(k) && !viaGeo(k))
+          warn(`assert expr: ${k} is the graph var ${k} (${String(named[k])}), not the measured ${k} (${typeof measured[k] === 'number' ? fmt(measured[k]) : String(measured[k])}); write geo.${k} for the measurement`);
+      }
       let res: any;
       try { res = evalExpr(src, scope, { host: engine.host, timeoutMs: engine.scriptTimeoutMs }); }
       catch (e: any) {
@@ -503,13 +642,15 @@ defineNode({
         throw new NodeError(`assert expr "${src}" cannot be evaluated: ${why}`, `expr can read ${EXPR_NAMES}`);
       }
       if (!res) {
-        const used = Object.keys(scope).filter((k) => new RegExp(`\\b${k}\\b`).test(src));
-        const val = (k: string) => {
-          const x = scope[k];
-          if (k === 'bbox') return `bbox ${v3(x.min)} .. ${v3(x.max)}`;
+        const val = (k: string, x: any) => {
+          if (/^(geo\.)?bbox$/.test(k) && x && x.min) return `${k} ${v3(x.min)} .. ${v3(x.max)}`;
           return `${k} ${typeof x === 'number' ? fmt(x) : String(x)}`;
         };
-        fail('expr', `"${src}" is false${used.length ? ` (${used.map(val).join(', ')})` : ''}`);
+        const used = [
+          ...Object.keys(scope).filter((k) => k !== 'geo' && bare(k)).map((k) => val(k, scope[k])),
+          ...Object.keys(measured).filter(viaGeo).map((k) => val(`geo.${k}`, measured[k])),
+        ];
+        fail('expr', `"${src}" is false${used.length ? ` (${used.join(', ')})` : ''}`);
       }
     }
 

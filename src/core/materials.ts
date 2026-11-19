@@ -21,7 +21,7 @@ export interface Material {
   roughness: number;
   emissive: [number, number, number];
   alpha: number;
-  /** Absent = legacy auto (blend only for scalar / vertex opacity). */
+  /** Absent = auto: blend only when the material's own alpha is below 1 (vertex alpha never changes it). */
   alphaMode?: 'OPAQUE' | 'MASK' | 'BLEND';
   alphaCutoff?: number;
   doubleSided: boolean;
@@ -37,6 +37,19 @@ export interface MaterialTextures { baseColor?: string; normal?: string; roughne
 
 /** Texture slots in table order. */
 export const TEXTURE_SLOTS = ['baseColor', 'normal', 'roughness', 'orm'] as const;
+
+/**
+ * The factors a material exports with, as glTF writes them (and materials.json of a textures export): a map replaces
+ * its factor (a white base colour under a base colour map, roughness 1 under a separate roughness map); metallic, and
+ * both factors beside an orm map, are the material's own. `has` says which maps are there (default: the ones it names).
+ */
+export function exportFactors(m: Material, has: (slot: keyof MaterialTextures) => boolean = (s) => !!m.textures?.[s]): { baseColor: [number, number, number]; roughness: number; metallic: number } {
+  return {
+    baseColor: has('baseColor') ? [1, 1, 1] : m.baseColor,
+    roughness: has('roughness') && !has('orm') ? 1 : m.roughness,
+    metallic: m.metallic,
+  };
+}
 
 export type MaterialTable = Record<string, Material>;
 
@@ -80,8 +93,9 @@ function alphaFields(m: any): Pick<Material, 'alphaMode' | 'alphaCutoff'> {
   return { alphaMode: mode, ...(mode === 'MASK' ? { alphaCutoff: Math.max(0, Math.min(1, num(m?.alphaCutoff, 0.5))) } : {}) };
 }
 
-export function materialAlphaMode(m: Material, vertexAlpha = false): 'OPAQUE' | 'MASK' | 'BLEND' {
-  return m.alphaMode ?? (m.alpha < 1 || vertexAlpha ? 'BLEND' : 'OPAQUE');
+/** The glTF alpha mode of a material: its own alpha_mode, else BLEND when its scalar alpha is below 1. Vertex alpha is data and never promotes it. */
+export function materialAlphaMode(m: Material): 'OPAQUE' | 'MASK' | 'BLEND' {
+  return m.alphaMode ?? (m.alpha < 1 ? 'BLEND' : 'OPAQUE');
 }
 
 /** { textures } with the non-empty string slots, or {} when there is none (keeps texture-free tables unchanged). */

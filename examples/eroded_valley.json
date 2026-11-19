@@ -1,0 +1,821 @@
+{
+  "version": 1,
+  "description": "A mountain valley worn by rain, as a terrain for a game engine. The ground is a heightfield of 257 × 257 samples over size × size metres: a valley winding along X, its floor falling from the high end (+X) to the low end (-X) between walls of ridged mountains on both sides, from 0 at the lowest point of the river bed to height at the highest ridge. Rain wears it in three steps, all scaled by erosion (0 leaves the ground raw): gullies are cut down the walls where the water gathers (heightfield_flow), sediment fans are laid on the floor where they reach it, and droplet erosion (heightfield_erode) wears the whole ground and settles what it carries. Last, frost and scree blunt the peaks: a thermal-only erode on the high ground above about half of height sheds the sharpest needles, which can leave the highest ridge a few percent below height. The river follows the valley's centre line on a bed that falls all the way, river_depth below the floor, in a channel of varying width (the river curve's point attribute width, in metres) cut into the floor with sloping banks. Layers: flow (0..1, the water draining through each sample, on a log scale), sediment (metres of fans and settled material) and river (1 under the water, fading up the banks). The river output is that bed as a curve; the preview is the ground as a mesh with a colour map painted from the layers: grass (fresher where water gathers), rock on the slopes, darker gullies, pale fans on the floor, wet gravel on the banks and dark water in the channel. Asserts check that the ground stays between 0 and height and that the river never rises along its course.",
+  "params": {
+    "size": {
+      "type": "float",
+      "default": 400,
+      "min": 100,
+      "max": 2000,
+      "step": 10,
+      "label": "size",
+      "desc": "side of the square terrain (m)"
+    },
+    "height": {
+      "type": "float",
+      "default": 150,
+      "min": 20,
+      "max": 600,
+      "step": 5,
+      "label": "height",
+      "desc": "from the valley floor to the highest ridge (m)"
+    },
+    "erosion": {
+      "type": "float",
+      "default": 0.6,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "erosion",
+      "desc": "how long the rain wears the ground; 0 leaves it raw"
+    },
+    "river_depth": {
+      "type": "float",
+      "default": 4,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "label": "river depth",
+      "desc": "how deep the river cuts into the valley floor (m)"
+    },
+    "seed": {
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 9999,
+      "label": "seed",
+      "desc": "changes the mountains, not the look"
+    }
+  },
+  "vars": {
+    "size": 400,
+    "height": 150,
+    "erosion": 0.6,
+    "river_depth": 4,
+    "seed": 1
+  },
+  "meta": {
+    "render": {
+      "views": [
+        "persp"
+      ],
+      "azimuth": 90.0,
+      "elevation": 38.0,
+      "look_at": [
+        -40.0,
+        30.0,
+        0.0
+      ],
+      "zoom": 1.25,
+      "size": "1600x900",
+      "shading": "pbr",
+      "grid": false
+    }
+  },
+  "nodes": {
+    "field": {
+      "type": "heightfield",
+      "params": {
+        "size": [
+          "=size",
+          "=size"
+        ],
+        "samples": [
+          257,
+          257
+        ],
+        "name": "valley"
+      }
+    },
+    "walls": {
+      "type": "heightfield_layer",
+      "in": [
+        "field"
+      ],
+      "note": "the bends come from a golden angle per seed, not rand(): rand() in a heightfield_layer expression costs about a microsecond a call (F-124)",
+      "params": {
+        "layer": "mask",
+        "expression": "// 0 on the valley floor, rising to 1 up the walls on both sides; the valley winds along X\nconst a = 3 + 2.39996 * seed, b = 0.88 + 3.88322 * seed; // the bends' phases, a golden angle further per seed\nconst zc = size * (0.06 * sin(TAU * 0.85 * x / size + a) + 0.025 * sin(TAU * 1.9 * x / size + b));\nreturn smoothstep(0.07, 0.34, abs(z - zc) / size);"
+      }
+    },
+    "trough": {
+      "type": "heightfield_layer",
+      "in": [
+        "walls"
+      ],
+      "params": {
+        "expression": "// the valley: walls rising from a floor that falls from +X to -X\n0.55 * pow(mask, 1.2) + 0.04 * (x / size + 0.5)"
+      }
+    },
+    "ridges": {
+      "type": "heightfield_noise",
+      "in": [
+        "trough"
+      ],
+      "params": {
+        "fractal": "ridged",
+        "amplitude": 0.45,
+        "element_size": "=size * 0.3",
+        "octaves": 5,
+        "roughness": 0.5,
+        "range": "positive",
+        "seed": "=seed",
+        "warp_amplitude": "=size * 0.04",
+        "warp_element_size": "=size * 0.3",
+        "warp_seed": "=seed + 1",
+        "mask_layer": "mask"
+      }
+    },
+    "bumps": {
+      "type": "heightfield_noise",
+      "in": [
+        "ridges"
+      ],
+      "params": {
+        "amplitude": 0.02,
+        "element_size": "=size * 0.08",
+        "octaves": 3,
+        "seed": "=seed + 2"
+      }
+    },
+    "runoff": {
+      "type": "heightfield_flow",
+      "in": [
+        "bumps"
+      ],
+      "params": {
+        "fill_sinks": true
+      }
+    },
+    "fan_mouths": {
+      "type": "heightfield_layer",
+      "in": [
+        "runoff"
+      ],
+      "params": {
+        "layer": "fan",
+        "expression": "// where gullies reach the floor: water of 20 to 2000 cells at the foot of the walls\nconst n = Math.log(1 + (Math.exp(drainage) - 1) / (cell * cell));\nreturn smoothstep(3, 5.5, n) * (1 - smoothstep(7.5, 9.5, n)) * (1 - smoothstep(0.02, 0.15, mask));"
+      }
+    },
+    "fan_spread": {
+      "type": "heightfield_mask_blur",
+      "in": [
+        "fan_mouths"
+      ],
+      "params": {
+        "layer": "fan",
+        "radius": "=size / 256 * 6",
+        "iterations": 2
+      }
+    },
+    "fan_floor": {
+      "type": "heightfield_layer",
+      "in": [
+        "fan_spread"
+      ],
+      "params": {
+        "layer": "fan",
+        "expression": "// the fans spread out from the foot of the walls over the floor, thinning towards the middle, not up the walls\nconst a = 3 + 2.39996 * seed, b = 0.88 + 3.88322 * seed; // the bends' phases, a golden angle further per seed\nconst d = abs(z - size * (0.06 * sin(TAU * 0.85 * x / size + a) + 0.025 * sin(TAU * 1.9 * x / size + b))) / size;\nreturn clamp(2 * fan, 0, 1) * (1 - smoothstep(0.03, 0.2, mask)) * smoothstep(0.01, 0.07, d);"
+      }
+    },
+    "gullies": {
+      "type": "heightfield_layer",
+      "in": [
+        "fan_floor"
+      ],
+      "params": {
+        "layer": "mask",
+        "expression": "// gullies on the walls where the water of 7 to 1100 cells gathers\nconst cells = (Math.exp(drainage) - 1) / (cell * cell);\nreturn smoothstep(2, 7, Math.log(1 + cells)) * smoothstep(0.05, 0.4, mask);"
+      }
+    },
+    "gullies_soft": {
+      "type": "heightfield_mask_blur",
+      "in": [
+        "gullies"
+      ],
+      "params": {
+        "layer": "mask",
+        "radius": "=size / 256 * 2.5"
+      }
+    },
+    "incise": {
+      "type": "heightfield_layer",
+      "in": [
+        "gullies_soft"
+      ],
+      "params": {
+        "expression": "// cut them in\nvalue - erosion * 0.12 * mask"
+      }
+    },
+    "raw": {
+      "type": "heightfield_remap",
+      "in": [
+        "incise"
+      ],
+      "params": {
+        "auto_range": true,
+        "output_min": 0,
+        "output_max": "=height"
+      }
+    },
+    "fans": {
+      "type": "heightfield_layer",
+      "in": [
+        "raw"
+      ],
+      "params": {
+        "expression": "// lay the fans: up to 5 cells of sediment, the more rain, the thicker\nvalue + erosion * 5 * cell * fan"
+      }
+    },
+    "eroded": {
+      "type": "heightfield_erode",
+      "in": [
+        "fans"
+      ],
+      "params": {
+        "iterations": "=Math.round(erosion * 30)",
+        "seed": "=seed",
+        "erosion_rate": 0.15,
+        "deposition_rate": 0.15,
+        "sediment_capacity": 3,
+        "thermal_rate": 0.02,
+        "erosion_radius": "=size / 256 * 3",
+        "max_distance": "=size / 256 * 30",
+        "rain_density": "=0.02 / (size / 256) / (size / 256)"
+      }
+    },
+    "course": {
+      "type": "parametric_curve",
+      "params": {
+        "count": 257,
+        "expr": "// the valley's centre line, from the high end (+X) to the low end (-X)\nconst x = size / 2 - t * size;\nconst a = 3 + 2.39996 * seed, b = 0.88 + 3.88322 * seed; // the bends' phases, a golden angle further per seed\nreturn [x, 0, size * (0.06 * sin(TAU * 0.85 * x / size + a) + 0.025 * sin(TAU * 1.9 * x / size + b))];"
+      }
+    },
+    "eroded_grid": {
+      "type": "heightfield_to_mesh",
+      "in": [
+        "eroded"
+      ],
+      "params": {
+        "layers": false,
+        "normals": false,
+        "uv": false
+      }
+    },
+    "bed": {
+      "type": "wrangle",
+      "in": [
+        "course",
+        "eroded_grid"
+      ],
+      "params": {
+        "run_over": "detail",
+        "code": "// the river bed: the eroded floor under the course, smoothed along it, then made to fall all the way, river_depth\n// below; and the river's width (m), wider and narrower along its course\nconst n = Math.round(Math.sqrt(npoints(1))), o = point(1, 'P', 0), cell = point(1, 'P', 1)[0] - o[0];\nconst ground = (px, pz) => {\n  const fx = (px - o[0]) / cell, fz = (pz - o[2]) / cell;\n  const i = clamp(Math.floor(fx), 0, n - 2), j = clamp(Math.floor(fz), 0, n - 2), u = clamp(fx - i, 0, 1), v = clamp(fz - j, 0, 1);\n  const h = (a, b) => point(1, 'P', (j + b) * n + i + a)[1];\n  return (h(0, 0) * (1 - u) + h(1, 0) * u) * (1 - v) + (h(0, 1) * (1 - u) + h(1, 1) * u) * v;\n};\nconst pts = primpoints(0, 0), P = pts.map((p) => point(0, 'P', p)), m = P.length;\nconst floor = P.map((q) => ground(q[0], q[2]));\nconst k = 6, smooth = floor.map((_, i) => { let s = 0, c = 0; for (let d = -k; d <= k; d++) { const y = floor[clamp(i + d, 0, m - 1)]; s += y; c++; } return s / c; });\nconst drop = 0.002; // the least fall per metre\nconst w = clamp(size * 0.03, 4, 40);\nlet y = smooth[0], along = 0;\nfor (let i = 0; i < m; i++) {\n  if (i > 0) { along += distance(P[i], P[i - 1]); y = Math.min(smooth[i], y - drop * distance(P[i], P[i - 1])); }\n  setpointattrib(0, 'P', pts[i], [P[i][0], y - river_depth, P[i][2]]);\n  setpointattrib(0, 'width', pts[i], w * (1 + 1.1 * noise(along / (w * 5), seed + 5)));\n}"
+      }
+    },
+    "channel_scale": {
+      "type": "wrangle",
+      "in": [
+        "bed"
+      ],
+      "params": {
+        "run_over": "points",
+        "code": "// the channel's half width, for the sweep\n@pscale = @width;"
+      }
+    },
+    "channel": {
+      "type": "sweep",
+      "in": [
+        "channel_scale"
+      ],
+      "params": {
+        "shape": "ribbon",
+        "radius": 0.5,
+        "up": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "carved": {
+      "type": "heightfield_project",
+      "in": [
+        "eroded",
+        "channel"
+      ],
+      "note": "the channel stamped flat at the bed, its banks blended over radius; mask river: 1 under the water, fading up the banks",
+      "params": {
+        "mode": "min",
+        "radius": "=river_depth * 1.2 + size / 256",
+        "mask_layer": "river"
+      }
+    },
+    "bank_zone": {
+      "type": "heightfield_layer",
+      "in": [
+        "carved"
+      ],
+      "params": {
+        "layer": "bank",
+        "expression": "// the channel and its banks, a little wider\nriver"
+      }
+    },
+    "bank_spread": {
+      "type": "heightfield_mask_blur",
+      "in": [
+        "bank_zone"
+      ],
+      "params": {
+        "layer": "bank",
+        "radius": "=size / 256 * 3"
+      }
+    },
+    "bank_edge": {
+      "type": "heightfield_layer",
+      "in": [
+        "bank_spread"
+      ],
+      "params": {
+        "layer": "bank",
+        "expression": "smoothstep(0, 0.15, bank)"
+      }
+    },
+    "banks": {
+      "type": "heightfield_blur",
+      "in": [
+        "bank_edge"
+      ],
+      "note": "workaround for F-133: heightfield_project blends its radius from the cells a polygon stamp covers, which leaves cell-sized steps along the banks; this blur smooths them (the bed mid-channel stays as stamped), and can be removed once F-133 lands",
+      "params": {
+        "radius": "=size / 256 * 2.5",
+        "mask_layer": "bank"
+      }
+    },
+    "river_soft": {
+      "type": "heightfield_mask_blur",
+      "in": [
+        "banks"
+      ],
+      "params": {
+        "layer": "river",
+        "radius": "=size / 256 * 1.5"
+      }
+    },
+    "streams": {
+      "type": "heightfield_flow",
+      "in": [
+        "river_soft"
+      ],
+      "params": {
+        "fill_sinks": true
+      }
+    },
+    "flow_layer": {
+      "type": "heightfield_layer",
+      "in": [
+        "streams"
+      ],
+      "params": {
+        "layer": "flow",
+        "expression": "// water flow 0..1: the cells draining through each sample, on a log scale over the whole field\nconst cells = (Math.exp(drainage) - 1) / (cell * cell);\nreturn clamp(Math.log(1 + cells) / Math.log(1 + size * size / (cell * cell)), 0, 1);"
+      }
+    },
+    "settled": {
+      "type": "heightfield_layer",
+      "in": [
+        "flow_layer"
+      ],
+      "params": {
+        "layer": "sediment",
+        "expression": "// sediment (m): the fans, and what the rain carried and settled\nsediment + debris + erosion * 5 * cell * fan"
+      }
+    },
+    "no_debris": {
+      "type": "heightfield_layer",
+      "in": [
+        "settled"
+      ],
+      "note": "one node per layer: heightfield_layer delete takes a single layer name, and a list silently deletes nothing (F-119)",
+      "params": {
+        "operation": "delete",
+        "layer": "debris"
+      }
+    },
+    "no_water": {
+      "type": "heightfield_layer",
+      "in": [
+        "no_debris"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "water"
+      }
+    },
+    "no_mask": {
+      "type": "heightfield_layer",
+      "in": [
+        "no_water"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "mask"
+      }
+    },
+    "no_drainage": {
+      "type": "heightfield_layer",
+      "in": [
+        "no_mask"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "drainage"
+      }
+    },
+    "no_direction": {
+      "type": "heightfield_layer",
+      "in": [
+        "no_drainage"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "direction"
+      }
+    },
+    "no_fan": {
+      "type": "heightfield_layer",
+      "in": [
+        "no_direction"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "fan"
+      }
+    },
+    "no_bank": {
+      "type": "heightfield_layer",
+      "in": [
+        "no_fan"
+      ],
+      "params": {
+        "operation": "delete",
+        "layer": "bank"
+      }
+    },
+    "fit": {
+      "type": "heightfield_remap",
+      "in": [
+        "no_bank"
+      ],
+      "params": {
+        "input_min": "=bbox('carved').min.y",
+        "input_max": "=bbox('carved').max.y",
+        "output_min": 0,
+        "output_max": "=height"
+      }
+    },
+    "crests": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "fit"
+      ],
+      "params": {
+        "feature": "height",
+        "layer": "still",
+        "min_height": "=height * 0.55",
+        "max_height": "=height * 3",
+        "height_falloff": "=height * 0.15",
+        "invert": true
+      }
+    },
+    "weathered": {
+      "type": "heightfield_erode",
+      "in": [
+        "crests"
+      ],
+      "note": "frost and scree: slopes steeper than the talus angle shed material on the high ground only (layer still freezes the rest)",
+      "params": {
+        "iterations": "=Math.round(erosion * 20)",
+        "seed": "=seed",
+        "erosion_rate": 0,
+        "deposition_rate": 0,
+        "rain_density": 0,
+        "thermal_talus_angle": 40.0,
+        "thermal_rate": 0.2,
+        "erosion_radius": "=size / 256 * 3",
+        "freeze_layer": "still"
+      }
+    },
+    "peaks": {
+      "type": "heightfield_layer",
+      "in": [
+        "fit",
+        "weathered"
+      ],
+      "note": "workaround for F-136: a thermal-only heightfield_erode still rewrites the flow and water layers, so only its heights are taken back here; once F-136 lands, terrain_out can read weathered directly",
+      "params": {
+        "expression": "// the weathered heights (input 1); the other layers stay as fitted, since the erode rewrites flow and water\nb_height"
+      }
+    },
+    "terrain_out": {
+      "type": "assert",
+      "in": [
+        "peaks"
+      ],
+      "params": {
+        "label": "height",
+        "heightfields": "valley",
+        "height_min": 0,
+        "height_max": "=height + 0.001"
+      }
+    },
+    "river_fit": {
+      "type": "transform",
+      "in": [
+        "bed"
+      ],
+      "params": {
+        "pivot": [
+          0,
+          "=bbox('carved').min.y",
+          0
+        ],
+        "scale": [
+          1,
+          "=height / (bbox('carved').max.y - bbox('carved').min.y)",
+          1
+        ],
+        "translate": [
+          0,
+          "=-bbox('carved').min.y",
+          0
+        ]
+      }
+    },
+    "river_named": {
+      "type": "attrib_create",
+      "in": [
+        "river_fit"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "river"
+      }
+    },
+    "river_fall": {
+      "type": "wrangle",
+      "in": [
+        "river_named"
+      ],
+      "params": {
+        "run_over": "detail",
+        "code": "// the largest rise from one point of the course to the next (negative: it falls all the way)\nconst pts = primpoints(0, 0);\nlet rise = -Infinity;\nfor (let i = 1; i < pts.length; i++) rise = Math.max(rise, point(0, 'P', pts[i])[1] - point(0, 'P', pts[i - 1])[1]);\nf@rise = rise;"
+      }
+    },
+    "downhill": {
+      "type": "assert",
+      "in": [
+        "river_fall"
+      ],
+      "params": {
+        "label": "downhill",
+        "attrib": "rise",
+        "attrib_class": "detail",
+        "attrib_max": 0
+      }
+    },
+    "river_out": {
+      "type": "attrib_delete",
+      "in": [
+        "downhill"
+      ],
+      "params": {
+        "names": "rise"
+      }
+    },
+    "rock": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "terrain_out"
+      ],
+      "params": {
+        "layer": "rock",
+        "min_angle": 40,
+        "angle_falloff": 8,
+        "blur": "=size / 256 * 1.5"
+      }
+    },
+    "steep": {
+      "type": "heightfield_mask_by_feature",
+      "in": [
+        "rock"
+      ],
+      "params": {
+        "layer": "steep",
+        "min_angle": 15,
+        "angle_falloff": 10
+      }
+    },
+    "sand": {
+      "type": "heightfield_layer",
+      "in": [
+        "steep",
+        "fan_floor"
+      ],
+      "params": {
+        "layer": "sand",
+        "expression": "// pale fans where the gullies reach the floor (the fan layer of input 1), palest where they are thickest\n0.95 * smoothstep(0.03, 0.7, b_fan) * (1 - rock)"
+      }
+    },
+    "deep": {
+      "type": "heightfield_layer",
+      "in": [
+        "sand"
+      ],
+      "params": {
+        "layer": "deep",
+        "expression": "// the river, softened: highest mid-channel\nriver"
+      }
+    },
+    "deep_soft": {
+      "type": "heightfield_mask_blur",
+      "in": [
+        "deep"
+      ],
+      "params": {
+        "layer": "deep",
+        "radius": "=clamp(size * 0.03, 4, 40) * 0.3"
+      }
+    },
+    "red": {
+      "type": "heightfield_layer",
+      "in": [
+        "deep_soft"
+      ],
+      "note": "the colours are painted as layers and written with heightfield_to_tex: bake_vertex_color with a paint wrangle took about 550 ms (F-124)",
+      "params": {
+        "layer": "red",
+        "expression": "// red of the colour map: grass (fresher where water gathers), rock on the slopes, darker gullies, pale fans, and the\n// river in its channel: wet gravel on the banks, water on the bottom, darker mid-channel\nlet c = mix(0.38, 0.25, smoothstep(0.05, 0.3, flow));\nc = mix(c, 0.46, rock);\nc *= 1 - 0.38 * smoothstep(0.3, 0.5, flow) * steep;\nc = mix(c, 0.78, sand);\nc = mix(c, 0.45, smoothstep(0.02, 0.25, river));\nreturn mix(c, mix(0.2, 0.05, smoothstep(0.6, 0.95, deep)), smoothstep(0.7, 0.9, river));"
+      }
+    },
+    "green": {
+      "type": "heightfield_layer",
+      "in": [
+        "red"
+      ],
+      "params": {
+        "layer": "green",
+        "expression": "// green of the colour map: grass (fresher where water gathers), rock on the slopes, darker gullies, pale fans, and the\n// river in its channel: wet gravel on the banks, water on the bottom, darker mid-channel\nlet c = mix(0.43, 0.38, smoothstep(0.05, 0.3, flow));\nc = mix(c, 0.42, rock);\nc *= 1 - 0.38 * smoothstep(0.3, 0.5, flow) * steep;\nc = mix(c, 0.72, sand);\nc = mix(c, 0.41, smoothstep(0.02, 0.25, river));\nreturn mix(c, mix(0.3, 0.11, smoothstep(0.6, 0.95, deep)), smoothstep(0.7, 0.9, river));"
+      }
+    },
+    "blue": {
+      "type": "heightfield_layer",
+      "in": [
+        "green"
+      ],
+      "params": {
+        "layer": "blue",
+        "expression": "// blue of the colour map: grass (fresher where water gathers), rock on the slopes, darker gullies, pale fans, and the\n// river in its channel: wet gravel on the banks, water on the bottom, darker mid-channel\nlet c = mix(0.22, 0.14, smoothstep(0.05, 0.3, flow));\nc = mix(c, 0.38, rock);\nc *= 1 - 0.38 * smoothstep(0.3, 0.5, flow) * steep;\nc = mix(c, 0.58, sand);\nc = mix(c, 0.34, smoothstep(0.02, 0.25, river));\nreturn mix(c, mix(0.3, 0.15, smoothstep(0.6, 0.95, deep)), smoothstep(0.7, 0.9, river));"
+      }
+    },
+    "red_map": {
+      "type": "heightfield_to_tex",
+      "in": [
+        "blue"
+      ],
+      "params": {
+        "layer": "red",
+        "name": "red_map"
+      }
+    },
+    "green_map": {
+      "type": "heightfield_to_tex",
+      "in": [
+        "blue"
+      ],
+      "params": {
+        "layer": "green",
+        "name": "green_map"
+      }
+    },
+    "blue_map": {
+      "type": "heightfield_to_tex",
+      "in": [
+        "blue"
+      ],
+      "params": {
+        "layer": "blue",
+        "name": "blue_map"
+      }
+    },
+    "colour_pack": {
+      "type": "tex_channel",
+      "in": [
+        "red_map",
+        "green_map",
+        "blue_map"
+      ],
+      "params": {
+        "name": "colour_pack"
+      }
+    },
+    "colour_map": {
+      "type": "tex_transform",
+      "in": [
+        "colour_pack"
+      ],
+      "note": "heightfield_to_tex puts the -Z row at the top of the image while heightfield_to_mesh gives -Z the uv v = 0 (the bottom), so the map is mirrored in v here to land on its own samples (F-122): remove this node when F-122 lands and name colour_pack valley_colour",
+      "params": {
+        "scale": [
+          1,
+          -1
+        ],
+        "name": "valley_colour"
+      }
+    },
+    "preview_mesh": {
+      "type": "heightfield_to_mesh",
+      "in": [
+        "terrain_out"
+      ],
+      "params": {
+        "layers": false
+      }
+    },
+    "textured": {
+      "type": "merge",
+      "in": [
+        "preview_mesh",
+        "colour_map"
+      ]
+    },
+    "ground": {
+      "type": "material",
+      "in": [
+        "textured"
+      ],
+      "params": {
+        "name": "valley_ground",
+        "base_color": [
+          1,
+          1,
+          1
+        ],
+        "base_color_map": "image:valley_colour",
+        "roughness": 0.9
+      }
+    },
+    "preview_out": {
+      "type": "attrib_create",
+      "in": [
+        "ground"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "valley"
+      }
+    }
+  },
+  "output": "preview_out",
+  "outputs": {
+    "terrain": {
+      "node": "terrain_out",
+      "label": "Terrain",
+      "kind": "terrain",
+      "tags": [
+        "terrain",
+        "heightfield",
+        "erosion",
+        "valley",
+        "river"
+      ],
+      "description": "The eroded ground from 0 to height, 257 × 257 samples, with the layers flow, sediment and river."
+    },
+    "river": {
+      "node": "river_out",
+      "label": "River",
+      "kind": "curves",
+      "tags": [
+        "river",
+        "curve",
+        "spline",
+        "water"
+      ],
+      "description": "The river's course along the valley floor, on its bed, falling all the way from the high end to the low end, with its width in metres on every point."
+    },
+    "preview": {
+      "node": "preview_out",
+      "label": "Preview",
+      "kind": "mesh",
+      "tags": [
+        "terrain",
+        "mesh",
+        "preview",
+        "erosion"
+      ],
+      "description": "The terrain as a mesh with a colour map painted from its layers: rock on the slopes, grass on the floor, darker gullies, pale sediment fans, gravel banks and water in the river channel."
+    }
+  }
+}

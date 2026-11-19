@@ -27,6 +27,28 @@ export function kindLine(item) {
   return line || (item.view === 'image' ? 'image' : item.view === 'file' ? 'file' : '');
 }
 
+/**
+ * A result's name as hover shows it beside the cursor: its published output, else its node; of a piece, the name its
+ * file gives it after that, when it is not the same ("house › roof").
+ */
+export function resultName({ output = null, node = null, part = null } = {}) {
+  const base = output || node || 'result';
+  return part && part !== base ? `${base} › ${part}` : base;
+}
+
+/**
+ * The own name of a drawable in a loaded glTF, or null: a primitive the loader numbered after its mesh ("house_1"
+ * under "house") goes by the mesh's name; the names the preview gives unnamed parts ("mesh", "source_0", "scene")
+ * are no names.
+ */
+export function partName(name, parent = '') {
+  const own = parent && new RegExp(`^${parent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_\\d+$`).test(name) ? parent : name;
+  return !own || /^(mesh|source|scene|points|curves|lines)(_\d+)*$/.test(own) ? null : own;
+}
+
+/** The counts of a geometry summary (src/inspect.ts summarize): its first line, "1,234 points, 567 prims …". */
+export const countsLine = (summary) => String(summary ?? '').split('\n')[0].trim();
+
 /** A heightfield's layers a person can see in red (not the height itself): the mask first, then the others, then none. */
 export function layerChoices(hf) {
   if (!hf) return [];
@@ -36,6 +58,43 @@ export function layerChoices(hf) {
     ...layers.map((l) => ({ value: l.name, label: l.name === 'mask' || unit(l) ? l.name : `${l.name} (${+l.min.toPrecision(3)} .. ${+l.max.toPrecision(3)})` })),
     { value: 'none', label: 'none' },
   ];
+}
+
+/** Quads per side the viewer draws a heightfield with by default (src/render/preview.ts HEIGHTFIELD_PREVIEW_RES). */
+export const PREVIEW_RES = 512;
+/** The most triangles a terrain detail choice may draw: more does not load in a browser tab. */
+export const MAX_PREVIEW_TRIANGLES = 8.5e6;
+
+/** The sample step and the triangles of a heightfield drawn with at most `res` quads per side (src/core/heightfield.ts). */
+export function previewStep(hf, res) {
+  const step = Math.max(1, Math.ceil((Math.max(hf.width, hf.height) - 1) / Math.max(1, res)));
+  const shown = (n) => Math.ceil((n - 1) / step) + 1;
+  return { step, triangles: 2 * (shown(hf.width) - 1) * (shown(hf.height) - 1) };
+}
+
+/**
+ * The terrain detail choices for a heightfield: the preview, 1024 and 2048 quads per side, every sample ("full"); each
+ * says how far apart the drawn samples are and how many triangles that makes. Choices that draw the same as one before
+ * are left out (a budget that draws every sample is "full"); one past MAX_PREVIEW_TRIANGLES is disabled.
+ */
+export function detailChoices(hf) {
+  if (!hf) return [];
+  const tri = (t) => (t >= 1e6 ? `${+(t / 1e6).toFixed(1)}M` : `${Math.round(t / 1e3)}k`) + ' triangles';
+  const out = [], seen = new Set();
+  for (let [value, res] of [['preview', PREVIEW_RES], ['1024', 1024], ['2048', 2048], ['full', Infinity]]) {
+    const s = previewStep(hf, res);
+    if (seen.has(s.step)) continue;
+    seen.add(s.step);
+    // a budget that draws every sample is "full"
+    if (s.step === 1 && value !== 'preview') value = 'full';
+    const name = value;
+    const spacing = +(hf.cell * s.step).toPrecision(3);
+    out.push({
+      value, step: s.step, triangles: s.triangles, disabled: s.triangles > MAX_PREVIEW_TRIANGLES,
+      label: `${name} (${s.step === 1 ? 'every sample' : `${spacing} m`}, ${tri(s.triangles)}${s.triangles > MAX_PREVIEW_TRIANGLES ? ': too many for the viewer' : ''})`,
+    });
+  }
+  return out;
 }
 
 /** The layer shown in red: the one chosen if the heightfield still has it (or "none"), else the mask, else none. */

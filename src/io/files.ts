@@ -5,7 +5,10 @@
 //                    (one GLB per packed source; meshes: false leaves the GLBs out)
 //   unreal_landscape a directory (the path, or the directory of a .json path naming the manifest): io/unreal.ts
 //   usda             + <name>_textures/<image>.png for "image:<name>" material textures (io/textures.ts)
+//   obj              with prim materials: + <name>.mtl (mtllib) and <name>_textures/<image>.png as usda
 //   textures         a directory with one PNG per image volume (io/textures.ts)
+//   glb / gltf       with maps 'external': + one file per distinct image in the shared maps folder (mapsDir, default
+//                    maps/ beside the export), named <image>-<hash>.<ext> so exports that share an image share one file
 // With options.source (how the export was made, io/source.ts) the sidecar or manifest above records it: the heightmap
 // .json, <base>.meshes.json, the bundle's landscape.json. Every other export gets <path>.source.json next to it (the
 // textures folder: source.json inside it), and glb / gltf also carry it in asset.extras.source.
@@ -20,10 +23,25 @@ import { flattenSource } from '../core/packed.ts';
 import { baseOf, dirOf, joinPath, packedSourceNames } from './common.ts';
 import type { ExportOptions } from './common.ts';
 import { unrealLandscapeBundle } from './unreal.ts';
-import { texturesExport, usdTextureFiles } from './textures.ts';
+import { textureFilesBeside, texturesExport } from './textures.ts';
+import { exportOBJFiles } from './export.ts';
 import { SOURCE_SUFFIX, sourceManifestBytes } from './source.ts';
+import { sha256Hex } from '../core/sha256.ts';
 
-export interface ExportFile { path: string; bytes: Uint8Array }
+export interface ExportFile {
+  path: string;
+  bytes: Uint8Array;
+  /** a map of the shared maps folder, named by its content: other exports may write the same file with the same bytes */
+  shared?: boolean;
+}
+
+/** The content part of a shared map's file name (12 hex digits of its SHA-256), once per byte array. */
+const mapHashes = new WeakMap<Uint8Array, string>();
+const mapHash = (b: Uint8Array) => {
+  let h = mapHashes.get(b);
+  if (!h) mapHashes.set(b, h = sha256Hex(b).slice(0, 12));
+  return h;
+};
 export type FileExportOptions = ExportOptions & HeightmapOptions & {
   /** instance streams: also write one GLB per packed source next to the stream (default true) */
   meshes?: boolean;
@@ -73,7 +91,7 @@ export function formatWrites(format: ExportFormat, o: { instances?: boolean; ima
     glb: 'binary glTF with its textures and how it was made inside (+ .source.json in exports/)',
     gltf: 'glTF JSON with its buffers, textures and how it was made inside (+ .source.json in exports/)',
     usda: `USD stage${o.instances ? ' (instances as a PointInstancer)' : ''}${o.images ? ' + its textures as PNGs' : ''}${record}`,
-    obj: `OBJ with vertex colours, no materials${expanded}${record}`,
+    obj: `OBJ with vertex colours (+ .mtl with its materials)${expanded}${record}`,
     geo: `Houdini .geo with every attribute and group${record}`,
     ply: `binary PLY with the point attributes${expanded}${record}`,
     stl: `binary STL triangles, no colours${expanded}${record}`,
@@ -105,13 +123,23 @@ async function formatFiles(g: Geometry, format: ExportFormat | 'unreal_landscape
     return texturesExport(g, texturesDir(path), { deflate: o.deflate, layers: o.layers });
   }
   const nImages = g.volumes.filter((v) => v.kind === 'image').length;
-  if (nImages && !['glb', 'gltf', 'usda', 'json'].includes(format)) o.warn?.(`${format}: ${nImages} image(s) not written (${format} has no images; glb/gltf embed the textures materials use, usda writes them next to the file, format "textures" writes every image as PNG)`);
+  if (nImages && !['glb', 'gltf', 'usda', 'obj', 'json'].includes(format)) o.warn?.(`${format}: ${nImages} image(s) not written (${format} has no images; glb/gltf embed the textures materials use, usda and obj write them next to the file, format "textures" writes every image as PNG)`);
   if (format === 'usda') {
     // image textures as PNGs in <name>_textures/ next to the .usda, referenced relative to it
-    const tex = usdTextureFiles(g, path, o.deflate, o.warn);
+    const tex = textureFilesBeside(g, path, 'usda', o.deflate, o.warn);
     const map = o.texturePath;
     const bytes = await exportGeometryAsync(g, format, { ...o, texturePath: (t) => tex.assetPath.get(t) ?? (t.startsWith('image:') ? t : map ? map(t) : t) });
     return { files: [{ path, bytes }, ...tex.files], summary: `usda, ${(bytes.byteLength / 1024).toFixed(1)} KB${tex.files.length ? ` + ${tex.files.length} texture PNG(s)` : ''}` };
+  }
+  if (format === 'obj' && o.materials !== false) {
+    // prim materials: <base>.mtl beside the .obj (mtllib), image textures as PNGs in <base>_textures/, file maps relative to it
+    const mtl = stripExtension(path) + '.mtl';
+    const tex = textureFilesBeside(g, path, 'obj', o.deflate, o.warn);
+    const map = o.texturePath;
+    const r = exportOBJFiles(g, { ...o, mtllib: baseOf(mtl), texturePath: (t) => tex.assetPath.get(t) ?? (t.startsWith('image:') ? t : map ? map(t) : t) });
+    const files: ExportFile[] = [{ path, bytes: r.obj }];
+    if (r.mtl) files.push({ path: mtl, bytes: r.mtl }, ...tex.files);
+    return { files, summary: `obj, ${(r.obj.byteLength / 1024).toFixed(1)} KB${r.mtl ? ` + ${baseOf(mtl)} (${r.materials} material${r.materials === 1 ? '' : 's'})${tex.files.length ? ` + ${tex.files.length} texture PNG(s)` : ''}` : ''}` };
   }
   if (HEIGHTMAP_FORMATS.includes(format as HeightmapFormat)) {
     const res = heightmapExport(g, format as HeightmapFormat, o);
@@ -125,6 +153,21 @@ async function formatFiles(g: Geometry, format: ExportFormat | 'unreal_landscape
     const manifestName = isManifest ? baseOf(path) : undefined;
     const res = await unrealLandscapeBundle(g, { ...o, manifestName });
     return { files: res.files.map((f) => ({ path: joinPath(dir, f.path), bytes: f.bytes })), summary: res.summary, sourceFile: o.source ? joinPath(dir, manifestName || 'landscape.json') : undefined };
+  }
+  if ((format === 'glb' || format === 'gltf') && o.maps === 'external' && o.materials !== false) {
+    // each distinct image once, in the shared folder, referenced relative to the export
+    const dir = o.mapsDir ?? joinPath(dirOf(path), 'maps');
+    const prefix = (o.mapsURI ?? 'maps').split(/[\\/]+/).filter(Boolean).map(encodeURIComponent).join('/');
+    const maps: ExportFile[] = [];
+    const bytes = await exportGeometryAsync(g, format, {
+      ...o,
+      mapFile: (stem, b, mime) => {
+        const name = `${stem}-${mapHash(b)}${mime === 'image/jpeg' ? '.jpg' : '.png'}`, at = joinPath(dir, name);
+        if (!maps.some((m) => m.path === at)) maps.push({ path: at, bytes: b, shared: true });
+        return prefix ? `${prefix}/${name}` : name;
+      },
+    });
+    return { files: [{ path, bytes }, ...maps], summary: `${format}, ${(bytes.byteLength / 1024).toFixed(1)} KB${maps.length ? ` + ${maps.length} map${maps.length === 1 ? '' : 's'} in ${prefix || '.'}/` : ''}` };
   }
   const bytes = await exportGeometryAsync(g, format, o);
   const files: ExportFile[] = [{ path, bytes }];

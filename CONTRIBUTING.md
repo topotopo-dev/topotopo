@@ -11,6 +11,10 @@ Thanks for your interest. A few things to know before you start.
   description (they generate the docs and drive validation), plus an `example`: a node spec or a small graph that
   cooks without errors (`npm test` cooks every example). Add a fixture in `test/fixtures.ts`, run
   `npm run test:update` for its golden, add behavioural checks to the matching `test/*.ts`, and run `npm run docs`.
+- **Examples are cards first.** An example in `examples/` is a card, `<name>.md`, that says in plain words what goes in
+  and what comes out, and a graph, `<name>.json`, that is today's way to do it. Write the card first, then build the
+  graph to it; rebuild a graph freely when there is a better way, as long as `npm test` still passes its card. The
+  house rules and the card format are in [docs/examples.md](docs/examples.md).
 - **Keep the core host-agnostic.** `src/core`, `src/graph` and `src/nodes` must not import Node APIs. Cooked geometry
   is immutable: `clone()` before writing. Y-up, metres, degrees, Houdini attribute names.
 - **TopoTopo's own packages are versioned.** A built-in package in `library/<name>/` publishes versions: change its graphs, run
@@ -20,6 +24,11 @@ Thanks for your interest. A few things to know before you start.
 - **Licences.** Dependencies that ship must be permissive: MIT, Apache-2.0, BSD, ISC, MPL-2.0, Unicode-3.0, Zlib, 0BSD, Unlicense or CC0. No GPL or AGPL anywhere in the tree. LGPL is tolerated only for optional native modules that our code never calls and that load dynamically if present (today: sharp/libvips, an optional dependency of gltf-transform); `npm run notice` lists them and flags anything outside this list.
   Run `npm run notice` after adding one so `NOTICE` carries its licence text; after a change to the Rust crates of
   `kernels/` (Cargo.lock) it needs `cargo`. `npm test` checks NOTICE without Rust.
+- **The Windows launcher is committed built.** `launcher/` (Rust, no crates) builds `launcher/win32-x64/topotopo-open.exe`,
+  what a double-clicked package runs. After changing it, run `npm run launcher:build` on Windows and commit the exe;
+  `npm test` fails while the committed exe was built from other sources (see `launcher/README.md`).
+- **File icons are drawn in SVG.** The Windows icons of packages and workspaces are drawn in `assets/icons/src`;
+  `npm run icons` makes `assets/icons/*.ico` from them, and `npm test` fails while the two differ.
 
 ## Before you open a pull request
 
@@ -29,9 +38,11 @@ npm test
 npm run showcase     # then look at examples/renders/*.png
 ```
 
-`npm test` runs smoke, golden, property, fuzz, docs, examples, io, interop, MCP and the per-feature suites. It fails on
-missing goldens, stale `docs/nodes.md` or a stale `NOTICE`. CI (`.github/workflows/ci.yml`) runs typecheck, `npm test`,
-the build, the pack test and the site check on Linux and Windows, so code must not assume either: build paths with
+`npm test` runs smoke, golden, property, fuzz, docs, examples, cards, io, interop, MCP and the per-feature suites. It
+fails on missing goldens, an example graph that breaks its card, stale `docs/nodes.md` or `docs/examples.md` (both
+written by `npm run docs`) or a stale `NOTICE`. `npm run test:cards` adds the sweep of every example across its
+sliders (`npm test` cooks each example at its defaults only). CI (`.github/workflows/ci.yml`) runs typecheck, `npm test`,
+`npm run test:cards`, the build, the pack test and the site check on Linux and Windows, so code must not assume either: build paths with
 `path.join`, spell file names with their exact case, sort with a fixed locale (`localeCompare(b, 'en')`) and keep
 generated files byte-identical on every OS (`test/portability.ts` checks what it can).
 
@@ -56,8 +67,8 @@ npm run site:check   # fails on broken internal links or anchors, missing images
 to GitHub Pages.
 
 `npm run pack:test` is not part of `npm test` (it takes about a minute and needs the npm cache or network for the
-install). It fails if the tarball misses a runtime file or carries sources, tests or examples, or if anything that
-works from a clone breaks when installed from the tarball.
+install). It fails if the tarball misses a runtime file (the examples and their cards among them: `help` serves them)
+or carries sources or tests, or if anything that works from a clone breaks when installed from the tarball.
 
 ## Sign your commits (DCO)
 

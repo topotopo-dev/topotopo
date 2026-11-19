@@ -1,4 +1,5 @@
-// Export the Unreal demo scene (examples/unreal_demo.json) as the file set for the Unreal 5.8 / Houdini / Blender
+// Export the Unreal demo scene (test/scenes/unreal_demo.json, the fixed scene the Unreal plugin's checks expect; the
+// unreal_landscape example is the one to start a level from) as the file set for the Unreal 5.8 / Houdini / Blender
 // round trip:
 //   landscape/         unreal_landscape bundle of node "landscape": heightmap.png + .json, layers/*.png, landscape.json
 //                      (import settings + steps), objects.glb (road + instances), instances.csv + instances.meshes.json
@@ -41,7 +42,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 const out = path.resolve(outArg ?? path.join(root, 'out', tiles ? 'unreal_demo_tiled' : 'unreal_demo'));
 const examples = path.join(root, 'examples');
-const graph = JSON.parse(fs.readFileSync(path.join(examples, 'unreal_demo.json'), 'utf8'));
+const graph = JSON.parse(fs.readFileSync(path.join(root, 'test', 'scenes', 'unreal_demo.json'), 'utf8'));
 const host = createNodeHost({ baseDir: examples });
 const engine = new Engine(host);
 await engine.init();
@@ -101,7 +102,7 @@ await write(scene, 'geo', 'scene.geo', { precision: 32 });
 await write(instances, 'csv', 'instances.csv', { pcg: true });
 
 const info = {
-  graph: 'examples/unreal_demo.json',
+  graph: 'test/scenes/unreal_demo.json',
   cook_ms: Math.round(cookMs),
   scene: { points: scene.numPoints, prims: scene.numPrims, instances: scene.numPacked, sources: scene.packedSources.length },
   instances: instances.numPacked,

@@ -13,6 +13,8 @@
 //  - Thin charts join a neighbour where their seam lines up; charts longer than the tile, rings and arcs are cut into
 //    parts when the parts pack denser (core/uvislands.ts).
 //  - The charts are packed with the raster packer (core/uvpack.ts) and the result is checked exactly (uvoverlap.ts).
+//  - chart_smoothing: the caller passes a smoothed copy and the real positions (realP); everything above runs on the
+//    copy, and the real positions go back before packing (points keep their order through the straddling split).
 import type { Geometry } from './geometry.ts';
 import { GeoBuilder } from './geometry.ts';
 import { triangulate } from './topology.ts';
@@ -46,6 +48,11 @@ export interface UnwrapOptions {
   texelWeight: string;
   /** island orders the packer tries */
   iterations: number;
+  /**
+   * the real point positions when `g` is a smoothed copy (chart_smoothing): charts are cut and flattened on the copy,
+   * then these go back before packing, so texel density and the output follow the real shape
+   */
+  realP?: Float64Array | null;
 }
 
 export interface UnwrapResult {
@@ -379,6 +386,11 @@ export function unwrapMesh(X: any, g: Geometry, o: UnwrapOptions): UnwrapResult 
     outChart = primChart;
     outUV = vuv;
     for (let t = 0; t < nt; t++) { oTris.push(tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2]); oTriPrim.push(triPrim[t]); }
+  }
+  // charted on a smoothed copy: the real shape back (the output keeps the points in order), packed by its areas
+  if (o.realP) {
+    if (o.realP.length !== out.P.length) throw new Error('unwrapMesh: realP does not match the points');
+    out.P.set(o.realP);
   }
   return finishUnwrap(out, o, outChart, outUV, Uint32Array.from(oTris), Uint32Array.from(oTriPrim), {
     pieces: nPieces, degenerate, firstDegenerate, isolated, straddled, firstStraddled, mirrored, unstretched, refolded, splitInto,

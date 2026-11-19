@@ -5,10 +5,13 @@ import zlib from 'node:zlib';
 import { Session, EditRejected } from '../session.ts';
 import type { EditOp } from '../session.ts';
 import type { CookReport } from '../graph/engine.ts';
+import { timingLines } from '../graph/timing.ts';
+import { refreshGraph, refreshNotes } from '../graph/refresh.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
 import { catalogText, nodeDoc, topicList, topicText, INSTRUCTIONS } from './docs.ts';
+import { exampleText } from './examples.ts';
 import { nodeBudgetInput, summarize, inspect } from '../inspect.ts';
 import { glbSceneReport, sceneReportText } from '../io/inspect-scene.ts';
 import { renderGeometryAsync } from '../render/raster.ts';
@@ -23,10 +26,12 @@ import { exportSource } from '../io/source.ts';
 import { packageAt, packagesUsed } from '../graph/packages.ts';
 import type { ExportSource } from '../io/source.ts';
 import { ArtifactStore } from '../host/artifacts.ts';
-import { prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
+import { filesShaFor, prepareTarget, serializeExport, writeExportFiles, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import type { Host, StopSignal } from '../host/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
+import { engineSha256 } from '../host/engine-code.ts';
+import { program } from '../package.ts';
 import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 import { verifyTools } from './verify.ts';
@@ -53,7 +58,7 @@ export interface ToolDef {
 /** " at frame N" when the cook was not at frame 1. */
 const atFrame = (r: { frame: number }) => (r.frame !== 1 ? ` at frame ${r.frame}` : '');
 
-function reportText(name: string, r: CookReport, extraNotes: string[] = [], extraWarnings: string[] = []): string {
+function reportText(name: string, r: CookReport, scriptLimitMs: number, extraNotes: string[] = [], extraWarnings: string[] = []): string {
   const lines: string[] = [];
   const nodes = [...r.results.values()];
   const cooked = nodes.filter((n) => !n.cached && !n.error).length;
@@ -68,8 +73,7 @@ function reportText(name: string, r: CookReport, extraNotes: string[] = [], extr
     if (r.warnings.length > 15) lines.push(`  … ${r.warnings.length - 15} more`);
   }
   if (r.geo) lines.push(summarize(r.geo));
-  const slow = nodes.filter((n) => n.ms > 50).sort((a, b) => b.ms - a.ms).slice(0, 4);
-  if (slow.length) lines.push(`slowest: ${slow.map((n) => `${n.node} ${n.ms.toFixed(0)}ms`).join(', ')}`);
+  lines.push(...timingLines(r, scriptLimitMs));
   const stats = nodes.filter((n) => n.stats);
   if (stats.length) lines.push(`stats: ${stats.slice(0, 6).map((n) => `${n.node} ${Object.entries(n.stats!).map(([k, v]) => `${k}=${v}`).join(' ')}`).join('; ')}`);
   const timed = nodes.filter((n) => n.timeDependent).map((n) => n.node);
@@ -171,7 +175,10 @@ const RENDER_PROPS = {
   legend: { type: 'boolean', description: 'legend for color_by (gradient bar with min/max, or categorical swatches) and highlight' },
   shading: { type: 'string', enum: ['default', 'flat', 'matcap', 'ao', 'pbr'], description: 'flat: facets (ignores N); matcap: clay that reads form; ao: screen-space ambient occlusion darkens creases and cavities; pbr: the exported metallic-roughness material (base colour, normal, orm/roughness maps, emissive, unlit) under a fixed studio light rig, deterministic' },
   exposure: { type: 'number', description: 'shading "pbr": exposure in stops (default 0)' },
+  grey: { type: 'boolean', description: 'value check: shading "pbr" (implied) with every base colour a neutral 18% grey under the studio rig at its luminance (no hue anywhere); base colour maps and Cd give no colour, roughness/metallic/normal/orm maps, alpha and emissive still apply' },
+  cd: { type: 'string', enum: ['auto', 'ignore', 'multiply'], description: 'shading "pbr": vertex colour Cd. auto (default, as glTF export): a named material\'s base colour (factor or map) wins and Cd colours only prims without a material; ignore: Cd never shown; multiply: Cd also tints a named material\'s base colour (vertex paint)' },
   ao_radius: { type: 'number', description: 'shading "ao": sample radius in pixels (default 10)' },
+  camera: { type: 'object', properties: { from: { type: 'array', items: { type: 'number' } }, to: { type: 'array', items: { type: 'number' } }, fov: { type: 'number' } }, description: 'a camera by position for the persp view, instead of the fit: {from: [x, y, z] (the eye), to: [x, y, z] (where it looks), fov: degrees across the width of the view (default 40)}, world metres, +Y up. Nothing is fitted, so the render matches a concept or game camera (give size the aspect of the concept; an underlay fills the view); azimuth, elevation, look_at, zoom and bounds do not move it. Without views the render is that one persp view; ortho views still fit' },
   look_at: { type: 'array', items: { type: 'number' }, description: 'look-at point [x, y, z] in world metres (x right, y up, z towards the front; default the bbox centre): the view centres on it and still fits the bounds; with zoom > 1 it zooms into that point' },
   bounds: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'world-space [[x0, y0, z0], [x1, y1, z1]] (min then max, metres, Y up): every 3D view frames these bounds instead of the box of the geometry, so renders of different geometries share one camera (timelapse frames, turntable azimuths)' },
   footer: { type: 'boolean', description: 'false leaves out the footer strip (the image is exactly the tiles; annotate is then ignored); default true' },
@@ -210,7 +217,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
 
   /** The text (+ optional render) of a cook report. */
   const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
-    const content: Content[] = [{ type: 'text', text: reportText(name, r, extraNotes, await kindWarnings(name, r, a.frame)) }];
+    const content: Content[] = [{ type: 'text', text: reportText(name, r, engine.scriptTimeoutMs, extraNotes, await kindWarnings(name, r, a.frame)) }];
     if (r.geo && a.render) {
       const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`, ws.dir);
       const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
@@ -229,22 +236,43 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     return reportResult(name, r, a, extraNotes);
   };
 
+  /**
+   * export {follow}: the packages whose working folders the export uses (each followed this session), checked; an
+   * export that would cook a followed package with no published version in use from published copies is refused.
+   */
+  const exportFollow = (a: any, spec: GraphSpec): string[] => {
+    const follow: string[] = a.follow === undefined ? [] : (Array.isArray(a.follow) ? a.follow : [a.follow]).map(String);
+    const followed = new Set((ws.packages?.following?.() ?? []).map((f) => f.package));
+    for (const p of follow) {
+      if (!followed.has(p)) throw new Error(`follow: this session does not follow ${p}: workspace {action:"follow", package:"${p}", on:true} follows its working folder (renders show it too), then export {follow:["${p}"]} exports from it`);
+    }
+    const missing = ws.packages?.unpublished?.(spec, follow) ?? [];
+    if (missing.length) {
+      throw new Error(`export: ${missing.map((u) => u.package).join(', ')} ${missing.length === 1 ? 'has' : 'have'} no published version in use (this session shows ${missing.length === 1 ? 'its working folder' : 'their working folders'}, for looking): `
+        + `${missing.map((u) => `publish ${u.package} (${program()} publish ${u.dir} --note "...") or pass follow:["${u.package}"] to export from its working folder`).join('; ')}; nothing was written`);
+    }
+    return follow;
+  };
+
   const resolveNodeGeo = async (a: any, forExport = false) => {
     const name = a.graph ?? a.name ?? 'main'; // `name` is what build/edit call it; accept both
     const g = ws.getGraph(name);
     const target = a.node || undefined;
-    // an export uses the published copies of the packages the session shows live (following is for looking)
-    const scope = forExport && ws.packages?.publishedNote?.(g) ? ws.packages.published?.() : null;
+    // an export uses the published copies of the packages the session shows live (following is for looking), but
+    // the working folders of those export {follow} names
+    const follow = forExport ? exportFollow(a, g) : [];
+    const scope = forExport && ws.packages?.publishedNote?.(g, follow) ? ws.packages.published?.(follow) : null;
     const r = await engine.cook(g, { target, frame: a.frame, ...(scope ? { scope } : {}) });
-    if (!r.ok || !r.geo) throw new Error(reportText(name, r));
-    return { r, name, geo: r.geo, scope };
+    if (!r.ok || !r.geo) throw new Error(reportText(name, r, engine.scriptTimeoutMs));
+    return { r, name, geo: r.geo, scope, follow };
   };
-  /** What an export of a graph made while following says (the published versions it used), on a line of its own. */
-  const publishedLine = (spec: GraphSpec) => { const n = ws.packages?.publishedNote?.(spec); return n ? `\n${n}` : ''; };
+  /** What an export of a graph made while following says (the working folders and published versions it used), on a line of its own. */
+  const publishedLine = (spec: GraphSpec, follow: string[]) => { const n = ws.packages?.publishedNote?.(spec, follow); return n ? `\n${n}` : ''; };
 
   /** export without a path: the graph's targets (the default output's, a named one's, or all), inside exports/ */
   const exportTargets = async (a: any): Promise<ToolResult> => {
     const name = a.graph ?? a.name ?? 'main', spec = ws.getGraph(name);
+    const follow = exportFollow(a, spec);
     const published = publishedOutputs(name, spec, engine.findOutput(spec).name);
     const hint = (o: string | undefined) => `edit {ops:[{op:"export"${o === undefined ? '' : `, output:"${o}"`}, export:"glb"}]}`;
     let chosen = published;
@@ -258,14 +286,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     if (!targets.length) return text(`no output of "${name}" has an export target: set one with ${hint(undefined)}, or pass path`, true);
     const prepared: PreparedTarget[] = [];
     for (const p of targets) {
-      const r = await ws.cook(name, p.node, a.frame, { kind: 'export' });
-      if (!r.ok || !r.geo) return text(reportText(name, r), true);
-      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.() ?? engine.root) }));
+      const r = await ws.cook(name, p.node, a.frame, { kind: 'export', follow });
+      if (!r.ok || !r.geo) return text(reportText(name, r, engine.scriptTimeoutMs), true);
+      prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root), files: filesShaFor(ws.graphFile(name)) }));
     }
     writeTargets(prepared, ws.exportDir);
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
     return text(prepared.map((p) => exportReport(p.files, p.root, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
-      + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : '') + publishedLine(spec));
+      + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : '') + publishedLine(spec, follow));
   };
 
   const tools: ToolDef[] = [
@@ -290,11 +318,12 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'help',
-      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its params, inputs, version and note, also one search found that the package does not use yet) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
-      inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` } } },
+      description: `Exact docs for node types (params with types, defaults, ranges, aliases; inputs; examples; a package output "owner/name/output": its params, inputs, version and note, also one search found that the package does not use yet), complete worked examples (topic "examples" lists them; examples:[name] gives one's card and graph to build and adapt) and concept topics: ${topicList().join(', ')}. Call before using unfamiliar nodes.`,
+      inputSchema: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'node type names' }, topic: { type: 'string', description: `one of: ${topicList().join(', ')}, overview` }, examples: { type: 'array', items: { type: 'string' }, description: 'example names (help topic "examples" lists them): each one\'s card (what goes in, what comes out, what it promises) and its graph' } } },
       run: async (a) => {
         const out: string[] = [];
         if (a.topic) out.push(topicText(String(a.topic)) ?? `unknown topic "${a.topic}". Topics: overview, ${topicList().join(', ')}`);
+        for (const n of a.examples ?? []) out.push(exampleText(String(n)));
         for (const n of a.nodes ?? []) {
           const d = engine.resolveDef(n);
           if (!d && String(n).includes('/')) {
@@ -314,14 +343,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'build',
-      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph. dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value.',
+      description: 'Create or replace a whole node graph and cook it. Returns per-node errors with hints, warnings, and a summary of the output geometry (counts, bbox, attributes, groups). mode "merge" upserts nodes into the existing graph; mode "refresh" replaces it with a regenerated graph but keeps what a person tuned on it (the var values they changed, when they still fit; control labels and steps; node ui; meta): use it when regenerating a graph a person works on (help topic "graph"). dry_run validates and resolves params without cooking. render:true (or render options) also returns an image. Expose the 3–8 vars a human would tune: declare "params": {var: {type, desc, min, max, options, label, step}}; the live viewer shows them as controls. Humans may change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var\'s value.',
       inputSchema: {
         type: 'object',
         required: ['graph'],
         properties: {
-          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not published), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc", "min", "max", "options", "label", "step"}}}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
+          graph: { type: 'object', description: '{"nodes": {name: {"type", "in", "params"}}, "output": name, "outputs": {id: {"node": name, "label": "Published result", "export": "glb", "publish": false (not published), "kind": "mesh" (pinned: build warns and publishing blocks when it cooks to another kind), "tags": ["conifer", "low-poly"], "description": "what it is"}}, "export": "glb", "vars": {...}, "params": {var: {"type", "desc" (required: what it does and its unit, the control hover text), "min", "max" (the slider range), "options", "label", "step", "group" (a heading in the viewer Controls)}}, "strict": true (a value outside a param range fails the node instead of clamping with a warning; "strict" on a node overrides it)}. Publish intended deliverables in outputs; output remains the default. A node "type" "owner/name/output" is an output of a package (help topic "packages"). "export" (on the graph for the default output, or on a named output) is where it exports: a format, or {format, path?, ...export options}, written inside exports/ by the viewer\'s Export buttons and export {output} / {all:true}.' },
           name: { type: 'string', description: 'graph name (default "main")' },
-          mode: { type: 'string', enum: ['replace', 'merge'] },
+          mode: { type: 'string', enum: ['replace', 'merge', 'refresh'] },
           dry_run: { type: 'boolean' },
           render: { description: 'true or render options (views, color_by, …)', anyOf: [{ type: 'boolean' }, { type: 'object' }] },
           ...FRAME_PROP,
@@ -333,11 +362,14 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         if (typeof spec === 'string') spec = JSON.parse(spec);
         spec = spec;
         if (a.mode === 'merge' && ws.graphs.has(name)) spec = ws.mergeGraph(name, spec);
+        // a regenerated graph over the one a person tuned (src/graph/refresh.ts)
+        let refreshed: string[] = [];
+        if (a.mode === 'refresh') { const rf = refreshGraph(ws.graphs.get(name) ?? { nodes: {} }, spec); spec = rf.graph; refreshed = refreshNotes(rf); }
         if (a.dry_run) {
           // a package the graph names for the first time: checked against the version a build adds, nothing copied
           const dry = ws.dryScope(spec);
           const d = engine.dryRun(spec, undefined, dry.scope);
-          const first = dry.notes.map((n) => `\nnote: ${n}`).join('');
+          const first = [...dry.notes, ...refreshed].map((n) => `\nnote: ${n}`).join('');
           return text(d.errors.length
             ? `✗ ${d.errors.length} error(s):\n` + d.errors.map((e) => `  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`).join('\n') + first
             : `✓ valid: ${Object.keys(spec.nodes).length} nodes, output "${d.output}"` + (d.notes.length ? '\nnotes: ' + d.notes.join('; ') : '') + first, d.errors.length > 0);
@@ -348,7 +380,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         // packages the graph names for the first time join the package
         const added = ws.packages?.addFor(spec) ?? [];
         ws.setGraph(name, spec);
-        return cookAndReport(name, a, added);
+        return cookAndReport(name, a, [...added, ...refreshed]);
       },
     },
     {
@@ -384,6 +416,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           export_options: { type: 'object', description: 'detail "scene": export options as the export tool takes them (up_axis, scale, split_by_name, materials, custom_attribs, tangents, instancing, compress …)' },
           uv_attrib: { type: 'string', description: 'detail "uv": the uv attribute (default "uv")' },
           resolution: { description: 'detail "uv": texture size in texels for texel density, n or [width, height]', anyOf: [{ type: 'number' }, { type: 'array', items: { type: 'number' } }] },
+          per_piece: { type: 'boolean', description: 'detail "uv": every prim "name" (one object of a multi-object OBJ) has its own uv space: test overlaps within each piece only and report overlaps and utilization per piece' },
           json: { type: 'boolean', description: 'detail "uv", "budget" or "scene": append the report as JSON' },
           class: { type: 'string', enum: ['point', 'prim', 'vertex', 'detail', 'edge'], description: 'element class; "edge" lists unique edges (point pair, length, polygon count, dihedral angle, edge groups)' },
           attribs: { type: 'array', items: { type: 'string' } },
@@ -406,7 +439,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           return text([head, ...sceneReportText(rep), ...ex.warnings.map((w) => `warning: ${w}`), ...(a.json ? ['scene (JSON):', JSON.stringify(rep)] : [])].join('\n'));
         }
         const nodes = a.detail === 'budget' ? nodeBudgetInput(ws.getGraph(name), r.results) : undefined;
-        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, json: a.json, nodes }));
+        return text(head + '\n' + inspect(geo, { detail: a.detail, cls: a.class, attribs: a.attribs, start: a.start, count: a.count, group: a.group, uvAttrib: a.uv_attrib, uvResolution: a.resolution, uvPerPiece: a.per_piece, json: a.json, nodes }));
       },
     },
     {
@@ -440,7 +473,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'export',
-      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the package. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG, usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]). Every export records how it was made (graph, vars, seeds, frame, version) in its sidecar or in <file>.source.json next to it (help topic "export").',
+      description: 'Write a node\'s output to a file: .glb/.gltf (glTF via gltf-transform: materials + texture maps, vertex colours, uv, custom attributes, EXT_mesh_gpu_instancing with per-instance attributes, meshopt compression; best for Unreal/Blender/web), .obj, .usda (PointInstancer with per-instance primvars, UsdPreviewSurface materials), .ply, .stl, .geo (Houdini JSON geometry, every attribute and group, packed prims as PackedGeometry), .csv (point stream; pcg:true for Unreal PCG columns; packed instances = one row per instance + Mesh column + .meshes.json sidecar + one GLB per source), .points.json, .json (lossless topotopo). Relative paths go into the package. help {topic:"export"} for details. Heightfields: png16 (.png, 16-bit Unreal Landscape heightmap) or r16 (.r16/.raw) plus a .json sidecar with the height range and the Unreal scale/location, mask_png (8-bit weight layers; param layers), unreal_landscape (a directory: heightmap, every layer, manifest with the exact Landscape import settings, objects.glb and the instance stream). Textures: glb/gltf embed the image textures of materials (texture_to_material) as PNG (maps: external writes them once into a shared maps/ folder, none leaves them out), usda writes them to <name>_textures/ next to the file, format textures writes every image as <path>/<image>.png (layers: extra layers, or ["*"]). Every export records how it was made (graph, vars, seeds, frame, version) in its sidecar or in <file>.source.json next to it (help topic "export").',
       inputSchema: {
         type: 'object',
         properties: {
@@ -461,6 +494,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           custom_attribs: { type: 'boolean', description: 'glTF/PLY/USD: include extra numeric attributes (glTF _NAME vertex and per-instance accessors, PLY properties, USD primvars; default false for glb/gltf/usda, true for ply). The CLI flag is --custom-attribs / --no-custom-attribs' },
           materials: { type: 'boolean', description: 'glTF: write materials from the prim "material" attribute + table (default true)' },
           vertex_colors: { type: 'boolean', description: 'glTF: also write Cd as COLOR_0 on prims that have a named material (default false: the material decides their colour; prims without one keep their Cd)' },
+          maps: { type: 'string', enum: ['embed', 'external', 'none'], description: 'glTF texture maps: embed (default) = the images inside the file; external = each image written once into a shared maps/ folder (beside the export; export targets share exports/maps/) and referenced by relative URI; none = material names and factors only, no images (an engine that supplies the maps by material name). CLI --maps' },
           compress: { type: 'string', enum: ['none', 'meshopt', 'draco'], description: 'glTF: meshopt = EXT_meshopt_compression + quantization; draco needs the optional draco3dgltf package' },
           quantize: { type: 'boolean', description: 'glTF: KHR_mesh_quantization (smaller, lossy) without compression' },
           tangents: { type: 'string', enum: ['auto', 'preserve', 'none'], description: 'glTF TANGENT: auto (default) = MikkTSpace for normal-mapped materials, a valid supplied "tangent" attribute elsewhere; preserve = the supplied attribute wherever it exists (malformed = error); none = never' },
@@ -471,22 +505,23 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           instancing: { type: 'string', enum: ['packed', 'expand'], description: 'packed prims: glb/gltf (EXT_mesh_gpu_instancing), usda (PointInstancer) and geo (PackedGeometry) keep instances by default; expand writes real copies' },
           instances: { type: 'string', enum: ['rows', 'expand'], description: 'csv / points.json of packed prims: rows (default) = one row per instance (full transform, Mesh column, anchor attributes) + <name>.meshes.json + <name>_meshes/<Mesh>.glb; expand = the points of the expanded geometry' },
           meshes: { type: 'boolean', description: 'instance rows: also write one GLB per packed source (default true)' },
+          follow: { type: 'array', items: { type: 'string' }, description: 'packages ("owner/name") this session follows (workspace {action:"follow"}) whose working folders the export uses instead of their published copies: for a package with no published version yet, or edits not yet published. The source record lists them under "followed". Without it an export uses the published copies' },
           ...FRAME_PROP,
         },
       },
       run: async (a) => {
         if (a.path === undefined) return exportTargets(a);
-        const { geo, name, r, scope } = await resolveNodeGeo(a, true);
+        const { geo, name, r, scope, follow } = await resolveNodeGeo(a, true);
         const p = path.resolve(ws.dir, a.path);
         const fmt0 = String(a.format ?? exportFormatFromPath(p)).toLowerCase();
         const ext = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[fmt0] ?? fmt0) as ExportFormat;
         if (!EXPORT_FORMATS.includes(ext)) throw new Error(`unknown format "${ext}"; use ${EXPORT_FORMATS.map((f) => (f === 'pointsjson' ? '.points.json' : '.' + f)).join(' ')}`);
         const source = exportSource({
           graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
-          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), version: TOPOTOPO_VERSION,
+          format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), files: filesShaFor(ws.graphFile(name)), version: TOPOTOPO_VERSION, engine: engineSha256(),
         });
         const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
-        return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name))}`);
+        return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name), follow)}`);
       },
     },
     {

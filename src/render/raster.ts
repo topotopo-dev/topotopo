@@ -29,10 +29,10 @@ import { heightfieldPreviewStep, isHeightfield, layerStats, withHeightfieldPrevi
 import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler, withMaterialPreview } from './texview.ts';
 import { EMPTY_ATTRIB } from '../core/scene.ts';
-import { pbrScene, preparePBR } from './pbr.ts';
+import { ALPHA_BLEND, ALPHA_MASK, pbrScene, preparePBR } from './pbr.ts';
 import { loadMikkTSpace } from '../core/tangents.ts';
-import { decodePNG } from '../io/png-decode.ts';
-import type { PBRScene, PBRTextures } from './pbr.ts';
+import { decodePNG, lfsPointerNote } from '../io/png-decode.ts';
+import type { PBRScene, PBRTextures, VertexColorMode } from './pbr.ts';
 
 /**
  * 3D views, 'persp@<azimuth>' (a persp view at that azimuth), 'section' (the cut through the section plane,
@@ -115,6 +115,13 @@ export interface RenderOptions {
   zoom?: number;
   /** look-at point in world coordinates (x right, y up, z towards the front; default the bbox centre); the views still fit the bounds around it */
   target?: Vec3 | null;
+  /**
+   * a camera by position for the persp views instead of the fit: the eye at from (world metres), looking at to, with
+   * world +Y up, fov degrees across the view's width (default 40). Nothing is fitted: what the lens sees is what is
+   * drawn, so it matches a concept or game camera. azimuth, elevation, look_at, zoom and bounds do not move it; ortho
+   * and section views still fit. Without views the render is the one persp view; an underlay fills that view
+   */
+  camera?: RenderCamera | null;
   ssaa?: number;
   /** packed instances: triangles to draw at most (default RENDER_TRIANGLE_BUDGET, 600k; up to 50M); above it an evenly spread subset */
   maxTriangles?: number;
@@ -165,6 +172,18 @@ export interface RenderOptions {
   exposure?: number;
   /** shading 'pbr': texture files read by renderGeometryAsync (preparePBR); image volumes need none */
   pbrTextures?: PBRTextures;
+  /**
+   * shading 'pbr': how vertex colour Cd enters the base colour. 'auto' (default, the glTF export rule): a named
+   * material's base colour (factor or map) wins and Cd colours only prims without a material; 'ignore': Cd is never
+   * used; 'multiply': Cd also multiplies a named material's base colour (vertex paint as a tint)
+   */
+  vertexColors?: VertexColorMode;
+  /**
+   * value check: shading 'pbr' (implied when shading is not given) with every base colour replaced by a neutral 18%
+   * grey (linear 0.18); base colour maps and Cd give no colour, while alpha, roughness, metallic, normal and orm maps,
+   * emissive and unlit still apply
+   */
+  grey?: boolean;
   /** ao sample radius in output pixels (default 10) */
   aoRadius?: number;
   /** ortho and section views: world width in metres visible across a view (default: fit the bounds) */
@@ -179,6 +198,20 @@ export interface RenderOptions {
   textures?: boolean;
   /** 'texture' view: "" = every image, an image name, "image/layer", or a material name (its maps as a strip) */
   texture?: string;
+}
+
+/** A camera by position (RenderOptions.camera): eye, look-at point, horizontal field of view in degrees. */
+export interface RenderCamera { from: Vec3; to: Vec3; fov?: number }
+/** The horizontal field of view of a camera by position when none is given (degrees; about a 50 mm lens on 36 mm film). */
+export const CAMERA_FOV = 40;
+
+/** Throws when a camera by position cannot be used: from and to equal or not finite, fov outside 0..180 (exclusive). */
+export function checkCamera(c: RenderCamera): void {
+  const ok3 = (v: unknown) => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+  if (!ok3(c.from) || !ok3(c.to)) throw new Error(`render: camera expects from [x, y, z] and to [x, y, z] in world metres, got ${JSON.stringify(c)}`);
+  if (Math.hypot(c.to[0] - c.from[0], c.to[1] - c.from[1], c.to[2] - c.from[2]) < 1e-9) throw new Error('render: camera from and to are the same point; to is where the camera looks');
+  const fov = c.fov ?? CAMERA_FOV;
+  if (!(fov > 0 && fov < 180)) throw new Error(`render: camera fov is degrees across the view's width, above 0 and below 180, got ${c.fov}`);
 }
 
 /** The most quads per side a heightfield is drawn with by default (RenderOptions.heightfieldRes). */
@@ -214,6 +247,8 @@ const SHADING_MODES = ['default', 'flat', 'matcap', 'ao', 'pbr'];
 /** The automatic wireframe draws polygon edges up to this many polygons. */
 export const AUTO_WIRE_MAX = 6000;
 const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9], SOCKET_C = [0.35, 1, 0.72];
+/** Barycentric tolerance of the blend pass's shared-edge rule. */
+const EDGE_EPS = 1e-9;
 
 export interface RenderResult { width: number; height: number; rgba: Uint8Array; notes: string[] }
 
@@ -235,12 +270,12 @@ const zoomFramed = (o: RenderOptions) => !!o.target || !!(o.orthoScale && o.orth
 const zoomOf = (o: RenderOptions) => { const z = Math.max(0.05, Math.min(20, o.zoom ?? 1)); return z > 1 && !zoomFramed(o) ? 1 : z; };
 
 const ORTHO: Record<string, { f: Vec3; r: Vec3; u: Vec3; label: string }> = {
-  front: { f: [0, 0, -1], r: [1, 0, 0], u: [0, 1, 0], label: 'FRONT  X> Y^' },
-  back: { f: [0, 0, 1], r: [-1, 0, 0], u: [0, 1, 0], label: 'BACK  -X> Y^' },
-  right: { f: [-1, 0, 0], r: [0, 0, -1], u: [0, 1, 0], label: 'RIGHT  -Z> Y^' },
-  left: { f: [1, 0, 0], r: [0, 0, 1], u: [0, 1, 0], label: 'LEFT  Z> Y^' },
-  top: { f: [0, -1, 0], r: [1, 0, 0], u: [0, 0, -1], label: 'TOP  X> -Z^' },
-  bottom: { f: [0, 1, 0], r: [1, 0, 0], u: [0, 0, 1], label: 'BOTTOM  X> Z^' },
+  front: { f: [0, 0, -1], r: [1, 0, 0], u: [0, 1, 0], label: 'FRONT (+Z)  X> Y^' },
+  back: { f: [0, 0, 1], r: [-1, 0, 0], u: [0, 1, 0], label: 'BACK (-Z)  -X> Y^' },
+  right: { f: [-1, 0, 0], r: [0, 0, -1], u: [0, 1, 0], label: 'RIGHT (+X)  -Z> Y^' },
+  left: { f: [1, 0, 0], r: [0, 0, 1], u: [0, 1, 0], label: 'LEFT (-X)  Z> Y^' },
+  top: { f: [0, -1, 0], r: [1, 0, 0], u: [0, 0, -1], label: 'TOP (+Y)  X> -Z^' },
+  bottom: { f: [0, 1, 0], r: [1, 0, 0], u: [0, 0, 1], label: 'BOTTOM (-Y)  X> Z^' },
 };
 
 /** persp, persp@<azimuth> and the named three-quarter views are perspective views. */
@@ -317,6 +352,16 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
       ? { hx: Math.max(Math.abs(x0), Math.abs(x1)), hy: Math.max(Math.abs(y0), Math.abs(y1)), cx: 0, cy: 0 }
       : { hx: (x1 - x0) / 2, hy: (y1 - y0) / 2, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
   };
+  if (kind === 'persp' && o.camera) {
+    // a camera by position: the eye where it was put, a lens of fov across the width, nothing fitted
+    const { from, to } = o.camera, fov = ((o.camera.fov ?? CAMERA_FOV) * Math.PI) / 180;
+    const f = norm3([to[0] - from[0], to[1] - from[1], to[2] - from[2]]);
+    let r = cross3(f, [0, 1, 0]);
+    if (Math.hypot(...r) < 1e-6) r = cross3(f, [0, 0, f[1] > 0 ? 1 : -1]); // straight down: screen up is -Z, up: +Z
+    r = norm3(r);
+    const u = cross3(r, f);
+    return { name, persp: true, eye: [from[0], from[1], from[2]], f, r, u, c: [to[0], to[1], to[2]], focal: W / 2 / Math.tan(fov / 2), scale: 1, ox: W / 2, oy: H / 2 };
+  }
   if (kind === 'persp') {
     const az = ((azDeg ?? o.azimuth ?? 35) * Math.PI) / 180, el = ((o.elevation ?? 25) * Math.PI) / 180;
     const fov = (32 * Math.PI) / 180;
@@ -347,6 +392,7 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
  * Host.readFile); every other mode renders exactly as renderGeometry does.
  */
 export async function renderGeometryAsync(g: Geometry, o: RenderOptions = {}, readFile?: (path: string) => Promise<Uint8Array>): Promise<RenderResult> {
+  o = greyShading(o);
   if (o.shading === 'pbr' && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
   if (o.underlay && !o.underlayImage) o = { ...o, underlayImage: await readUnderlay(o.underlay, readFile) };
   // last, so no other task replaces the MikkTSpace instance between this and the synchronous render
@@ -359,6 +405,8 @@ export async function readUnderlay(p: string, readFile?: (path: string) => Promi
   if (!readFile) throw new Error(`render: underlay "${p}": no file access in this render`);
   let bytes: Uint8Array;
   try { bytes = await readFile(p); } catch (e: any) { throw new Error(`render: underlay "${p}" cannot be read (${e?.message ?? e})`); }
+  const lfs = lfsPointerNote(bytes);
+  if (lfs) throw new Error(`render: underlay "${p}" is not a PNG: ${lfs}`);
   if (!(bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47)) throw new Error(`render: underlay "${p}" is not a PNG (only PNG reference images are read; convert it to PNG)`);
   let img: ReturnType<typeof decodePNG>;
   try { img = decodePNG(bytes); } catch (e: any) { throw new Error(`render: underlay "${p}" is not a readable PNG (${e?.message ?? e})`); }
@@ -374,8 +422,16 @@ export async function readUnderlay(p: string, readFile?: (path: string) => Promi
   return { width: img.width, height: img.height, rgba };
 }
 
+/** grey is a pbr value check: it implies shading 'pbr' and refuses another shading. */
+function greyShading(o: RenderOptions): RenderOptions {
+  if (!o.grey || o.shading === 'pbr') return o;
+  if (o.shading && o.shading !== 'default') throw new Error(`render: grey is a value check of shading "pbr" (given shading "${o.shading}"); leave shading out or set it to "pbr"`);
+  return { ...o, shading: 'pbr' };
+}
+
 /** Render the geometry; returns RGBA pixels. Shading 'pbr' needs renderGeometryAsync first (or MikkTSpace loaded). */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
+  o = greyShading(o);
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
   if (g.hasPacked() || g.hasSplines()) {
     const budget = o.maxTriangles !== undefined && o.maxTriangles > 0 ? Math.min(o.maxTriangles, 50_000_000) : undefined;
@@ -405,7 +461,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const vlist = typeof (o.views as unknown) === 'string' ? parseViews(o.views as unknown as string) : o.views;
   // images and nothing else to draw in 3D: the texture view (render/texview.ts)
   const onlyImages = !g.numPoints && g.volumes.length > 0 && g.volumes.every((v) => v.kind === 'image');
-  const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : materialOnly ? ['persp'] : ['persp', 'front', 'right', 'top'];
+  if (o.camera) checkCamera(o.camera);
+  const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : materialOnly || o.camera ? ['persp'] : ['persp', 'front', 'right', 'top'];
   const ui = Math.max(1, Math.min(4, Math.round(o.scale ?? 1)));
   // tile size: n (square) or [width, height] pixels per view, before scale
   const sz0 = o.size ?? (views.length === 1 ? 800 : 512);
@@ -426,7 +483,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   if (o.shading && !SHADING_MODES.includes(o.shading)) throw new Error(`unknown shading "${o.shading}" (use ${SHADING_MODES.join(', ')})`);
   const shadingMode = o.shading && o.shading !== 'default' ? o.shading : null;
   // reference image behind the 3D views
-  const ulFit: UnderlayFit = o.underlayFit ?? 'bounds';
+  const ulFit: UnderlayFit = o.underlayFit ?? (o.camera ? 'view' : 'bounds');
   if (!UNDERLAY_FITS.includes(ulFit)) throw new Error(`unknown underlay_fit "${o.underlayFit}" (use ${UNDERLAY_FITS.join(', ')})`);
   const ulOpacity = Math.max(0, Math.min(1, o.underlayOpacity ?? 0.5));
   if (o.underlayOpacity !== undefined && !Number.isFinite(o.underlayOpacity)) throw new Error(`render: underlay_opacity expects 0..1, got ${o.underlayOpacity}`);
@@ -448,7 +505,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const notes: string[] = hfShown.map((x) =>
     `heightfield "${x.v.name}" shown at ${x.shown[0]}×${x.shown[1]} of ${x.v.width}×${x.v.height} samples (1 in ${x.step} per side); heightfield_res "full" (CLI --heightfield-res full) draws every sample`);
   notes.push(...hfNotes);
-  if ((o.zoom ?? 1) > 1 && !zoomFramed(o)) notes.push(`zoom ${fmtNum(o.zoom!)}: held at 1, the fit (the views fit the bounds; a zoom above 1 would crop them): add look_at [x, y, z] to zoom into a point`);
+  if (o.camera && views.some(isPerspView)) {
+    const unused = [o.azimuth !== undefined && 'azimuth', o.elevation !== undefined && 'elevation', o.target && 'look_at', o.zoom !== undefined && 'zoom', o.bounds && 'bounds'].filter(Boolean);
+    if (unused.length) notes.push(`camera: ${unused.join(', ')} ${unused.length === 1 ? 'does' : 'do'} not move a camera by position (from, to, fov); the persp view stands where the camera puts it`);
+  }
+  if ((o.zoom ?? 1) > 1 && !zoomFramed(o) && !o.camera) notes.push(`zoom ${fmtNum(o.zoom!)}: held at 1, the fit (the views fit the bounds; a zoom above 1 would crop them): add look_at [x, y, z] to zoom into a point`);
   if (o.underlayImage && o.transparent) notes.push('underlay: not drawn on a transparent background');
 
   // --- scene data shared by all views
@@ -464,7 +525,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const nrmOf = (v: number, out: number[]) => { out[0] = vnorm[v * 3]; out[1] = vnorm[v * 3 + 1]; out[2] = vnorm[v * 3 + 2]; };
   // back faces are only suspicious on closed pieces (closed once the vertex splits of uv / normal seams are welded, as
   // an imported mesh has them); open sheets / cards are shaded two-sided. The pieces are the welded ones (core/report.ts).
-  const solid = nTri ? solidReport(g, { tri: { tris, triPrim }, flips: false }) : null;
+  const solid = nTri ? solidReport(g, { tri: { tris, triPrim }, flips: false, inward: false }) : null;
   const pieceOf = solid ? solid.primPiece : new Int32Array(0), closedPiece = solid ? solid.pieceClosed : new Uint8Array(0);
 
   // --- colours per vertex (Cd, colour-by, highlight)
@@ -484,12 +545,13 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const a = f.attr;
       const ci = comp ? 'xyzwrgb'.indexOf(comp) % 4 : -1;
       if (a.type === 'string' || (a.type === 'int' && a.size === 1)) {
+        // distinct values, counted up to 100,000 (a Set stops at 2^24 entries; the legend shows a few dozen)
         const seen = new Set<any>();
-        for (let i = 0; i < a.count; i++) seen.add(a.get(i));
+        for (let i = 0; i < a.count && seen.size < 100_000; i++) seen.add(a.get(i));
         const toKey = (x: any) => (typeof x === 'string' ? hashStr(x) : x);
         colorOf = (v) => catColor(toKey(a.get(elemIndex(f.cls, v))));
         pointColorOf = f.cls === 'point' ? (p) => catColor(toKey(a.get(p))) : () => null;
-        legend = `COLOR BY ${aname} (${seen.size} VALUES)`;
+        legend = `COLOR BY ${aname} (${seen.size < 100_000 ? seen.size : '100000+'} VALUES)`;
         if (o.legend) cbLegend = categoryLegend(`COLOR BY ${aname}`, seen, (x) => catColor(toKey(x)));
       } else {
         const scalar = (i: number) => {
@@ -528,7 +590,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       colorOf = (v) => get(elemIndex(f.cls, v));
       if (f.cls === 'point') pointColorOf = (p) => get(p);
     }
-    // material base colours where there is no colour (no Cd, or Houdini's default white), as glTF export does
+    // material base colours where there is no colour (no Cd, or Houdini's default white); an inspection view, so Cd
+    // stays visible here (shading 'pbr' follows the export rule: a named material wins)
     const pm = primMaterials(g), table = pm ? readMaterials(g) : null;
     if (pm && table && Object.keys(table).length) {
       const cd = colorOf, hasCd = !!(f && f.attr.type === 'float');
@@ -651,13 +714,22 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const flatN = shadingMode === 'flat' && nTri ? primNormals(g) : null;
   const matcap = shadingMode === 'matcap';
   let pbrS: PBRScene | null = null;
+  const pbrBlend: { prim: number; tris: number[] }[] = [];
   if (shadingMode === 'pbr' && nTri) {
     const ev = o.exposure ?? 0;
     if (!Number.isFinite(ev)) throw new Error(`render: exposure expects a number of stops, got ${o.exposure}`);
-    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes);
+    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes, { vertexColors: o.vertexColors, grey: !!o.grey });
     // color_by and highlight tint the shaded material (their colour, lit by its brightness); the checker is not shown
     if (o.checker) notes.push('pbr: checker is not shown under shading "pbr" (color_by and highlight tint the material)');
-    ovDesc.push(`SHADING PBR STUDIO EV ${fmtNum(ev)} (${pbrS.summary.toUpperCase()})`);
+    const cdMode = o.vertexColors && o.vertexColors !== 'auto' ? ` CD ${o.vertexColors.toUpperCase()}` : '';
+    ovDesc.push(`SHADING PBR${o.grey ? ' GREY 18%' : ''} STUDIO EV ${fmtNum(ev)}${cdMode} (${pbrS.summary.toUpperCase()})`);
+    // blend triangles grouped by prim, for the back-to-front pass of each view
+    // (a prim's triangles are consecutive, so no Map by prim: a Map stops at 2^24 entries)
+    for (let t = 0; t < nTri; t++) {
+      if (pbrS.triAlpha[t] !== ALPHA_BLEND) continue;
+      const last = pbrBlend[pbrBlend.length - 1];
+      if (last && last.prim === triPrim[t]) last.tris.push(t); else pbrBlend.push({ prim: triPrim[t], tris: [t] });
+    }
   } else if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
   // section / clip planes
   const planeAt = (k: number, off: number | undefined, abs: boolean | undefined) => (abs ? off ?? 0 : bmin[k] + (bmax[k] - bmin[k]) * (off ?? 0.5));
@@ -930,7 +1002,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     // downsample a finished tile into the output, draw the output-resolution overlays (post), label it. Transparent
     // 3D views (zb given): alpha = the covered fraction of each pixel's samples and the colour of those samples alone;
     // whatever post and the label draw is opaque
-    const blit = (label: string, post?: () => void, zb?: Float32Array) => {
+    const blit = (label: string, post?: () => void, zb?: Float32Array, bA?: Float32Array | null) => {
       const inv = 1 / (ss * ss);
       const cover = !!(outA && zb);
       for (let y = 0; y < TH; y++)
@@ -940,6 +1012,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             const zi = (y * ss + j) * W + x * ss + i, k = zi * 3;
             r += col[k]; gg += col[k + 1]; b += col[k + 2];
             if (cover && zb![zi] > -Infinity) { n++; cr += col[k]; cg += col[k + 1]; cb += col[k + 2]; }
+            else if (cover && bA && bA[zi] > 0) { n += bA[zi]; cr += col[k]; cg += col[k + 1]; cb += col[k + 2]; } // premultiplied
           }
           const o1 = (ty + y) * outW + tx + x, k = o1 * 3;
           if (!cover) { out[k] = r * inv; out[k + 1] = gg * inv; out[k + 2] = b * inv; if (outA) outA[o1] = 1; continue; }
@@ -1052,25 +1125,35 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     const na = [0, 0, 0], nb = [0, 0, 0], nc = [0, 0, 0];
     const tn = [0, 0, 0];
     const chk = [0, 0, 0];
-    const pbrUV0 = [0, 0], pbrUV1 = [0, 0], pbrUV2 = [0, 0], pbrV = [0, 0, 0], pbrRGB = [0, 0, 0];
+    const pbrUV0 = [0, 0], pbrUV1 = [0, 0], pbrUV2 = [0, 0], pbrV = [0, 0, 0], pbrRGB = [0, 0, 0, 1];
     const bf = vi === backView ? new Uint8Array(W * H) : null, bfPrim = bf ? new Int32Array(W * H) : null;
-    for (let t = 0; t < nTri; t++) {
+    // shading 'pbr' blend materials: drawn after the opaque pass (blendPass), depth-tested without writing depth and
+    // composited over what is behind; on a transparent background, bA holds their coverage of empty samples (col
+    // premultiplied there)
+    const bA = pbrBlend.length && transparent ? new Float32Array(W * H) : null;
+    let behindCam = 0;
+    const drawTri = (t: number, blendPass: boolean) => {
+      if (pbrS && (pbrS.triAlpha[t] === ALPHA_BLEND) !== blendPass) return;
       const va = tris[t * 3], vb = tris[t * 3 + 1], vc = tris[t * 3 + 2];
       const a = g.vertexPoint[va], b = g.vertexPoint[vb], c = g.vertexPoint[vc];
-      if (cam.persp && (vz[a] < 1e-4 || vz[b] < 1e-4 || vz[c] < 1e-4)) continue;
+      if (cam.persp && (vz[a] < 1e-4 || vz[b] < 1e-4 || vz[c] < 1e-4)) {
+        // a camera by position can stand among the geometry: a triangle partly in front of it is lost, say so
+        if (!blendPass && o.camera && (vz[a] >= 1e-4 || vz[b] >= 1e-4 || vz[c] >= 1e-4)) behindCam++;
+        return;
+      }
       let partial = false, qa = 0, qb = 0, qc = 0;
       if (clipOn) {
         qa = Pd[a * 3 + cK]; qb = Pd[b * 3 + cK]; qc = Pd[c * 3 + cK];
         const ra = (qa - cC) * cS > 0, rb = (qb - cC) * cS > 0, rc = (qc - cC) * cS > 0;
-        if (ra && rb && rc) continue;
+        if (ra && rb && rc) return;
         partial = ra || rb || rc;
       }
       const ax = sx[a], ay = sy[a], bx = sx[b], by = sy[b], cx = sx[c], cy = sy[c];
       const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-      if (Math.abs(area) < 1e-12) continue;
+      if (Math.abs(area) < 1e-12) return;
       let minX = Math.max(0, Math.floor(Math.min(ax, bx, cx))), maxX = Math.min(W - 1, Math.ceil(Math.max(ax, bx, cx)));
       let minY = Math.max(0, Math.floor(Math.min(ay, by, cy))), maxY = Math.min(H - 1, Math.ceil(Math.max(ay, by, cy)));
-      if (minX > maxX || minY > maxY) continue;
+      if (minX > maxX || minY > maxY) return;
       // facing (world space)
       const e1 = [Pd[b * 3] - Pd[a * 3], Pd[b * 3 + 1] - Pd[a * 3 + 1], Pd[b * 3 + 2] - Pd[a * 3 + 2]];
       const e2 = [Pd[c * 3] - Pd[a * 3], Pd[c * 3 + 1] - Pd[a * 3 + 1], Pd[c * 3 + 2] - Pd[a * 3 + 2]];
@@ -1078,7 +1161,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const toCam = cam.persp ? [cam.eye[0] - Pd[a * 3], cam.eye[1] - Pd[a * 3 + 1], cam.eye[2] - Pd[a * 3 + 2]] : [-cam.f[0], -cam.f[1], -cam.f[2]];
       const back = dot3(fnw, toCam) < 0;
       const material = materialNames ? materialTable[materialNames[triPrim[t]]] : undefined;
-      const alphaMask = material?.alphaMode === 'MASK';
+      // shading 'pbr' evaluates its own coverage (base colour maps of any source, vertex Alpha as exported)
+      const alphaMask = !pbrS && material?.alphaMode === 'MASK';
+      const pbrMask = !!pbrS && pbrS.triAlpha[t] === ALPHA_MASK, pbrCut = pbrMask ? pbrS!.cutoff(t) : 0;
       const suspicious = back && !material?.doubleSided && solid !== null && closedPiece[pieceOf[triPrim[t]]] === 1;
       if (flatN) {
         const p = triPrim[t] * 3;
@@ -1095,6 +1180,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         colA = tint(colA); colB = tint(colB); colC = tint(colC);
       }
       const za = cz[a], zb2 = cz[b], zc = cz[c];
+      // blend pass: a pixel centre on an edge shared by two triangles is drawn by exactly one of them (the one whose
+      // opposite vertex lies on a fixed side of the edge), so shared edges are not composited twice
+      const owns = (p0x: number, p0y: number, p1x: number, p1y: number, rx: number, ry: number) => {
+        let nx = p0y - p1y, ny = p1x - p0x;
+        if (nx < 0 || (nx === 0 && ny < 0)) { nx = -nx; ny = -ny; }
+        return nx * (rx - p0x) + ny * (ry - p0y) > 0;
+      };
+      const own0 = blendPass && owns(bx, by, cx, cy, ax, ay), own1 = blendPass && owns(cx, cy, ax, ay, bx, by), own2 = blendPass && owns(ax, ay, bx, by, cx, cy);
       const inv = 1 / area;
       // shading 'pbr': screen-space gradients of the affine weights (uv derivatives for the texture level of detail)
       const g0x = (by - cy) * inv, g0y = (cx - bx) * inv, g1x = (cy - ay) * inv, g1y = (ax - cx) * inv;
@@ -1112,7 +1205,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           let w0 = ((bx - xx) * (cy - yy) - (by - yy) * (cx - xx)) * inv;
           let w1 = ((cx - xx) * (ay - yy) - (cy - yy) * (ax - xx)) * inv;
           let w2 = 1 - w0 - w1;
-          if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+          if (blendPass) {
+            if (w0 < -EDGE_EPS || w1 < -EDGE_EPS || w2 < -EDGE_EPS) continue;
+            if ((w0 < EDGE_EPS && !own0) || (w1 < EDGE_EPS && !own1) || (w2 < EDGE_EPS && !own2)) continue;
+          } else if (w0 < 0 || w1 < 0 || w2 < 0) continue;
           const depth = w0 * za + w1 * zb2 + w2 * zc;
           const zi = py * W + px;
           if (depth <= zb[zi]) continue;
@@ -1132,8 +1228,6 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             }
             if (alpha < (material!.alphaCutoff ?? 0.5)) continue;
           }
-          zb[zi] = depth;
-          if (bf) { bf[zi] = suspicious ? 1 : 0; bfPrim![zi] = triPrim[t]; }
           if (pbrS) {
             let dudx = 0, dvdx = 0, dudy = 0, dvdy = 0;
             if (pbrS.hasUV) {
@@ -1151,6 +1245,11 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
               pbrV[0] = vx / vl; pbrV[1] = vy / vl; pbrV[2] = vz2 / vl;
             } else { pbrV[0] = -cam.f[0]; pbrV[1] = -cam.f[1]; pbrV[2] = -cam.f[2]; }
             pbrS.shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, pbrV, back, pbrRGB);
+            if (pbrMask && pbrRGB[3] < pbrCut) continue;
+            if (!blendPass) {
+              zb[zi] = depth;
+              if (bf) { bf[zi] = suspicious ? 1 : 0; bfPrim![zi] = triPrim[t]; }
+            }
             const ci = zi * 3;
             if (pbrTint) {
               // the attribute colour lit by the material's brightness, over a third of the material itself
@@ -1158,9 +1257,20 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
               for (let k = 0; k < 3; k++) pbrRGB[k] = pbrRGB[k] * 0.35 + (tA[k] * w0 + tB[k] * w1 + tC[k] * w2) * lum * 0.65;
             }
             if (suspicious) { pbrRGB[0] = pbrRGB[0] * 0.35 + 0.12; pbrRGB[1] = pbrRGB[1] * 0.35 + 0.22; pbrRGB[2] = pbrRGB[2] * 0.35 + 0.6; }
+            if (blendPass) {
+              const al = pbrRGB[3];
+              if (bA && zb[zi] === -Infinity) {
+                if (bA[zi] === 0) col[ci] = col[ci + 1] = col[ci + 2] = 0;
+                bA[zi] = al + bA[zi] * (1 - al);
+              }
+              for (let k = 0; k < 3; k++) col[ci + k] = pbrRGB[k] * al + col[ci + k] * (1 - al);
+              continue;
+            }
             col[ci] = pbrRGB[0]; col[ci + 1] = pbrRGB[1]; col[ci + 2] = pbrRGB[2];
             continue;
           }
+          zb[zi] = depth;
+          if (bf) { bf[zi] = suspicious ? 1 : 0; bfPrim![zi] = triPrim[t]; }
           tn[0] = ca[0] * w0 + cb[0] * w1 + cc[0] * w2;
           tn[1] = ca[1] * w0 + cb[1] * w1 + cc[1] * w2;
           tn[2] = ca[2] * w0 + cb[2] * w1 + cc[2] * w2;
@@ -1199,6 +1309,14 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           col[ci + 2] = aces(fb * k + spec + rim);
         }
       }
+    };
+    for (let t = 0; t < nTri; t++) drawTri(t, false);
+    if (pbrBlend.length) {
+      // blend prims from back to front by their centroid's depth along the view axis
+      const pc = centroids();
+      const depthOf = (p: number) => (pc[p * 3] - cam.eye[0]) * cam.f[0] + (pc[p * 3 + 1] - cam.eye[1]) * cam.f[1] + (pc[p * 3 + 2] - cam.eye[2]) * cam.f[2];
+      const order = pbrBlend.map((b) => ({ b, d: depthOf(b.prim) })).sort((x, y) => y.d - x.d || x.b.prim - y.b.prim);
+      for (const { b } of order) for (const t of b.tris) drawTri(t, true);
     }
     if (bf) for (let i = 0; i < W * H; i++) if (zb[i] > -Infinity) {
       shadedPix++; backPix += bf[i];
@@ -1368,7 +1486,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         drawText(col, W, H, Math.round(ex + 2 * ss * ui), Math.round(ey - 4 * ss * ui), lab, colr, ss * ui, true);
       }
     }
-    const viewLabel = (kind === 'persp' ? `${NAMED_VIEWS[vname] !== undefined ? vname.toUpperCase().replace('_', ' ') : 'PERSP'}  AZ ${Math.round(azDeg ?? o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}`
+    if (behindCam) notes.push(`camera: ${behindCam} triangles reach behind the camera and are not drawn (the camera stands among the geometry); move from further out`);
+    const camLabel = o.camera ? `CAMERA  FROM ${o.camera.from.map(fmtNum).join(' ')}  FOV ${fmtNum(o.camera.fov ?? CAMERA_FOV)}` : '';
+    const viewLabel = (kind === 'persp' ? camLabel || `${NAMED_VIEWS[vname] !== undefined ? vname.toUpperCase().replace('_', ' ') : 'PERSP'}  AZ ${Math.round(azDeg ?? o.azimuth ?? 35)} EL ${Math.round(o.elevation ?? 25)}`
       : kind === 'section' ? `SECTION ${planeDesc(secK, secC)}  ${SECTION_CAM[secK].label.split('  ')[1]}`
       : ORTHO[vname].label) + (checkerOn ? '  CHECKER' : '') + (clipOn && kind === 'persp' ? `  CLIP ${planeDesc(cK, cC)}` : '');
 
@@ -1483,7 +1603,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       }
       for (let y = 0; y < TH; y++) out.set(tb.subarray(y * TW * 3, (y + 1) * TW * 3), ((ty + y) * outW + tx) * 3);
     };
-    blit(viewLabel, post, zb);
+    blit(viewLabel, post, zb, bA);
   });
 
   // footer

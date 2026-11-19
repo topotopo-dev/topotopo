@@ -14,6 +14,7 @@ import { encodePNG } from '../src/render/png.ts';
 import zlib from 'node:zlib';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
+import { addFixture } from './fixtures.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -553,6 +554,64 @@ for (const node of ['uv_layout', 'uv_unwrap']) {
   check(mirrored.sort().join(' ') === '+X +Y -Z', `uv_project box: mirrored faces ${mirrored.join(' ')} (as documented: +X +Y -Z)`);
 }
 
+// uv_project cylindrical and spherical: a face the seam runs through keeps its own short stretch of u (it used to get
+// the whole turn's tiles, mirrored: streaks that read as planks, and folds in inspect uv); seam turns where the seam lies;
+// a pole takes its face's u
+{
+  const tube = (params: Record<string, any>) => cook({ t: { type: 'tube', params: { radius: 3, cols: 7, caps: false } }, out: { type: 'uv_project', in: ['t'], params: { method: 'cylindrical', scale: [3, 8], ...params } } });
+  const spans = (geo: Geometry) => {
+    const uv = readUV(geo)!, out: { lo: number; hi: number; c: number[] }[] = [];
+    for (let p = 0; p < geo.numPrims; p++) {
+      let lo = Infinity, hi = -Infinity;
+      const c = [0, 0, 0], n = geo.primStart[p + 1] - geo.primStart[p];
+      for (let v = geo.primStart[p]; v < geo.primStart[p + 1]; v++) {
+        lo = Math.min(lo, uv[v * 2]); hi = Math.max(hi, uv[v * 2]);
+        for (let k = 0; k < 3; k++) c[k] += geo.P[geo.vertexPoint[v] * 3 + k] / n;
+      }
+      out.push({ lo, hi, c });
+    }
+    return out;
+  };
+  const { geo } = await tube({});
+  const r = uvReport(geo), s = spans(geo);
+  check(s.every((f) => Math.abs(f.hi - f.lo - 3 / 7) < 1e-9), `cylindrical: every face of a 7-sided tube spans 3/7 of u at scale 3, the seam face too (${s.map((f) => (f.hi - f.lo).toFixed(3)).join(' ')})`);
+  check(r.mirrored === 0 && r.overlap.pairs === 0 && r.wrapSeam.prims === 0, `cylindrical: no mirrored faces, folds or wrap seams (${r.mirrored} mirrored, ${r.overlap.pairs} overlapping pairs)`);
+  // the face holding u = 0 (or one full turn) is where the seam runs: towards -Z by default, -X at seam 90, +Z at 180,
+  // +X at 270 (seam angles off the tube's corners, so the seam crosses a face: within half a face, 25.7 degrees)
+  const seamFace = (f: ReturnType<typeof spans>) => f.find((x) => [0, 3].some((t) => x.lo < t - 1e-9 && x.hi > t + 1e-9));
+  for (const seam of [0, 90, 180, 280]) {
+    const want = [-Math.sin((seam * Math.PI) / 180), -Math.cos((seam * Math.PI) / 180)];
+    const f = seamFace(spans((await tube({ seam })).geo));
+    const dir = f ? [f.c[0] / Math.hypot(f.c[0], f.c[2]), f.c[2] / Math.hypot(f.c[0], f.c[2])] : [NaN, NaN];
+    check(!!f && dir[0] * want[0] + dir[1] * want[1] > Math.cos((26 * Math.PI) / 180), `cylindrical seam ${seam}: the seam runs through the face towards (${want.map((x) => x.toFixed(2)).join(', ')}) in x, z (${dir.map((x) => x.toFixed(2)).join(', ')})`);
+  }
+  const sph = await cook({ s: { type: 'sphere', params: { rows: 12, cols: 16 } }, out: { type: 'uv_project', in: ['s'], params: { method: 'spherical', seam: 33 } } });
+  const rs = uvReport(sph.geo);
+  check(rs.mirrored === 0 && rs.overlap.pairs === 0 && rs.wrapSeam.prims === 0, `spherical with poles and a seam through faces: no mirrored faces or folds (${rs.mirrored} mirrored, ${rs.overlap.pairs} overlapping pairs)`);
+  // uv computed from the angle elsewhere (a wrangle, an import) keeps the seam inside a face: inspect uv names it
+  const w = await cook({
+    t: { type: 'tube', params: { radius: 3, cols: 7, caps: false } }, d: { type: 'attrib_delete', in: ['t'], params: { names: 'uv' } },
+    out: { type: 'wrangle', in: ['d'], params: { code: '@uv = [(Math.atan2(@P[0], @P[2]) / (2 * Math.PI) + 0.5) * 3, @P[1] / 8, 0];' } },
+  });
+  const rw = uvReport(w.geo);
+  check(rw.wrapSeam.prims === 1 && rw.wrapSeam.triangles === 2 && /prim 1 at \(0\.178, -0\.167, -2\.732\)/.test(rw.wrapSeam.examples[0] ?? '') && rw.overlap.pairs === 0 && rw.mirrored === 0,
+    `inspect uv names the face a wrap seam runs through instead of reporting folds (${rw.wrapSeam.prims} faces, ${rw.wrapSeam.examples[0]}; ${rw.overlap.pairs} overlapping pairs)`);
+  const { inspect } = await import('../src/inspect.ts');
+  check(/WRAP SEAM: 1 face \(2 triangles\) spans the seam/.test(inspect(w.geo, { detail: 'uv' })) && /1 faces span a wrap seam/.test(inspect(w.geo)), 'inspect uv and the summary print the wrap seam line');
+  // a revolve (its start and end columns welded), seams on and off its columns, a pole: every face spans its share of a
+  // turn, no strip, and the GLB splits the seam's points so it reads back the same
+  for (const seam of [0, 7]) {
+    const rev = await cook({
+      p: { type: 'curve', params: { points: [[0, 0, 0], [0.4, 0, 0], [0.25, 0.6, 0], [0.45, 1.2, 0]] } }, r: { type: 'revolve', in: ['p'], params: { segments: 24 } },
+      out: { type: 'uv_project', in: ['r'], params: { method: 'cylindrical', seam, scale: [4, 0.25] } },
+    });
+    const widest = Math.max(...spans(rev.geo).map((f) => f.hi - f.lo)), rr = uvReport(rev.geo);
+    const back = await importGeometryAsync(await exportGeometryAsync(rev.geo, 'glb'), 'glb'), backWidest = Math.max(...spans(back).map((f) => f.hi - f.lo));
+    check(Math.abs(widest - 4 / 24) < 1e-9 && rr.overlap.pairs === 0 && rr.mirrored === 0 && rr.wrapSeam.prims === 0 && Math.abs(backWidest - 4 / 24) < 1e-6,
+      `cylindrical on a revolve, seam ${seam}: the widest face spans one face's share of a turn (${widest.toFixed(4)}; read back from GLB ${backWidest.toFixed(4)}), no strip or fold`);
+  }
+}
+
 // decimating after the unwrap: a plain reduction folds the uv of a torus; keep_uv (the default) never does, says where
 // it held the reduction back, and reaches the plain count where no fold is in the way
 {
@@ -576,6 +635,25 @@ for (const node of ['uv_layout', 'uv_unwrap']) {
   }
   const lp = await cook(nodes(0.05, false, 'lod')), lk = await cook(nodes(0.05, true, 'lod'));
   check(uvReport(lp.geo).overlap.pairs > 0 && uvReport(lk.geo).overlap.pairs === 0 && lk.warnings.some((w) => w.includes('folds the uv') && w.includes('"ring"')), `lod keep_uv: a level of the unwrapped torus keeps the uv clean (plain: ${uvReport(lp.geo).overlap.pairs} overlapping pairs) and says where it held back`);
+}
+
+// chart_smoothing: a noisy rock is charted on a smoothed copy (a few smooth charts instead of many ragged ones) and the
+// uv goes onto the real shape: every point where it was, one texel density, no overlaps; on quads too, where the
+// straddling split turns some polygons into triangles
+for (const [fixture, halves] of [['NOISY_ROCK', true], ['NOISY_QUAD_ROCK', false]] as const) {
+  const nodes: GraphSpec['nodes'] = {};
+  addFixture(nodes, fixture);
+  const src = (await cook(nodes, fixture)).geo;
+  const plain = await cook({ ...nodes, out: { type: 'uv_unwrap', in: [fixture] } });
+  const soft = await cook({ ...nodes, out: { type: 'uv_unwrap', in: [fixture], params: { chart_smoothing: 60 } } });
+  const rp = uvReport(plain.geo), rs = uvReport(soft.geo, { resolution: 1024 });
+  const moved = soft.geo.numPoints === src.numPoints ? soft.geo.P.reduce((m, x, i) => Math.max(m, Math.abs(x - src.P[i])), 0) : Infinity;
+  const d = rs.density!;
+  check(rs.charts <= 10 && (!halves || rs.charts * 2 < rp.charts) && !soft.warnings.some((w) => w.includes('folded')), `uv_unwrap chart_smoothing on ${fixture}: ${rp.charts} charts → ${rs.charts}`);
+  if (!halves) check(soft.geo.numPrims > src.numPrims, `uv_unwrap chart_smoothing on ${fixture}: the straddling split made triangles (${src.numPrims} → ${soft.geo.numPrims} prims)`);
+  check(moved === 0, `uv_unwrap chart_smoothing on ${fixture}: the uv is on the real shape (${soft.geo.numPoints} of ${src.numPoints} points, largest move ${moved})`);
+  check(rs.overlap.pairs === 0 && rs.mirrored === 0 && rs.collapsed === 0 && d.p05 > d.median * 0.95 && d.p95 < d.median * 1.05,
+    `uv_unwrap chart_smoothing on ${fixture}: ${rs.overlap.pairs} overlapping pairs, ${rs.mirrored} mirrored, ${rs.collapsed} collapsed; texel density 5%..95% = ${(d.p05 / d.median).toFixed(3)}..${(d.p95 / d.median).toFixed(3)} of the median (${soft.geo.numPrims} prims from ${src.numPrims})`);
 }
 
 // a renamed or removed param is refused, and the error says what to write now (NodeDef.renamed)

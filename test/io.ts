@@ -24,13 +24,14 @@ import { heightmapExport } from '../src/io/heightmap.ts';
 import { glbSceneReport, sceneReportText } from '../src/io/inspect-scene.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { importCSV } from '../src/io/points.ts';
-import { canonicalJSON, exportSource, graphSha256 } from '../src/io/source.ts';
+import { canonicalJSON, exportSource, graphSha256, nodesRead, nodesSha256, sameSource } from '../src/io/source.ts';
 import { publishedOutputs } from '../src/io/targets.ts';
 import { parseVarArg, parseVarValue, withVars } from '../src/graph/vars.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { prepareTarget, writeTargets } from '../src/host/export-targets.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { TOPOTOPO_VERSION } from '../src/host/version.ts';
+import { engineCodeHash } from '../src/host/engine-code.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -55,6 +56,22 @@ for (const fmt of ['json', 'obj', 'ply', 'glb', 'stl', 'geo'] as const) {
   if (fmt === 'glb') check(back.points.has('heat') && back.points.has('Cd'), 'glb keeps custom + Cd attributes');
   if (fmt === 'geo') check(back.points.has('heat') && back.points.has('Cd') && back.numVertices === g.numVertices, 'geo keeps custom + Cd attributes and vertices');
   if (fmt === 'obj' || fmt === 'stl' || fmt === 'json' || fmt === 'ply' || fmt === 'geo') check(rep.closed, `${fmt}: watertight after round trip`);
+}
+{
+  // OBJ writes each distinct vt and vn once: a smooth unwrapped sphere shares them between the corners of a point
+  const sr = await engine.cook({ nodes: { s: { type: 'sphere', params: { type: 'quad', divisions: 24 } }, u: { type: 'uv_unwrap', in: ['s'] } }, output: 'u' });
+  const sg = sr.geo!;
+  const text = new TextDecoder().decode(await exportGeometryAsync(sg, 'obj', {}));
+  const nvt = (text.match(/^vt /gm) ?? []).length, nvn = (text.match(/^vn /gm) ?? []).length;
+  const back = await importGeometryAsync(new TextEncoder().encode(text), 'obj');
+  const ua = sg.vertices.get('uv') ?? sg.points.get('uv'), ub = back.vertices.get('uv') ?? back.points.get('uv');
+  let du = 0;
+  for (let v = 0; v < sg.numVertices; v++) {
+    const a = ua!.get(sg.vertices.get('uv') ? v : sg.vertexPoint[v]) as number[], b = ub!.get(back.vertices.get('uv') ? v : back.vertexPoint[v]) as number[];
+    du = Math.max(du, Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
+  }
+  check(nvt < sg.numVertices / 2 && nvn < sg.numVertices / 2 && back.numVertices === sg.numVertices && du <= 1e-6,
+    `obj: one vt and vn per distinct value (${nvt} vt, ${nvn} vn for ${sg.numVertices} corners, ${sg.numPoints} points); uv back per corner within ${du.toExponential(1)}`);
 }
 const usd = new TextDecoder().decode(exportGeometry(g, 'usda'));
 check(usd.startsWith('#usda 1.0') && usd.includes('def Mesh') && usd.includes('faceVertexCounts'), 'usda structure');
@@ -227,13 +244,59 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     vars: { seed: 3, relief: 6 },
   };
   const src = exportSource({ graph: 'terrain', spec, node: 'hills', format: 'glb', options: { up_axis: 'z', scale: undefined }, version: '9.9.9' });
-  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'export', 'topotopo']), 'source block: fields in a fixed order');
+  check(JSON.stringify(Object.keys(src)) === JSON.stringify(['graph', 'graph_sha256', 'nodes_sha256', 'output', 'node', 'frame', 'fps', 'vars', 'seeds', 'export', 'topotopo']), 'source block: fields in a fixed order');
   check(src.output === null && src.frame === 1 && src.fps === 24 && JSON.stringify(src.vars) === '{"relief":6,"seed":3}' && JSON.stringify(src.seeds) === '{"hills":"=seed","loop/pts":4}'
     && JSON.stringify(src.export) === '{"format":"glb","options":{"up_axis":"z"}}' && src.topotopo === '9.9.9',
     `source block: the engine's time defaults, sorted vars, seeds by node path as written (nested bodies too), the options given (${JSON.stringify(src)})`);
   const reordered: GraphSpec = { vars: { relief: 6, seed: 3 }, nodes: { box: { type: 'box' }, loop: spec.nodes.loop, hills: { type: 'heightfield_noise', params: { amplitude: '=relief', seed: '=seed' } } } };
   check(src.graph_sha256 === nodeSha(canonicalJSON(spec)) && graphSha256(reordered) === src.graph_sha256,
     'graph_sha256: SHA-256 of the canonical graph JSON; key order does not change it');
+  // nodes_sha256: the nodes a cook of the node reads (its inputs, the nodes its params name, theirs), without ui and note
+  const parts: GraphSpec = {
+    nodes: {
+      a: { type: 'box' }, b: { type: 'transform', in: ['a'] }, e: { type: 'merge', in: ['b'] },
+      c: { type: 'sphere', params: { radius: '=ch("../d/size") * 2' } }, d: { type: 'box', params: { size: 2 } }, x: { type: 'torus' },
+    },
+  };
+  const withNode = (n: string, spec: any): GraphSpec => ({ ...parts, nodes: { ...parts.nodes, [n]: spec } });
+  check(nodesRead(parts, 'e').join() === 'a,b,e' && nodesRead(parts, 'c').join() === 'c,d' && nodesRead(parts, 'x').join() === 'x',
+    `nodesRead: inputs and the nodes params name, in turn (e: ${nodesRead(parts, 'e').join()}; c: ${nodesRead(parts, 'c').join()})`);
+  check(nodesSha256(withNode('a', { type: 'box', ui: { x: 40 }, note: 'moved' }), 'e') === nodesSha256(parts, 'e') && nodesSha256(withNode('x', { type: 'tube' }), 'e') === nodesSha256(parts, 'e')
+    && nodesSha256(withNode('a', { type: 'box', params: { size: 3 } }), 'e') !== nodesSha256(parts, 'e') && nodesSha256({ ...parts, strict: true }, 'e') !== nodesSha256(parts, 'e'),
+    'nodes_sha256: a node moved or noted, or one it does not read, leaves it; a param of one it reads, or strict, changes it');
+  const made = (o: Partial<Parameters<typeof exportSource>[0]>) => exportSource({ graph: 'parts', spec: parts, node: 'e', format: 'glb', version: '9.9.9', files: 'f1', engine: 'e1', ...o });
+  check(sameSource(made({}), made({ spec: withNode('x', { type: 'tube' }) })) && !sameSource(made({}), made({ spec: withNode('a', { type: 'box', params: { size: 3 } }) }))
+    && !sameSource(made({}), made({ files: 'f2' })) && !sameSource(made({}), made({ spec: { ...parts, vars: { k: 1 } } })) && !sameSource(made({}), made({ version: '9.9.10' }))
+    && !sameSource(made({ files: undefined }), made({ files: undefined })) && !sameSource(null, made({})),
+    'sameSource: equal but for the whole graph hash (another node edited); not with another read node, files, var or version, nor without files');
+  check(Object.keys(made({})).slice(-2).join() === 'topotopo,engine_sha256' && made({}).engine_sha256 === 'e1' && !sameSource(made({}), made({ engine: 'e2' }))
+    && !sameSource(made({ engine: undefined }), made({ engine: undefined })) && !sameSource(made({ engine: undefined }), made({})),
+    'sameSource: not when the engine code changed under the same version, nor without the engine hash (engine_sha256 after topotopo)');
+  {
+    // the engine's code hash: every file of the code tree, the kernels and fonts, and package.json; links followed
+    const eroot = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-engine-')), code = path.join(eroot, 'src');
+    for (const d of ['src/nodes', 'kernels/pkg', 'assets/fonts', 'docs']) fs.mkdirSync(path.join(eroot, d), { recursive: true });
+    fs.writeFileSync(path.join(eroot, 'package.json'), '{"version":"0.5.4"}');
+    fs.writeFileSync(path.join(code, 'cli.ts'), 'export {};\n');
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 1;\n');
+    fs.writeFileSync(path.join(eroot, 'kernels', 'pkg', 'k.wasm'), new Uint8Array([0, 97, 115, 109]));
+    const h0 = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'docs', 'notes.md'), 'not engine code');
+    const docs = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 2;\n');
+    const edited = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(code, 'nodes', 'box.ts'), 'export const size = 1;\n');
+    const back = engineCodeHash(eroot, code);
+    fs.renameSync(path.join(code, 'nodes', 'box.ts'), path.join(code, 'nodes', 'cube.ts'));
+    const renamed = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'kernels', 'pkg', 'k.wasm'), new Uint8Array([0, 97, 115, 110]));
+    const kernel = engineCodeHash(eroot, code);
+    fs.writeFileSync(path.join(eroot, 'package.json'), '{"version":"0.5.5"}');
+    const pkg = engineCodeHash(eroot, code);
+    check(/^[0-9a-f]{64}$/.test(h0) && docs === h0 && edited !== h0 && back === h0 && new Set([h0, renamed, kernel, pkg]).size === 4,
+      'engine code hash: a code file edited, renamed, a kernel or package.json changed each give another; other files of the package and an edit undone do not');
+    fs.rmSync(eroot, { recursive: true, force: true });
+  }
 
   // --var values and overrides (src/graph/vars.ts)
   const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test((e as Error).message); } };
@@ -298,12 +361,82 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
     const prepared = await prepareTarget(g, 'g', part as typeof part & { target: NonNullable<typeof part.target> }, dir, engine.host, { frame: 5 });
     const man = json(prepared.files.find((f) => f.path === prepared.sourceManifest)!.bytes).source;
     check(prepared.sourceManifest === path.join(dir, 'parts', 'b.obj.source.json') && man.graph === 'g' && man.output === 'part' && man.node === 'b' && man.frame === 5 && man.fps === 24
-      && JSON.stringify(man.export) === '{"format":"obj","options":{"instancing":"packed","scale":1,"split_by_name":true,"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
+      && JSON.stringify(man.export) === '{"format":"obj","options":{"instancing":"packed","materials":true,"scale":1,"split_by_name":true,"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
       `an export target records its source from the graph it is published from, every option the format reads with its default (${JSON.stringify(man.export)})`);
     writeTargets([prepared], dir);
     check(fs.existsSync(path.join(dir, 'parts', 'b.obj.source.json')) && new ArtifactStore(dir).records()[0].files.length === 2, 'writeTargets writes the manifest with the export and records both');
+    // the receipts and the record name files by their paths in the package: nothing of this machine; a file outside the
+    // package is named by its absolute path, not by a path that climbs out of it
+    const exportsDir = path.join(dir, 'exports'), inside = path.join(exportsDir, 'a.glb'), outside = path.join(path.dirname(dir), `${path.basename(dir)}-elsewhere.glb`);
+    const store = new ArtifactStore(exportsDir);
+    store.record([inside], { label: 'in' });
+    store.record([outside], { label: 'out' });
+    const receipts = JSON.parse(fs.readFileSync(path.join(exportsDir, '.outputs.json'), 'utf8')).map((a: any) => a.files[0]);
+    const back = new ArtifactStore(exportsDir).records().map((a) => a.files[0]);
+    check(JSON.stringify(receipts) === JSON.stringify(['exports/a.glb', outside]) && JSON.stringify(back) === JSON.stringify([inside, outside]),
+      `receipts: a file in the package by its package path, one outside by its absolute path, both read back (${JSON.stringify(receipts)})`);
+    const record = fs.readFileSync(path.join(dir, 'parts', 'b.obj.source.json'), 'utf8');
+    check(!record.includes(dir) && !record.includes(dir.split(path.sep).join('/')) && !/[A-Za-z]:[\\/]|"\/|\.\.\//.test(record),
+      'the source record names no machine path: the graph by name, packages by name and hash, files from its folder');
+    // a target path written as the export tool's (exports/…) lands in exports/, not exports/exports/, and the graph is told
+    const ge: GraphSpec = { nodes: { b: { type: 'box' } }, output: 'b', outputs: { rock: { node: 'b', export: { format: 'obj', path: 'exports/rocks/rock.obj' } } } };
+    const rock = publishedOutputs('g', ge, 'b').find((p) => p.output === 'rock')!;
+    const said = engine.validate(ge).warnings.map((w) => w.message).join('; ');
+    check(rock.target?.path === 'rocks/rock.obj' && /writes exports\/rocks\/rock\.obj, not exports\/exports\/rocks\/rock\.obj; write "rocks\/rock\.obj"/.test(said),
+      `an export target path starting with exports/ drops it (${rock.target?.path}) and warns: ${said}`);
   } finally {
     // mkdtemp returns the exact owned directory
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------- OBJ materials: usemtl + .mtl written, and read back
+{
+  const mr = await engine.cook({
+    nodes: {
+      a: { type: 'box', params: { center: [-1, 0, 0] } },
+      b: { type: 'box', params: { center: [1, 0, 0] } },
+      c: { type: 'box', params: { center: [0, 2, 0] } },
+      ma: { type: 'material', in: ['a'], params: { name: 'wet stone', base_color: [0.6, 0.5, 0.4], roughness: 0.3, metallic: 0.1, base_color_map: 'tex/stone.png', normal_map: 'tex/stone_n.png' } },
+      mb: { type: 'material', in: ['b'], params: { name: 'moss', base_color: [0.2, 0.5, 0.1], roughness: 0.9, alpha: 0.8, emissive: [0.1, 0.2, 0] } },
+      m: { type: 'merge', in: ['ma', 'mb', 'c'] },
+    },
+    output: 'm',
+  });
+  const src = mr.geo!;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-io-mtl-'));
+  try {
+    // the export as a package writes it: exports/ beside tex/, texture paths relative to the .obj
+    const res = await exportFilesAsync(src, 'obj', 'exports/rocks.obj', { texturePath: (t) => '../' + t });
+    check(res.files.map((f) => f.path).join() === 'exports/rocks.obj,exports/rocks.mtl', `obj with materials writes the .mtl beside it (${res.files.map((f) => f.path)}; ${res.summary})`);
+    for (const f of res.files) { fs.mkdirSync(path.dirname(path.join(dir, f.path)), { recursive: true }); fs.writeFileSync(path.join(dir, f.path), f.bytes); }
+    const objText = new TextDecoder().decode(res.files[0].bytes), mtlText = new TextDecoder().decode(res.files[1].bytes);
+    check(/^mtllib rocks\.mtl$/m.test(objText) && /^usemtl wet stone$/m.test(objText) && /^usemtl default$/m.test(objText) && /^map_Kd \.\.\/tex\/stone\.png$/m.test(mtlText) && /^norm \.\.\/tex\/stone_n\.png$/m.test(mtlText),
+      'obj: mtllib, usemtl per material (prims without one: "default"), the maps relative to the .mtl');
+    const warnings: string[] = [];
+    const reader = new Engine(createNodeHost({ baseDir: dir }));
+    await reader.init();
+    const back = await reader.cook({ nodes: { f: { type: 'file', params: { path: 'exports/rocks.obj' } } }, output: 'f' });
+    const bg = back.geo!;
+    warnings.push(...back.warnings.map((w) => w.message));
+    const { readMaterials, primMaterials } = await import('../src/core/materials.ts');
+    const before = primMaterials(src)!, after = primMaterials(bg)!;
+    check(after.every((m, i) => m === (before[i] || 'default')), `usemtl read back into prim material (${[...new Set(after)].join(', ')})`);
+    const t0 = readMaterials(src), t1 = readMaterials(bg);
+    const close = (a: number[], b: number[]) => a.every((x, k) => Math.abs(x - b[k]) < 1e-5);
+    const same = (n: string) => close(t0[n].baseColor, t1[n].baseColor) && close(t0[n].emissive, t1[n].emissive) && Math.abs(t0[n].roughness - t1[n].roughness) < 1e-5
+      && Math.abs(t0[n].metallic - t1[n].metallic) < 1e-5 && Math.abs(t0[n].alpha - t1[n].alpha) < 1e-5;
+    check(same('wet stone') && same('moss') && t1['wet stone'].textures?.baseColor === 'tex/stone.png' && t1['wet stone'].textures?.normal === 'tex/stone_n.png' && !!t1.default && !warnings.length,
+      `the .mtl read back into the material table: colours, roughness, metallic, alpha, emissive, maps (${JSON.stringify(t1['wet stone'])}; warnings: ${warnings.join('; ') || 'none'})`);
+    // a Blender-style .mtl: Ns for the roughness, map options before a file name with spaces; a missing library is warned of
+    const { readMTL, importOBJAsync } = await import('../src/io/import.ts');
+    const bl = readMTL('newmtl Rock\nNs 250.000000\nKa 1 1 1\nKd 0.8 0.8 0.8\nd 1.0\nillum 2\nmap_Kd -s 1 1 1 -bm 0.5 my textures/rock albedo.png\n', 'inputs');
+    check(Math.abs(bl.Rock.roughness - 0.5) < 1e-9 && Math.abs(bl.Rock.baseColor[0] - 0.9063) < 1e-3 && bl.Rock.textures?.baseColor === 'inputs/my textures/rock albedo.png',
+      `a Blender .mtl: roughness from Ns, Kd linear → display, map options skipped (${JSON.stringify(bl.Rock)})`);
+    const lost: string[] = [];
+    const nolib = await importOBJAsync('mtllib gone.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl Rock\nf 1 2 3\n', { path: 'inputs/a.obj', readFile: async (p) => { throw new Error(`no ${p}`); }, warn: (m) => lost.push(m) });
+    check(primMaterials(nolib)![0] === 'Rock' && /material library "gone\.mtl" could not be read \(no inputs\/gone\.mtl\)/.test(lost.join()), `a missing .mtl is warned of, the prims keep their names (${lost.join('; ')})`);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -327,5 +460,25 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   check(hook?.kind === 'empty' && hook.parent === 'body' && hook.world.map((x) => +x.toFixed(3)).join() === '0.5,0.25,0', `scene report: the socket under its parent at its world position (${JSON.stringify(hook)})`);
   const txt = sceneReportText(rep).join('\n');
   check(/^scene \(the glb export, read back\): 2 nodes, 1 meshes, 12 triangles, 1 materials/.test(txt) && /\n {4}hook: empty \(socket\); at \(0\.500, 0\.250, 0\.000\)/.test(txt) && /paint: base colour factor \(linear\) \(0\.60, 0\.01, 0\.01\), metallic 0\.00, roughness 0\.40; no maps/.test(txt), 'scene report text: nodes as a tree, materials');
+}
+
+// ---------------------------------------------------------------- vertex alpha is data: it never changes the material's alpha mode
+{
+  const gj = (bytes: Uint8Array) => { const n = new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true); return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + n))); };
+  const cook = async (matParams: Record<string, unknown>) => { const r = await engine.cook({
+    nodes: {
+      b: { type: 'box' },
+      m: { type: 'material', in: ['b'], params: { name: 'leaf', ...matParams } },
+      cd: { type: 'attrib_create', in: ['m'], params: { name: 'Cd', class: 'point', value: [0.2, 0.6, 0.3] } },
+      al: { type: 'attrib_create', in: ['cd'], params: { name: 'Alpha', class: 'point', value: 0.3 } },
+    },
+    output: 'al',
+  }); if (!r.geo) throw new Error(r.errors.map((e) => e.message).join('; ')); return r.geo; };
+  const j = gj(await exportGeometryAsync(await cook({}), 'glb', { vertexColors: true }) as Uint8Array);
+  const prim = j.meshes[0].primitives[0], mat = j.materials[prim.material];
+  const colorAcc = j.accessors[prim.attributes.COLOR_0];
+  check(colorAcc?.type === 'VEC4' && (mat.alphaMode ?? 'OPAQUE') === 'OPAQUE', `an opaque material keeps its alpha mode under vertex alpha 0.3 (${mat.alphaMode ?? 'OPAQUE'}, COLOR_0 ${colorAcc?.type})`);
+  const jb = gj(await exportGeometryAsync(await cook({ alpha_mode: 'blend' }), 'glb', { vertexColors: true }) as Uint8Array);
+  check(jb.materials[jb.meshes[0].primitives[0].material].alphaMode === 'BLEND', 'a material with alpha_mode blend still exports BLEND');
 }
 process.exit(fail ? 1 : 0);

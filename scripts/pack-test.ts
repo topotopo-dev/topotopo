@@ -4,11 +4,12 @@
 //
 // Checks
 // - npm pack (prepack builds dist/): required files are in the tarball, TopoTopo's built-in library among them (the
-//   versions of its own packages, library/<name>/versions/), and nothing from src/, test/, examples/, out/, the built-in packages'
-//   working folders and thumbnails, or the Rust sources is.
+//   versions of its own packages, library/<name>/versions/), the examples with their cards (examples/<name>.json and .md,
+//   each example package's manifest, graphs and inputs: help {examples}), and nothing from src/, test/, the examples'
+//   renders and package copies, out/, the built-in packages' working folders and thumbnails, or the Rust sources is.
 // - The bin from the installed package: `npm exec --no -- topotopo --help`, and cooking an example graph copied into the
-//   temp folder with a PNG render and a GLB export (examples/skeleton_roofs.json: straight_skeleton runs in the WASM
-//   kernels loaded from the installed kernels/pkg, and the house walls are topotopo/architecture's: `topotopo init`
+//   temp folder with a PNG render and a GLB export (examples/town_from_lots.json: straight_skeleton runs in the WASM
+//   kernels loaded from the installed kernels/pkg, and the door frames are topotopo/architecture's: `topotopo init`
 //   makes the folder a package, and the cook's first use copies the built-in package in from the installed built-in library).
 // - The cook for Godot from the installed bin: `topotopo cook <package> --for godot --progress json` on the neutral props
 //   of the cook tests in a Godot project, `topotopo godot status` reading it as current, and `topotopo godot setup`
@@ -21,11 +22,13 @@
 //   catalog (TopoTopo's own packages too), a build that names a built-in package's output and copies the built-in package in from the installed
 //   built-in library, a build that uses sdf_grid, and the preview page with three.js served from the installed
 //   dependencies.
+// - On Windows, the launcher from the installed package (launcher/win32-x64/topotopo-open.exe): it finds the installed
+//   command line and a Node.js by itself and reports a failing open.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -80,6 +83,7 @@ try {
     ...fs.readdirSync(path.join(ROOT, 'library')).map((k) => `library/${k}/versions/${newestOf(k)}/version.json`), 'assets/fonts/DejaVuSans.ttf', 'assets/fonts/LICENSE_DEJAVU',
     'kernels/pkg/topotopo_kernels.js', 'kernels/pkg/topotopo_kernels_bg.wasm', 'kernels/pkg/LICENSE',
     'kernels/pkg-simd/topotopo_kernels.js', 'kernels/pkg-simd/topotopo_kernels_bg.wasm', 'kernels/pkg-simd/LICENSE',
+    'launcher/win32-x64/topotopo-open.exe', 'assets/icons/topotopo-package.ico', 'assets/icons/topotopo-workspace.ico',
   ];
   const missing = required.filter((f) => !files.includes(f));
   check(!missing.length, `tarball has the runtime files${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
@@ -92,9 +96,25 @@ try {
     `tarball has every file of the Godot addon (${addonFiles.length}) and not its tests or demo${addonMissing.length ? `; missing: ${addonMissing.join(', ')}` : ''}`);
   const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
   check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
-  const stray = files.filter((f) => /^(src|test|examples|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
-    (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
-  check(!stray.length, `tarball has no sources, tests, examples, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
+  // the examples and their cards (src/mcp/examples.ts, help {examples}), and each example package's manifest, graphs and inputs
+  const exampleFiles: string[] = [];
+  for (const e of fs.readdirSync(path.join(ROOT, 'examples'), { withFileTypes: true })) {
+    const dir = path.join(ROOT, 'examples', e.name);
+    if (e.isFile() && /\.(json|md)$/.test(e.name)) exampleFiles.push(`examples/${e.name}`);
+    else if (e.isDirectory() && fs.readdirSync(dir).some((f) => f.endsWith('.topo'))) {
+      for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.topo'))) exampleFiles.push(`examples/${e.name}/${f}`);
+      for (const sub of ['graphs', 'inputs']) {
+        if (fs.existsSync(path.join(dir, sub))) for (const f of fs.readdirSync(path.join(dir, sub)).filter((x) => !x.startsWith('.'))) exampleFiles.push(`examples/${e.name}/${sub}/${f}`);
+      }
+    }
+  }
+  const exampleMissing = exampleFiles.filter((f) => !files.includes(f));
+  check(exampleFiles.length > 30 && !exampleMissing.length, `tarball has the examples and their cards (${exampleFiles.length} files)${exampleMissing.length ? `; missing: ${exampleMissing.slice(0, 5).join(', ')}` : ''}`);
+  const shippedExample = (f: string) => /^examples\/[\w-]+\.(json|md)$/.test(f) || /^examples\/[\w-]+\/([\w-]+\.topo|(graphs|inputs)\/[^/]+)$/.test(f);
+  const stray = files.filter((f) => /^(src|test|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^examples\//.test(f) && !shippedExample(f)) ||
+    (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
+    (/^launcher\//.test(f) && f !== 'launcher/win32-x64/topotopo-open.exe') || /^assets\/icons\/src\//.test(f) || (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
+  check(!stray.length, `tarball has no sources, tests, example renders or package copies, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
   // every file of every version of TopoTopo's own packages: a version has the same files wherever it is
   const versionFiles: string[] = [];
   const walkVersions = (dir: string, rel: string) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = `${rel}/${e.name}`; if (e.isDirectory()) walkVersions(path.join(dir, e.name), r); else versionFiles.push(r); } };
@@ -123,7 +143,7 @@ try {
   step(`CLI: npm exec --no -- ${BIN}`);
   const help = sh(`npm exec --no -- ${BIN} --help`, app);
   check(help.startsWith(`usage: ${BIN} `) && help.includes(`${BIN} mcp`), `--help prints the usage (${help.split('\n')[0].slice(0, 60)}…)`);
-  fs.copyFileSync(path.join(ROOT, 'examples', 'skeleton_roofs.json'), path.join(app, 'roofs.json'));
+  fs.copyFileSync(path.join(ROOT, 'examples', 'town_from_lots.json'), path.join(app, 'roofs.json'));
   // the example names topotopo/architecture's outputs: only a package's graphs use packages
   const init = sh(`npm exec --no -- ${BIN} init .`, app);
   check(/^package app → /.test(init) && fs.existsSync(path.join(app, 'app.topo')), `init makes the temp folder a package (${init.split('\n')[0]})`);
@@ -134,9 +154,27 @@ try {
     && fs.existsSync(path.join(app, 'packages', 'topotopo', 'architecture', arch, 'version.json')), `the first use copies topotopo/architecture ${arch} in from the installed built-in library and locks it`);
   const png = path.join(app, 'roofs.png');
   const pngOk = fs.existsSync(png) && fs.readFileSync(png).subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && fs.statSync(png).size > 20000;
-  check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/skeleton_roofs.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
+  check(/cooked roofs\.json/.test(cook) && pngOk, `cooked examples/town_from_lots.json (straight_skeleton + topotopo/architecture) and rendered roofs.png (${pngOk ? fs.statSync(png).size : 0} bytes)`);
   check(fs.existsSync(path.join(app, 'roofs.glb')) && fs.readFileSync(path.join(app, 'roofs.glb')).subarray(0, 4).toString() === 'glTF', 'exported roofs.glb');
   console.log(cook.split('\n').filter((l) => /^(cooked|geometry|rendered|exported)/.test(l)).join('\n'));
+
+  // ------------------------------------------------------------------------------------------------ Windows launcher
+  const launcherFile = info.files.find((f: any) => f.path === 'launcher/win32-x64/topotopo-open.exe');
+  console.log(`launcher/win32-x64/topotopo-open.exe: ${launcherFile?.size ?? 0} bytes unpacked`);
+  if (process.platform === 'win32') {
+    step('Windows launcher from the installed package');
+    // what a double-click runs, found from where the package is installed: the installed dist/cli.js and a Node.js
+    // found without --node (none beside this prefix, so the installer's registry entry or PATH). open on a file that is
+    // not there must fail and say so, whatever open does with a real one.
+    const exe = path.join(installed, 'launcher', 'win32-x64', 'topotopo-open.exe');
+    const env = { ...process.env, TOPOTOPO_LAUNCHER_QUIET: '1' };
+    const version = execFileSync(exe, ['--version'], { env, encoding: 'utf8' }).trim();
+    check(/^topotopo-open \S+ source [0-9a-f]{16}$/.test(version), `installed launcher answers --version (${version})`);
+    const r = spawnSync(exe, [path.join(app, 'missing.topo')], { cwd: app, env, encoding: 'utf8', timeout: 60000 });
+    const said = (r.stderr ?? '').replace(/\r\n/g, '\n');
+    check(r.status !== 0 && said.startsWith('TopoTopo could not open missing.topo.\n\n') && said.trim().split('\n').length > 2 && !said.includes('src/cli.ts'),
+      `installed launcher runs the installed command line: open on a missing file fails and says why (exit ${r.status}: ${JSON.stringify(said.split('\n')[2] ?? '')})`);
+  }
 
   // ------------------------------------------------------------------------------------------------ Godot
   step(`Godot: npm exec --no -- ${BIN} cook … --for godot`);
@@ -270,6 +308,13 @@ console.log(JSON.stringify({ variant: kernelsWasmVariant, url: kernelsWasmURL.hr
     check(client.getServerVersion()?.name === NAME && client.getServerVersion()?.version === pkg.version, `server ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
     const cat = await call('catalog', {});
     check(!cat.isError && cat.txt.includes('straight_skeleton') && cat.txt.includes('topotopo/nature/rock'), 'catalog lists the nodes and the installed packages of TopoTopo\'s own');
+    // the examples ship with the package: help lists them and gives one's card and graph, which validates here
+    const exIdx = await call('help', { topic: 'examples' });
+    const exOne = await call('help', { examples: ['town_from_lots'] });
+    const exGraph = /\nGRAPH [^\n]*\n\n(\{[\s\S]*\})$/.exec(exOne.txt)?.[1];
+    const exDry = exGraph ? await call('build', { name: 'roofs_example', graph: JSON.parse(exGraph), dry_run: true }) : null;
+    check(/\n- town_from_lots — /.test(exIdx.txt) && !!exDry && !exDry.isError && /^✓ valid/.test(exDry.txt),
+      `help lists the installed examples and gives one whose graph validates: ${exDry?.txt.split('\n')[0] ?? exOne.txt.slice(0, 80)}`);
     // the documented setup: a new folder, which the server made a package, so the first build that names a
     // an output of one of TopoTopo's own packages copies it in
     const rock = await call('build', { graph: { nodes: { r: { type: 'topotopo/nature/rock', params: { size: 2 } } } }, name: 'rock' });

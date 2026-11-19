@@ -230,11 +230,19 @@ export interface SessionPackages {
   revision(): string;
   /**
    * while this session follows working folders (for looking): the scope exports cook in, resolving packages to their
-   * published copies; null while nothing is followed
+   * published copies, those in `follow` (an export told to use their working folders) to their working folders; null
+   * while nothing is followed but those
    */
-  published?(): Scope | null;
-  /** what an export of the graph made while following says: the published versions it used (null: nothing to say) */
-  publishedNote?(graph: GraphSpec): string | null;
+  published?(follow?: readonly string[]): Scope | null;
+  /**
+   * what an export of the graph made while following says: the working folders it used (`follow`) and the published
+   * versions it used for the others (null: nothing to say)
+   */
+  publishedNote?(graph: GraphSpec, follow?: readonly string[]): string | null;
+  /** the followed packages the graph names that an export not following them cannot cook (no published version in use) */
+  unpublished?(graph: GraphSpec, follow?: readonly string[]): { package: string; dir: string }[];
+  /** the packages this session follows */
+  following?(): { package: string }[];
 }
 
 export class Session {
@@ -684,9 +692,10 @@ export class Session {
    * Cook a graph (its output, or `target`) with its session values, as a cook of `kind`. Session.stop and `signal`
    * stop it at a node boundary; activity() reports it while it runs. A cook of the whole graph records its outcome
    * (lastCook) and, unless it was stopped, its report (lastReport), when no cook started after it has done so first.
-   * An export cooks with the published copies of the packages the session shows live, and records nothing.
+   * An export cooks with the published copies of the packages the session shows live (the working folders of those
+   * `follow` names), and records nothing.
    */
-  async cook(name: string, target?: string, frame?: number, opts: { kind?: CookKind; signal?: StopSignal } = {}) {
+  async cook(name: string, target?: string, frame?: number, opts: { kind?: CookKind; signal?: StopSignal; follow?: readonly string[] } = {}) {
     const g = this.getGraph(name);
     // a followed working folder edited since the last cook resolves to its new files
     this.packages?.refresh();
@@ -705,8 +714,9 @@ export class Session {
     this.notifyActivity(name);
     try {
       const s = this.sessions.get(name);
-      // an export uses the published copies of the packages this session shows live (SessionPackages.published)
-      const scope = run.kind === 'export' ? this.packages?.published?.() ?? null : null;
+      // an export uses the published copies of the packages this session shows live (SessionPackages.published), but
+      // the working folders of those it is told to follow
+      const scope = run.kind === 'export' ? this.packages?.published?.(opts.follow) ?? null : null;
       const r = await this.engine.cook(g, { target, frame, signal, onNode: (ev) => this.onNode(name, run, ev), ...(s?.size ? { vars: this.sessionVars(name) } : {}), ...(scope ? { scope } : {}) });
       if (seq && !scope && !(r.stopped && run.superseded) && seq > (this.recordedSeq.get(name) ?? 0)) {
         this.recordedSeq.set(name, seq);

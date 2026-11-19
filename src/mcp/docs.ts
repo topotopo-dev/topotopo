@@ -4,10 +4,13 @@ import { CATEGORY_ORDER } from '../graph/registry.ts';
 import { PACKAGE_COMMANDS } from '../packages/commands.ts';
 import { GODOT_COMMANDS } from '../host/godot-commands.ts';
 import { UNREAL_COMMANDS } from '../host/unreal-commands.ts';
+import { graphLines } from './graphlines.ts';
+import { examplesIndexText } from './examples.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
 WORKFLOW
+Start a scene, an asset or a pipeline from the closest complete example: help {topic:"examples"} lists them, each with a card (the request, what goes in, what comes out, what it promises) and today's graph; help {examples:["name"]} gives one to build and adapt.
 0. inputs {action:"list"} → the person's own files in the package inputs/ folder (guide curves, sites, zones, blockouts, PNG masks). Building a landscape or scene: look there first and build on them (help topic "inputs").
 1. catalog → see node types (100+, Houdini names work as aliases: copytopoints, attribwrangle, polyextrude, mountain…) and TopoTopo's own packages, ready-made generators by full name (topotopo/architecture/house, topotopo/nature/tree_lowpoly, topotopo/street/road_strip …).
 2. help {nodes:[...]} for exact params before using unfamiliar nodes; help {topic:"wrangle"|"graph"|"recipes"…} for concepts.
@@ -15,16 +18,16 @@ WORKFLOW
 4. render to SEE it (quad view: persp/front/right/top; backfaces are tinted blue = flipped normals; views "quad_uv" + checker:true for UVs; overlays for specific questions: wireframe "hard"/"boundary", views "section", glyphs "N", label_groups, shading "matcap", see help topic "render"). inspect for numbers (bbox, attributes, watertightness).
 5. edit {ops} for incremental changes (set params, insert nodes, rewire) — only downstream nodes re-cook.
 6. export to glb/gltf (materials, textures, meshopt), geo (Houdini), csv (Unreal PCG points / instance rows), points.json, usda, obj/ply/stl/json for Unreal, Blender, Houdini; unreal_landscape = a whole terrain scene for Unreal. Every export records its source (graph, vars, seeds, frame, version) so it can be made again (help topic "export").
-7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
+7. verify: assert nodes guard invariants in the graph (watertight, counts, bbox, expr, heightfields, images); explain {graph} reads a result in words; diff {a, b} shows what an edit changed. See help topic "verify".
 OUTPUTS: publish intended deliverables in graph.outputs: {"rotor":{"node":"rotor_final","label":"Rotor"}}. The default graph.output stays unchanged. The viewer lists every graph and named result, its generated textures and image layers; clicking a result isolates it. Each card says what the result is (mesh, instances, points, curves, terrain, textures, material, volume or scene; its size) and offers the formats that write it: Download (the export as a file, or a zip with its sidecars) and Export (its target in exports/). Rendered images and exports are saved and visible too. Use descriptive names; keep intermediate work in the node outliner. Rename/remove edits maintain published references. In a package that publishes versions, give each output "tags" (["conifer", "low-poly"]: search finds outputs by them) and a "description" (else its graph's is recorded); "kind" (mesh, instances, points, curves, terrain, textures, material, volume, scene; a mesh with scene_null sockets is a mesh; materials alone are a material) pins what it must cook to: build warns and publishing blocks when it does not.
 INSTANCING: copy_to_points {pack:true} / pack make packed instances (millions stay cheap; glb, usda and geo export them as instances, csv/points.json as one row per instance). See help topic "instancing".
 PCG: mask → scatter {density_mask} → orient → prune → copy_to_points {pack, variants, variant_weights}; points_along_curve, cluster, attribute_from_map. See help topic "pcg".
 CURVES: bezier / nurbs make spline prims (CVs + order, exact everywhere); convert_curve, resample, fillet_curve, offset_curve_3d, project_curve (roads on terrain), spline_fit, curve_attribs (curveu, frames, ramps). See help topic "curves".
 CLOTH: drape {steps} simulates a mesh as cloth over a collider (input 1) and the floor, from pins (pin_group / input 2) and in wind; inflate {pressure} puffs a closed mesh into a cushion or balloon. See help topic "cloth".
 
-CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians). Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
+CONVENTIONS: Y-up, metres, angles in degrees (wrangle trig uses radians), turning right-handed (counter-clockwise seen from the + end of the axis); transform rotate turns about world X, then Y, then Z. An asset faces +Z (its front looks towards +Z, as in glTF and Houdini; its right side is +X): the front view looks at it from +Z, back from −Z. Houdini attribute names (P N Cd uv pscale orient up scale width name class piece). Polygons are closed prims, polylines are open prims.
 GRAPH: {"nodes": {"name": {"type": "...", "in": ["upstream", ...], "params": {...}}}, "output": "name", "vars": {"k": 1}}. Params accept "=expr" using vars by their bare name (e.g. "=height*0.5"), time (frame, time) and other nodes (npoints('pts'), bbox('base').size.y, ch('box1/size')). Code (wrangle, script, sdf_expr, heightfield_layer, parametric, group and assert expressions) reads vars the same way: height, not vars.height.
-HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step}}); the live viewer (preview) shows them as sliders and menus. People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
+HUMANS TUNE VARS: declare "params" for the 3–8 vars a person would tune ({"k": {type, desc, min, max, options, label, step, group}}); the live viewer (preview) shows them as sliders and menus, under a heading per "group". Every declared param needs a "desc" (what it does and its unit: the control's hover text; without one the build warns). People change vars at any time, so read the graph (graphs {action:"get"}) before assuming a var's value. See help topic "graph".
 TIME: build/edit/render/inspect/export take "frame" (default 1). solver = per-frame feedback (growth, accumulation). See help topic "time".
 PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in one node: emission, gravity/drag/wind, curl noise, fields, floor and mesh collisions, trails as polylines; steps with the frame. See help topic "particles".
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
@@ -64,13 +67,7 @@ export const INPUTS_EXAMPLE: GraphSpec = {
   },
 };
 
-/** A graph as JSON with one node (and one param) per line: readable in a topic page, and JSON.parse gives it back. */
-export function graphLines(g: GraphSpec): string {
-  const rows = (o: Record<string, any>) => Object.entries(o).map(([k, v]) => `   ${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(',\n');
-  const parts = Object.entries(g).map(([k, v]) =>
-    (k === 'nodes' || k === 'params') && v && typeof v === 'object' ? `${JSON.stringify(k)}: {\n${rows(v)}\n }` : `${JSON.stringify(k)}: ${JSON.stringify(v)}`);
-  return `{${parts.join(',\n ')}}`;
-}
+export { graphLines };
 
 export const TOPICS: Record<string, string> = {
   workspace: `WORKSPACE, PACKAGE, LIBRARY (the three words, and the workspace tool)
@@ -144,8 +141,8 @@ says what the open package's workspace holds: its packages as the scan finds the
   all. A package that publishes versions keeps its own uses and copies (they are published with it). workspace init
   moves the copies of the packages inside that kept their own.
 - FOLLOWING: "follow": true shows the workspace's own packages live from their working folders, for looking (the
-  viewer, renders, inspect); exports and publishing always use the published versions, and an export made while
-  following says which it used.
+  viewer, renders, inspect); exports and publishing use the published versions (but an export told to follow one,
+  help topic "packages", FOLLOWING), and an export made while following says which it used.
 - THE ENGINE: "engine" names the engine project ({"type", "project"}, the path written from the workspace and leading
   upward when the workspace is inside it) or "none" (kept). workspace init finds it: the nearest at or above the
   folder, else one below. It says when Unreal will not see the workspace (outside the project's Content/ or a plugin's),
@@ -185,16 +182,24 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   },
   "output": "out",
   "vars": {"rock_count": 200},
-  "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks"}}
+  "params": {"rock_count": {"type": "int", "min": 0, "max": 2000, "label": "Rocks", "desc": "number of rocks", "group": "Scatter"}}
 }
 - "vars": graph constants that "=expr" params and code read by their bare name ("=rock_count * 2", @P.y += height).
   Name them so code can: letters, digits and _, and not a JavaScript keyword (class, default …), a helper (noise,
   rand, length, detail …), a built-in (Math, Number, JSON …), the time (frame, time, fps, timeInc) or a wrangle name
   (ptnum, Frame …); the build says when a name is taken. "params": one entry per var a person would tune (3–8 of them):
   {type (float int bool string enum), desc, min, max, options (enum: strings or numbers; the var holds the option,
-  so [4, 8, 16] gives numbers), label (control name), step (slider step)}.
+  so [4, 8, 16] gives numbers), label (control name), step (slider step), group (a heading)}.
   The live viewer (preview) renders them as controls: sliders for numbers with a range, menus for options, checkboxes
   for bools. They are also the parameters when the graph is saved as an asset.
+  desc: what the param does and its unit ("gap between cliffs, metres"): the control's hover text. Every declared
+  param needs one; a param without a desc is a build and cook warning. label: the control's name, short; it may carry
+  the unit ("Gap between cliffs (m)"; a long one wraps to two lines). group: the heading the Controls list the param
+  under ("group": "Scatter"): a heading a person can close, the groups in the order of their first param, params
+  without a group above them. The viewer lists undeclared vars apart, closed under "other vars".
+  min/max are the slider's range, not a limit on the person: a value typed past them is kept (the slider widens to it;
+  ↺ brings back the declared value and range), and a refresh keeps it. They do limit a caller: a graph that uses this
+  one as an asset or package output has a value outside them clamped (below), except the graph's own value.
 - People change vars at any time (the viewer's controls edit the stored graph): read it with graphs {action:"get"}
   before assuming a var's value, and edit {op:"vars"} rather than rebuilding to change one. When a person asks to
   keep a value, keep it.
@@ -202,10 +207,14 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   JSON values are parsed, other text is a string; an unknown name lists the graph's vars), and --output <id> renders,
   exports and inspects a named output instead of the default: topotopo terrain.json --output land --var relief=8
   --render r.png --export land.glb. Exports record the vars they were made with (help topic "export", SOURCE).
+  Several outputs in one run (the graph and the maps they share load and cook once): repeat --output, each taking the
+  options after it up to the next one; options before the first apply to all: topotopo kit.json --scale 100
+  --output wall --export wall.glb --output gate --export gate.glb --render gate.png
 - The viewer shows each cook as it runs (the node, the time) and has a Stop button: a cook a person stopped fails with
   "cook stopped" at the node it stopped at. That is their decision, not an error to retry: ask before cooking it again.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
-- Output node: "output", else a node named out/OUT, else the last unconnected node.
+- Output node: "output" (a node's name; for a published output write its node, outputs.<name>.node), else a node
+  named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
   the default. Publish complete assets and useful separate parts; the viewer isolates each on click and lists
   its textures/layers. In a package that publishes versions they are its outputs; "publish": false keeps one (a viewer-only
@@ -216,15 +225,30 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
 - Optional "export" (on the graph for the default output, or on an entry of "outputs") is where that output
   exports: a format ("glb" → exports/<graph or output id>.glb) or {"format":"obj","path":"parts/a.obj","up_axis":"z"}
   (the export tool's options), always inside the package's exports/ (a workspace inside the engine project has it
-  inside the project, where the engine imports from; an "engine:" path prefix is gone: it warns, and exporting it is
-  refused). The person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
+  inside the project, where the engine imports from; a path starting with "exports/" drops it, with a warning, so it
+  never lands in exports/exports/; an "engine:" path prefix is gone: it warns, and exporting it is refused). The person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
   targets; set one with edit {op:"export", output?, export}.
   The viewer's Download buttons need no target: they offer the formats that fit the output (a heightfield: png16,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
+- A value outside a param's range (help gives min/max; a package output's "params" declarations) is clamped with a
+  warning. "strict": true on the graph makes it the node's error instead, for every node of the graph; "strict" on a
+  node (true or false) overrides the graph's for that node. Use it where a clamp would hide a mistake (an asset whose
+  range is narrower than the values its caller passes). Nested graphs (loop bodies, assets, package outputs) follow
+  their own "strict"; dry_run reports the same errors.
 - Vectors: a single number broadcasts ("size": 2 → [2,2,2]). Colours accept [r,g,b], "#ff8800" or names.
 - build mode "merge" upserts nodes into the existing graph; edit ops: set, add, remove (auto-rewires), connect, rename, output, vars, bypass, replace, insert (after a node, rewiring its consumers).
+- REGENERATING a graph a person works on: build mode "refresh" (or "topotopo refresh graph.json generated.json", for a
+  generator outside TopoTopo; - reads stdin). The new graph's nodes, wiring, outputs and var declarations (type, range,
+  options, default) win. Kept from the graph it replaces: each var value the person changed, while it still fits the
+  new declaration (same kind of value, a whole number for an int, one of the options; a value past min/max is kept,
+  as in the viewer; one that no longer fits takes the new value and is reported); a control's label and step when
+  the new graph gives none; a
+  control the person added for a var the new graph has; each node's "ui" when the new node has none; meta keys the new
+  graph does not set. A value counts as the person's when it differs from what the last refresh gave: each refresh
+  records the generated values in meta.generated_vars, so a value nobody touched follows the generator. Vars the new
+  graph lacks are dropped. The report lists what was kept, reset and dropped.
 - Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the package.
 - "fragment": true marks a graph that is a piece another graph or a script completes (merging in nodes it names but
   does not hold): it is never cooked on its own, and topotopo check skips it.`,
@@ -242,8 +266,11 @@ MARKERS: what a person places by clicking in the live viewer (the guides tools: 
   pscale and orient; paths open and zones closed polylines; volumes closed boxes), so describe it and read it like any
   other input. A graph meant to be directed by guides reads the file with "missing": "empty"
   ({"type":"file","params":{"path":"inputs/markers.json","missing":"empty"}}): it cooks before the first guide is
-  drawn, and again each time the guides change.
-FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"), obj/stl/ply (no up axis:
+  drawn, and again each time the guides change. One markers.json per package: every graph in it shares the guides
+  (topotopo view <graph> uses the graph's package's inputs/ too). Guides can be written: a markers.json of that geometry
+  (by hand or by a graph's export) shows in the viewer's GUIDES list, ready to drag.
+FORMATS: glb/gltf (+Y up already; object names → prim "name", materials → "material"; obj too: usemtl → "material",
+  its .mtl (mtllib, beside it) → the material table with colours, alpha, roughness and maps), obj/stl/ply (no up axis:
   Unreal exports and Blender exports with Up = Z are Z-up, so add "up_axis":"z"), geo/bgeo (Houdini), csv and
   points.json (one point per row; columns such as name, role, pscale become point attributes), blend (needs Blender
   installed; it converts the file headlessly). Images: png (8/16-bit grey or colour).
@@ -355,7 +382,17 @@ PARTICLES: the particles node is a solver too: frame f runs steps + (f - start_f
   cached the same way (10 → 11 runs one frame), and animate:false makes it time-independent (always "steps" steps).
 LIMITS: one cook of rbd_settle, rbd_stack, drape, inflate, particles, heightfield_erode or remesh_quad stops with an error
   naming the node after TOPOTOPO_SIM_TIMEOUT_MS (default 10 min; lower steps/duration/iterations, not the limit). Params that
-  count something have a max (help shows it); larger values are clamped.`,
+  count something have a max (help shows it); larger values are clamped (with a warning; a graph with "strict": true
+  fails instead, see help topic "graph").
+  User code (expressions, wrangles, a whole script with its lib.run calls, parametric curves and surfaces, sdf_expr
+  sampling) stops after TOPOTOPO_SCRIPT_TIMEOUT_MS (default 30 s): the node fails with "exceeded N ms" and a hint naming
+  the limit. Both limits are environment variables in milliseconds, read by every host the same way: the CLI, the MCP
+  server, the live viewer and package cooks (a value that is not a positive number fails at start). Keep the guard: raise
+  it for a cook that needs longer (a whole city in one script: 120000), not to hide an endless loop.
+TIMING: a cook report (build, edit, the CLI for cooks of 1 s or more, CLI --timing for every node) says where the time
+  went: "timing (41.0 s in all): city 40.1 s, roads 0.8 s", each node's own cook (its inputs count at their own nodes),
+  and under a script the time of its lib.run calls by node type ("city: lib.run boolean 30× 22.0 s, lib.run
+  copy_to_points 12× 9.5 s"). When the slowest node took half the script limit or more, the line says the limit.`,
 
   wrangle: `WRANGLE (per-element JavaScript with VEX-style @attributes)
 {"type": "wrangle", "in": ["geo"], "params": {"run_over": "points", "code": "@P.y += noise(@P*2) * 0.1;"}}
@@ -406,10 +443,13 @@ SDF helpers are also available (see topic sdf).`,
   ""  or  *          all elements
   top                named group (wildcards: side*)
   !top               everything not in top     ^top  removes top from the selection so far
+  ?top               top when the geometry has it, nothing when it does not (a bare name that matches no group is
+                     an error); with ^ and !: "^?top" "!?top". For groups a variant may lack (help topic "materials")
   0-10  5  0-100:2   element index ranges (:2 = every 2nd)
   @P.y>0.5           attribute test, ops = == != > < >= <= ; components .x .y .z .w .r .g .b
   @class==3   @name=piece*   @Cd.r<0.2   @ptnum<100
-Tokens are space-separated and applied left to right (union unless prefixed ! or ^).
+Tokens are space-separated and applied left to right (union unless prefixed ! or ^). A wildcard (side*) or an
+attribute test (@name=x) that matches nothing selects nothing; only a bare group name must exist (or be "?name").
 STRING ATTRIBUTES (name, path, a material or part label):
   @name=barrel        exactly "barrel" (= and == are the same)
   @name=bar*  @name=*rel  @name=b?rrel   wildcards: * any run, ? one character; case-sensitive
@@ -489,6 +529,16 @@ NAME THE PIECES FIRST when they have no names (one node each):
   clean up          attrib_string {"find":"_LOD","replace":"_lod"} · {"find":"\\\\.\\\\d+$","regex":true} · {"case":"lower"}
   prefix            attrib_string {"format":"gun_{value}"} keeps each name behind a prefix
   Then material {group:"@name=hull_*"} and export split_by_name write one mesh per name.
+CONDITIONAL BINDING (variants that may lack a part): a bare group name that a variant does not have fails the material
+  node ("unknown group"); write "?trim" to bind trim where it exists and nothing elsewhere. Chain the optional ones
+  after the base material:
+    {"wall": {"type":"material","in":["building"],"params":{"name":"brick"}},
+     "trim": {"type":"material","in":["wall"],"params":{"name":"metal","metallic":1,"group":"?trim"}},
+     "glass":{"type":"material","in":["trim"],"params":{"name":"glass","alpha":0.3,"group":"?windows @name=Glass*"}}}
+  A material whose group is empty only adds its table entry: glb writes the materials prims use, so a variant without
+  trim exports no "metal". Keep plain names (no ?) for parts every variant must have, so a missing one stays an error.
+  By a prim attribute instead of a group: "@part=trim" (a string test that matches nothing selects nothing; the
+  attribute itself must exist).
 EXPORT: glTF writes one material per table entry; a named material decides the colour of its prims (their Cd is
   dropped unless vertex_colors:true). Merging pieces whose materials or images share a name but differ (two package
   outputs that both call their map "basecolor") renames the later one ("paint_2", "<material>_basecolor"), so every
@@ -499,12 +549,18 @@ MATERIAL OUTPUTS (a material as a package output, kind "material": materials and
           roughness} with no input for a plain one.
           Each map keeps its texture node's resolution (a 4k normal beside a 512 mask); expose one as a param (a var
           such as "normal_resolution" read by that node) to let a use change it.
+  alpha   texture_to_material sets no alpha mode, so on its own the material is opaque. Blended (glass, stains) or
+          cut-out (grates) takes two nodes: material {name:"glass", alpha_mode:"blend"} with no input (the values:
+          roughness, metallic, alpha), then texture_to_material {material:"glass", base_color:"glass_color"} with that
+          node in input 0 and the images in input 1 ("in": ["glass_mat", "maps"]) → the output. It adds the maps and
+          keeps the mode; the base colour image's alpha is the transparency. Cut-outs: alpha_mode "mask", alpha_cutoff.
   use     {"type":"owner/materials/steel", "params":{...}} → input 1 of material {group:"@name=body*"} on the mesh: the
           material and its maps are copied in and assigned (from names one when the source holds several; name
           renames it). The material node's own colour and map params are not used then.
   see     renders, the viewer and the web app show it on spheres (one per material) with its base colour maps;
           publishing records each map's size (packages lists "maps baseColor 2048, normal 4096").
-  export  format "textures": one PNG per map + materials.json (each material's values and the files of its maps), for
+  export  format "textures": one PNG per map + materials.json (each material's values, with the factors glb writes: white
+          base colour under a base colour map, roughness 1 under a roughness map; and the files of its maps), for
           engines to rebuild it; glb and usda need a mesh: export the mesh that uses it.`,
 
   attributes: `ATTRIBUTES (Houdini conventions)
@@ -622,7 +678,7 @@ EROSION: droplets in metres, so the same params erode alike at any spacing (an 8
   which depends on its extent); direction E/SE/S/SW/W/NW/N/NE = 0..7, sink = 255. D8 routes one receiver,
   D-infinity splits across two downhill receivers; local pits retain flow unless fill_sinks:true routes over a
   virtually filled surface (height stays unchanged). stream_power accepts the same opt-in fill_sinks flag.
-  See examples/erosion_models.json for all four erosion methods on the same ridged terrain.
+  A whole valley eroded, then weathered, with its flow read for fans and a river: help {examples:["eroded_valley"]}.
 DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise closed depressions to their spill level.
   epsilon:0 keeps flat spill surfaces; epsilon>0 adds a strict downhill gradient (metres per neighbour step).
   max_depth:0 fills every depression; a positive limit retains each connected depression whose maximum depth exceeds
@@ -631,12 +687,13 @@ DRAINAGE: heightfield_fill_sinks uses deterministic priority-flood to raise clos
   mask_layer names a no-fill layer (values must be 0..1; cells at 1 stay untouched as terminal outlets).
   Protected outlets and retained lakes are exceptions to border drainage. Pipe/stream_power erosion initializes from lake and writes simulated water
   depth back to lake within that original lake footprint. Droplet water remains its legacy normalised resting mask.
-  See examples/drainage.json: unfilled massif beside shallow fills, blue retained lakes and coloured accumulation.
 RENDER / INSPECT: render draws heightfields as a shaded grid with the mask in red; heightfield_layer:"flow" draws
   another layer in red instead ("none": none; the viewer's layer picker does the same), color_by any layer name maps
   it to colours. It draws at most 256 quads per side, so a 513 × 513 field shows at 257 × 257 (the footer and a note
-  say so); heightfield_res: "full" (CLI --heightfield-res full) draws every sample. inspect and every cook summary
-  list the grid and each layer's min/max/mean.
+  say so); heightfield_res: "full" (CLI --heightfield-res full) draws every sample. The live viewer draws at most 512
+  quads per side by default (a 2 km field at 2 m every 2nd sample) and its "terrain detail" setting draws finer, up to
+  every sample, so instances scattered on the surface sit on it exactly; it is remembered per browser. inspect and
+  every cook summary list the grid and each layer's min/max/mean.
 UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with
   height_min / height_max and the import settings. Pixel column = X, row = Z (row 0 at min Z); Unreal X = X,
   Unreal Y = Z, Unreal Z = Y, centimetres.
@@ -648,7 +705,7 @@ UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes 
   Tiles: pass the same height_min / height_max to every export.
   Whole scene: export {format: "unreal_landscape", path: "exports/level"} of a merge(heightfield, meshes, instances) →
   heightmap + every layer + landscape.json (the exact Landscape import settings and steps) + objects.glb + the instance
-  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). examples/unreal_demo.json is a complete scene.`,
+  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). help {examples:["unreal_landscape"]} is a complete scene.`,
 
   textures: `PROCEDURAL TEXTURES AND BAKES (Substance Designer / Houdini COP style; category "texture")
 An image is a volume carried in the geometry (like a heightfield): a 2D grid of float pixels with named layers of 1
@@ -675,7 +732,8 @@ GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/
   RGBA colour with channels:"rgba"; input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star,
   ring; falloff; tile) · tex_sdf_shape (the signed distance in metres to a disc, box, polygon, star, capsule or cross;
   corner rounding; tile; see SHAPES below) · tex_grunge (dirt / leaks / spots with a coverage fraction and edge
-  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text.
+  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text (font, weight: 100 thin … 400 regular … 900
+  black on the wght axis of a variable font, e.g. a Noto Sans TC variable file; a static font keeps its own weight).
 FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
   (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
   (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).
@@ -754,15 +812,15 @@ CUTOUTS: tex_crop extracts a top-left pixel rectangle (all layers), optionally r
   tex_dilate pads nearest valid pixels; alpha stays unchanged by default. For grey/data maps supply an explicit
   validity mask (same size). Pack padding reserves empty gutters; dilate supplies the edge values.
   material {alpha_mode:"mask",alpha_cutoff:0.5,double_sided:true} BEFORE texture_to_material enables cutouts.
-  Omitted/auto alpha mode retains legacy behaviour; explicit opaque/mask/blend overrides scalar/vertex auto mode.
-  Complete example: examples/image_cutouts.json; workflow and layout contract: docs/image-cutouts.md.
+  Omitted/auto alpha mode blends only for scalar alpha < 1; vertex Alpha (COLOR_0.A) is data and never changes it.
+  Complete example: help {examples:["image_cutouts"]}; workflow and layout contract: docs/image-cutouts.md.
 SEE IT: render of a geometry holding only images shows the "texture" view; render {texture:"<image>"|"image/layer"|
   "<material>"} adds the view (a material shows its maps as a labelled strip); render {textures:true} samples base
   colour maps on the mesh (texture × Cd, like glTF). inspect lists every image with size and per-layer ranges.
 EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metallicRoughnessTexture); usda writes
   <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
   <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
-RECIPE (brick wall + worn crate: examples/textures.json):
+RECIPE (brick wall + worn crate; tileable stone, wood and metal from texture nodes: help {examples:["material_set"]}):
   bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {layer:"id"}
   color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)
   normal = tex_normal_from_height(bricks) {depth:0.035, size:1.6} · crate: uv_unwrap → bake_ao + bake_curvature →
@@ -770,7 +828,7 @@ RECIPE (brick wall + worn crate: examples/textures.json):
   tex_blend(wood, paint, wear) → tex_channel(ao, rough) = ORM → texture_to_material {base_color, orm}.
   Detail on a bake: grain = tex_noise {scale:60} → grain_n = tex_normal_from_height {depth:0.0003, size:<uv span in m>}
   → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.
-RECIPE (worn painted metal from texture nodes only: examples/texture_lab.json): SDF plates and rivets → height →
+RECIPE (worn painted metal from texture nodes only; the metal of help {examples:["material_set"]}): plates and rivets → height →
   normal, tex_ao · edge wear = tex_curvature(normal) layer convex × tex_grunge chips → tex_slope_blur {mode:"max"}
   (ragged) → tex_histogram_scan {coverage:0.07} · steel = tex_directional_blur(fine noise) under the paint · per-plate
   paint = tex_flood_fill(plate mask) → tex_histogram_range → tex_colorize · rust runs = tex_directional_blur(rivet
@@ -801,6 +859,8 @@ Make them:
   pack {by: connectivity|name|attrib|all, pivot}   pieces → instances; identical pieces share one source;
                                constant name/Cd/material per piece move onto the instance.
   file *.glb                   EXT_mesh_gpu_instancing comes in packed (instancing:"expand" for real geometry).
+  file *.csv / *.json          a placement list (P, yaw, pscale, a piece name per row) as the template points: help
+                               topic "recipes", 15 (instance a placement list).
 Nodes that KEEP instances (work on anchors / packed prims): transform (also rotates/scales each instance), match_size,
   copy_xform, copy_to_points, merge, switch, null, foreach (pieces/prims/points: one iteration per instance), solver,
   graph_ref, file, delete (not edge dissolve), group, group_*, attrib_* (create, randomize, promote, delete, rename,
@@ -822,15 +882,34 @@ See them: render draws instances (an evenly spread subset above 600k triangles, 
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
 Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",
   TRANSLATION/ROTATION/SCALE per instance, with custom_attribs:true the anchor attributes as _NAME instance accessors
-  (Cd → _COLOR); shear is approximated with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
+  (Cd → _COLOR); shear is approximated with a warning; the instanced mesh holds the source's polygons, as
+  readers instance triangle meshes only: its polylines and loose points are written as copies, its scene empties are left
+  out with a warning); usda → one PointInstancer (prototypes = sources, protoIndices,
   positions, orientations, scales, ids, velocities, with custom_attribs:true primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
   csv / points.json → one row per instance (instance stream: Position/Rotation/Scale or P/orient/scale, Mesh column)
   + <name>.meshes.json + one GLB per source; json keeps them losslessly; obj/ply/stl expand them (warned).
   instancing:"expand" (export option) always writes real geometry (instances:"expand" for csv/points.json only).
   Unreal: instances.csv + meshes for PCG / ISM, or glb instances where the importer supports EXT_mesh_gpu_instancing;
   USD PointInstancer → HISM.
+IDENTITY THROUGH INSTANCES AND EXPORT (which lot, edge or source layer an instance came from): plain attributes carry it.
+  Use ints for ids engines read (a wrangle's "@lot_id = …" makes a float: write "i@lot_id"); strings read as text in
+  csv, points.json and usda.
+  source layer  tag each layer before the merge: wrangle {run_over:"prims", code:'s@source = "parcels"; i@lot_id = @primnum + 1;'}
+                (merge gives "" or 0 to the inputs that lack the attribute)
+  lot → points  scatter copies the lot's prim attributes onto its points (with sourceprim); points_along_curve copies
+                a curve's onto its points (one polyline per edge with "i@edge_id"); resample and ends keep them
+  → instances   copy_to_points {pack:true} puts every template point attribute on the anchors (lot_id, edge_id, source);
+                pack carries only its "carry" list (default "name Cd material"): pack {carry:"name Cd material lot_id edge_id source"}
+  ← unpack      copies the anchor attributes in its transfer_attributes (default "name Cd material piece") onto the
+                unpacked points where the source has no attribute of that name: unpack {transfer_attributes:"name Cd
+                material piece lot_id edge_id source"} (or "*"); the others are not on the result
+  export        csv / points.json: one column per anchor attribute (the attributes option can pick). glb/gltf with custom_attribs:true: _LOT_ID,
+                _EDGE_ID … per-instance accessors of EXT_mesh_gpu_instancing (a string is an index into the node's
+                extras.topotopo.instanceAttributes._SOURCE.strings). usda with custom_attribs:true: primvars:lot_id per
+                instance (strings as string[]). geo and json keep every attribute. Check: inspect lists the anchors'
+                attributes; a csv export shows the values.
 Example (forest): terrain → mask → scatter → orient → prune → copy_to_points {pack:true, variants:"name", variant_weights}
-  with trees = merge of three meshes named pine/fir/oak (examples/forest.json; help topic "pcg").`,
+  with trees = merge of three meshes named pine/fir/oak (a whole forest: help {examples:["forest_on_terrain"]}; help topic "pcg").`,
 
   rbd: `RIGID BODIES: SETTLE AND STACK (Houdini RBD drop / settle, Rapier physics; category "sim")
 Use it when placed pieces must rest physically: rocks on a terrain, props on a floor, crates in a pile, a container filled.
@@ -867,7 +946,7 @@ Example: rocks on a terrain, then a crate pile on the terrain and the settled ro
   "settled": {"type":"rbd_settle","in":["rocks","terrain"],"params":{"delete_fallen":true}},
   "ground2": {"type":"merge","in":["terrain","settled"]},
   "crates": {"type":"copy_to_points","in":["crate","same_spot_x16"],"params":{"pack":true}},
-  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (examples/rbd_settle.json)`,
+  "pile": {"type":"rbd_stack","in":["crates","ground2"],"params":{"interval":30}}   (rbd_stack in a whole scene: help {examples:["fracture_settle"]})`,
 
   pcg: `PCG: SCATTERING AND INSTANCING (Houdini scatter/copy toolkit, Unreal PCG point filters)
 THE CHAIN
@@ -888,7 +967,9 @@ scatter: generate_by count (exactly count) | density (density × density_scale p
   density, else count). weight = density_attrib (point/vertex/prim, ≥ 0) × density_mask (0..1). relax (blue noise, follows
   the weights), relax_iterations (Lloyd-style push-apart on the surface), min_distance (exact), max_per_prim,
   emit_attributes ("*": point/vertex attributes interpolated, prim attributes copied; "^uv" excludes), write_primuv
-  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume.
+  (sourceprimuv), write_seed (int seed). Curves: mode curve; volumes: mode volume. The input N is carried; write_normals
+  writes the surface normal (curve tangent) when the input has none.
+  N on points orients copies (+Z along N), so delete it or set orient/up when instances should stand upright.
   backend auto (default) uses WASM when already loaded, otherwise JS; kernel loads WASM, js forces the reference path.
   Elimination, ordered minimum-distance rejection (including per-prim caps), and surface relaxation have Rust kernels.
   min_distance can reduce the count; blue-noise elimination alone is not a hard separation constraint.
@@ -908,7 +989,7 @@ copy_to_points: variants "name"/"piece" + variant_attrib (exact pick) or variant
   pack:true for anything above a few thousand copies.
 Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatter ≈ Surface/Spline/Volume Sampler; orient ≈
   Transform Points; prune ≈ Self Pruning / Density Filter / Difference; copy_to_points pack ≈ Static Mesh Spawner.
-Example: examples/forest.json (30k candidates → pruned packed forest) and examples/pcg_scatter.json (road, lamps, rocks).`,
+Example: help {examples:["forest_on_terrain"]} (slope and noise masks → heightfield_scatter → packed trees and rocks, off steep ground).`,
 
   curves: `CURVES (polylines and Bezier / NURBS spline prims)
 straight_skeleton {mode skeleton|offset|roof, distance, pitch, pitch_attrib, height_cap, group}
@@ -948,6 +1029,10 @@ Nodes:
       profile placed by sections [{offset, scale, rotate}, ...]; sections with the same point count join point to point
       (insets keep their corners), closed sections are turned to the first one's winding; closed results face outward.
   revolve {axis, origin, angle}   lathe about any axis line; draw the profile in a plane that holds the axis.
+      angle [a0, a1] turns right-handed about the axis (plan angle of the result = -a); caps only for closed profiles and
+      then always outward; an open profile gives an open surface, flip reverses it. extrude plane: xz along +Y, xy along +Z,
+      yz along +X. sweep end caps are perpendicular to the path (a tilted last segment tilts the cap). grid_split splits
+      quads only: cut first (boolean leaves n-gons), then split.
   shape2d capsule | slot   a stadium (rect with half-circle ends) in size; extrude for a slot cutter.
   project_curve (curves, surface | heightfield) {mode direction|closest, direction, spacing, lift, misses}   drapes a
       curve onto terrain; spacing resamples first so it follows the bumps; writes point hit and N (smooth normals).
@@ -960,7 +1045,7 @@ Recipes:
     frame:"plane"} → sweep {radius:0.04}; posts: resample the rails {length:1.5} → copy_to_points a thin box.
   Letter / logo outline: bezier {closed:true, points} (+ inner contours for holes) → convert_curve → extrude.
   Cable with sag: nurbs {points:[a, mid lowered, b]} → resample {length:0.05} → polywire; taper with curve_attribs.
-See examples/splines.json.`,
+A railing and pipes along a filleted path: help {examples:["rail_along_curve"]}.`,
 
   particles: `PARTICLES (Houdini POP network in one node; category "sim")
 {"type":"particles","in":["emitter","collision","field"],"params":{...}}: inputs 1 and 2 are optional.
@@ -984,8 +1069,8 @@ TIME: a cook at start_frame (default 1) runs "steps" steps; frame f runs steps +
   animate:false = always "steps" steps, time-independent. Same bits with or without the worker pool and however it is stepped.
 RECIPES: fountain = one point, speed 6, velocity_var 1.3, life 3, floor:true, collide bounce, trails 6. Runoff on terrain =
   emitters scattered on ridges (heightfield_mask_by_feature curvature convex + heightfield_scatter), the heightfield as input 1
-  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age
-  (examples/particles.json). Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1. Swarm on a mesh: attract_to surface.`,
+  and 2 (field_scale 3, drag 1.4), noise 4 curl, collide slide, trails 40 output trails, color ramp by age.
+  Sparks: emit_all burst, velocity_var 5, life 0.5 ± 0.3, drag 1 (a burst with trails: help {examples:["sparks"]}). Swarm on a mesh: attract_to surface.`,
 
   assets: `ASSETS (reusable custom nodes, like HDAs)
 Any graph with vars can be saved as a node type: assets {action:"save", name:"rock_cluster", from_graph:"main"}.
@@ -1008,8 +1093,8 @@ A published package has a full name and versions. Its author names it once in it
 Publishing is permanent: run the dry run, show it to the person, and publish when they say so.
 A graph uses an output of a package as a node type; "owner/name" alone is the package's default output:
   {"type": "studio/trees/pine", "in": ["ground"], "params": {"height": 6}}      {"type": "studio/trees"}
-Its params are the vars of the output's graph that its node reads, with their "params" declarations (ranges clamp,
-options are checked), and its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the
+Its params are the vars of the output's graph that its node reads, with their "params" declarations (ranges clamp
+with a warning, or fail in a "strict" graph; options are checked), and its inputs that graph's input nodes. help {nodes:["studio/trees/pine"]} gives them with the
 version and its note, also for an output search found in a place the package looks in but does not use yet (read there,
 nothing copied); catalog {category:"package"} lists the outputs of the packages in use and TopoTopo's own.
 
@@ -1145,6 +1230,13 @@ on:false or the end of the session; nothing about it is saved. Every edit there 
 (the viewer, renders, inspect): exports and publishing use the published copy, and an export made while following
 says which published version it used. A workspace with "follow": true (topotopo workspace init --follow) follows its
 own packages this way, those whose working folder is inside it. Other packages' versions keep the copies they hold.
+EXPORTING FROM A WORKING FOLDER: an export told to follow a package uses its working folder too: the CLI's --follow
+studio/trees on a graph-file cook (its --export and --export-all), MCP export {follow:["studio/trees"]} for a package
+this session follows. It is for a package with no published version yet (an unpublished sibling in the workspace) or
+for edits not published yet. Such an export is no published version: its source record lists the package under "followed" (and
+the folder's hash under packages, "studio/trees@working"), and the export says so. An export not told to follow a
+followed package with no published version in use is refused, saying to publish it or to pass --follow / follow.
+--locked (a build machine) exports published versions alone: a followed package it does not use fails the run.
 
 OUT OF DATE AND UPDATE: what a package uses changes only by an update, after a before/after.
 - workspace {action:"outdated"} (CLI: topotopo outdated) lists the packages in use that have newer versions:
@@ -1278,6 +1370,11 @@ Which node:
                tiling textures, boxes. box: each polygon along the axis its normal is closest to (X faces u = z, v = y;
                Y faces u = x, v = z; Z faces u = x, v = y); both sides of an axis share it, so faces looking along +X,
                +Y and -Z are MIRRORED (text reads backwards; inspect uv counts them) and -X, -Y, +Z read right.
+               cylindrical scale[0] = tile count around the axis (a count per turn, so nested radii get different tile
+               sizes: a 0.4 m post and a 3.6 m drum at the same count; give each radius about 2π · r / tile width);
+               seam = the angle where u wraps (0 = -Z for axis y, 90 = -X, 180 = +Z, 270 = +X), and a face the seam
+               runs through keeps its own short uv (the seam lies on edges); its top and bottom annuli collapse, so
+               give them a prim group and project them again with method box / planar and group.
   uv_unwrap    automatic (xatlas): cuts charts by angle/cost, flattens and packs into 0..1. Default for props and
                hard-surface. Keeps polygons; writes prim chart. Each connected piece is charted on its own; polygons
                xatlas cuts across charts become triangles (exact uv); faces with no area collapse onto a neighbour's
@@ -1286,6 +1383,11 @@ Which node:
                (cut_long). The result is checked and warnings name the part. use_seams:true keeps existing seams.
                Big smooth meshes chart slowly: max_chart_area -1 (auto) caps chart size above ~1000 triangles; a higher
                max_cost makes fewer, larger charts (less space lost to padding).
+               Noisy surfaces (scans, decimated or AI-generated rocks, cliffs, trunks) shatter into hundreds of ragged
+               charts whatever the weights: chart_smoothing 60 cuts and flattens the charts on a smoothed copy and puts
+               the uv on the real shape (packed by its real areas), e.g. a 6k-triangle rock: ~220 charts → ~20. More
+               passes = fewer, rounder charts with a little more stretch. Several rocks in one mesh: each piece is
+               charted on its own, so one uv_unwrap does them all (foreach by name only to give each its own 0..1).
   uv_flatten   LSCM (conformal) per chart, charts bounded by YOUR seams: uv discontinuities (use_seams), the
                "seams" edge group, point pairs ({"seams": [[a,b],[b,c]]}), a prim chart attribute, the group border.
                Closed charts / handles are cut open automatically (cut_closed). pins: [a,b] fixes orientation.
@@ -1322,18 +1424,25 @@ position of each, and their areas; folds inside one chart included; shared edges
 overlap.inTile (between atlas charts, each inside one tile: what a bake suffers), overlap.tiling (a chart runs across
 tile borders, as uv_project over many tiles does: a repeating texture, flagged tiling:true; expected) and
 overlap.acrossLods (prims named _lod0 / _lod1 … share the uv space on purpose); collapsed / non-finite / out-of-tile
-triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, utilization (exact for a
+triangles (the first one named with its position), UDIM tiles, charts, mirrored triangles, wrapSeam (faces a wrap seam
+runs through: uv from an angle, cylindrical or spherical, with corners at both ends of the turn, so one face takes the
+whole turn's tiles mirrored; named with their position and kept out of mirrored and overlap; uv_project keeps its seam
+on edges, and its seam param turns where), utilization (exact for a
 clean atlas in 0..1, else a labelled raster ESTIMATE; tileUtilization per UDIM tile), texel density (density: overall,
 per chart 5 % / median / 95 %, the lowest and highest chart and where; texels/m with a resolution) and per-piece
 (prim "name") surface, uv area and texel density. An analysis that hits its bounds says INCOMPLETE.
-CLI: --inspect uv --uv-resolution 1024 [--json].
+per_piece:true when every prim "name" has its own 0..1 layout (the objects of a multi-object OBJ, each with its own
+texture): overlaps are tested within each piece only, each piece lists its overlapping pairs and covered share
+(utilization is the mean over the pieces), and a whole file is checked in one call.
+CLI: --inspect uv --uv-resolution 1024 [--uv-per-piece] [--json].
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
   render: `RENDER (pick the overlay that answers your question; everything is off by default)
 render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
 overlays and notes pieces, open edges and back-facing % (also returned as text notes).
 VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
-  persp, front, back, left, right, top, bottom, uv, section, texture, persp@<azimuth>, and the three-quarter views
+  persp, front (looking from +Z, at an asset's front), back (from −Z), left (−X), right (+X), top (+Y), bottom (−Y),
+  uv, section, texture, persp@<azimuth>, and the three-quarter views
   front_left, front_right, back_left, back_right (persp at azimuth -45, 45, -135, 135).
   "texture" draws images flat (texture:"<image>" | "image/layer" | "<material>" picks; a geometry holding only images
   renders as it by default); textures:true shows base colour maps on the mesh. Help topic "textures".
@@ -1349,6 +1458,16 @@ FRAMING: every 3D view fits the bounds: the bbox corners fill the view with a sm
     e.g. render {views:"front", ortho_scale:0.5} shows 50 cm across the front view, at any size.
   size: pixels per view, n or "WxH": size:"1600x600" gives wide views a long prop fills (the fit follows the aspect);
     scale 2 makes a 2× image.
+CAMERA BY POSITION (match a concept or game camera; the fit can hide a piece that is 15 % too narrow):
+  camera: {from: [x, y, z], to: [x, y, z], fov: 40}: the persp view's eye at from, looking at to, world +Y up, fov in
+    degrees across the view's WIDTH (horizontal, as Unreal and Houdini give it; default 40, about a 50 mm lens). A
+    vertical fov v at a W×H view is 2·atan(tan(v/2)·W/H). Nothing is fitted: what the lens sees is drawn, cut at the
+    view's edges. Give size the concept's aspect ("1920x1080") and the concept as underlay: with a camera the underlay
+    fills the view (underlay_fit "view"). azimuth, elevation, look_at, zoom and bounds do not move it (a note says
+    so). Without views the render is the one camera view; ortho views in views still fit. A camera standing among the
+    geometry loses the triangles that reach behind it (a note counts them).
+    e.g. render {camera:{from:[6, 1.7, 9], to:[0, 2, 0], fov:60}, size:"1600x900", underlay:"inputs/concept.png"}
+    CLI: --from 6,1.7,9 --to 0,2,0 --fov 60 --size 1600x900 --underlay concept.png
 BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no ground grid or axis gizmo; the footer
   stays). grid:false drops the persp ground grid. underlay:"inputs/side.png" draws a reference image (PNG, relative to
   the package) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
@@ -1377,12 +1496,22 @@ QUESTION → OPTION
   What shape is it?                                shading:"matcap" (clay, reads form) · "ao" (ambient occlusion: creases and
                    cavities darken; ao_radius px) · "flat" (facets, ignores N)
   How do the materials read? Roughness, metal, maps?  shading:"pbr": the metallic-roughness material glTF export writes
-                   (base colour map × vertex colour, tangent-space normal map in the exported MikkTSpace frame, orm or
+                   (base colour factor or map, tangent-space normal map in the exported MikkTSpace frame, orm or
                    roughness map, metallic, emissive, unlit) under a fixed camera-relative studio rig (key, fill, rim and a
                    sky/ground environment), GGX specular, ACES, exposure (stops, default 0). Deterministic: the same graph
-                   gives the same PNG. Texture files are read from disk; transparency is not evaluated (shaded opaque,
-                   with a note), nor are missing or non-PNG maps (named in the notes). color_by and highlight tint
+                   gives the same PNG. Texture files are read from disk; missing or non-PNG maps are not evaluated
+                   (named in the notes). Transparency follows the exported alpha mode: alpha_mode "mask" cuts out
+                   pixels below alpha_cutoff (alpha × base colour map alpha), "blend" (or alpha below 1 under "auto")
+                   is composited over what is behind, prim by prim from back to front; the inspection shadings
+                   (default, flat, matcap, ao) keep drawing blend materials as surfaces. color_by and highlight tint
                    the shaded material (the attribute colour lit by the material's brightness); checker is not shown.
+                   Vertex colour, as in glTF export: a named material wins (its base colour factor or map; the prims'
+                   Cd is not shown, a note says so), Cd colours prims without a material. cd:"multiply" also tints a
+                   named material with Cd (vertex paint), cd:"ignore" never shows Cd; cd:"auto" is the default.
+  Are the values right (light and dark, without colour)?  grey:true: shading "pbr" with every base colour a neutral
+                   18% grey lit by the studio rig at its luminance (base colour maps and Cd give no colour); roughness,
+                   metallic, normal and orm maps, alpha
+                   and emissive still apply.
 POLYGON EDGES: wireframe "auto" (the default) draws polygon edges on meshes under 6,000 polygons, never under shading
   "pbr" or textures:true (they would read as marks in the material); the footer says EDGES AUTO when it draws them.
   wireframe:false hides them, true draws them always.
@@ -1401,6 +1530,7 @@ CLI: several renders per cook: the options after a --render apply to that render
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
   --shading pbr --exposure 0.5 --views front_left --size 1600x600 --transparent --no-grid --sockets
   --azimuth -90 --elevation 10 --look-at 0.6,0.15,0 --zoom 4 --ortho-scale 0.5
+  --from 6,1.7,9 --to 0,2,0 --fov 60 (a camera by position)
   --underlay ref.png --underlay-opacity 0.6 --underlay-fit width (CLI paths are relative to the current folder)
   --no-view-labels --heightfield-res full --heightfield-layer flow`,
 
@@ -1417,7 +1547,9 @@ export {path:"exports/thing.glb"} — format from the extension:
   geo           Houdini JSON geometry: every attribute (all classes), group and polyline, lossless (precision 64 or 32)
   csv           point stream, one row per point: P.x,P.y,P.z,N.x,…,pscale,name (strings quoted); prims are ignored
   points.json   {format:"topotopo-points", count, attributes:{P:{type,size,data}}} (same schema on import)
-  obj usda ply stl json (lossless topotopo)
+  obj           vertex colours; prims with a "material" get usemtl and <name>.mtl beside it (Kd / Ke linear, as Blender
+                reads them; d, Pr / Pm and Ns; map_Kd / norm / map_Pr, "image:<name>" maps as PNGs in <name>_textures/)
+  usda ply stl json (lossless topotopo)
   textures      format:"textures", path = a folder: every image volume as <image>.png (help topic "textures")
 Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one mesh per prim "name", default true),
   custom_attribs (extra numeric attributes: default off for glb / gltf / usda and the GLBs of instance rows and bundles,
@@ -1426,25 +1558,50 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   ~3× smaller; for web engines such as three.js/Babylon.js) | "draco" (only with the optional draco3dgltf package),
   quantize (KHR_mesh_quantization alone), tangents "auto" | "preserve" | "none" (glTF TANGENT, below), attributes ["P","pscale",…] (csv / points.json), pcg / pcg_struct (csv),
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
-  prims), meshes (instance rows: also write one GLB per source, default true). For Unreal and Blender keep the default
-  uncompressed GLB.
+  prims), meshes (instance rows: also write one GLB per source, default true), maps "embed" | "external" | "none"
+  (glb / gltf texture maps, MAPS below). For Unreal and Blender keep the default uncompressed GLB.
+MAPS (glb / gltf; CLI --maps, export targets and the export tool "maps"): where the images of the materials go.
+  embed (default): inside the file. Self-contained, but every module carries full copies of the maps it uses.
+  external: each distinct image is written once as <image>-<hash>.png (or .jpg) in a shared maps/ folder and the glTF
+    references it by relative URI: maps/ beside the export file, and exports/maps/ for export targets (--export-all,
+    the viewer's Export, export {all:true}), so every output of a package reuses the same files and a run writes each
+    map once. The name carries the image's content hash, so two images never overwrite each other and an unchanged map
+    is not written again; a changed map gets a new file (clear maps/ and export again to drop the old ones).
+  none: no images and no texture slots: material names and factors only (each material as if it had no maps: its own
+    base colour, roughness and metallic; the material extras still name its maps). For an engine that supplies the maps
+    by material name; the glTF stays small and nothing is read or encoded.
 SOURCE: every export (export tool, export targets and the viewer's Export and Download buttons, the CLI's --export and
   --export-all) records how it was made, so it can be made again: a "source" block {graph, graph_sha256 (SHA-256 of the graph JSON as
-  cooked: vars after overrides, keys sorted, no whitespace), output (a named output, else null), node, frame, fps, vars
+  cooked: vars after overrides, keys sorted, no whitespace), nodes_sha256 (SHA-256 of the nodes the node's cook reads:
+  it, its inputs and the nodes its params name, theirs in turn, without their ui and note; an edit to another output's
+  nodes leaves it), files_sha256 (only for a graph in a package: SHA-256 of the package files its cook may read
+  besides the graph file: its other graphs, assets/ and inputs/), output (a named output, else null), node, frame, fps, vars
   (all of them, after overrides), seeds (the seed params the graph sets, by node: "loop/pts" inside a body, as written),
+  packages (only when the graph uses packages: "owner/name@version" → the version's hash, every version it uses, and
+  "owner/name@working" → the hash of a working folder the export followed), followed (only when it followed one: those
+  packages, no published version; the export is made again only from those folders as they were, and replay passes
+  --follow for each; help topic "packages", EXPORTING FROM A WORKING FOLDER),
   export: {format, options: every option the format reads, the given ones and the defaults of the rest}, topotopo (the
-  version)}. png16 / r16 carry it in their .json sidecar, csv / points.json
+  version), engine_sha256 (SHA-256 of the engine's own code: its src/ or dist/ tree, kernels, fonts and package.json)}. png16 / r16 carry it in their .json sidecar, csv / points.json
   instance rows in <name>.meshes.json, unreal_landscape in landscape.json; every other export writes <file>.source.json
   next to the file ({format:"topotopo-export-source", version, files, source}; a textures folder: source.json inside
   it), and glb / gltf also carry it in asset.extras.source. Nothing in it depends on the time or the machine: the same
   graph, values and options give the same bytes, and a later version changing a default does not change what the
   record replays. Replay on the command line: topotopo <graph>.json --output <output> (or --node <node>) --frame <frame>
-  --fps <fps>, one --var <name>=<value as JSON> per var, --format <format>, every option as its flag (up_axis "z" →
+  --fps <fps>, one --follow <package> per followed package, one --var <name>=<value as JSON> per var, --format <format>, every option as its flag (up_axis "z" →
   --up-axis z, custom_attribs false → --no-custom-attribs, layers ["a","b"] → --layers a,b) and --export <path>. e.g.
     topotopo graphs/crate.json --node h --frame 1 --fps 24 --format glb --compress none --custom-attribs
       --instancing packed --materials --no-quantize --scale 100 --split-by-name --tangents auto --up-axis z --export crate.glb
   These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
   them with it (kind "metadata"), and a file node reading one says what to read instead.
+EXPORT-ALL (CLI --export-all): cooks and exports each output with an export target, one line per output (its name,
+  kind, time, size and file), then writes them all (nothing when one fails to cook). It cooks only the outputs it
+  exports, not the default output first. In a package, an output is kept as it is when its last export would be made
+  the same: its receipt in exports/.outputs.json, every file it wrote still there, and the record's source block equal
+  to the one an export would write now but for graph_sha256 and seeds (so its nodes, vars, frame, fps, packages, files
+  of the package, export options and the engine's code: any edit to it, as in a source checkout under one version,
+  exports again). Its line says "unchanged since its last export"; --force
+  exports it anyway. A graph in no package exports every output every time (its files are not known).
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or
@@ -1459,16 +1616,18 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors).
   Custom attributes (custom_attribs true): every other numeric point/vertex attribute of size 1-4 → _NAME (upper-cased,
   float or the smallest int type), mesh extras keep the original names and types, and packed instances carry their
-  anchor attributes as per-instance accessors. The attributes only scene empties use (scene_empty, parent, orient, scale,
+  anchor attributes as per-instance accessors (carrying lot / edge / source ids there: help topic "instancing",
+  IDENTITY). The attributes only scene empties use (scene_empty, parent, orient, scale,
   their extras) never become mesh channels.
 MATERIALS: the material node writes prim "material" + the detail table. A named material wins: its prims export in that
   material as it is and their Cd / Alpha are dropped (Cd left from colouring parts does not become COLOR_0 or a second,
   white or tinted copy of the material). Prims without a material, and every prim with vertex_colors:true, keep their
   Cd: not all white → baseColor white × COLOR_0 with the material's metallic/roughness/emissive (one constant Cd is
-  folded into the factor). alpha < 1 → alphaMode BLEND; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
+  folded into the factor). a material's own alpha < 1 (or alpha_mode blend) → alphaMode BLEND; vertex Alpha is data: it stays COLOR_0.A and never changes the mode; unlit → KHR_materials_unlit; emissive above 1 → KHR_materials_emissive_strength.
 TEXTURES: material {base_color_map, normal_map, roughness_map} (PNG/JPEG paths relative to the package folder; the mesh
   needs uv). glb/gltf embed the images (baseColorTexture, normalTexture, metallicRoughnessTexture = roughness in green; a
-  map replaces its factor). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
+  map replaces its factor; beside a metallic above 0 a separate roughness map is written repacked, blue 1, so the
+  metallic stays the material's value). usda: UsdUVTexture shaders reading primvars:st, asset paths relative to the .usda. geo/json
   keep the paths in the material table. glTF import records texture paths (or "embedded:<name>") without decoding.
   "image:<name>" textures (texture_to_material, texture nodes) are image volumes of the geometry: glb/gltf encode them
   to PNG in memory, usda writes <name>_textures/<image>.png next to the .usda, format "textures" writes every image as
@@ -1555,7 +1714,16 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
    (BVH, stops after max_tests candidate pairs and says so), attrib (must exist; attrib_min/attrib_max bound its first
    component; attrib_class), group (exists and is non-empty), expr (JS over npoints nprims nvertices npolys nlines
    bbox.min/.max/.size/.center (.x .y .z) volume area pieces open_pieces genus closed boundary_edges, and the graph
-   vars by their bare name: "npoints == count * 8").
+   vars by their bare name: "npoints == count * 8"). As in every expression a var comes first: with a slider "pieces",
+   pieces is the slider and geo.pieces the measurement (geo holds every measurement), so "geo.pieces == pieces" reads
+   both; an expr that reads such a name bare, without geo, gets a warning naming the clash.
+   Heightfields and images have no points, so they have checks of their own: heightfields / images (names that must
+   exist; * wildcards), then for the ones named (every one when empty) samples ([x, z] or one number), height_min /
+   height_max (every height sample), match ("edges" | "all": the heightfield against the reference heightfield wired
+   to input 1, at the same world X and Z, within match_tolerance: a tile cooked on its own against its map),
+   image_size ([w, h] or one number) and image_min / image_max (every channel of every layer; NaN fails):
+   {"type":"assert","in":["tile","map"],"params":{"label":"seamless","match":"edges","height_min":0,"height_max":"=relief"}}
+   {"type":"assert","in":["maps"],"params":{"label":"maps","images":"stone_*","image_size":"=resolution","image_min":0,"image_max":1}}
    on_fail: error (default) | warn | mark → detail assert_failed (count) + assert_report, groups assert_fail;
    then render {highlight:"assert_fail"} shows where. Each assert records stats checks/failed in the cook report.
    Every failed check names its first offender: the part (prim "name", groups) and its world position.
@@ -1575,7 +1743,8 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
 5. INSPECT {detail} (CLI --inspect <detail>):
    summary (default)  one screen: counts and triangles, bbox in metres to the millimetre, parts (prim "name"),
                       materials and their maps, images, uv state (charts, in-tile overlap, tiling, utilization), closed
-                      or open edges (after welding seam splits)
+                      or open edges (after welding seam splits). Over 200,000 triangles it leaves the uv overlap test and
+                      utilization to detail "uv", and says so
    budget             triangles per part (prim "name": each exports as its own mesh), split per LOD when the names
                       end in _lod0, _lod1 …, and per node (the triangles each node adds over its inputs), sorted, with
                       totals; packed instances count expanded. json:true (CLI --json) appends it as JSON
@@ -1652,23 +1821,45 @@ LIMITS: collision is per point plus sharp corners (a sharp collider edge can pas
  normals, group / prim attribute borders): reduce before unwrapping and compute vertex normals after lod. remesh_quad {target_faces:2000, feature_angle:45} produces field-aligned
  quad-dominant polygons with point/vertex/prim attributes; mode:"quads_only" conformingly subdivides all faces and can
  exceed target_faces, especially along hard curves. crease_group aligns explicit edges; group keeps its border fixed.
- Inspect detail quad_fraction and singularities, and the wireframe (examples/quad_remesh.json). remesh (voxel) only
- when the input is beyond repair (it drops attributes).
+ Inspect detail quad_fraction and singularities, and the wireframe. remesh (voxel) only when the input is beyond repair
+ (it drops attributes). A whole cleanup, scan to LODs: help {examples:["asset_cleanup"]}.
 14) Street from TopoTopo's own packages (help topic packages): topotopo/street/road_strip on a line →
  topotopo/street/lamp_post packed onto points_along_curve {side_offset, both_sides}; a house = four
  topotopo/architecture/wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true on the front) +
  topotopo/architecture/roof_gable or roof_hip translated to the wall top; topotopo/street/fence and bench,
  topotopo/props/crate and topotopo/nature/tree_lowpoly placed with transform or copy_to_points;
- topotopo/nature/forest_patch on a grid for a park. Whole graph: examples/street_block.json.`,
+ topotopo/nature/forest_patch on a grid for a park. Whole graph: help {examples:["market_street"]}.
+15) Instance a placement list (a position, yaw, scale and piece name per row, from a file) into one instanced GLB:
+ placements  file {path:"inputs/placements.json"}: a JSON list of rows [{"P":[2,0,0], "yaw":45, "pscale":1.2,
+             "name":"barrel"}, …], or a CSV with the columns P.x,P.y,P.z,yaw,pscale,name; every key or column is a
+             point attribute (orient.x…w or N and up in place of yaw, scale for a per-axis scale; yaw in degrees,
+             counter-clockwise seen from above, so a list from Unreal, clockwise, needs its sign flipped).
+ pieces      one file node per piece (pieces/crate.glb, or a package output in its place) + attrib_create
+             {name:"name", class:"prim", value:"crate"}, merged; or a folder, file {path:"pieces"}, whose files
+             are named after their stems ("<stem>/<part>" for a file with several named parts: wrangle
+             {run_over:"prims", code:"s@name = @name.split('/')[0];"} makes each file one piece again).
+ instance    copy_to_points {pack:true, variants:"name", variant_attrib:"name", rotate_attrib:"yaw"} (in: pieces,
+             placements); rows naming no piece get no copy and a warning that lists them.
+ export      glb: one mesh per piece with EXT_mesh_gpu_instancing (help topic "instancing").
+ {"nodes":{"crate":{"type":"file","params":{"path":"pieces/crate.glb"}},
+  "crate_n":{"type":"attrib_create","in":["crate"],"params":{"name":"name","class":"prim","value":"crate"}},
+  "barrel":{"type":"file","params":{"path":"pieces/barrel.glb"}},
+  "barrel_n":{"type":"attrib_create","in":["barrel"],"params":{"name":"name","class":"prim","value":"barrel"}},
+  "pieces":{"type":"merge","in":["crate_n","barrel_n"]},
+  "spots":{"type":"file","params":{"path":"inputs/placements.json"}},
+  "layout":{"type":"copy_to_points","in":["pieces","spots"],"params":{"pack":true,"variants":"name","variant_attrib":"name","rotate_attrib":"yaw"}}},
+  "output":"layout"}`,
 };
 
+/** The help topics: "examples" (generated from the example cards, src/mcp/examples.ts) and the written ones. */
 export function topicList() {
-  return Object.keys(TOPICS);
+  return ['examples', ...Object.keys(TOPICS)];
 }
 
 /** A help topic's text ("overview" or "instructions": the operating guide), or null for a name that is not a topic. */
 export function topicText(name: string): string | null {
   if (name === 'overview' || name === 'instructions') return INSTRUCTIONS;
+  if (name === 'examples') return examplesIndexText();
   return Object.hasOwn(TOPICS, name) ? TOPICS[name] : null;
 }
 
@@ -1727,7 +1918,7 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}${kindTags(d) ? `  (${kindTags(d)})` : ''}`);
   }
   out.push(filter?.cli
-    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ')
+    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ') + '; --help-example <name> for an example\'s card and graph'
     : '(◦ = generator, no inputs). Use help {nodes:[...]} for params. Help topics: ' + topicList().join(', '));
   if (hidden) out.push(`${hidden} deprecated node type(s) hidden (include_deprecated: true lists them).`);
   return out.join('\n');

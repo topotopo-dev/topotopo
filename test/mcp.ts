@@ -149,7 +149,7 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
 {
   const x = await call('export', { path: 'exports/scene_z.obj', up_axis: 'z', scale: 100, frame: 3 });
   const s = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'scene_z.obj.source.json'), 'utf8')).source;
-  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"instancing":"packed","scale":100,"split_by_name":true,"up_axis":"z"}}', `the source records the frame, the export options given and the defaults of the rest (${JSON.stringify(s.export)})`);
+  check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"instancing":"packed","materials":true,"scale":100,"split_by_name":true,"up_axis":"z"}}', `the source records the frame, the export options given and the defaults of the rest (${JSON.stringify(s.export)})`);
 }
 {
   const x = await call('export', { path: 'exports/scene_meshopt.glb', compress: 'meshopt' });
@@ -255,6 +255,15 @@ check(!useAsset.isError && /geometry: \d/.test(useAsset.txt), `asset used as nod
   const example = exText ? JSON.parse(exText) : null;
   check(!!example && JSON.stringify(example) === JSON.stringify(INPUTS_EXAMPLE) && help.txt.includes('@name=path.*') && help.txt.includes("s@role = s@role || @name.split('.')[0].toLowerCase();"),
     'help topic inputs: group pattern, role wrangle and the example graph');
+  // help topic "examples" lists the examples (src/mcp/examples.ts); help {examples} gives one's card and its graph
+  const exIdx = await call('help', { topic: 'examples' });
+  check(!exIdx.isError && /^EXAMPLES: /.test(exIdx.txt) && /\n- guided_town — /.test(exIdx.txt), `help topic examples lists the examples: ${exIdx.txt.split('\n')[0]}`);
+  const exOne = await call('help', { examples: ['guided_town'] });
+  const exGraph = /\nGRAPH [^\n]*\n\n(\{[\s\S]*\})$/.exec(exOne.txt)?.[1];
+  check(/^## guided_town \(example\)/.test(exOne.txt) && !!exGraph && JSON.parse(exGraph).outputs?.village?.kind === 'scene' && /from its inputs\/ folder/.test(exOne.txt),
+    `help examples gives an example's card and its graph, which parses: ${exOne.txt.split('\n')[0]}`);
+  const exBad = await call('help', { examples: ['guided_twn'] });
+  check(/^unknown example "guided_twn" — did you mean guided_town/.test(exBad.txt), `an unknown example gets a did-you-mean: ${exBad.txt}`);
   // it names topotopo/nature/tree_lowpoly: a dry run checks it against the package's version a build adds, and copies nothing
   const dry = await call('build', { name: 'land', graph: example, dry_run: true });
   check(!dry.isError && /^✓ valid: 15 nodes/.test(dry.txt) && new RegExp(`\\nnote: build or edit adds topotopo/nature ${NV} to package .* on first use, from TopoTopo's built-in library: this dry run read it there and copied nothing`).test(dry.txt),

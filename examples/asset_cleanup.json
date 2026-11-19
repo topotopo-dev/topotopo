@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "description": "A made-up broken scan cleaned into a game-ready asset. The scan is a faceted rock or a fluted, cracked column (revolved from a profile), roughened with scan noise and then damaged: patches of missing faces, an open underside, flipped and duplicate faces, a crumpled self-intersecting patch and floating debris. Two mesh_repair passes weld it, drop the duplicates, fix the winding and fill every hole; the largest piece is kept (the debris goes); a voxel remesh rebuilds one watertight surface, which removes the tangles; taubin smoothing (more passes for longer edges) and an isotropic remesh make even triangles of edge_length. The asset sits on the ground at the origin, named after its source, in a plain stone material, with smooth normals and uv unwrapped into the 0..1 square for a texture whose size (detail int texture_size, a power of two) gives about texel_density pixels per metre. lod makes the levels of detail from it, each keeping lod_ratio of the triangles of the one before. Asserts guard one closed outward piece without self-intersections, no edge shorter than a fifth of edge_length, and every uv inside 0..1.",
+  "params": {
+    "source": {"type": "enum", "options": ["rock", "column"], "default": "rock", "label": "source", "desc": "the made-up scan to clean: a lumpy rock or a cracked column"},
+    "edge_length": {"type": "float", "default": 0.05, "min": 0.02, "max": 0.2, "step": 0.005, "label": "edge length", "desc": "edge length of the cleaned mesh (m)"},
+    "lods": {"type": "int", "default": 3, "min": 1, "max": 4, "label": "lods", "desc": "levels of detail after the full one"},
+    "lod_ratio": {"type": "float", "default": 0.5, "min": 0.2, "max": 0.8, "step": 0.05, "label": "lod ratio", "desc": "share of the triangles each level keeps of the one before"},
+    "texel_density": {"type": "float", "default": 512, "min": 128, "max": 2048, "step": 32, "label": "texel density", "desc": "texture pixels per metre the uvs are laid out for"},
+    "seed": {"type": "int", "default": 1, "min": 0, "max": 9999, "label": "seed", "desc": "changes the made-up scan, not the cleanup"}
+  },
+  "vars": {
+    "source": "rock",
+    "edge_length": 0.05,
+    "lods": 3,
+    "lod_ratio": 0.5,
+    "texel_density": 512,
+    "seed": 1
+  },
+  "meta": {
+    "render": {"node": "look", "views": ["persp"], "azimuth": 15, "elevation": 18, "size": "1600x640", "shading": "pbr", "wireframe": "all"}
+  },
+  "nodes": {
+    "rock_ball": {"type": "sphere", "params": {"type": "ico", "level": 3, "radius": 0.5}},
+    "rock_facets": {
+      "type": "wrangle",
+      "in": ["rock_ball"],
+      "params": {
+        "run_over": "detail",
+        "code": "const planes = [];\nfor (let k = 0; k < 10; k++) {\n  const u = rand(seed, k, 1) * 1.6 - 0.6, a = rand(seed, k, 2) * 6.2832, s = Math.sqrt(1 - u * u);\n  planes.push([set(s * Math.cos(a), u, s * Math.sin(a)), 0.27 + 0.12 * rand(seed, k, 3)]);\n}\nconst n = npoints(0);\nfor (let i = 0; i < n; i++) {\n  let p = point(0, 'P', i);\n  for (const [nrm, d] of planes) { const h = dot(p, nrm); if (h > d) p = sub(p, mul(nrm, h - d)); }\n  setpointattrib(0, 'P', i, set(p.x * 1.35, p.y * 0.85, p.z * 1.1));\n}"
+      }
+    },
+    "rock_lumps": {"type": "noise_displace", "in": ["rock_facets"], "params": {"amplitude": 0.03, "frequency": 3, "octaves": 3, "seed": "=seed"}},
+    "column_profile": {
+      "type": "curve",
+      "params": {
+        "points": [[0, 0, 0], [0.36, 0, 0], [0.36, 0.18, 0], [0.29, 0.18, 0], [0.29, 0.2, 0], [0.315, 0.25, 0], [0.25, 0.31, 0], [0.22, 0.38, 0], [0.19, 1.95, 0], [0.215, 1.98, 0], [0.2, 2.02, 0], [0.31, 2.14, 0], [0.36, 2.15, 0], [0.36, 2.3, 0], [0, 2.3, 0]],
+        "corner_radius": [0, 0.01, 0.01, 0.02, 0.02, 0.04, 0.03, 0.06, 0.02, 0.01, 0.02, 0.03, 0.01, 0.01, 0],
+        "corner_segments": 4
+      }
+    },
+    "column_rows": {"type": "resample", "in": ["column_profile"], "params": {"length": 0.05}},
+    "column_turned": {"type": "revolve", "in": ["column_rows"], "params": {"segments": 48}},
+    "column_carved": {
+      "type": "wrangle",
+      "in": ["column_turned"],
+      "params": {
+        "code": "const y0 = 0.45, y1 = 1.9;\nif (@P.y > y0 && @P.y < y1) {\n  const a = Math.atan2(@P.z, @P.x), r = Math.hypot(@P.x, @P.z);\n  const t = (@P.y - y0) / (y1 - y0);\n  const ends = Math.min(1, t / 0.04, (1 - t) / 0.04);\n  let k = 1 - 0.2 * ends * Math.pow(0.5 + 0.5 * Math.cos(8 * a), 2);\n  const a0 = rand(seed) * 6.2832 + 0.5 * Math.sin(t * 7 + seed) + 0.12 * Math.sin(t * 31 + 2 * seed);\n  let da = a - a0; da -= 6.2832 * Math.round(da / 6.2832);\n  const d = Math.abs(da) * r, w = 0.02 + 0.06 * Math.sin(3.1416 * t);\n  if (d < w) k -= 0.35 * (1 - d / w);\n  @P.x *= k; @P.z *= k;\n}"
+      }
+    },
+    "shape": {"type": "switch", "in": ["rock_lumps", "column_carved"], "params": {"index": "=source == 'column' ? 1 : 0"}},
+    "scan": {"type": "noise_displace", "in": ["shape"], "params": {"mode": "3d", "amplitude": 0.006, "frequency": 22, "octaves": 2, "seed": "=seed + 17"}},
+    "holes_pick": {
+      "type": "group",
+      "in": ["scan"],
+      "params": {
+        "name": "missing",
+        "random": "=source == 'column' ? 0.004 : 0.005",
+        "seed": "=seed + 3",
+        "bbox_min": [-1000000000, "=bbox('scan').min.y + 0.3 * bbox('scan').size.y", -1000000000],
+        "bbox_max": [1000000000, "=bbox('scan').max.y - 0.12 * bbox('scan').size.y", 1000000000]
+      }
+    },
+    "holes_grow": {"type": "group_expand", "in": ["holes_pick"], "params": {"group": "missing", "steps": 2}},
+    "underside": {
+      "type": "group",
+      "in": ["holes_grow"],
+      "params": {"name": "missing", "mode": "union", "bbox_max": [1000000000, "=bbox('scan').min.y + (source == 'column' ? 0.01 : 0.1) * bbox('scan').size.y", 1000000000]}
+    },
+    "holed": {"type": "delete", "in": ["underside"], "params": {"group": "missing"}},
+    "flip_pick": {"type": "group", "in": ["holed"], "params": {"name": "flipped", "random": 0.03, "seed": "=seed + 5"}},
+    "flipped": {"type": "reverse", "in": ["flip_pick"], "params": {"group": "flipped"}},
+    "crumpled": {
+      "type": "wrangle",
+      "in": ["flipped"],
+      "params": {
+        "run_over": "detail",
+        "code": "const n = npoints(0);\nlet lo = 1e9, hi = -1e9;\nfor (let i = 0; i < n; i++) { const y = point(0, 'P', i).y; lo = min(lo, y); hi = max(hi, y); }\nlet c = point(0, 'P', 0);\nfor (let k = 0; k < 50; k++) {\n  c = point(0, 'P', floor(rand(seed + 3, k) * n));\n  if (c.y > lo + 0.35 * (hi - lo) && c.y < hi - 0.2 * (hi - lo)) break;\n}\nfor (let i = 0; i < n; i++) {\n  const p = point(0, 'P', i), d = distance(p, c);\n  if (d < 0.12) {\n    const f = 0.035 * (1 - d / 0.12);\n    setpointattrib(0, 'P', i, add(p, set((rand(i, seed) - 0.5) * 2 * f, (rand(i, seed + 1) - 0.5) * 2 * f, (rand(i, seed + 2) - 0.5) * 2 * f)));\n  }\n}"
+      }
+    },
+    "twin_pick": {"type": "group", "in": ["crumpled"], "params": {"name": "twins", "random": 0.02, "seed": "=seed + 7"}},
+    "twins": {"type": "delete", "in": ["twin_pick"], "params": {"group": "twins", "keep": true}},
+    "debris_sites": {"type": "scatter", "in": ["scan"], "params": {"count": 8, "seed": "=seed + 11", "keep_attribs": false}},
+    "debris_lift": {
+      "type": "wrangle",
+      "in": ["debris_sites"],
+      "params": {"code": "@P = add(@P, mul(@N, 0.15 + 0.15 * rand(@ptnum, seed)));\nf@pscale = 0.6 + 1.2 * rand(@ptnum, seed + 1);"}
+    },
+    "chip": {"type": "sphere", "params": {"type": "ico", "level": 1, "radius": 0.02}},
+    "debris": {"type": "copy_to_points", "in": ["chip", "debris_lift"]},
+    "broken": {"type": "merge", "in": ["crumpled", "twins", "debris"]},
+    "repaired": {"type": "mesh_repair", "in": ["broken"], "params": {"max_hole_edges": 0, "warn": false}},
+    "sealed": {
+      "type": "mesh_repair",
+      "in": ["repaired"],
+      "params": {"max_hole_edges": 0, "warn": false},
+      "note": "Workaround for F-127: mesh_repair (max_hole_edges 0) sometimes leaves a small hole (3 open edges) or a non-manifold edge after one pass on this damage; a second pass closes it. Drop it once one pass is enough."
+    },
+    "piece_volume": {"type": "measure", "in": ["sealed"], "params": {"measure": "volume", "name": "piece_volume"}},
+    "one_piece": {
+      "type": "wrangle",
+      "in": ["piece_volume"],
+      "params": {
+        "run_over": "detail",
+        "code": "const n = nprims(0);\nlet best = -1e30;\nfor (let i = 0; i < n; i++) best = max(best, prim(0, 'piece_volume', i));\nfor (let i = 0; i < n; i++) if (prim(0, 'piece_volume', i) < best) removeprim(0, i, true);"
+      }
+    },
+    "solid": {"type": "remesh", "in": ["one_piece"], "params": {"edge_length": "=min(max(edge_length, 0.04), 0.05)"}},
+    "relaxed": {"type": "smooth", "in": ["solid"], "params": {"iterations": "=max(4, round(4 * pow(edge_length / min(max(edge_length, 0.04), 0.05), 2)))", "method": "taubin"}},
+    "remeshed": {"type": "remesh_isotropic", "in": ["relaxed"], "params": {"target_length": "=edge_length", "iterations": 6, "feature_angle": 0}},
+    "placed": {"type": "match_size", "in": ["remeshed"], "params": {"justify": ["center", "min", "center"], "target": [0, 0, 0]}},
+    "named": {"type": "attrib_create", "in": ["placed"], "params": {"name": "name", "class": "prim", "value": "=source"}},
+    "stone": {"type": "material", "in": ["named"], "params": {"name": "stone", "base_color": [0.56, 0.54, 0.5], "roughness": 0.85}},
+    "surface": {"type": "measure", "in": ["remeshed"], "params": {"measure": "total_area", "name": "surface"}},
+    "unwrapped": {
+      "type": "uv_unwrap",
+      "in": ["stone"],
+      "params": {
+        "chart_smoothing": 0,
+        "padding": 4,
+        "resolution": "=min(8192, max(128, pow(2, round(Math.log2(sqrt(prim('surface', 0, 'surface') / 0.65) * texel_density)))))",
+        "iterations": 2
+      }
+    },
+    "shaded": {"type": "normal", "in": ["unwrapped"], "params": {"class": "point"}},
+    "tidy": {"type": "attrib_delete", "in": ["shaded"], "params": {"names": "chart"}},
+    "texture_size": {"type": "attrib_create", "in": ["tidy"], "params": {"name": "texture_size", "class": "detail", "type": "int", "value": "=ch('unwrapped', 'resolution')"}},
+    "closed": {
+      "type": "assert",
+      "in": ["texture_size"],
+      "params": {"label": "closed", "watertight": true, "manifold": true, "no_flipped": true, "no_self_intersections": true, "expr": "pieces == 1"}
+    },
+    "even": {"type": "assert", "in": ["closed"], "params": {"label": "even", "min_edge_length": "=edge_length / 5"}},
+    "uv": {"type": "assert", "in": ["even"], "params": {"label": "uv", "attrib": "uv", "attrib_class": "vertex", "attrib_min": 0, "attrib_max": 1}},
+    "levels": {
+      "type": "lod",
+      "in": ["uv"],
+      "params": {"levels": "=lods + 1", "ratios": [1, "=lod_ratio", "=pow(lod_ratio, 2)", "=pow(lod_ratio, 3)", "=pow(lod_ratio, 4)"], "attributes": "uv N", "prune": false}
+    },
+    "look_checker_tex": {"type": "tex_pattern", "params": {"pattern": "checker", "resolution": [512, 512], "count": [16, 16], "gap": 0, "bevel": 0}},
+    "look_checker_color": {"type": "tex_colorize", "in": ["look_checker_tex"], "params": {"ramp": [[0, "#d9673a"], [1, "#f1ece2"]]}},
+    "look_checker": {"type": "transform", "in": ["uv"], "params": {"translate": ["=1.25 * bbox('uv').size.x", 0, 0]}},
+    "look_checker_mat": {
+      "type": "texture_to_material",
+      "in": ["look_checker", "look_checker_color"],
+      "params": {"material": "uv_checker", "base_color": "look_checker_color", "roughness_value": 0.7}
+    },
+    "look_smaller": {"type": "delete", "in": ["levels"], "params": {"group": "@lod=0"}},
+    "look_width": {"type": "attrib_create", "in": ["look_smaller"], "params": {"name": "width", "class": "detail", "value": "=bbox('uv').size.x"}},
+    "look_row": {
+      "type": "wrangle",
+      "in": ["look_width"],
+      "params": {"code": "const lod = prim(0, 'lod', pointprims(0, @ptnum)[0]);\n@P.x += 1.25 * (lod + 1) * detail(0, 'width');"}
+    },
+    "look_scan": {
+      "type": "transform",
+      "in": ["broken"],
+      "note": "the scan before cleanup, moved as the cleaned asset was and set one place to its left",
+      "params": {"translate": ["=bbox('placed').center.x - bbox('remeshed').center.x - 1.25 * bbox('uv').size.x", "=bbox('placed').min.y - bbox('remeshed').min.y", "=bbox('placed').center.z - bbox('remeshed').center.z"]}
+    },
+    "look_scan_mat": {"type": "material", "in": ["look_scan"], "params": {"name": "scan", "base_color": [0.5, 0.49, 0.47], "roughness": 0.9}},
+    "look": {"type": "merge", "in": ["look_scan_mat", "uv", "look_checker_mat", "look_row"]}
+  },
+  "output": "uv",
+  "outputs": {
+    "asset": {
+      "node": "uv",
+      "label": "Asset",
+      "kind": "mesh",
+      "tags": ["scan-cleanup", "remesh", "uv", "game-ready", "rock", "column"],
+      "description": "The cleaned asset: one closed, outward-facing piece of even triangles about edge_length long, on the ground at the origin, with smooth normals, uv inside the 0..1 square (detail texture_size: the texture size it is laid out for) and the stone material; prims named rock or column."
+    },
+    "lods": {
+      "node": "levels",
+      "label": "Levels of detail",
+      "kind": "mesh",
+      "tags": ["lod", "levels-of-detail", "decimate", "game-ready"],
+      "description": "The asset's levels of detail, all at the origin and sharing its uv: LOD0 (the full asset) and lods coarser levels, each keeping lod_ratio of the triangles of the one before; each level is a piece named <source>_lod<level> with prim int lod."
+    }
+  }
+}

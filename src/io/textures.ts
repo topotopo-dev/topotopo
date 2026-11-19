@@ -5,7 +5,7 @@
 // applied (colour layers already hold display values; data maps are linear).
 import type { Geometry } from '../core/geometry.ts';
 import { Image, LUMA, MAX_PIXELS, channelsOf, imageRef, imageToBytes, opaque, referenceableImages } from '../core/image.ts';
-import { TEXTURE_SLOTS, mergeMaterialTables } from '../core/materials.ts';
+import { TEXTURE_SLOTS, exportFactors, mergeMaterialTables } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { encodePNG } from '../render/png.ts';
 import { encodeGreyPNG, zlibStored } from './heightmap.ts';
@@ -18,10 +18,21 @@ import { baseOf, dirOf, joinPath } from './common.ts';
  * per channel). deflate compresses (Node: zlib.deflateSync); without it the PNG uses stored (uncompressed) blocks.
  */
 export function imagePNG(img: Image, layer = '', deflate?: (d: Uint8Array) => Uint8Array): Uint8Array {
+  const a = img.layer(layer || img.mainLayer), key = `${img.width}x${img.height}`;
+  const known = a && encoded.get(a)?.find((e) => e.key === key && e.deflate === deflate);
+  if (known) return known.bytes;
   const { bytes, channels } = imageToBytes(img, layer, true);
-  if (channels === 1) return encodeGreyPNG(bytes, img.width, img.height, 8, deflate);
-  return encodePNG(bytes, img.width, img.height, deflate ?? zlibStored);
+  const png = channels === 1 ? encodeGreyPNG(bytes, img.width, img.height, 8, deflate) : encodePNG(bytes, img.width, img.height, deflate ?? zlibStored);
+  if (a) { let list = encoded.get(a); if (!list) encoded.set(a, list = []); list.push({ key, deflate, bytes: png }); }
+  return png;
 }
+
+/**
+ * PNGs encoded, by the layer they encode and the compressor: a cooked image is never written again (cooked geometry is
+ * immutable; a copy shares its layers), so the maps of a package's materials, used by many exports of one run, are
+ * encoded once. Callers pass one compressor function throughout (src/host/export-targets.ts) for this to find them.
+ */
+const encoded = new WeakMap<Float32Array, { key: string; deflate?: (d: Uint8Array) => Uint8Array; bytes: Uint8Array }[]>();
 
 /** How a PNG's channels become layers: see ImageFromPNGOptions. */
 export const PNG_LAYERS = ['auto', 'grey', 'rgba'] as const;
@@ -142,14 +153,14 @@ export function imageTextureData(g: Geometry, deflate?: (d: Uint8Array) => Uint8
 export interface TextureFile { path: string; bytes: Uint8Array }
 
 /**
- * PNG files for the "image:<name>" textures of a USD export to `usdPath`: <base>_textures/<name>.png next to it, and
- * the asset path (relative to the .usda) each texture path maps to.
+ * PNG files for the "image:<name>" textures of a usda or obj export to `mainPath`: <base>_textures/<name>.png next to
+ * it, and the path (relative to the main file, which the .mtl sits beside) each texture path maps to.
  */
-export function usdTextureFiles(g: Geometry, usdPath: string, deflate?: (d: Uint8Array) => Uint8Array, warn?: (msg: string) => void): { files: TextureFile[]; assetPath: Map<string, string> } {
-  const data = imageTextureData(g, deflate, warn, 'usda');
+export function textureFilesBeside(g: Geometry, mainPath: string, format: 'usda' | 'obj', deflate?: (d: Uint8Array) => Uint8Array, warn?: (msg: string) => void): { files: TextureFile[]; assetPath: Map<string, string> } {
+  const data = imageTextureData(g, deflate, warn, format);
   const files: TextureFile[] = [], assetPath = new Map<string, string>();
   if (!data.size) return { files, assetPath };
-  const base = baseOf(usdPath).replace(/\.[^.]*$/, '');
+  const base = baseOf(mainPath).replace(/\.[^.]*$/, '');
   const folder = `${base}_textures`;
   const used = new Set<string>();
   for (const [ref, bytes] of data) {
@@ -157,7 +168,7 @@ export function usdTextureFiles(g: Geometry, usdPath: string, deflate?: (d: Uint
     let f = safeFileName(ref.slice(6)), k = 1;
     while (used.has(f.toLowerCase())) f = `${safeFileName(ref.slice(6))}_${k++}`;
     used.add(f.toLowerCase());
-    files.push({ path: joinPath(dirOf(usdPath), folder, f + '.png'), bytes });
+    files.push({ path: joinPath(dirOf(mainPath), folder, f + '.png'), bytes });
     assetPath.set(ref, `${folder}/${f}.png`);
   }
   return { files, assetPath };
@@ -199,7 +210,8 @@ export function texturesExport(g: Geometry, dir: string, o: TexturesExportOption
       add(`${name}_${l}`, imagePNG(img, l, o.deflate));
     }
   }
-  // the materials (a material output's, or a mesh's) with the files of their maps, for engines to rebuild them
+  // the materials (a material output's, or a mesh's) with the files of their maps, for engines to rebuild them; the
+  // factors are the ones glTF writes (a map replaces its factor: exportFactors)
   const table = mergeMaterialTables([g, ...g.packedSources]);
   const names = Object.keys(table);
   if (names.length) {
@@ -212,7 +224,7 @@ export function texturesExport(g: Geometry, dir: string, o: TexturesExportOption
         const img = imageRef(ref);
         maps[slot] = img === null ? ref : fileOf.get(img) ?? ref;
       }
-      materials[n] = { ...values, maps };
+      materials[n] = { ...values, ...exportFactors(table[n]), maps };
     }
     files.push({ path: joinPath(dir, 'materials.json'), bytes: new TextEncoder().encode(`${JSON.stringify({ materials }, null, 1)}\n`) });
   }

@@ -23,19 +23,43 @@ function withManifolds<T>(fn: (track: (m: any) => any) => T): T {
   }
 }
 
+/**
+ * One manifold for a solid made of pieces that may overlap. The kernel takes a multi-piece mesh as it is, so where its
+ * pieces overlap the region counts twice and a cut leaves it standing; the pieces are built apart and unioned instead,
+ * each with the cavity walls it holds (`solid`/`solids` from outwardPieces). One piece, or pieces whose bounds stay
+ * apart, go through as they are.
+ */
+function solidManifold(g: Geometry, L: ReturnType<typeof propLayout>, o: ReturnType<typeof outwardPieces>, track: (m: any) => any): { m: any; id: number } {
+  const { solid, solids } = o;
+  if (solids < 2 || !o.overlap) { const m = track(toManifold(g, L)); return { m, id: manifoldId(m) }; }
+  const { tris, triPrim } = triangulate(g);
+  const parts = Array.from({ length: solids }, () => ({ tris: [] as number[], triPrim: [] as number[] }));
+  for (let t = 0; t < triPrim.length; t++) {
+    const s = solid[triPrim[t]];
+    if (s < 0) continue;
+    parts[s].tris.push(tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2]);
+    parts[s].triPrim.push(triPrim[t]);
+  }
+  const W = M(), id = W.Manifold.reserveIDs(1);
+  return { m: track(W.Manifold.union(parts.map((tri) => track(toManifold(g, L, { tri, id }))))), id };
+}
+
 defineNode({
   type: 'boolean',
   category: 'solid',
-  summary: 'Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, unions A’s overlapping pieces.',
-  description: 'The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.',
+  summary: 'Robust mesh boolean (union / subtract / intersect) of closed solids. Each input’s overlapping pieces are unioned first; without B, the result is that union of A.',
+  description: 'Either input may be a merge of pieces that overlap: each input is first made one solid, the union of its pieces (the inner wall of a hollow piece stays with it, so the hollow is kept), and the operation runs on those two solids, so subtracting a merge of cutters removes everything any of them covers. The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.',
   aliases: ['csg', 'bool', 'difference', 'union', 'intersect'],
-  inputs: [{ name: 'a', desc: 'solid A' }, { name: 'b', desc: 'solid B (optional)', optional: true }],
+  inputs: [
+    { name: 'a', desc: 'solid A: closed pieces, which may overlap (unioned first)' },
+    { name: 'b', desc: 'solid B (optional): closed pieces, which may overlap (unioned first, so a merge of cutters cuts as one); its faces become the cut faces when subtracting', optional: true },
+  ],
   params: {
     operation: { type: 'enum', options: ['union', 'subtract', 'intersect'], default: 'subtract', desc: 'A ∪ B, A − B, or A ∩ B', aliases: ['op', 'mode'] },
     output: { type: 'enum', options: ['polygons', 'triangles'], default: 'polygons', desc: 'polygons = each surviving input face as one polygon (or a few around a hole); triangles = the kernel triangles as they come' },
     tolerance: { type: 'float', default: 0.00001, min: 0, desc: 'after the cut, collapse edges shorter than this and flatten slivers thinner than it, keeping the solid closed (0 = rounding only)', aliases: ['simplify', 'sliver'] },
   },
-  outputs: 'prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated',
+  outputs: 'prim groups from_a, from_b (cut faces come from B when subtracting); each face keeps the prim attributes of the input face it comes from (a cut face B’s material); float point/vertex attributes interpolated',
   example: {
     nodes: {
       box: { type: 'box' },
@@ -48,18 +72,19 @@ defineNode({
     const outward = (g: Geometry, label: string) => {
       const r = outwardPieces(g);
       if (r.flipped.length) warn(`${label}: ${r.flipped.length} piece(s) were inside out (faces pointing inward, e.g. mirrored without a winding flip) and were turned outward first; first ${primWhere(g, r.flipped[0])}`);
-      return r.geo;
+      return r;
     };
-    const A = outward(input(0), 'A'), B = hasInput(1) ? outward(input(1), 'B') : null;
+    const oA = outward(input(0), 'A'), oB = hasInput(1) ? outward(input(1), 'B') : null;
+    const A = oA.geo, B = oB?.geo ?? null;
     const L = propLayout(B ? [A, B] : [A]);
-    const mA = track(toManifold(A, L));
-    let r;
-    const sources = [{ geo: A, id: manifoldId(mA) }];
-    if (!B) r = track(M().Manifold.union(mA.decompose().map(track)));
-    else {
-      const mB = track(toManifold(B, L));
-      sources.push({ geo: B, id: manifoldId(mB) });
-      r = track(p.operation === 'union' ? mA.add(mB) : p.operation === 'intersect' ? mA.intersect(mB) : mA.subtract(mB));
+    // overlapping pieces of either input are unioned first
+    const sA = solidManifold(A, L, oA, track);
+    let r = sA.m;
+    const sources = [{ geo: A, id: sA.id }];
+    if (oB && B) {
+      const sB = solidManifold(B, L, oB, track);
+      sources.push({ geo: B, id: sB.id });
+      r = track(p.operation === 'union' ? sA.m.add(sB.m) : p.operation === 'intersect' ? sA.m.intersect(sB.m) : sA.m.subtract(sB.m));
     }
     if (p.tolerance > 0) r = track(r.simplify(p.tolerance));
     const { geo, primSource, primFace } = fromManifold(r, L, sources);
@@ -224,7 +249,7 @@ defineNode({
     count: { type: 'int', default: 12, min: 1, max: 10000, desc: 'number of pieces when no site points are given' },
     seed: P.seed(),
     gap: { type: 'float', default: 0, min: 0, desc: 'shrink each piece toward its centre by this distance (visual separation)' },
-    neighbors: { type: 'int', default: 24, min: 4, max: 1024, desc: 'nearest sites considered per cell (raise if cells look wrong)' },
+    neighbors: { type: 'int', default: 24, min: 4, max: 1024, desc: 'nearest sites that cut each cell first; farther sites that can still reach the cell cut it too, so cells are exact and pieces never overlap' },
   },
   outputs: 'prim name ("piece0"...), class (int), group inside; point/prim attributes from the source',
   example: { type: 'voronoi_fracture', params: { count: 20, gap: 0.02, seed: 4 } },
@@ -251,18 +276,40 @@ defineNode({
     const flat = Float64Array.from(sites.flat());
     const kd = new KDTree(flat);
     const pad = Math.max(...[0, 1, 2].map((a) => bb.max[a] - bb.min[a])) * 0.1 + 1e-3;
+    // how far a cell corner may lie past a plane and still count as on it (the corners are float32)
+    const tol = 1e-6 * (pad * 10 + Math.max(...[0, 1, 2].map((a) => Math.max(Math.abs(bb.min[a]), Math.abs(bb.max[a])))));
     const pieces: Geometry[] = [];
     sites.forEach((s, i) => {
       const box = track(W.Manifold.cube([bb.max[0] - bb.min[0] + 2 * pad, bb.max[1] - bb.min[1] + 2 * pad, bb.max[2] - bb.min[2] + 2 * pad], true));
       const cellId = box.originalID();
       let cell = track(box.translate([(bb.min[0] + bb.max[0]) / 2, (bb.min[1] + bb.max[1]) / 2, (bb.min[2] + bb.max[2]) / 2]));
-      for (const j of kd.knn(s[0], s[1], s[2], Math.min(p.neighbors + 1, sites.length))) {
-        if (j === i) continue;
-        const o = sites[j];
-        const n = normalize([s[0] - o[0], s[1] - o[1], s[2] - o[2]] as Vec3);
-        const mid = [(s[0] + o[0]) / 2, (s[1] + o[1]) / 2, (s[2] + o[2]) / 2];
-        cell = track(cell.trimByPlane(n, n[0] * mid[0] + n[1] * mid[1] + n[2] * mid[2] + p.gap / 2));
-        if (cell.isEmpty()) break;
+      // cut by the bisector planes of the nearest sites, then by every site closer than twice the cell's reach (its
+      // farthest corner from the site): the nearest sites alone could leave a cell too big, so pieces overlapped. Sites
+      // farther away cannot reach the cell, and a plane that cuts off none of its corners leaves it as it is.
+      const cut = new Set<number>([i]);
+      let mesh = cell.getMesh();
+      const cutBy = (near: number[]) => {
+        for (const j of near) {
+          if (cut.has(j)) continue;
+          cut.add(j);
+          const o = sites[j];
+          const n = normalize([s[0] - o[0], s[1] - o[1], s[2] - o[2]] as Vec3);
+          const off = n[0] * (s[0] + o[0]) / 2 + n[1] * (s[1] + o[1]) / 2 + n[2] * (s[2] + o[2]) / 2 + p.gap / 2;
+          const np = mesh.numProp as number, vp = mesh.vertProperties as Float32Array;
+          let corner = false;
+          for (let v = 0; v < vp.length && !corner; v += np) corner = n[0] * vp[v] + n[1] * vp[v + 1] + n[2] * vp[v + 2] < off - tol;
+          if (!corner) continue;
+          cell = track(cell.trimByPlane(n, off));
+          if (cell.isEmpty()) return;
+          mesh = cell.getMesh();
+        }
+      };
+      cutBy(kd.knn(s[0], s[1], s[2], Math.min(p.neighbors + 1, sites.length)));
+      if (!cell.isEmpty() && cut.size < sites.length) {
+        const np = mesh.numProp as number, vp = mesh.vertProperties as Float32Array;
+        let reach = 0;
+        for (let v = 0; v < vp.length; v += np) reach = Math.max(reach, Math.hypot(vp[v] - s[0], vp[v + 1] - s[1], vp[v + 2] - s[2]));
+        cutBy(kd.within(s[0], s[1], s[2], 2 * reach + tol));
       }
       if (cell.isEmpty()) return;
       const piece = track(mSrc.intersect(cell));

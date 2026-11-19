@@ -4,7 +4,7 @@ import type { Src } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import {
-  boundaryLoops, buildEdges, connectivity, orientOutward, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, signedVolume, topologyReport, triangulate,
+  boundaryLoops, buildEdges, connectivity, orientPieces, refreshNormals, primArea, primCentroid, primNewell, primNormals, reversePrims, signedVolume, topologyReport, triangulate,
 } from '../core/topology.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { M, fromManifold, propLayout } from '../core/manifold.ts';
@@ -46,7 +46,7 @@ defineNode({
     remove_degenerate: { type: 'bool', default: true, desc: 'remove prims with repeated/too few points' },
     min_area: { type: 'float', default: 1e-12, min: 0, desc: 'remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side' },
     remove_unused_points: { type: 'bool', default: true, desc: 'remove points not used by prims (only when the geometry has prims)' },
-    fix_winding: { type: 'bool', default: false, desc: 'make closed meshes face outward' },
+    fix_winding: { type: 'bool', default: false, desc: 'make the winding consistent in each connected piece (most of its area decides, so a few flipped faces turn back), then turn closed pieces outward; a closed piece inside another one (the inner wall of a hollow solid) stays inward' },
   },
   example: { type: 'clean', params: { fuse_distance: 0.0001, fix_winding: true } },
   cook: ({ input, p }) => {
@@ -55,7 +55,7 @@ defineNode({
     if (p.remove_degenerate) g = removeDegenerate(g);
     if (p.min_area > 0) g = removeSmallFaces(g, p.min_area);
     if (p.remove_unused_points && g.numPrims > 0) g = g.removeUnusedPoints();
-    if (p.fix_winding) g = orientOutward(g);
+    if (p.fix_winding) g = orientPieces(g).geo;
     return g === input(0) ? g.clone() : g;
   },
 });
@@ -263,8 +263,8 @@ function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smoo
     const s = g.primStart[pr], e = g.primStart[pr + 1];
     for (let v = s; v < e; v++) {
       const a = g.vertexPoint[v], b = g.vertexPoint[v + 1 < e ? v + 1 : s];
-      const ei = E.map.get(E.key(a, b));
-      if (ei !== undefined) edgeFaces[ei].push(pr);
+      const ei = E.find(a, b);
+      if (ei >= 0) edgeFaces[ei].push(pr);
     }
   }
   const b = new GeoBuilder(g);
@@ -379,7 +379,7 @@ function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smoo
     for (let k = 0; k < n; k++) {
       const v = vs[k], vn = vs[(k + 1) % n], vp = vs[(k - 1 + n) % n];
       const a = g.vertexPoint[v];
-      const eNext = E.map.get(E.key(a, g.vertexPoint[vn]))!, ePrev = E.map.get(E.key(g.vertexPoint[vp], a))!;
+      const eNext = E.find(a, g.vertexPoint[vn]), ePrev = E.find(g.vertexPoint[vp], a);
       b.addPrim([vtxPt[a], edgePt[eNext], facePt[pr], edgePt[ePrev]], true, pr, [
         v, { i: [v, vn], w: [0.5, 0.5] }, all, { i: [vp, v], w: [0.5, 0.5] },
       ]);
@@ -913,7 +913,7 @@ defineNode({
       for (let pr = 0; pr < g.numPrims; pr++) {
         if (!isSel(pr)) continue;
         const s = g.primStart[pr], e = g.primStart[pr + 1];
-        for (let v = s; v < e; v++) edgeSel[E.map.get(E.key(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s]))!].push(pr);
+        for (let v = s; v < e; v++) edgeSel[E.find(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s])].push(pr);
       }
       for (let pr = 0; pr < g.numPrims; pr++) {
         if (!isSel(pr) || region[pr] >= 0) continue;
@@ -923,7 +923,7 @@ defineNode({
           const f = stack.pop()!;
           const s = g.primStart[f], e = g.primStart[f + 1];
           for (let v = s; v < e; v++) {
-            const ei = E.map.get(E.key(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s]))!;
+            const ei = E.find(g.vertexPoint[v], g.vertexPoint[v + 1 < e ? v + 1 : s]);
             for (const o of edgeSel[ei]) if (region[o] < 0) { region[o] = nreg; stack.push(o); }
           }
         }
@@ -1017,9 +1017,10 @@ defineNode({
 defineNode({
   type: 'grid_split',
   category: 'topology',
-  summary: 'Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded.',
+  summary: 'Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded. Only quads are split: cut first, then split.',
+  description: 'Only 4-sided polygons are divided; triangles and n-gons pass through unsplit. After a boolean the faces around the cut are often n-gons, so they stay whole: run grid_split on the quads BEFORE the cut (or triangulate the n-gons first), not after it.',
   aliases: ['divide_quads', 'facade_split', 'quad_split', 'split_faces'],
-  inputs: [{ name: 'geo', desc: 'polygon mesh (quads are split; other polygons pass through)' }],
+  inputs: [{ name: 'geo', desc: 'polygon mesh (quads are split; triangles and n-gons pass through unsplit)' }],
   params: {
     group: P.group('prim', 'quads to split ("" = all)'),
     mode: { type: 'enum', options: ['size', 'count'], default: 'size', desc: 'size = divide each edge by length / target size; count = fixed divisions' },

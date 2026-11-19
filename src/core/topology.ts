@@ -246,6 +246,61 @@ export function pointPrims(g: Geometry) {
   return { start: cnt, prims };
 }
 
+/** An Int32Array of at least n entries holding a's first `used` values (a itself when it is big enough). */
+export function growInt32(a: Int32Array, n: number, used = a.length): Int32Array {
+  if (n <= a.length) return a;
+  const b = new Int32Array(Math.max(n, a.length * 2, 16));
+  b.set(a.subarray(0, used));
+  return b;
+}
+
+/**
+ * Ids 0, 1, 2… for ordered pairs of non-negative ints, in the order they are first added: an open-addressing hash over
+ * typed arrays. Use it in place of a Map keyed by edge, point or piece: a JS Map holds at most 2^24 (16.7M) entries,
+ * which a large render or export passes (RangeError "Map maximum size exceeded").
+ */
+export class PairIds {
+  /** the pairs by id; valid up to `size` */
+  a: Int32Array;
+  b: Int32Array;
+  size = 0;
+  private slots: Int32Array;
+  private mask: number;
+  constructor(expected = 16) {
+    let cap = 16;
+    while (cap < expected * 2) cap *= 2;
+    this.slots = new Int32Array(cap).fill(-1);
+    this.mask = cap - 1;
+    this.a = new Int32Array(Math.max(16, expected));
+    this.b = new Int32Array(Math.max(16, expected));
+  }
+  private slot(a: number, b: number): number {
+    let i = (Math.imul(a, 0x9e3779b1) ^ Math.imul(b + 0x7f4a7c15, 0x85ebca77)) & this.mask;
+    for (;;) {
+      const id = this.slots[i];
+      if (id < 0 || (this.a[id] === a && this.b[id] === b)) return i;
+      i = (i + 1) & this.mask;
+    }
+  }
+  /** the id of (a, b), or -1 */
+  get(a: number, b: number): number { return this.slots[this.slot(a, b)]; }
+  /** the id of (a, b), added when new (then it is size - 1) */
+  add(a: number, b: number): number {
+    let i = this.slot(a, b);
+    if (this.slots[i] >= 0) return this.slots[i];
+    if ((this.size + 1) * 2 > this.slots.length) { this.rehash(); i = this.slot(a, b); }
+    const id = this.size++;
+    if (id >= this.a.length) { this.a = growInt32(this.a, id + 1); this.b = growInt32(this.b, id + 1); }
+    this.a[id] = a; this.b[id] = b; this.slots[i] = id;
+    return id;
+  }
+  private rehash() {
+    this.slots = new Int32Array(this.slots.length * 2).fill(-1);
+    this.mask = this.slots.length - 1;
+    for (let id = 0; id < this.size; id++) this.slots[this.slot(this.a[id], this.b[id])] = id;
+  }
+}
+
 export interface EdgeInfo {
   a: Int32Array; // lower point index
   b: Int32Array; // higher point index
@@ -253,31 +308,32 @@ export interface EdgeInfo {
   firstPrim: Int32Array;
   /** second prim using the edge (-1 if none) */
   secondPrim: Int32Array;
-  map: Map<number, number>; // key(a,b) -> edge index
-  key: (a: number, b: number) => number;
+  /** the edge between points a and b (either order), or -1 */
+  find: (a: number, b: number) => number;
 }
 
-/** Unique undirected edges of all prims (polyline segments included). */
+/** Unique undirected edges of all prims (polyline segments included), numbered in the order the prims first use them. */
 export function buildEdges(g: Geometry): EdgeInfo {
-  const n = g.numPoints;
-  const key = (a: number, b: number) => (a < b ? a * n + b : b * n + a);
-  const map = new Map<number, number>();
-  const A: number[] = [], B: number[] = [], C: number[] = [], F: number[] = [], S: number[] = [];
+  const ids = new PairIds(Math.min(g.numVertices, 1 << 20));
+  let C: Int32Array = new Int32Array(16), F: Int32Array = new Int32Array(16), S: Int32Array = new Int32Array(16);
   for (let p = 0; p < g.numPrims; p++) {
     const s = g.primStart[p], e = g.primStart[p + 1];
     const last = g.primClosed[p] ? e : e - 1;
     for (let v = s; v < last; v++) {
       const a = g.vertexPoint[v], b = g.vertexPoint[v + 1 < e ? v + 1 : s];
       if (a === b) continue;
-      const k = key(a, b);
-      const ei = map.get(k);
-      if (ei === undefined) {
-        map.set(k, A.length);
-        A.push(Math.min(a, b)); B.push(Math.max(a, b)); C.push(1); F.push(p); S.push(-1);
+      const n = ids.size, ei = a < b ? ids.add(a, b) : ids.add(b, a);
+      if (ei === n) {
+        if (n >= C.length) { C = growInt32(C, n + 1, n); F = growInt32(F, n + 1, n); S = growInt32(S, n + 1, n); }
+        C[n] = 1; F[n] = p; S[n] = -1;
       } else { C[ei]++; if (S[ei] < 0 && F[ei] !== p) S[ei] = p; }
     }
   }
-  return { a: Int32Array.from(A), b: Int32Array.from(B), count: Int32Array.from(C), firstPrim: Int32Array.from(F), secondPrim: Int32Array.from(S), map, key };
+  const n = ids.size;
+  return {
+    a: ids.a.subarray(0, n), b: ids.b.subarray(0, n), count: C.subarray(0, n), firstPrim: F.subarray(0, n), secondPrim: S.subarray(0, n),
+    find: (a, b) => (a < b ? ids.get(a, b) : ids.get(b, a)),
+  };
 }
 
 /** CSR point adjacency through edges. */
@@ -289,6 +345,43 @@ export function pointNeighbors(g: Geometry) {
   const nb = new Int32Array(E.a.length * 2), fill = cnt.slice(0, g.numPoints);
   for (let e = 0; e < E.a.length; e++) { nb[fill[E.a[e]]++] = E.b[e]; nb[fill[E.b[e]]++] = E.a[e]; }
   return { start: cnt, nb };
+}
+
+/**
+ * Relax point positions in place (the smooth node; uv_unwrap's chart_smoothing): each pass moves a point `strength`
+ * of the way to the mean of its edge neighbours; taubin follows each pass with one back (-1.04 × strength), so the
+ * shape does not shrink. preserveBoundary pins open-boundary points and polyline ends; points outside `sel` stay.
+ */
+export function relaxPoints(g: Geometry, o: { iterations: number; strength: number; method: 'taubin' | 'laplacian'; preserveBoundary: boolean; sel?: ArrayLike<number> | null }): void {
+  const { start, nb } = pointNeighbors(g);
+  const pin = new Uint8Array(g.numPoints);
+  if (o.preserveBoundary) {
+    const E = buildEdges(g);
+    for (let e = 0; e < E.a.length; e++) if (E.count[e] === 1 && g.primClosed[E.firstPrim[e]]) { pin[E.a[e]] = 1; pin[E.b[e]] = 1; }
+    for (let pr = 0; pr < g.numPrims; pr++) if (!g.primClosed[pr]) {
+      pin[g.vertexPoint[g.primStart[pr]]] = 1;
+      pin[g.vertexPoint[g.primStart[pr + 1] - 1]] = 1;
+    }
+  }
+  const Pd = g.P, tmp = new Float64Array(Pd.length), sel = o.sel;
+  const pass = (lam: number) => {
+    tmp.set(Pd);
+    for (let i = 0; i < g.numPoints; i++) {
+      if (pin[i] || (sel && !sel[i])) continue;
+      const s = start[i], e = start[i + 1];
+      if (e === s) continue;
+      let x = 0, y = 0, z = 0;
+      for (let k = s; k < e; k++) { const j = nb[k]; x += tmp[j * 3]; y += tmp[j * 3 + 1]; z += tmp[j * 3 + 2]; }
+      const c = e - s;
+      Pd[i * 3] += (x / c - tmp[i * 3]) * lam;
+      Pd[i * 3 + 1] += (y / c - tmp[i * 3 + 1]) * lam;
+      Pd[i * 3 + 2] += (z / c - tmp[i * 3 + 2]) * lam;
+    }
+  };
+  for (let it = 0; it < o.iterations; it++) {
+    pass(o.strength);
+    if (o.method === 'taubin') pass(-o.strength * 1.04);
+  }
 }
 
 /** Directed boundary half-edges of closed polygons, chained into loops of point indices. */
@@ -405,6 +498,7 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
     }
     const flip = poly2 * tri2 < 0;
     if (n > 4 && planarPoly(P, vp, s, n, nrm)) delaunayFlips(flat, idx);
+    keepDroppedCorners(idx, n);
     for (let k = 0; k < idx.length; k += 3) {
       const a = s + idx[k], b = s + idx[k + 1], c = s + idx[k + 2];
       if (flip) tris.push(a, c, b); else tris.push(a, b, c);
@@ -412,6 +506,38 @@ export function triangulate(g: Geometry, primMask?: ArrayLike<number> | null): T
     }
   }
   return { tris: Uint32Array.from(tris), triPrim: Uint32Array.from(tp) };
+}
+
+/**
+ * earcut leaves out corners that repeat or lie on a straight run between their neighbours, so the polygon's edges
+ * through them are missing from its triangles: a crack (T-junction) against the neighbouring face in an export, and
+ * open edges for the mesh kernel. Each run of left-out corners goes back into the triangle on the edge that skips it,
+ * as a fan from that triangle's third corner, in the triangle's own winding. `idx` holds local corner indices 0..n-1.
+ */
+function keepDroppedCorners(idx: number[], n: number) {
+  const used = new Uint8Array(n);
+  for (const i of idx) used[i] = 1;
+  const first = used.indexOf(1);
+  if (first < 0 || used.indexOf(0) < 0) return;
+  for (let k = 0; k < n; k++) {
+    const a = (first + k) % n;
+    if (!used[a]) continue;
+    const run: number[] = [];
+    let b = (a + 1) % n;
+    while (!used[b] && run.length < n) { run.push(b); b = (b + 1) % n; }
+    if (!run.length) continue;
+    for (let t = 0; t < idx.length; t += 3) {
+      const tri = [idx[t], idx[t + 1], idx[t + 2]];
+      let fan: number[] | null = null;
+      for (let r = 0; r < 3 && !fan; r++) {
+        const x = tri[r], y = tri[(r + 1) % 3], c = tri[(r + 2) % 3];
+        // the triangle runs a → b: a, run…, b around c; it runs b → a: b, run reversed…, a around c
+        const chain = x === a && y === b ? [a, ...run, b] : x === b && y === a ? [b, ...run.slice().reverse(), a] : null;
+        if (chain) { fan = []; for (let i = 0; i + 1 < chain.length; i++) fan.push(chain[i], chain[i + 1], c); }
+      }
+      if (fan) { idx.splice(t, 3, ...fan); break; }
+    }
+  }
 }
 
 /** Is polygon s..s+n flat (every corner within a millionth of its size of the plane through its centroid)? */
@@ -499,17 +625,18 @@ export function connectivity(g: Geometry) {
       if (a !== b) parent[b] = a;
     }
   }
-  const id = new Map<number, number>();
+  // component ids by root point, numbered in point order (typed: a Map stops at 2^24 entries)
+  const id = new Int32Array(g.numPoints).fill(-1);
   const ptClass = new Int32Array(g.numPoints);
+  let count = 0;
   for (let i = 0; i < g.numPoints; i++) {
     const r = find(i);
-    let c = id.get(r);
-    if (c === undefined) { c = id.size; id.set(r, c); }
-    ptClass[i] = c;
+    if (id[r] < 0) id[r] = count++;
+    ptClass[i] = id[r];
   }
   const primClass = new Int32Array(g.numPrims);
   for (let p = 0; p < g.numPrims; p++) primClass[p] = g.primSize(p) ? ptClass[g.vertexPoint[g.primStart[p]]] : -1;
-  return { ptClass, primClass, count: id.size };
+  return { ptClass, primClass, count };
 }
 
 /**
@@ -560,11 +687,12 @@ export function orientOutward(g: Geometry): Geometry {
  * Turn inside-out pieces outward: a connected piece with negative signed volume flips, unless it lies inside another
  * piece's bounds (the inner wall of a hollow solid faces inward on purpose). A mirror without a winding flip, or a
  * hand-built cutter, gives such pieces; booleans would make inverted walls from them. Returns the first prim of each
- * flipped piece.
+ * flipped piece, and the solids the pieces make: each outward piece with the inward pieces (cavity walls) it holds,
+ * as a solid index per prim (-1 for empty prims), and whether the bounds of two solids overlap.
  */
-export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[] } {
+export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[]; solid: Int32Array; solids: number; overlap: boolean } {
   const { primClass, count } = connectivity(g);
-  if (!count) return { geo: g, flipped: [] };
+  if (!count) return { geo: g, flipped: [], solid: new Int32Array(g.numPrims).fill(-1), solids: 0, overlap: false };
   const { tris, triPrim } = triangulate(g);
   const vol = new Float64Array(count), first = new Int32Array(count).fill(-1);
   const lo = new Float64Array(count * 3).fill(Infinity), hi = new Float64Array(count * 3).fill(-Infinity);
@@ -590,8 +718,122 @@ export function outwardPieces(g: Geometry): { geo: Geometry; flipped: number[] }
     flip[c] = 1;
     flipped.push(first[c]);
   }
-  if (!flipped.length) return { geo: g, flipped };
-  return { geo: reversePrims(g, Uint8Array.from(primClass, (c) => (c >= 0 ? flip[c] : 0))), flipped };
+  // a cavity wall joins the smallest outward piece around it
+  const size = (c: number) => (flip[c] ? -vol[c] : vol[c]);
+  const owner = new Int32Array(count), index = new Int32Array(count).fill(-1);
+  let solids = 0;
+  for (let c = 0; c < count; c++) {
+    owner[c] = c;
+    if (!(size(c) < 0)) continue;
+    let best = -1;
+    for (let o = 0; o < count; o++) if (size(o) > -size(c) && inside(c, o) && (best < 0 || size(o) < size(best))) best = o;
+    if (best >= 0) owner[c] = best;
+  }
+  const roots: number[] = [];
+  for (let c = 0; c < count; c++) if (owner[c] === c) { index[c] = solids++; roots.push(c); }
+  const solid = Int32Array.from(primClass, (c) => (c >= 0 ? index[owner[c]] : -1));
+  // bounds that overlap or touch (touching pieces fuse in a union), swept along x
+  roots.sort((a, b) => lo[a * 3] - lo[b * 3]);
+  let overlap = false;
+  for (let i = 0; i < roots.length && !overlap; i++)
+    for (let j = i + 1; j < roots.length && lo[roots[j] * 3] <= hi[roots[i] * 3] && !overlap; j++) {
+      const a = roots[i], b = roots[j];
+      overlap = lo[a * 3 + 1] <= hi[b * 3 + 1] && lo[b * 3 + 1] <= hi[a * 3 + 1] && lo[a * 3 + 2] <= hi[b * 3 + 2] && lo[b * 3 + 2] <= hi[a * 3 + 2];
+    }
+  if (!flipped.length) return { geo: g, flipped, solid, solids, overlap };
+  return { geo: reversePrims(g, Uint8Array.from(primClass, (c) => (c >= 0 ? flip[c] : 0))), flipped, solid, solids, overlap };
+}
+
+/**
+ * Consistent winding per connected piece, then outward (clean fix_winding). Across every edge exactly two polygons
+ * share, the second is turned to run the edge the opposite way to the first, piece by piece from its first polygon;
+ * each piece then keeps the orientation most of its area already had, so a few flipped faces turn back to their
+ * neighbours. Closed pieces that face inward are then turned outward, unless they lie inside the bounds of a closed
+ * piece that faces outward (the inner wall of a hollow solid faces inward on purpose). Open pieces keep their
+ * majority side. Polylines and points are left alone.
+ */
+export function orientPieces(g: Geometry): { geo: Geometry; faces: number; pieces: number } {
+  const np = g.numPrims, P = g.P, vp = g.vertexPoint;
+  const poly = (p: number) => g.primClosed[p] && g.primStart[p + 1] - g.primStart[p] >= 3;
+  // the edges of polygons: undirected key → [prim, runs from the lower point to the higher] for each side using it
+  const n = g.numPoints, sides = new Map<number, number[]>();
+  for (let p = 0; p < np; p++) {
+    if (!poly(p)) continue;
+    const s = g.primStart[p], e = g.primStart[p + 1];
+    for (let v = s; v < e; v++) {
+      const a = vp[v], b = vp[v + 1 < e ? v + 1 : s];
+      if (a === b) continue;
+      const k = a < b ? a * n + b : b * n + a;
+      let l = sides.get(k);
+      if (!l) { l = []; sides.set(k, l); }
+      l.push(p, a < b ? 1 : 0);
+    }
+  }
+  const adj: number[][] = Array.from({ length: np }, () => []);
+  const open = new Uint8Array(np);
+  for (const l of sides.values()) {
+    if (l.length === 4 && l[0] !== l[2]) {
+      // same direction in both: one of them must turn
+      const turn = l[1] === l[3] ? 1 : 0;
+      adj[l[0]].push(l[2], turn); adj[l[2]].push(l[0], turn);
+    } else if (l.length === 2) open[l[0]] = 1;
+    else for (let i = 0; i < l.length; i += 2) open[l[i]] = 1;
+  }
+  // fan volume and area per polygon
+  const vol = new Float64Array(np), area = new Float64Array(np);
+  for (let p = 0; p < np; p++) {
+    if (!poly(p)) continue;
+    area[p] = primArea(g, p);
+    const s = g.primStart[p], e = g.primStart[p + 1], a = vp[s] * 3;
+    for (let v = s + 1; v + 1 < e; v++) {
+      const b = vp[v] * 3, d = vp[v + 1] * 3;
+      vol[p] += P[a] * (P[b + 1] * P[d + 2] - P[b + 2] * P[d + 1]) - P[a + 1] * (P[b] * P[d + 2] - P[b + 2] * P[d]) + P[a + 2] * (P[b] * P[d + 1] - P[b + 1] * P[d]);
+    }
+  }
+  const flip = new Int8Array(np).fill(-1), piece = new Int32Array(np).fill(-1);
+  const pieces: { members: number[]; closed: boolean; vol: number; lo: number[]; hi: number[] }[] = [];
+  for (let f = 0; f < np; f++) {
+    if (!poly(f) || flip[f] >= 0) continue;
+    const members = [f];
+    flip[f] = 0; piece[f] = pieces.length;
+    for (let i = 0; i < members.length; i++) {
+      const x = members[i], a = adj[x];
+      for (let j = 0; j < a.length; j += 2) {
+        const y = a[j];
+        if (flip[y] >= 0) continue;
+        flip[y] = flip[x] ^ a[j + 1]; piece[y] = pieces.length;
+        members.push(y);
+      }
+    }
+    let keep = 0, turn = 0;
+    for (const x of members) if (flip[x]) turn += area[x]; else keep += area[x];
+    if (turn > keep) for (const x of members) flip[x] ^= 1;
+    let closed = true, v = 0;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const x of members) {
+      if (open[x]) closed = false;
+      v += flip[x] ? -vol[x] : vol[x];
+      for (let k = g.primStart[x]; k < g.primStart[x + 1]; k++) for (let c = 0; c < 3; c++) {
+        const q = P[vp[k] * 3 + c];
+        if (q < lo[c]) lo[c] = q;
+        if (q > hi[c]) hi[c] = q;
+      }
+    }
+    pieces.push({ members, closed, vol: v, lo, hi });
+  }
+  const inside = (c: number, o: number) => [0, 1, 2].every((k) => pieces[c].lo[k] >= pieces[o].lo[k] && pieces[c].hi[k] <= pieces[o].hi[k]);
+  let turned = 0;
+  for (let c = 0; c < pieces.length; c++) {
+    const pc = pieces[c];
+    if (!pc.closed || !(pc.vol < 0)) continue;
+    if (pieces.some((o, i) => i !== c && o.closed && o.vol > 0 && inside(c, i))) continue;
+    for (const x of pc.members) flip[x] ^= 1;
+    turned++;
+  }
+  let faces = 0;
+  const mask = new Uint8Array(np);
+  for (let p = 0; p < np; p++) if (flip[p] === 1) { mask[p] = 1; faces++; }
+  return { geo: faces ? reversePrims(g, mask) : g, faces, pieces: turned };
 }
 
 /** Quick topology health report used by inspect and by solid ops. */

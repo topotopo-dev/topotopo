@@ -1,0 +1,91 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": [
+        "P:float:3",
+        "colour:float:1",
+        "depth:float:1",
+        "door_colour:float:1",
+        "kind:string:1",
+        "pitch:float:1",
+        "roof:float:1",
+        "shop:float:1",
+        "side_windows:float:1",
+        "size:float:1",
+        "tiles:float:1",
+        "windows:float:1",
+        "yaw:float:1"
+      ],
+      "prim": ["Cd:float:3", "copynum:int:1", "material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [40, 12.352, 35],
+      "min": [-40, 0, -35]
+    },
+    "counts": {
+      "points": 14107,
+      "prims": 10767,
+      "vertices": 44646,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["bottom", "side", "top"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "b3d8743739cb8ca1",
+      "attributes": {
+        "detail.materials": "b934821b461f82a9",
+        "group.prim.bottom": "59fc2e6392d1aef1",
+        "group.prim.side": "bfcced71ce1fc4df",
+        "group.prim.top": "5e25711bf116bd51",
+        "point.colour": "aed97ba59b99869f",
+        "point.depth": "aed97ba59b99869f",
+        "point.door_colour": "aed97ba59b99869f",
+        "point.kind": "fac7ceb2a33afef4",
+        "point.pitch": "aed97ba59b99869f",
+        "point.roof": "aed97ba59b99869f",
+        "point.shop": "aed97ba59b99869f",
+        "point.side_windows": "aed97ba59b99869f",
+        "point.size": "008e0d9c7b72a1f2",
+        "point.tiles": "aed97ba59b99869f",
+        "point.windows": "aed97ba59b99869f",
+        "point.yaw": "6334bf7d1801afa7",
+        "prim.Cd": "4706ee0049826f4a",
+        "prim.copynum": "925ea9d2d4aa47a8",
+        "prim.material": "6085afaba488461d",
+        "prim.name": "1139c01876cc05be",
+        "vertex.uv": "37075ed8e02a747a"
+      },
+      "topology": "f4914fde565d4254"
+    },
+    "packed": {
+      "hash": "6448e89caa7b9fde",
+      "instances": 160,
+      "sources": [
+        "b7d1179f2ab74041",
+        "5a1dfd3b90ad94e5",
+        "3276c7d41a06c71e",
+        "e3c9eec2665dea58",
+        "59f3ae8044d3b89a",
+        "80fc8e320e0c4cbc",
+        "cd2c36a177477acf",
+        "05b86600b2de7f42",
+        "75d9445d21013577",
+        "eac5e954546cea4a",
+        "634423361bffd7e4",
+        "bc8f0c14e337485e",
+        "83935b3ee4a2c73c"
+      ]
+    }
+  },
+  "name": "example.market_street",
+  "ok": true,
+  "source": "examples/market_street.json",
+  "warnings": []
+}

@@ -23,7 +23,9 @@ defineNode({
     'geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. ' +
     'Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): ' +
     'its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map ' +
-    'params here are not used. With nothing in input 0 the result is the material alone: a material output.',
+    'params here are not used; with from, a merge of published package material outputs in input 1 does not cook the ' +
+    'outputs after the last one that holds that material (the ones before it are cooked: a merge renames the maps of a ' +
+    'later output after those of an earlier one). With nothing in input 0 the result is the material alone: a material output.',
   aliases: ['material_assign', 'shop', 'assign_material', 'materialassign'],
   inputs: [
     { name: 'geo', desc: 'geometry (none: the material alone, for a material output)', optional: true },
@@ -33,13 +35,13 @@ defineNode({
   params: {
     name: { type: 'string', default: '', desc: 'material name, also the glTF material name ("" = "material", or the source material\'s own name with input 1)', aliases: ['shop_materialpath', 'material', 'path', 'materialpath'] },
     from: { type: 'string', default: '', desc: 'input 1: which of its materials ("" = its only one)', aliases: ['source_material', 'use'] },
-    group: P.group('prim', 'prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9"'),
+    group: P.group('prim', 'prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9"; "?trim" for a group some variants lack (nothing assigned where it is absent)'),
     base_color: { type: 'color', default: [0.8, 0.8, 0.8], desc: 'base colour [r,g,b] 0..1, "#rrggbb" or a name', aliases: ['basecolor', 'color', 'cd', 'albedo', 'diffuse'] },
-    metallic: { type: 'float', default: 0, min: 0, max: 1, desc: 'metalness 0..1', aliases: ['metal', 'metalness'] },
-    roughness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'roughness 0..1', aliases: ['rough'] },
+    metallic: { type: 'float', default: 0, min: 0, max: 1, desc: 'metalness 0..1 (the glTF metallicFactor; texture_to_material with an orm map sets its own factors and ignores this)', aliases: ['metal', 'metalness'] },
+    roughness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'roughness 0..1 (the glTF roughnessFactor, 1 under a roughness map; texture_to_material with an orm map sets its own factors and ignores this)', aliases: ['rough'] },
     emissive: { type: 'color', default: [0, 0, 0], desc: 'emitted colour; components above 1 export with KHR_materials_emissive_strength', aliases: ['emission', 'emit'] },
     alpha: { type: 'float', default: 1, min: 0, max: 1, desc: 'opacity; below 1 exports with alphaMode BLEND', aliases: ['opacity', 'opac'] },
-    alpha_mode: { type: 'enum', options: ['auto', 'opaque', 'mask', 'blend'], default: 'auto', desc: 'auto preserves legacy scalar/vertex opacity; mask cuts out pixels below alpha_cutoff; explicit modes override auto' },
+    alpha_mode: { type: 'enum', options: ['auto', 'opaque', 'mask', 'blend'], default: 'auto', desc: 'auto blends only when alpha is below 1 (vertex alpha never changes the mode); mask cuts out pixels below alpha_cutoff; explicit modes override auto' },
     alpha_cutoff: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'mask: discard where material alpha × texture alpha × vertex Alpha is below this value' },
     double_sided: { type: 'bool', default: false, desc: 'render both faces', aliases: ['doublesided', 'two_sided'] },
     unlit: { type: 'bool', default: false, desc: 'unlit shading (KHR_materials_unlit)', aliases: ['emissive_only', 'flat'] },
@@ -48,6 +50,12 @@ defineNode({
     roughness_map: { type: 'path', default: '', desc: 'roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel', aliases: ['roughness_texture', 'rough_map'] },
   },
   example: { type: 'material', params: { name: 'brick', base_color: '#a5462e', roughness: 0.9, group: '@P.y<0.5' } },
+  // with "from", input 1 is read for that one material: a merge of material outputs there leaves out the ones after
+  // the last that holds it (src/graph/demand.ts)
+  materialsRead: (raw) => {
+    const from = raw('from');
+    return typeof from === 'string' && from.trim() && !from.startsWith('=') ? { input: 1, names: [from.trim()] } : null;
+  },
   cook: ({ input, hasInput, p }) => {
     const g = hasInput(0) ? input(0).clone() : new Geometry();
     let name = String(p.name ?? '').trim();

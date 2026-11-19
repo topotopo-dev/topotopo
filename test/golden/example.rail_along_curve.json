@@ -1,0 +1,55 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": [
+        "P:float:3",
+        "curve_id:int:1",
+        "curveu:float:1",
+        "measured_length:float:1",
+        "name:string:1",
+        "tangent:float:3",
+        "turn:float:1"
+      ],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [8.1326, 1, 4.4692],
+      "min": [-8.0645, 0, -4.5933]
+    },
+    "counts": {
+      "points": 1964,
+      "prims": 1668,
+      "vertices": 6984,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "24a9334b3aed2901",
+      "attributes": {
+        "detail.materials": "3284d0d633630724",
+        "point.curve_id": "27fa95456903031f",
+        "point.curveu": "a1088685a3bbb05f",
+        "point.measured_length": "11a8dc85df408f1f",
+        "point.name": "6d43999d58868267",
+        "point.tangent": "7fc150258eb3e57f",
+        "point.turn": "1fa2e7553301345f",
+        "prim.material": "8d9521c577ec7dff",
+        "prim.name": "75a66881009a880b",
+        "vertex.uv": "f81fab2d92368727"
+      },
+      "topology": "1e1da0e8038362a2"
+    }
+  },
+  "name": "example.rail_along_curve",
+  "ok": true,
+  "source": "examples/rail_along_curve.json",
+  "warnings": []
+}

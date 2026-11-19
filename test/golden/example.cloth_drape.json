@@ -1,0 +1,42 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["N:float:3", "P:float:3", "uv:float:3"],
+      "prim": ["material:string:1", "name:string:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1.0181, 0.682, 0.777],
+      "min": [-1.063, 0.002, -0.831]
+    },
+    "counts": {
+      "points": 25921,
+      "prims": 25600,
+      "vertices": 102400,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "eeb4c92801066aca",
+      "attributes": {
+        "detail.materials": "5eb497038cc3e0a1",
+        "point.N": "9f84829ddde78f0b",
+        "point.uv": "6f3e9876db32c1ec",
+        "prim.material": "bb411dc50c5c0d1f",
+        "prim.name": "a300d5c54b62951f"
+      },
+      "topology": "bbfc3cb31b174f6d"
+    }
+  },
+  "name": "example.cloth_drape",
+  "ok": true,
+  "source": "examples/cloth_drape.json",
+  "warnings": []
+}

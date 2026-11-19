@@ -94,6 +94,15 @@ export interface NodeDef {
    * selected candidate). Inputs marked false are not cooked and appear as null. Default: all inputs.
    */
   inputsUsed?: (p: Record<string, any>, count: number) => boolean[];
+  /**
+   * The materials the node reads from one input, by name, from its params as written (`raw(name)`: a param's value
+   * before expressions, aliases resolved), or null when it reads the input whole (the material node with input 1 and a
+   * "from" name). A cook that reaches a node only through such reads leaves out the package material outputs that hold
+   * none of those materials (src/graph/demand.ts).
+   */
+  materialsRead?: (raw: (param: string) => unknown) => { input: number; names: string[] } | null;
+  /** The node's result holds its inputs' materials as they are (merge): what is read of it is read of each input. */
+  passesMaterials?: boolean;
   /** extra cache-key material (e.g. file mtime), from the scope the node cooks in */
   signatureExtra?: (p: Record<string, any>, scope: Scope) => string;
   /** a package output's node type (src/graph/packages.ts): the package, its version and what it cooks */
@@ -106,6 +115,8 @@ export interface NodeSpec {
   in?: string | (string | null)[] | Record<string, string | null>;
   params?: Record<string, any>;
   bypass?: boolean;
+  /** a value outside a param's min/max fails this node instead of being clamped with a warning (overrides GraphSpec.strict) */
+  strict?: boolean;
   note?: string;
   ui?: any;
 }
@@ -114,7 +125,9 @@ export interface NodeSpec {
 export interface VarDef {
   type?: string;
   default?: any;
+  /** what it does and its unit: the control's hover text (a declared param without one warns at validation) */
   desc?: string;
+  /** the slider's range; a person may go past it, a caller of the graph as an asset is clamped to it */
   min?: number;
   max?: number;
   /** choices (type enum): strings or numbers, and the var holds the option itself */
@@ -123,6 +136,8 @@ export interface VarDef {
   label?: string;
   /** slider step (default: 1 for ints, else derived from the range) */
   step?: number;
+  /** heading the viewer's Controls list this param under (a collapsible group; groups follow declaration order) */
+  group?: string;
 }
 
 /** Free-form graph metadata (showcase render presets, editor layout, …). */
@@ -153,6 +168,12 @@ export interface GraphSpec {
    */
   outputs?: Record<string, { node: string; label?: string; export?: ExportTarget; publish?: boolean; kind?: Kind; tags?: string[]; description?: string }>;
   vars?: Record<string, any>;
+  /**
+   * Strict params: a value outside a param's min/max fails the node instead of being clamped with a warning, for every
+   * node of this graph (a node's own strict overrides it). Nested graphs (loop bodies, assets, package outputs) follow
+   * their own strict.
+   */
+  strict?: boolean;
   /** metadata for exposed vars: asset parameters, and the controls the live viewer shows for them */
   params?: Record<string, VarDef>;
   description?: string;
@@ -212,6 +233,11 @@ export interface CookContext {
   inputAt(i: number, frame: number): Promise<{ geo: Geometry; sig: string; timeDependent: boolean }>;
   /** record a numeric statistic on the node result (e.g. solver steps) */
   stat(name: string, value: number): void;
+  /**
+   * Add the time of one step of the cook to a named stage of it (a script's lib.run calls by node type): the cook
+   * report lists the node's stages with its time (NodeResult.stages), so a slow node says where its time went.
+   */
+  stage(name: string, ms: number): void;
   /**
    * Run a registered per-element kernel (src/core/kernels.ts) over job.count elements: in chunks on the host's worker
    * pool when there is one and the job is large enough, else in one piece on this thread, synchronously (the result is

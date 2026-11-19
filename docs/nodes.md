@@ -509,7 +509,9 @@ None (generator).
 
 category: `generate` · aliases: `font`, `type`, `lettering`
 
-Text from a TrueType/OpenType font: filled faces, outlines, or extruded solid. Lies in the XY plane facing +Z.
+Text from a TrueType/OpenType font: filled faces, outlines, or an extruded solid, in the XY plane facing +Z (a solid stands out towards +Z from its back face).
+
+Lettering for signs, signage, labels, plaques and logos. The letters lie in the XY plane and face +Z, placed by center: x and y where align and valign put the text, z the plane of the faces and outlines, and of the back face of a solid (depth > 0), whose front face is at center z + depth. So letters on a wall at z = 0 stand out from it towards +Z; turn and move the result to face elsewhere. back false leaves the back face of a solid off (letters mounted on a wall, whose back is never seen: fewer triangles, an open solid). To engrave, set center z to minus half the depth (the letters straddle the surface) and subtract the text from the surface with boolean; to emboss, merge it onto the surface or union it. curve_segments 2 (the default) suits signs; 4 to 8 for large lettering seen up close (each step adds about a third more triangles).
 
 **Inputs**
 
@@ -522,13 +524,15 @@ None (generator).
 | `text` | string | `"TopoTopo"` |  |  |  | text (use \\n for new lines) |
 | `font` | string | `""` |  |  |  | font file path or system family name ("" = the bundled DejaVu Sans, identical on every machine) |
 | `size` | float | `1` |  |  |  | font size (em height in units) |
+| `weight` | float | `400` | 1..1000 |  | `wght`, `font_weight` | font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold, 900 black (clamped to the range the font has, with a warning). A font without a wght axis (the bundled DejaVu Sans, a static file) is drawn at its own weight; any weight but 400 then warns |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment |
 | `valign` | enum | `"bottom"` |  | `baseline`, `center`, `bottom`, `top` |  | vertical alignment |
 | `depth` | float | `0` | 0.. |  |  | extrusion depth (> 0 makes a solid) |
 | `output` | enum | `"auto"` |  | `auto`, `faces`, `outlines`, `solid` |  | auto = solid if depth > 0, else faces |
 | `line_spacing` | float | `1.2` |  |  |  | line height as a multiple of size |
-| `curve_segments` | int | `6` | 1..32 |  |  | segments per glyph curve |
-| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
+| `curve_segments` | int | `2` | 1..32 |  |  | segments per glyph curve: 2 suits signs; 4 to 8 for large lettering seen up close |
+| `back` | bool | `true` |  |  | `back_face` | solid: its back face at center z (false leaves it off: letters on a wall, whose back is never seen; the solid is then open) |
+| `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | position: x and y where align and valign put the text; z the plane of faces and outlines, and the back face of a solid |
 
 **Example**
 
@@ -1024,6 +1028,8 @@ category: `curve` · aliases: `linear_extrude`, `extrude2d`
 
 Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.
 
+A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids. Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -1034,15 +1040,15 @@ Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon cap
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `height` | float | `1` |  |  | `depth`, `distance`, `h` | extrusion distance along the plane normal |
+| `height` | float | `1` |  |  | `depth`, `distance`, `h` | extrusion distance along the plane normal: plane xz extrudes along +Y, xy along +Z, yz along +X |
 | `divisions` | int | `1` | 1..10000 |  |  | segments along the extrusion |
 | `twist` | float | `0` |  |  |  | twist in degrees (about each shape centroid) |
 | `scale_top` | vec2 | `[1,1]` |  |  |  | scale of the top cap (taper); [0,0] = pyramid |
 | `center` | bool | `false` |  |  |  | extrude symmetrically about the shape plane |
-| `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | shape plane (auto = flattest axis) |
+| `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis) |
 | `caps` | bool | `true` |  |  |  | add top/bottom caps |
 
-**Writes:** prim groups top, bottom, side
+**Writes:** prim groups top, bottom, side; the attributes and groups of the input (see above)
 
 **Example**
 
@@ -1480,7 +1486,9 @@ None (generator).
 
 category: `curve` · aliases: `wire`, `tubes`
 
-Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Great for branches, cables, wireframes.
+Turn curves into tubes. Per-point radius from "width" (diameter) or radius × pscale. Great for branches, cables, wireframes.
+
+The tube radius at each point is half its "width" attribute when the curves carry width and use_width is on; pscale is then ignored, so particle trails with a small pscale keep the width they were given. Without width (or with use_width off) the radius is the radius param times point pscale (1 when there is none).
 
 **Inputs**
 
@@ -1492,10 +1500,10 @@ Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Grea
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `radius` | float | `0.05` |  |  | `rad`, `wire_radius` | tube radius (used when no width attribute) |
+| `radius` | float | `0.05` |  |  | `rad`, `wire_radius` | tube radius when there is no width attribute (or use_width is off), multiplied by point pscale |
 | `divisions` | int | `8` | 3..1024 |  | `sides`, `cols` | sides around the tube |
 | `caps` | bool | `true` |  |  |  | cap the tube ends |
-| `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present |
+| `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present; pscale is then ignored |
 
 **Writes:** vertex uv; prim groups caps, sides
 
@@ -1646,7 +1654,7 @@ category: `curve` · aliases: `lathe`
 
 Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.
 
-Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. Closed results face outward.
+Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed solids always face outward and flip has no effect on them: a closed profile turned a full 360, a closed profile over a partial angle with caps on (the caps are wound with the sides, for any angle and either profile direction), and a profile whose open ends both lie on the axis turned a full 360. Caps are only made for closed profiles. Every other result is an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.
 
 **Inputs**
 
@@ -1661,9 +1669,9 @@ Each profile point turns around the axis line (through origin, along axis) at it
 | `axis` | vec3 | `[0,1,0]` |  |  | `direction`, `dir` | direction of the axis to turn around |
 | `origin` | vec3 | `[0,0,0]` |  |  | `center`, `pivot` | a point on the axis |
 | `segments` | int | `32` | 3..4096 |  | `divisions`, `cols` | segments around |
-| `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees |
-| `caps` | bool | `false` |  |  |  | cap partial revolves (closed profiles) |
-| `flip` | bool | `false` |  |  |  | reverse face orientation |
+| `angle` | vec2 | `[0,360]` |  |  |  | start/end angle in degrees, counter-clockwise seen from the axis tip (right-handed): 0..90 about Y runs from +X towards -Z |
+| `caps` | bool | `false` |  |  |  | cap partial revolves of closed profiles, making a closed solid that faces outward (open profiles get no caps) |
+| `flip` | bool | `false` |  |  |  | reverse face orientation of an open result; no effect on a closed solid (always faces outward) |
 
 **Writes:** vertex uv
 
@@ -1867,7 +1875,7 @@ category: `curve`
 
 Straight skeleton, polygon offsets and pitched roofs from planar footprints, including holes.
 
-Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order.
+Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesting to detect holes, including doubled bridges in one primitive. Each shape (an outer contour and its holes) is processed on its own, so separate shapes may share edges and corners, as lots split from one block do; a hole must lie strictly inside its outer contour, and no two contours may cross. Positive offset distances move inward. Roof pitch attributes use the outgoing edge of each point (or one pitch for the whole source primitive). Output edge numbers follow input primitive and corner order. Straight and doubled corners (within 1e-5 of the shape's extent of the line between their neighbours) are dropped before the skeleton when the edges around them have the same pitch: one roof face spans them, its eave still runs through every footprint point, and its edge number is the first of the merged edges.
 
 **Inputs**
 
@@ -1952,7 +1960,7 @@ category: `curve`
 
 Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).
 
-The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
+The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. The end caps lie in the profile plane, perpendicular to the curve at its last point: where the last segment is tilted, the cap is tilted with it and its rim pokes above or below a horizontal plane the tube was meant to end on (a ground or snap plane). End the path with a short horizontal run, or cut the result with clip. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
 
 **Inputs**
 
@@ -2325,13 +2333,13 @@ Translate / rotate (degrees) / scale about a pivot. Also transforms N, v, up, or
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `translate` | vec3 | `[0,0,0]` |  |  | `t`, `move`, `offset`, `position` | translation |
-| `rotate` | vec3 | `[0,0,0]` |  |  | `r`, `rot`, `rotation` | rotation in degrees about X, Y, Z |
+| `rotate` | vec3 | `[0,0,0]` |  |  | `r`, `rot`, `rotation` | rotation in degrees about the world X, Y and Z axes, right-handed (counter-clockwise seen from the + end of the axis), X first, then Y, then Z (rotate_order xyz): [0, 0, 40] turns +Y to (-0.64, 0.77, 0), [0, 90, 0] turns +X to -Z |
 | `scale` | vec3 | `[1,1,1]` |  |  | `s` | scale (a single number = uniform) |
 | `uniform_scale` | float | `1` |  |  | `uniformscale`, `scale_uniform` | extra uniform scale multiplier |
 | `pivot` | vec3 | `[0,0,0]` |  |  | `p` | pivot for rotation and scale |
 | `pivot_mode` | enum | `"param"` |  | `param`, `centroid`, `bbox_min`, `bbox_center_bottom` |  | where the pivot comes from |
 | `order` | enum | `"srt"` |  | `srt`, `str`, `rst`, `rts`, `tsr`, `trs` | `xord` | transform order (srt = scale, then rotate, then translate) |
-| `rotate_order` | enum | `"xyz"` |  | `xyz`, `xzy`, `yxz`, `yzx`, `zxy`, `zyx` | `rord` | rotation order |
+| `rotate_order` | enum | `"xyz"` |  | `xyz`, `xzy`, `yxz`, `yzx`, `zxy`, `zyx` | `rord` | order the three rotations apply in, each about a world axis: xyz = X first, then Y, then Z |
 | `group` | group (point) | `""` |  |  |  | point group to transform ("" = all) |
 
 **Example**
@@ -3134,6 +3142,8 @@ category: `attribute` · aliases: `attribcopy`, `copy_attrib`
 
 Copy attributes from the second input by element index (or by matching an id attribute).
 
+Elements pair up by index (element i takes the source's element i), or by match_by. Point positions are copied when names lists P itself (names "P" or "P Cd"; normals are not recomputed: add a normal node), never through a wildcard, so the default "*" leaves the shape alone. Warns when the counts differ in index mode (only the first elements pair up: the topology differs, so match_by an id), and when a listed name is not on the source in that class.
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -3145,7 +3155,7 @@ Copy attributes from the second input by element index (or by matching an id att
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `names` | string | `"*"` |  |  | `name`, `pattern` | attribute name pattern |
+| `names` | string | `"*"` |  |  | `name`, `pattern` | attribute name pattern (space-separated, * and ? wildcards, ^name excludes); point P only when listed by name |
 | `class` | enum | `"point"` |  | `point`, `prim`, `vertex`, `detail` |  | class |
 | `match_by` | string | `""` |  |  |  | match elements by this int/string attribute instead of index (e.g. "id" or "name") |
 
@@ -3675,7 +3685,7 @@ category: `attribute` · aliases: `material_assign`, `shop`, `assign_material`, 
 
 Assign a named material (PBR base colour, metallic, roughness, emissive, alpha) to prims, or one from a material output; exporters write it as a glTF material.
 
-Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the package folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used. With nothing in input 0 the result is the material alone: a material output.
+Writes the prim string attribute "material" for the selected prims and adds (or replaces) the entry in the detail material table "materials" (JSON). In glTF export the material decides the colour of its prims and their Cd is not written (export option vertex_colors keeps it). Assign several materials by chaining material nodes with different groups: by name pattern "@name=Glass*", prim ranges "0-11", or node groups (help topic "materials"). Texture maps are file paths (PNG or JPEG, relative to the package folder): glb/gltf embed them, usda references them through UsdUVTexture shaders, geo and json keep the paths in the table. A map replaces its scalar (base_color, roughness) in exports. Input 1 takes the material from elsewhere, typically a material output of a package ({"type": "owner/materials/steel"}): its entry and the maps it uses are copied in (from names it when the source holds several) and the colour and map params here are not used; with from, a merge of published package material outputs in input 1 does not cook the outputs after the last one that holds that material (the ones before it are cooked: a merge renames the maps of a later output after those of an earlier one). With nothing in input 0 the result is the material alone: a material output.
 
 **Inputs**
 
@@ -3690,13 +3700,13 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 |---|---|---|---|---|---|---|
 | `name` | string | `""` |  |  | `shop_materialpath`, `material`, `path`, `materialpath` | material name, also the glTF material name ("" = "material", or the source material's own name with input 1) |
 | `from` | string | `""` |  |  | `source_material`, `use` | input 1: which of its materials ("" = its only one) |
-| `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9" |
+| `group` | group (prim) | `""` |  |  |  | prims to assign ("" = all). e.g. "top", "@P.y>0", "0-9"; "?trim" for a group some variants lack (nothing assigned where it is absent) |
 | `base_color` | color | `[0.8,0.8,0.8]` |  |  | `basecolor`, `color`, `cd`, `albedo`, `diffuse` | base colour [r,g,b] 0..1, "#rrggbb" or a name |
-| `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 |
-| `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 |
+| `metallic` | float | `0` | 0..1 |  | `metal`, `metalness` | metalness 0..1 (the glTF metallicFactor; texture_to_material with an orm map sets its own factors and ignores this) |
+| `roughness` | float | `0.5` | 0..1 |  | `rough` | roughness 0..1 (the glTF roughnessFactor, 1 under a roughness map; texture_to_material with an orm map sets its own factors and ignores this) |
 | `emissive` | color | `[0,0,0]` |  |  | `emission`, `emit` | emitted colour; components above 1 export with KHR_materials_emissive_strength |
 | `alpha` | float | `1` | 0..1 |  | `opacity`, `opac` | opacity; below 1 exports with alphaMode BLEND |
-| `alpha_mode` | enum | `"auto"` |  | `auto`, `opaque`, `mask`, `blend` |  | auto preserves legacy scalar/vertex opacity; mask cuts out pixels below alpha_cutoff; explicit modes override auto |
+| `alpha_mode` | enum | `"auto"` |  | `auto`, `opaque`, `mask`, `blend` |  | auto blends only when alpha is below 1 (vertex alpha never changes the mode); mask cuts out pixels below alpha_cutoff; explicit modes override auto |
 | `alpha_cutoff` | float | `0.5` | 0..1 |  |  | mask: discard where material alpha × texture alpha × vertex Alpha is below this value |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
@@ -3759,15 +3769,16 @@ Measure prim area/perimeter, curve length, per-piece volume/area, or point curva
 
 category: `measure` · aliases: `expect`, `check`, `verify`
 
-Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression) and fail, warn or mark when a check fails. Passes the geometry through.
+Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression, heightfields, images) and fail, warn or mark when a check fails. Passes the geometry through.
 
-Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first). Each cook records stats checks and failed.
+Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement). Heightfields and images (which have no points) have checks of their own: heightfields / images name the ones that must exist, and the checks after each read those (every one when the name is empty): samples, height_min / height_max and match for heightfields (match compares with the heightfield of the reference input at the same world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size and image_min / image_max (every channel of every layer) for images. Each cook records stats checks and failed.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | geometry to check (passed through) |
+| 1 | `reference` | yes | no | optional: geometry with the heightfield match compares against |
 
 **Parameters**
 
@@ -3791,11 +3802,21 @@ Every check is off by default; enable the ones that express what the graph must 
 | `max_tests` | int | `2000000` | 1000..1000000000 |  |  | self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped) *(advanced)* |
 | `attrib` | string | `""` |  |  | `attribute` | attribute that must exist ("" = off) |
 | `attrib_class` | enum | `"auto"` |  | `auto`, `point`, `vertex`, `prim`, `detail` |  | where attrib must live (auto = any class: vertex, point, prim, detail) |
-| `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of its first component (null = off) |
-| `attrib_max` | json | `null` |  |  |  | attrib: largest allowed value of its first component (null = off) |
+| `attrib_min` | json | `null` |  |  |  | attrib: smallest allowed value of every component (null = off) |
+| `attrib_max` | json | `null` |  |  |  | attrib: largest allowed value of every component (null = off) |
 | `group` | string | `""` |  |  |  | group name (any class) that must exist and be non-empty ("" = off) |
-| `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges and the graph vars (by their bare name; the names above come first); e.g. "volume > 1 && pieces == 1" |
+| `expr` | code | `""` |  |  | `expression`, `condition` | JS expression that must be true ("" = off) over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement); e.g. "volume > 1 && pieces == 1" |
 | `tolerance` | float | `0.000001` | 0.. |  |  | distance tolerance for bbox_min/max and duplicate points *(advanced)* |
+| `heightfields` | string | `""` |  |  | `heightfield` | heightfield names that must exist (space-separated, * wildcards, ^name excludes; "" = off); the heightfield checks read these, or every heightfield when empty |
+| `samples` | json | `null` |  |  |  | [x, z] samples (or one number for both) every heightfield checked must have, e.g. an Unreal Landscape size (null = off) |
+| `height_min` | json | `null` |  |  |  | no height sample of a heightfield checked may lie below this (null = off) |
+| `height_max` | json | `null` |  |  |  | no height sample of a heightfield checked may lie above this (null = off) |
+| `match` | enum | `"off"` |  | `off`, `edges`, `all` |  | compare every heightfield checked with the first heightfield of input 1 at the same world X and Z: edges = its border samples (tiles join without seams), all = every sample |
+| `match_tolerance` | float | `0.0001` | 0.. |  |  | match: largest height difference allowed (m) *(advanced)* |
+| `images` | string | `""` |  |  | `image` | image names that must exist (space-separated, * wildcards, ^name excludes; "" = off); the image checks read these, or every image when empty |
+| `image_size` | json | `null` |  |  |  | [width, height] in pixels (or one number for both) every image checked must have (null = off) |
+| `image_min` | json | `null` |  |  |  | no channel value of an image checked may lie below this, in any layer; NaN fails (null = off) |
+| `image_max` | json | `null` |  |  |  | no channel value of an image checked may lie above this, in any layer; NaN fails (null = off) |
 
 **Writes:** passes geometry through; mark: detail int assert_failed, detail string assert_report, point/prim group assert_fail
 
@@ -4581,7 +4602,7 @@ For holes, non-manifold edges, inconsistent winding and self-intersections use m
 | `remove_degenerate` | bool | `true` |  |  |  | remove prims with repeated/too few points |
 | `min_area` | float | `1e-12` | 0.. |  |  | remove polygons with smaller area (0 = keep); a closed mesh stays closed: a tiny face collapses into a point, a thin sliver hands its middle point to the face across its long side |
 | `remove_unused_points` | bool | `true` |  |  |  | remove points not used by prims (only when the geometry has prims) |
-| `fix_winding` | bool | `false` |  |  |  | make closed meshes face outward |
+| `fix_winding` | bool | `false` |  |  |  | make the winding consistent in each connected piece (most of its area decides, so a few flipped faces turn back), then turn closed pieces outward; a closed piece inside another one (the inner wall of a hollow solid) stays inward |
 
 **Example**
 
@@ -4878,13 +4899,15 @@ Weld points closer than a distance; collapsed prims are removed.
 
 category: `topology` · aliases: `divide_quads`, `facade_split`, `quad_split`, `split_faces`
 
-Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded.
+Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded. Only quads are split: cut first, then split.
+
+Only 4-sided polygons are divided; triangles and n-gons pass through unsplit. After a boolean the faces around the cut are often n-gons, so they stay whole: run grid_split on the quads BEFORE the cut (or triangulate the n-gons first), not after it.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | polygon mesh (quads are split; other polygons pass through) |
+| 0 | `geo` | no | no | polygon mesh (quads are split; triangles and n-gons pass through unsplit) |
 
 **Parameters**
 
@@ -5812,7 +5835,7 @@ category: `copy` · aliases: `copytopoints`, `instance`, `copy_to_pts`
 
 Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over. pack:true makes packed instances (cheap at millions).
 
-pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner.
+pack:false (default) makes real copies. pack:true makes one packed prim per template point: an anchor point at the instance position carrying the template point attributes, referencing the shared source with the instance rotation/scale (no geometry is copied). Packed instances render, export to glb (EXT_mesh_gpu_instancing) and usda (PointInstancer), survive transform/merge/delete/attribute nodes, and are expanded automatically for nodes that need polygons (or explicitly with unpack). Variants: variants "name" (split the source by prim name) or "piece" (by connectivity), or piece_attrib for any prim attribute; the template point attribute variant_attrib picks one per copy (an int index into the pieces, sorted by value for attributes, or the exact value, e.g. a string name); without that attribute the pieces cycle, or, with variant_weights, are picked at random with those weights (seeded; PCG Static Mesh Spawner weights). scale_attrib and rotate_attrib add a scale and a local rotation from any template attribute (e.g. a mask driving the size) on top of pscale/scale/orient/rot. Unreal PCG: Static Mesh Spawner. Pieces placed from a list in a file (P, yaw, pscale, name per row): help topic "recipes", "instance a placement list".
 
 **Inputs**
 
@@ -5938,6 +5961,8 @@ category: `copy` · aliases: `copy`, `copyxform`, `array`, `duplicate`
 
 Make N copies, each transformed cumulatively (Houdini Copy and Transform): stairs, radial arrays, stacks.
 
+Copies placed from a list instead (positions, yaw, scale and a piece name per row, from a CSV or JSON file): read the list with file and instance the pieces onto it with copy_to_points {pack, variants "name", variant_attrib "name", rotate_attrib "yaw"}, exported as one instanced GLB: help topic "recipes", "instance a placement list".
+
 **Inputs**
 
 | # | name | optional | multi | description |
@@ -6025,7 +6050,7 @@ category: `copy` · aliases: `scatter_points`, `distribute`
 
 Scatter points on surfaces (area-weighted, blue-noise spacing; by count or per m²; density attribute and 0..1 mask; relaxation; exact minimum distance), along curves, or inside volumes.
 
-Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or prim attribute, Houdini's density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; "^name" excludes). Packed input is unpacked first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").
+Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sampler for curves, Volume Sampler). generate_by: count = exactly count points; density = density × density_scale points per square metre (per metre on curves, per cubic metre in volumes) of area × weight; auto = density when density > 0, else count (there, for compatibility, density_attrib only redistributes the points while density_mask still scales the total). Weight per point = density_attrib (≥ 0, point, vertex or prim attribute, Houdini's density attribute) × density_mask (clamped 0..1, e.g. the "mask" of the mask node). relax: blue-noise spacing by weighted sample elimination (5 candidates per point) whose radii follow the weights (auto mode with only density_attrib keeps the legacy uniform radius, which evens the density out). relax_iterations: Lloyd-style point relaxation afterwards (surface mode): points push apart to the spacing of the local density (relax_radius to fix it) and are projected back onto the surface through a BVH; points that end where the weight is 0 are dropped. min_distance: exact minimum distance between points (dart throwing over the candidates; fewer than count points when the surface is full). max_per_prim: at most that many points per source prim. emit_attributes: which source attributes the points carry (point and vertex attributes interpolated, prim attributes copied; "^name" excludes). N: the input N is always carried (point or vertex N interpolated and normalised, prim N copied; attrib_delete removes it); scatter computes none of its own unless write_normals is on (the surface normal, or the tangent along curves), as the Houdini scatter does, because copy_to_points turns each copy so its +Z follows N and an N pointing up lays upright models on their side. Packed input is unpacked first. A heightfield or an SDF has no polygons and is refused: use heightfield_scatter, or heightfield_to_mesh / sdf_to_mesh first. Chain: mask → scatter → orient → prune → copy_to_points (help topic "pcg").
 
 **Inputs**
 
@@ -6057,8 +6082,9 @@ Houdini: Scatter (Scatter and Align). Unreal PCG: Surface Sampler (Spline Sample
 | `write_sourceprim` | bool | `true` |  |  | `source_prim`, `sourceprim` | write int sourceprim (the source prim of each point) |
 | `write_primuv` | bool | `false` |  |  | `prim_uv`, `sourceprimuv` | write sourceprimuv (prim uv of the point on its source prim, Houdini primuv convention) |
 | `write_seed` | bool | `false` |  |  | `seed_attrib`, `pcg_seed` | write int seed per point (PCG $Seed; a hash of seed and the point number) |
+| `write_normals` | bool | `false` |  |  | `compute_normals`, `output_normals` | write N when no input N is carried: the surface normal (surface mode) or the curve tangent (curve mode); off leaves the points without N so copy_to_points stands copies upright |
 
-**Writes:** point N (surface normal), sourceprim; optional sourceprimuv, seed; source attributes (emit_attributes)
+**Writes:** point sourceprim; N when the input has N (carried) or write_normals is on; optional sourceprimuv, seed; source attributes (emit_attributes)
 
 **Example**
 
@@ -6154,16 +6180,16 @@ Instances are expanded in prim order after the other prims; source attributes an
 
 category: `solid` · aliases: `csg`, `bool`, `difference`, `union`, `intersect`
 
-Robust mesh boolean (union / subtract / intersect) of closed solids. Without B, unions A’s overlapping pieces.
+Robust mesh boolean (union / subtract / intersect) of closed solids. Each input’s overlapping pieces are unioned first; without B, the result is that union of A.
 
-The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.
+Either input may be a merge of pieces that overlap: each input is first made one solid, the union of its pieces (the inner wall of a hollow piece stays with it, so the hollow is kept), and the operation runs on those two solids, so subtracting a merge of cutters removes everything any of them covers. The result is a closed solid made of polygons: each input face that survives the cut comes out as one polygon (a face the cut leaves with a hole as a few polygons sharing flat edges), so a bevel or inset after the boolean sees the real edges, and edges shorter than "tolerance" are collapsed so no slivers are left. Inside-out input pieces (a mirror without a winding flip) are turned outward first, with a warning.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `a` | no | no | solid A |
-| 1 | `b` | yes | no | solid B (optional) |
+| 0 | `a` | no | no | solid A: closed pieces, which may overlap (unioned first) |
+| 1 | `b` | yes | no | solid B (optional): closed pieces, which may overlap (unioned first, so a merge of cutters cuts as one); its faces become the cut faces when subtracting |
 
 **Parameters**
 
@@ -6173,7 +6199,7 @@ The result is a closed solid made of polygons: each input face that survives the
 | `output` | enum | `"polygons"` |  | `polygons`, `triangles` |  | polygons = each surviving input face as one polygon (or a few around a hole); triangles = the kernel triangles as they come |
 | `tolerance` | float | `0.00001` | 0.. |  | `simplify`, `sliver` | after the cut, collapse edges shorter than this and flatten slivers thinner than it, keeping the solid closed (0 = rounding only) |
 
-**Writes:** prim groups from_a, from_b (cut faces come from B when subtracting); float point/vertex attributes interpolated
+**Writes:** prim groups from_a, from_b (cut faces come from B when subtracting); each face keeps the prim attributes of the input face it comes from (a cut face B’s material); float point/vertex attributes interpolated
 
 **Example**
 
@@ -6433,7 +6459,7 @@ Shatter a closed solid into convex Voronoi pieces (sites from input 2 or scatter
 | `count` | int | `12` | 1..10000 |  |  | number of pieces when no site points are given |
 | `seed` | float | `0` |  |  |  | random seed |
 | `gap` | float | `0` | 0.. |  |  | shrink each piece toward its centre by this distance (visual separation) |
-| `neighbors` | int | `24` | 4..1024 |  |  | nearest sites considered per cell (raise if cells look wrong) |
+| `neighbors` | int | `24` | 4..1024 |  |  | nearest sites that cut each cell first; farther sites that can still reach the cell cut it too, so cells are exact and pieces never overlap |
 
 **Writes:** prim name ("piece0"...), class (int), group inside; point/prim attributes from the source
 
@@ -9000,7 +9026,7 @@ category: `uv` · aliases: `uvproject`, `texture`, `uv_texture`
 
 Project UVs: planar, box (tri-planar per face), cylindrical or spherical.
 
-uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center, with a seam where the angle wraps.
+uv = world position / scale + offset (no packing: the uv runs over many tiles, for tiling textures; uv_layout or uv_unwrap make an atlas). planar projects along axis: y → u = x, v = z; x → u = z, v = y; z → u = x, v = y. box projects each polygon the same way along the axis its normal is closest to. Both sides of an axis share one projection, so the faces looking along +X, +Y and -Z get MIRRORED uv (a texture reads backwards there, and their uv winding is opposite to the polygon's: inspect uv counts them as mirrored), while -X, -Y and +Z read the right way round. cylindrical: u = angle around axis (one turn per scale[0]), v = height along axis / scale[1]; spherical: u = angle, v = polar angle (0..1 times scale[1]); both measured from center. u starts at the seam (the seam param, an angle around the axis) and grows turning right-handed about the axis. A face that the seam runs through keeps its own short stretch of u (its corners stay one turn apart from the neighbour on the far side), so the seam falls on the edges between faces and a whole number of tiles per turn wraps without a visible seam; a point on the axis (a pole, a cone tip) takes the u of its face. For cylindrical and spherical scale[0] is the TILE COUNT around the axis (a number of repeats, not a length: 1 = the texture wraps the surface once, 4 = four repeats), so one count gives surfaces of different radii different tile sizes (a 0.4 m post and a 3.6 m drum both get scale[0] tiles around): to keep tiles the same size, give each radius its own count, about 2π · radius / tile width. scale[1] is metres per v tile for cylindrical. A cylindrical projection collapses the flat top and bottom faces of a tube or ring (all their points share one height, so the uv degenerates to a line): put those faces in a prim group and run a second uv_project with method box or planar and that group; group limits a projection to its prims and leaves the uv of the others untouched.
 
 **Inputs**
 
@@ -9012,11 +9038,13 @@ uv = world position / scale + offset (no packing: the uv runs over many tiles, f
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
+| `group` | group (prim) | `""` |  |  |  | prims to project ("" = all); the other prims keep their uv |
 | `method` | enum | `"box"` |  | `box`, `planar`, `cylindrical`, `spherical` |  | projection type |
 | `axis` | enum | `"y"` |  | `y`, `x`, `z` |  | projection axis (planar normal / cylinder axis) |
-| `scale` | vec2 | `[1,1]` |  |  |  | world units per UV tile (box/planar); tiles around (cyl/sph) |
+| `scale` | vec2 | `[1,1]` |  |  |  | box/planar: world units per UV tile; cylindrical/spherical: scale[0] is the number of tiles around the axis (a count, not a length), scale[1] is metres per tile along the axis (cylindrical) or the number of tiles pole to pole (spherical) |
 | `offset` | vec2 | `[0,0]` |  |  |  | uv offset |
 | `center` | vec3 | `[0,0,0]` |  |  |  | projection center (cyl/sph) |
+| `seam` | float | `0` |  |  | `seam_angle` | cylindrical/spherical: where the seam (u = 0) lies, in degrees around the axis, turning right-handed about it (counter-clockwise seen from +axis). 0 = towards -Z for axis y (-Y for axis x, -X for axis z); axis y: 90 = -X, 180 = +Z, 270 = +X. Put it where nobody looks |
 
 **Writes:** vertex uv
 
@@ -9027,7 +9055,8 @@ uv = world position / scale + offset (no packing: the uv runs over many tiles, f
   "type": "uv_project",
   "params": {
     "method": "cylindrical",
-    "axis": "y"
+    "axis": "y",
+    "seam": 90
   }
 }
 ```
@@ -9094,7 +9123,7 @@ category: `uv` · aliases: `uvunwrap`, `autouv`, `xatlas`, `uv_auto`, `unwrap`
 
 Automatic UV unwrap: xatlas cuts and flattens charts per connected piece; they are packed without overlaps into the 0..1 square. Polygons are kept.
 
-Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Writes prim chart (and atlas with fit stack).
+Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the weights: chart_smoothing cuts and flattens the charts on a smoothed copy and keeps the uv on the real shape. Writes prim chart (and atlas with fit stack).
 
 **Inputs**
 
@@ -9107,6 +9136,7 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `use_seams` | bool | `false` |  |  |  | keep existing seams: edges where uv is discontinuous, and a "seams" edge group, become chart borders xatlas never crosses (seams that do not cut a region apart are hints only) |
+| `chart_smoothing` | int | `0` | 0..1000 |  |  | smoothing passes (taubin, as smooth) on a copy that the charts are cut and flattened on; the uv goes onto the real shape and packs by its areas. Noisy surfaces (scans, decimated or generated models) shatter into hundreds of ragged charts; 30 to 100 passes make a few smooth ones. 0 = off |
 | `max_chart_area` | float | `-1` | -1.. |  |  | largest chart area in world units²; 0 = unlimited (xatlas default), -1 = auto (unlimited below ~1000 triangles, then total area * 1000 / triangles to keep charting fast) |
 | `max_boundary_length` | float | `0` | 0.. |  |  | longest chart boundary in world units (0 = unlimited) |
 | `normal_deviation` | float | `2` | 0.. |  | `normal_deviation_weight` | weight of the angle between a face and the chart average normal |
@@ -9133,14 +9163,56 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 
 ```json
 {
-  "type": "uv_unwrap",
-  "in": [
-    "geo"
-  ],
-  "params": {
-    "padding": 4,
-    "resolution": 1024
-  }
+  "nodes": {
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "type": "ico",
+        "level": 4
+      }
+    },
+    "shape": {
+      "type": "noise_displace",
+      "in": [
+        "ball"
+      ],
+      "params": {
+        "amplitude": 0.35,
+        "frequency": 1.2
+      }
+    },
+    "rough": {
+      "type": "noise_displace",
+      "in": [
+        "shape"
+      ],
+      "params": {
+        "amplitude": 0.06,
+        "frequency": 9
+      }
+    },
+    "rock": {
+      "type": "decimate",
+      "in": [
+        "rough"
+      ],
+      "params": {
+        "ratio": 0.4
+      }
+    },
+    "out": {
+      "type": "uv_unwrap",
+      "in": [
+        "rock"
+      ],
+      "params": {
+        "chart_smoothing": 60,
+        "padding": 4,
+        "resolution": 1024
+      }
+    }
+  },
+  "output": "out"
 }
 ```
 
@@ -9577,7 +9649,7 @@ Pass through one of several inputs by index (use "=expr" to drive it from vars).
 
 category: `io` · aliases: `import`, `load`, `read`
 
-Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON or topotopo JSON; a PNG becomes an image volume named after the file, as image_file reads it with its defaults (image_file has the layer and colour options). .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively: name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points); its PNGs become images. copy_to_points {variants: 'name'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.
+Load a scene or folder from disk, or geometry from a URL: OBJ, STL, PLY, glTF/GLB, .blend, Houdini .geo/.bgeo, CSV, points JSON, a JSON list of point rows (a placement list) or topotopo JSON; a PNG becomes an image volume named after the file, as image_file reads it with its defaults (image_file has the layer and colour options). .blend needs the Node host and Blender (TOPOTOPO_BLENDER selects its executable); Blender’s own exporter converts it to a cached GLB. Folder mode loads supported files in name order, non-recursively (export sidecars such as crate.glb.source.json are skipped): name becomes the file stem, or `<stem>/<name>` when the file has multiple distinct object names (on prims, packed prims and isolated points); its PNGs become images. copy_to_points {variants: 'name'} consumes a dropped folder of models directly. glTF empties become points; path holds ancestor names, and object extras become attributes. For a manual Blender GLB: +Y up (default), Apply Modifiers, Loose Edges and Custom Properties; convert curves to mesh first because the exporter drops curves without bevel geometry. Z-up files can be converted.
 
 **Inputs**
 
@@ -9588,7 +9660,7 @@ None (generator).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `path` | path | `""` |  |  | `file`, `filename` | file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a .topo file at or above the graph), else from the graph's folder (MCP: the package); folder mode needs directory support in the host |
-| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
+| `format` | enum | `"auto"` |  | `auto`, `obj`, `stl`, `ply`, `glb`, `gltf`, `blend`, `json`, `geo`, `bgeo`, `csv`, `pointsjson`, `png` |  | file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams, point rows ([{"P": [x, y, z], "yaw": 30, "name": "crate"}, …], each key an attribute as a CSV column) and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume) |
 | `up_axis` | enum | `"y"` |  | `y`, `z` |  | source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up |
 | `scale` | float | `1` |  |  |  | uniform scale (e.g. 0.01 for centimetres → metres) |
 | `weld` | bool | `false` |  |  |  | fuse coincident points (glTF/STL meshes are split at seams; weld before booleans; expands packed instances) |
@@ -11331,6 +11403,7 @@ Unreal PCG: Self Pruning (overlap), Density Filter (density), Attribute Filter (
         "s"
       ],
       "params": {
+        "mode": "direction",
         "scale_min": 0.5,
         "scale_max": 1.5
       }
@@ -13915,7 +13988,7 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `style` | enum | `"dirt"` |  | `dirt`, `leaks`, `spots` | `type`, `mode` | dirt patches, vertical leaks or round spots |
-| `scale` | float | `4` | 0.1..256 |  | `frequency` | features across the image width |
+| `scale` | float | `4` | 0.1..256 |  | `frequency` | features across the image width (1 to 256: larger values are clamped to 256) |
 | `coverage` | float | `0.35` | 0..1 |  | `amount`, `density` | fraction of the image that turns white |
 | `contrast` | float | `0.6` | 0..1 |  | `hardness` | edge hardness (1 = hard) |
 | `detail` | float | `0.4` | 0..1 |  | `breakup` | fine breakup mixed in (0 = smooth shapes) |
@@ -14798,7 +14871,7 @@ category: `texture` · aliases: `tile_generator`, `bricks`, `brick`, `checker`, 
 
 Tiling pattern image: bricks, tiles, checker, stripes, hex, dots, or a grid line mask, with gap (mortar), bevel and per-cell random id.
 
-Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.
+Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); stripes are vertical (u count), and with a u count of 1 the v count makes horizontal stripes; bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.
 
 **Inputs**
 
@@ -15439,6 +15512,7 @@ None (generator).
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `text` | string | `"TOPOTOPO"` |  |  |  | text (use \\n for new lines) |
 | `font` | string | `""` |  |  |  | font file or family ("" = the bundled DejaVu Sans) |
+| `weight` | float | `400` | 1..1000 |  | `wght`, `font_weight` | font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold (see the text node; a font without a wght axis is drawn at its own weight) |
 | `size` | float | `0.2` | 0.001.. |  | `height`, `font_size` | height of the text block as a fraction of the image height (shrunk to fit the width) |
 | `position` | vec2 | `[0.5,0.5]` |  |  | `center` | centre of the text in uv |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment of lines |
@@ -15650,7 +15724,7 @@ category: `texture` · aliases: `transform_texture`, `transformation_2d`, `offse
 
 Offset, rotate, scale and tile an image (2D transform with wrap).
 
-Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv). With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.
+Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv); tiling is about the lower-left corner, so cell 0 starts at uv (0, 0) and offset 0 keeps the cells aligned with the image edges. With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.
 
 **Inputs**
 
@@ -15665,7 +15739,7 @@ Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `t
 | `offset` | vec2 | `[0,0]` |  |  | `translate`, `t` | shift in uv (0.5 = half the image) |
 | `rotate` | float | `0` |  |  | `rotation`, `r`, `angle` | rotation in degrees (counter-clockwise) |
 | `scale` | vec2 | `[1,1]` |  |  | `s`, `zoom` | zoom (> 1 enlarges the content) |
-| `tile` | vec2 | `[1,1]` | 0.001.. |  | `tiling`, `repeat` | repeats of the content along u and v |
+| `tile` | vec2 | `[1,1]` | 0.001.. |  | `tiling`, `repeat` | repeats of the content along u and v; cells start at the lower-left corner (uv 0, 0), so [1, 2] gives two stacked cells, each the whole image |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | repeat the source outside 0..1 (else black) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -15774,7 +15848,7 @@ category: `texture` · aliases: `texture_material`, `material_textures`, `attach
 
 Attach images as texture maps (base colour, normal, roughness, ORM) to a named material and assign it; the images travel with the geometry and exporters embed them.
 
-Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other packages assign through input 1 of the material node.
+Input 0 is the mesh (with uv), input 1 the images (merge several texture branches first). Each slot names an image of input 1 (or input 0), by default the name of the node that made it; it is copied into the output and the material table entry gets "image:<name>" in that slot (two different images under the named one are an error). orm is a packed occlusion (R) / roughness (G) / metallic (B) map (tex_channel pack), written to glTF as the metallicRoughness and occlusion textures and to USD through the r/g/b outputs; occlusion and metallic images given separately are packed into "<material>_orm" (missing channels from the material: occlusion 1, its roughness and metallic; a roughness image goes in too). The material is created with defaults when missing (or updated) and assigned to the prims of `group` ("" = every prim when the material is new, none when it exists). render {textures: true} shows base colour maps on the mesh; views "texture" shows the images. With nothing in input 0 the result is the material alone with the maps it uses: a material output (kind material), which other packages assign through input 1 of the material node. It sets no alpha mode: for a blended or cut-out material put a material node {name, alpha_mode: "blend" or "mask"} in input 0 (with no input of its own for a material output); this node adds the maps to it and keeps the mode.
 
 **Inputs**
 
@@ -15796,8 +15870,8 @@ Input 0 is the mesh (with uv), input 1 the images (merge several texture branche
 | `orm` | string | `""` |  |  | `orm_map`, `packed` | packed occlusion / roughness / metallic image (R, G, B) |
 | `group` | group (prim) | `""` |  |  |  | prims that get the material ("" = all prims when the material is new, else none) |
 | `base_color_tint` | color | `[1,1,1]` |  |  | `tint` | base colour factor of a new material (glTF writes white under a base colour map) |
-| `roughness_value` | float | `0.8` | 0..1 |  |  | roughness of a new material (the ORM green channel when no roughness image is given) |
-| `metallic_value` | float | `0` | 0..1 |  |  | metallic of a new material (the ORM blue channel when no metallic image is given) |
+| `roughness_value` | float | `-1` | -1..1 |  |  | roughness. -1 = unset: 0.8 for a new material; with an orm map the glTF roughnessFactor is 1 (a material on input 0 does not set it). A value is the roughnessFactor that multiplies the ORM green channel; for occlusion / metallic images packed here it fills the green channel when no roughness image is given |
+| `metallic_value` | float | `-1` | -1..1 |  |  | metallic. -1 = unset: 0 for a new material; with an orm map the glTF metallicFactor is 1 (a material on input 0 does not set it). A value is the metallicFactor that multiplies the ORM blue channel; for occlusion / metallic images packed here it fills the blue channel when no metallic image is given |
 
 **Writes:** prim "material", detail "materials" with image:<name> texture slots, the referenced images as image volumes
 

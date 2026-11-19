@@ -2,6 +2,7 @@
 //   node test/bugs.ts [--verbose]
 import { allNodeDefs } from '../src/graph/registry.ts';
 import type { GraphSpec, NodeDef, NodeSpec } from '../src/graph/types.ts';
+import type { Geometry } from '../src/core/geometry.ts';
 import { SKIP, checkGeo, createFixtureEngine, fixtureGraphFor } from './fixtures.ts';
 import { diffFields, fingerprint, formatDiff } from './fingerprint.ts';
 
@@ -216,6 +217,364 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   const count = (name: string) => g?.primGroups.get(name)?.reduce((s, x) => s + x, 0) ?? 0;
   check(r.ok && g && g.numPrims > 0 && count('from_a') > 0 && count('from_b') > 0,
     `boolean fixture cuts B out of A (${g?.numPrims} prims, from_a ${count('from_a')}, from_b ${count('from_b')})`, errs(r));
+}
+
+// ------------------------------------------------------------------ 5b. boolean with overlapping pieces in B
+// A cutter made of overlapping pieces used to go to the kernel as one multi-piece solid: where the pieces overlap the
+// region counted twice and stayed solid, with no warning. B's pieces are now unioned first (cavities kept).
+
+{
+  const { signedVolume } = await import('../src/core/topology.ts');
+  const { solidReport } = await import('../src/core/report.ts');
+  const nodes = (op: string, extra: Record<string, NodeSpec> = {}, a = 'a'): Record<string, NodeSpec> => ({
+    a: { type: 'box', params: { size: [4, 4, 4] } },
+    ma: { type: 'material', in: ['a'], params: { name: 'stone' } },
+    b1: { type: 'box', params: { size: [2, 2, 6] } },
+    b2: { type: 'box', params: { size: [3, 3, 2] } },
+    b: { type: 'merge', in: ['b1', 'b2'] },
+    mb: { type: 'material', in: ['b'], params: { name: 'cut' } },
+    ...extra,
+    c: { type: 'boolean', in: [a, 'mb'], params: { operation: op } },
+  });
+  // inside A, B1 takes 2×2×4 = 16, B2 3×3×2 = 18, their overlap 2×2×2 = 8: the union of B's pieces in A is 26
+  for (const [op, want, graph] of [
+    ['subtract', 64 - 26, nodes('subtract', {}, 'ma')],
+    ['intersect', 26, nodes('intersect', {}, 'ma')],
+    ['union', 72, nodes('union', {}, 'ma')],
+    // a hollow cutter: the inner shell (a cavity in B1, outside B2) stays with its piece, so a core is left standing
+    ['subtract hollow', 64 - 26 + 0.125, nodes('subtract', {
+      h0: { type: 'box', params: { size: [0.5, 0.5, 0.5], center: [0, 0, 1.5] } }, h: { type: 'reverse', in: ['h0'] },
+      b: { type: 'merge', in: ['b1', 'b2', 'h'] },
+    }, 'ma')],
+  ] as [string, number, GraphSpec['nodes']][]) {
+    const r = await engine.cook({ nodes: graph, output: 'c' });
+    const g = r.geo;
+    const vol = g ? signedVolume(g) : NaN;
+    check(r.ok && Math.abs(vol - want) < 1e-4 && solidReport(g!).closedAfterWeld,
+      `boolean ${op} with overlapping pieces in B has volume ${want} and is closed (${vol.toFixed(4)})`, errs(r));
+    if (op !== 'subtract' || !g) continue;
+    const mat = g.prims.get('material'), fromB = g.primGroups.get('from_b')!, fromA = g.primGroups.get('from_a')!;
+    let bad = 0, cut = 0;
+    for (let pr = 0; pr < g.numPrims; pr++) {
+      const m = mat?.get(pr);
+      if (fromB[pr]) cut++;
+      if (fromB[pr] ? m !== 'cut' : !fromA[pr] || m !== 'stone') bad++;
+    }
+    check(cut > 0 && bad === 0, `boolean subtract: the cut faces carry B's material, the rest A's (${cut} cut faces, ${bad} wrong)`);
+  }
+  // A's own overlapping pieces are unioned too, with or without B
+  const two = { a1: { type: 'box', params: { size: [4, 4, 4] } }, a2: { type: 'box', params: { size: [1, 1, 1], center: [1.5, 1.5, 1.5] } }, aa: { type: 'merge', in: ['a1', 'a2'] } };
+  const ra = await engine.cook({ nodes: nodes('subtract', two, 'aa'), output: 'c' });
+  check(ra.ok && Math.abs(signedVolume(ra.geo!) - 38) < 1e-4, `boolean subtract with overlapping pieces in A and B (${ra.geo && signedVolume(ra.geo).toFixed(4)})`, errs(ra));
+  // without B a hollow A keeps its cavity
+  const rh = await engine.cook({ nodes: {
+    o: { type: 'box', params: { size: [4, 4, 4] } }, i0: { type: 'box', params: { size: [2, 2, 2] } }, i: { type: 'reverse', in: ['i0'] },
+    a: { type: 'merge', in: ['o', 'i'] }, c: { type: 'boolean', in: ['a'] },
+  }, output: 'c' });
+  check(rh.ok && Math.abs(signedVolume(rh.geo!) - 56) < 1e-4, `boolean without B keeps a cavity in A (${rh.geo && signedVolume(rh.geo).toFixed(4)})`, errs(rh));
+  // touching pieces fuse into one
+  const rt = await engine.cook({ nodes: {
+    t1: { type: 'box' }, t2: { type: 'box', params: { center: [1, 0, 0] } }, a: { type: 'merge', in: ['t1', 't2'] }, c: { type: 'boolean', in: ['a'] },
+  }, output: 'c' });
+  check(rt.ok && solidReport(rt.geo!).pieces === 1 && Math.abs(signedVolume(rt.geo!) - 2) < 1e-6, `boolean without B fuses touching pieces (${rt.geo && solidReport(rt.geo).pieces} pieces)`, errs(rt));
+}
+
+// ------------------------------------------------------------------ 5c. triangulation keeps every corner of a polygon
+// earcut leaves out corners that repeat or lie on a straight run, so a polygon's edges through them were missing from
+// its triangles: cracks in exports, and a boolean's own polygons (three slots unioned into a star leave three corners
+// 1e-11 m apart) rejected as "not a closed solid" by the next boolean.
+
+{
+  const { Geometry } = await import('../src/core/geometry.ts');
+  const { triangulate } = await import('../src/core/topology.ts');
+  const { solidReport } = await import('../src/core/report.ts');
+  // an L with a corner on its long edge, a repeated corner and two corners on a straight run of the short arm
+  const ring: [number, number][] = [[0, 0], [1, 0], [2, 0], [2, 0], [2, 1], [1, 1], [1, 2], [1, 3], [0, 3]];
+  const g = new Geometry({ positions: ring.flatMap(([x, z]) => [x, 0, z]), prims: [ring.map((_, i) => i)] });
+  const { tris } = triangulate(g);
+  const vp = g.vertexPoint, uses = new Map<string, number>();
+  for (let t = 0; t < tris.length; t += 3) for (let k = 0; k < 3; k++) { const key = `${vp[tris[t + k]]}>${vp[tris[t + (k + 1) % 3]]}`; uses.set(key, (uses.get(key) ?? 0) + 1); }
+  const missing = ring.map((_, i) => `${i}>${(i + 1) % ring.length}`).filter((e) => uses.get(e) !== 1 && uses.get(e.split('>').reverse().join('>')) !== 1);
+  check(missing.length === 0, `triangulate keeps every edge of a polygon with repeated and collinear corners (${missing.length ? 'missing ' + missing.join(', ') : `${tris.length / 3} triangles`})`);
+  const star = await engine.cook({ nodes: {
+    profile: { type: 'curve', params: { points: [[0, 0.2125, 0], [0.0275, 0.2125, 0], [0.0275, 0.2335, 0], [0.0225, 0.2335, 0], [0.0225, 0.24, 0], [0.0185, 0.24, 0], [0.0185, 0.2905, 0], [0.0092, 0.2905, 0], [0.0092, 0.262, 0], [0, 0.262, 0]] } },
+    turned: { type: 'revolve', in: ['profile'], params: { segments: 18 } },
+    laid: { type: 'transform', in: ['turned'], params: { rotate: [-90, 0, 0], translate: [0, 0.046, 0] } },
+    welded: { type: 'fuse', in: ['laid'], params: { distance: 0.0001 } },
+    slot: { type: 'box', params: { size: [0.005, 0.05, 0.0245], center: [0, 0.046, -0.2802] } },
+    slots: { type: 'copy_xform', in: ['slot'], params: { count: 3, rotate: [0, 0, 60], pivot: [0, 0.046, 0] } },
+    star: { type: 'boolean', in: ['slots'], params: { operation: 'union' } },
+    cut: { type: 'boolean', in: ['welded', 'star'], params: { operation: 'subtract' } },
+  }, output: 'cut' });
+  check(star.ok && solidReport(star.geo!).closed, `a star of three slots, unioned, cuts a turned part (${star.geo ? `${star.geo.numPrims} prims` : 'no result'})`, errs(star));
+}
+
+// ------------------------------------------------------------------ 5d. revolve caps wind with its sides
+// The caps of a partial revolve were wound against the sides they share edges with (8 inconsistent edges for a square
+// profile), so the closed solid was inside-out at its caps and orienting it outward could not fix it; flip hid it.
+
+{
+  const { solidReport } = await import('../src/core/report.ts');
+  const { signedVolume } = await import('../src/core/topology.ts');
+  const ccw = [[3, 0, 0], [3.6, 0, 0], [3.6, 4, 0], [3, 4, 0]];
+  const profiles: [string, number[][], number[]][] = [
+    ['square', ccw, [0, 1, 0]],
+    ['square drawn clockwise', ccw.slice().reverse(), [0, 1, 0]],
+    ['profile touching the axis', [[0, 0, 0], [1, 0, 0], [0.6, 1, 0], [0, 1.4, 0]], [0, 1, 0]],
+    ['square about X', [[0, 3, 0], [0, 3.6, 0], [1, 3.6, 0], [1, 3, 0]], [1, 0, 0]],
+  ];
+  const angles = [[-30, 30], [0, 300], [-360, -60], [0, 90], [90, 0], [0, -120], [45, 46]];
+  const bad: string[] = [];
+  let cases = 0;
+  for (const [name, points, axis] of profiles) for (const angle of angles) {
+    const vols: number[] = [];
+    for (const flip of [false, true]) {
+      const r = await engine.cook({ nodes: {
+        p: { type: 'curve', params: { points, closed: true } },
+        a: { type: 'revolve', in: ['p'], params: { segments: 10, angle, axis, caps: true, flip } },
+      }, output: 'a' });
+      cases++;
+      const rep = r.geo && solidReport(r.geo);
+      const vol = r.geo ? signedVolume(r.geo) : NaN;
+      vols.push(vol);
+      if (!r.ok || !rep!.closed || rep!.flippedEdges || rep!.inwardPieces || !(vol > 0))
+        bad.push(`${name} angle [${angle}] flip ${flip}: ${r.ok ? `closed ${rep!.closed}, ${rep!.flippedEdges} inconsistent edges, ${rep!.inwardPieces} inward, volume ${vol.toFixed(3)}` : errs(r)}`);
+    }
+    if (Math.abs(vols[0] - vols[1]) > 1e-9) bad.push(`${name} angle [${angle}]: flip changes the volume (${vols[0]} vs ${vols[1]})`);
+  }
+  check(bad.length === 0, `capped partial revolves are consistent, closed and outward for every angle, profile direction and flip (${cases} cooks)`, bad.slice(0, 6).join('\n'));
+}
+
+// ------------------------------------------------------------------ 5e. polywire width is not scaled by pscale
+// polywire multiplied width by pscale, so particle trails (pscale 0.05, width 0.2) came out 20 times too thin.
+
+{
+  const tubeRadius = async (code: string, params: Record<string, any> = {}) => {
+    const r = await engine.cook({ nodes: {
+      l: { type: 'line', params: { origin: [0, 0, 0], direction: [1, 0, 0], length: 2, points: 3 } },
+      w: { type: 'wrangle', in: ['l'], params: { code } },
+      t: { type: 'polywire', in: ['w'], params: { divisions: 16, ...params } },
+    }, output: 't' });
+    if (!r.ok || !r.geo) return NaN;
+    const b = r.geo.bbox();
+    return (b.max[1] - b.min[1]) / 2;
+  };
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  const w = await tubeRadius('@pscale = 0.05; @width = 0.2;');
+  check(near(w, 0.1), `polywire takes the radius from width alone when pscale is small (radius ${w}, want 0.1)`);
+  const wOff = await tubeRadius('@pscale = 0.05; @width = 0.2;', { use_width: false, radius: 0.5 });
+  check(near(wOff, 0.025), `polywire with use_width off keeps radius × pscale (radius ${wOff}, want 0.025)`);
+  const ps = await tubeRadius('@pscale = 2;', { radius: 0.1 });
+  check(near(ps, 0.2), `polywire without width keeps radius × pscale (radius ${ps}, want 0.2)`);
+  const sw = await engine.cook({ nodes: {
+    l: { type: 'line', params: { origin: [0, 0, 0], direction: [1, 0, 0], length: 2, points: 3 } },
+    w: { type: 'wrangle', in: ['l'], params: { code: '@pscale = 0.5; @width = 4;' } },
+    s: { type: 'sweep', in: ['w'], params: { radius: 0.2, divisions: 16, caps: false } },
+  }, output: 's' });
+  const sb = sw.geo?.bbox();
+  check(sb && near((sb.max[1] - sb.min[1]) / 2, 0.1), `sweep still scales its profile by pscale and ignores width (${sb ? (sb.max[1] - sb.min[1]) / 2 : errs(sw)})`);
+}
+
+// ------------------------------------------------------------------ 5f. what the docs promise about rotate and holes
+// transform rotate: degrees, right-handed, world X then Y then Z; extrude: a shape inside a merged plate is a hole.
+
+{
+  const turned = async (rotate: number[], at: number[]) => {
+    const r = await engine.cook({ nodes: {
+      a: { type: 'add', params: { points: [at] } },
+      t: { type: 'transform', in: ['a'], params: { rotate } },
+    }, output: 't' });
+    return r.geo ? [0, 1, 2].map((k) => Math.round(r.geo!.P[k] * 1000) / 1000) : errs(r);
+  };
+  const same = (a: any, b: number[]) => Array.isArray(a) && a.every((x: number, k: number) => Math.abs(x - b[k]) < 1e-3);
+  const z40 = await turned([0, 0, 40], [0, 1, 0]), y90 = await turned([0, 90, 0], [1, 0, 0]), xy = await turned([90, 90, 0], [0, 0, 1]);
+  check(same(z40, [-0.643, 0.766, 0]), `transform rotate [0, 0, 40] turns +Y to (-0.64, 0.77, 0), right-handed (${z40})`);
+  check(same(y90, [0, 0, -1]), `transform rotate [0, 90, 0] turns +X to -Z (${y90})`);
+  check(same(xy, [0, -1, 0]), `transform rotate [90, 90, 0] turns X first, then Y, about world axes: +Z to -Y (${xy})`);
+
+  const { pieceReport } = await import('../src/core/analysis.ts');
+  const wall = await engine.cook({ nodes: {
+    plate: { type: 'shape2d', params: { shape: 'rect', size: [3, 2] } },
+    w1: { type: 'circle', params: { radius: 0.3, center: [-0.7, 0, 0] } },
+    w2: { type: 'circle', params: { radius: 0.3, center: [0.7, 0, 0] } },
+    m: { type: 'merge', in: ['plate', 'w1', 'w2'] },
+    e: { type: 'extrude', in: ['m'], params: { height: 0.25 } },
+  }, output: 'e' });
+  const pr = wall.geo ? pieceReport(wall.geo) : null;
+  const p0 = pr?.pieces[0];
+  check(pr && pr.pieces.length === 1 && p0!.closed && p0!.genus === 2 && pr.flippedEdges === 0 && p0!.volume > 0,
+    `extrude of a merged plate and two circles is one closed solid with two holes (${pr ? `${pr.pieces.length} piece(s), genus ${p0?.genus}, closed ${p0?.closed}` : errs(wall)})`);
+}
+
+// ------------------------------------------------------------------ 5g. attrib_copy copies P when named, and says what it cannot pair
+// names "P" moves the points (Houdini's Attribute Copy does); the default "*" leaves the shape alone; differing counts
+// in index mode and a name the source lacks in that class are warned of, never skipped silently.
+
+{
+  const nodes: Record<string, NodeSpec> = {
+    g: { type: 'grid', params: { size: [2, 2], divisions: [4, 4] } },
+    up: { type: 'transform', in: ['g'], params: { translate: [0, 1, 0] } },
+    tint: { type: 'color', in: ['up'], params: { mode: 'random' } },
+    big: { type: 'grid', params: { size: [2, 2], divisions: [6, 6] } },
+    uv: { type: 'uv_project', in: ['g'] },
+  };
+  const cook = async (out: NodeSpec) => { const r = await engine.cook({ nodes: { ...nodes, out }, output: 'out' }); return { r, ys: r.geo ? [...r.geo.P].filter((_, i) => i % 3 === 1) : [], w: r.warnings.map((x) => x.message).join('; ') }; };
+  const named = await cook({ type: 'attrib_copy', in: ['g', 'tint'], params: { names: 'P Cd' } });
+  check(named.r.ok && named.ys.every((y) => Math.abs(y - 1) < 1e-12) && named.r.geo!.points.has('Cd') && !named.w, `attrib_copy names "P Cd" moves the points up 1 and copies Cd (${named.w || 'no warnings'})`, errs(named.r));
+  const star = await cook({ type: 'attrib_copy', in: ['g', 'tint'] });
+  check(star.r.ok && star.ys.every((y) => Math.abs(y) < 1e-12) && star.r.geo!.points.has('Cd'), 'attrib_copy "*" copies Cd and leaves P alone', errs(star.r));
+  const short = await cook({ type: 'attrib_copy', in: ['big', 'tint'], params: { names: 'P' } });
+  check(/dest has 49 points and source 25: copied by index, so only the first 25 pair up/.test(short.w) && short.ys.filter((y) => Math.abs(y - 1) < 1e-12).length === 25, `attrib_copy P onto more points copies the first 25 and warns: ${short.w}`);
+  const wrong = await cook({ type: 'attrib_copy', in: ['g', 'uv'], params: { names: 'uv' } });
+  check(/no point attribute "uv" \(it has a vertex "uv": set class to vertex\)/.test(wrong.w), `attrib_copy names a vertex attribute with class point: the warning says which class has it (${wrong.w})`);
+}
+
+// ------------------------------------------------------------------ 5h. extrude carries its input's attributes
+// extrude used to drop every attribute. Like polyextrude: caps and side walls take their contour prim's attributes,
+// new points their source point's, corners their source corner's; a vertex uv gets its own layout up the walls.
+
+{
+  const nodes: Record<string, NodeSpec> = {
+    plate: { type: 'shape2d', params: { shape: 'rect', size: [4, 2] } },
+    hole: { type: 'circle', params: { radius: 0.5, divisions: 12 } },
+    both: { type: 'merge', in: ['plate', 'hole'] },
+    tag: { type: 'wrangle', in: ['both'], params: { run_over: 'prims', code: "s@name = 'part' + @primnum; i@lot = 7 + @primnum;" } },
+    paint: { type: 'wrangle', in: ['tag'], params: { run_over: 'points', code: 'f@height = @ptnum; @Cd = [1, 0.5, 0];' } },
+    uv: { type: 'uv_project', in: ['paint'] },
+    group: { type: 'group', in: ['uv'], params: { name: 'chosen', class: 'prim', expr: '@primnum == 1' } },
+  };
+  for (const params of [{ height: 0.5 }, { height: -0.5, divisions: 3, twist: 20, scale_top: [0.8, 0.8] }]) {
+    const r = await engine.cook({ nodes: { ...nodes, e: { type: 'extrude', in: ['group'], params } }, output: 'e' });
+    const g = r.geo, label = `extrude ${JSON.stringify(params)}`;
+    check(r.ok && g, `${label} cooks`, errs(r));
+    if (!g) continue;
+    const name = (pr: number) => g.prims.get('name')?.get(pr), lot = (pr: number) => g.prims.get('lot')?.get(pr);
+    const sideHole = Array.from({ length: g.numPrims }, (_, pr) => pr).filter((pr) => g.primGroups.get('side')![pr] && name(pr) === 'part1');
+    const caps = Array.from({ length: g.numPrims }, (_, pr) => pr).filter((pr) => !g.primGroups.get('side')![pr]);
+    check(sideHole.length === 12 * (params.divisions ?? 1) && sideHole.every((pr) => lot(pr) === 8 && g.primGroups.get('chosen')![pr]),
+      `${label}: the hole's side walls keep the hole prim's name, lot and group`);
+    check(caps.length > 0 && caps.every((pr) => name(pr) === 'part0' && lot(pr) === 7 && !g.primGroups.get('chosen')![pr]), `${label}: the caps (with the hole cut) keep the plate's attributes`);
+    const height = g.points.get('height'), Cd = g.points.get('Cd');
+    check(!!height && !!Cd && Array.from({ length: g.numPoints }, (_, i) => Cd.get(i)).every((c) => JSON.stringify(c) === '[1,0.5,0]'), `${label}: every point keeps Cd`);
+    check(!g.points.has('N') && !g.vertices.has('N'), `${label}: no stale N`);
+    const uv = g.vertices.get('uv')!, side = g.primGroups.get('side')!;
+    let wallArea = 0;
+    for (let pr = 0; pr < g.numPrims; pr++) if (side[pr]) {
+      const c = Array.from({ length: 4 }, (_, k) => uv.get(g.primStart[pr] + k) as number[]);
+      wallArea += Math.abs((c[1][0] - c[0][0]) * (c[3][1] - c[0][1]) - (c[3][0] - c[0][0]) * (c[1][1] - c[0][1]));
+    }
+    check(Math.abs(wallArea - 2) < 1e-9, `${label}: side walls get a 0..1 uv layout per contour (uv area ${wallArea}, plate and hole 1 each)`);
+  }
+}
+
+// ------------------------------------------------------------------ 5i. removeprim andpoints removes only the prim's own points
+// removeprim(0, pr, 1) used to delete every point no prim used, the ones it never touched included, and a removepoint
+// in the same run then took its numbers after that renumbering. Houdini removes only the removed prim's points that no
+// other prim uses.
+
+{
+  const pts = 'for (let i = 0; i < 5; i++) addpoint(0, [i, 0, 0]);\naddprim(0, [0, 1, 2], false);\naddprim(0, [2, 3], false);';
+  const run = async (code: string) => {
+    const r = await engine.cook({ nodes: {
+      e: { type: 'null' },
+      a: { type: 'wrangle', in: ['e'], params: { run_over: 'detail', code: pts } },
+      b: { type: 'wrangle', in: ['a'], params: { run_over: 'detail', code } },
+    }, output: 'b' });
+    const g = r.geo;
+    return { r, xs: g ? Array.from({ length: g.numPoints }, (_, i) => g.P[i * 3]).join(',') : '', prims: g?.numPrims ?? -1 };
+  };
+  // 5 points: polyline 0-1-2 and segment 2-3; point 4 belongs to no prim
+  const cases: [string, string, string, number][] = [
+    ['removeprim(0, 0, 1)', 'removeprim(0, 0, 1);', '2,3,4', 1],
+    ['removeprim(0, 0, 0)', 'removeprim(0, 0, 0);', '0,1,2,3,4', 1],
+    ['removeprim(0, 1, 1)', 'removeprim(0, 1, 1);', '0,1,2,4', 1],
+    ['removeprim both with andpoints', 'removeprim(0, 0, 1); removeprim(0, 1, 1);', '4', 0],
+    ['removeprim with and without andpoints', 'removeprim(0, 0, 0); removeprim(0, 1, 1);', '0,1,4', 0],
+    ['removeprim andpoints and removepoint', 'removeprim(0, 1, 1); removepoint(0, 1);', '0,2,4', 1],
+    ['removepoint', 'removepoint(0, 4);', '0,1,2,3', 2],
+  ];
+  for (const [label, code, want, prims] of cases) {
+    const { r, xs, prims: np } = await run(code);
+    check(r.ok && xs === want && np === prims, `wrangle ${label}: points at x = ${want}, ${prims} prim(s) (got ${xs || 'none'}, ${np})`, errs(r));
+  }
+}
+
+// ------------------------------------------------------------------ 5j. voronoi_fracture pieces never overlap
+// voronoi_fracture cut each cell by its 24 nearest sites only, so with more pieces some cells came out too big and
+// overlapped their neighbours by centimetres; rbd_settle then (rightly) found pieces inside each other and pushed them
+// apart. Now every site that can reach a cell cuts it. Touching pieces are contact, not overlap; real overlap warns.
+
+{
+  const block = (count: number): Record<string, NodeSpec> => ({
+    b: { type: 'box', params: { size: [1, 1, 1], center: [0, 0.5, 0] } },
+    f: { type: 'voronoi_fracture', in: ['b'], params: { count, gap: 0, seed: 2 } },
+    s: { type: 'rbd_settle', in: ['f'] },
+  });
+  // volume of the pieces: their closed shells, by the divergence theorem over the triangulated polygons
+  const volumeOf = (g: Geometry) => {
+    let v = 0;
+    for (let p = 0; p < g.numPrims; p++) {
+      const q = g.primPoints(p);
+      for (let k = 1; k + 1 < q.length; k++) {
+        const a = q[0] * 3, b = q[k] * 3, c = q[k + 1] * 3, P = g.P;
+        v += (P[a] * (P[b + 1] * P[c + 2] - P[b + 2] * P[c + 1]) - P[a + 1] * (P[b] * P[c + 2] - P[b + 2] * P[c]) + P[a + 2] * (P[b] * P[c + 1] - P[b + 1] * P[c])) / 6;
+      }
+    }
+    return v;
+  };
+  const centres = (g: Geometry) => {
+    const nm = g.prims.get('name')!.data as string[], m = new Map<string, number[]>();
+    for (let p = 0; p < g.numPrims; p++) for (const q of g.primPoints(p)) {
+      const a = m.get(nm[p]) ?? [0, 0, 0, 0];
+      a[0] += g.P[q * 3]; a[1] += g.P[q * 3 + 1]; a[2] += g.P[q * 3 + 2]; a[3]++;
+      m.set(nm[p], a);
+    }
+    return m;
+  };
+  const fr = await engine.cook({ nodes: block(60), output: 'f' });
+  const vol = fr.geo ? volumeOf(fr.geo) : NaN;
+  check(fr.ok && fr.geo!.prims.get('name') && Math.abs(vol - 1) < 1e-6, `voronoi_fracture of a 1 m box into 60 pieces: the pieces fill it once (volume ${vol.toFixed(6)})`, errs(fr));
+  const st = await engine.cook({ nodes: block(60), output: 's' });
+  const before = centres(fr.geo!), after = st.geo ? centres(st.geo) : new Map();
+  const moved = [...before].map(([k, a]) => { const b = after.get(k)!; return Math.hypot(a[0] / a[3] - b[0] / b[3], a[1] / a[3] - b[1] / b[3], a[2] / a[3] - b[2] / b[3]); }).sort((x, y) => x - y);
+  check(st.ok && !st.warnings.some((w) => /started inside/.test(w.message)) && moved[moved.length >> 1] < 0.01,
+    `rbd_settle of the fractured box: no piece starts inside another, the pieces stay together (median move ${(moved[moved.length >> 1] ?? NaN).toFixed(4)} m)`, st.warnings.map((w) => w.message).join('; '));
+  // two boxes sharing a face rest as they are; two boxes overlapping by 30 cm are pushed apart, with a warning
+  const pair = (x: number): Record<string, NodeSpec> => ({
+    l: { type: 'box', params: { size: [1, 1, 1], center: [-x, 0.5, 0] } },
+    r: { type: 'box', params: { size: [1, 1, 1], center: [x, 0.5, 0] } },
+    m: { type: 'merge', in: ['l', 'r'] },
+    s: { type: 'rbd_settle', in: ['m'], params: { jitter: 0 } },
+  });
+  const touch = await engine.cook({ nodes: pair(0.5), output: 's' });
+  const tb = touch.geo?.bbox();
+  check(touch.ok && !touch.warnings.length && !!tb && Math.abs(tb.min[0] + 1) < 1e-3 && Math.abs(tb.max[0] - 1) < 1e-3,
+    `rbd_settle: boxes sharing a face are in contact, not overlapping (no warning, x ${tb?.min[0].toFixed(4)} .. ${tb?.max[0].toFixed(4)})`, touch.warnings.map((w) => w.message).join('; '));
+  const deep = await engine.cook({ nodes: pair(0.35), output: 's' });
+  check(deep.ok && deep.warnings.some((w) => /2 pieces started inside/.test(w.message)), 'rbd_settle: boxes overlapping by 30 cm still warn', deep.warnings.map((w) => w.message).join('; '));
+}
+
+// ------------------------------------------------------------------ 5k. scatter never scatters at the origin
+// A heightfield (or an SDF) has no prims and no points: scatter fell back to volume mode over an empty box and put
+// every point at the origin, without a word. It now names what works; an empty input gives no points and says so.
+
+{
+  const terrain: Record<string, NodeSpec> = {
+    h: { type: 'heightfield', params: { size: [20, 20] } },
+    n: { type: 'heightfield_noise', in: ['h'], params: { height: 4 } },
+  };
+  for (const mode of ['auto', 'surface', 'volume']) {
+    const r = await engine.cook({ nodes: { ...terrain, s: { type: 'scatter', in: ['n'], params: { count: 50, mode } } }, output: 's' });
+    check(!r.ok && /heightfield, which has no polygons/.test(r.errors[0]?.message ?? '') && /heightfield_scatter/.test(r.errors[0]?.hint ?? '') && /heightfield_to_mesh/.test(r.errors[0]?.hint ?? ''),
+      `scatter mode ${mode} on a heightfield: an error naming heightfield_scatter and heightfield_to_mesh (${r.errors[0]?.message})`);
+  }
+  const meshed = await engine.cook({ nodes: { ...terrain, m: { type: 'heightfield_to_mesh', in: ['n'] }, s: { type: 'scatter', in: ['m'], params: { count: 50 } } }, output: 's' });
+  const mb = meshed.geo?.bbox();
+  check(meshed.ok && meshed.geo!.numPoints === 50 && !!mb && mb.max[0] - mb.min[0] > 10 && mb.max[2] - mb.min[2] > 10, `scatter after heightfield_to_mesh spreads over the terrain (${mb ? (mb.max[0] - mb.min[0]).toFixed(1) : '?'} m wide)`, errs(meshed));
+  const sdf = await engine.cook({ nodes: { b: { type: 'sphere' }, v: { type: 'sdf_from_mesh', in: ['b'] }, s: { type: 'scatter', in: ['v'], params: { count: 20 } } }, output: 's' });
+  check(!sdf.ok && /SDF volume/.test(sdf.errors[0]?.message ?? '') && /sdf_to_mesh/.test(sdf.errors[0]?.hint ?? ''), `scatter on an SDF: an error naming sdf_to_mesh (${sdf.errors[0]?.message})`);
+  const empty = await engine.cook({ nodes: { e: { type: 'null' }, s: { type: 'scatter', in: ['e'], params: { count: 20 } } }, output: 's' });
+  check(empty.ok && empty.geo!.numPoints === 0 && empty.warnings.some((w) => /no points/.test(w.message)), 'scatter on an empty input: no points, with a warning', errs(empty));
 }
 
 // ------------------------------------------------------------------ 6. watertight ray-triangle tests

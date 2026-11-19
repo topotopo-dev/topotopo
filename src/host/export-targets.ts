@@ -13,14 +13,16 @@ import type { Geometry } from '../core/geometry.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
 import type { ExportFile } from '../io/files.ts';
-import { exportSource, withExportOptions } from '../io/source.ts';
+import { exportSource, sameSource, withExportOptions } from '../io/source.ts';
 import { prefixGone, resolvedExportOptions } from '../io/targets.ts';
 import type { ExportSource } from '../io/source.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
+import { packageFilesHash } from '../packages/registry.ts';
 import { topoFiles } from '../session.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
+import { engineSha256 } from './engine-code.ts';
 
 /** The package a path lies in: the nearest folder holding a .topo file, the path's own or one above it; null for none. */
 export function packageFolderOf(p: string): string | null {
@@ -45,21 +47,37 @@ export function exportsFolderFor(graphFile: string): string {
 }
 
 /**
+ * files_sha256 of an export of the graph in `graphFile` (io/source.ts): the files of its package a cook may read besides
+ * it (src/packages/registry.ts packageFilesHash); undefined for a graph in no package, or none read from a file.
+ */
+export function filesShaFor(graphFile: string | undefined): string | undefined {
+  if (!graphFile) return undefined;
+  const dir = packageFolderOf(path.dirname(path.resolve(graphFile)));
+  return dir ? packageFilesHash(dir, graphFile) : undefined;
+}
+
+/** PNG compression for the images exports encode (one function, so encoded images are found again: io/textures.ts) */
+const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
+
+/**
  * The files an export writes, nothing written yet; `a` holds the export tool's snake_case options. Every option the
  * format reads is passed explicitly, the given ones over the format's defaults (io/targets.ts exportDefaults), and the
- * source block records exactly those, so the record replays to the same bytes.
+ * source block records exactly those, so the record replays to the same bytes. glb / gltf with maps "external" write
+ * their images into `mapsDir` (default: maps/ beside the export; export targets share exports/maps/).
  */
-export async function serializeExport(geo: Geometry, format: ExportFormat, p: string, given: Record<string, any>, host: Host, source?: ExportSource) {
+export async function serializeExport(geo: Geometry, format: ExportFormat, p: string, given: Record<string, any>, host: Host, source?: ExportSource, mapsDir?: string) {
   const a: Record<string, any> = resolvedExportOptions(format, given);
   if (source) source = withExportOptions(source, a);
   const warnings: string[] = [];
   const outDir = format === 'unreal_landscape' && !/\.json$/i.test(p) ? p : path.dirname(p);
+  const maps = mapsDir ?? path.join(path.dirname(p), 'maps');
   const res = await exportFilesAsync(geo, format, p, {
     upAxis: a.up_axis, scale: a.scale, splitByName: a.split_by_name ?? true, custom: a.custom_attribs,
     materials: a.materials, vertexColors: a.vertex_colors, compress: a.compress, quantize: a.quantize, tangents: a.tangents, attributes: a.attributes, pcg: a.pcg || a.pcg_struct, pcgStruct: a.pcg_struct,
     precision: a.precision, instancing: a.instancing, instances: a.instances, meshes: a.meshes,
     layer: a.layer, layers: a.layers, heightMin: a.height_min, heightMax: a.height_max, heightfield: a.heightfield, tile_size: a.tile_size,
-    deflate: (d) => zlib.deflateSync(d, { level: 6 }),
+    maps: a.maps, mapsDir: maps, mapsURI: path.relative(path.dirname(p), maps).split(path.sep).join('/'),
+    deflate,
     readFile: (t) => host.readFile(t),
     texturePath: (t) => {
       const abs = host.resolvePath(t);
@@ -83,12 +101,16 @@ export function insideRoot(root: string, p: string): string {
   return abs;
 }
 
-/** Write files, each through a .part renamed into place; with `root`, each must stay inside it. Returns the count. */
+/**
+ * Write files, each through a .part renamed into place; with `root`, each must stay inside it. A shared map (named by
+ * its content) already there with its size is left as it is. Returns the count.
+ */
 export function writeExportFiles(files: ExportFile[], root?: string): number {
   let written = 0;
   try {
     for (const f of files) {
       const abs = root ? insideRoot(root, f.path) : path.resolve(f.path);
+      if (f.shared && fs.statSync(abs, { throwIfNoEntry: false })?.size === f.bytes.byteLength) { written++; continue; }
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs + '.part', f.bytes);
       fs.renameSync(abs + '.part', abs);
@@ -120,7 +142,7 @@ export interface PreparedTarget {
  * When a target's output was cooked: the engine's defaults (frame 1, 24 fps) unless the cook used others, and the
  * package versions the graph uses (src/graph/packages.ts packagesUsed).
  */
-export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string> }
+export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string>; files?: string }
 
 /**
  * Serialize one published output to its target inside `exportsDir` (nothing is written yet); a target still written
@@ -133,9 +155,10 @@ export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOu
   const dest = insideRoot(root, path.join(root, ...p.target.path.split('/')));
   const source = exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
-    format: p.target.format, options: p.target.options, packages: cook.packages, version: TOPOTOPO_VERSION,
+    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION, engine: engineSha256(),
   });
-  const r = await serializeExport(geo, p.target.format, dest, p.target.options, host, source);
+  // every target of the package shares exports/maps/ (maps "external")
+  const r = await serializeExport(geo, p.target.format, dest, p.target.options, host, source, path.join(root, 'maps'));
   for (const f of r.files) insideRoot(root, f.path);
   return {
     graph, output: p.output, label: p.label, node: p.node, target: p.target, root, files: r.files, summary: r.summary, warnings: r.warnings,
@@ -144,13 +167,39 @@ export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOu
 }
 
 /**
+ * Whether a published output's last export into `exportsDir` would be made the same now (io/source.ts sameSource):
+ * its receipt there, every file it wrote still in place, and the source block its record holds the same as the one an
+ * export would record now (`cook`: its frame, fps, packages and files). Nothing is cooked.
+ */
+export function unchangedTarget(graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, cook: TargetCook): boolean {
+  if (p.target.refused || !cook.files) return false;
+  const last = new ArtifactStore(exportsDir).records().filter((a) => a.label === p.target.path && a.graph === graph && (a.output ?? '') === (p.output ?? '')).pop();
+  if (!last || !last.files.every((f) => fs.statSync(f, { throwIfNoEntry: false })?.isFile())) return false;
+  const now = withExportOptions(exportSource({
+    graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
+    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION, engine: engineSha256(),
+  }), resolvedExportOptions(p.target.format, p.target.options));
+  // the record: the file among them that holds a source block (<file>.source.json or the format's sidecar)
+  for (const f of last.files) {
+    if (!/\.json$/i.test(f)) continue;
+    try {
+      const prev = JSON.parse(fs.readFileSync(f, 'utf8'))?.source;
+      if (prev && typeof prev.graph_sha256 === 'string') return sameSource(prev, now);
+    } catch { /* not a record */ }
+  }
+  return false;
+}
+
+/**
  * Write prepared targets and record the receipts of those inside `exportsDir` (the viewer lists that folder); two
  * targets writing one file are refused before any write.
  */
 export function writeTargets(prepared: PreparedTarget[], exportsDir: string): number {
-  const owner = new Map<string, PreparedTarget>();
+  const owner = new Map<string, PreparedTarget>(), shared = new Set<string>();
   for (const p of prepared) for (const f of p.files) {
     const key = path.resolve(f.path).toLowerCase(), other = owner.get(key);
+    // a shared map is named by its content: the targets that use it write it once
+    if (f.shared) { if (!other || other.files.some((x) => x.shared && path.resolve(x.path).toLowerCase() === key)) { owner.set(key, other ?? p); continue; } }
     // status: the viewer answers 409 (the request conflicts with itself); the CLI and MCP print the message
     if (other && other !== p) throw Object.assign(new Error(`"${other.label}" (${other.graph}) and "${p.label}" (${p.graph}) both write ${path.relative(p.root, f.path)}: give one a different export path`), { status: 409 });
     owner.set(key, p);
@@ -158,7 +207,8 @@ export function writeTargets(prepared: PreparedTarget[], exportsDir: string): nu
   const store = new ArtifactStore(exportsDir);
   let written = 0;
   for (const p of prepared) {
-    written += writeExportFiles(p.files, p.root);
+    const files = p.files.filter((f) => { if (!f.shared) return true; const key = path.resolve(f.path).toLowerCase(); if (shared.has(key)) return false; shared.add(key); return true; });
+    written += writeExportFiles(files, p.root);
     if (path.resolve(p.root) !== path.resolve(exportsDir)) continue;
     store.record(p.files.map((f) => f.path), { label: p.target.path, graph: p.graph, node: p.node, format: p.target.format, output: p.output ?? '' });
   }

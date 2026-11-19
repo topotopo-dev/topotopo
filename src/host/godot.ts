@@ -28,10 +28,14 @@ import { setInstall } from '../config.ts';
 import { forgetScans } from '../scan.ts';
 import { MANIFEST_EXT } from '../session.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
+import { engineSha256 } from './engine-code.ts';
 import { freshness, readRecord } from './cook.ts';
 import type { CookJob, CookRecord, EngineOptions, Flavour, Freshness } from './cook.ts';
 import { GODOT_COMMANDS } from './godot-commands.ts';
 import type { Io } from '../packages/commands.ts';
+
+/** PNG compression for the images outputs encode: one function, so an image used by many outputs is encoded once (io/textures.ts) */
+const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
 
 export { GODOT_COMMANDS };
 
@@ -230,7 +234,6 @@ export function godotFlavour(project: string): Flavour {
     exposed: (dir) => (godotProjectOf(dir) ? GODOT_HIDDEN.filter((d) => isDir(path.join(dir, d)) && !fs.existsSync(path.join(dir, d, '.gdignore'))).map((d) => `${d}/`) : []),
     async write(geo: Geometry, x) {
       const warnings: string[] = [];
-      const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
       if (x.kind === 'textures') {
         // one PNG per image, nothing else (materials.json would be a .json in res://)
         const r = texturesExport(geo, '', { deflate });
@@ -239,7 +242,7 @@ export function godotFlavour(project: string): Flavour {
       const o = x.output;
       const options = resolvedExportOptions('glb', { instancing: x.options.instancing });
       const source = exportSource({
-        graph: o.graph, spec: o.spec, node: o.node, output: o.name, frame: 1, fps: 24, format: 'glb', options, packages: x.packages, package: x.packageName, version: TOPOTOPO_VERSION,
+        graph: o.graph, spec: o.spec, node: o.node, output: o.name, frame: 1, fps: 24, format: 'glb', options, packages: x.packages, package: x.packageName, version: TOPOTOPO_VERSION, engine: engineSha256(),
       });
       const bytes = await exportGeometryAsync(geo, 'glb', {
         upAxis: 'y', scale: 1, splitByName: true, custom: false, materials: true, vertexColors: false, compress: 'none', quantize: false, tangents: 'auto',

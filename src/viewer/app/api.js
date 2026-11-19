@@ -43,8 +43,8 @@ export const api = {
   async package() { const { status, j } = await json('/api/package'); return status === 200 ? j : null; },
   /** the last cook of a graph: {ok, ms, target, errors, warnings} */
   async report(graph) { const { status, j } = await json('/api/report?' + q({ graph })); return status === 200 ? j : null; },
-  /** the output (or a node) as a GLB; heightfields with `layer` in red (default the mask) */
-  geo: (graph, node, layer) => glb('/api/geo?' + q({ graph, node, ...(layer ? { heightfield_layer: layer } : {}) })),
+  /** the output (or a node) as a GLB; heightfields with `layer` in red (default the mask), at `detail` (terrain detail) */
+  geo: (graph, node, layer, detail) => glb('/api/geo?' + q({ graph, node, ...(layer ? { heightfield_layer: layer } : {}), ...(detail && detail !== 'preview' ? { heightfield_res: detail } : {}) })),
   /** {target, summary, ms, about: what it is (kind, text, size, heightfield)} or null */
   async info(graph, node) { const { status, j } = await json('/api/info?' + q({ graph, node })); return status === 200 ? j : null; },
   /** {ok, ms, errors, vars?, graphVars?, overrides?, stopped?}, once a cook has applied the values (or a stop ended it) */

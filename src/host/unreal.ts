@@ -41,6 +41,7 @@ import { unrealSees } from '../engines.ts';
 import { setInstall } from '../config.ts';
 import { MANIFEST_EXT } from '../session.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
+import { engineSha256 } from './engine-code.ts';
 import { freshness, readRecord } from './cook.ts';
 import type { CookJob, CookRecord, EngineOptions, Flavour, Freshness } from './cook.ts';
 import { CLI_PATH, IMPORT_DEFAULTS, SetupError, addLines, cookTargets, cookedFor, glbJson, isPublishedCopy, markPng, parseArgs, readImportParams } from './godot.ts';
@@ -49,6 +50,9 @@ import { UNREAL_COMMANDS } from './unreal-commands.ts';
 import type { Io } from '../packages/commands.ts';
 
 export { UNREAL_COMMANDS };
+
+/** PNG compression for the images outputs encode: one function, so an image used by many outputs is encoded once (io/textures.ts) */
+const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
 
 /** The plugin's name, its folder in a project, and what this TopoTopo carries (shipped in the npm package). */
 export const PLUGIN_NAME = 'TopoTopoImport';
@@ -280,7 +284,6 @@ export function unrealFlavour(project: string): Flavour {
     async write(geo: Geometry, x) {
       const warnings: string[] = [];
       const warn = (m: string) => { if (!warnings.includes(m)) warnings.push(m); };
-      const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
       const readFile = (t: string) => x.host.readFile(t);
       if (x.kind === 'textures') {
         const r = texturesExport(geo, '', { deflate });
@@ -288,7 +291,7 @@ export function unrealFlavour(project: string): Flavour {
       }
       const o = x.output;
       const sourceFor = (format: 'glb' | 'csv' | 'unreal_landscape', extra: Record<string, unknown> = {}) => exportSource({
-        graph: o.graph, spec: o.spec, node: o.node, output: o.name, frame: 1, fps: 24, format, options: resolvedExportOptions(format, { instancing: x.options.instancing, ...extra }), packages: x.packages, package: x.packageName, version: TOPOTOPO_VERSION,
+        graph: o.graph, spec: o.spec, node: o.node, output: o.name, frame: 1, fps: 24, format, options: resolvedExportOptions(format, { instancing: x.options.instancing, ...extra }), packages: x.packages, package: x.packageName, version: TOPOTOPO_VERSION, engine: engineSha256(),
       });
       if (x.kind === 'terrain' || (x.kind === 'scene' && heightfieldsOf(geo).length)) {
         const bundle = await exportFilesAsync(geo, 'unreal_landscape', 'bundle', { materials: true, custom: false, deflate, readFile, warn, source: sourceFor('unreal_landscape') });

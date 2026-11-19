@@ -3,18 +3,19 @@
 // topology (welding, pieces, the render tool's edge classes), the Controls rules, the status and cook state lines,
 // the output cards (kind line, heightfield layers, formats offered, download names), the Packages tab (a package's
 // state, the Scene tree's mark, a before/after's places) and the minimal edits the viewer makes to a graph file
-// (src/viewer/json-edit.ts). Also checks that the page's
-// modules only import each other and the served three.js.
+// (src/viewer/json-edit.ts), and packed instances as the page loads them (scene.js: drawn and framed at their places).
+// Also checks that the page's modules only import each other and the served three.js.
 //   node test/viewer-logic.ts
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
-import { markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
+import { markersFromGeometry, markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
 import * as km from '../src/viewer/app/keymap.js';
 import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
+import * as pt from '../src/viewer/app/pointer.js';
 import { createUndo } from '../src/viewer/app/undo.js';
 import { createGuides } from '../src/viewer/app/guides.js';
 import { api, coalesce } from '../src/viewer/app/api.js';
@@ -26,6 +27,12 @@ import * as cooking from '../src/viewer/app/cooking.js';
 import * as info from '../src/viewer/app/output-info.js';
 import * as pop from '../src/viewer/app/export-popover.js';
 import * as pkgs from '../src/viewer/app/packages.js';
+import { heightfieldPreviewStep } from '../src/core/heightfield.ts';
+import { HEIGHTFIELD_PREVIEW_RES, previewGLB } from '../src/render/preview.ts';
+import { MeshObject, parseGLB } from '../src/viewer/app/scene.js';
+import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
+import { packedFromMatrices } from '../src/core/packed.ts';
+import { m4translate } from '../src/core/math.ts';
 import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,9 +47,9 @@ const throws = (f: () => unknown) => { try { f(); return null; } catch (e: any) 
 
 section('keymap presets (section 9)');
 {
-  check(km.PRESETS.map((p: any) => p.id).join() === 'topotopo,maya,houdini,blender' && km.DEFAULT_PRESET === 'topotopo', 'four presets, TopoTopo the default');
+  check(km.PRESETS.map((p: any) => p.id).join() === 'houdini,topotopo,maya,blender' && km.DEFAULT_PRESET === 'houdini', 'four presets, Houdini the default (G-4)');
   const ids = km.PRESETS.map((p: any) => p.id);
-  check(km.ROWS.length === 24 && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
+  check(km.ROWS.length === 23 + pt.SELECTION_ROWS.length && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
     `every row of the table has binding text in every preset (${km.ROWS.length} rows)`);
   const later = km.ROWS.filter((r: any) => r.phase === 2);
   check(later.map((r: any) => r.label).join(' | ') === 'move / rotate / scale | snap to grid (held) | snap to surface or curve (held) | snap to point (held) | snapping on / off'
@@ -135,7 +142,7 @@ section('guides: perspective insertion and drag cancellation');
   const ctx: any = {
     store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} },
     objects: new Map(), guidesRoot: new THREE.Group(), hover: null, isolated: false,
-    selection: { has: () => false, prune: () => {}, apply: () => {} },
+    selection: sel.createSelection(() => 0),
     pxWorld: () => 0.01, requestRender: () => {}, message: () => {},
     coalesce: () => () => {}, emit: (event: string) => events.push(event), undo: { push: (step: any) => undo.push(step) },
     views: {
@@ -174,7 +181,7 @@ section('guides: cancellation while a prior save is queued');
   try {
     const ctx: any = {
       store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
-      selection: { has: () => false, prune: () => {} }, undo: { push: () => {} }, requestRender: () => {},
+      selection: sel.createSelection(() => 0), undo: { push: () => {} }, requestRender: () => {},
       message: () => {}, emit: () => {}, pxWorld: () => 0.01, layers: {}, surfacePoint: () => null, coalesce,
       views: { cam: () => ({ name: 'top' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
     };
@@ -201,6 +208,62 @@ section('guides: cancellation while a prior save is queued');
     await tick();
     check(bodies.length === writes && !idle.saving(), 'cancelling an ordinary drag with no pending save performs no network write');
   } finally { api.saveMarkers = originalSave; }
+}
+
+section('guides: placing while the scene loads');
+{
+  // a heavy terrain still cooking: a click that finds no surface would put the null on the grid (y = 0) under it
+  const originalSave = api.saveMarkers;
+  api.saveMarkers = async () => ({ ok: true });
+  try {
+    const said: string[] = [];
+    let hit: any = { point: new THREE.Vector3(5, 0, 5), surface: false };
+    const ctx: any = {
+      store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
+      selection: sel.createSelection(() => 0), undo: { push: () => {} }, requestRender: () => {},
+      message: (m: string) => said.push(m), emit: () => {}, pxWorld: () => 0.01, coalesce, surfacePoint: () => hit,
+      output: { loading: true }, layers: { loading: () => false },
+      views: { cam: () => ({ name: 'persp' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
+    };
+    const guides = createGuides(ctx);
+    const click = (x = 10, y = 10) => { guides.pointerDown(0, x, y); guides.pointerUp(0, x, y); };
+    guides.setMode('site');
+    click();
+    check(guides.list.length === 0 && /still loading/.test(said[said.length - 1] ?? ''), `a null clicked on no surface while the output loads is not placed; the hint says why (${said[said.length - 1]})`);
+    hit = { point: new THREE.Vector3(5, 7, 5), surface: true };
+    click();
+    check(guides.list.length === 1 && guides.list[0].points[0][1] === 7, 'on a surface already drawn it is placed while loading');
+    ctx.output.loading = false; ctx.layers.loading = () => true;
+    hit = { point: new THREE.Vector3(1, 0, 1), surface: false };
+    click();
+    check(guides.list.length === 1, 'a shown reference layer still loading holds it back too');
+    ctx.layers.loading = () => false;
+    click();
+    check(guides.list.length === 2 && guides.list[1].points[0][1] === 0, 'once the scene is drawn, a click on no surface places it on the grid as before');
+    guides.setMode('volume');
+    ctx.output.loading = true;
+    guides.pointerDown(0, 0, 0); guides.pointerUp(0, 40, 40);
+    check(guides.list.length === 2 && /still loading/.test(said[said.length - 1] ?? ''), 'a volume dragged on no surface while loading is not drawn either');
+  } finally { api.saveMarkers = originalSave; }
+}
+
+section('guides: a markers.json written as geometry reads back as guides');
+{
+  const kinds = [
+    { id: 'a', kind: 'site', name: 'village', points: [[10, 2, -5]], radius: 7 },
+    { id: 'b', kind: 'path', name: 'road', points: [[0, 0, 0], [20, 1, 0], [20, 2, 30]] },
+    { id: 'c', kind: 'zone', name: 'keep empty', points: [[0, 0, 0], [0, 0, 10], [10, 0, 10], [10, 0, 0]] },
+    { id: 'd', kind: 'volume', name: 'no trees', points: [[20, 1, 30], [30, 1, 40]], height: 8 },
+  ];
+  const back = mk.parseMarkers({ markers: markersFromGeometry(markersGeometry(kinds as any)) });
+  const by = (k: string) => back.find((m: any) => m.kind === k);
+  const zone = by('zone');
+  check(back.length === 4 && JSON.stringify(by('site').points) === '[[10,2,-5]]' && by('site').radius === 7 && JSON.stringify(by('path').points) === JSON.stringify(kinds[1].points)
+    && by('volume').height === 8 && JSON.stringify(by('volume').points) === JSON.stringify(kinds[3].points) && zone.points.length === 4 && zone.name === 'keep empty',
+    `markersFromGeometry(markersGeometry(list)) gives the guides back: names, points, radius, height (${back.map((m: any) => m.name).join(', ')})`);
+  const other = new GeoBuilder(new Geometry());
+  other.addPrim([other.addPoint(0, 0, 0), other.addPoint(1, 0, 0)], false);
+  check(markersFromGeometry(other.build()).length === 0, 'elements without a guide role are not guides');
 }
 
 section('guides: the marker rules the server uses');
@@ -290,6 +353,117 @@ section('selection (section 5)');
   check(s.items.join() === 'out#2' && (s.clear(), s.size === 0), 'remove, prune of vanished objects, clear');
 }
 
+section('selection model (section 5, G-4): what a left press does');
+{
+  const P = (target: string, mods: Record<string, boolean> = {}, movable = target === 'edit') => pt.pressPlan({ target, movable, ...mods });
+  const plan = (p: any) => `${p.click}/${p.drag}${p.box ? ':' + p.box : ''}`;
+  // the table, row by row: things you edit | results | empty space
+  check(plan(P('edit')) === 'replace/move' && plan(P('result')) === 'none/tumble' && plan(P('empty')) === 'clear/tumble',
+    'plain: a click selects what you edit, selects nothing on a result, clears on empty space; a drag moves what you edit, else tumbles');
+  check(plan(P('edit', {}, false)) === 'replace/tumble', 'an input (no move until the gizmo) selects on a click and tumbles on a drag');
+  const shift = { shiftKey: true }, ctrl = { ctrlKey: true };
+  check(plan(P('edit', shift)) === 'add/box:add' && plan(P('result', shift)) === 'add/box:add' && plan(P('empty', shift)) === 'none/box:add',
+    'Shift: a click adds what you edit and adds a result (to read it); empty space does nothing; a drag box-selects wherever it starts');
+  check(plan(P('edit', ctrl)) === 'remove/box:remove' && plan(P('result', ctrl)) === 'remove/box:remove' && plan(P('empty', ctrl)) === 'none/box:remove',
+    'Ctrl: a click takes out, a drag box-subtracts wherever it starts');
+  check(plan(P('result', { ctrlKey: true, shiftKey: true })) === 'add/box:add' && plan(P('edit', { metaKey: true })) === 'remove/box:remove',
+    'Ctrl+Shift adds (Shift wins, as opOf); Cmd is Ctrl');
+  check(pt.targetKind('guide:m1') === 'edit' && pt.targetKind('guide:m1#2') === 'edit' && pt.targetKind('layer:scans/a#b.obj#3') === 'edit'
+    && pt.targetKind('out') === 'result' && pt.targetKind('out#4') === 'result' && pt.targetKind(null) === 'empty',
+    'target kinds: guides, their CVs and input layers are things you edit; "out" and its pieces are results; no id is empty space');
+  // a click from a selection of a guide, per target and modifier
+  const after = (target: string, id: string | null, mods: Record<string, boolean> = {}, start = ['guide:a', 'out#1']) => {
+    const s = sel.createSelection(() => 9);
+    s.apply(start);
+    const c = pt.clickChange(P(target, mods).click, id);
+    if (c) s.apply(c.ids, c.op);
+    return s.items.join();
+  };
+  check(after('result', 'out#2') === 'guide:a,out#1' && after('empty', null) === '' && after('edit', 'guide:b') === 'guide:b',
+    'clicks: on a result the selection stays as it is, on empty space it clears, on a guide it becomes that guide');
+  check(after('result', 'out#2', shift) === 'guide:a,out#1,out#2' && after('result', 'out#1', ctrl) === 'guide:a' && after('empty', null, shift) === 'guide:a,out#1'
+    && after('edit', 'guide:c#3', shift) === 'guide:a,out#1,guide:c#3' && after('edit', 'guide:a', ctrl) === 'out#1',
+    'Shift-click adds a result (the lead, which Properties shows) or a CV; Ctrl-click takes either out; Shift on empty space changes nothing');
+  check(pt.clickChange('none', 'out') === null && !!throws(() => pt.clickChange('toggle', 'out')), 'no click change for "none"; unknown clicks are refused');
+  check(pt.boxTakes('add', 'edit') && !pt.boxTakes('add', 'result') && pt.boxTakes('remove', 'result') && pt.boxTakes('remove', 'edit'),
+    'a Shift box takes things you edit, never results; a Ctrl box takes out results too');
+  const g = { id: 'guide:a' }, l = { id: 'layer:t.obj', dist: 20 }, r = { id: 'out', dist: 12 }, far = { id: 'out', dist: 30 };
+  check(pt.pickWinner(g, l, r) === g && pt.pickWinner(null, l, r) === r && pt.pickWinner(null, l, far) === l && pt.pickWinner(null, l, { id: 'out', dist: 20 }) === l
+    && pt.pickWinner(null, null, r) === r && pt.pickWinner(null, l, null) === l && pt.pickWinner(null, null, null) === null,
+    'picking: a guide or CV within its pixels beats an input and a result in front of it; between an input and a result the nearer wins (the input on a tie)');
+  check(!pt.isDrag(3, 2) && pt.isDrag(4, 3) && pt.DRAG_PX === 4, 'a press is a click until it travels more than 4 px');
+  check(pt.dragSelects(['out'], 'guide:a') && !pt.dragSelects(['guide:a', 'out'], 'guide:a') && !pt.dragSelects(['guide:a'], 'guide:a#2') && pt.dragSelects(['guide:a#1'], 'guide:a#2'),
+    'a drag selects what it moves, unless it is selected already or its guide is selected whole');
+  // the same in every preset: the left button without a navigation chord is the model's
+  const ids = km.PRESETS.map((p: any) => p.id);
+  check(ids.every((p: string) => km.matchDrag(p, { button: 0 }) === null && km.matchDrag(p, { button: 0, shiftKey: true }) === null && km.matchDrag(p, { button: 0, ctrlKey: true }) === null),
+    'every preset leaves plain, Shift and Ctrl left presses to the selection model');
+  const rows = (p: string) => km.overlayRows(p).filter((r: any) => pt.SELECTION_ROWS.some(([label]: string[]) => label === r.label)).map((r: any) => `${r.label}=${r.text}`).join('|');
+  check(rows('houdini').split('|').length === pt.SELECTION_ROWS.length && ids.every((p: string) => rows(p) === rows('houdini')), 'the keymap overlay prints the model\'s rows, the same in every preset');
+}
+
+section('selection model: Houdini navigation is the default');
+{
+  check(km.DEFAULT_PRESET === 'houdini' && km.PRESETS[0].id === 'houdini', 'Houdini is the default preset (the first in the menu); saved choices stay (main.js reads them first)');
+  const d = (p: string, o: any) => km.matchDrag(p, o);
+  check(d('houdini', { button: 1 }) === 'track' && d('houdini', { button: 2 }) === 'dolly' && d('houdini', { button: 0, space: true }) === 'tumble'
+    && d('houdini', { button: 1, space: true }) === 'track' && d('houdini', { button: 2, space: true }) === 'dolly' && d('houdini', { button: 0 }) === null,
+    'Houdini: middle drag pans, right drag zooms, Space + L / M / R as before; a plain left drag tumbles through the model (on a result or empty space)');
+  check(km.surfacePivot('houdini') && km.surfacePivot('topotopo') && !km.surfacePivot('maya') && !km.surfacePivot('blender'),
+    'Houdini takes TopoTopo\'s pivot rules (surface under the cursor, zoom toward it, pan in orthographic views); Maya and Blender orbit the selection');
+  check(info.resultName({ output: 'Rotor', node: 'rotor_final' }) === 'Rotor' && info.resultName({ node: 'house', part: 'roof' }) === 'house › roof'
+    && info.resultName({ output: 'house', part: 'house' }) === 'house' && info.resultName({}) === 'result',
+    'a hovered result shows its output\'s name, else its node\'s, and a part\'s own name after it');
+  check(info.partName('mesh_3', 'mesh') === null && info.partName('source_0_1', 'source_0') === null && info.partName('bush', 'scene') === 'bush'
+    && info.partName('house_2', 'house') === 'house' && info.partName('roof.v2_1', 'roof.v2') === 'roof.v2' && info.partName('', 'x') === null,
+    'a part\'s own name: a numbered primitive goes by its mesh, the preview\'s names for unnamed parts are none');
+  check(info.countsLine('1,234 points, 56 prims: 56 polygons\nattributes …') === '1,234 points, 56 prims: 56 polygons' && info.countsLine(undefined) === '',
+    'a result\'s counts are its summary\'s first line');
+}
+
+section('selection model: CVs, boxes and the guides');
+{
+  // a top view: x right, z down, 10 px a metre, centred at (500, 500)
+  const project = (_slot: number, p: THREE.Vector3) => ({ x: 500 + p.x * 10, y: 500 + p.z * 10 });
+  const undo: any[] = [];
+  const ctx: any = {
+    store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, objects: new Map(), guidesRoot: new THREE.Group(), hover: null, isolated: false,
+    pxWorld: () => 0.01, requestRender: () => {}, message: () => {}, coalesce: () => () => {}, emit: () => {}, undo: { push: (step: any) => undo.push(step) },
+    views: {
+      camera: () => null, project,
+      ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3((x - 500) / 10, 100, (y - 500) / 10), new THREE.Vector3(0, -1, 0)),
+    },
+  };
+  const guides = createGuides(ctx);
+  ctx.selection = sel.createSelection((obj: string) => (obj.startsWith('guide:') ? guides.pieceCount(obj.slice(6)) : 0));
+  guides.list = [
+    { id: 'c', kind: 'path', name: 'road', points: [[0, 0, 0], [10, 0, 0], [20, 0, 0]] },
+    { id: 'z', kind: 'zone', name: 'park', points: [[0, 0, 10], [4, 0, 10], [4, 0, 14]] },
+    { id: 'n', kind: 'site', name: 'village', points: [[30, 0, 0]], radius: 5 },
+    { id: 'v', kind: 'volume', name: 'keep', points: [[40, 0, 0], [44, 0, 4]], height: 3 },
+  ];
+  const at = (p: number[]) => project(0, new THREE.Vector3(...p));
+  const idAt = (p: number[]) => { const h = guides.handleAt(0, at(p).x, at(p).y); return h && guides.idOf(h); };
+  check(idAt([10, 0, 0]) === 'guide:c#1' && idAt([5, 0, 0]) === 'guide:c' && idAt([30, 0, 0]) === 'guide:n' && idAt([40, 0, 0]) === 'guide:v' && idAt([4, 0, 14]) === 'guide:z#2',
+    'a click on a CV of a curve or an area selects that CV, on a line the guide; a null and a volume select whole');
+  check(guides.pieceCount('c') === 3 && guides.pieceCount('n') === 1 && guides.pieceCount('v') === 1 && sel.normalize(['guide:n#0', 'guide:c#1'], (o: string) => guides.pieceCount(o.slice(6))).join() === 'guide:n,guide:c#1',
+    'a guide\'s pieces are its CVs (curves and areas), one for a null or a volume');
+  const box = (x0: number, x1: number, z0: number, z1: number) => guides.boxSelect((pts: THREE.Vector3[]) => pts.every((p) => p.x >= x0 && p.x <= x1 && p.z >= z0 && p.z <= z1)).join();
+  check(box(-1, 11, -1, 1) === 'guide:c#0,guide:c#1' && box(-1, 21, -1, 15) === 'guide:c,guide:z' && box(29, 45, -1, 5) === 'guide:n,guide:v',
+    'a box takes the CVs inside it, a guide wholly inside it whole, nulls and volumes whole');
+  check(!!guides.cvBounds(guides.list[0], 2) && guides.cvBounds(guides.list[0], 2).min.x === 20 && guides.cvBounds(guides.list[2], 0) === null, 'a CV has bounds (F frames it); a null has no CVs');
+  // a change of the list keeps the CVs that are still there
+  ctx.selection.apply(['guide:c#2', 'guide:z#0']);
+  guides.change('move', (list: any[]) => { list[0].points[2] = [21, 0, 0]; });
+  check(ctx.selection.items.join() === 'guide:c#2,guide:z#0', 'an edit of a guide keeps its selected CVs');
+  const steps = undo.length, r = guides.removeCVs(new Map([['c', [2, 0]], ['z', [0]]]));
+  check(r.removed === 1 && r.kept === 2 && JSON.stringify(guides.list[0].points) === '[[0,0,0],[10,0,0]]' && guides.list[1].points.length === 3 && undo.length === steps + 1,
+    'Delete on CVs removes them as one undo step; a curve keeps 2 and an area 3 (those are kept and counted)');
+  check(ctx.selection.items.join() === 'guide:z#0', 'the CVs of a changed curve leave the selection (they renumber); those of an unchanged area stay');
+  guides.remove(['z']);
+  check(ctx.selection.size === 0 && !guides.byId('z'), 'the CVs of a deleted guide leave the selection');
+}
+
 section('undo stack');
 {
   let t = 0, value = 0;
@@ -349,8 +523,26 @@ section('Controls rules (section 8)');
   const r = vars.rangeOf({ min: 0.1, max: 10 }, 1, false);
   check(r.lo === 0.1 && r.hi === 10 && r.step === 0.01 && vars.rangeOf({ default: 5 }, 5, true).hi === 20 && vars.rangeOf({}, 0, false).lo === -1,
     'slider ranges: declared, 0..4×default, −1..1 around 0');
+  // min/max are the slider's range, not a limit on the person: 5 typed into 0.3..3 stays 5 and the slider widens to it;
+  // ↺ builds the declared range again (rangeOf)
+  const wide = vars.widenRange(vars.rangeOf({ min: 0.3, max: 3 }, 1, false), 5), low = vars.widenRange(vars.rangeOf({ min: 1, max: 10 }, 2, true), -2.5);
+  check(wide.lo === 0.3 && wide.hi === 5 && wide.step === 0.01 && low.lo === -3 && low.hi === 10 && low.step === 1 && vars.rangeOf({ min: 0.3, max: 3 }, 5, false).hi === 3
+    && vars.widenRange(vars.rangeOf({ min: 0, max: 1, step: 0.25 }, 0, false), 40).step === 0.25 && vars.widenRange(vars.rangeOf({ min: 0, max: 1 }, 0, false), 40).step === 0.1,
+    'a value past a declared end widens the slider to it (an int range to whole numbers; the step follows unless declared); the declared range comes back');
+  check(vars.pastDeclared({ min: 0.3, max: 3 }, 5) && vars.pastDeclared({ min: 0.3 }, 0.1) && !vars.pastDeclared({ min: 0.3, max: 3 }, 3) && !vars.pastDeclared({}, 1e9) && !vars.pastDeclared({ max: 3 }, 'x'),
+    'a value past a declared end is marked; inside the range or with no declared end it is not');
   check(vars.snapTo({ lo: 0.1, step: 0.01 } as any, 0.12345) === 0.12 && vars.blank({ type: 'vec3' }).join() === '0,0,0' && vars.controlList({ s: {} }, { s: 1, extra: 2 }).other.join() === 'extra',
     'snapping to steps, blank vectors, undeclared vars listed apart');
+  // param groups: a heading per group in the order of its first param, ungrouped params first, undeclared vars closed
+  const secs = vars.controlSections(
+    { count: { group: 'Scatter' }, size: { group: 'Rocks' }, seed: {}, gap: { group: 'Rocks' }, jitter: { group: ' Scatter ' }, blank: { group: '' } },
+    { count: 1, size: 1, seed: 1, gap: 1, jitter: 1, blank: 1, smallest: 0.2 });
+  check(JSON.stringify(secs.map((s: any) => [s.group, s.keys.join()])) === JSON.stringify([[null, 'seed,blank'], ['Scatter', 'count,jitter'], ['Rocks', 'size,gap'], ['other vars', 'smallest']]),
+    `sections: ungrouped first, then groups in declaration order holding their params, then "other vars" (${JSON.stringify(secs.map((s: any) => s.group))})`);
+  const otherSec = secs[3], rocks = secs[2], loose = vars.controlSections({}, { a: 1 });
+  check(vars.sectionClosed(otherSec) && !vars.sectionClosed(rocks) && vars.sectionClosed(rocks, { 'g:Rocks': true }) && !vars.sectionClosed(otherSec, { other: false })
+    && loose.length === 1 && loose[0].group === null && loose[0].other && !vars.sectionClosed(loose[0], { other: true }),
+    'the undeclared vars start closed when the graph declares params, groups open; the remembered state wins; with nothing declared they are listed as they are');
   // a menu of numbers wrote the picked entry as text ("8"): an entry stands for its option
   const nums = vars.menuOf({ options: [4, 8, 16] }, 8), texts = vars.menuOf({ options: ['low', 'high'] }, 'low'), idx = vars.menuOf({ options: ['low', 'high'] }, 1);
   check(vars.kindOf({ type: 'enum', options: [4, 8, 16] }, 8) === 'select' && nums.valueOf('16') === 16 && nums.textOf(8) === '8' && !nums.byIndex && nums.valueOf('5') === undefined
@@ -507,6 +699,18 @@ section('output cards: what an output is, its formats and downloads');
     'the layers a terrain shows in red: the mask first, others with their range, then none (never the height itself)');
   check(info.shownLayer(hf, undefined) === 'mask' && info.shownLayer(hf, 'flow') === 'flow' && info.shownLayer(hf, 'gone') === 'mask' && info.shownLayer(hf, 'none') === 'none'
     && info.shownLayer({ layers: [{ name: 'height', min: 0, max: 1 }] }, undefined) === 'none', 'the layer shown: the chosen one while the field has it, else the mask, else none');
+  // terrain detail: the page's step and triangle count agree with the server's preview mesh; choices that draw the same
+  // are listed once, one that draws every sample is "full", one too heavy for a browser tab is disabled
+  check(info.PREVIEW_RES === HEIGHTFIELD_PREVIEW_RES, 'the page and the server agree on the preview budget');
+  for (const [w, h, res] of [[1001, 1001, 512], [4001, 2001, 1024], [130, 70, 64], [4001, 4001, Infinity]] as const) {
+    const fake = { width: w, height: h } as any, a = info.previewStep(fake, res), b = heightfieldPreviewStep(fake, res);
+    check(a.step === b.step && a.triangles === 2 * (b.shown[0] - 1) * (b.shown[1] - 1), `step and triangles of ${w} × ${h} at ${res}: ${a.step}, ${a.triangles}`);
+  }
+  const two = info.detailChoices({ width: 1001, height: 1001, cell: 2 }), eight = info.detailChoices({ width: 4001, height: 4001, cell: 2 });
+  check(JSON.stringify(two.map((c: any) => c.label)) === JSON.stringify(['preview (4 m, 500k triangles)', 'full (every sample, 2M triangles)'])
+    && JSON.stringify(eight.map((c: any) => [c.value, c.disabled])) === JSON.stringify([['preview', false], ['1024', false], ['2048', false], ['full', true]])
+    && /too many for the viewer/.test(eight[3].label) && info.detailChoices({ width: 129, height: 129, cell: 1 }).length === 1,
+    `terrain detail choices: a 2 km field at 2 m (${two.map((c: any) => c.label).join(' | ')}), an 8 km one (full disabled), a small one (only the preview)`);
   const formats = [{ format: 'glb', label: 'GLB', extension: '.glb' }, { format: 'png16', label: 'Heightmap', extension: '.png' }];
   const glb = { format: 'glb', label: 'GLB', extension: '.glb', writes: 'binary glTF', leaves: [], oneFile: true };
   const png = { format: 'png16', label: 'Heightmap', extension: '.png', writes: '16-bit PNG + JSON sidecar', leaves: ['instances'], oneFile: false };
@@ -551,6 +755,28 @@ section('the page\'s modules');
   const shell = fs.readFileSync(path.join(root, 'src', 'viewer', 'index.html'), 'utf8');
   check(!problems.length && files.includes('style.css') && /src="\/app\/main\.js"/.test(shell) && /href="\/app\/style\.css"/.test(shell) && !/<script(?![^>]*src)[^>]*>[^<]{200,}/.test(shell),
     `index.html is a shell loading /app/main.js and /app/style.css; modules import only each other and three (${problems.join('; ') || `${files.length} files`})`);
+}
+
+section('packed instances in the viewer: drawn where they are, framed where they are (F-96, F-101)');
+{
+  // a source of a triangle with no material, a polyline and a loose point, packed twice far from the origin, loaded the
+  // way the viewer loads /api/geo: three.js instances triangle meshes only, so a points or lines primitive in the
+  // instanced mesh made it draw one copy at the origin and no instance, and frame all took in the origin
+  const b = new GeoBuilder(new Geometry());
+  b.addPrim([b.addPoint(0, 0, 0), b.addPoint(1, 0, 0), b.addPoint(1, 1, 0)], true);
+  b.addPrim([b.addPoint(0, 2, 0), b.addPoint(0, 3, 0)], false);
+  b.addPoint(0, 4, 0);
+  const g = packedFromMatrices(b.build(), [m4translate(-834, 0, 2567), m4translate(-800, 0, 2600)]);
+  const bytes = await previewGLB(g);
+  const obj = new MeshObject('out', await parseGLB(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)));
+  const inst = obj.parts.filter((p: any) => p.type === 'inst'), box = obj.bounds();
+  check(inst.length === 1 && inst[0].obj.count === 2 && !obj.parts.some((p: any) => p.type === 'mesh'), `the triangle is one instanced mesh of 2 instances (parts: ${obj.parts.map((p: any) => p.type).join(', ')})`);
+  check(!box.isEmpty() && box.min.x > -835 && box.max.x < -798 && box.min.z > 2566 && box.max.z < 2601 && !box.containsPoint(new THREE.Vector3()),
+    `frame all's bounds hold the instances alone, far from the origin (${box.min.toArray().join(', ')} to ${box.max.toArray().join(', ')})`);
+  const k = obj.parts.indexOf(inst[0]) >= 0 ? (obj.pieceCount(), inst[0].offset) : -1;
+  const pb = [k, k + 1].map((i) => obj.bounds(i));
+  check(k >= 0 && pb.every((x: any) => !x.isEmpty()) && pb[0].min.x > -835 && pb[0].max.x < -832 && pb[1].min.x > -801 && pb[1].max.x < -798,
+    `frame selection: each picked instance has its own bounds at its place (${pb.map((x: any) => x.min.x).join(', ')})`);
 }
 
 console.log(`\n${passes} passed, ${failures} failed`);

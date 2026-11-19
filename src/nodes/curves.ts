@@ -527,8 +527,8 @@ function sweepCurves(
     const rings: number[][] = [], scales: number[] = [];
     for (let k = 0; k < pts.length; k++) {
       const u = L[k] / total;
-      let s = psA ? (psA.get(idx[k]) as number) : 1;
-      if (o.radiusOf) s *= o.radiusOf(idx[k]);
+      // radiusOf (polywire) is the whole radius; otherwise point pscale scales the profile
+      let s = o.radiusOf ? o.radiusOf(idx[k]) : psA ? (psA.get(idx[k]) as number) : 1;
       if (o.scaleRamp) s *= evalRamp(o.scaleRamp, u) as number;
       scales.push(s);
       const tw = ((o.twist * u) * Math.PI) / 180, c = Math.cos(tw), sn = Math.sin(tw);
@@ -582,7 +582,7 @@ defineNode({
   type: 'sweep',
   category: 'curve',
   summary: 'Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).',
-  description: 'The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. uv: u runs around the profile, v along the curve; caps take the profile\'s flat layout.',
+  description: 'The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. The end caps lie in the profile plane, perpendicular to the curve at its last point: where the last segment is tilted, the cap is tilted with it and its rim pokes above or below a horizontal plane the tube was meant to end on (a ground or snap plane). End the path with a short horizontal run, or cut the result with clip. uv: u runs around the profile, v along the curve; caps take the profile\'s flat layout.',
   inputs: [
     { name: 'backbone', desc: 'curves to sweep along (Bezier/NURBS curves are sampled adaptively)' },
     { name: 'profile', desc: 'cross-section curve drawn in the XY plane (optional; one per backbone or a single shared one)', optional: true },
@@ -628,15 +628,16 @@ defineNode({
 defineNode({
   type: 'polywire',
   category: 'curve',
-  summary: 'Turn curves into tubes. Per-point radius from "width" (diameter) or pscale. Great for branches, cables, wireframes.',
+  summary: 'Turn curves into tubes. Per-point radius from "width" (diameter) or radius × pscale. Great for branches, cables, wireframes.',
+  description: 'The tube radius at each point is half its "width" attribute when the curves carry width and use_width is on; pscale is then ignored, so particle trails with a small pscale keep the width they were given. Without width (or with use_width off) the radius is the radius param times point pscale (1 when there is none).',
   aliases: ['wire', 'tubes'],
   inputs: [{ name: 'curves', desc: 'polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively' }],
   splines: 'keep',
   params: {
-    radius: { type: 'float', default: 0.05, desc: 'tube radius (used when no width attribute)', aliases: ['rad', 'wire_radius'] },
+    radius: { type: 'float', default: 0.05, desc: 'tube radius when there is no width attribute (or use_width is off), multiplied by point pscale', aliases: ['rad', 'wire_radius'] },
     divisions: { type: 'int', default: 8, min: 3, max: 1024, desc: 'sides around the tube', aliases: ['sides', 'cols'] },
     caps: { type: 'bool', default: true, desc: 'cap the tube ends' },
-    use_width: { type: 'bool', default: true, desc: 'use point "width" attribute (diameter) when present' },
+    use_width: { type: 'bool', default: true, desc: 'use point "width" attribute (diameter) when present; pscale is then ignored' },
   },
   outputs: 'vertex uv; prim groups caps, sides',
   example: {
@@ -649,9 +650,10 @@ defineNode({
   cook: ({ input, p }) => {
     const g = evaluateSplines(input(0));
     const wA = p.use_width ? g.points.get('width') : undefined;
+    const psA = g.points.get('pscale');
     return sweepCurves(g, [circleProfile(1, p.divisions)], {
       caps: p.caps, twist: 0, up: [0, 1, 0], scaleRamp: null, uvLength: false,
-      radiusOf: (pt) => (wA ? Math.max(1e-6, (wA.get(pt) as number) / 2) : p.radius),
+      radiusOf: (pt) => (wA ? Math.max(1e-6, (wA.get(pt) as number) / 2) : p.radius * (psA ? (psA.get(pt) as number) : 1)),
     });
   },
 });
@@ -662,16 +664,16 @@ defineNode({
   type: 'revolve',
   category: 'curve',
   summary: 'Lathe: revolve profile curves around an axis (Y through the origin by default). Profiles touching the axis close up.',
-  description: 'Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer. Closed results face outward.',
+  description: 'Each profile point turns around the axis line (through origin, along axis) at its own distance from it, so the profile can be drawn in any plane that holds the axis: the XY plane (x = radius) for the default Y axis, the XY plane (y = radius) for axis [1, 0, 0]. angle is measured from where the profile is drawn, turning counter-clockwise when the axis points at the viewer, so the plan angle of the result (atan2(z, x) seen from +Y) is minus the angle: a 0..90 revolve about Y ends at -90 in plan, towards -Z. Closed solids always face outward and flip has no effect on them: a closed profile turned a full 360, a closed profile over a partial angle with caps on (the caps are wound with the sides, for any angle and either profile direction), and a profile whose open ends both lie on the axis turned a full 360. Caps are only made for closed profiles. Every other result is an open surface whose facing follows the profile direction and the sign of the angle span: if it faces the wrong way, set flip.',
   aliases: ['lathe'],
   inputs: [{ name: 'profile', desc: 'curves in a plane holding the axis (default: the XY plane, x = distance from the Y axis)' }],
   params: {
     axis: { type: 'vec3', default: [0, 1, 0], desc: 'direction of the axis to turn around', aliases: ['direction', 'dir'] },
     origin: { type: 'vec3', default: [0, 0, 0], desc: 'a point on the axis', aliases: ['center', 'pivot'] },
     segments: { type: 'int', default: 32, min: 3, max: 4096, desc: 'segments around', aliases: ['divisions', 'cols'] },
-    angle: { type: 'vec2', default: [0, 360], desc: 'start/end angle in degrees' },
-    caps: { type: 'bool', default: false, desc: 'cap partial revolves (closed profiles)' },
-    flip: { type: 'bool', default: false, desc: 'reverse face orientation' },
+    angle: { type: 'vec2', default: [0, 360], desc: 'start/end angle in degrees, counter-clockwise seen from the axis tip (right-handed): 0..90 about Y runs from +X towards -Z' },
+    caps: { type: 'bool', default: false, desc: 'cap partial revolves of closed profiles, making a closed solid that faces outward (open profiles get no caps)' },
+    flip: { type: 'bool', default: false, desc: 'reverse face orientation of an open result; no effect on a closed solid (always faces outward)' },
   },
   outputs: 'vertex uv',
   example: {
@@ -730,8 +732,11 @@ defineNode({
         }
       }
       if (p.caps && !full && closed) {
-        b.addPrim(grid.map((r) => r[0]).reverse(), true, pr);
-        b.addPrim(grid.map((r) => r[cols - 1]), true, pr);
+        // wound against the side edges they share: a side quad runs grid[i1][0] → grid[i][0] along the start column and
+        // grid[i][n] → grid[i1][n] along the end column, so the start cap runs down the profile and the end cap up it
+        const start = grid.map((r) => r[0]), end = grid.map((r) => r[cols - 1]).reverse();
+        b.addPrim(p.flip ? start.reverse() : start, true, pr);
+        b.addPrim(p.flip ? end.reverse() : end, true, pr);
       }
     }
     let out = b.build();
@@ -772,18 +777,27 @@ defineNode({
   type: 'extrude',
   category: 'curve',
   summary: 'Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.',
+  description:
+    'A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; ' +
+    'which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect ' +
+    'and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes ' +
+    'through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids. ' +
+    'Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the ' +
+    'shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, ' +
+    'corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: ' +
+    'u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.',
   aliases: ['linear_extrude', 'extrude2d'],
   inputs: [{ name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' }],
   params: {
-    height: { type: 'float', default: 1, desc: 'extrusion distance along the plane normal', aliases: ['depth', 'distance', 'h'] },
+    height: { type: 'float', default: 1, desc: 'extrusion distance along the plane normal: plane xz extrudes along +Y, xy along +Z, yz along +X', aliases: ['depth', 'distance', 'h'] },
     divisions: { type: 'int', default: 1, min: 1, max: 10000, desc: 'segments along the extrusion' },
     twist: { type: 'float', default: 0, desc: 'twist in degrees (about each shape centroid)' },
     scale_top: { type: 'vec2', default: [1, 1], desc: 'scale of the top cap (taper); [0,0] = pyramid' },
     center: { type: 'bool', default: false, desc: 'extrude symmetrically about the shape plane' },
-    plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'shape plane (auto = flattest axis)' },
+    plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis)' },
     caps: { type: 'bool', default: true, desc: 'add top/bottom caps' },
   },
-  outputs: 'prim groups top, bottom, side',
+  outputs: 'prim groups top, bottom, side; the attributes and groups of the input (see above)',
   example: {
     nodes: {
       star: { type: 'shape2d', params: { shape: 'star', radius: 1, inner_radius: 0.5, sides: 5 } },
@@ -822,9 +836,21 @@ defineNode({
     const { polys, depth, parent } = orientNested(raw);
     const root = polys.map((_, i) => { let r = i; while (parent[r] >= 0) r = parent[r]; return r; });
     const centre = polys.map((poly) => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length]);
-    const b = new GeoBuilder();
+    // where each contour corner came from: toPolygons skips prims under 3 corners, orientNested may reverse a contour
+    const srcPrim: number[] = [], srcVertex: number[][] = [];
+    for (let pr = 0, k = 0; pr < g.numPrims && k < raw.length; pr++) {
+      if (g.primStart[pr + 1] - g.primStart[pr] < 3) continue;
+      const vs = Array.from({ length: raw[k].length }, (_, j) => g.primStart[pr] + j);
+      srcPrim.push(pr); srcVertex.push(area2(raw[k]) > 0 === (depth[k] % 2 === 0) ? vs : vs.reverse());
+      k++;
+    }
+    // like polyextrude: new points take their source point's attributes, caps and side walls their contour prim's,
+    // corners their source corner's (normals are left out: they no longer fit)
+    const b = new GeoBuilder(g);
+    for (const cls of ['point', 'vertex', 'prim'] as const) b.skip[cls].add('N');
     const top = b.group('prim', 'top'), bottom = b.group('prim', 'bottom'), side = b.group('prim', 'side');
     const h0 = p.center ? -p.height / 2 : 0;
+    const vertexOf = new Map<number, number>(), contourOf = new Map<number, number>();
     const rings = polys.map((poly, i) => {
       // twist and taper about the outermost outline's centre, so holes stay where they are in their shape
       const [cx, cy] = centre[root[i]];
@@ -833,19 +859,33 @@ defineNode({
         const t = k / p.divisions, w = offset + h0 + p.height * t;
         const a = ((p.twist * t) * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
         const sx = 1 + (p.scale_top[0] - 1) * t, sy = 1 + (p.scale_top[1] - 1) * t;
-        out.push(poly.map(([u, v]) => {
+        out.push(poly.map(([u, v], j) => {
           const du = (u - cx) * sx, dv = (v - cy) * sy;
-          const uu = cx + du * c - dv * sn, vv = cy + du * sn + dv * c;
-          return b.addPoint(F.U[0] * uu + F.V[0] * vv + F.N[0] * w, F.U[1] * uu + F.V[1] * vv + F.N[1] * w, F.U[2] * uu + F.V[2] * vv + F.N[2] * w);
+          const uu = cx + du * c - dv * sn, vv = cy + du * sn + dv * c, vertex = srcVertex[i][j];
+          const id = b.addPoint(F.U[0] * uu + F.V[0] * vv + F.N[0] * w, F.U[1] * uu + F.V[1] * vv + F.N[1] * w, F.U[2] * uu + F.V[2] * vv + F.N[2] * w, g.vertexPoint[vertex]);
+          vertexOf.set(id, vertex); contourOf.set(id, i);
+          return id;
         }));
       }
       return out;
     });
+    // a vertex uv cannot be copied up a wall (it would collapse to a line): side walls get their own layout,
+    // u once around the contour by length and v up the extrusion, both 0 to 1, as revolve and sweep lay them out
+    const uvIn = g.vertices.get('uv'), sideUV = uvIn?.type === 'float' && uvIn.size >= 2 ? b.attrib('vertex', 'uv', uvIn.size, 'float') : null;
     polys.forEach((poly, i) => {
-      const m = poly.length, r = rings[i];
+      const m = poly.length, r = rings[i], vs = srcVertex[i];
+      const along = [0];
+      for (let j = 0; j < m; j++) along.push(along[j] + Math.hypot(poly[(j + 1) % m][0] - poly[j][0], poly[(j + 1) % m][1] - poly[j][1]));
       for (let k = 0; k < p.divisions; k++)
-        for (let j = 0; j < m; j++) side.add(b.addPrim([r[k][j], r[k][(j + 1) % m], r[k + 1][(j + 1) % m], r[k + 1][j]]));
+        for (let j = 0; j < m; j++) {
+          const j1 = (j + 1) % m, first = b.numVertices;
+          side.add(b.addPrim([r[k][j], r[k][j1], r[k + 1][j1], r[k + 1][j]], true, srcPrim[i], [vs[j], vs[j1], vs[j1], vs[j]]));
+          if (!sideUV) continue;
+          const u0 = along[j] / (along[m] || 1), u1 = along[j + 1] / (along[m] || 1), v0 = k / p.divisions, v1 = (k + 1) / p.divisions;
+          [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].forEach((uv, c) => sideUV.set(first + c, uv.concat(new Array(uvIn!.size - 2).fill(0))));
+        }
     });
+    const corners = (points: number[]) => points.map((id) => vertexOf.get(id)!);
     if (p.caps) {
       // each outline with its own holes is one cap, triangulated on the ring points (so it stays watertight) and
       // merged back into as few polygons as a cap with holes needs
@@ -854,8 +894,9 @@ defineNode({
         if (depth[i] % 2) return;
         const holes = polys.map((_, j) => j).filter((j) => parent[j] === i);
         if (!holes.length) {
-          bottom.add(b.addPrim(rings[i][0].slice().reverse()));
-          top.add(b.addPrim(rings[i][p.divisions].slice()));
+          const under = rings[i][0].slice().reverse(), over = rings[i][p.divisions].slice();
+          bottom.add(b.addPrim(under, true, srcPrim[i], corners(under)));
+          top.add(b.addPrim(over, true, srcPrim[i], corners(over)));
           return;
         }
         const flat: number[] = [], holeAt: number[] = [], ids: number[] = [];
@@ -897,7 +938,12 @@ defineNode({
       };
       for (const [level, grp, flip] of [[0, bottom, true], [p.divisions, top, false]] as const) {
         const { merged, back } = capGeo(level, flip);
-        for (let pr = 0; pr < merged.numPrims; pr++) grp.add(b.addPrim(merged.primPoints(pr).map((i) => back.get(i)!)));
+        for (let pr = 0; pr < merged.numPrims; pr++) {
+          const points = Array.from(merged.primPoints(pr), (i) => back.get(i)!);
+          // a cap belongs to its outline: the contour of its first corner, or that contour's parent for a hole
+          const j = contourOf.get(points[0])!, owner = depth[j] % 2 ? parent[j] : j;
+          grp.add(b.addPrim(points, true, srcPrim[owner], corners(points)));
+        }
       }
     }
     let out = b.build();

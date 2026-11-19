@@ -13,6 +13,8 @@ import type { Geometry } from '../src/core/geometry.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { readMaterials } from '../src/core/materials.ts';
 import { referenceableImages } from '../src/core/image.ts';
+import { decodePNG } from '../src/io/png-decode.ts';
+import { imagePNG } from '../src/io/textures.ts';
 import { outputKind } from '../src/io/kinds.ts';
 import { exportFilesAsync } from '../src/io/files.ts';
 import { renderGeometry } from '../src/render/raster.ts';
@@ -28,6 +30,7 @@ const check = (ok: unknown, msg: string) => {
   if (ok) pass++; else fail++;
   console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
 };
+const eqArr = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const engine = new Engine(createNodeHost());
 await engine.init();
 async function cook(nodes: Record<string, NodeSpec>, output: string): Promise<Geometry> {
@@ -167,6 +170,78 @@ const MAPS: Record<string, NodeSpec> = {
   const g = r.geo;
   check(r.ok && g && readMaterials(g).brick?.textures?.normal === 'image:brick_normal' && referenceableImages(g).get('brick_normal')?.width === 128,
     `another package wears studio/mats/brick (${r.ok ? 'ok' : r.errors.map((x) => x.message).join('; ')})`);
+}
+
+{
+  // a group that one variant of the geometry lacks: "?trim" binds it where the group exists and selects nothing elsewhere
+  const variant = (withTrim: boolean, group: string): Record<string, NodeSpec> => ({
+    box: { type: 'box' },
+    shaped: withTrim ? { type: 'group', in: ['box'], params: { name: 'trim', class: 'prim', expr: '@P.y > 0.4' } } : { type: 'null', in: ['box'] },
+    wall: { type: 'material', in: ['shaped'], params: { name: 'wall', base_color: '#a5462e' } },
+    metal: { type: 'material', in: ['wall'], params: { name: 'metal', metallic: 1, group } },
+  });
+  const uses = (g: Geometry, name: string) => { const a = g.prims.get('material')!; let n = 0; for (let i = 0; i < g.numPrims; i++) if (a.get(i) === name) n++; return n; };
+  const withTrim = await cook(variant(true, '?trim'), 'metal');
+  check(uses(withTrim, 'metal') === 1 && uses(withTrim, 'wall') === 5, `"?trim" binds the trim group where it exists (${uses(withTrim, 'metal')} metal, ${uses(withTrim, 'wall')} wall)`);
+  const without = await engine.cook({ nodes: variant(false, '?trim'), output: 'metal' });
+  check(without.ok && !without.warnings.length && uses(without.geo!, 'metal') === 0 && uses(without.geo!, 'wall') === 6, `"?trim" selects nothing, silently, on a variant without the group (${without.ok ? 'ok' : without.errors.map((e) => e.message).join('; ')})`);
+  const glbMaterials = async (g: Geometry) => {
+    const f = (await exportFilesAsync(g, 'glb', path.join(tmp, 'optional.glb'), {})).files.find((x) => x.path.endsWith('.glb'))!;
+    const dv = new DataView(f.bytes.buffer, f.bytes.byteOffset, f.bytes.byteLength);
+    return (JSON.parse(new TextDecoder().decode(f.bytes.subarray(20, 20 + dv.getUint32(12, true)))).materials ?? []).map((m: any) => m.name).sort().join(',');
+  };
+  const [mWith, mWithout] = [await glbMaterials(withTrim), await glbMaterials(without.geo!)];
+  check(mWith === 'metal,wall' && mWithout === 'wall', `glb writes only the materials prims use: no empty "metal" on the variant without trim (${mWith} | ${mWithout})`);
+  const strictName = await cookError(variant(false, 'trim'), 'metal');
+  check(/unknown group "trim".*write "\?trim" for a group that may be absent/.test(strictName), `a bare name that matches no group is an error that says how to allow it (${strictName})`);
+  const notTrim = await cook(variant(false, '!?trim'), 'metal'), minus = await cook(variant(true, '* ^?trim'), 'metal'), minusAbsent = await cook(variant(false, '* ?^trim'), 'metal');
+  check(uses(notTrim, 'metal') === 6 && uses(minus, 'metal') === 5 && uses(minusAbsent, 'metal') === 6, '"!?trim" and "^?trim" (or "?^trim") combine with an absent or present group');
+  const badAttr = await cookError(variant(false, '?@P.q>0'), 'metal');
+  check(badAttr !== '', `"?" allows only a missing group: other selection errors still fail (${badAttr})`);
+}
+
+{
+  // a separate grey roughness map is glTF's metallicRoughness texture: metallic must stay the material's value (not the
+  // map's blue channel), and materials.json must carry the factors the glb writes
+  const base: Record<string, NodeSpec> = {
+    box: { type: 'box' }, uv: { type: 'uv_project', in: ['box'], params: { method: 'box' } },
+    rough: { type: 'tex_noise', params: { resolution: 32, name: 'rough' } },
+    col: { type: 'tex_noise', params: { resolution: 16, name: 'col', seed: 4 } },
+    maps: { type: 'merge', in: ['rough', 'col'] },
+  };
+  const glbOf = async (g: Geometry) => {
+    const b = (await exportFilesAsync(g, 'glb', path.join(tmp, 'mr.glb'), {})).files[0].bytes;
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength), jl = dv.getUint32(12, true);
+    const j = JSON.parse(new TextDecoder().decode(b.subarray(20, 20 + jl)));
+    const pbr = j.materials.find((m: any) => m.name === 'm').pbrMetallicRoughness;
+    const bv = j.bufferViews[j.images[j.textures[pbr.metallicRoughnessTexture.index].source].bufferView], at = 20 + jl + 8 + (bv.byteOffset ?? 0);
+    return { pbr, img: decodePNG(b.subarray(at, at + bv.byteLength)) };
+  };
+  const jsonOf = async (g: Geometry) => JSON.parse(new TextDecoder().decode((await exportFilesAsync(g, 'textures', path.join(tmp, 'mr_maps'), {})).files.find((f) => f.path.endsWith('materials.json'))!.bytes)).materials.m;
+  const roughPNG = decodePNG(imagePNG(referenceableImages(await cook({ ...base, out: { type: 'texture_to_material', in: ['uv', 'rough'], params: { material: 'm', roughness: 'rough' } } }, 'out')).get('rough')!));
+  for (const [what, extra] of [
+    ['metallic_value 1', { out: { type: 'texture_to_material', in: ['uv', 'maps'], params: { material: 'm', roughness: 'rough', base_color: 'col', metallic_value: 1 } } }],
+    ['a material with metallic 0.5', { mat: { type: 'material', in: ['uv'], params: { name: 'm', metallic: 0.5 } }, out: { type: 'texture_to_material', in: ['mat', 'maps'], params: { material: 'm', roughness: 'rough', base_color: 'col' } } }],
+  ] as [string, Record<string, NodeSpec>][]) {
+    const g = await cook({ ...base, ...extra }, 'out');
+    const metallic = readMaterials(g).m.metallic;
+    const { pbr, img } = await glbOf(g);
+    let blueOk = true, greenOk = true;
+    for (let i = 0; i < img.width * img.height; i++) {
+      if (img.data[i * img.channels + 2] !== 255) blueOk = false;
+      if (img.data[i * img.channels + 1] !== roughPNG.data[i]) greenOk = false;
+    }
+    check(img.channels >= 3 && blueOk && greenOk && (pbr.metallicFactor ?? 1) === metallic && (pbr.roughnessFactor ?? 1) === 1,
+      `glb, ${what}: the roughness map is repacked (green = roughness, blue = 1), so metallic is the factor ${pbr.metallicFactor ?? 1} everywhere`);
+    const mj = await jsonOf(g);
+    check(mj.roughness === (pbr.roughnessFactor ?? 1) && mj.metallic === (pbr.metallicFactor ?? 1) && eqArr(mj.baseColor, [1, 1, 1]) && mj.maps.roughness === 'rough.png',
+      `textures materials.json, ${what}: the factors the glb writes (roughness ${mj.roughness}, metallic ${mj.metallic}, white base colour under its map)`);
+  }
+  const plain = await cook({ ...base, out: { type: 'texture_to_material', in: ['uv', 'rough'], params: { material: 'm', roughness: 'rough' } } }, 'out');
+  const p0 = await glbOf(plain);
+  check(p0.pbr.metallicFactor === 0 && p0.img.channels === 1 && p0.img.data.every((v, i) => v === roughPNG.data[i]), 'glb, metallic 0: the grey roughness map is written as it is');
+  const greyOrm = await engine.cook({ nodes: { ...base, out: { type: 'texture_to_material', in: ['uv', 'rough'], params: { material: 'm', orm: 'rough' } } }, output: 'out' });
+  check(greyOrm.ok && greyOrm.warnings.some((w) => /the orm image "rough" is grey: glTF reads its one value as occlusion, roughness and metallic alike/.test(w.message)), 'texture_to_material warns about a grey image in the orm slot');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

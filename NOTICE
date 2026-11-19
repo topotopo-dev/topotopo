@@ -183,6 +183,10 @@ tslib@2.8.1: 0BSD (https://www.npmjs.com/package/tslib)
 
 Rust crates in the WebAssembly kernels (kernels/pkg): see "Rust crates compiled into the WebAssembly kernels (kernels/pkg)" at the end.
 
+Windows launcher (launcher/win32-x64/topotopo-open.exe, built from launcher/): TopoTopo's own code with the Rust
+standard library (MIT OR Apache-2.0, https://github.com/rust-lang/rust) and the Microsoft C runtime linked in;
+it uses no other crates.
+
 Licence texts
 -------------
 ==============================================================================
