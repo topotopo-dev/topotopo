@@ -52,16 +52,21 @@ folder under `Saved/TopoTopo/`. Everything there belongs to the cook. For the op
 
 | kind | files |
 |---|---|
-| mesh | `<id>.glb`; prims named `*_lod<n>` split into `<id>.glb` and `<id>_lod<i>.glb`; `<id>.sockets.json` when it has `scene_null` points |
+| mesh | `<id>.glb`; prims named `*_lod<n>` split into `<id>.glb` and `<id>_lod<i>.glb`, without the suffix inside; `<id>.sockets.json` when it has `scene_null` points |
 | instances | `<id>.instances.csv`, `<id>.instances.meshes.json`, `<id>_meshes/<source>.glb`, and `<id>.glb` for any plain meshes beside them |
 | points | `<id>.points.csv` |
 | textures | one PNG per image |
-| terrain | the `unreal_landscape` bundle: `landscape.json`, `heightmap.png`, `heightmap.json`, `layers/*.png`, ... |
+| terrain | the `unreal_landscape` bundle: `landscape.json`, `heightmap.png`, `heightmap.json`, `layers/*.png`, ...; a warning when its `exact_fit` is false, which TopoTopoPCG refuses to place |
 | scene | by what it holds: with a heightfield a terrain bundle, else as mesh and instances |
 | curves, material, volume | none: skipped, with why |
 
 The GLB is y up, in metres, with materials and embedded images, and uncompressed. A GLB that would require an extension
-Interchange does not read fails that output and writes nothing. The CSVs have the PCG columns in Unreal axes and centimetres:
+Interchange does not read fails that output and writes nothing. Prims named `<x>-convcolonly` or `<x>-colonly` are renamed
+`UCX_<mesh>_<nn>`, numbered in order, where `<mesh>` is the first other prim name (or the output id, which unnamed prims
+then take): Interchange makes them the mesh's convex collision. A `-colonly` piece adds a warning, since it becomes convex.
+Interchange logs `Json Value of type 'Object' used as a 'String'` once per GLB, because it keeps `asset.extras` as strings
+and the GLB's `asset.extras.source` is an object; the import is not affected, and the cook reads that block to know its
+files, so it stays. The CSVs have the PCG columns in Unreal axes and centimetres:
 X = x, Y = z, Z = y, with rotation as a rotator. Sockets use the same axes:
 
 ```json
@@ -85,7 +90,7 @@ decided here, on TopoTopo's side, and tested without the editor.
 
 | `as` | fields | the plugin |
 |---|---|---|
-| `static_mesh` | `file`, `folder`, `name`, optional `lods`, `sockets` | imports the GLB with Interchange as one Static Mesh `folder/name`, its materials and textures in `Materials/` and `Textures/` below it; each LOD GLB becomes the next LOD; sockets tagged `TopoTopo` are replaced |
+| `static_mesh` | `file`, `folder`, `name`, optional `lods`, `sockets` | imports the GLB with Interchange as one Static Mesh `folder/name`, its materials and textures in `Materials/` and `Textures/` below it, never reusing a material of the same name; an asset that exists is updated in place and takes the GLB's values again, except properties changed in the editor since (Interchange's Preserve Editor Changed Properties), and the materials below `folder` made from that GLB are reimported from it with all of its values (an import over a mesh leaves them as they were); when the GLB has `UCX_` nodes, the mesh's old simple collision is removed first; each LOD GLB becomes the next LOD; sockets tagged `TopoTopo` are replaced |
 | `texture` | `file`, `folder`, `name` | imports the PNG as a Texture |
 | `instances` | `file`, `folder`, `name`, `meshes` | writes a TopoTopo Instances asset from the rows, its groups by the `Mesh` column; `meshes` maps each value to an asset; rebuilds actors in open levels |
 | `points` | `file`, `folder`, `name`, optional `meshes` | writes a PCG Data Asset; the columns that are no native point property become attributes (whole numbers, numbers or strings), and `meshes` adds a `MeshPath` attribute |

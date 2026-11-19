@@ -29,7 +29,7 @@ output's assets go to `outputs/<output id>/` beside the package.
 
 | Output kind | What you get |
 |---|---|
-| mesh | A Static Mesh with its materials and textures (in `Materials/` and `Textures/`), `_lod<n>` pieces as its LODs, `scene_null` points as sockets tagged `TopoTopo` |
+| mesh | A Static Mesh with its materials and textures (in `Materials/` and `Textures/`), `_lod<n>` pieces as its LODs, `scene_null` points as sockets tagged `TopoTopo`, and pieces named `<name>-convcolonly` as its convex collision |
 | instances | One Static Mesh per packed source in `Meshes/`, a **TopoTopo Instances** asset, and a PCG Data Asset (`<id>_Points`) with one point per instance |
 | points | A PCG Data Asset (`<id>_Points`); every column becomes an attribute |
 | textures | One Texture per image |
@@ -37,8 +37,23 @@ output's assets go to `outputs/<output id>/` beside the package.
 | curves, material, volume | Not imported yet. The package asset lists them under Skipped, with why |
 
 Levels use these assets, never the package asset, which stays in the editor. Drag a TopoTopo Instances asset into a level to
-place it as hierarchical instanced static meshes. In a PCG graph, read `<id>_Points` with a Load Data Asset node; its
-`MeshPath` attribute names each point's mesh for a Static Mesh Spawner.
+place it as hierarchical instanced static meshes. For a Blueprint, place it first and convert the actor (Convert Selection to
+Blueprint Class), which keeps its instances: Unreal 5.8 no longer lets the plugin fill in a Blueprint made straight from the
+asset, so that one starts empty and needs its Instances property set. In a PCG graph, read `<id>_Points` with a Load Data
+Asset node; its `MeshPath` attribute names each point's mesh for a Static Mesh Spawner.
+
+A few things about meshes:
+
+- **Collision**: a piece named `<name>-convcolonly` becomes a convex collision hull and is not drawn (the cook renames it to
+  Unreal's `UCX_`). Unreal's collision pieces are always convex, so a `-colonly` piece becomes its convex hull, and the cook
+  warns. A mesh without such pieces gets one convex hull that Unreal generates. With pieces, the package owns the mesh's simple
+  collision: a reimport replaces it, including hulls added by hand.
+- **Colour**: a mesh with a colour but no material gets a material of that colour.
+- **Materials** follow the package: a changed material comes through on reimport, and edits made to an imported material
+  are replaced. To change the look, assign your own material in the Static Mesh's slots or on a placed actor: those stay.
+
+Terrain can be placed only when it fits Unreal's landscape grid: 127, 253, 505, 1009, 2017 or 4033 samples per side (use
+`heightfield_resample`). The cook warns on the output when it does not, and Place Terrain in Level refuses it.
 
 Axes are converted the same way everywhere: Unreal X is TopoTopo x, Y is z, Z is y, in centimetres.
 

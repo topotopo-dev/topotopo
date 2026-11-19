@@ -8,12 +8,15 @@
 #include "Data/PCGPointArrayData.h"
 #include "Dom/JsonObject.h"
 #include "Editor.h"
+#include "EditorFramework/AssetImportData.h"
 #include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Engine/StaticMeshSocket.h"
 #include "EngineUtils.h"
 #include "FileHelpers.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "IAssetTools.h"
+#include "InterchangeAssetImportData.h"
 #include "InterchangeGenericAssetsPipeline.h"
 #include "InterchangeGenericAssetsPipelineSharedSettings.h"
 #include "InterchangeGenericMaterialPipeline.h"
@@ -104,39 +107,56 @@ namespace
 
     // ------------------------------------------------------------------------------------------------- meshes
 
+    /** The pipelines a GLB is imported with, kept alive while Interchange uses them. */
+    struct FGlbPipelines
+    {
+        TStrongObjectPtr<UInterchangeGenericAssetsPipeline> Assets;
+        TStrongObjectPtr<UTopoTopoFolderPipeline> Folders;
+        FImportAssetParameters Parameters;
+
+        bool Make(const FString& Name, bool bMaterials, bool bNanite, FString& Error)
+        {
+            UInterchangeGenericAssetsPipeline* Template = LoadObject<UInterchangeGenericAssetsPipeline>(nullptr,
+                TEXT("/Interchange/Pipelines/DefaultGLTFAssetsPipeline.DefaultGLTFAssetsPipeline"));
+            if (!Template)
+            {
+                Error = TEXT("Interchange's DefaultGLTFAssetsPipeline is unavailable: enable the Interchange Framework plugin and restart");
+                return false;
+            }
+            Assets.Reset(DuplicateObject(Template, GetTransientPackage()));
+            // an asset that exists takes the pipeline's values again, but keeps what was changed on it in the editor since
+            Assets->ReimportStrategy = EReimportStrategyFlags::ApplyEditorChangedProperties;
+            Assets->bUseSourceNameForAsset = true;
+            Assets->AssetName = Name;
+            Assets->bSceneNameSubFolder = false;
+            Assets->bAssetTypeSubFolders = false;
+            Assets->CommonMeshesProperties->bBakeMeshes = true;
+            Assets->MeshPipeline->bImportStaticMeshes = true;
+            Assets->MeshPipeline->CombineStaticMeshesBehavior = EInterchangeCombineStaticMeshesBehavior::All;
+            if (!bNanite) { Assets->MeshPipeline->bBuildNanite = false; }
+            Assets->MaterialPipeline->bImportMaterials = bMaterials;
+            // the default reuses a material of the same name already in the folder
+            Assets->MaterialPipeline->bReuseExistingMaterials = false;
+            Assets->MaterialPipeline->TexturePipeline->bImportTextures = bMaterials;
+
+            Parameters.bIsAutomated = true;
+            Parameters.bReplaceExisting = true;
+            Parameters.OverridePipelines.Add(FSoftObjectPath(Assets.Get()));
+            // the second native glTF pipeline maps glTF materials to the engine's material templates
+            Parameters.OverridePipelines.Add(FSoftObjectPath(TEXT("/Interchange/Pipelines/DefaultGLTFPipeline.DefaultGLTFPipeline")));
+            Folders.Reset(NewObject<UTopoTopoFolderPipeline>(GetTransientPackage()));
+            Parameters.OverridePipelines.Add(FSoftObjectPath(Folders.Get()));
+            return true;
+        }
+    };
+
     UStaticMesh* ImportGlb(const FString& File, const FString& Folder, const FString& Name, bool bMaterials, bool bNanite, FSession* Session, FString& Error)
     {
-        UInterchangeGenericAssetsPipeline* Template = LoadObject<UInterchangeGenericAssetsPipeline>(nullptr,
-            TEXT("/Interchange/Pipelines/DefaultGLTFAssetsPipeline.DefaultGLTFAssetsPipeline"));
-        if (!Template)
-        {
-            Error = TEXT("Interchange's DefaultGLTFAssetsPipeline is unavailable: enable the Interchange Framework plugin and restart");
-            return nullptr;
-        }
-        TStrongObjectPtr<UInterchangeGenericAssetsPipeline> Pipeline(DuplicateObject(Template, GetTransientPackage()));
-        Pipeline->bUseSourceNameForAsset = true;
-        Pipeline->AssetName = Name;
-        Pipeline->bSceneNameSubFolder = false;
-        Pipeline->bAssetTypeSubFolders = false;
-        Pipeline->CommonMeshesProperties->bBakeMeshes = true;
-        Pipeline->MeshPipeline->bImportStaticMeshes = true;
-        Pipeline->MeshPipeline->CombineStaticMeshesBehavior = EInterchangeCombineStaticMeshesBehavior::All;
-        if (!bNanite) { Pipeline->MeshPipeline->bBuildNanite = false; }
-        Pipeline->MaterialPipeline->bImportMaterials = bMaterials;
-        Pipeline->MaterialPipeline->TexturePipeline->bImportTextures = bMaterials;
-
-        FImportAssetParameters Parameters;
-        Parameters.bIsAutomated = true;
-        Parameters.bReplaceExisting = true;
-        Parameters.OverridePipelines.Add(FSoftObjectPath(Pipeline.Get()));
-        // the second native glTF pipeline maps glTF materials to the engine's material templates
-        Parameters.OverridePipelines.Add(FSoftObjectPath(TEXT("/Interchange/Pipelines/DefaultGLTFPipeline.DefaultGLTFPipeline")));
-        TStrongObjectPtr<UTopoTopoFolderPipeline> Folders(NewObject<UTopoTopoFolderPipeline>(GetTransientPackage()));
-        Parameters.OverridePipelines.Add(FSoftObjectPath(Folders.Get()));
-
+        FGlbPipelines Pipelines;
+        if (!Pipelines.Make(Name, bMaterials, bNanite, Error)) { return nullptr; }
         TStrongObjectPtr<UInterchangeSourceData> Source(UInterchangeManager::CreateSourceData(File));
         TArray<UObject*> Imported;
-        if (!UInterchangeManager::GetInterchangeManager().ImportAsset(Folder, Source.Get(), Parameters, Imported))
+        if (!UInterchangeManager::GetInterchangeManager().ImportAsset(Folder, Source.Get(), Pipelines.Parameters, Imported))
         {
             Error = FString::Printf(TEXT("Interchange could not import %s (see the Interchange log)"), *File);
             return nullptr;
@@ -147,7 +167,40 @@ namespace
             if (Session) { Session->Touched(Object); }
             if (UStaticMesh* Found = Cast<UStaticMesh>(Object)) { Mesh = Found; }
         }
-        if (!Mesh) { Error = FString::Printf(TEXT("Interchange made no static mesh from %s"), *File); }
+        if (!Mesh) { Error = FString::Printf(TEXT("Interchange made no static mesh from %s"), *File); return nullptr; }
+        if (!bMaterials) { return Mesh; }
+        // an import over a mesh leaves the materials it already has as they were, so a changed material would never come
+        // through: the materials below the mesh's folder that were made from this GLB are reimported from it, whether or
+        // not a slot still uses them. They belong to the package, so they take all of its values (a reimport runs with
+        // the pipelines stored on the asset); an artist's choice is a material assigned to a slot or an actor, which stays
+        const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+        TArray<FAssetData> Found;
+        Registry.GetAssetsByPath(FName(*Folder), Found, true);
+        for (const FAssetData& Asset : Found)
+        {
+            if (!Asset.IsInstanceOf(UMaterialInterface::StaticClass())) { continue; }
+            UMaterialInterface* Material = Cast<UMaterialInterface>(Asset.GetAsset());
+            if (!Material || !Material->AssetImportData || !FPaths::IsSamePath(Material->AssetImportData->GetFirstFilename(), File)) { continue; }
+            if (UInterchangeAssetImportData* Data = Cast<UInterchangeAssetImportData>(Material->AssetImportData))
+            {
+                TArray<UObject*> Stored = Data->GetPipelines();
+                for (UObject* Stage : Stored)
+                {
+                    if (UInterchangeGenericAssetsPipeline* Assets = Cast<UInterchangeGenericAssetsPipeline>(Stage)) { Assets->ReimportStrategy = EReimportStrategyFlags::ApplyPipelineProperties; }
+                }
+                Data->SetPipelines(Stored);
+            }
+            FGlbPipelines Again;
+            if (!Again.Make(Name, true, bNanite, Error)) { return nullptr; }
+            Again.Parameters.ReimportAsset = Material;
+            TArray<UObject*> Reimported;
+            if (!UInterchangeManager::GetInterchangeManager().ReimportAsset(Material, Again.Parameters, Reimported))
+            {
+                UE_LOG(LogTopoTopo, Warning, TEXT("TopoTopo: %s was not reimported from %s"), *Material->GetPathName(), *File);
+                continue;
+            }
+            for (UObject* Object : Reimported) { if (Session) { Session->Touched(Object); } }
+        }
         return Mesh;
     }
 
@@ -199,8 +252,35 @@ namespace
         }
     }
 
+    /** Whether a GLB has collision pieces: nodes named UCX_ (the cook's name for -convcolonly / -colonly pieces). */
+    bool HasCollisionPieces(const FString& File)
+    {
+        TArray<uint8> Bytes;
+        if (!FFileHelper::LoadFileToArray(Bytes, *File) || Bytes.Num() < 20) { return false; }
+        const uint32 Length = Bytes[12] | (Bytes[13] << 8) | (Bytes[14] << 16) | (uint32(Bytes[15]) << 24);
+        if (20 + int64(Length) > Bytes.Num()) { return false; }
+        const FString Text = FString(FUTF8ToTCHAR(reinterpret_cast<const ANSICHAR*>(Bytes.GetData() + 20), Length));
+        TSharedPtr<FJsonObject> Root;
+        const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+        if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root) || !Root || !Root->TryGetArrayField(TEXT("nodes"), Nodes)) { return false; }
+        for (const TSharedPtr<FJsonValue>& Node : *Nodes)
+        {
+            FString Name;
+            if (Node->AsObject() && Node->AsObject()->TryGetStringField(TEXT("name"), Name) && Name.StartsWith(TEXT("UCX_"), ESearchCase::CaseSensitive)) { return true; }
+        }
+        return false;
+    }
+
     UObject* ImportMeshStep(const FStep& Step, FSession& Session, FString& Error)
     {
+        // a GLB with collision pieces owns the mesh's simple collision: the old hulls go first, or Interchange copies the new
+        // ones over them (an engine ensure) and keeps a hull Unreal generated before there were pieces
+        UStaticMesh* Old = HasCollisionPieces(ProjectFile(Step.File)) ? LoadObject<UStaticMesh>(nullptr, *Step.ObjectPath(), nullptr, LOAD_NoWarn | LOAD_Quiet) : nullptr;
+        if (UBodySetup* Body = Old ? Old->GetBodySetup() : nullptr)
+        {
+            Body->Modify();
+            Body->RemoveSimpleCollision();
+        }
         UStaticMesh* Mesh = ImportGlb(ProjectFile(Step.File), Step.Folder, Step.Name, true, Step.Lods.IsEmpty(), &Session, Error);
         if (!Mesh) { return nullptr; }
         for (int32 I = 0; I < Step.Lods.Num(); I++)
