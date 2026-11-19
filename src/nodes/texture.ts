@@ -1576,8 +1576,11 @@ defineNode({
     }
     const first = [0, 1, 2, 3].find((i) => ctx.hasInput(i));
     if (first === undefined) throw new NodeError(`${type}: connect at least one input (R, G, B or A)`);
-    const ref = source(ctx, first, '', '', '');
-    const w = ref.img.width, h = ref.img.height, n = w * h;
+    // the largest input sets the size; the others are resized to it, and the cook says so
+    const found = [0, 1, 2, 3].filter((i) => ctx.hasInput(i)).map((i) => ({ i, img: source(ctx, i, '', '', '').img }));
+    const ref = found.reduce((a, b) => (b.img.width * b.img.height > a.img.width * a.img.height ? b : a)).img;
+    const w = ref.width, h = ref.height, n = w * h;
+    for (const f of found) if (f.img.width !== w || f.img.height !== h) ctx.warn(`${type}: input ${f.i} "${f.img.name}" is ${f.img.width} × ${f.img.height}, the largest is ${w} × ${h}; it is resized`);
     const out = new Float32Array(n * 4);
     for (let c = 0; c < 4; c++) {
       const s = sourceAt(ctx, c, w, h);
