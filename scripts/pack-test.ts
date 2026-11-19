@@ -22,6 +22,8 @@
 //   catalog (TopoTopo's own packages too), a build that names a built-in package's output and copies the built-in package in from the installed
 //   built-in library, a build that uses sdf_grid, and the preview page with three.js served from the installed
 //   dependencies.
+// - `topotopo open <package>` from the installed bin: it starts the web app of the installed dist/ unseen, on a folder and
+//   a config of its own, records the address instead of opening a browser, the address answers, and a second open reuses it.
 // - On Windows, the launcher from the installed package (launcher/win32-x64/topotopo-open.exe): it finds the installed
 //   command line and a Node.js by itself and reports a failing open.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
@@ -174,6 +176,36 @@ try {
     const said = (r.stderr ?? '').replace(/\r\n/g, '\n');
     check(r.status !== 0 && said.startsWith('TopoTopo could not open missing.topo.\n\n') && said.trim().split('\n').length > 2 && !said.includes('src/cli.ts'),
       `installed launcher runs the installed command line: open on a missing file fails and says why (exit ${r.status}: ${JSON.stringify(said.split('\n')[2] ?? '')})`);
+  }
+
+  // ------------------------------------------------------------------------------------------------ open
+  step(`open: npm exec --no -- ${BIN} open <package>`);
+  {
+    // the installed command line opens a package: it starts the web app (the installed dist/, unseen, on a free port of
+    // its own folder and config), records the address instead of opening a browser, and the address answers
+    const home = path.join(tmp, 'open-home');
+    fs.mkdirSync(home);
+    const net = await import('node:net');
+    const port = await new Promise<number>((resolve) => { const sv = net.createServer(); sv.listen(0, '127.0.0.1', () => { const p = (sv.address() as any).port as number; sv.close(() => resolve(p)); }); });
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ web: { port } }));
+    const kit = path.join(tmp, 'open-kit', 'demo-kit');
+    fs.mkdirSync(kit, { recursive: true });
+    sh(`npm exec --no -- ${BIN} init "${kit}"`, app);
+    const log = path.join(home, 'browser.log');
+    const openEnv = { ...process.env, TOPOTOPO_HOME: home, TOPOTOPO_CONFIG: path.join(home, 'config.json'), TOPOTOPO_BROWSER_LOG: log };
+    let lockPid = 0;
+    try {
+      const said = sh(`npm exec --no -- ${BIN} open "${path.join(kit, 'demo-kit.topo')}"`, app, openEnv);
+      const lock = JSON.parse(fs.readFileSync(path.join(home, 'web.lock'), 'utf8'));
+      lockPid = lock.pid;
+      const url = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '';
+      const res = url ? await fetch(url, { headers: { connection: 'close' }, signal: AbortSignal.timeout(20000) }).catch(() => null) : null;
+      check(/^opening http:\/\/127\.0\.0\.1:\d+\/l\/open-kit\/demo-kit\/$/m.test(said) && url === said.trim().replace(/^opening /, '') && lock.port === port && res?.status === 200, `open starts the web app from the installed dist/ and the package's page answers (${url}: ${res?.status})`);
+      sh(`npm exec --no -- ${BIN} open "${kit}"`, app, openEnv);
+      check(JSON.parse(fs.readFileSync(path.join(home, 'web.lock'), 'utf8')).pid === lockPid && fs.readFileSync(log, 'utf8').trim().split(String.fromCharCode(10)).length === 2, 'a second open reuses that web app');
+    } finally {
+      if (lockPid) { try { if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(lockPid), '/T', '/F'], { stdio: 'ignore' }); else process.kill(lockPid); } catch { /* gone */ } }
+    }
   }
 
   // ------------------------------------------------------------------------------------------------ Godot

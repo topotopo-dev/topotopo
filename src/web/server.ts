@@ -7,9 +7,11 @@
 // /p/<workspace or library>/<id>, which leads to its folder page, with its thumbnail and an iframe embed.
 // It reads files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in
 // editor" starts a `topotopo edit` child. Bound to 127.0.0.1 on a fixed port (stable links); requests must name this
-// server as their Host, and writes must come from its own pages.
+// server as their Host, and writes must come from its own pages. `topotopo open` asks it (POST /api/open) for the page of a
+// package or workspace, which it lists for its run when the config does not (src/host/open.ts).
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
@@ -21,7 +23,7 @@ import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { readWorkspace, engineFile } from '../workspace.ts';
-import { WORKSPACE_PACKAGES, workspaceAt, workspaceFilePath } from '../package.ts';
+import { WORKSPACE_PACKAGES, locate, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
 import { folderKey, forgetScans, forgetScansOf, scanTree, unscanned } from '../scan.ts';
 import { engineTypeOf } from '../engines.ts';
@@ -289,8 +291,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     }, 500);
   };
   const watchers: fs.FSWatcher[] = [];
-  for (const s of scans) {
-    if (s.name === BUILTIN_LIBRARY.name) continue; // nothing of it is baked here: read again at each rescan
+  const watched = new Set<string>();
+  /** Watch the folders of the scans not watched yet (those at the start, and those a request opened later). */
+  const watchRoots = () => { for (const s of scans) {
+    if (s.name === BUILTIN_LIBRARY.name || watched.has(s.root)) continue; // nothing of it is baked here: read again at each rescan
+    watched.add(s.root);
     try {
       const w = fs.watch(s.root, { recursive: true }, (_ev, f) => {
         const rel = f ? String(f).split(path.sep).join('/') : '';
@@ -313,9 +318,53 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       w.unref();
       watchers.push(w);
     } catch { /* no folder (a problem on the page) or no recursive watch: the periodic rescan covers it */ }
-  }
+  } };
+  watchRoots();
   const periodic = setInterval(() => { rescan(); for (const p of packages.values()) bakeIfStale(p); rewarm(); }, RESCAN_MS);
   periodic.unref();
+
+  // ---------------------------------------------------------------- pages for what topotopo open asks for
+  /**
+   * Add a workspace or library to the web app for this run (the config is not written), read it, and watch it.
+   * Another workspace or library with the name makes the name another: a library's, since a package's folder gives it.
+   */
+  const addRoot = (kind: 'w' | 'l', wanted: string, dir: string): string => {
+    const all = [...cfg.workspaces, ...cfg.libraries, BUILTIN_LIBRARY];
+    let name = wanted;
+    if (kind === 'w' && all.some((x) => x.name === name)) throw new HttpError(409, `"${name}" is the name of a library or workspace the web app lists already (${all.find((x) => x.name === name)!.path}): rename the workspace's .topows file`);
+    for (let n = 2; all.some((x) => x.name === name); n++) name = `${wanted}-${n}`;
+    (kind === 'w' ? cfg.workspaces : cfg.libraries).push({ name, path: dir });
+    rescan();
+    watchRoots();
+    for (const p of packages.values()) bakeIfStale(p);
+    broadcast({ list: true });
+    return name;
+  };
+  /** The page of a package folder or a workspace folder, listed first when it is not. */
+  const openPage = (kind: 'package' | 'workspace', dir: string): string => {
+    if (kind === 'workspace') {
+      const file = workspaceAt(dir);
+      if (!file) throw new HttpError(400, `${dir} holds no .topows file`);
+      const have = games.find((g) => folderKey(g.dir) === folderKey(dir));
+      return urls.folder('w', have ? have.name : addRoot('w', file.name, dir), '');
+    }
+    let p = byDir.get(folderKey(dir));
+    if (!p) {
+      const ws = locate(dir).workspace;
+      if (ws) {
+        if (!games.some((g) => folderKey(g.dir) === folderKey(ws))) addRoot('w', workspaceAt(ws)?.name ?? (slugify(path.basename(ws)) || 'workspace'), ws);
+      } else {
+        const parent = path.dirname(dir);
+        // a root of a drive or the person's whole home folder is no library to read all of
+        if (parent === path.dirname(parent) || folderKey(parent) === folderKey(os.homedir()))
+          throw new HttpError(409, `${dir} is in no workspace or library the web app lists, and its folder is too wide to list: put the package in a folder of its own packages, or in a workspace`);
+        if (!scans.some((s) => folderKey(s.root) === folderKey(parent))) addRoot('l', slugify(path.basename(parent)) || 'packages', parent);
+      }
+      p = byDir.get(folderKey(dir));
+    }
+    if (!p) throw new HttpError(409, `${dir} is a package the web app cannot list (another package there uses its id, or its manifest cannot be read): see its folder page`);
+    return pageOf(p);
+  };
 
   // ---------------------------------------------------------------- editors
   const editors = new Map<string, { child: ChildProcess; url: Promise<string> }>();
@@ -773,6 +822,19 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream', { 'cache-control': 'max-age=3600' }) : send(404, 'not found');
       }
       if (u.pathname === '/api/health') return json(200, { web: true, libraries: scans.length, packages: packages.size, baking: queue.size });
+      if (u.pathname === '/api/open') {
+        // `topotopo open`: the page of a package or workspace, which the web app lists for this run when it does not yet
+        // (nothing is written to the config). Only the program that starts the web app asks: a page of another origin
+        // cannot send the header without a preflight, which is refused
+        if (req.method !== 'POST') throw new HttpError(405, 'POST {"kind": "package" | "workspace", "dir": folder}');
+        if (req.headers.origin || req.headers['x-topotopo-open'] !== '1') throw new HttpError(403, 'only topotopo open may ask for this');
+        let text = '';
+        for await (const c of req) { text += c; if (text.length > 100_000) throw new HttpError(413, 'too long'); }
+        let ask: any;
+        try { ask = JSON.parse(text); } catch { throw new HttpError(400, 'a JSON body {"kind", "dir"} is expected'); }
+        if ((ask?.kind !== 'package' && ask?.kind !== 'workspace') || typeof ask.dir !== 'string') throw new HttpError(400, 'a JSON body {"kind": "package" | "workspace", "dir": folder} is expected');
+        return json(200, { url: openPage(ask.kind, path.resolve(ask.dir)) });
+      }
       if (u.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
         res.write(': hello\n\n');

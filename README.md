@@ -477,6 +477,13 @@ topotopo library add props D:/shared/props
 topotopo web
 ```
 
+`topotopo open <file.topo | file.topows | folder>` opens one package or workspace in your browser: it finds the web
+app of your user (a small lock file, `web.lock`, in `~/.topotopo`), starts one unseen when none runs, lists the
+package or workspace for that run when the config does not (the config is not changed) and opens its page. With no
+path it opens the home page. A path that does not exist, or a folder holding neither file, is one sentence on stderr
+and exit code 1. `TOPOTOPO_HOME` names the TopoTopo folder instead of `~/.topotopo`; `TOPOTOPO_BROWSER_LOG` names a
+file the address is written to instead of opening a browser (scripts and tests).
+
 - **Front page**: each registered workspace and library as a card with a few pictures from inside and its counts of
   packages, folders, files and flags; TopoTopo's built-in library last. The search finds every package by name, tag
   and the packages it uses, and their outputs by name, kind and tag.

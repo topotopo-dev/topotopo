@@ -155,8 +155,8 @@ says what the open package's workspace holds: its packages as the scan finds the
   and why; it changes nothing but missing .gdignore files. Run it after a TopoTopo update.
 
 LIBRARIES AND THE WEB APP: a library holds packages in folders below it; the parent folders ("props") are a package's
-collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340)
-mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries: the front page
+collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340; \`topotopo open <file.topo|file.topows|folder>\` opens one package or
+workspace in the browser, starting the web app unseen when none runs and listing it for that run) mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries: the front page
 shows each as a card (TopoTopo's built-in library last) and searches every package and output; every folder is a page
 (/w/<workspace>/<path>/, /l/<library>/<path>/) with its flags, its package when it holds a .topo file (preview,
 versions, outputs with their kinds and tags, the packages that use it and those it uses, graphs, exports), its notes,
