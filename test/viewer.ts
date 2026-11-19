@@ -755,7 +755,7 @@ section('GET /api/geo: the preview GLB of many packed sources and their edge cas
     // a result whose GLB cannot be written: the cook is good, the route says the preview failed
     const binfo = await fetch(`${v.url}api/info?graph=broken`);
     const bres = await fetch(`${v.url}api/geo?graph=broken`), bj = await bres.json() as any;
-    check(binfo.status === 200 && bres.status === 500 && bj.preview === true && /^preview failed: /.test(bj.error ?? ''), `a GLB that cannot be written answers 500 "preview failed: …" (${bj.error})`);
+    check(binfo.status === 200 && bres.status === 500 && bj.preview === true && /^preview failed: a packed prim names packed source 7, and the geometry has 1 /.test(bj.error ?? ''), `a GLB that cannot be written answers 500 "preview failed: …", saying why (${bj.error})`);
   } finally { v.close(); }
 }
 
