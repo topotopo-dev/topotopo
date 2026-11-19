@@ -1,13 +1,14 @@
 // The cook for Unreal and the plugin's setup, without the editor: `topotopo unreal setup` (the plugin copied, the .uproject, the
 // Auto Reimport exclusions, .gitignore, idempotence, refusals), the cook's mapping of output kinds to files and import steps
 // (src/host/unreal.ts, integrations/unreal/PROTOCOL.md), axes in rows and sockets, freshness and incremental cooks, a failed output
-// keeping its last good files, status, the jobs file, and that the plugin's C++ speaks the same protocol and exclusions. The editor
-// round trip is manual and its steps are in integrations/unreal/TopoTopoImport/README.md.
+// keeping its last good files, status, the jobs file, and that the plugin's C++ speaks the same protocol and exclusions. What the
+// plugin does in the editor (import, reimport, Auto Reimport) is not checked here.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import '../src/nodes/index.ts';
 import { cookCommand } from '../src/host/cook-command.ts';
 import { COOK_PROTOCOL, RECORD_SCHEMA } from '../src/host/cook.ts';
 import { GITIGNORE_LINES, PLUGIN_NAME, PLUGIN_SOURCE, REIMPORT_INI, UNREAL_EXCLUDES, assetName, contentPathOf, enableInUproject, missingExcludes, normalContentPath, unrealCommand, unrealPlan, unrealStatus, withExcludes } from '../src/host/unreal.ts';
@@ -102,8 +103,6 @@ section('unreal setup');
   check(e.code === 2 && /no Unreal project folder/.test(e.err), `a folder without a .uproject exits 2 (${e.err})`);
   check((await unreal(['setup'])).code === 2 && (await unreal(['nope'])).code === 2, 'usage errors exit 2');
 
-  const uproject = path.join(tmp, 'bad.uproject');
-  fs.writeFileSync(uproject, 'not json');
   let threw = '';
   try { enableInUproject('not json', PLUGIN_NAME); } catch (x: any) { threw = x.message; }
   check(/no JSON/.test(threw), 'a broken .uproject is said, not overwritten');
@@ -231,9 +230,14 @@ section('the cook');
   const none = path.join(tmp, 'noproject');
   copyDir(FIXTURE, none);
   const noP = await cook([none, '--for', 'unreal']);
-  check(noP.code === 2 && /no Unreal project/.test(noP.text), 'a package in no project exits 2');
+  check(noP.code === 2 && /is in no Unreal project/.test(noP.text), `a package in no project exits 2 (${noP.text.slice(-70)})`);
+  // --into: a content path (above), or a folder on disk under Content/; a relative folder is the working directory's
+  const abs = await cook([dir, '--for', 'unreal', '--into', path.join(game, 'Content', 'Baked'), '--report', report]);
+  check(abs.code === 0 && readJson(report).outputs.find((o: any) => o.id === 'crate').import[0].folder === '/Game/Baked/crate', '--into takes a folder under Content/ as its content path');
+  const recordBefore = fs.readFileSync(path.join(dir, '.topotopo', 'unreal.json'), 'utf8');
   const u = await cook([dir, '--for', 'unreal', '--into', 'relative/folder']);
-  check(u.code === 2 || u.code === 0, `--into takes a content path (${u.text.split('\n')[0].slice(0, 80)})`);
+  check(u.code === 2 && /outside the Unreal project's Content/.test(u.text) && fs.readFileSync(path.join(dir, '.topotopo', 'unreal.json'), 'utf8') === recordBefore,
+    `a relative --into outside Content/ exits 2 and writes nothing (${u.text.split('\n')[0].slice(-60)})`);
 
   // the jobs file
   const jobs = path.join(tmp, 'jobs.json');
@@ -271,7 +275,8 @@ section('the plugin speaks this TopoTopo');
   const editor = path.join(PLUGIN_SOURCE, 'Source', 'TopoTopoImportEditor', 'Private');
   const read = (f: string) => fs.readFileSync(path.join(editor, f), 'utf8');
   check(new RegExp(`constexpr int32 Protocol = ${COOK_PROTOCOL};`).test(read('TopoTopoCook.h')), `its protocol is ${COOK_PROTOCOL}`);
-  const excludes = [...read('TopoTopoImportEditorModule.cpp').matchAll(/TEXT\("((?:\*|topotopo-)[^"]*)"\)/g)].map((m) => m[1]);
+  const list = /Excludes\[\] = \{([^}]*)\}/.exec(read('TopoTopoImportEditorModule.cpp'))?.[1] ?? '';
+  const excludes = [...list.matchAll(/TEXT\("([^"]*)"\)/g)].map((m) => m[1]);
   check(excludes.join() === UNREAL_EXCLUDES.join(), `it adds the exclusions setup writes (${excludes.length})`);
   const importer = read('TopoTopoImporter.cpp');
   const kinds = [...importer.matchAll(/Step\.As == TEXT\("([a-z_]+)"\)/g)].map((m) => m[1]);
