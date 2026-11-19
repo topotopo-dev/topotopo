@@ -122,6 +122,16 @@ try {
   const again = await post({ id: model.id });
   const mainReceipts = new ArtifactStore(ws.exportDir).records().filter((a) => a.graph === 'asset' && a.output === '');
   check(again.status === 200 && !fs.readdirSync(ws.exportDir).some((f) => /^asset_\d+\.glb$/.test(f)) && mainReceipts.length === 1, 'exporting again overwrites the same file and receipt');
+  // an editor that is asked to end waits for the export under way (viewer.idle): it resolves only once the files are written whole
+  const glb = path.join(ws.exportDir, 'asset.glb');
+  fs.rmSync(glb, { force: true });
+  const underWay = post({ id: model.id }); // not awaited
+  await new Promise((r) => setTimeout(r, 20)); // the request has arrived
+  await viewer.idle();
+  check(fs.existsSync(glb) && fs.readFileSync(glb).subarray(0, 4).toString() === 'glTF' && !fs.readdirSync(ws.exportDir).some((f) => f.endsWith('.part')) && (await underWay).status === 200,
+    'viewer.idle() resolves once an export under way has written its files whole (no .part file is left)');
+  await viewer.idle();
+  check(true, 'viewer.idle() with nothing under way resolves at once');
   check((await post({ id: model.id, export: { format: 'glb', path: '../escape.glb' } })).status === 400, 'a target cannot leave exports/');
   check((await post({ id: model.id, export: { format: 'glb', scale: -1 } })).status === 400 && (await post({ id: model.id, export: { format: 'glb', sacle: 2 } })).status === 400, 'invalid and unknown export options rejected');
   check((await post({ id: model.id, export: 'fbx' })).status === 400 && ws.getGraph('asset').export === 'glb', 'unknown formats rejected, the target unchanged');

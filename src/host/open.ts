@@ -4,8 +4,10 @@
 //   - A web app of this user is found through a lock file, <TopoTopo folder>/web.lock: {"port": 7340, "pid": 1234}. The
 //     folder is ~/.topotopo ($TOPOTOPO_HOME names another). The lock names a live web app when its process lives and its
 //     port's /api/health answers with that pid. A web app that is busy (it reads a large tree) answers late: it is waited
-//     for. A lock that cannot be confirmed (the process is gone, the port is closed, answers as something else or
-//     does not answer for 40 seconds) is stale: it is replaced, and no process is ended for it.
+//     for, up to 15 seconds. A lock that cannot be confirmed (the process is gone, the port is closed, answers as something
+//     else or does not answer for 15 seconds) is stale: it is replaced, and no process is ended for it.
+//   - A web app that was asked to stop (a bake finishing first can take seconds) says so in its health and refuses to list
+//     anything: `open` waits for it to leave and starts another.
 //   - A running web app is used whatever its version or engine code, and never ended by `open`. `open` tells it its own
 //     version and engine code with each request: when they are not the web app's, its pages say that TopoTopo has changed
 //     since it started, with a button that stops it (POST /api/stop), and the person opens the file again.
@@ -35,8 +37,11 @@ const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', imp
 const OPEN_MS = 75_000;
 /** How long a web app that is starting may take. */
 const START_MS = 30_000;
-/** How long a busy web app is waited for before its lock counts as one that cannot be confirmed. */
-const BUSY_MS = 40_000;
+/**
+ * How long a port that accepts connections and does not answer is waited for before its lock counts as one that cannot be
+ * confirmed (a web app that is busy reading a large tree answers within this; one that never answers is no web app).
+ */
+const BUSY_MS = 15_000;
 /** How long `open --stop` gives the web app to leave by itself (its bakes may take up to 20 s to finish). */
 const STOP_MS = 40_000;
 
@@ -101,7 +106,7 @@ export function resolveTarget(given: string | undefined): Target {
 
 interface Lock { port: number; pid: number }
 /** What a web app's /api/health says of it (src/web/server.ts). */
-interface Health { web: true; pid: number; version?: string; engine?: string; open?: boolean }
+interface Health { web: true; pid: number; version?: string; engine?: string; open?: boolean; stopping?: boolean }
 
 const readLock = (file: string): Lock | null => {
   try {
@@ -119,15 +124,16 @@ export function removeLockIfMine(home = topotopoHome()) {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * Ask a port for its health, waiting while it is busy: `live` (the web app answered), `other` (something else
- * answered), `closed` (nothing listens), `busy` (it accepts connections but did not answer within `limit` ms).
+ * Ask a port for its health, waiting while it is busy: `live` (the web app answered), `stopping` (a web app that was asked
+ * to stop and is finishing: it is not one to open a file in), `other` (something else answered), `closed` (nothing
+ * listens), `busy` (it accepts connections but did not answer within `limit` ms).
  */
-export async function probe(port: number, limit: number): Promise<{ state: 'live'; health: Health } | { state: 'other' | 'closed' | 'busy' }> {
+export async function probe(port: number, limit: number): Promise<{ state: 'live' | 'stopping'; health: Health } | { state: 'other' | 'closed' | 'busy' }> {
   for (const t0 = Date.now(); Date.now() - t0 < limit; ) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/health`, { headers: { connection: 'close' }, signal: AbortSignal.timeout(Math.min(5000, Math.max(500, limit - (Date.now() - t0)))) });
       const j: any = await res.json().catch(() => null);
-      return j?.web === true && Number.isInteger(j.pid) ? { state: 'live', health: j } : { state: 'other' };
+      return j?.web === true && Number.isInteger(j.pid) ? { state: j.stopping === true ? 'stopping' : 'live', health: j } : { state: 'other' };
     } catch (e: any) {
       if (e?.cause?.code === 'ECONNREFUSED') return { state: 'closed' };
       if (e?.name !== 'TimeoutError') await sleep(200); // a reset, a connection that did not open yet: asked again
@@ -136,16 +142,28 @@ export async function probe(port: number, limit: number): Promise<{ state: 'live
   return { state: 'busy' };
 }
 
+/** What the lock says of a web app: it is live, it is stopping, the port is silent (it accepts connections and never answers), or there is none. */
+type Verdict = { live: Lock } | { stopping: Lock } | { silent: Lock } | { none: true };
+
 /**
- * The web app the lock names, when its process lives and its port answers with that pid. Anything else (the process is
- * gone, the port is closed or answers as something else or with another pid, or nothing answers for BUSY_MS) is a lock
- * that cannot be confirmed: null, and no process is ended for it.
+ * The web app the lock names, when its process lives and its port answers with that pid. A web app that was asked to stop
+ * and is finishing says so (`stopping`). Anything else (the process is gone, the port is closed or answers as something
+ * else or with another pid) is a lock that cannot be confirmed (`none`); so is one whose port nothing answers on for
+ * `busyMs` (`silent`: decided once, and `knownSilent` is that decision again for the same lock). No process is ended for it.
  */
-async function livingServer(file: string, dl: Deadline, busyMs = BUSY_MS): Promise<Lock | null> {
+async function judge(file: string, dl: Deadline, busyMs = BUSY_MS, knownSilent?: Lock): Promise<Verdict> {
   const lock = readLock(file);
-  if (!lock || !processAlive(lock.pid)) return null;
+  if (!lock || !processAlive(lock.pid)) return { none: true };
+  if (knownSilent && knownSilent.pid === lock.pid && knownSilent.port === lock.port) return { none: true };
   const r = await probe(lock.port, dl.left('the web app', busyMs));
-  return r.state === 'live' && r.health.pid === lock.pid ? lock : null;
+  if (r.state === 'busy') return { silent: lock };
+  if ((r.state === 'live' || r.state === 'stopping') && r.health.pid === lock.pid) return r.state === 'live' ? { live: lock } : { stopping: lock };
+  return { none: true };
+}
+
+/** Wait for a web app that is stopping to leave: its process ends (its lock goes with it). */
+async function waitToLeave(lock: Lock, dl: Deadline): Promise<void> {
+  while (processAlive(lock.pid)) { dl.left(`the web app (process ${lock.pid}) that is stopping to leave`); await sleep(100); }
 }
 
 /** End a process and what it started. */
@@ -204,7 +222,18 @@ async function startServer(home: string, lockPath: string, o: OpenOptions, dl: D
 /** The web app of this user, started when none runs (one `open` starts it; another waits and uses it). */
 export async function ensureServer(home: string, o: OpenOptions, dl: Deadline): Promise<Lock> {
   const lockPath = lockFile(home);
-  const first = await livingServer(lockPath, dl, o.busyMs);
+  let silent: Lock | undefined;
+  // the live web app, or null when there is none to use: one that is stopping is waited for to leave first
+  const find = async (): Promise<Lock | null> => {
+    for (;;) {
+      const v = await judge(lockPath, dl, o.busyMs, silent);
+      if ('live' in v) return v.live;
+      if ('stopping' in v) { await waitToLeave(v.stopping, dl); continue; }
+      if ('silent' in v) silent = v.silent;
+      return null;
+    }
+  };
+  const first = await find();
   if (first) return first;
   fs.mkdirSync(home, { recursive: true });
   let release: () => void;
@@ -213,7 +242,7 @@ export async function ensureServer(home: string, o: OpenOptions, dl: Deadline): 
   } catch (e: any) { throw new Error(e.message); }
   try {
     // another `open` may have started it while this one waited
-    return (await livingServer(lockPath, dl, o.busyMs)) ?? (await startServer(home, lockPath, o, dl));
+    return (await find()) ?? (await startServer(home, lockPath, o, dl));
   } finally { release(); }
 }
 
@@ -223,14 +252,15 @@ async function stopCommand(home: string, io: { out(s: string): void }, dl: Deadl
   const lock = readLock(lockPath);
   if (!lock || !processAlive(lock.pid)) { fs.rmSync(lockPath, { force: true }); io.out('no web app of yours is running'); return; }
   const r = await probe(lock.port, dl.left('the web app', busyMs));
-  if (r.state !== 'live' || r.health.pid !== lock.pid) {
+  if ((r.state !== 'live' && r.state !== 'stopping') || r.health.pid !== lock.pid) {
     // a reused pid, or another program on the port: the lock goes, no process is ended
     fs.rmSync(lockPath, { force: true });
     io.out(`no web app of yours answers at port ${lock.port} as process ${lock.pid}: the lock was removed and nothing was ended`);
     return;
   }
   let asked = true;
-  try {
+  // one that is stopping was asked already
+  if (r.state === 'live') try {
     const res = await fetch(`http://127.0.0.1:${lock.port}/api/stop`, { method: 'POST', headers: { 'x-topotopo-open': '1', connection: 'close' }, signal: AbortSignal.timeout(dl.left('the web app to take the request to stop', 10_000)) });
     asked = res.ok;
   } catch { asked = false; }
@@ -239,7 +269,7 @@ async function stopCommand(home: string, io: { out(s: string): void }, dl: Deadl
   if (processAlive(lock.pid)) {
     // it did not leave (or cannot be asked): the one process its health confirmed
     const again = await probe(lock.port, 2000);
-    if (again.state === 'live' && again.health.pid === lock.pid) {
+    if ((again.state === 'live' || again.state === 'stopping') && again.health.pid === lock.pid) {
       killTree(lock.pid);
       for (const t0 = Date.now(); processAlive(lock.pid) && Date.now() - t0 < 10_000; ) await sleep(100);
       ended = ' (it did not leave when asked, so the process was ended)';
@@ -265,6 +295,7 @@ async function pageFor(server: Lock, target: Exclude<Target, { kind: 'home' }>, 
     throw new Error(`the web app did not answer: ${e?.message ?? e}`);
   }
   const body: any = await res.json().catch(() => null);
+  if (res.status === 503 && body?.error) throw Object.assign(new Error(body.error), { stopping: true }); // asked to stop between the check and this request
   if (res.status === 404 || res.status === 405) throw new Error(`the running web app (port ${server.port}) cannot open files: run topotopo open --stop, then open ${target.what} again`);
   if (!res.ok || typeof body?.url !== 'string') throw new Error(body?.error ?? `the web app answered ${res.status}`);
   return body.url;
@@ -298,8 +329,12 @@ export async function openCommand(argv: string[], prog: string, io: { out(s: str
     if (argv.length === 1 && argv[0] === '--stop') { await stopCommand(home, io, new Deadline(OPEN_MS + STOP_MS), o.busyMs); return 0; }
     if (argv.length > 1 || argv[0]?.startsWith('--')) throw new Error(usage);
     const target = resolveTarget(argv[0]);
-    const server = await ensureServer(home, o, dl);
-    const where = target.kind === 'home' ? '/' : await pageFor(server, target, dl);
+    // a web app that was asked to stop between the check and the request is waited for to leave, and another is started
+    let server = await ensureServer(home, o, dl), where = '/';
+    for (let tries = 0; target.kind !== 'home'; tries++) {
+      try { where = await pageFor(server, target, dl); break; }
+      catch (e: any) { if (!e?.stopping || tries >= 3) throw e; server = await ensureServer(home, o, dl); }
+    }
     const url = `http://127.0.0.1:${server.port}${where}`;
     await (o.browser ?? openBrowser)(url);
     io.out(`opening ${url}`);

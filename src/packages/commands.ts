@@ -223,6 +223,9 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
   });
 }
 
+/** How long an editor that is asked to end lets an export under way finish (the web app gives it a few seconds more before it is ended). */
+const EDITOR_GRACE_MS = 15_000;
+
 /** `edit [folder]`: the live viewer on a package, following changes other processes make to it. */
 export async function editCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
   return run(io, async () => {
@@ -239,8 +242,13 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
     if (a.has('--json')) {
       // started by the web app: report the URL, and stop once no page has been open for a while
       io.out(JSON.stringify({ url: v.url }));
-      // the web app ends the editor by closing its stdin: the viewer closes and the process leaves, as it would at its own end
-      process.stdin.on('end', () => { v.close(); process.exit(0); });
+      // the web app ends the editor by closing its stdin: an export under way is let finish (its files are written through .part
+      // files renamed into place, so a cut would leave the old ones whole, but then not the new set), for at most
+      // EDITOR_GRACE_MS; then the viewer closes and the process leaves, as it would at its own end
+      process.stdin.on('end', () => {
+        const grace = new Promise<void>((r) => setTimeout(r, EDITOR_GRACE_MS));
+        void Promise.race([v.idle(), grace]).finally(() => { v.close(); process.exit(0); });
+      });
       process.stdin.resume();
       let idleSince = Date.now();
       setInterval(() => {

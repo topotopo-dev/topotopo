@@ -65,7 +65,8 @@ const viewCsp = (map: string, framed: boolean) => `default-src 'self'; script-sr
 /** What every page says once a `topotopo open` of another version or engine code has asked this web app for a page. */
 const CHANGED_BANNER = '<div class="changed" role="status">TopoTopo has changed since this server started. <button type="button" data-stop-topotopo>Stop TopoTopo</button> then open your file again.</div>';
 /** How long a bake that is running is given to finish when the web app is stopped, and an editor to leave. */
-const BAKE_STOP_MS = 20_000, EDITOR_STOP_MS = 5000;
+// an editor is given longer than the export it may be finishing (EDITOR_GRACE_MS in src/packages/commands.ts)
+const BAKE_STOP_MS = 20_000, EDITOR_STOP_MS = 20_000;
 const README = /^(readme|index)\.(md|txt)$/i;
 
 class HttpError extends Error {
@@ -314,6 +315,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   let warm: ReturnType<typeof setTimeout> | undefined, closed = false;
   /** a `topotopo open` came from another version or engine code than this web app's: the pages say so */
   let changedSince = false;
+  /** a request to stop has been accepted: from then on this is no web app to open files in (health says so, /api/open refuses) */
+  let stopRequested = false;
   const rewarm = () => {
     clearTimeout(warm);
     warm = setTimeout(async () => { for (const r of roots) { if (closed) return; try { await auditOf(r); } catch { /* its page says it */ } } }, 200);
@@ -336,6 +339,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     changeTimer = setTimeout(() => safe('rescan after a change', () => {
       const before = [...packages.keys()].join('\n');
       rescanPackages([...changedRoots]);
+      watchRoots(); // a folder that was gone and is back is watched again
       for (const k of staleAudits) forget(k);
       for (const k of touched) { const p = packages.get(k); if (p) bakeIfStale(p); }
       for (const p of packages.values()) if (!readBakeState(p.dir)) bakeIfStale(p);
@@ -353,8 +357,18 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     if (s.name === BUILTIN_LIBRARY.name || watched.has(s.root)) continue; // nothing of it is baked here: read again at each rescan
     try {
       const w = fs.watch(s.root, { recursive: true }, (_ev, f) => safe('watch', () => {
+        if (watched.get(s.root) !== w) return; // let go already: the events still queued are of a folder that is gone
         const rel = f ? String(f).split(path.sep).join('/') : '';
-        if (path.isAbsolute(rel)) return; // the root itself went away: the periodic rescan notices
+        if (path.isAbsolute(rel)) {
+          // the root itself went away (deleted, renamed or moved; Windows then sends its events by the thousand, with the
+          // root's full path): let the watch go and read the packages again now, not at the next periodic rescan
+          if (isDir(s.root)) return;
+          stopWatching(s.root);
+          changedRoots.add(s.root);
+          for (const r of roots) if (r.dir === s.root) staleAudits.add(rootKey(r));
+          onChange();
+          return;
+        }
         const parts = rel.split('/');
         if (parts.some((x) => x.startsWith('.') || x === 'node_modules')) return; // .web/, .cache/, .part files
         const p = scans.find((x) => x.root === s.root)?.packages.find((x) => rel === x.rel || rel.startsWith(x.rel + '/'));
@@ -935,6 +949,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         const p = readStatic(threeDir, seg.slice(2).join('/'));
         return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream', { 'cache-control': 'max-age=3600' }) : send(404, 'not found');
       }
+      // a web app that is stopping (its bakes finish first, which can take seconds) is not one to open a file in: it says so
+      // with its pid, and `topotopo open` waits for it to leave and starts another
+      if (u.pathname === '/api/health' && stopRequested) return json(503, { web: true, stopping: true, pid: process.pid });
       if (u.pathname === '/api/health') return json(200, { web: true, pid: process.pid, version: TOPOTOPO_VERSION, engine, open: true, libraries: scans.length, packages: packages.size, baking: queue.size });
       if (u.pathname === '/api/open' || u.pathname === '/api/stop') {
         // what only the program that starts the web app (and the page's own button) asks: a POST with a header that a page
@@ -946,10 +963,12 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         if (u.pathname === '/api/stop') {
           // a request to stop: the answer first, then a stop the way a person would (bakes finish, editors end), then the process
           if (!o.onStop) throw new HttpError(501, 'this web app was not started by topotopo web: it cannot be stopped from a request');
+          stopRequested = true;
           json(200, { ok: true });
           setTimeout(() => { shutdown().then(() => o.onStop!(), (e) => { log(`stop: ${e?.message ?? e}`); o.onStop!(); }); }, 50);
           return;
         }
+        if (stopRequested) throw new HttpError(503, 'this web app is stopping: open the file again in a moment');
         // `topotopo open`: the page of a package or workspace, which the web app lists for this run when the config does not
         // (nothing is written to the config). The program tells its version and engine code: when they are not this web
         // app's, every page says so (changedSince)

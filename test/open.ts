@@ -227,6 +227,7 @@ try {
   });
   for (const d of wsGone) { const o = await opened(d); check(o.code === 0 && (await get(o.url!)).status === 200, `${path.basename(d)} is listed for the run`); }
   for (const d of [...gone3, ...wsGone.map((w) => path.join(w, 'inner'))]) await bakedIn(d);
+  const tGone = Date.now();
   fs.renameSync(gone3[0], `${gone3[0]}-renamed`);
   fs.mkdirSync(path.join(tmp, 'vanish-moved'));
   fs.renameSync(gone3[1], path.join(tmp, 'vanish-moved', 'gone-b'));
@@ -235,7 +236,9 @@ try {
   fs.rmSync(wsGone[1], { recursive: true, force: true });
   let listedAfter: string[] = [];
   for (let i = 0; i < 80; i++) { await sleep(250); listedAfter = await ownPackages(); if (!listedAfter.some((p) => /gone-|ws-ren|ws-del/.test(p))) break; }
-  check(await up() && !listedAfter.some((p) => /gone-/.test(p)) && !listedAfter.some((p) => /^ws-(ren|del)\//.test(p)), `a lone package renamed, moved or deleted, and a workspace opened for the run renamed or deleted: dropped, the web app stays up (${listedAfter.join(', ')})`);
+  const goneMs = Date.now() - tGone;
+  check(goneMs < 10_000, `the web app noticed the roots that went away when it happened, not at its next periodic rescan (${goneMs} ms)`);
+  check(await up() &&!listedAfter.some((p) => /gone-/.test(p)) && !listedAfter.some((p) => /^ws-(ren|del)\//.test(p)), `a lone package renamed, moved or deleted, and a workspace opened for the run renamed or deleted: dropped, the web app stays up (${listedAfter.join(', ')})`);
   const pagesGone = await Promise.all(['/l/gone-a/', '/l/gone-b/', '/l/gone-c/', '/w/ws-ren/', '/w/ws-del/'].map((x) => get(`${base}${x}`).then((g) => g.status)));
   check(pagesGone.every((c) => c === 404) && (await get(`${base}/`)).status === 200, `their pages say they are not there (${pagesGone.join(' ')}), the home page answers`);
   const weblog = fs.readFileSync(path.join(home, 'web.log'), 'utf8');
@@ -249,7 +252,36 @@ try {
   check(forged.status === 200 && [loud, loudFolder].every((t) => t.includes('TopoTopo has changed since this server started.') && t.includes('data-stop-topotopo') && t.includes('then open your file again')) && alive(lock1!.pid), 'a web app asked by another engine code says so at the top of the front page and a folder page, and runs on');
   check(await post(lock1!.port, '/api/stop', {}) === 403 && await post(lock1!.port, '/api/stop', { 'x-topotopo-open': '1', origin: 'http://evil.example' }) === 403 && await post(lock1!.port, '/api/open', {}) === 403 && alive(lock1!.pid), '/api/stop and /api/open are refused without the header, and from another origin');
 
+  // ---- a web app that is stopping is no web app to open a file in: the person presses Stop TopoTopo during a bake and opens
+  // their file again at once. Its health says it is stopping, /api/open refuses, and open waits for it to leave and starts another
+  const home2 = path.join(tmp, 'home-two');
+  fs.mkdirSync(home2);
+  const heavy = mkPkg('heavy', 'heavy-kit');
+  fs.writeFileSync(path.join(heavy, 'graphs', 'main.json'), JSON.stringify({ nodes: { g: { type: 'grid', params: { size: [10, 10], divisions: [1800, 1800] } }, m: { type: 'mountain', in: ['g'] } }, output: 'm' }));
+  const homeOne = process.env.TOPOTOPO_HOME;
+  process.env.TOPOTOPO_HOME = home2; // the web app it starts takes the TopoTopo folder from the environment
+  try {
+    const heavyOpen = await openedWith({ home: home2 }, path.join(heavy, 'heavy-kit.topo'));
+    const lockA = lockOf(home2);
+    check(heavyOpen.code === 0 && !!lockA && lockA.pid !== lock1!.pid, `a second web app is started in its own folder, and its bake of a heavy package begins (${heavyOpen.url})`);
+    const asked = await post(lockA!.port, '/api/stop', { 'x-topotopo-open': '1' });
+    const stoppingNow = await probe(lockA!.port, 3000);
+    const refusedOpen = await post(lockA!.port, '/api/open', { 'x-topotopo-open': '1' });
+    check(asked === 200 && stoppingNow.state === 'stopping' && stoppingNow.health.pid === lockA!.pid && refusedOpen === 503 && alive(lockA!.pid),
+      `after /api/stop the web app says it is stopping while its bake finishes, and /api/open is refused (${asked}, ${stoppingNow.state}, ${refusedOpen})`);
+    const tStop = Date.now(), spawnedBefore = spawnedPids.length;
+    const reopened = await openedWith({ home: home2 }, path.join(loose, 'demo-kit.topo'));
+    const lockB = lockOf(home2);
+    check(reopened.code === 0 && !!lockB && lockB.pid !== lockA!.pid && !alive(lockA!.pid) && spawnedPids.length === spawnedBefore + 1 && lockB.pid === spawnedPids.at(-1) && (await get(reopened.url!)).status === 200,
+      `an open in those seconds waits for the web app to leave and starts a fresh one, whose page answers (${Date.now() - tStop} ms, ${reopened.url ?? reopened.err[0]})`);
+    own.delete(lockA!.pid);
+    if (lockB) { killOwn(lockB.pid); await waitGone(lockB.pid); }
+    fs.rmSync(lockFile(home2), { force: true });
+  } finally { process.env.TOPOTOPO_HOME = homeOne; }
+
   // ---- a stop lets a bake finish and ends an editor the way it ends itself
+  // (the earlier bakes are done first: the bake of the package below then starts at once, so the stop finds it running)
+  for (let i = 0; i < 400; i++) { const h = await probe(lock1!.port, 5000); if (h.state === 'live' && !(h.health as any).baking) break; await sleep(100); }
   const stopBake = mkPkg('stoppers', 'stop-bake'), stopBake2 = mkPkg('stoppers', 'stop-bake-two');
   await opened(path.join(stopBake, 'stop-bake.topo'));
   const edit = await fetch(`${base}/p/stop-bake/stop-bake/edit`, { redirect: 'manual', headers: { connection: 'close' }, signal: AbortSignal.timeout(60_000) });
@@ -284,6 +316,15 @@ try {
   const beforeUnconfirmed = spawnedPids.length;
   const startedAnyway = await openedWith({ busyMs: 1500 }, path.join(loose, 'demo-kit.topo'));
   check(startedAnyway.code === 0 && spawnedPids.length === beforeUnconfirmed + 1 && alive(bystander) && lockOf(home)?.pid === spawnedPids.at(-1) && (await get(startedAnyway.url!)).status === 200, 'open with such a lock starts a web app as usual instead of failing, and ends nothing');
+  killOwn(spawnedPids.at(-1)!); await waitGone(spawnedPids.at(-1)!);
+  // the same with the real timings: a port that accepts connections and never answers HTTP is judged once, after about 15 s,
+  // and the web app is then started inside the 75 s of open (it used to wait 40 s, then the 35 s left, then have no time to start)
+  fs.writeFileSync(lockFile(home), JSON.stringify({ port: silentPort, pid: bystander }));
+  const beforeReal = spawnedPids.length, tReal = Date.now();
+  const realTimings = await opened(path.join(loose, 'demo-kit.topo'));
+  const realMs = Date.now() - tReal;
+  check(realTimings.code === 0 && realMs >= 12_000 && realMs < 45_000 && spawnedPids.length === beforeReal + 1 && lockOf(home)?.pid === spawnedPids.at(-1) && alive(bystander) && (await get(realTimings.url!)).status === 200,
+    `a lock whose process lives and whose port never answers, with the real timings: judged once after about 15 s, then a web app starts, inside the 75 s (${realMs} ms, ${realTimings.url ?? realTimings.err[0]})`);
   killOwn(spawnedPids.at(-1)!); await waitGone(spawnedPids.at(-1)!);
   silent.close(); killOwn(bystander);
 
