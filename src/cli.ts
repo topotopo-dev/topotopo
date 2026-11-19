@@ -149,7 +149,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
     '                          [--cd auto|ignore|multiply] (shading pbr: auto = a named material wins over Cd, Cd colours prims without one; multiply = Cd tints the material too)',
     '                          [--grey] (value check: pbr with every base colour a neutral 18% grey; roughness, metallic and normal maps still apply)',
-    '                          views: persp front back left right top bottom front_left front_right back_left back_right uv section texture persp@<az>',
+    '                          views: persp front back left right top bottom front_left front_right back_left back_right uv sheet section texture persp@<az>',
     '                          framing: every 3D view fits the bounds; [--zoom 1] is relative to that fit (above 1 only with --look-at or --ortho-scale)',
     '                          [--azimuth 35] (degrees around +Y: 0 = camera on +Z at the front, 90 = on +X, the right side) [--elevation 25] (degrees above the horizon)',
     '                          [--look-at x,y,z] (world metres, Y up, +Z front) [--ortho-scale 0.5] (metres across an ortho view)',

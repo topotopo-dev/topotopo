@@ -33,6 +33,7 @@ import type { Mat4, Vec3 } from './math.ts';
 import { EdgeSet, EDGE_KEY_LIMIT } from './edges.ts';
 import { geoContentHash } from './geohash.ts';
 import { MATERIALS_DETAIL, MATERIAL_ATTRIB, TEXTURE_SLOTS, readMaterials, writeMaterials } from './materials.ts';
+import { TRIM_SHEETS_DETAIL, mergeTrimTables, writeTrimSheets } from './trim.ts';
 import type { MaterialTable } from './materials.ts';
 
 export type AttribClass = 'point' | 'vertex' | 'prim' | 'detail';
@@ -1115,6 +1116,7 @@ export class Geometry {
       for (const g of withTables) for (const [m, def] of Object.entries(readMaterials(g))) if (!(m in union)) union[m] = def;
       writeMaterials(out, union);
     }
+    if (geos.filter((g) => g.detail.has(TRIM_SHEETS_DETAIL)).length > 1) writeTrimSheets(out, mergeTrimTables(geos));
     out.primStart = new Int32Array(nprim + 1);
     out.vertexPoint = new Int32Array(nv);
     out.primClosed = new Uint8Array(nprim);

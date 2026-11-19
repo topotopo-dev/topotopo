@@ -119,6 +119,13 @@ A tablecloth draped over a table: it falls over the edges in soft folds and rest
 - In: `table_width`, `table_depth`, `cloth_size`, `stiffness`, `thickness`, `seed`
 - Out: `cloth` (mesh), `table` (mesh)
 
+### [Corridor panels](../examples/corridor_panels.md) (`corridor_panels`)
+
+A sci-fi corridor wall on one trim sheet: a frame, a row of panels fitted to a hotspot rectangle, a small sign on its own rectangle, and a rail along the top.
+
+- In: `width`, `height`, `columns`, `gap`, `seed`
+- Out: `wall` (mesh)
+
 ### [Eroded valley](../examples/eroded_valley.md) (`eroded_valley`)
 
 A mountain valley worn by rain: sharp ridges, gullies and sediment fans, with a river along the valley floor, as a terrain for a game engine.
@@ -216,6 +223,13 @@ A burst of sparks for an effect: hot sparks fly out from a point, fall, bounce o
 
 - In: `count`, `speed`, `spread`, `bounce`, `life`, `seed`
 - Out: `sparks` (points), `trails` (curves)
+
+### [Stair flight](../examples/stair_flight.md) (`stair_flight`)
+
+A straight stair flight mapped onto one trim sheet: stone treads and risers, a cheek wall in courses, and a metal handrail with a post at each end.
+
+- In: `steps`, `rise`, `run`, `width`, `rail_height`, `rail_radius`
+- Out: `flight` (mesh)
 
 ### [Terrain tiles](../examples/terrain_tiles.md) (`terrain_tiles`)
 

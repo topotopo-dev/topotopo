@@ -16,6 +16,7 @@ import { halfEdges } from '../core/halfedge.ts';
 import type { HalfEdgeMesh } from '../core/halfedge.ts';
 import { drawText, textWidth } from './font.ts';
 import { readUV, polygonSides, uvSeamPairs } from '../core/uv.ts';
+import { readTrimSheets } from '../core/trim.ts';
 import { chartKinds, chartRoots, primLods } from '../core/uvreport.ts';
 import { expandForRender } from '../core/packed.ts';
 import { qNormalize, qRotate } from '../core/math.ts';
@@ -38,7 +39,7 @@ import type { PBRScene, PBRTextures, VertexColorMode } from './pbr.ts';
  * 3D views, 'persp@<azimuth>' (a persp view at that azimuth), 'section' (the cut through the section plane,
  * looking along its axis), plus 'uv': the 0..1 UV square (UDIM tiles) with every polygon drawn at its uv.
  */
-export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'uv' | 'section' | 'texture' | `persp@${number}`
+export type ViewName = 'persp' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'uv' | 'sheet' | 'section' | 'texture' | `persp@${number}`
   | 'front_left' | 'front_right' | 'back_left' | 'back_right';
 /**
  * Named three-quarter views: persp views at these azimuths (degrees; 0 = the camera on +Z looking at the front, 90 =
@@ -223,7 +224,7 @@ export const VIEW_PRESETS: Record<string, ViewName[]> = {
   quad_uv: ['persp', 'uv'],
   turntable: ['persp@0', 'persp@90', 'persp@180', 'persp@270'],
 };
-export const BASE_VIEWS = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', ...Object.keys(NAMED_VIEWS), 'uv', 'section', 'texture'];
+export const BASE_VIEWS = ['persp', 'front', 'back', 'left', 'right', 'top', 'bottom', ...Object.keys(NAMED_VIEWS), 'uv', 'sheet', 'section', 'texture'];
 
 /** Views from a preset name, a comma/space separated list or an array (presets expand inside lists). Throws on unknown names. */
 export function parseViews(spec: string | readonly string[] | null | undefined): ViewName[] | undefined {
@@ -643,7 +644,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const autoWire = o.wireframe === undefined || o.wireframe === 'auto';
   const wire = !wireMode && o.wireframe !== 'none' && (o.wireframe === true
     || (autoWire && closedPrims > 0 && closedPrims <= AUTO_WIRE_MAX && o.shading !== 'pbr' && !o.textures));
-  const autoEdgesShown = wire && autoWire && views.some((v) => v !== 'uv' && v !== 'texture');
+  const flat = (v: ViewName) => v === 'uv' || v === 'sheet' || v === 'texture';
+  const autoEdgesShown = wire && autoWire && views.some((v) => !flat(v));
   if (autoEdgesShown) notes.push('wireframe auto: polygon edges drawn (wireframe false hides them)');
   const edges = wire ? buildEdges(g) : null;
   // triangle-dominant meshes (boolean/remesh output): hide edges between coplanar faces so the
@@ -675,7 +677,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // --- uv data (uv view, checker shading)
   const materialNames = primMaterials(g), materialTable = readMaterials(g);
   const hasMasks = Object.values(materialTable).some((m) => m.alphaMode === 'MASK');
-  const uvd = views.includes('uv') || o.checker || o.textures || hasMasks ? readUV(g) : null;
+  const uvd = views.includes('uv') || views.includes('sheet') || o.checker || o.textures || hasMasks ? readUV(g) : null;
   const checkerOn = !!(o.checker && uvd);
   if (o.checker && !uvd) notes.push('checker: no uv attribute (run uv_project, uv_unwrap or uv_flatten first)');
   // base colour maps (image textures) on the mesh: texture × Cd (as glTF multiplies COLOR_0), off under checker / colour-by
@@ -988,8 +990,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   }
   if (o.legend && !cbLegend.length) notes.push('legend: nothing to explain (use with color_by or highlight)');
   const hasOverlay = sockets.length > 0 || oeA.length > 0 || dotPts.length > 0 || wl.length > 0 || glCol.length > 0 || legendItems.length > 0 || hasSection || clipK >= 0;
-  const legendView = views.findIndex((v) => v !== 'uv' && v !== 'texture');
-  const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'texture' && v !== 'section' && !(clipK >= 0 && isPerspView(v))) : -1;
+  const legendView = views.findIndex((v) => v !== 'uv' && v !== 'sheet' && v !== 'texture');
+  const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'sheet' && v !== 'texture' && v !== 'section' && !(clipK >= 0 && isPerspView(v))) : -1;
   let backPix = 0, shadedPix = 0;
   /** the prims whose back faces show (blue), by pixel count, in the view that counts them */
   const backPrims = new Map<number, number>();
@@ -1031,6 +1033,10 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     };
     if (vname === 'uv') {
       blit(drawUVView(g, col, W, H, ss * ui, uvd, tris, colorOf, colorByActive, notes));
+      return;
+    }
+    if (vname === 'sheet') {
+      blit(drawSheetView(g, col, W, H, ss * ui, uvd, tris, notes));
       return;
     }
     if (vname === 'texture') {
@@ -1906,4 +1912,49 @@ function drawUVView(
   if (tilingTris) notes.push(`uv view: tiling uv: ${tilingTris} triangles lie in charts that run across tile borders (a repeating texture, not an atlas); their overlap is expected (amber)`);
   if (ex >= 0.05 && lods) notes.push('uv view: LODs share the uv space; their overlap is expected (amber)');
   return `UV  ${tiles}${ov >= 0.05 ? `  OVERLAP ${ov.toFixed(1)}%` : ''}${tilingTris ? '  TILING' : ''}${ex >= 0.05 && !tilingTris ? '  LOD OVERLAP OK' : ''}`;
+}
+
+/**
+ * The sheet view: the trim sheet's bands in its colours (the same colours color_by trim_band uses), each labelled
+ * with its name, height, period and pixel rows, and the mapped faces drawn on top.
+ */
+function drawSheetView(g: Geometry, col: Float32Array, W: number, H: number, ss: number, uv: Float64Array | null, tris: Uint32Array, notes: string[]): string {
+  for (let i = 0; i < col.length; i += 3) { col[i] = 0.12; col[i + 1] = 0.125; col[i + 2] = 0.14; }
+  const sheets = Object.values(readTrimSheets(g));
+  const sheet = sheets[0];
+  if (!sheet) { notes.push('sheet view: no trim sheet on the geometry (a trim_sheet node, carried through the mapping)'); return 'SHEET  (NO TRIM SHEET)'; }
+  const pad = 28 * ss, sz = Math.min(W - pad * 2, H - 64 * ss), ox = (W - sz) / 2, oy = 36 * ss;
+  const X = (u: number) => ox + u * sz, Y = (v: number) => oy + sz - v * sz;
+  const fill = (x0: number, y0: number, x1: number, y1: number, rgb: number[]) => {
+    const a = Math.max(0, Math.floor(Math.min(x0, x1))), b = Math.min(W - 1, Math.ceil(Math.max(x0, x1)));
+    const c = Math.max(0, Math.floor(Math.min(y0, y1))), d = Math.min(H - 1, Math.ceil(Math.max(y0, y1)));
+    for (let y = c; y <= d; y++) for (let x = a; x <= b; x++) { const i = (y * W + x) * 3; col[i] = rgb[0]; col[i + 1] = rgb[1]; col[i + 2] = rgb[2]; }
+  };
+  const strips = [
+    ...sheet.bands.map((b) => ({ name: b.name, u0: 0, u1: 1, v0: b.v[0], v1: b.v[1], height: b.height, period: b.period, rows: b.rows })),
+    ...sheet.rects.map((r) => ({ name: r.name, u0: r.u[0], u1: r.u[1], v0: r.v[0], v1: r.v[1], height: r.size[1], period: r.size[0], rows: [r.rect[1], r.rect[1] + r.rect[3]] as [number, number] })),
+  ];
+  for (const band of strips) {
+    const rgb = catColor(hashStr(band.name));
+    const x0 = X(band.u0), x1 = X(band.u1), y0 = Y(band.v0), y1 = Y(band.v1);
+    fill(x0, y1, x1, y0, rgb.map((c) => c * 0.55));
+    drawLine(col, null, W, H, x0, y0, 0, x1, y0, 0, rgb, 0.9, ss, false, 0);
+    drawLine(col, null, W, H, x1, y0, 0, x1, y1, 0, rgb, 0.9, ss, false, 0);
+    drawLine(col, null, W, H, x1, y1, 0, x0, y1, 0, rgb, 0.9, ss, false, 0);
+    drawLine(col, null, W, H, x0, y1, 0, x0, y0, 0, rgb, 0.9, ss, false, 0);
+    const label = `${band.name}  ${band.height} m  / ${band.period} m  rows ${band.rows[0]}–${band.rows[1]}`;
+    if (Math.abs(y0 - y1) > 14 * ss) drawText(col, W, H, Math.round(Math.min(x0, x1) + 4 * ss), Math.round(Math.min(y0, y1) + 3 * ss), label, [1, 1, 1], ss, true);
+  }
+  if (uv) {
+    for (let t = 0; t < tris.length; t += 3) {
+      const tri = [tris[t], tris[t + 1], tris[t + 2]];
+      const p = tri.map((v) => [X(uv[v * 2]), Y(uv[v * 2 + 1])]);
+      if (!p.every((q) => q.every(Number.isFinite))) continue;
+      drawLine(col, null, W, H, p[0][0], p[0][1], 0, p[1][0], p[1][1], 0, [0.05, 0.05, 0.06], 0.85, Math.max(1, ss * 0.8), false, 0);
+      drawLine(col, null, W, H, p[1][0], p[1][1], 0, p[2][0], p[2][1], 0, [0.05, 0.05, 0.06], 0.85, Math.max(1, ss * 0.8), false, 0);
+      drawLine(col, null, W, H, p[2][0], p[2][1], 0, p[0][0], p[0][1], 0, [0.05, 0.05, 0.06], 0.85, Math.max(1, ss * 0.8), false, 0);
+    }
+  }
+  if (sheets.length > 1) notes.push(`sheet view: showing "${sheet.name}"; the geometry also carries ${sheets.slice(1).map((s) => s.name).join(', ')}`);
+  return `SHEET  ${sheet.name}  ${sheet.resolution[0]}×${sheet.resolution[1]}  ${sheet.texels_per_metre} px/m`;
 }

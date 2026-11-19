@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "description": "A straight stair flight on one trim sheet: treads and risers, a cheek wall, a sloping handrail and two posts. Every face carries the sheet's uv, so one bake dresses the whole flight.",
+  "params": {
+    "steps": { "type": "int", "default": 4, "min": 3, "max": 6, "label": "steps", "desc": "treads in the flight" },
+    "rise": { "type": "float", "default": 0.17, "min": 0.15, "max": 0.2, "step": 0.01, "label": "rise", "desc": "riser height (m)" },
+    "run": { "type": "float", "default": 0.28, "min": 0.25, "max": 0.32, "step": 0.01, "label": "run", "desc": "tread depth (m)" },
+    "width": { "type": "float", "default": 1.1, "min": 0.9, "max": 1.3, "step": 0.05, "label": "width", "desc": "width of the flight (m)" },
+    "rail_height": { "type": "float", "default": 0.95, "min": 0.85, "max": 1.05, "step": 0.05, "label": "rail height", "desc": "handrail height above the slope (m)" },
+    "rail_radius": { "type": "float", "default": 0.025, "min": 0.02, "max": 0.04, "step": 0.005, "label": "rail radius", "desc": "handrail and post radius (m)" }
+  },
+  "vars": { "steps": 4, "rise": 0.17, "run": 0.28, "width": 1.1, "rail_height": 0.95, "rail_radius": 0.025 },
+  "meta": { "render": { "views": ["front", "sheet"], "size": "1600x800", "shading": "matcap", "color_by": "trim_band", "grid": false } },
+  "nodes": {
+    "sheet": { "type": "trim_sheet", "params": { "name": "stair", "resolution": [1024, 1024], "texels_per_metre": 256, "bands": [
+      { "name": "tread", "height": 0.25 },
+      { "name": "riser", "height": 0.25 },
+      { "name": "wall", "height": 1 },
+      { "name": "metal", "height": 0.2, "kind": "edge" },
+      { "name": "cap", "height": 0.08, "kind": "cap", "tile": false }
+    ] } },
+
+    "tread": { "type": "box", "params": { "size": ["=run + 0.015", 0.04, "=width + 0.03"], "center": ["=(run - 0.015) / 2", "=rise - 0.02", "=(width - 0.03) / 2"] } },
+    "treads": { "type": "copy_xform", "in": ["tread"], "params": { "count": "=steps", "translate": ["=run", "=rise", 0], "copy_attrib": "" } },
+    "treads_uv": { "type": "trim_map", "in": ["treads", "sheet"], "params": { "band": "tread" } },
+    "treads_named": { "type": "attrib_create", "in": ["treads_uv"], "params": { "name": "name", "class": "prim", "value": "tread" } },
+    "treads_stone": { "type": "material", "in": ["treads_named"], "params": { "name": "stone", "base_color": [0.45, 0.43, 0.4], "roughness": 0.85 } },
+
+    "riser": { "type": "box", "params": { "size": [0.03, "=rise - 0.02", "=width + 0.01"], "center": [0.015, "=(rise - 0.02) / 2", "=(width - 0.03) / 2"] } },
+    "risers": { "type": "copy_xform", "in": ["riser"], "params": { "count": "=steps", "translate": ["=run", "=rise", 0], "copy_attrib": "" } },
+    "risers_uv": { "type": "trim_map", "in": ["risers", "sheet"], "params": { "band": "riser" } },
+    "risers_named": { "type": "attrib_create", "in": ["risers_uv"], "params": { "name": "name", "class": "prim", "value": "riser" } },
+    "risers_stone": { "type": "material", "in": ["risers_named"], "params": { "name": "stone", "base_color": [0.45, 0.43, 0.4], "roughness": 0.85 } },
+
+    "cheek": { "type": "box", "params": { "size": ["=steps * run + 0.04", "=steps * rise + 0.09", 0.06], "center": ["=steps * run / 2", "=(steps * rise - 0.01) / 2", -0.03] } },
+    "cheek_uv": { "type": "trim_map", "in": ["cheek", "sheet"], "params": { "band": "wall", "fit": "courses" } },
+    "cheek_named": { "type": "attrib_create", "in": ["cheek_uv"], "params": { "name": "name", "class": "prim", "value": "cheek" } },
+    "cheek_stone": { "type": "material", "in": ["cheek_named"], "params": { "name": "stone", "base_color": [0.45, 0.43, 0.4], "roughness": 0.85 } },
+
+    "rail_path": { "type": "line", "params": { "origin": [0, "=rail_height", "=width + 0.05"], "direction": ["=run", "=rise", 0], "length": "=steps * hypot(run, rise)", "points": 8 } },
+    "rail": { "type": "polywire", "in": ["rail_path", "sheet"], "params": { "radius": "=rail_radius", "divisions": 8, "trim_band": "metal", "trim_cap": "cap" } },
+    "rail_named": { "type": "attrib_create", "in": ["rail"], "params": { "name": "name", "class": "prim", "value": "rail" } },
+    "rail_metal": { "type": "material", "in": ["rail_named"], "params": { "name": "metal", "base_color": [0.25, 0.26, 0.28], "metallic": 0.9, "roughness": 0.35 } },
+
+    "post_a": { "type": "tube", "in": ["sheet"], "params": { "radius": "=rail_radius", "height": "=rail_height", "cols": 8, "center": [0, "=rail_height / 2", "=width + 0.05"], "trim_band": "metal", "trim_cap": "cap" } },
+    "post_b": { "type": "tube", "in": ["sheet"], "params": { "radius": "=rail_radius", "height": "=rail_height + steps * rise", "cols": 8, "center": ["=steps * run", "=(rail_height + steps * rise) / 2", "=width + 0.05"], "trim_band": "metal", "trim_cap": "cap" } },
+    "posts": { "type": "merge", "in": ["post_a", "post_b"] },
+    "posts_named": { "type": "attrib_create", "in": ["posts"], "params": { "name": "name", "class": "prim", "value": "post" } },
+    "posts_metal": { "type": "material", "in": ["posts_named"], "params": { "name": "metal", "base_color": [0.25, 0.26, 0.28], "metallic": 0.9, "roughness": 0.35 } },
+
+    "flight": { "type": "merge", "in": ["treads_stone", "risers_stone", "cheek_stone", "rail_metal", "posts_metal"] },
+
+    "bounds": { "type": "assert", "in": ["flight"], "params": { "label": "flight", "tolerance": 0.002, "bbox_min": ["=-rail_radius", -0.05, -0.06], "bbox_max": ["=steps * run + rail_radius", "=steps * rise + rail_height + rail_radius", "=width + 0.05 + rail_radius"] } },
+    "mapped": { "type": "assert", "in": ["bounds"], "params": { "label": "mapped", "attrib": "trim_band", "attrib_class": "prim" } },
+    "sheet_carried": { "type": "assert", "in": ["mapped"], "params": { "label": "sheet", "attrib": "trim_sheets", "attrib_class": "detail" } },
+    "named": { "type": "assert", "in": ["sheet_carried"], "params": { "label": "named", "attrib": "name", "attrib_class": "prim" } },
+    "uv": { "type": "assert", "in": ["named"], "params": { "label": "uv", "attrib": "uv", "attrib_class": "vertex" } }
+  },
+  "output": "uv",
+  "outputs": {
+    "flight": {
+      "node": "uv", "label": "Stair flight", "kind": "mesh",
+      "tags": ["stair", "trim-sheet", "architecture", "handrail"],
+      "description": "A straight flight on the stair trim sheet: stone treads, risers and a cheek wall, and a metal handrail with posts. Vertex uv sits on the sheet's bands."
+    }
+  }
+}

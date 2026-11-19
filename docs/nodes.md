@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-258 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+262 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -20,7 +20,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [solid](#solid-nodes): [boolean](#boolean) · [clip](#clip) · [convex_hull](#convex_hull) · [minkowski](#minkowski) · [slice](#slice) · [smooth_solid](#smooth_solid) · [voronoi_fracture](#voronoi_fracture)
 - [sdf](#sdf-nodes): [grid_blur](#grid_blur) · [grid_combine](#grid_combine) · [grid_dilate](#grid_dilate) · [grid_erode](#grid_erode) · [grid_offset](#grid_offset) · [grid_resample](#grid_resample) · [grid_to_mesh](#grid_to_mesh) · [grid_to_sdf](#grid_to_sdf) · [sdf_combine](#sdf_combine) · [sdf_expr](#sdf_expr) · [sdf_from_mesh](#sdf_from_mesh) · [sdf_grid](#sdf_grid) · [sdf_modify](#sdf_modify) · [sdf_shape](#sdf_shape) · [sdf_to_mesh](#sdf_to_mesh) · [voxel_remesh](#voxel_remesh)
 - [heightfield](#heightfield-nodes): [heightfield](#heightfield) · [heightfield_blur](#heightfield_blur) · [heightfield_clip](#heightfield_clip) · [heightfield_crop](#heightfield_crop) · [heightfield_cutout](#heightfield_cutout) · [heightfield_erode](#heightfield_erode) · [heightfield_fill_sinks](#heightfield_fill_sinks) · [heightfield_flow](#heightfield_flow) · [heightfield_from_image](#heightfield_from_image) · [heightfield_from_mesh](#heightfield_from_mesh) · [heightfield_layer](#heightfield_layer) · [heightfield_mask_blur](#heightfield_mask_blur) · [heightfield_mask_by_feature](#heightfield_mask_by_feature) · [heightfield_mask_by_object](#heightfield_mask_by_object) · [heightfield_mask_expand](#heightfield_mask_expand) · [heightfield_mask_noise](#heightfield_mask_noise) · [heightfield_noise](#heightfield_noise) · [heightfield_path](#heightfield_path) · [heightfield_project](#heightfield_project) · [heightfield_remap](#heightfield_remap) · [heightfield_resample](#heightfield_resample) · [heightfield_scatter](#heightfield_scatter) · [heightfield_terrace](#heightfield_terrace) · [heightfield_to_mesh](#heightfield_to_mesh) · [heightfield_to_sdf](#heightfield_to_sdf) · [heightfield_transform](#heightfield_transform)
-- [uv](#uv-nodes): [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
+- [uv](#uv-nodes): [hotspot](#hotspot) · [trim_layout](#trim_layout) · [trim_map](#trim_map) · [trim_sheet](#trim_sheet) · [uv_autoseam](#uv_autoseam) · [uv_flatten](#uv_flatten) · [uv_layout](#uv_layout) · [uv_project](#uv_project) · [uv_transform](#uv_transform) · [uv_unwrap](#uv_unwrap)
 - [code](#code-nodes): [script](#script) · [wrangle](#wrangle)
 - [flow](#flow-nodes): [foreach](#foreach) · [graph_ref](#graph_ref) · [input](#input) · [merge](#merge) · [null](#null) · [solver](#solver) · [switch](#switch)
 - [io](#io-nodes): [file](#file) · [scene_null](#scene_null)
@@ -591,7 +591,9 @@ Cylinder / cone / frustum along an axis, optional end caps (watertight when capp
 
 **Inputs**
 
-None (generator).
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `sheet` | yes | no | trim sheet for trim_band (a trim_sheet node; optional) |
 
 **Parameters**
 
@@ -605,8 +607,12 @@ None (generator).
 | `caps` | bool | `true` |  |  |  | close the ends with n-gons |
 | `axis` | enum | `"y"` |  | `y`, `x`, `z` |  | axis direction |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
+| `trim_band` | string | `""` |  |  | `trim` | trim sheet band (or rectangle) to map onto ("" = the node's own uv): u runs along the path at the band's period, v fills the band across the circumference (its cols are the segments: faces gives every side the whole band). A comma list ("stone, coping") gives one band per segment of the circumference (its cols are the segments: faces gives every side the whole band), cycled. "sheet:band" picks a sheet when several are carried. Help topic trim_sheets. |
+| `trim_around` | enum | `"wrap"` |  | `wrap`, `faces` |  | wrap: consecutive segments of the circumference (its cols are the segments: faces gives every side the whole band) on the same band share it by length (one band wrapped round); faces: every segment fills the whole band |
+| `trim_cap` | string | `""` |  |  |  | band for the caps at real size ("" = the sheet's first band of kind cap, else the first trim_band) |
+| `trim_offset` | float | `0` |  |  |  | shift u along the path, metres (staggers the joints of pieces side by side) |
 
-**Writes:** vertex uv
+**Writes:** vertex uv; with trim_band: prim trim_band, trim_sheet and detail trim_sheets
 
 **Example**
 
@@ -1035,6 +1041,7 @@ A shape that lies inside another shape of the same input is a hole, and a shape 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `shapes` | no | no | closed polygons lying in a plane (e.g. shape2d, circle, text) |
+| 1 | `sheet` | yes | no | trim sheet for trim_band (a trim_sheet node; optional: else the one the shapes carry) |
 
 **Parameters**
 
@@ -1047,8 +1054,12 @@ A shape that lies inside another shape of the same input is a hole, and a shape 
 | `center` | bool | `false` |  |  |  | extrude symmetrically about the shape plane |
 | `plane` | enum | `"auto"` |  | `auto`, `xz`, `xy`, `yz` |  | plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis) |
 | `caps` | bool | `true` |  |  |  | add top/bottom caps |
+| `trim_band` | string | `""` |  |  | `trim` | trim sheet band (or rectangle) to map onto ("" = the node's own uv): u runs along the path at the band's period, v fills the band across the height (its divisions are the segments: faces gives one course per division). A comma list ("stone, coping") gives one band per segment of the height (its divisions are the segments: faces gives one course per division), cycled. "sheet:band" picks a sheet when several are carried. Help topic trim_sheets. |
+| `trim_around` | enum | `"wrap"` |  | `wrap`, `faces` |  | wrap: consecutive segments of the height (its divisions are the segments: faces gives one course per division) on the same band share it by length (one band wrapped round); faces: every segment fills the whole band |
+| `trim_cap` | string | `""` |  |  |  | band for the caps at real size ("" = the sheet's first band of kind cap, else the first trim_band) |
+| `trim_offset` | float | `0` |  |  |  | shift u along the path, metres (staggers the joints of pieces side by side) |
 
-**Writes:** prim groups top, bottom, side; the attributes and groups of the input (see above)
+**Writes:** prim groups top, bottom, side; the attributes and groups of the input (see above); with trim_band: vertex uv, prim trim_band, trim_sheet and detail trim_sheets
 
 **Example**
 
@@ -1495,6 +1506,7 @@ The tube radius at each point is half its "width" attribute when the curves carr
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `curves` | no | no | polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively |
+| 1 | `sheet` | yes | no | trim sheet for trim_band (a trim_sheet node; optional: else the one the curves carry) |
 
 **Parameters**
 
@@ -1504,8 +1516,12 @@ The tube radius at each point is half its "width" attribute when the curves carr
 | `divisions` | int | `8` | 3..1024 |  | `sides`, `cols` | sides around the tube |
 | `caps` | bool | `true` |  |  |  | cap the tube ends |
 | `use_width` | bool | `true` |  |  |  | use point "width" attribute (diameter) when present; pscale is then ignored |
+| `trim_band` | string | `""` |  |  | `trim` | trim sheet band (or rectangle) to map onto ("" = the node's own uv): u runs along the path at the band's period, v fills the band across the tube's circumference. A comma list ("stone, coping") gives one band per segment of the tube's circumference, cycled. "sheet:band" picks a sheet when several are carried. Help topic trim_sheets. |
+| `trim_around` | enum | `"wrap"` |  | `wrap`, `faces` |  | wrap: consecutive segments of the tube's circumference on the same band share it by length (one band wrapped round); faces: every segment fills the whole band |
+| `trim_cap` | string | `""` |  |  |  | band for the caps at real size ("" = the sheet's first band of kind cap, else the first trim_band) |
+| `trim_offset` | float | `0` |  |  |  | shift u along the path, metres (staggers the joints of pieces side by side) |
 
-**Writes:** vertex uv; prim groups caps, sides
+**Writes:** vertex uv; prim groups caps, sides; with trim_band: prim trim_band, trim_sheet and detail trim_sheets
 
 **Example**
 
@@ -1968,6 +1984,7 @@ The profile is drawn in the XY plane around the origin, looking along the curve:
 |---|---|---|---|---|
 | 0 | `backbone` | no | no | curves to sweep along (Bezier/NURBS curves are sampled adaptively) |
 | 1 | `profile` | yes | no | cross-section curve drawn in the XY plane (optional; one per backbone or a single shared one) |
+| 2 | `sheet` | yes | no | trim sheet for trim_band (a trim_sheet node; optional: else the one the backbone carries) |
 
 **Parameters**
 
@@ -1982,8 +1999,12 @@ The profile is drawn in the XY plane around the origin, looking along the curve:
 | `scale_ramp` | ramp | `[[0,1],[1,1]]` |  |  |  | profile scale along the curve (u 0..1); point pscale also multiplies |
 | `up` | vec3 | `[0,1,0]` |  |  |  | initial up vector (point attribute "up" overrides per point) |
 | `uv_length` | bool | `false` |  |  |  | v coordinate in world length instead of 0..1 |
+| `trim_band` | string | `""` |  |  | `trim` | trim sheet band (or rectangle) to map onto ("" = the node's own uv): u runs along the path at the band's period, v fills the band across the profile. A comma list ("stone, coping") gives one band per segment of the profile, cycled. "sheet:band" picks a sheet when several are carried. Help topic trim_sheets. |
+| `trim_around` | enum | `"wrap"` |  | `wrap`, `faces` |  | wrap: consecutive segments of the profile on the same band share it by length (one band wrapped round); faces: every segment fills the whole band |
+| `trim_cap` | string | `""` |  |  |  | band for the caps at real size ("" = the sheet's first band of kind cap, else the first trim_band) |
+| `trim_offset` | float | `0` |  |  |  | shift u along the path, metres (staggers the joints of pieces side by side) |
 
-**Writes:** vertex uv; prim groups caps, sides
+**Writes:** vertex uv; prim groups caps, sides; with trim_band: prim trim_band, trim_sheet and detail trim_sheets
 
 **Example**
 
@@ -8873,6 +8894,401 @@ Houdini: HeightField Transform. Heightfields stay axis-aligned grids: rotation s
 
 ## uv nodes
 
+### hotspot
+
+category: `uv` · aliases: `hotspot_map`, `uv_hotspot`, `rect_map`
+
+Fit each island of coplanar faces to the trim-sheet rectangle or band closest to its real size.
+
+Faces of the group that share an edge and lie in one plane form an island. Walls keep v up and u level; floors and ceilings run u along their longest edge. Each island is fitted to the rectangle or band whose real size is closest: the cost is the worse of the two directions on a log scale, and a rectangle that allows rotation may be turned 90°. A band that tiles only has to match across its height (u repeats). An island is stretched to the fit up to max_stretch; past that it is left unmapped, in the group hotspot_unmatched. Ties take the seeded hash of the island's position, so the same mesh always fits the same way. Search words: hotspot, trim sheet, trim band. Help topic trim_sheets.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geometry` | no | no | faces to fit |
+| 1 | `sheet` | yes | no | trim sheet (a trim_sheet node; optional: else the one the geometry carries) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (prim) | `""` |  |  |  | faces to fit ("" = all) |
+| `sheet` | string | `""` |  |  |  | which sheet when several are carried ("" = the only one) |
+| `max_stretch` | float | `2` | 1.. |  |  | largest size ratio accepted in the worse direction; an island past it stays in hotspot_unmatched |
+| `seed` | float | `0` |  |  |  | random seed |
+
+**Writes:** vertex uv; prim trim_band, trim_sheet; prim group hotspot_unmatched; detail trim_sheets
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "sheet": {
+      "type": "trim_sheet",
+      "params": {
+        "name": "panels",
+        "resolution": [
+          512,
+          512
+        ],
+        "texels_per_metre": 256,
+        "bands": [
+          {
+            "name": "edge",
+            "height": 0.1
+          }
+        ],
+        "rects": [
+          {
+            "name": "wide",
+            "rect": [
+              0,
+              128,
+              256,
+              128
+            ]
+          },
+          {
+            "name": "tall",
+            "rect": [
+              256,
+              128,
+              128,
+              256
+            ],
+            "rotate": false
+          }
+        ]
+      }
+    },
+    "wall": {
+      "type": "box",
+      "params": {
+        "size": [
+          1,
+          0.5,
+          0.05
+        ],
+        "center": [
+          0,
+          0.25,
+          0
+        ]
+      }
+    },
+    "door": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.5,
+          1,
+          0.05
+        ],
+        "center": [
+          1.2,
+          0.5,
+          0
+        ]
+      }
+    },
+    "parts": {
+      "type": "merge",
+      "in": [
+        "wall",
+        "door"
+      ]
+    },
+    "nrm": {
+      "type": "normal",
+      "in": [
+        "parts"
+      ],
+      "params": {
+        "class": "prim"
+      }
+    },
+    "fit": {
+      "type": "hotspot",
+      "in": [
+        "nrm",
+        "sheet"
+      ],
+      "params": {
+        "group": "@N.z>0.5"
+      }
+    }
+  },
+  "output": "fit"
+}
+```
+
+### trim_layout
+
+category: `uv` · aliases: `trim_bake`, `trim_mesh`, `sheet_layout`
+
+Lay a trim sheet out flat at real size, one strip per band, to bake its maps; relief adds the 45° border bevels and rounds edge bands.
+
+The layout lies in the XY plane, the sheet's bottom-left corner at the origin, facing +Z. Each band is a strip x = 0 to its period and y over its real height, with uv filling the band (u 0..1 is one period). Rectangles sit at their place on the sheet. relief builds the high poly for those maps: a 45° chamfer of the band's bevel at each border, an edge band as a quarter-round, and a rectangle as a panel raised by its bevel. Bake with the layout as the low mesh and the relief as the high mesh (bake_normal, bake_ao, bake_curvature). A model placed at the same coordinates lines up with the strips. Help topic trim_sheets.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `sheet` | no | no | the trim sheet (a trim_sheet node, or geometry carrying one) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `sheet` | string | `""` |  |  | `name` | which sheet when the input carries several ("" = the only one) |
+| `relief` | bool | `false` |  |  |  | the high poly: 45° bevels, quarter-round edge bands, raised rectangles |
+
+**Writes:** the strips; vertex uv; prim trim_band, trim_sheet; a prim group per band; detail trim_sheets
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "sheet": {
+      "type": "trim_sheet",
+      "params": {
+        "name": "stone",
+        "resolution": [
+          256,
+          256
+        ],
+        "texels_per_metre": 128,
+        "bands": [
+          {
+            "name": "wall",
+            "height": 1,
+            "bevel": 0.02
+          },
+          {
+            "name": "edge",
+            "height": 0.1,
+            "kind": "edge"
+          }
+        ]
+      }
+    },
+    "flat": {
+      "type": "trim_layout",
+      "in": [
+        "sheet"
+      ]
+    }
+  },
+  "output": "flat"
+}
+```
+
+### trim_map
+
+category: `uv` · aliases: `trim_uv`, `trim_project`, `band_map`
+
+Map selected faces onto a trim sheet band: u along the faces at the band's period (running on round corners), v across the band; or cut walls into courses one band high.
+
+Faces of the group that share an edge form a strip. On walls (normals within 45° of level) u runs level and v up; on floors and ceilings u runs along the strip's longest edge (along picks another direction). u and v are unfolded across the shared edges, so u carries on round the corners of a wall and v over the fold of a coping. u starts at 0 at the strip's start and repeats every period of the band; a band that does not tile, and a rectangle, fits the strip once. fit says how the strip meets the band across: stretch fills the band with each strip, scale keeps real size from the strip's bottom (higher parts run out of the band: the uv report counts them), courses cuts the faces into rows one band high from the strip's bottom and maps each row onto the whole band (stone courses), adding the cut points to the neighbouring faces so no T-junctions appear. Faces are never mirrored. Search words: trim sheet, trim band, texture a wall, stone courses, uvs along a path. Help topic trim_sheets.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geometry` | no | no | faces to map |
+| 1 | `sheet` | yes | no | trim sheet (a trim_sheet node; optional: else the one the geometry carries) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `group` | group (prim) | `""` |  |  |  | faces to map ("" = all), e.g. "side", "@P.y>0.1", "!caps" |
+| `band` | string | `""` |  |  | `trim_band`, `trim` | band (or rectangle) to map onto; "sheet:band" picks a sheet when several are carried |
+| `along` | enum | `"auto"` |  | `auto`, `x`, `y`, `z`, `longest` |  | direction of u: auto = level on walls, the longest edge on floors; x, y, z = that axis laid into each face; longest = the strip's longest edge on every face |
+| `fit` | enum | `"stretch"` |  | `stretch`, `scale`, `courses` |  | across the band: stretch = each strip fills it; scale = real size from the strip's bottom; courses = cut into rows one band high, each filling the band |
+| `connect` | bool | `true` |  |  |  | faces sharing an edge form one strip (u and v run on across the edge); off: every face is its own strip |
+| `offset` | float | `0` |  |  |  | shift u, metres |
+| `stagger` | float | `0` |  |  |  | courses: shift u by this many metres more on each row (a running bond) |
+
+**Writes:** vertex uv; prim trim_band, trim_sheet; detail trim_sheets
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "sheet": {
+      "type": "trim_sheet",
+      "params": {
+        "name": "stone",
+        "resolution": [
+          512,
+          512
+        ],
+        "texels_per_metre": 256,
+        "bands": [
+          {
+            "name": "course",
+            "height": 0.5
+          },
+          {
+            "name": "coping",
+            "height": 0.25
+          }
+        ]
+      }
+    },
+    "plan": {
+      "type": "shape2d",
+      "params": {
+        "shape": "rect",
+        "size": [
+          3,
+          0.4
+        ]
+      }
+    },
+    "wall": {
+      "type": "extrude",
+      "in": [
+        "plan"
+      ],
+      "params": {
+        "height": 1.6
+      }
+    },
+    "stone": {
+      "type": "trim_map",
+      "in": [
+        "wall",
+        "sheet"
+      ],
+      "params": {
+        "group": "side",
+        "band": "course",
+        "fit": "courses",
+        "stagger": 0.3
+      }
+    },
+    "top": {
+      "type": "trim_map",
+      "in": [
+        "stone"
+      ],
+      "params": {
+        "group": "top",
+        "band": "coping"
+      }
+    }
+  },
+  "output": "top"
+}
+```
+
+### trim_sheet
+
+category: `uv` · aliases: `trim`, `trimsheet`, `ultimate_trim`, `hotspot_sheet`
+
+Describe a trim sheet once: named bands that tile along u (and hotspot rectangles) at a real size. Mapping, baking, the uv report and the sheet view read it.
+
+A trim sheet is one texture whose horizontal bands each hold a strip of surface that repeats along u: stone courses, a coping, a step nosing, a metal edge. Bands stack from the top of the image downwards; each is height metres tall, so it takes height × texels_per_metre pixel rows (or give rows: [top, bottom] in pixels). Along u a band repeats every period metres (default: the sheet width, resolution[0] / texels_per_metre). kind marks what a band is for: surface, edge (a rounded or bevelled edge strip) or cap (end caps of sweeps and tubes). bevel is the width of the 45° chamfer trim_layout bakes into the band's borders. Rectangles below the bands are hotspots: rect [x, y, width, height] in pixels from the top-left (as Hammer++ .rect files), fitted by hotspot. The output carries no geometry, only the sheet (detail trim_sheets): wire it into the sheet input of sweep, polywire, tube, extrude, trim_map, hotspot or trim_layout. Search words: trim sheet, trim band, hotspot, texture a railing, uvs along a path. Help topic trim_sheets.
+
+**Inputs**
+
+None (generator).
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `name` | string | `"trim"` |  |  | `sheet` | sheet name (mapped prims carry it in trim_sheet; materials may share it) |
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `image_size` | sheet image size in pixels [width, height]; the bakes default to it |
+| `texels_per_metre` | float | `512` | 1.. |  | `texel_density`, `px_per_m`, `tpm` | texel density: pixels per metre on the model (the sheet width in metres is resolution[0] / this) |
+| `bands` | json | `[{"name":"wall","height":1},{"name":"edge","height":0.25,"kind":"edge"},{"name":"trim","height":0.25,"bevel":0.01},{"name":"cap","height":0.5,"kind":"cap","tile":false}]` |  |  | `strips`, `trims` | bands from the top: [{name, height (m), period (m, default the sheet width), tile (default true), kind ("surface" \| "edge" \| "cap"), bevel (m), rows ([top, bottom] px, instead of stacking)}] |
+| `rects` | json | `[]` |  |  | `hotspots`, `rectangles` | hotspot rectangles: [{name, rect: [x, y, width, height] px from the top-left, rotate (may turn 90°, default true), bevel (m)}] |
+| `gap` | int | `0` | 0.. |  | `padding` | empty pixel rows between stacked bands (padding against mip bleed) |
+
+**Writes:** no geometry; detail trim_sheets (the sheet description, JSON)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "sheet": {
+      "type": "trim_sheet",
+      "params": {
+        "name": "stone",
+        "resolution": [
+          512,
+          512
+        ],
+        "texels_per_metre": 256,
+        "bands": [
+          {
+            "name": "wall",
+            "height": 1
+          },
+          {
+            "name": "coping",
+            "height": 0.25,
+            "kind": "edge"
+          },
+          {
+            "name": "cap",
+            "height": 0.5,
+            "kind": "cap",
+            "tile": false
+          }
+        ]
+      }
+    },
+    "path": {
+      "type": "curve",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            3,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    "rail": {
+      "type": "sweep",
+      "in": [
+        "path",
+        null,
+        "sheet"
+      ],
+      "params": {
+        "shape": "rect",
+        "size": [
+          0.3,
+          0.2
+        ],
+        "trim_band": "coping"
+      }
+    }
+  },
+  "output": "rail"
+}
+```
+
 ### uv_autoseam
 
 category: `uv` · aliases: `uvautoseam`, `autoseam`, `uv_seams`
@@ -12042,6 +12458,7 @@ Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping 
 | `bias` | float | `0` | 0.. |  |  | ray start offset along the normal against self-hits (0 = auto: 1e-4 of the bbox diagonal) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `invert` | bool | `false` |  |  |  | write 1 - value |
+| `tile` | bool | `true` |  |  |  | trim sheets: a band that tiles is copied one period past each open end, so the bake does not fade there (no effect without trim bands). Help topic trim_sheets. |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
 | `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
@@ -12110,6 +12527,7 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `strength` | float | `1` | 0.. |  | `intensity`, `contrast` | contrast multiplier |
 | `min_angle` | float | `0.5` | 0..179 |  |  | edges bending less than this (degrees) are ignored |
 | `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | also find the concave creases where separate parts cut into each other (kitbashed meshes) |
+| `tile` | bool | `true` |  |  |  | trim sheets: a band that tiles is copied one period past each open end, so curvature does not fade there (no effect without trim bands). Help topic trim_sheets. |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
 | `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |
@@ -12309,7 +12727,7 @@ category: `texture` · aliases: `mask_bake`, `bake_group`, `bake_attribute`, `at
 
 Bake a mask into uv space from a prim group (1 inside) or a numeric attribute (its value), e.g. to paint per-part materials.
 
-Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mask_group (a prim group pattern) gives 1 on its prims and 0 elsewhere; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
+Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mask_group (a prim group pattern) gives 1 where any of its prims covers the texel and 0 elsewhere, so overlapping region prims add up instead of the topmost one winning; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
 
 **Inputs**
 
@@ -12531,6 +12949,7 @@ Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `bias` | float | `0` | 0.. |  |  | ray start offset along the normal against self-hits (0 = auto: 1e-4 of the bbox diagonal) |
 | `seed` | float | `0` |  |  |  | random seed |
 | `invert` | bool | `false` |  |  |  | write 1 - value |
+| `tile` | bool | `true` |  |  |  | trim sheets: a band that tiles is copied one period past each open end, so the bake does not fade there (no effect without trim bands). Help topic trim_sheets. |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
 | `cage_attrib` | string | `"cage"` |  |  | `cage_attribute` | high-res input: a float attribute of the mesh (prim, point or vertex) that sets the cage where it is above 0, e.g. per part with attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03} |

@@ -12,6 +12,9 @@ import { uvSphere } from '../core/shapes.ts';
 import { fractal, makeNoise } from '../core/noise.ts';
 import { FRAMES, P } from './util.ts';
 import type { PlaneName } from './util.ts';
+import { stampTrim, trimParams, trimTarget } from './trim.ts';
+import type { TrimTarget } from './trim.ts';
+import { capUV, pathU, profileMap } from '../core/trim.ts';
 
 /** Most points of a point_grid (its counts multiply). */
 const MAX_GRID_POINTS = 20_000_000;
@@ -173,10 +176,13 @@ function platonic(shape: string, r: number): Geometry {
   return orientConvex(V.map((v) => [v[0] * s, v[1] * s, v[2] * s]), F);
 }
 
-function makeTube(rb: number, rt: number, h: number, rows: number, cols: number, caps: boolean, center: Vec3, axis: string): Geometry {
+function makeTube(rb: number, rt: number, h: number, rows: number, cols: number, caps: boolean, center: Vec3, axis: string, trim: TrimTarget | null = null): Geometry {
   rows = Math.max(1, rows); cols = Math.max(3, cols);
   const b = new GeoBuilder();
   const uv = b.attrib('vertex', 'uv', 3);
+  // trim: the axis is the path (u up the tube) and the columns the profile, wound column × axis like a sweep's sides
+  const seg = trim ? profileMap(Array.from({ length: cols }, (_, c) => trim.sides[c % trim.sides.length]), new Array(cols).fill(1), new Array(cols).fill(0), trim.mode, false) : [];
+  const bandOf: (string | null)[] = [];
   const rings: number[][] = [];
   for (let r = 0; r <= rows; r++) {
     const t = r / rows, rad = rb + (rt - rb) * t, y = -h / 2 + h * t;
@@ -193,7 +199,13 @@ function makeTube(rb: number, rt: number, h: number, rows: number, cols: number,
     const lo = rings[r], hi = rings[r + 1];
     for (let c = 0; c < cols; c++) {
       const ids = [at(lo, c), at(lo, c + 1), at(hi, c + 1), at(hi, c)];
-      const uvs = [[c / cols, r / rows], [(c + 1) / cols, r / rows], [(c + 1) / cols, (r + 1) / rows], [c / cols, (r + 1) / rows]];
+      let uvs = [[c / cols, r / rows], [(c + 1) / cols, r / rows], [(c + 1) / cols, (r + 1) / rows], [c / cols, (r + 1) / rows]];
+      if (trim) {
+        const { region: rg, va, vb, dir } = seg[c];
+        const u0 = pathU(rg, (h * r) / rows, h, false, dir, trim.offset), u1 = pathU(rg, (h * (r + 1)) / rows, h, false, dir, trim.offset);
+        uvs = [[u0, va], [u0, vb], [u1, vb], [u1, va]];
+        bandOf[b.numPrims] = rg.name;
+      }
       const keep = ids.map((id, k) => (k === 0 || id !== ids[k - 1]) && !(k === 3 && id === ids[0]));
       const fid = ids.filter((_, k) => keep[k]), fuv = uvs.filter((_, k) => keep[k]);
       if (fid.length < 3) continue;
@@ -204,20 +216,25 @@ function makeTube(rb: number, rt: number, h: number, rows: number, cols: number,
   }
   if (caps) {
     const bot = rings[0], top = rings[rows];
+    // trim caps at real size, seen from the side they face: the top from +Y (u = x, v = -z), the bottom from -Y
+    const capXY = (ids: number[], sx: number) => ids.map((id) => [sx * b.pos[id * 3], -b.pos[id * 3 + 2]]);
     if (top.length > 1) {
       const v0 = b.numVertices;
+      if (trim) { bandOf[b.numPrims] = trim.cap.name; capUV(trim.cap, capXY(top, 1)).forEach((t, k) => uv.set(v0 + k, t)); }
       b.addPrim(top);
-      top.forEach((_, c) => { const a = (2 * Math.PI * c) / cols; uv.set(v0 + c, [0.5 + 0.5 * Math.cos(a), 0.5 + 0.5 * Math.sin(a), 0]); });
+      if (!trim) top.forEach((_, c) => { const a = (2 * Math.PI * c) / cols; uv.set(v0 + c, [0.5 + 0.5 * Math.cos(a), 0.5 + 0.5 * Math.sin(a), 0]); });
     }
     if (bot.length > 1) {
       const v0 = b.numVertices;
       const rev = bot.slice().reverse();
+      if (trim) { bandOf[b.numPrims] = trim.cap.name; capUV(trim.cap, capXY(rev, -1)).forEach((t, k) => uv.set(v0 + k, t)); }
       b.addPrim(rev);
-      rev.forEach((_, k) => { const c = cols - 1 - k, a = (2 * Math.PI * c) / cols; uv.set(v0 + k, [0.5 + 0.5 * Math.cos(a), 0.5 - 0.5 * Math.sin(a), 0]); });
+      if (!trim) rev.forEach((_, k) => { const c = cols - 1 - k, a = (2 * Math.PI * c) / cols; uv.set(v0 + k, [0.5 + 0.5 * Math.cos(a), 0.5 - 0.5 * Math.sin(a), 0]); });
     }
   }
   const g = b.build();
   orientAxis(g, axis, center);
+  if (trim) stampTrim(g, trim.sheet, bandOf);
   return g;
 }
 
@@ -325,7 +342,7 @@ defineNode({
   category: 'generate',
   summary: 'Cylinder / cone / frustum along an axis, optional end caps (watertight when capped).',
   aliases: ['cylinder', 'cone'],
-  inputs: [],
+  inputs: [{ name: 'sheet', desc: 'trim sheet for trim_band (a trim_sheet node; optional)', optional: true }],
   params: {
     radius: { type: 'float', default: 0.5, min: 0, desc: 'radius (both ends unless radius_top is set)', aliases: ['rad', 'r'] },
     radius_top: { type: 'float', default: -1, desc: 'top radius; -1 = same as radius; 0 = cone apex' },
@@ -335,10 +352,14 @@ defineNode({
     caps: { type: 'bool', default: true, desc: 'close the ends with n-gons' },
     axis: { type: 'enum', options: ['y', 'x', 'z'], default: 'y', desc: 'axis direction' },
     center: P.center(),
+    ...trimParams('the circumference (its cols are the segments: faces gives every side the whole band)'),
   },
-  outputs: 'vertex uv',
+  outputs: 'vertex uv; with trim_band: prim trim_band, trim_sheet and detail trim_sheets',
   example: { type: 'tube', params: { radius: 0.3, radius_top: 0.1, height: 2, cols: 16 } },
-  cook: ({ p }) => makeTube(p.radius, p.radius_top < 0 ? p.radius : p.radius_top, p.height, p.rows, p.cols, p.caps, p.center, p.axis),
+  cook: (ctx) => {
+    const p = ctx.p;
+    return makeTube(p.radius, p.radius_top < 0 ? p.radius : p.radius_top, p.height, p.rows, p.cols, p.caps, p.center, p.axis, trimTarget(ctx, 0, new Geometry()));
+  },
 });
 
 defineNode({

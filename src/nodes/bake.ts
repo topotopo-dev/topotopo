@@ -8,7 +8,7 @@
 import type { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER } from '../core/image.ts';
 import {
-  averagedVertexNormals, bakeSamples, curvatureEdges, dilate, edgeGrid, idColor, interpolate, interpolateCorners, normalize3, resolve, uvIslands, vertexPositions, vertexValues,
+  averagedVertexNormals, bakeSamples, curvatureEdges, dilate, edgeGrid, idColor, interpolate, interpolateCorners, normalize3, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
@@ -20,6 +20,7 @@ import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { andThen } from '../graph/parallel.ts';
 import { partsOf, primWhere } from '../core/report.ts';
+import { tiledScene } from '../core/trimtile.ts';
 import { P, mask } from './util.ts';
 import { NAMED_BY_NODE, imageGeo, nameParam, outName, resolutionParam, size2 } from './texture.ts';
 
@@ -139,7 +140,8 @@ function finish(b: Bake, vals: ArrayLike<number>, ch: number, background: number
 function highOf(ctx: CookContext): Geometry | null {
   if (!ctx.hasInput(1)) return null;
   const h = ctx.input(1);
-  return triangulate(h).tris.length ? h : null;
+  if (!triangulate(h).tris.length) return null;
+  return ctx.p.tile ? tiledScene(h) : h;
 }
 
 /**
@@ -295,7 +297,7 @@ function rayBake(ctx: CookContext, mode: 'occlusion' | 'thickness') {
       return finish(b, v, 1, [mode === 'occlusion' ? 1 : 0]);
     });
   };
-  if (!high) return go(b.P, b.N, RayScene.of(b.g));
+  if (!high) return go(b.P, b.N, RayScene.of(p.tile ? tiledScene(b.g) : b.g));
   return chain(onHigh(b, high), (h) => go(h.P, h.N, h.scene));
 }
 
@@ -304,6 +306,7 @@ const RAY_PARAMS: Record<string, ParamDef> = {
   bias: { type: 'float', default: 0, min: 0, desc: 'ray start offset along the normal against self-hits (0 = auto: 1e-4 of the bbox diagonal)' },
   seed: P.seed(),
   invert: { type: 'bool', default: false, desc: 'write 1 - value' },
+  tile: { type: 'bool', default: true, desc: 'trim sheets: a band that tiles is copied one period past each open end, so the bake does not fade there (no effect without trim bands). Help topic trim_sheets.' },
   ...HIGH_PARAMS(),
 };
 
@@ -381,6 +384,7 @@ defineBake({
     strength: { type: 'float', default: 1, min: 0, desc: 'contrast multiplier', aliases: ['intensity', 'contrast'] },
     min_angle: { type: 'float', default: 0.5, min: 0, max: 179, desc: 'edges bending less than this (degrees) are ignored' },
     intersections: { type: 'bool', default: true, desc: 'also find the concave creases where separate parts cut into each other (kitbashed meshes)', aliases: ['crossings', 'intersection_creases'] },
+    tile: { type: 'bool', default: true, desc: 'trim sheets: a band that tiles is copied one period past each open end, so curvature does not fade there (no effect without trim bands). Help topic trim_sheets.' },
     ...HIGH_PARAMS(),
   },
   outputs: 'image <name> (default: the node name): C grey (0.5 = flat), convex, concave, mask',
@@ -421,7 +425,7 @@ defineBake({
         return finish(b, C, 1, [0.5], { convex: { vals: cx, ch: 1, background: [0] }, concave: { vals: cc, ch: 1, background: [0] } });
       });
     };
-    if (!high) return go(b.P, b.N, b.g);
+    if (!high) return go(b.P, b.N, p.tile ? tiledScene(b.g) : b.g);
     return chain(onHigh(b, high), (h) => go(h.P, h.N, high));
   },
 });
@@ -647,7 +651,7 @@ defineBake({
 defineBake({
   type: 'bake_mask',
   summary: 'Bake a mask into uv space from a prim group (1 inside) or a numeric attribute (its value), e.g. to paint per-part materials.',
-  description: 'Substance Painter "ID" (by group / attribute). ' + BAKE_DOC + 'mask_group (a prim group pattern) gives 1 on its prims and 0 elsewhere; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.',
+  description: 'Substance Painter "ID" (by group / attribute). ' + BAKE_DOC + 'mask_group (a prim group pattern) gives 1 where any of its prims covers the texel and 0 elsewhere, so overlapping region prims add up instead of the topmost one winning; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.',
   aliases: ['mask_bake', 'bake_group', 'bake_attribute', 'attribute_bake'],
   inputs: [INPUTS[0]],
   params: {
@@ -671,7 +675,12 @@ defineBake({
     const grp = String(p.mask_group ?? '').trim();
     if (grp) {
       const sel = mask(b.g, 'prim', grp)!;
-      for (let i = 0; i < n; i++) C[i] = sel[b.triPrim[b.s.tri[i]]] ? 1 : 0;
+      // the centre raster keeps the last triangle, so a group prim hidden under another would read 0; a second raster
+      // of the group alone makes the mask their union. Texels only the conservative pass covered keep the winner.
+      const skipG = new Uint8Array(b.triPrim.length);
+      for (let t = 0; t < b.triPrim.length; t++) skipG[t] = sel[b.triPrim[t]] ? 0 : 1;
+      const hit = rasterizeUV(b.uv, b.tris, b.s.W * b.s.S, b.s.H * b.s.S, false, skipG);
+      for (let i = 0; i < n; i++) C[i] = hit.tri[b.s.pix[i]] >= 0 || sel[b.triPrim[b.s.tri[i]]] ? 1 : 0;
     } else if (String(p.attrib ?? '').trim()) {
       const f = b.g.findAttrib(p.attrib, ['vertex', 'point', 'prim', 'detail']);
       if (!f || f.attr.type === 'string' || f.attr.isArray) throw new NodeError(`${ctx.type}: no numeric attribute "${p.attrib}"`, 'bake_mask reads float/int point, vertex, prim or detail attributes');
