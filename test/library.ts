@@ -333,7 +333,7 @@ section('the scan: what it skips, what it enters, how deep');
     const oldSaid = /holds topotopo-workspace\.json, which TopoTopo no longer reads: rename it to old-style\.topows and, in it, remove "name"$/;
     check(throws(() => readWorkspace(old), oldSaid) && throws(() => initWorkspace(old), oldSaid) && throws(() => workspaceText(old), oldSaid),
       'a folder with the old workspace file name gets one clear error naming <name>.topows (reading, init and show)');
-    check(locate(old).workspace === old && !scanTree('x', holder).workspaces.includes(old), 'the old file name still marks the folder as the place its packages look for a workspace (the error says what to do), and is no workspace file to the scan');
+    check(locate(old).workspace === old && scanTree('x', holder).workspaces.includes(old), 'a folder with the old file name is a workspace to locate and to the scan alike (the error says what to do where it is read)');
     fs.rmSync(path.join(old, 'topotopo-workspace.json'));
     const fresh = initWorkspace(old, { engine: 'none' });
     check(fresh.manifest.name === 'old-style' && fs.readdirSync(old).filter((f) => f.endsWith('.topows')).join() === 'old-style.topows' && !('name' in JSON.parse(fs.readFileSync(path.join(old, 'old-style.topows'), 'utf8'))) && !fs.existsSync(path.join(old, 'topotopo-workspace.json')),

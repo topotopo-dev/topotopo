@@ -19,9 +19,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE } from './graph/scope.ts';
-import { MANIFEST_EXT, isWorkspaceFile } from './session.ts';
+import { MANIFEST_EXT } from './session.ts';
 import { engineTypeOf } from './engines.ts';
-import { oldManifest, readManifestFile, slugify } from './package.ts';
+import { oldManifest, readManifestFile, slugify, workspaceFileIn } from './package.ts';
 import type { PackageManifest } from './package.ts';
 
 /** How deep below its root a scan looks. */
@@ -91,7 +91,7 @@ export function skippedName(name: string, parentFiles: string[] | (() => string[
  * workspace's own engine project file); null when it does.
  */
 function skippedFolder(dir: string, files: string[], engine: string | null): string | null {
-  const ws = files.find(isWorkspaceFile);
+  const ws = workspaceFileIn(files);
   if (ws) return `another workspace (it holds ${ws})`;
   const projects = files.filter((f) => engineTypeOf(f));
   if (projects.length && !projects.some((f) => folderKey(path.join(dir, f)) === engine)) return `another engine project (it holds ${projects[0]})`;
@@ -164,7 +164,7 @@ function scanNow(name: string, rootDir: string, o: ScanOptions): Scan {
     if (rel) {
       // another workspace (listed, not scanned), another engine project than the workspace's own, a TopoTopo checkout
       // (its test fixtures and built-in packages are not the workspace's)
-      if (skippedFolder(dir, files, engine)) { if (files.some(isWorkspaceFile)) out.workspaces.push(dir); return; }
+      if (skippedFolder(dir, files, engine)) { if (workspaceFileIn(files)) out.workspaces.push(dir); return; }
       if (tops.length > 1) { out.problems.push(`${rel}: holds ${tops.slice(0, -1).join(', ')} and ${tops.at(-1)}: a package has one ${MANIFEST_EXT} file, whose name is its id`); return; }
       if (tops.length === 1) { addPackage(dir, rel, tops[0]); return; }
       // a folder that holds project.json instead: said, and not entered
@@ -199,5 +199,28 @@ function scanNow(name: string, rootDir: string, o: ScanOptions): Scan {
     });
   };
   walk(root, '', 0);
+  return out;
+}
+
+/**
+ * One package as a root of its own (`topotopo open` of a package that is in no listed workspace or library): the
+ * package at the root, `rel` empty, and nothing around or below it looked at. Not kept: it is cheap.
+ */
+export function scanSingle(name: string, dir: string): Scan {
+  const root = path.resolve(dir);
+  const out: Scan = { name, root, packages: [], problems: [], workspaces: [] };
+  const files = fs.readdirSync(root).filter((f) => f.endsWith(MANIFEST_EXT) && f.length > MANIFEST_EXT.length).sort();
+  if (files.length !== 1) { out.problems.push(`${root} holds ${files.length ? files.join(', ') : `no ${MANIFEST_EXT} file`}: a package has one ${MANIFEST_EXT} file, whose name is its id`); return out; }
+  const id = files[0].slice(0, -MANIFEST_EXT.length), abs = path.join(root, files[0]);
+  if (!ID_RE.test(id)) { out.problems.push(`${abs}: the file's name is the package id: lower-case letters, digits, - and _, starting with a letter or digit ("${slugify(id) || 'package'}${MANIFEST_EXT}")`); return out; }
+  let manifest: PackageManifest;
+  try { manifest = readManifestFile(abs, id); } catch (e: any) { out.problems.push(e.message); return out; }
+  let updated: number | undefined;
+  out.packages.push({
+    lib: name, id, dir: root, rel: '', collection: '', manifest,
+    get updated() {
+      return updated ??= Math.round(Math.max(mtime(abs), ...['graphs', 'assets'].flatMap((d) => jsonFiles(path.join(root, d)).map((f) => mtime(path.join(root, d, f))))));
+    },
+  });
   return out;
 }

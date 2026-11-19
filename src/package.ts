@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE, parsePackageName } from './graph/scope.ts';
-import { MANIFEST_EXT, NAME_RE, PACKAGE_FOLDERS, WORKSPACE_EXT, graphFiles, topoFiles, topowsFiles } from './session.ts';
+import { MANIFEST_EXT, NAME_RE, PACKAGE_FOLDERS, WORKSPACE_EXT, graphFiles, isWorkspaceFile, topoFiles, topowsFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
 import { engineFile, readWorkspace, writeWorkspace } from './workspace.ts';
 import { folderKey, forgetScans, unscanned } from './scan.ts';
@@ -507,6 +507,12 @@ export function oldWorkspace(dir: string): string | null {
   const name = typeof raw?.name === 'string' && ID_RE.test(raw.name) ? raw.name : slugify(path.basename(path.resolve(dir))) || 'workspace';
   return `${dir} holds ${OLD_WORKSPACE_FILE}, which TopoTopo no longer reads: rename it to ${name}${WORKSPACE_EXT}${raw?.name !== undefined ? ' and, in it, remove "name"' : ''}`;
 }
+
+/**
+ * The file in a folder's listing that makes it a workspace's root: its .topows file, or the old file name (a folder that
+ * holds that one is told what to do where it is read). undefined for a folder that is no workspace's root.
+ */
+export const workspaceFileIn = (files: string[]) => files.find(isWorkspaceFile) ?? files.find((f) => f === OLD_WORKSPACE_FILE);
 
 /** Whether the folder is a workspace's root, or was one under the old file name (a workspace file that cannot be used is said where it is read). */
 export const holdsWorkspace = (dir: string) => topowsFiles(dir).length > 0 || oldWorkspace(dir) !== null;
