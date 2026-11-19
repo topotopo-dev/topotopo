@@ -21,7 +21,7 @@ import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { readWorkspace, engineFile } from '../workspace.ts';
-import { WORKSPACE_PACKAGES } from '../package.ts';
+import { WORKSPACE_PACKAGES, workspaceAt, workspaceFilePath } from '../package.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
 import { folderKey, forgetScans, forgetScansOf, scanTree, unscanned } from '../scan.ts';
 import { engineTypeOf } from '../engines.ts';
@@ -98,7 +98,9 @@ export async function runningWeb(port: number): Promise<string | null> {
 /** The engine project a workspace file names, read as written even when the file is otherwise refused. */
 function engineWritten(ws: string): Root['engine'] {
   try {
-    const e = JSON.parse(fs.readFileSync(path.join(ws, 'topotopo-workspace.json'), 'utf8'))?.engine;
+    const file = workspaceAt(ws)?.file;
+    if (!file) return null;
+    const e = JSON.parse(fs.readFileSync(file, 'utf8'))?.engine;
     return e && (e.type === 'godot' || e.type === 'unreal') && typeof e.project === 'string' && e.project ? { type: e.type, file: path.resolve(ws, e.project) } : null;
   } catch { return null; }
 }
@@ -537,7 +539,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const walk = await walkTree(r, { links: noteLinks, slice: 8, limits: o.walkLimits });
     const flags: Flag[] = [];
     const g = r.kind === 'w' ? games.find((x) => x.name === r.name) : undefined;
-    if (g?.problem) flags.push({ kind: 'workspace', at: '', what: `topotopo-workspace.json cannot be read: ${g.problem.replace(/^.*?topotopo-workspace\.json: /, '')}`, todo: 'Fix the file as this says: until then TopoTopo cannot use the workspace (its folders still show here)' });
+    if (g?.problem) flags.push({ kind: 'workspace', at: '', what: /\.topows: /.test(g.problem) ? `${path.basename(workspaceFilePath(r.dir))} cannot be read: ${g.problem.replace(/^.*?\.topows: /, '')}` : g.problem, todo: 'Fix the file as this says: until then TopoTopo cannot use the workspace (its folders still show here)' });
     for (const prob of scans.find((s) => s.root === r.dir && s.name === r.name)?.problems ?? []) if (!g?.problem || !prob.includes(g.problem)) flags.push({ kind: 'workspace', at: '', what: prob, todo: 'Fix it in the folder it names: until then that package is not found' });
     const pk = packagesOf(r);
     let used: Map<string, Set<string>> | null = null;
@@ -646,7 +648,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (f.engine) return { name: f.name, url, kind: 'engine', title: f.engine.title, sub: `${f.engine.type === 'godot' ? 'Godot' : 'Unreal'} project`, ...(f.image ? { thumb: urls.raw(r.kind, r.name, f.image) } : {}), flags: 0, packages: 0 };
       if (f.workspace) {
         let wsName = f.name;
-        try { wsName = JSON.parse(fs.readFileSync(path.join(fabs, 'topotopo-workspace.json'), 'utf8'))?.name ?? f.name; } catch { /* its folder's name */ }
+        try { wsName = workspaceAt(fabs)?.name ?? f.name; } catch { /* its folder's name */ }
         const reg = games.find((g) => folderKey(g.dir) === folderKey(fabs));
         return { name: f.name, url: reg ? urls.folder('w', reg.name, '') : url, kind: 'workspace', title: String(wsName), sub: reg ? 'another workspace' : 'another workspace, not registered', flags: 0, packages: 0 };
       }

@@ -7,7 +7,7 @@
 //   Unreal's Binaries, Intermediate, Saved, DerivedDataCache, __ExternalActors__, __ExternalObjects__;
 //   C#'s bin and obj beside a *.csproj or *.sln;
 //   a folder holding an engine project (project.godot, *.uproject) other than the workspace's own;
-//   a folder holding another topotopo-workspace.json: another workspace, listed as such and not scanned;
+//   a folder holding another .topows file: another workspace, listed as such and not scanned;
 //   a TopoTopo checkout (a package.json named "topotopo").
 // Plain folders named assets, graphs, inputs, exports, attachments, versions or packages are scanned like any other
 // outside a package (a Godot project keeps its content in assets/). It goes 16 folders deep; a folder cut off there is
@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE } from './graph/scope.ts';
-import { MANIFEST_EXT } from './session.ts';
+import { MANIFEST_EXT, isWorkspaceFile } from './session.ts';
 import { engineTypeOf } from './engines.ts';
 import { oldManifest, readManifestFile, slugify } from './package.ts';
 import type { PackageManifest } from './package.ts';
@@ -30,7 +30,6 @@ export const SCAN_DEPTH = 16;
 export const SKIP = new Set(['node_modules', 'topotopo-packages', 'binaries', 'intermediate', 'saved', 'deriveddatacache', '__externalactors__', '__externalobjects__']);
 /** C#'s build folders: skipped beside a *.csproj or *.sln. */
 const DOTNET = new Set(['bin', 'obj']);
-export const WORKSPACE_FILE = 'topotopo-workspace.json';
 
 export interface Package {
   /** the name of the workspace or library it was found in */
@@ -55,7 +54,7 @@ export interface Scan {
   packages: Package[];
   /** what is wrong: a manifest that cannot be read, two .topo files, an id used twice, a folder too deep */
   problems: string[];
-  /** other workspaces below the root (a folder holding topotopo-workspace.json): listed, not scanned */
+  /** other workspaces below the root (a folder holding a .topows file): listed, not scanned */
   workspaces: string[];
 }
 
@@ -92,7 +91,8 @@ export function skippedName(name: string, parentFiles: string[] | (() => string[
  * workspace's own engine project file); null when it does.
  */
 function skippedFolder(dir: string, files: string[], engine: string | null): string | null {
-  if (files.includes(WORKSPACE_FILE)) return `another workspace (it holds ${WORKSPACE_FILE})`;
+  const ws = files.find(isWorkspaceFile);
+  if (ws) return `another workspace (it holds ${ws})`;
   const projects = files.filter((f) => engineTypeOf(f));
   if (projects.length && !projects.some((f) => folderKey(path.join(dir, f)) === engine)) return `another engine project (it holds ${projects[0]})`;
   if (files.includes('package.json') && isCheckout(dir)) return 'a TopoTopo checkout';
@@ -164,7 +164,7 @@ function scanNow(name: string, rootDir: string, o: ScanOptions): Scan {
     if (rel) {
       // another workspace (listed, not scanned), another engine project than the workspace's own, a TopoTopo checkout
       // (its test fixtures and built-in packages are not the workspace's)
-      if (skippedFolder(dir, files, engine)) { if (files.includes(WORKSPACE_FILE)) out.workspaces.push(dir); return; }
+      if (skippedFolder(dir, files, engine)) { if (files.some(isWorkspaceFile)) out.workspaces.push(dir); return; }
       if (tops.length > 1) { out.problems.push(`${rel}: holds ${tops.slice(0, -1).join(', ')} and ${tops.at(-1)}: a package has one ${MANIFEST_EXT} file, whose name is its id`); return; }
       if (tops.length === 1) { addPackage(dir, rel, tops[0]); return; }
       // a folder that holds project.json instead: said, and not entered

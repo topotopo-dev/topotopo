@@ -173,6 +173,18 @@ export function topoFiles(dir: string): string[] {
   catch { return []; }
 }
 
+/** The extension of a workspace's file: a workspace is a folder holding one <name>.topows file, at its root (src/package.ts). */
+export const WORKSPACE_EXT = '.topows';
+
+/** Whether a file name is a workspace's file (<name>.topows). */
+export const isWorkspaceFile = (name: string) => name.endsWith(WORKSPACE_EXT) && name.length > WORKSPACE_EXT.length;
+
+/** The .topows files directly in a folder, by name, sorted: one makes it a workspace. */
+export function topowsFiles(dir: string): string[] {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && isWorkspaceFile(e.name)).map((e) => e.name).sort(); }
+  catch { return []; }
+}
+
 /** A graph file's text holds a graph: an object with "nodes" (other JSON files do not). */
 const holdsGraph = (j: unknown) => !!j && typeof j === 'object' && !Array.isArray(j) && !!(j as any).nodes && typeof (j as any).nodes === 'object';
 

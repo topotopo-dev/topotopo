@@ -370,15 +370,15 @@ if (url) {
   const noPath = await call('workspace', { action: 'init_workspace' });
   check(noPath.isError && /init_workspace needs path/.test(noPath.txt), 'init_workspace names the game\'s folder as required');
   const mk = await call('workspace', { action: 'init_workspace', path: game, name: 'mcp-game' });
-  check(!mk.isError && fs.existsSync(path.join(game, 'topotopo-workspace.json')) && /^workspace "mcp-game"/m.test(mk.txt), `init_workspace makes the folder a workspace: ${mk.txt.split('\n')[0]}`);
+  check(!mk.isError && fs.existsSync(path.join(game, 'mcp-game.topows')) && /^workspace "mcp-game"/m.test(mk.txt), `init_workspace makes the folder a workspace: ${mk.txt.split('\n')[0]}`);
   await call('workspace', { action: 'open', path: path.join(game, 'art', 'crate') });
   const inside = await call('workspace', { action: 'show' });
   check(!inside.isError && /^workspace "mcp-game"/.test(inside.txt) && /art\/crate/.test(inside.txt), `workspace show from a package inside it: ${inside.txt.split('\n').slice(0, 2).join(' | ')}`);
   // the shared libraries of the open package's workspace: shown, listed and unlisted when the person says so
   const libs = await call('workspace', { action: 'libraries' });
-  check(!libs.isError && /^the workspace "mcp-game" lists no libraries in .*topotopo-workspace\.json "libraries"\nits packages find packages in the workspace itself, then in no shared library, then in TopoTopo's built-in library/.test(libs.txt), `libraries alone says what the workspace lists: ${libs.txt}`);
+  check(!libs.isError && /^the workspace "mcp-game" lists no libraries in .*mcp-game\.topows "libraries"\nits packages find packages in the workspace itself, then in no shared library, then in TopoTopo's built-in library/.test(libs.txt), `libraries alone says what the workspace lists: ${libs.txt}`);
   const addLib = await call('workspace', { action: 'libraries', add: 'game' });
-  const wsLibs = () => JSON.parse(fs.readFileSync(path.join(game, 'topotopo-workspace.json'), 'utf8')).libraries.join();
+  const wsLibs = () => JSON.parse(fs.readFileSync(path.join(game, 'mcp-game.topows'), 'utf8')).libraries.join();
   check(!addLib.isError && wsLibs() === 'game' && !(await call('workspace', { action: 'libraries', remove: 'game' })).isError && wsLibs() === '', `libraries {add} and {remove} change the workspace's list: ${addLib.txt.split('\n')[0]}`);
   const setLibs = await call('workspace', { action: 'set', libraries: ['game'] });
   check(setLibs.isError && /"libraries" is no longer set on a package/.test(setLibs.txt), 'set {libraries} is refused, saying where it went');

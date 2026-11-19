@@ -272,10 +272,10 @@ section('the cache is keyed by the engine code: an engine edit under the same ve
 
 section('a workspace around the engine project: its file is recorded from the package, so a checkout anywhere is current');
 {
-  // as a game repository holds it: topotopo-workspace.json at the root, the Godot project in game/
+  // as a game repository holds it: <name>.topows at the root, the Godot project in game/
   const checkout = (name: string) => {
     const root = path.join(tmp, name);
-    write(path.join(root, 'topotopo-workspace.json'), JSON.stringify({ name: 'game-ws', libraries: [], engine: { type: 'godot', project: 'game/project.godot' } }, null, 2) + '\n');
+    write(path.join(root, 'game-ws.topows'), JSON.stringify({ libraries: [], engine: { type: 'godot', project: 'game/project.godot' } }, null, 2) + '\n');
     write(path.join(root, 'game', 'project.godot'), 'config_version=5\n\n[application]\n\nconfig/name="Cook test"\n');
     copyDir(FIXTURE, path.join(root, 'game', 'props'));
     return root;
@@ -285,8 +285,8 @@ section('a workspace around the engine project: its file is recorded from the pa
   const first = await cookPkg(path.join(W1, 'game', 'props'));
   const rec = JSON.parse(recordOf(W1));
   const deps: string[] = Object.values(rec.outputs).flatMap((o: any) => o.deps);
-  check(first.code === 0 && Object.values(rec.outputs).every((o: any) => o.deps.includes('../../topotopo-workspace.json')) && '../../topotopo-workspace.json' in rec.sources,
-    `every output lists the workspace file as ../../topotopo-workspace.json (${stateText(first.rep)})`);
+  check(first.code === 0 && Object.values(rec.outputs).every((o: any) => o.deps.includes('../../game-ws.topows')) && '../../game-ws.topows' in rec.sources,
+    `every output lists the workspace file as ../../game-ws.topows (${stateText(first.rep)})`);
   check(!deps.some((d) => path.isAbsolute(d) || /^[A-Za-z]:\//.test(d)) && !rec.notes.some((n: string) => /outside the engine project/.test(n)), `no absolute dep and no "outside" note (${rec.notes.join('; ') || 'no notes'})`);
   // the same checkout at another path, its record and outputs with it (a clone, a worktree): nothing cooks
   const W2 = path.join(tmp, 'ws2');

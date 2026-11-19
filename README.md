@@ -519,8 +519,8 @@ set of names; a library inside a registered workspace shows as the workspace's f
 
 ## Workspaces, packages and libraries
 
-Three words: a **workspace** is a folder tree, one production (a game, an archviz job), with `topotopo-workspace.json`
-at its root; every folder in it with a `.topo` file is a **package**, and the packages of a workspace find each other
+Three words: a **workspace** is a folder tree, one production (a game, an archviz job), with one `<name>.topows` file
+at its root (the file's name is the workspace's name); every folder in it with a `.topo` file is a **package**, and the packages of a workspace find each other
 by themselves; a **library** is a shared folder of packages registered on this machine (`topotopo library add <name>
 <folder>`), which a workspace lists to use it. TopoTopo's built-in library is always there.
 
@@ -532,7 +532,7 @@ keeps its content in `assets/`):
 ```text
 my-game/                         the Godot project
   project.godot
-  topotopo-workspace.json        {"name": "my-game", "libraries": ["props"], "engine": {"type": "godot", "project": "project.godot"}}
+  my-game.topows                 {"libraries": ["props"], "engine": {"type": "godot", "project": "project.godot"}}
   topotopo-packages/             one copy of each package version the workspace uses
   assets/props/lantern/          a package: lantern.topo, graphs/, inputs/, exports/, attachments/
   assets/levels/yard/            a package that uses studio/rocks from the props library

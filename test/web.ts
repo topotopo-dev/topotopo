@@ -247,7 +247,7 @@ try {
   {
     const ws = path.join(tmp, 'valley');
     fs.mkdirSync(path.join(ws, 'scenes', 'hall'), { recursive: true });
-    fs.writeFileSync(path.join(ws, 'topotopo-workspace.json'), JSON.stringify({ name: 'valley', libraries: ['game'], engine: { type: 'godot', project: 'game/project.godot' }, uses: { 'topotopo/props': '1.0' } }));
+    fs.writeFileSync(path.join(ws, 'valley.topows'), JSON.stringify({ libraries: ['game'], engine: { type: 'godot', project: 'game/project.godot' }, uses: { 'topotopo/props': '1.0' } }));
     write(path.join(ws, 'game', 'project.godot'), 'config_version=5\n[application]\nconfig/name="Valley Run"\n');
     fs.writeFileSync(path.join(ws, 'scenes', 'hall', 'hall.topo'), JSON.stringify({ title: 'Pump hall' }));
     // a library registered inside the workspace: shown once, as the workspace's
@@ -291,7 +291,7 @@ try {
   /** a second workspace for what a note link may never do, plumbing by other names, the look and the flags that are not there */
   const probe = path.join(tmp, 'probe');
   {
-    write(path.join(yard, 'topotopo-workspace.json'), { name: 'yard', libraries: [], engine: { type: 'godot', project: 'game/project.godot' } });
+    write(path.join(yard, 'yard.topows'), { libraries: [], engine: { type: 'godot', project: 'game/project.godot' } });
     // the Godot project inside: browsable, not audited
     write(path.join(yard, 'game', 'project.godot'), 'config_version=5\n[application]\nconfig/name="Yard Game"\n');
     write(path.join(yard, 'game', 'scenes', 'main.tscn'), '[gd_scene format=3]\n');
@@ -363,12 +363,12 @@ try {
     write(path.join(kit, 'Maps', 'L_Test.umap'), 'x');
     write(path.join(kit, 'README.md'), 'The rock: [SM_Rock](/Game/Kit/Meshes/SM_Rock) and [the gone one](/Game/Kit/Meshes/SM_Gone).\n');
     // a workspace whose file TopoTopo refuses: its folders still show, and the problem is a flag
-    write(path.join(tmp, 'old', 'topotopo-workspace.json'), { name: 'old', engine: { type: 'godot', project: 'game/project.godot', assets: 'game/assets' } });
+    write(path.join(tmp, 'old', 'old.topows'), { engine: { type: 'godot', project: 'game/project.godot', assets: 'game/assets' } });
     write(path.join(tmp, 'old', 'props', 'chair', 'chair.topo'), { title: 'Chair' });
     // a link that leads out of the workspace
     try { fs.symlinkSync(path.join(tmp, 'outside'), path.join(yard, 'notes', 'out'), process.platform === 'win32' ? 'junction' : 'dir'); } catch { /* no links here: the check below says so */ }
 
-    write(path.join(probe, 'topotopo-workspace.json'), { name: 'probe', libraries: [] });
+    write(path.join(probe, 'probe.topows'), { libraries: [] });
     write(path.join(probe, 'notes', '01-a.md'), 'A note.\n');
     write(path.join(probe, 'notes', '02-unc.md'), [
       '[unc-pct](%5C%5Cunreachable.invalid%5Cs%5Cx.png) [unc-root](/%5C%5Cunreachable.invalid%5Cs%5Cy.png) [unc-raw](\\\\\\\\unreachable.invalid\\s\\z.png)',
@@ -561,7 +561,7 @@ try {
     const card = home.slice(home.indexOf('data-root="w/old"'), home.indexOf('</a>', home.indexOf('data-root="w/old"')));
     check(/<span class="rprob">Its workspace file cannot be read: see its page<\/span>/.test(card) && /<span class="stat fstat"><b>1<\/b> <span>flag<\/span>/.test(card), 'its card says its file cannot be read, as a flag');
     const root = (await fr('/w/old/')).body.toString();
-    check(/<span class="fkind">workspace<\/span><span class="fwhat">topotopo-workspace\.json cannot be read: [^<]*assets/.test(root) && /href="\/w\/old\/props\/"/.test(root), 'its root says what is wrong with the file, and its folders still show');
+    check(/<span class="fkind">workspace<\/span><span class="fwhat">old\.topows cannot be read: [^<]*assets/.test(root) && /href="\/w\/old\/props\/"/.test(root), 'its root says what is wrong with the file, and its folders still show');
     check(/<h1>Chair<\/h1>/.test((await fr('/w/old/props/chair/')).body.toString()), 'and its packages');
   }
 
@@ -711,7 +711,7 @@ try {
     // the audits follow the files: a note written while the server runs (also while its first audit is under way) is
     // read again, and so is one fixed, in the tree that changed
     const live = path.join(tmp, 'live');
-    write(path.join(live, 'topotopo-workspace.json'), { name: 'live', libraries: [] });
+    write(path.join(live, 'live.topows'), { libraries: [] });
     write(path.join(live, 'docs', 'a.md'), 'A note.\n');
     const lv = await startWeb({ config: { file: path.join(tmp, 'config.json'), libraries: [], workspaces: [{ name: 'live', path: live }], web: { port: 0, cors: [] } }, port: 0, bake: false });
     try {

@@ -10,13 +10,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type http from 'node:http';
-import { MANIFEST_EXT } from '../session.ts';
+import { MANIFEST_EXT, isWorkspaceFile } from '../session.ts';
 import { engineAbove, engineTypeOf, godotProjectOf } from '../engines.ts';
 import type { EngineType } from '../engines.ts';
 import { canonicalJSON } from '../io/source.ts';
 import { sha256Hex } from '../core/sha256.ts';
 import { jsonFormat, SIDECAR_FORMATS, SIDECAR_HEAD_BYTES } from '../io/sidecars.ts';
-import { skippedName, isCheckout, WORKSPACE_FILE } from '../scan.ts';
+import { skippedName, isCheckout } from '../scan.ts';
 import { escHtml, markdownLinks, renderMarkdown, slug } from './markdown.ts';
 import type { LinkOut, MdLink } from './markdown.ts';
 
@@ -257,7 +257,7 @@ export interface FolderEntry {
   rel: string;
   /** an engine project (project.godot, *.uproject): one card that opens on demand, never audited */
   engine?: { type: EngineType; title: string };
-  /** another workspace (it holds topotopo-workspace.json) */
+  /** another workspace (it holds a .topows file) */
   workspace?: boolean;
   /** it holds a .topo file */
   package?: boolean;
@@ -311,7 +311,7 @@ function peek(abs: string, rel: string): Omit<FolderEntry, 'name' | 'rel'> {
   const out: Omit<FolderEntry, 'name' | 'rel'> = { files: shown.length, folders: 0, unreal };
   const project = files.find((f) => engineTypeOf(f));
   if (project) out.engine = { type: engineTypeOf(project)!, title: engineTitle(path.join(abs, project)) };
-  if (files.includes(WORKSPACE_FILE)) out.workspace = true;
+  if (files.some(isWorkspaceFile)) out.workspace = true;
   if (files.some(isTopo)) out.package = true;
   const image = shown.filter((f) => kindOf(f) === 'image').sort(byName)[0];
   out.folders = entries.filter((e) => e.isDirectory() && !plumbing(e.name, files)).length;
@@ -787,7 +787,7 @@ export async function walkTree(root: Root, o: WalkOptions = {}): Promise<Walk> {
     const files = entries.filter((e) => e.isFile()).map((e) => e.name);
     if (rel) {
       if (files.some((f) => engineTypeOf(f))) { out.engines.push(rel); continue; }
-      if (files.includes(WORKSPACE_FILE) || (files.includes('package.json') && isCheckout(abs))) continue;
+      if (files.some(isWorkspaceFile) || (files.includes('package.json') && isCheckout(abs))) continue;
     }
     const { shown } = shownFiles(abs, files);
     out.files += shown.length;

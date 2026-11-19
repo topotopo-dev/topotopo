@@ -40,11 +40,11 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
 ## its shared copies, and inside a package folder (a folder holding a .topo) its top-level .json/.md/.txt files and
 ## everything under its TopoTopo folders.
 func skipped(path: String) -> bool:
-	if path.get_extension() == "topo":
+	if path.get_extension() == "topo" or path.get_extension() == "topows":
 		return true
 	if path.begins_with("res://addons/topotopo/"):
 		return true
-	if path == "res://topotopo-workspace.json" or path.begins_with("res://topotopo-packages/") or path.contains("/topotopo-packages/"):
+	if path.begins_with("res://topotopo-packages/") or path.contains("/topotopo-packages/"):
 		return true
 	var pkg := _package_dir_of(path.get_base_dir())
 	if pkg == "":
