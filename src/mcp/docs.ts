@@ -1364,6 +1364,32 @@ The plugin's contract (import steps, what differs from the cook for Godot): inte
 
 THE CLI COMMANDS:
 ${UNREAL_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
+  trim_sheets: `TRIM SHEETS (one description, then map, bake, check)
+Search words: trim sheet, trim band, hotspot, texture a railing, uvs along a path.
+A trim sheet is one texture whose horizontal bands each repeat along u: stone courses, a coping, a step, a metal
+edge. Describe it once with trim_sheet (pixel size, texels per metre, bands from the top of the image, and hotspot
+rectangles). The description travels on the geometry (detail trim_sheets). Wire that node into the sheet input.
+
+MAPPING (the same convention on every node): u = distance along the path / the band's period, starting at 0 at the
+start of the path; a closed path stretches the period so a whole number of repeats fits; a band that does not tile
+fits its length once. v fills the band across the profile, the first point of the profile at the band's bottom, and
+a face is never mirrored. On a wall, v climbs.
+  sweep, polywire, tube, extrude   trim_band (one name, or a comma list with one band per profile segment),
+      trim_around wrap (one band round the profile) or faces (each segment fills the band), trim_cap, trim_offset.
+      The sheet is the last input.
+  trim_map   any faces onto a band. u runs on round corners. fit: stretch (the strip fills the band), scale (real
+      size from the bottom), courses (cut into rows one band high; the cuts are shared, so no T-junctions).
+  hotspot   each island of coplanar faces to the rectangle or band closest to its real size. A rectangle may turn
+      90°; a tiling band only has to match across. max_stretch limits the fit; the rest land in hotspot_unmatched.
+
+BAKING: trim_layout lays the sheet out at real size (relief adds the 45° border bevels and rounds edge bands), so
+bake_normal / bake_ao / bake_curvature from the layout to the relief bake the sheet. bake_ao, bake_thickness and
+bake_curvature copy a tiling band one period past each open end (tile, on by default), so the bake does not fade
+there. bake_mask is the union of the group's prims where they overlap.
+
+CHECKING: --inspect uv adds a trim section per band (faces, area, v coverage, texel density, stretch) and counts
+faces outside every band or straddling two. Render with --views sheet for the labelled sheet, and --color-by
+trim_band for the model in the same colours.`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):

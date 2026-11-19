@@ -16,6 +16,10 @@ import { FRAMES, P, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
 import { arcTable, evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
 import { filletCurves } from './splines.ts';
+import { stampTrim, trimParams, trimTarget } from './trim.ts';
+import type { TrimTarget } from './trim.ts';
+import { capUV, pathU, profileMap } from '../core/trim.ts';
+import type { SegmentMap, TrimRegion } from '../core/trim.ts';
 
 // ---------------------------------------------------------------- helpers
 
@@ -505,7 +509,7 @@ defineNode({
 interface Profile { pts: number[][]; closed: boolean }
 
 function sweepCurves(
-  g: Geometry, profiles: Profile[], o: { caps: boolean; twist: number; up: Vec3; scaleRamp: any[] | null; radiusOf?: (pt: number) => number; uvLength: boolean },
+  g: Geometry, profiles: Profile[], o: { caps: boolean; twist: number; up: Vec3; scaleRamp: any[] | null; radiusOf?: (pt: number) => number; uvLength: boolean; trim?: TrimTarget | null },
 ): Geometry {
   const b = new GeoBuilder(g);
   b.skip.point.add('N'); b.skip.point.add('up'); b.skip.point.add('tangentu');
@@ -513,6 +517,7 @@ function sweepCurves(
   const upA = g.points.get('up');
   const psA = g.points.get('pscale');
   const capG = b.group('prim', 'caps'), sideG = b.group('prim', 'sides');
+  const trim = o.trim ?? null, bandOf: (string | null)[] = [];
   for (let pr = 0; pr < g.numPrims; pr++) {
     let idx = g.primPoints(pr);
     let closed = !!g.primClosed[pr];
@@ -541,6 +546,15 @@ function sweepCurves(
       rings.push(ring);
     }
     const nk = closed ? pts.length : pts.length - 1, nj = prof.closed ? m : m - 1;
+    let seg: SegmentMap[] = [];
+    if (trim) {
+      const len: number[] = [], dy: number[] = [], regions: TrimRegion[] = [];
+      for (let j = 0; j < nj; j++) {
+        const a = prof.pts[j], c = prof.pts[(j + 1) % m];
+        len.push(Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2])); dy.push(c[1] - a[1]); regions.push(trim.sides[j % trim.sides.length]);
+      }
+      seg = profileMap(regions, len, dy, trim.mode, false);
+    }
     for (let k = 0; k < nk; k++) {
       const k1 = (k + 1) % pts.length;
       const v0 = L[k] / total, v1 = closed && k1 === 0 ? 1 : L[k + 1] / total;
@@ -549,6 +563,13 @@ function sweepCurves(
         const vb = b.numVertices;
         const prim = b.addPrim([rings[k][j], rings[k][j1], rings[k1][j1], rings[k1][j]], true, pr);
         sideG.add(prim);
+        if (trim) {
+          const { region: r, va, vb: vz, dir } = seg[j];
+          const ua = pathU(r, L[k], total, closed, dir, trim.offset), ub = pathU(r, closed && k1 === 0 ? total : L[k + 1], total, closed, dir, trim.offset);
+          [[ua, va], [ua, vz], [ub, vz], [ub, va]].forEach((t, q) => uv.set(vb + q, [t[0], t[1], 0]));
+          bandOf[prim] = r.name;
+          continue;
+        }
         const scaleV = o.uvLength ? total : 1;
         [[j / nj, v0], [(j + 1) / nj, v0], [(j + 1) / nj, v1], [j / nj, v1]].forEach(([a, c2], q) => uv.set(vb + q, [a, c2 * scaleV, 0]));
       }
@@ -563,7 +584,15 @@ function sweepCurves(
         const order = end === 0 ? prof.pts.map((_, j) => m - 1 - j) : prof.pts.map((_, j) => j);
         const sc = o.uvLength ? scales[end] : 1 / span;
         const vb = b.numVertices;
-        capG.add(b.addPrim(ids, true, pr));
+        const prim = b.addPrim(ids, true, pr);
+        capG.add(prim);
+        if (trim) {
+          // the end cap seen from ahead has the profile's +x to the right; the start cap, seen from behind, its -x
+          const xy = order.map((j) => [prof.pts[j][0] * scales[end] * (end === 0 ? -1 : 1), prof.pts[j][1] * scales[end]]);
+          capUV(trim.cap, xy).forEach((t, q) => uv.set(vb + q, t));
+          bandOf[prim] = trim.cap.name;
+          continue;
+        }
         order.forEach((j, q) => {
           const u = (prof.pts[j][0] - x0) * sc, v = (prof.pts[j][1] - y0) * sc;
           uv.set(vb + q, [end === 0 ? 1 - u : u, v, 0]);
@@ -571,7 +600,9 @@ function sweepCurves(
       }
     }
   }
-  return b.build();
+  const out = b.build();
+  if (trim) stampTrim(out, trim.sheet, bandOf);
+  return out;
 }
 
 function circleProfile(r: number, n: number): Profile {
@@ -586,6 +617,7 @@ defineNode({
   inputs: [
     { name: 'backbone', desc: 'curves to sweep along (Bezier/NURBS curves are sampled adaptively)' },
     { name: 'profile', desc: 'cross-section curve drawn in the XY plane (optional; one per backbone or a single shared one)', optional: true },
+    { name: 'sheet', desc: 'trim sheet for trim_band (a trim_sheet node; optional: else the one the backbone carries)', optional: true },
   ],
   splines: 'keep',
   params: {
@@ -598,8 +630,9 @@ defineNode({
     scale_ramp: { type: 'ramp', default: [[0, 1], [1, 1]], desc: 'profile scale along the curve (u 0..1); point pscale also multiplies' },
     up: { type: 'vec3', default: [0, 1, 0], desc: 'initial up vector (point attribute "up" overrides per point)' },
     uv_length: { type: 'bool', default: false, desc: 'v coordinate in world length instead of 0..1' },
+    ...trimParams('the profile'),
   },
-  outputs: 'vertex uv; prim groups caps, sides',
+  outputs: 'vertex uv; prim groups caps, sides; with trim_band: prim trim_band, trim_sheet and detail trim_sheets',
   example: {
     nodes: {
       path: { type: 'curve', params: { points: [[0, 0, 0], [1, 1, 0], [3, 1.5, 1], [4, 3, 1]], smooth: true } },
@@ -607,7 +640,8 @@ defineNode({
     },
     output: 'horn',
   },
-  cook: ({ input, hasInput, p }) => {
+  cook: (ctx) => {
+    const { input, hasInput, p } = ctx;
     const g = evaluateSplines(input(0));
     let profiles: Profile[];
     if (hasInput(1)) {
@@ -621,7 +655,7 @@ defineNode({
     else if (p.shape === 'half_circle') profiles = [{ pts: Array.from({ length: p.divisions + 1 }, (_, i) => { const a = (Math.PI * i) / p.divisions; return [p.radius * Math.cos(a), p.radius * Math.sin(a), 0]; }), closed: false }];
     else profiles = [circleProfile(p.radius, p.divisions)];
     const ramp = p.scale_ramp.length === 2 && p.scale_ramp.every((k: any) => k.value === 1) ? null : p.scale_ramp;
-    return sweepCurves(g, profiles, { caps: p.caps, twist: p.twist, up: p.up, scaleRamp: ramp, uvLength: p.uv_length });
+    return sweepCurves(g, profiles, { caps: p.caps, twist: p.twist, up: p.up, scaleRamp: ramp, uvLength: p.uv_length, trim: trimTarget(ctx, 2, g) });
   },
 });
 
@@ -631,15 +665,19 @@ defineNode({
   summary: 'Turn curves into tubes. Per-point radius from "width" (diameter) or radius × pscale. Great for branches, cables, wireframes.',
   description: 'The tube radius at each point is half its "width" attribute when the curves carry width and use_width is on; pscale is then ignored, so particle trails with a small pscale keep the width they were given. Without width (or with use_width off) the radius is the radius param times point pscale (1 when there is none).',
   aliases: ['wire', 'tubes'],
-  inputs: [{ name: 'curves', desc: 'polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively' }],
+  inputs: [
+    { name: 'curves', desc: 'polylines (or polygon edges); Bezier/NURBS curves are sampled adaptively' },
+    { name: 'sheet', desc: 'trim sheet for trim_band (a trim_sheet node; optional: else the one the curves carry)', optional: true },
+  ],
   splines: 'keep',
   params: {
     radius: { type: 'float', default: 0.05, desc: 'tube radius when there is no width attribute (or use_width is off), multiplied by point pscale', aliases: ['rad', 'wire_radius'] },
     divisions: { type: 'int', default: 8, min: 3, max: 1024, desc: 'sides around the tube', aliases: ['sides', 'cols'] },
     caps: { type: 'bool', default: true, desc: 'cap the tube ends' },
     use_width: { type: 'bool', default: true, desc: 'use point "width" attribute (diameter) when present; pscale is then ignored' },
+    ...trimParams('the tube\'s circumference'),
   },
-  outputs: 'vertex uv; prim groups caps, sides',
+  outputs: 'vertex uv; prim groups caps, sides; with trim_band: prim trim_band, trim_sheet and detail trim_sheets',
   example: {
     nodes: {
       tree: { type: 'lsystem', params: { generations: 4 } },
@@ -647,12 +685,13 @@ defineNode({
     },
     output: 'branches',
   },
-  cook: ({ input, p }) => {
+  cook: (ctx) => {
+    const { input, p } = ctx;
     const g = evaluateSplines(input(0));
     const wA = p.use_width ? g.points.get('width') : undefined;
     const psA = g.points.get('pscale');
     return sweepCurves(g, [circleProfile(1, p.divisions)], {
-      caps: p.caps, twist: 0, up: [0, 1, 0], scaleRamp: null, uvLength: false,
+      caps: p.caps, twist: 0, up: [0, 1, 0], scaleRamp: null, uvLength: false, trim: trimTarget(ctx, 1, g),
       radiusOf: (pt) => (wA ? Math.max(1e-6, (wA.get(pt) as number) / 2) : p.radius * (psA ? (psA.get(pt) as number) : 1)),
     });
   },
@@ -787,7 +826,10 @@ defineNode({
     'corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: ' +
     'u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.',
   aliases: ['linear_extrude', 'extrude2d'],
-  inputs: [{ name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' }],
+  inputs: [
+    { name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' },
+    { name: 'sheet', desc: 'trim sheet for trim_band (a trim_sheet node; optional: else the one the shapes carry)', optional: true },
+  ],
   params: {
     height: { type: 'float', default: 1, desc: 'extrusion distance along the plane normal: plane xz extrudes along +Y, xy along +Z, yz along +X', aliases: ['depth', 'distance', 'h'] },
     divisions: { type: 'int', default: 1, min: 1, max: 10000, desc: 'segments along the extrusion' },
@@ -796,8 +838,9 @@ defineNode({
     center: { type: 'bool', default: false, desc: 'extrude symmetrically about the shape plane' },
     plane: { type: 'enum', options: ['auto', 'xz', 'xy', 'yz'], default: 'auto', desc: 'plane the shapes lie in, which sets the extrusion direction: xz extrudes along +Y, xy along +Z, yz along +X (auto = the flattest axis)' },
     caps: { type: 'bool', default: true, desc: 'add top/bottom caps' },
+    ...trimParams('the height (its divisions are the segments: faces gives one course per division)'),
   },
-  outputs: 'prim groups top, bottom, side; the attributes and groups of the input (see above)',
+  outputs: 'prim groups top, bottom, side; the attributes and groups of the input (see above); with trim_band: vertex uv, prim trim_band, trim_sheet and detail trim_sheets',
   example: {
     nodes: {
       star: { type: 'shape2d', params: { shape: 'star', radius: 1, inner_radius: 0.5, sides: 5 } },
@@ -805,13 +848,16 @@ defineNode({
     },
     output: 'solid',
   },
-  cook: ({ input, p }) => {
+  cook: (ctx) => {
+    const { input, p } = ctx;
     const g = input(0);
     if (!g.numPrims) throw new NodeError('extrude needs closed shapes (polygons) as input');
     const plane: Plane = p.plane === 'auto' ? detectPlane(g) : p.plane;
     const { polys: raw, offset } = toPolygons(g, plane);
     const F = FRAMES[plane];
     const pyramid = p.scale_top[0] === 0 && p.scale_top[1] === 0;
+    const trim = trimTarget(ctx, 1, g);
+    if (pyramid && trim) throw new NodeError('trim_band needs side walls of quads: scale_top [0, 0] (a pyramid) cannot carry a trim mapping; use a small scale_top such as [0.01, 0.01]');
     if (pyramid) {
       // tapering to a point: manifold's extrude makes the apex; groups by face direction
       const cs = crossSection(raw, 'EvenOdd');
@@ -872,14 +918,21 @@ defineNode({
     // a vertex uv cannot be copied up a wall (it would collapse to a line): side walls get their own layout,
     // u once around the contour by length and v up the extrusion, both 0 to 1, as revolve and sweep lay them out
     const uvIn = g.vertices.get('uv'), sideUV = uvIn?.type === 'float' && uvIn.size >= 2 ? b.attrib('vertex', 'uv', uvIn.size, 'float') : null;
+    // trim: the outline is the path and the height the profile, one segment per division; walls wind outline × height
+    // (path × segment), and a negative height turns them over
+    const wallOf = new Map<number, { i: number; j: number; k: number }>(), alongOf: number[][] = [];
+    const seg = trim ? profileMap(Array.from({ length: p.divisions }, (_, k) => trim.sides[k % trim.sides.length]), new Array(p.divisions).fill(Math.abs(p.height) / p.divisions), new Array(p.divisions).fill(p.height / p.divisions), trim.mode, p.height >= 0) : [];
     polys.forEach((poly, i) => {
       const m = poly.length, r = rings[i], vs = srcVertex[i];
       const along = [0];
       for (let j = 0; j < m; j++) along.push(along[j] + Math.hypot(poly[(j + 1) % m][0] - poly[j][0], poly[(j + 1) % m][1] - poly[j][1]));
+      alongOf.push(along);
       for (let k = 0; k < p.divisions; k++)
         for (let j = 0; j < m; j++) {
           const j1 = (j + 1) % m, first = b.numVertices;
-          side.add(b.addPrim([r[k][j], r[k][j1], r[k + 1][j1], r[k + 1][j]], true, srcPrim[i], [vs[j], vs[j1], vs[j1], vs[j]]));
+          const prim = b.addPrim([r[k][j], r[k][j1], r[k + 1][j1], r[k + 1][j]], true, srcPrim[i], [vs[j], vs[j1], vs[j1], vs[j]]);
+          side.add(prim);
+          if (trim) wallOf.set(prim, { i, j, k });
           if (!sideUV) continue;
           const u0 = along[j] / (along[m] || 1), u1 = along[j + 1] / (along[m] || 1), v0 = k / p.divisions, v1 = (k + 1) / p.divisions;
           [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].forEach((uv, c) => sideUV.set(first + c, uv.concat(new Array(uvIn!.size - 2).fill(0))));
@@ -948,6 +1001,35 @@ defineNode({
     }
     let out = b.build();
     if (p.height < 0) out = orientOutward(out);
+    if (trim) {
+      // rings[i][k][j] → (k, j), to read each corner's place after orientOutward may have turned a prim round
+      const ringAt = new Map<number, [number, number]>();
+      rings.forEach((r) => r.forEach((ring, k) => ring.forEach((id, j) => ringAt.set(id, [k, j]))));
+      const uv = out.vertices.add('uv', 'float', 3), bandOf: (string | null)[] = new Array(out.numPrims).fill(null);
+      const topG = out.primGroups.get('top'), botG = out.primGroups.get('bottom'), nrm = primNormals(out);
+      for (let pr = 0; pr < out.numPrims; pr++) {
+        const wall = wallOf.get(pr);
+        if (wall) {
+          const { region: r, va, vb, dir } = seg[wall.k], along = alongOf[wall.i], L = along[along.length - 1];
+          for (let v = out.primStart[pr]; v < out.primStart[pr + 1]; v++) {
+            const [k, j] = ringAt.get(out.vertexPoint[v])!;
+            const s = j === wall.j ? along[wall.j] : along[wall.j + 1];
+            uv.set(v, [pathU(r, s, L, true, dir, trim.offset), k === wall.k ? va : vb, 0]);
+          }
+          bandOf[pr] = r.name;
+        } else if (topG?.[pr] || botG?.[pr]) {
+          // caps in plane coordinates (U × V = N), seen from the side they face
+          const sgn = nrm[pr * 3] * F.N[0] + nrm[pr * 3 + 1] * F.N[1] + nrm[pr * 3 + 2] * F.N[2] >= 0 ? 1 : -1, xy: number[][] = [];
+          for (let v = out.primStart[pr]; v < out.primStart[pr + 1]; v++) {
+            const q = out.vertexPoint[v] * 3, P0 = out.P[q], P1 = out.P[q + 1], P2 = out.P[q + 2];
+            xy.push([sgn * (P0 * F.U[0] + P1 * F.U[1] + P2 * F.U[2]), P0 * F.V[0] + P1 * F.V[1] + P2 * F.V[2]]);
+          }
+          capUV(trim.cap, xy).forEach((t, q) => uv.set(out.primStart[pr] + q, t));
+          bandOf[pr] = trim.cap.name;
+        }
+      }
+      stampTrim(out, trim.sheet, bandOf);
+    }
     return out;
   },
 });

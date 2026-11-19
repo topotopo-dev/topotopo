@@ -133,6 +133,8 @@ export interface BakeSamples {
   tri: Int32Array;
   b1: Float32Array;
   b2: Float32Array;
+  /** sample-grid index (row-major in the S×S raster), so a second raster can be read at the same place */
+  pix: Int32Array;
   degenerate: number;
   outside: number;
 }
@@ -142,17 +144,17 @@ export function bakeSamples(uv: ArrayLike<number>, tris: ArrayLike<number>, W: n
   const w = W * S, h = H * S;
   const map = rasterizeUV(uv, tris, w, h, true, skip);
   const n = map.covered;
-  const texel = new Int32Array(n), tri = new Int32Array(n), b1 = new Float32Array(n), b2 = new Float32Array(n);
+  const texel = new Int32Array(n), tri = new Int32Array(n), b1 = new Float32Array(n), b2 = new Float32Array(n), pix = new Int32Array(n);
   let k = 0;
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       const q = j * w + i, t = map.tri[q];
       if (t < 0) continue;
       texel[k] = Math.floor(j / S) * W + Math.floor(i / S);
-      tri[k] = t; b1[k] = map.b1[q]; b2[k] = map.b2[q];
+      pix[k] = q; tri[k] = t; b1[k] = map.b1[q]; b2[k] = map.b2[q];
       k++;
     }
-  return { W, H, S, n, texel, tri, b1, b2, degenerate: map.degenerate, outside: map.outside };
+  return { W, H, S, n, texel, tri, b1, b2, pix, degenerate: map.degenerate, outside: map.outside };
 }
 
 /** Per-sample interpolation of per-vertex values (`size` floats per vertex index of the triangulation). */

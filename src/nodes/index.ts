@@ -23,6 +23,7 @@ import './code.ts';
 import './flow.ts';
 import './deform.ts';
 import './uv.ts';
+import './trim.ts';
 import './measure.ts';
 import './pcg.ts';
 import './texture.ts';
