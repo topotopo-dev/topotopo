@@ -7,7 +7,8 @@
 // Texture entries are file paths (as given to the material node; exporters read or reference them) or
 // "image:<name>", an image volume carried by the geometry (texture nodes, core/image.ts; exporters encode it); the
 // key is absent when a material has no texture, so tables without textures are unchanged. "orm" is a packed
-// occlusion (R) / roughness (G) / metallic (B) map, the glTF and Unreal convention.
+// occlusion (R) / roughness (G) / metallic (B) map, the glTF and Unreal convention. "kind" (optional, one of
+// MATERIAL_KINDS) says how the material ages; it is data for the surface nodes and no exporter writes it.
 //
 // Geometry.merge (every node that merges) unions the tables, after making names distinct: a material or an
 // "image:<name>" image that two inputs define differently is renamed in the later input (its table and prim
@@ -31,7 +32,15 @@ export interface Material {
    * (grey), orm (occlusion R, roughness G, metallic B)
    */
   textures?: MaterialTextures;
+  /**
+   * What the material is made of and how it ages (one of MATERIAL_KINDS; absent = not said). Data only: exporters
+   * ignore it, and bake_material writes a mask per kind.
+   */
+  kind?: string;
 }
+
+/** The material kinds: how a surface ages. "keep" marks a part that is left as it is (glass, lights, dark slots). */
+export const MATERIAL_KINDS = ['painted_metal', 'cast_metal', 'galvanised', 'bare_steel', 'stainless', 'plastic', 'rubber', 'concrete', 'painted_wood', 'decal', 'keep'] as const;
 
 export interface MaterialTextures { baseColor?: string; normal?: string; roughness?: string; orm?: string }
 
@@ -83,6 +92,7 @@ export function normalizeMaterial(m: any): Material {
     doubleSided: typeof m?.doubleSided === 'boolean' ? m.doubleSided : d.doubleSided,
     unlit: typeof m?.unlit === 'boolean' ? m.unlit : d.unlit,
     ...textureField(m?.textures),
+    ...(typeof m?.kind === 'string' && m.kind.trim() ? { kind: m.kind.trim() } : {}),
   };
 }
 
