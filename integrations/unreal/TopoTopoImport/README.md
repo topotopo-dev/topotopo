@@ -20,12 +20,15 @@ TopoTopoPCG, which places terrain in a level. Run it again after updating TopoTo
 
 ## Import a package
 
-Put the package in a folder of its own inside `Content/`, such as `Content/props/props.topo`, and answer yes when
-Auto Reimport offers to import it. Or use Import in the Content Browser and choose the `.topo`. A package outside `Content/`
-is refused: its graphs and inputs must stay beside its manifest.
+Put the package in a folder of its own inside the project's `Content/`, such as `Content/props/props.topo`, and answer yes
+when Auto Reimport offers to import it. Or use Import in the Content Browser and choose the `.topo`. A package outside
+`Content/` is refused: its graphs and inputs must stay beside its manifest. A package inside a plugin's `Content/` is refused
+for now too: the plugin watches and cooks only the project's `Content/`.
 
 You get a **TopoTopo Package** asset, which holds the import options and what happened to each output. By default, each
-output's assets go to `outputs/<output id>/` beside the package.
+output's assets go to `outputs/<output id>/` beside the package. Every package needs output folders of its own: when two
+packages would cook into the same folder, the second is refused, with an error naming both. With Per Output Folders off, two
+outputs whose assets would get one name (a texture named like a mesh) fail the same way.
 
 | Output kind | What you get |
 |---|---|
@@ -50,7 +53,8 @@ A few things about meshes:
   collision: a reimport replaces it, including hulls added by hand.
 - **Colour**: a mesh with a colour but no material gets a material of that colour.
 - **Materials** follow the package: a changed material comes through on reimport, and edits made to an imported material
-  are replaced. To change the look, assign your own material in the Static Mesh's slots or on a placed actor: those stay.
+  are replaced. To change the look, assign your own material in the Static Mesh's slots or on a placed actor: those stay. A
+  copy of an imported material (Duplicate) is yours: it keeps its edits, whatever the package does.
 
 Terrain can be placed only when it fits Unreal's landscape grid: 127, 253, 505, 1009, 2017 or 4033 samples per side (use
 `heightfield_resample`). The cook warns on the output when it does not, and Place Terrain in Level refuses it.
@@ -72,6 +76,15 @@ keep their references, and instance actors in open levels rebuild.
 When an output fails, its last good assets stay. The error is on the package asset and in Window > Message Log > TopoTopo, as
 `TopoTopo: <package> > <output>: [<node>] <message>`. Assets of an output that no longer exists stay too, in case a level uses
 them, and the package asset lists their files under Orphans.
+
+## Auto Reimport and folder names
+
+Setup keeps TopoTopo's working folders away from Auto Reimport with wildcards that match a folder by its name anywhere under
+`Content/`: `graphs`, `assets`, `inputs`, `exports`, `versions`, `packages`, `attachments`, `.topotopo` and
+`topotopo-packages`. A folder of yours with one of those names, even one that has nothing to do with TopoTopo, is not
+imported automatically either: import its files with Import in the Content Browser, or give the folder another name.
+Wildcards per package folder would avoid that, but they cannot keep up: a new package's files reach Auto Reimport at the same
+moment as its `.topo`, before any rule for it could exist, so they would be imported once.
 
 ## What to commit
 

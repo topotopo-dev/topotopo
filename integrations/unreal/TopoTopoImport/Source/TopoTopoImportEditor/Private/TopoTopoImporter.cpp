@@ -31,6 +31,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "PCGCommon.h"
 #include "PCGDataAsset.h"
 #include "Serialization/Csv/CsvParser.h"
@@ -150,8 +151,16 @@ namespace
         }
     };
 
-    UStaticMesh* ImportGlb(const FString& File, const FString& Folder, const FString& Name, bool bMaterials, bool bNanite, FSession* Session, FString& Error)
+    template <typename T>
+    T* LoadQuiet(const FString& Path) { return LoadObject<T>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet); }
+
+    /**
+     * A GLB into a static mesh in Folder. Materials (null: none are imported) holds the materials this plugin's imports made
+     * from the file before, and gets the ones made now.
+     */
+    UStaticMesh* ImportGlb(const FString& File, const FString& Folder, const FString& Name, TArray<FSoftObjectPath>* Materials, bool bNanite, FSession* Session, FString& Error)
     {
+        const bool bMaterials = Materials != nullptr;
         FGlbPipelines Pipelines;
         if (!Pipelines.Make(Name, bMaterials, bNanite, Error)) { return nullptr; }
         TStrongObjectPtr<UInterchangeSourceData> Source(UInterchangeManager::CreateSourceData(File));
@@ -170,17 +179,20 @@ namespace
         if (!Mesh) { Error = FString::Printf(TEXT("Interchange made no static mesh from %s"), *File); return nullptr; }
         if (!bMaterials) { return Mesh; }
         // an import over a mesh leaves the materials it already has as they were, so a changed material would never come
-        // through: the materials below the mesh's folder that were made from this GLB are reimported from it, whether or
-        // not a slot still uses them. They belong to the package, so they take all of its values (a reimport runs with
-        // the pipelines stored on the asset); an artist's choice is a material assigned to a slot or an actor, which stays
-        const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-        TArray<FAssetData> Found;
-        Registry.GetAssetsByPath(FName(*Folder), Found, true);
-        for (const FAssetData& Asset : Found)
+        // through: the materials this plugin's imports made from this GLB are reimported from it, whether or not a slot
+        // still uses them. Only those, by the list the package keeps: a copy of one (Ctrl+D) has the same source file and
+        // is someone's own. They belong to the package, so they take all of its values (a reimport runs with the pipelines
+        // stored on the asset); an artist's choice is a material assigned to a slot or an actor, which stays
+        TArray<FSoftObjectPath> Ours;
+        for (UObject* Object : Imported)
         {
-            if (!Asset.IsInstanceOf(UMaterialInterface::StaticClass())) { continue; }
-            UMaterialInterface* Material = Cast<UMaterialInterface>(Asset.GetAsset());
+            if (Cast<UMaterialInterface>(Object)) { Ours.AddUnique(FSoftObjectPath(Object)); }
+        }
+        for (const FSoftObjectPath& Path : *Materials)
+        {
+            UMaterialInterface* Material = LoadQuiet<UMaterialInterface>(Path.ToString());
             if (!Material || !Material->AssetImportData || !FPaths::IsSamePath(Material->AssetImportData->GetFirstFilename(), File)) { continue; }
+            Ours.AddUnique(Path);
             if (UInterchangeAssetImportData* Data = Cast<UInterchangeAssetImportData>(Material->AssetImportData))
             {
                 TArray<UObject*> Stored = Data->GetPipelines();
@@ -201,15 +213,26 @@ namespace
             }
             for (UObject* Object : Reimported) { if (Session) { Session->Touched(Object); } }
         }
+        *Materials = MoveTemp(Ours);
         return Mesh;
     }
 
-    /** A LOD's GLB, imported aside, into a mesh's LOD. Its materials are the mesh's own, by slot name, so no slot is added. */
-    bool SetLod(UStaticMesh* Mesh, int32 Index, const FString& File, FString& Error)
+    /** A LOD's GLB, imported aside into /Temp; Discard it after use. */
+    UStaticMesh* ImportAside(const FString& File, FString& Error)
     {
         const FString Temp = FString::Printf(TEXT("/Temp/TopoTopo/%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
-        UStaticMesh* Lod = ImportGlb(File, Temp, TEXT("Lod"), false, false, nullptr, Error);
-        if (!Lod) { return false; }
+        return ImportGlb(File, Temp, TEXT("Lod"), nullptr, false, nullptr, Error);
+    }
+
+    void Discard(UStaticMesh* Lod)
+    {
+        Lod->GetPackage()->SetDirtyFlag(false);
+        Lod->MarkAsGarbage();
+    }
+
+    /** A LOD imported aside into a mesh's LOD. Its materials are the mesh's own, by slot name, so no slot is added. */
+    bool SetLod(UStaticMesh* Mesh, int32 Index, UStaticMesh* Lod, const FString& File, FString& Error)
+    {
         TArray<FStaticMaterial>& Slots = Lod->GetStaticMaterials();
         for (FStaticMaterial& Slot : Slots)
         {
@@ -219,8 +242,6 @@ namespace
             }
         }
         const int32 Set = GEditor->GetEditorSubsystem<UStaticMeshEditorSubsystem>()->SetLodFromStaticMesh(Mesh, Index, Lod, 0, true);
-        Lod->GetPackage()->SetDirtyFlag(false);
-        Lod->MarkAsGarbage();
         if (Set < 0) { Error = FString::Printf(TEXT("LOD %d could not be set from %s"), Index, *File); return false; }
         return true;
     }
@@ -271,25 +292,74 @@ namespace
         return false;
     }
 
-    UObject* ImportMeshStep(const FStep& Step, FSession& Session, FString& Error)
+    /**
+     * A mesh step. Materials is the output's list of the materials this plugin made; the ones made from this step's GLB are
+     * replaced by what the import made. A step that fails leaves the saved mesh as it was: its packages are not saved, and
+     * its hashes are not recorded, so the next cook imports it again.
+     */
+    UObject* ImportMeshStep(const FStep& Step, TArray<FSoftObjectPath>& Materials, FSession& Session, FString& Error)
     {
-        // a GLB with collision pieces owns the mesh's simple collision: the old hulls go first, or Interchange copies the new
-        // ones over them (an engine ensure) and keeps a hull Unreal generated before there were pieces
-        UStaticMesh* Old = HasCollisionPieces(ProjectFile(Step.File)) ? LoadObject<UStaticMesh>(nullptr, *Step.ObjectPath(), nullptr, LOAD_NoWarn | LOAD_Quiet) : nullptr;
-        if (UBodySetup* Body = Old ? Old->GetBodySetup() : nullptr)
+        const FString File = ProjectFile(Step.File);
+        // the LODs first, aside: a LOD that cannot be imported leaves the mesh untouched
+        TArray<TStrongObjectPtr<UStaticMesh>> Lods;
+        ON_SCOPE_EXIT { for (const TStrongObjectPtr<UStaticMesh>& Lod : Lods) { Discard(Lod.Get()); } };
+        for (const FString& Lod : Step.Lods)
         {
+            UStaticMesh* Aside = ImportAside(ProjectFile(Lod), Error);
+            if (!Aside) { return nullptr; }
+            Lods.Emplace(Aside);
+        }
+
+        // a GLB with collision pieces owns the mesh's simple collision: the old hulls go first, or Interchange copies the new
+        // ones over them (an engine ensure) and keeps a hull Unreal generated before there were pieces; they come back if
+        // the import fails
+        UStaticMesh* Old = HasCollisionPieces(File) ? LoadQuiet<UStaticMesh>(Step.ObjectPath()) : nullptr;
+        UBodySetup* Body = Old ? Old->GetBodySetup() : nullptr;
+        FKAggregateGeom Hulls;
+        const bool bWasDirty = Old && Old->GetPackage()->IsDirty();
+        if (Body)
+        {
+            Hulls = Body->AggGeom;
             Body->Modify();
             Body->RemoveSimpleCollision();
         }
-        UStaticMesh* Mesh = ImportGlb(ProjectFile(Step.File), Step.Folder, Step.Name, true, Step.Lods.IsEmpty(), &Session, Error);
-        if (!Mesh) { return nullptr; }
-        for (int32 I = 0; I < Step.Lods.Num(); I++)
+        TArray<FSoftObjectPath> Made;
+        TArray<FSoftObjectPath> Others;
+        for (const FSoftObjectPath& Path : Materials)
         {
-            if (!SetLod(Mesh, I + 1, ProjectFile(Step.Lods[I]), Error)) { return nullptr; }
+            const UMaterialInterface* Material = LoadQuiet<UMaterialInterface>(Path.ToString());
+            if (!Material) { continue; }
+            (Material->AssetImportData && FPaths::IsSamePath(Material->AssetImportData->GetFirstFilename(), File) ? Made : Others).Add(Path);
+        }
+        FSession Own;
+        UStaticMesh* Mesh = ImportGlb(File, Step.Folder, Step.Name, &Made, Step.Lods.IsEmpty(), &Own, Error);
+        if (!Mesh)
+        {
+            if (Body)
+            {
+                Body->AggGeom = Hulls;
+                Body->InvalidatePhysicsData();
+                Body->CreatePhysicsMeshes();
+                Old->GetPackage()->SetDirtyFlag(bWasDirty);
+            }
+            return nullptr;
+        }
+        for (int32 I = 0; I < Lods.Num(); I++)
+        {
+            if (!SetLod(Mesh, I + 1, Lods[I].Get(), Step.Lods[I], Error)) { return nullptr; }
+        }
+        // a LOD the graph no longer has goes
+        if (Mesh->GetNumSourceModels() > Lods.Num() + 1)
+        {
+            UE_LOG(LogTopoTopo, Log, TEXT("TopoTopo: %s had %d LODs, the cook has %d"), *Step.ObjectPath(), Mesh->GetNumSourceModels(), Lods.Num() + 1);
+            Mesh->SetNumSourceModels(Lods.Num() + 1);
         }
         SetSockets(Mesh, Step.Sockets);
         Mesh->PostEditChange();
         Mesh->MarkPackageDirty();
+        Session.ToSave.Append(Own.ToSave);
+        Materials = MoveTemp(Others);
+        Materials.Append(Made);
         return Mesh;
     }
 
@@ -389,8 +459,8 @@ namespace
             if (!Mesh) { Error = FString::Printf(TEXT("the mesh %s of %s is missing"), *It.Value, *Step.Name); return nullptr; }
             Meshes.Add(It.Key, Mesh);
         }
-        UTopoTopoInstances* Asset = FindOrCreateAsset<UTopoTopoInstances>(Step, Session);
-        Asset->Groups.Reset();
+        // every row read before the asset changes: a bad row leaves it as it was
+        TArray<FTopoTopoInstanceGroup> Groups;
         TMap<FString, int32> GroupOf;
         for (int32 Row = 0; Row < Table.Num(); Row++)
         {
@@ -400,12 +470,14 @@ namespace
             int32* Group = GroupOf.Find(Name);
             if (!Group)
             {
-                FTopoTopoInstanceGroup& New = Asset->Groups.AddDefaulted_GetRef();
+                FTopoTopoInstanceGroup& New = Groups.AddDefaulted_GetRef();
                 New.Mesh = *Mesh;
-                Group = &GroupOf.Add(Name, Asset->Groups.Num() - 1);
+                Group = &GroupOf.Add(Name, Groups.Num() - 1);
             }
-            Asset->Groups[*Group].Transforms.Add(Table.Transform(Row));
+            Groups[*Group].Transforms.Add(Table.Transform(Row));
         }
+        UTopoTopoInstances* Asset = FindOrCreateAsset<UTopoTopoInstances>(Step, Session);
+        Asset->Groups = MoveTemp(Groups);
         Asset->ContentId = FGuid::NewGuid();
         for (TObjectIterator<ATopoTopoInstancesActor> It; It; ++It)
         {
@@ -532,6 +604,19 @@ namespace
         return Out;
     }
 
+    /** The package's state as text (its options and what the last cook made), to tell whether a cook changed it. */
+    FString StateOf(const UTopoTopoPackage* Package)
+    {
+        FString Out;
+        for (TFieldIterator<FProperty> It(UTopoTopoPackage::StaticClass(), EFieldIteratorFlags::ExcludeSuper); It; ++It)
+        {
+            if (It->HasAnyPropertyFlags(CPF_InstancedReference | CPF_PersistentInstance)) { continue; }
+            It->ExportTextItem_InContainer(Out, Package, nullptr, nullptr, PPF_None);
+            Out += TEXT("\n");
+        }
+        return Out;
+    }
+
     /** What the cook did, in the message log; errors also as a notification. */
     void ShowOutcome(const UTopoTopoPackage* Package, const TArray<FString>& PackageErrors)
     {
@@ -576,11 +661,14 @@ namespace
 
 void TopoTopo::FailCook(UTopoTopoPackage* Package, const FString& Why)
 {
-    Package->Modify();
-    Package->Status = Why;
-    Package->MarkPackageDirty();
+    if (Package->Status != Why)
+    {
+        Package->Modify();
+        Package->Status = Why;
+        Package->MarkPackageDirty();
+        SaveSoon(Package);
+    }
     ShowOutcome(Package, { Why });
-    SaveSoon(Package);
 }
 
 bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FString& ReportFile, const FString& Errors, bool bForce)
@@ -600,7 +688,9 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
         return false;
     }
 
-    Package->Modify();
+    // the asset is saved only when the cook changed it: every package cooks at editor start, and an unchanged one must not
+    // be written (under source control that is a checkout)
+    const FString StateBefore = StateOf(Package);
     const TMap<FString, FString> Hashes = RecordHashes(Package->SourceFile());
     TArray<FTopoTopoOutputStatus> Before = MoveTemp(Package->Outputs);
     Package->Outputs.Reset();
@@ -645,7 +735,7 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
         {
             // its last good files and assets stay as they are
             Output.State = TEXT("failed");
-            if (Previous) { Output.Assets = Previous->Assets; Output.Bundle = Previous->Bundle; }
+            if (Previous) { Output.Assets = Previous->Assets; Output.Bundle = Previous->Bundle; Output.Materials = Previous->Materials; }
             for (const FString& File : Strings(O, TEXT("files")))
             {
                 if (const FString* Hash = Package->ImportedFiles.Find(File)) { Imported.Add(File, *Hash); }
@@ -656,6 +746,7 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
             continue;
         }
         Output.State = TEXT("ok");
+        if (Previous) { Output.Materials = Previous->Materials; }
         bool bChanged = false;
         const TArray<TSharedPtr<FJsonValue>>* Steps = nullptr;
         O.TryGetArrayField(TEXT("import"), Steps);
@@ -683,7 +774,7 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
             {
                 UE_LOG(LogTopoTopo, Log, TEXT("TopoTopo: importing %s as %s"), *Step.File, *Step.ObjectPath());
                 UObject* Made = nullptr;
-                if (Step.As == TEXT("static_mesh")) { Made = ImportMeshStep(Step, Session, Error); }
+                if (Step.As == TEXT("static_mesh")) { Made = ImportMeshStep(Step, Output.Materials, Session, Error); }
                 else if (Step.As == TEXT("texture")) { Made = ImportTextureStep(Step, Session, Error); }
                 else if (Step.As == TEXT("instances")) { Made = ImportInstancesStep(Step, Session, Error); }
                 else if (Step.As == TEXT("points")) { Made = ImportPointsStep(Step, Session, Error); }
@@ -700,9 +791,15 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
             }
             if (!Error.IsEmpty())
             {
+                // like a failed output: the last good asset stays, with the hashes it was made from
                 Output.Errors.Add(Error);
                 Output.State = TEXT("failed");
                 bAllOk = false;
+                for (const FString& File : Files)
+                {
+                    if (const FString* Hash = Package->ImportedFiles.Find(File)) { Imported.Add(File, *Hash); }
+                }
+                if (Asset) { Output.Assets.Add(TSoftObjectPtr<UObject>(Asset)); }
                 continue;
             }
             for (const FString& File : Files)
@@ -719,9 +816,13 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
     Package->ImportedFiles = MoveTemp(Imported);
     bAllOk = bAllOk && PackageErrors.IsEmpty();
     Package->Status = FString::Printf(TEXT("%d imported, %d unchanged, %d failed, %d skipped"), NumUpdated, NumSame, NumFailed, Package->Skipped.Num());
-    Package->MarkPackageDirty();
-    UEditorLoadingAndSavingUtils::SavePackages(Session.ToSave.Array(), true);
-    SaveSoon(Package);
+    if (!Session.ToSave.IsEmpty()) { UEditorLoadingAndSavingUtils::SavePackages(Session.ToSave.Array(), true); }
+    if (StateOf(Package) != StateBefore)
+    {
+        Package->Modify();
+        Package->MarkPackageDirty();
+        SaveSoon(Package);
+    }
     ShowOutcome(Package, PackageErrors);
     return bAllOk;
 }

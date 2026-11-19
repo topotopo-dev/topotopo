@@ -27,7 +27,8 @@ namespace
     /** Whether importing now would not get in anyone's way. */
     bool EditorIsFree()
     {
-        return GEditor && !GEditor->PlayWorld && !GIsSlowTask && !UE::IsSavingPackage()
+        // an import inside someone's transaction would land in their undo step
+        return GEditor && !GEditor->PlayWorld && !GIsSlowTask && !UE::IsSavingPackage() && !GEditor->IsTransactionActive()
             && !(FSlateApplication::IsInitialized() && FSlateApplication::Get().GetActiveModalWindow().IsValid())
             && !UInterchangeManager::GetInterchangeManager().IsInterchangeActive();
     }
@@ -104,15 +105,14 @@ bool TopoTopo::CookNow(UTopoTopoPackage* Package, bool bForce)
     }
     FScopedSlowTask Task(100.f, FText::Format(LOCTEXT("Cooking", "TopoTopo: cooking {0}"), FText::FromString(Package->GetName())));
     Task.MakeDialog(true);
-    // a background cook first: one cook at a time for a package's record
+    // one cook at a time: a background cook is ended, not waited for; its package cooks again later (this one now)
     if (Live)
     {
-        while (Live->Poll()) { FPlatformProcess::Sleep(0.03f); }
-        const TUniquePtr<FCookProcess> Done = MoveTemp(Live);
-        if (UTopoTopoPackage* Other = PackageOf(Done->Topo()); Other && Other != Package)
-        {
-            ApplyCook(Other, Done->ExitCode(), Done->ReportFile(), Done->Errors(), false);
-        }
+        const FString Other = Live->Topo();
+        Live->Cancel();
+        Live.Reset();
+        if (!FPaths::IsSamePath(Other, Topo)) { CookLater(Other); }
+        UE_LOG(LogTopoTopo, Log, TEXT("TopoTopo: ended the background cook of %s for %s"), *Other, *Topo);
     }
     Waiting.Remove(Topo);
 

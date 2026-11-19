@@ -30,9 +30,10 @@ namespace TopoTopo
         /** Write the jobs file and start. False, with the reason in OutError, when it could not start. */
         bool Start(const FString& Topo, bool bForce, FString& OutError);
 
-        /** Read what it has said. True while it runs. */
+        /** Read what it has said. True while it runs. A cook past its time limit (CookTimeout and a grace) is ended here, so a CLI that hangs never holds the editor. */
         bool Poll();
 
+        /** End it now; Poll then reports it ended. */
         void Cancel();
 
         int32 ExitCode() const { return Code; }
@@ -61,6 +62,8 @@ namespace TopoTopo
         int32 OutputsTotal = 0;
         int32 OutputsDone = 0;
         int32 Code = -1;
+        double Started = 0.0;
+        double Limit = 0.0;
     };
 
     /** The viewer on a package: `edit <dir> --json`, which says its URL on its first line. One per package; they end with the editor. */

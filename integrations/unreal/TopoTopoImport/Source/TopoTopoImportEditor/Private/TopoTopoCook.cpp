@@ -217,6 +217,9 @@ bool TopoTopo::FCookProcess::Start(const FString& InTopo, bool bForce, FString& 
         OutError = FString::Printf(TEXT("%s could not be started"), *Tools.Node);
         return false;
     }
+    // the CLI ends a cook at the timeout itself; the grace covers its start and the writing of the report
+    Started = FPlatformTime::Seconds();
+    Limit = GetDefault<UTopoTopoImportSettings>()->CookTimeout + 30.0;
     return true;
 }
 
@@ -244,8 +247,18 @@ void TopoTopo::FCookProcess::Read()
 
 bool TopoTopo::FCookProcess::Poll()
 {
+    if (!Proc.IsValid()) { return false; }
     Read();
-    if (FPlatformProcess::IsProcRunning(Proc)) { return true; }
+    if (FPlatformProcess::IsProcRunning(Proc))
+    {
+        if (FPlatformTime::Seconds() - Started < Limit) { return true; }
+        FPlatformProcess::TerminateProc(Proc, true);
+        Read();
+        Err += FString::Printf(TEXT("TopoTopo did not finish within %d seconds and was ended; the last good assets stay\n"), FMath::RoundToInt(Limit));
+        Code = 2;
+        Close();
+        return false;
+    }
     Read();
     FPlatformProcess::GetProcReturnCode(Proc, &Code);
     Close();
@@ -313,17 +326,18 @@ void TopoTopo::PollViewers()
     {
         FViewer& V = It->Value;
         V.Buffer += FPlatformProcess::ReadPipe(V.Read);
+        // whole lines only: the first line can arrive over two reads; once the URL is known the rest is not needed
         int32 At = INDEX_NONE;
-        if (V.Url.IsEmpty() && V.Buffer.FindChar(TEXT('\n'), At))
+        while (V.Url.IsEmpty() && V.Buffer.FindChar(TEXT('\n'), At))
         {
             TSharedPtr<FJsonObject> Line;
-            if (FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(V.Buffer.Left(At)), Line) && Line)
+            if (FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(V.Buffer.Left(At)), Line) && Line && Line->TryGetStringField(TEXT("url"), V.Url))
             {
-                Line->TryGetStringField(TEXT("url"), V.Url);
                 UE_LOG(LogTopoTopo, Log, TEXT("TopoTopo: the viewer on %s is at %s"), *V.Id, *V.Url);
             }
+            V.Buffer.RightChopInline(At + 1);
         }
-        V.Buffer.Reset();
+        if (!V.Url.IsEmpty()) { V.Buffer.Reset(); }
         if (!V.Url.IsEmpty() && V.bWanted)
         {
             V.bWanted = false;

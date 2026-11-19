@@ -6,6 +6,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Logging/MessageLog.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Containers/Ticker.h"
 #include "Misc/Paths.h"
 #include "TopoTopoCook.h"
 #include "TopoTopoImporter.h"
@@ -44,9 +45,34 @@ void UTopoTopoPackage::PostEditChangeProperty(FPropertyChangedEvent& Event)
     const FName Name = Event.GetMemberPropertyName();
     if (Name != GET_MEMBER_NAME_CHECKED(UTopoTopoPackage, OutputFolder) && Name != GET_MEMBER_NAME_CHECKED(UTopoTopoPackage, bPerOutputFolders)
         && Name != GET_MEMBER_NAME_CHECKED(UTopoTopoPackage, SkipOutputs) && Name != GET_MEMBER_NAME_CHECKED(UTopoTopoPackage, InstanceMode)) { return; }
+    OptionsChanged();
+}
+
+void UTopoTopoPackage::PostEditUndo()
+{
+    Super::PostEditUndo();
+    // undo and redo bring back other import options: the file the cook reads follows them
+    OptionsChanged();
+}
+
+void UTopoTopoPackage::OptionsChanged()
+{
     FString Error;
-    if (TopoTopo::WriteImportOptions(this, Error)) { TopoTopo::CookNow(this, false); }
-    else { TopoTopo::FailCook(this, Error); }
+    if (!TopoTopo::WriteImportOptions(this, Error))
+    {
+        TopoTopo::FailCook(this, Error);
+        return;
+    }
+    if (bCookPending) { return; }
+    bCookPending = true;
+    // the cook and its imports run after the property edit's transaction, so they never become part of its undo step
+    FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateWeakLambda(this, [this](float)
+    {
+        if (GEditor && GEditor->IsTransactionActive()) { return true; }
+        bCookPending = false;
+        TopoTopo::CookNow(this, false);
+        return false;
+    }));
 }
 
 void UTopoTopoPackage::Recook()

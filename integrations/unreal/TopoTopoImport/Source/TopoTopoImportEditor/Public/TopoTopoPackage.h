@@ -45,6 +45,10 @@ struct FTopoTopoOutputStatus
     UPROPERTY(VisibleAnywhere, Category = "Output")
     TArray<TSoftObjectPtr<UObject>> Assets;
 
+    /** The materials this plugin's import made for the output's meshes: the only materials a cook updates (a copy of one keeps its edits). */
+    UPROPERTY(VisibleAnywhere, Category = "Output")
+    TArray<FSoftObjectPath> Materials;
+
     /** A terrain output: the bundle's landscape.json below the project; Place Terrain in Level brings it in. */
     UPROPERTY(VisibleAnywhere, Category = "Output")
     FString Bundle;
@@ -133,4 +137,10 @@ public:
     virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
     virtual bool IsEditorOnly() const override { return true; }
     virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
+    virtual void PostEditUndo() override;
+
+private:
+    /** Write the import options for the cook, and cook on the next tick. */
+    void OptionsChanged();
+    bool bCookPending = false;
 };
