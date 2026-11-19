@@ -27,7 +27,8 @@
 //                                                         guides and dropped files go to the package's inputs/
 //   node src/cli.ts web [--port 7340] [--library dir]  the web app for the workspaces and libraries (src/packages/commands.ts)
 //   node src/cli.ts open [<file.topo | file.topows | folder>]   open a package or workspace in the browser (what a
-//                                                         double-click runs); starts the web app unseen when none runs
+//                                                         double-click runs); starts the web app unseen when none runs;
+//                                                         open --stop stops that web app
 //   node src/cli.ts library add|remove|list|new|bake …    registered libraries and packages; edit [folder] opens the
 //                                                         live viewer on a package
 // The workspace around packages (src/workspace.ts), a package and the packages it uses (src/packages/commands.ts,
@@ -190,7 +191,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; guides and files dropped on the page go to the package's inputs/, beside the file in no package)`,
     `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
     `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: the registered workspaces and every library's packages, stable links for a board)`,
-    `       ${prog} open [<file.topo | file.topows | folder>]   (open a package or workspace in the browser, starting the web app unseen when none runs: what double-clicking the file runs; no path: the home page; $TOPOTOPO_HOME names the TopoTopo folder, $TOPOTOPO_BROWSER_LOG a file to write the address to instead of opening a browser)`,
+    `       ${prog} open [<file.topo | file.topows | folder>]   (open a package or workspace in the browser, starting the web app unseen when none runs: what double-clicking the file runs; no path: the home page; open --stop stops that web app; $TOPOTOPO_HOME names the TopoTopo folder, $TOPOTOPO_BROWSER_LOG a file to write the address to instead of opening a browser)`,
     `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
     '       a package and the packages it uses (a folder named must exist; default: the current folder\'s package; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',

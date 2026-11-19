@@ -11,7 +11,6 @@
 // package or workspace, which it lists for its run when the config does not (src/host/open.ts).
 import http from 'node:http';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
@@ -20,18 +19,20 @@ import type { ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
-import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll } from './library.ts';
+import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll, scanLibrary } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { readWorkspace, engineFile } from '../workspace.ts';
-import { WORKSPACE_PACKAGES, locate, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
+import { WORKSPACE_PACKAGES, locate, manifestAt, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
-import { folderKey, forgetScans, forgetScansOf, scanTree, unscanned } from '../scan.ts';
+import { folderKey, forgetScans, forgetScansOf, scanSingle, scanTree, unscanned } from '../scan.ts';
 import { engineTypeOf } from '../engines.ts';
 import { graphFiles } from '../session.ts';
 import type { BakeState, LibraryScan, Package } from './library.ts';
 import type { WebConfig } from '../config.ts';
 import { builtinLibrary, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion, workingHash } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
+import { engineSha256 } from '../host/engine-code.ts';
+import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { BakeQueue } from './bake.ts';
 import { embedPage, esc, frontPage, importMap, modelPage, shell, count } from './pages.ts';
 import type { CardData, OutputRow, PackageData, RootCardData, Urls, UserRow } from './pages.ts';
@@ -113,6 +114,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const cfg = o.config ?? loadConfig();
   const log = o.log ?? (() => {});
   const bakeOn = o.bake ?? true;
+  // what /api/health says of this server, hashed now so that a health check never waits for it (topotopo open compares them)
+  const engine = engineSha256();
   let base = '';
 
   // ---------------------------------------------------------------- workspaces and libraries
@@ -142,10 +145,16 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       packages: list.map((b) => ({ lib: BUILTIN_LIBRARY.name, id: b.id, dir: b.dir, rel: b.id, collection: '', manifest: b.manifest, updated: Date.parse(b.versions.at(-1)?.published ?? '') || 0 })),
     };
   };
-  /** the registered workspaces: their file (or what is wrong with it), engine project and scan */
-  let games: { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; engine: Root['engine']; scan: LibraryScan }[] = [];
+  /** a workspace: its file (or what is wrong with it), engine project and scan */
+  type Game = { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; engine: Root['engine']; scan: LibraryScan };
+  /** the registered workspaces, and those `topotopo open` listed for this run */
+  let games: Game[] = [];
   /** every registered workspace and library as a tree of pages, TopoTopo's built-in library last */
   let roots: Root[] = [];
+  /** the names this run gave workspaces whose own name another workspace or library had (by folder) */
+  const runNames = new Map<string, string>();
+  /** the packages `topotopo open` listed one by one for this run: each a root of itself, nothing around it read */
+  const singles: { name: string; dir: string }[] = [];
   const indexPackages = () => {
     packages.clear();
     byDir.clear();
@@ -155,6 +164,32 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (!byDir.has(folderKey(p.dir))) byDir.set(folderKey(p.dir), p);
     }
   };
+  /** A workspace's scan as a game: its file read, or when it cannot be, the problem and the folders still scanned. */
+  const gameFor = (scanned: LibraryScan): { game: Game; scan: LibraryScan } => {
+    // a workspace listed for this run under another name than its file's: its packages are that name's
+    const alias = runNames.get(folderKey(scanned.root));
+    const s: LibraryScan = alias && scanned.name !== alias
+      ? { ...scanned, name: alias, packages: scanned.packages.map((p) => Object.create(Object.getPrototypeOf(p), { ...Object.getOwnPropertyDescriptors(p), lib: { value: alias, enumerable: true, writable: true, configurable: true } })) }
+      : scanned;
+    try {
+      const m = readWorkspace(s.root), e = engineFile(s.root, m);
+      return { game: { name: runNames.get(folderKey(s.root)) ?? m.name, dir: s.root, m, engine: e && m.engine && m.engine !== 'none' ? { type: m.engine.type, file: e } : null, scan: s }, scan: s };
+    } catch (err: any) {
+      // the workspace file cannot be read: its folder pages still show its folders and packages (scanned with the
+      // engine project the file names), and the problem as a flag on it
+      const engine = engineWritten(s.root);
+      const t = scanTree(s.name, s.root, { engine: engine?.file ?? null });
+      const scan: LibraryScan = { ...t, problems: t.problems, workspace: true };
+      return { game: { name: s.name, dir: s.root, m: null, problem: err.message, engine, scan }, scan };
+    }
+  };
+  const buildRoots = () => {
+    roots = [
+      ...games.map((g): Root => ({ kind: 'w', name: g.name, dir: g.dir, engine: g.engine })),
+      ...scans.filter((s) => !s.workspace && s.name !== BUILTIN_LIBRARY.name).map((s): Root => ({ kind: 'l', name: s.name, dir: s.root, engine: null })),
+      { kind: 'l', name: BUILTIN_LIBRARY.name, dir: BUILTIN_LIBRARY.path, engine: null, builtin: true },
+    ];
+  };
   /**
    * Read the packages of the workspaces and libraries again: those of `roots` (their folders), else all of them. The
    * audits stay: what changed decides which go (forget()).
@@ -162,31 +197,19 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const rescanPackages = (changed?: string[]) => {
     if (changed) for (const d of changed) forgetScansOf(d);
     else forgetScans();
-    // the libraries (but those inside a registered workspace) and the workspaces; TopoTopo's built-in library last,
-    // read again each time: a built-in package published while the web app runs shows
-    const all = scanAll(cfg);
+    // the libraries (but those inside a registered workspace) and the workspaces, then the packages opened one by one;
+    // TopoTopo's built-in library last, read again each time: a built-in package published while the web app runs shows
+    const all: LibraryScan[] = [...scanAll(cfg), ...singles.map((x) => scanSingle(x.name, x.dir))];
     games = [];
     for (const [i, s] of all.entries()) {
       if (!s.workspace) continue;
-      try {
-        const m = readWorkspace(s.root), e = engineFile(s.root, m);
-        games.push({ name: m.name, dir: s.root, m, engine: e && m.engine && m.engine !== 'none' ? { type: m.engine.type, file: e } : null, scan: s });
-      } catch (err: any) {
-        // the workspace file cannot be read: its folder pages still show its folders and packages (scanned with the
-        // engine project the file names), and the problem as a flag on it
-        const engine = engineWritten(s.root);
-        const t = scanTree(s.name, s.root, { engine: engine?.file ?? null });
-        all[i] = { ...t, problems: t.problems, workspace: true };
-        games.push({ name: s.name, dir: s.root, m: null, problem: err.message, engine, scan: all[i] });
-      }
+      const g = gameFor(s);
+      games.push(g.game);
+      all[i] = g.scan;
     }
     scans = [...all, scanBuiltin()];
     indexPackages();
-    roots = [
-      ...games.map((g): Root => ({ kind: 'w', name: g.name, dir: g.dir, engine: g.engine })),
-      ...scans.filter((s) => !s.workspace && s.name !== BUILTIN_LIBRARY.name).map((s): Root => ({ kind: 'l', name: s.name, dir: s.root, engine: null })),
-      { kind: 'l', name: BUILTIN_LIBRARY.name, dir: BUILTIN_LIBRARY.path, engine: null, builtin: true },
-    ];
+    buildRoots();
   };
   /** The libraries' scans: a workspace's packages are its own. */
   const libraryScans = () => scans.filter((s) => !s.workspace);
@@ -324,21 +347,43 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   periodic.unref();
 
   // ---------------------------------------------------------------- pages for what topotopo open asks for
-  /**
-   * Add a workspace or library to the web app for this run (the config is not written), read it, and watch it.
-   * Another workspace or library with the name makes the name another: a library's, since a package's folder gives it.
-   */
-  const addRoot = (kind: 'w' | 'l', wanted: string, dir: string): string => {
-    const all = [...cfg.workspaces, ...cfg.libraries, BUILTIN_LIBRARY];
+  /** The name a workspace, library or package opened by itself takes: the wanted one, else it with -2, -3 … (one set of names). */
+  const freeName = (wanted: string): string => {
+    const taken = (n: string) => [...cfg.workspaces, ...cfg.libraries, ...singles, BUILTIN_LIBRARY].some((x) => x.name === n);
     let name = wanted;
-    if (kind === 'w' && all.some((x) => x.name === name)) throw new HttpError(409, `"${name}" is the name of a library or workspace the web app lists already (${all.find((x) => x.name === name)!.path}): rename the workspace's .topows file`);
-    for (let n = 2; all.some((x) => x.name === name); n++) name = `${wanted}-${n}`;
-    (kind === 'w' ? cfg.workspaces : cfg.libraries).push({ name, path: dir });
-    rescan();
-    watchRoots();
-    for (const p of packages.values()) bakeIfStale(p);
-    broadcast({ list: true });
+    for (let n = 2; taken(name); n++) name = `${wanted}-${n}`;
     return name;
+  };
+  /**
+   * Add one scan (a root listed for this run) and nothing else is read again: the pages know it at once, it is watched,
+   * and its packages are queued for a bake (the bake itself runs in a child process, after the answer).
+   */
+  const addScan = (s: LibraryScan) => {
+    let scan = s;
+    if (s.workspace) { const g = gameFor(s); games.push(g.game); scan = g.scan; }
+    // the libraries inside a workspace are the workspace's own
+    scans = [...scans.filter((x) => x.name === BUILTIN_LIBRARY.name ? false : !(s.workspace && !x.workspace && within(x.root, s.root))), scan, scans.find((x) => x.name === BUILTIN_LIBRARY.name) ?? scanBuiltin()];
+    indexPackages();
+    buildRoots();
+    watchRoots();
+    for (const p of scan.packages) bakeIfStale(p);
+    broadcast({ list: true });
+    rewarm();
+  };
+  /** List a workspace for this run (the config is not written): under its file's name, or another when that is taken. */
+  const addWorkspaceRoot = (dir: string, fileName: string): string => {
+    const name = freeName(fileName);
+    if (name !== fileName) runNames.set(folderKey(dir), name);
+    cfg.workspaces.push({ name, path: dir });
+    forgetScansOf(dir);
+    addScan(scanLibrary({ name, path: dir, workspace: true }));
+    return name;
+  };
+  /** List one package for this run as itself: nothing outside its folder is scanned, watched, served or baked. */
+  const addSingle = (dir: string, id: string) => {
+    const name = freeName(id);
+    singles.push({ name, dir });
+    addScan(scanSingle(name, dir));
   };
   /** The page of a package folder or a workspace folder, listed first when it is not. */
   const openPage = (kind: 'package' | 'workspace', dir: string): string => {
@@ -346,21 +391,29 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       const file = workspaceAt(dir);
       if (!file) throw new HttpError(400, `${dir} holds no .topows file`);
       const have = games.find((g) => folderKey(g.dir) === folderKey(dir));
-      return urls.folder('w', have ? have.name : addRoot('w', file.name, dir), '');
+      return urls.folder('w', have ? have.name : addWorkspaceRoot(dir, file.name), '');
     }
     let p = byDir.get(folderKey(dir));
     if (!p) {
-      const ws = locate(dir).workspace;
-      if (ws) {
-        if (!games.some((g) => folderKey(g.dir) === folderKey(ws))) addRoot('w', workspaceAt(ws)?.name ?? (slugify(path.basename(ws)) || 'workspace'), ws);
-      } else {
-        const parent = path.dirname(dir);
-        // a root of a drive or the person's whole home folder is no library to read all of
-        if (parent === path.dirname(parent) || folderKey(parent) === folderKey(os.homedir()))
-          throw new HttpError(409, `${dir} is in no workspace or library the web app lists, and its folder is too wide to list: put the package in a folder of its own packages, or in a workspace`);
-        if (!scans.some((s) => folderKey(s.root) === folderKey(parent))) addRoot('l', slugify(path.basename(parent)) || 'packages', parent);
+      const at = locate(dir), ws = at.workspace ?? at.outside?.workspace;
+      const wsName = ws ? workspaceAt(ws)?.name ?? (slugify(path.basename(ws)) || 'workspace') : '';
+      const rel = ws ? path.relative(ws, dir).split(path.sep) : [];
+      // a copy the workspace uses (its topotopo-packages folder) has no page: the package it is a copy of has
+      if (ws && rel[0] === WORKSPACE_PACKAGES)
+        throw new HttpError(409, `${dir} is a copy of ${rel[1] && rel[2] ? `${rel[1]}/${rel[2]}` : 'a package'} that the workspace "${wsName}" uses (its ${WORKSPACE_PACKAGES} folder), which has no page: open the package itself, in the folder of the workspace or library that holds it`);
+      // made a moment ago, before the watch noticed: the roots around it (not all of them) are read again
+      const near = scans.filter((x) => x.name !== BUILTIN_LIBRARY.name && within(dir, x.root)).map((x) => x.root);
+      if (near.length) { rescanPackages(near); p = byDir.get(folderKey(dir)); }
+      if (!p && at.workspace) {
+        // the workspace the person works in is listed, as the workspace
+        if (!games.some((g) => folderKey(g.dir) === folderKey(at.workspace!))) addWorkspaceRoot(at.workspace, wsName);
+        p = byDir.get(folderKey(dir));
+      } else if (!p) {
+        const m = manifestAt(dir);
+        if (!m) throw new HttpError(400, `${dir} holds no .topo file`);
+        addSingle(dir, m.id);
+        p = byDir.get(folderKey(dir));
       }
-      p = byDir.get(folderKey(dir));
     }
     if (!p) throw new HttpError(409, `${dir} is a package the web app cannot list (another package there uses its id, or its manifest cannot be read): see its folder page`);
     return pageOf(p);
@@ -821,7 +874,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         const p = readStatic(threeDir, seg.slice(2).join('/'));
         return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream', { 'cache-control': 'max-age=3600' }) : send(404, 'not found');
       }
-      if (u.pathname === '/api/health') return json(200, { web: true, libraries: scans.length, packages: packages.size, baking: queue.size });
+      if (u.pathname === '/api/health') return json(200, { web: true, pid: process.pid, version: TOPOTOPO_VERSION, engine, open: true, libraries: scans.length, packages: packages.size, baking: queue.size });
       if (u.pathname === '/api/open') {
         // `topotopo open`: the page of a package or workspace, which the web app lists for this run when it does not yet
         // (nothing is written to the config). Only the program that starts the web app asks: a page of another origin
