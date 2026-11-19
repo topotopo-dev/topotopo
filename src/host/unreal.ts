@@ -44,7 +44,7 @@ import { setInstall } from '../config.ts';
 import { MANIFEST_EXT } from '../session.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
 import { engineSha256 } from './engine-code.ts';
-import { freshness, readRecord } from './cook.ts';
+import { freshness, oldFiles, readRecord } from './cook.ts';
 import type { CookJob, CookRecord, EngineOptions, Flavour, Freshness } from './cook.ts';
 import { CLI_PATH, IMPORT_DEFAULTS, SetupError, addLines, cookTargets, cookedFor, glbJson, isPublishedCopy, markPng, parseArgs, readImportParams } from './godot.ts';
 import type { GivenOptions } from './godot.ts';
@@ -115,18 +115,24 @@ export function uprojectOf(project: string): string {
   return path.join(path.resolve(project), found[0]);
 }
 
-/** A folder of a project as its content path: Content/props is /Game/props, Plugins/Kit/Content/props is /Kit/props; throws outside them. */
+/**
+ * A folder of a project as its content path: Content/props is /Game/props. Throws outside Content/, and in a plugin's
+ * Content/: the editor plugin watches and cooks packages only under the project's Content/ for now.
+ */
 export function contentPathOf(project: string, abs: string): string {
   const parts = path.relative(path.resolve(project), path.resolve(abs)).split(path.sep);
   const low = parts.map((s) => s.toLowerCase());
-  const below = (at: number, mount: string) => [`/${mount}`, ...parts.slice(at + 1)].join('/');
-  if (low[0] === 'content') return below(0, 'Game');
-  if (low[0] === 'plugins') {
-    const at = low.indexOf('content');
-    if (at > 1) return below(at, parts[at - 1]);
-  }
-  throw new SetupError(`${abs} is outside the Unreal project's Content/ folder: Unreal imports only what lies under Content/ or a plugin's Content/`);
+  if (low[0] === 'content') return ['/Game', ...parts.slice(1)].join('/');
+  const at = low[0] === 'plugins' ? low.indexOf('content') : -1;
+  if (at > 1) throw new SetupError(inPluginText(abs, parts[at - 1]));
+  throw new SetupError(`${abs} is outside the Unreal project's Content/ folder: Unreal imports only what lies under Content/ (a content path starts with /Game/)`);
 }
+
+const inPluginText = (abs: string, plugin: string) =>
+  `${abs} is in the plugin ${plugin}: TopoTopo packages and their assets belong under the project's Content/ for now, which is all the editor plugin watches and cooks`;
+
+/** An --into or outputs/folder that is a content path (/Game/...), not a folder on disk; an absolute path elsewhere is a folder. */
+export const isContentPath = (t: string) => /^\/Game(\/|$)/.test(t);
 
 /** A content path normalised ("." and ".." resolved, no doubled or trailing slash); throws for one Unreal refuses. */
 export function normalContentPath(p: string): string {
@@ -158,7 +164,7 @@ export function unrealOptions(topo: string, project: string, given: GivenOptions
   const p = readImportParams(topo), dir = path.dirname(topo);
   const str = (k: string, d: string) => (typeof p[k] === 'string' ? p[k] as string : d);
   const text = given.into ?? str('outputs/folder', IMPORT_DEFAULTS.folder);
-  const folder = /^\/[^/]/.test(text) ? normalContentPath(text)
+  const folder = isContentPath(text) ? normalContentPath(text)
     : path.isAbsolute(text) ? normalContentPath(contentPathOf(project, text))
     : normalContentPath(`${contentPathOf(project, dir)}/${text.split(/[\\/]/).join('/')}`);
   const perOutput = given.per_output_folders ?? (typeof p['outputs/per_output_folders'] === 'boolean' ? p['outputs/per_output_folders'] as boolean : IMPORT_DEFAULTS.per_output_folders);
@@ -301,6 +307,31 @@ function unrealExposed(project: string, dir: string): string[] {
   return HIDDEN_FOLDERS.filter((d) => isDir(path.join(dir, d))).map((d) => `${d}/`);
 }
 
+/** A package as people see it in the Content Browser: the content path of its package asset. */
+const packageAsset = (project: string, topo: string) => `${contentPathOf(project, path.dirname(topo))}/${assetName(path.basename(topo, MANIFEST_EXT))}`;
+
+/**
+ * Whose a cooked file is that a package's record does not list: the other package whose record lists it, or whose name
+ * its GLB or PNG carries, as the sentence that refuses it; null when none (a file below Saved/TopoTopo/ that no package
+ * placed belongs to the cook). Two packages with one output folder would otherwise overwrite each other's files.
+ */
+function placedByOther(project: string, abs: string, job: { topo: string; pkgName: string }): string | null {
+  const key = path.resolve(abs).toLowerCase();
+  let other: string | null = null;
+  for (const topo of contentFolders(project).flatMap((c) => cookTargets(c))) {
+    if (path.resolve(topo).toLowerCase() === path.resolve(job.topo).toLowerCase()) continue;
+    let record: CookRecord | null = null;
+    try { record = readRecord(path.dirname(topo), 'unreal'); } catch { continue; }
+    if (oldFiles(record).some((f) => path.join(project, ...f.split('/')).toLowerCase() === key)) { other = packageAsset(project, topo); break; }
+  }
+  if (!other) {
+    const named = cookedFor(abs);
+    if (named && named !== job.pkgName) other = `the package ${named}`;
+  }
+  if (!other) return null;
+  return `${posix(path.relative(project, abs))} belongs to ${other}, and ${packageAsset(project, job.topo)} would write over it: two packages cannot share an output's folder`;
+}
+
 /** The Unreal flavour of the cook for one project. */
 export function unrealFlavour(project: string): Flavour {
   const proj = path.resolve(project);
@@ -313,6 +344,8 @@ export function unrealFlavour(project: string): Flavour {
     recordPath: (abs) => posix(path.relative(proj, abs)),
     absolutePath: (rec) => path.join(proj, ...rec.split('/')),
     ownerOf: cookedFor,
+    placedByOther: (abs, job) => placedByOther(proj, abs, job),
+    assets: (o, options) => unrealPlan(o, options).filter((s) => s.as !== 'landscape').map((s) => `${s.folder}/${s.name}`),
     exposed: (dir) => unrealExposed(proj, dir),
     plan: (o, options) => unrealPlan(o, options),
     async write(geo: Geometry, x) {
@@ -379,9 +412,10 @@ export function unrealFlavour(project: string): Flavour {
 // -------------------------------------------------------------------------------------------------------- the job
 
 /**
- * A package to cook: its manifest (checked: one .topo, an id), not a published copy, under an Unreal project's Content/ or
- * a plugin's, in a folder of its own; the options from its import file with `given` over them. Throws a SetupError
- * otherwise. Files below Saved/TopoTopo/ belong to the cook, so it takes them over as they are.
+ * A package to cook: its manifest (checked: one .topo, an id), not a published copy, under an Unreal project's Content/
+ * (not a plugin's), in a folder of its own; the options from its import file with `given` over them. Throws a SetupError
+ * otherwise. Files below Saved/TopoTopo/ belong to the cook, so it takes them over as they are, unless another package
+ * placed them.
  */
 export function unrealJob(topo: string, given: GivenOptions & { adopt?: boolean; report?: string; timeout?: number } = {}): CookJob & { project: string } {
   const abs = path.resolve(topo), dir = path.dirname(abs);
@@ -391,12 +425,12 @@ export function unrealJob(topo: string, given: GivenOptions & { adopt?: boolean;
   if (!at || path.resolve(at.file) !== abs) throw new SetupError(`${abs} is no package manifest`);
   const project = unrealProjectOf(dir);
   if (!project) throw new SetupError(`${dir} is in no Unreal project (no .uproject at or above it): a cook for Unreal names its assets by their content paths`);
-  if (!unrealSees(dir, uprojectOf(project))) throw new SetupError(`${dir} is outside the Unreal project's Content/ folder: Unreal imports only what lies under Content/ or a plugin's Content/; move the package there`);
+  if (!unrealSees(dir, uprojectOf(project))) throw new SetupError(`${dir} is outside the Unreal project's Content/ folder: Unreal imports only what lies under Content/; move the package there`);
   const content = contentPathOf(project, dir);
   if (content.split('/').length < 3) throw new SetupError(`${dir} is a package directly in Content/, which is not supported: its graphs/ and assets/ would be seen by Auto Reimport; move the package into a folder of its own`);
   normalContentPath(content);
   const options = unrealOptions(abs, project, given);
-  return { dir, topo: abs, id: at.id, options, adopt: true, report: given.report, timeout: given.timeout, project };
+  return { dir, topo: abs, id: at.id, options, adopt: given.adopt, report: given.report, timeout: given.timeout, project };
 }
 
 // ------------------------------------------------------------------------------------------------------ status
@@ -426,12 +460,19 @@ export interface UnrealStatus {
   excludes: string[];
   /** a package directly in Content/ (not supported) */
   root: string[];
+  /** a package in a plugin's Content/ (not supported yet), with why */
+  inPlugins: { topo: string; text: string }[];
   ok: boolean;
 }
 
-/** The project's Content/ and every plugin's. */
+/** The project's Content/, where packages are cooked. */
 function contentFolders(project: string): string[] {
-  const out = [path.join(project, 'Content')];
+  return [path.join(project, 'Content')].filter(isDir);
+}
+
+/** Every plugin's Content/: a package there is refused for now. */
+function pluginContentFolders(project: string): string[] {
+  const out: string[] = [];
   const plugins = path.join(project, 'Plugins');
   const walk = (d: string, depth: number) => {
     let entries: fs.Dirent[];
@@ -447,7 +488,10 @@ function contentFolders(project: string): string[] {
 export function unrealStatus(project: string): UnrealStatus {
   const proj = projectFolder(project);
   const flavour = unrealFlavour(proj);
-  const res: UnrealStatus = { project: proj, packages: [], plugin: isFile(path.join(proj, 'Plugins', PLUGIN_NAME, `${PLUGIN_NAME}.uplugin`)), excludes: missingExcludes(proj), root: [], ok: true };
+  const res: UnrealStatus = { project: proj, packages: [], plugin: isFile(path.join(proj, 'Plugins', PLUGIN_NAME, `${PLUGIN_NAME}.uplugin`)), excludes: missingExcludes(proj), root: [], inPlugins: [], ok: true };
+  for (const c of pluginContentFolders(proj)) {
+    for (const topo of cookTargets(c)) res.inPlugins.push({ topo: posix(path.relative(proj, topo)), text: inPluginText(posix(path.relative(proj, path.dirname(topo))), path.basename(path.dirname(c))) });
+  }
   const topos = contentFolders(proj).flatMap((c) => {
     const direct = fs.readdirSync(c).filter((f) => f.endsWith(MANIFEST_EXT) && f.length > MANIFEST_EXT.length).map((f) => path.join(c, f));
     res.root.push(...direct.map((t) => posix(path.relative(proj, t))));
@@ -472,7 +516,7 @@ export function unrealStatus(project: string): UnrealStatus {
     const skipped = Object.entries(record?.skipped ?? {}).sort(([a], [b]) => byCode(a, b)).map(([oid, s]) => ({ id: oid, why: s.why }));
     res.packages.push({ ...base, state: f.state, why: f.why, path: f.path, note: f.note, text: f.text, outputs, skipped });
   }
-  res.ok = !res.root.length && res.packages.every((p) => p.state === 'ok' && !p.exposed.length);
+  res.ok = !res.root.length && !res.inPlugins.length && res.packages.every((p) => p.state === 'ok' && !p.exposed.length);
   return res;
 }
 
@@ -490,6 +534,7 @@ export function unrealStatusText(r: UnrealStatus): string {
     if (p.exposed.length) lines.push(`      exposed: Auto Reimport sees ${p.exposed.join(', ')}: ${program()} unreal setup ${r.project} excludes them`);
   }
   for (const t of r.root) lines.push(`  unsupported  ${t}: a package directly in Content/: move it into a folder of its own`);
+  for (const p of r.inPlugins) lines.push(`  unsupported  ${p.topo}: ${p.text}`);
   lines.push(r.ok ? 'every package is current' : 'not every package is current (--strict exits 1)');
   return lines.join('\n');
 }

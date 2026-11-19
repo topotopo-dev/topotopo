@@ -1322,7 +1322,7 @@ The plugin's contract (jobs file, progress lines, record schema, freshness): int
 THE CLI COMMANDS:
 ${GODOT_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
   unreal: `UNREAL (packages inside an Unreal project's Content/, imported by the TopoTopoImport plugin)
-A package in a folder of its own under Content/ imports as <id>.topo, a source asset: the plugin (topotopo unreal setup puts it in
+A package in a folder of its own under the project's Content/ (not a plugin's, for now) imports as <id>.topo, a source asset: the plugin (topotopo unreal setup puts it in
 Plugins/TopoTopoImport/; Unreal 5.8; C++ source, which Unreal builds on opening) cooks each published output and brings it in as
 Unreal assets, kept current by Auto Reimport. Levels use those assets, never the package asset, which stays in the editor.
 
@@ -1358,7 +1358,11 @@ leaves its assets; they are listed as orphans. Right-click the package asset: Re
 THE RECORD <package>/.topotopo/unreal.json (commit it with the .uasset files) is the same record as Godot's; a checkout without
 Saved/TopoTopo/ is still current.
 EXIT CODES: 0 every output ok; 1 an output or package failed or timed out (records and reports still written);
-2 usage, setup or protocol error, a published copy, a package outside Content/ or directly in it (nothing written).
+2 usage, setup or protocol error, a published copy, a package outside Content/, directly in it or in a plugin's (nothing written).
+SHARED FOLDERS: each package needs output folders of its own; a file another package placed is refused, naming both packages. A flat
+folder whose outputs would make two assets of one name fails the second.
+AUTO REIMPORT skips folders named graphs, assets, inputs, exports, versions, packages, attachments, .topotopo or topotopo-packages
+anywhere under Content/ (the exclusions setup writes): a folder of yours with such a name is imported by hand.
 CI: topotopo unreal status <project> --strict exits 1 when a package is stale, failed or never cooked or Auto Reimport still sees its folders.
 The plugin's contract (import steps, what differs from the cook for Godot): integrations/unreal/PROTOCOL.md.
 

@@ -130,6 +130,14 @@ export interface Flavour {
   absolutePath(recorded: string): string;
   /** the package a file at an output path says it was cooked for (a GLB's source block, a PNG's tEXt chunk), or null */
   ownerOf(abs: string): string | null;
+  /**
+   * Whose a file at an output path is when this package's record does not list it: one sentence naming the other package
+   * that placed it and this one, or null when none did (the cook takes it over). Without it such a file is taken only
+   * when ownerOf names this package (or the job adopts).
+   */
+  placedByOther?(abs: string, job: { topo: string; pkgName: string }): string | null;
+  /** The assets an output's files become in the engine (content paths), for the check that two outputs make none of one name. */
+  assets?(o: { id: string; kind: string; files: string[] }, options: EngineOptions): string[];
   /** the package's TopoTopo folders the engine imports (no .gdignore): "graphs/" … */
   exposed(dir: string): string[];
   /**
@@ -556,6 +564,19 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
     // the files of the outputs of this cook (key → output), and those the old record lists (the guard lets them be replaced)
     const claimed = new Map<string, string>();
     const known = new Set(oldFiles(old).map((f) => folderKey(flavour.absolutePath(f))));
+    // the assets of the outputs (lower case, Unreal's names ignore case → output), those of the last cook first: in one
+    // folder two outputs can make assets of one name from files of other names (a texture named like a mesh)
+    const claimedAssets = new Map<string, string>();
+    const claimAssets = (id: string, kind: string, files: string[]): CookIssue | null => {
+      const names = flavour.assets?.({ id, kind, files }, options) ?? [];
+      for (const a of names) {
+        const by = claimedAssets.get(a.toLowerCase());
+        if (by && by !== id) return issue(`"${by}" and "${id}" would both make the asset ${a}`, 'two outputs in one folder cannot make assets of one name: per-output folders (outputs/per_output_folders), or rename one output or its images');
+      }
+      for (const a of names) claimedAssets.set(a.toLowerCase(), id);
+      return null;
+    };
+    if (old && sameOptions(old.options, options)) for (const [id, o] of Object.entries(old.outputs ?? {})) claimAssets(id, o.kind, Object.keys(o.files ?? {}));
     let cookedAny = false, timedOut = false;
     const signal = { aborted: false };
     if (job.timeout) timer = setTimeout(() => { signal.aborted = true; timedOut = true; void engine?.host.pool?.close(); }, job.timeout * 1000);
@@ -707,8 +728,10 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
         continue;
       }
 
-      // 3. the writing rules: no clash with another output, no foreign file, only changed bytes
-      const placed = place(result.files, dir, { id: x.id, claimed, known, pkgName, adopt: !!job.adopt, flavour });
+      // 3. the writing rules: no clash with another output (a file or an asset), no foreign file, only changed bytes
+      const clash = claimAssets(x.id, result.kind, result.files.map((f) => flavour.recordPath(path.join(dir, ...f.name.split('/')))));
+      if (clash) { fail([clash], result.deps, result.folders, result.warnings); continue; }
+      const placed = place(result.files, dir, { id: x.id, claimed, known, pkgName, topo: job.topo, adopt: !!job.adopt, flavour });
       if ('error' in placed) { fail([placed.error], result.deps, result.folders, result.warnings); continue; }
       outputs[x.id] = {
         default: x.default, deps: result.deps, errors: [], files: placed.files, folders: result.folders, graph: x.graph, instances: result.instances,
@@ -793,7 +816,7 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
 const manifestRel = (job: CookJob) => path.basename(job.topo);
 
 /** Every output file a record lists (outputs and orphans). */
-function oldFiles(old: CookRecord | null): string[] {
+export function oldFiles(old: CookRecord | null): string[] {
   if (!old) return [];
   return [...Object.keys(old.orphans ?? {}), ...Object.values(old.outputs ?? {}).flatMap((o) => Object.keys(o.files ?? {}))];
 }
@@ -825,11 +848,12 @@ function instanceCounts(g: Geometry): Record<string, number> {
 
 /**
  * The writing rules for one output's files in `dir`: none at a path another output of this cook writes; an existing
- * file is replaced only when the old record lists it, its source block names this package, or with `adopt`; a file
+ * file is replaced only when the old record lists it, its source block names this package (or the flavour finds no other
+ * package placed it), or with `adopt`; a file
  * is written (through <file>.topotopo-part, moved into place) only when its bytes differ. All or nothing: a refused
  * file writes none of the output's.
  */
-function place(files: { name: string; bytes: Uint8Array }[], dir: string, o: { id: string; claimed: Map<string, string>; known: Set<string>; pkgName: string; adopt: boolean; flavour: Flavour }):
+function place(files: { name: string; bytes: Uint8Array }[], dir: string, o: { id: string; claimed: Map<string, string>; known: Set<string>; pkgName: string; topo: string; adopt: boolean; flavour: Flavour }):
   { files: Record<string, string>; written: string[] } | { error: CookIssue } {
   const targets = files.map((f) => ({ abs: path.join(dir, ...f.name.split('/')), bytes: f.bytes }));
   for (const t of targets) {
@@ -838,6 +862,11 @@ function place(files: { name: string; bytes: Uint8Array }[], dir: string, o: { i
   }
   for (const t of targets) {
     if (!fs.existsSync(t.abs) || o.adopt || o.known.has(folderKey(t.abs))) continue;
+    if (o.flavour.placedByOther) {
+      const other = o.flavour.placedByOther(t.abs, { topo: o.topo, pkgName: o.pkgName });
+      if (!other) continue;
+      return { error: issue(other, 'give one of the packages another output folder (outputs/folder, --into)') };
+    }
     if (o.flavour.ownerOf(t.abs) === o.pkgName) continue;
     return { error: issue(`${o.flavour.recordPath(t.abs)} is there already and was not cooked from this package`, 'cook into another folder (outputs/folder, --into), or take the file over once with --adopt (its import settings are kept)') };
   }

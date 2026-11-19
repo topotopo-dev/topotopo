@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { cookCommand } from '../src/host/cook-command.ts';
 import { COOK_PROTOCOL, RECORD_SCHEMA } from '../src/host/cook.ts';
-import { GITIGNORE_LINES, PLUGIN_NAME, PLUGIN_SOURCE, REIMPORT_INI, UNREAL_EXCLUDES, assetName, contentPathOf, enableInUproject, missingExcludes, normalContentPath, unrealCommand, unrealPlan, unrealStatus, withExcludes } from '../src/host/unreal.ts';
+import { GITIGNORE_LINES, PLUGIN_NAME, PLUGIN_SOURCE, REIMPORT_INI, UNREAL_EXCLUDES, assetName, contentPathOf, enableInUproject, isContentPath, missingExcludes, normalContentPath, unrealCommand, unrealPlan, unrealStatus, withExcludes } from '../src/host/unreal.ts';
 import { UNREAL_COMMANDS } from '../src/host/unreal-commands.ts';
 import { topicText } from '../src/mcp/docs.ts';
 
@@ -46,13 +46,26 @@ const cook = (argv: string[]) => run(cookCommand as any, argv);
 const unreal = (argv: string[]) => run(unrealCommand as any, argv);
 const readJson = (f: string) => JSON.parse(fs.readFileSync(f, 'utf8'));
 
+/** A small package in a project's Content/<name>: one graph, its outputs, and an import file when given. */
+function pkg(game: string, name: string, nodes: Record<string, unknown>, outputs: Record<string, unknown>, importText?: string): string {
+  const dir = path.join(game, 'Content', name);
+  write(path.join(dir, `${name}.topo`), JSON.stringify({ title: name, graph: name, created: '2026-01-01', name: `studio/${name}` }));
+  write(path.join(dir, 'graphs', `${name}.json`), JSON.stringify({ nodes, output: Object.values(outputs as Record<string, { node: string }>)[0].node, outputs }));
+  if (importText) write(path.join(dir, `${name}.topo.import`), importText);
+  return dir;
+}
+
 // ---------------------------------------------------------------------------------------------------------- paths
 section('content paths');
 {
   const p = path.join(tmp, 'paths');
   check(contentPathOf(p, path.join(p, 'Content', 'props')) === '/Game/props', 'Content/props is /Game/props');
-  check(contentPathOf(p, path.join(p, 'Plugins', 'Kit', 'Content', 'props')) === '/Kit/props', 'Plugins/Kit/Content/props is /Kit/props');
   let threw = '';
+  try { contentPathOf(p, path.join(p, 'Plugins', 'Kit', 'Content', 'props')); } catch (e: any) { threw = e.message; }
+  check(/in the plugin Kit: .*belong under the project's Content\/ for now/.test(threw), `a plugin's Content/ is refused for now (${threw.slice(-80)})`);
+  check(isContentPath('/Game/props') && isContentPath('/Game') && !isContentPath('/home/me/game/Content/props') && !isContentPath('/Gamer/x') && !isContentPath('C:/game/Content'),
+    'a content path starts with /Game; an absolute macOS or Linux path is a folder');
+  threw = '';
   try { contentPathOf(p, path.join(p, 'Saved', 'x')); } catch (e: any) { threw = e.message; }
   check(/outside the Unreal project's Content/.test(threw), 'a folder outside Content/ is refused');
   check(normalContentPath('/Game//props/./a/../b/') === '/Game/props/b', 'a content path is normalised');
@@ -174,7 +187,20 @@ section('the cook');
   const sockets = readJson(path.join(game, ...below.split('/'), 'crate', 'crate.sockets.json'));
   check(sockets.format === 'topotopo-sockets' && sockets.version === 1 && sockets.sockets.length > 0 && Array.isArray(sockets.sockets[0].location) && typeof sockets.sockets[0].rotation.yaw === 'number', `the sockets file (${sockets.sockets.map((s: any) => s.name).join()})`);
   const handle = sockets.sockets[0];
-  check(/centimetres/.test(sockets.units), `sockets are in centimetres (${handle.name} at ${handle.location.join(' ')})`);
+  check(/centimetres/.test(sockets.units) && handle.location.join() === '0,0,25', `the handle at y = 0.25 m is Z = 25 cm (${handle.name} at ${handle.location.join(' ')})`);
+  // off every axis: a point and a socket at x = 1, y = 2, z = 3 m are X = 100, Y = 300, Z = 200 cm
+  const axesGame = project('axesgame', false);
+  const axes = pkg(axesGame, 'axes', {
+    spots: { type: 'add', params: { points: [[1, 2, 3]] } },
+    body: { type: 'box', params: { size: [0.2, 0.2, 0.2] } },
+    tip: { type: 'scene_null', in: ['body'], params: { name: 'tip', translation: [1, 2, 3] } },
+  }, { spots: { node: 'spots', kind: 'points' }, tip: { node: 'tip', kind: 'mesh' } });
+  check((await cook([axes, '--for', 'unreal'])).code === 0, 'a package of a point and a socket off the axes cooks');
+  const axesAt = path.join(axesGame, 'Saved', 'TopoTopo', 'Game', 'axes', 'outputs');
+  const pt = fs.readFileSync(path.join(axesAt, 'spots', 'spots.points.csv'), 'utf8').trim().split(/\r?\n/)[1].split(',');
+  check(pt.slice(1, 4).map(Number).join() === '100,300,200', `a point at (1, 2, 3) m is X Y Z = 100 300 200 cm (${pt.slice(1, 4).join(' ')})`);
+  const tip = readJson(path.join(axesAt, 'tip', 'tip.sockets.json')).sockets[0];
+  check(tip.location.join() === '100,300,200', `a socket at (1, 2, 3) m is at 100 300 200 cm (${tip.location.join(' ')})`);
 
   // incremental
   const unchanged = await cook([dir, '--for', 'unreal', '--report', report]);
@@ -197,6 +223,8 @@ section('the cook');
   const failed = readJson(report).outputs.find((o: any) => o.id === 'crate');
   check(broken.code === 1 && failed.state === 'failed' && failed.errors.length > 0, `a broken graph fails its output, exit 1 (${failed.errors[0]?.message?.slice(0, 60)})`);
   check(fs.readFileSync(path.join(game, ...below.split('/'), 'crate', 'crate.glb')).equals(good), 'its last good file stays');
+  check(failed.import?.[0]?.as === 'static_mesh' && failed.import[0].file === `${below}/crate/crate.glb` && failed.import[0].lods?.length === 1,
+    `and its import names that file, so the plugin keeps its asset (${failed.import?.map((s: any) => s.as).join()})`);
   const stale = unrealStatus(game);
   check(!stale.ok && stale.packages[0].outputs.some((o) => o.id === 'crate' && o.state === 'failed'), 'status says it failed');
   write(graph, original);
@@ -240,6 +268,15 @@ section('the cook');
   copyDir(FIXTURE, none);
   const noP = await cook([none, '--for', 'unreal']);
   check(noP.code === 2 && /is in no Unreal project/.test(noP.text), `a package in no project exits 2 (${noP.text.slice(-70)})`);
+  const kit = project('kitgame', false);
+  write(path.join(kit, 'Plugins', 'Kit', 'Kit.uplugin'), '{"FileVersion": 3}');
+  copyDir(FIXTURE, path.join(kit, 'Plugins', 'Kit', 'Content', 'props'));
+  const inKit = await cook([path.join(kit, 'Plugins', 'Kit', 'Content', 'props'), '--for', 'unreal']);
+  check(inKit.code === 2 && /in the plugin Kit: TopoTopo packages and their assets belong under the project's Content\//.test(inKit.text), `a package in a plugin's Content/ exits 2 (${inKit.text.slice(-90)})`);
+  const kitStatus = unrealStatus(kit);
+  check(!kitStatus.ok && kitStatus.inPlugins.length === 1 && kitStatus.inPlugins[0].topo === 'Plugins/Kit/Content/props/props.topo', 'status lists it as unsupported');
+  const posixInto = await cook([dir, '--for', 'unreal', '--into', '/srv/game/Content/props', '--report', report]);
+  check(posixInto.code === 2 && /outside the Unreal project's Content/.test(posixInto.text), `an absolute macOS or Linux --into is a folder, not a content path (${posixInto.text.slice(-60)})`);
   // --into: a content path (above), or a folder on disk under Content/; a relative folder is the working directory's
   const abs = await cook([dir, '--for', 'unreal', '--into', path.join(game, 'Content', 'Baked'), '--report', report]);
   check(abs.code === 0 && readJson(report).outputs.find((o: any) => o.id === 'crate').import[0].folder === '/Game/Baked/crate', '--into takes a folder under Content/ as its content path');
@@ -259,6 +296,34 @@ section('the cook');
   check(p.code === 2 && /topotopo unreal setup /.test(p.text) && !/Godot/.test(p.text), `another protocol asks for setup (${p.text.slice(0, 90)})`);
   write(jobs, JSON.stringify({ for: 'other', protocol: COOK_PROTOCOL, jobs: [] }));
   check((await cook(['--jobs', jobs])).code === 2, 'another engine exits 2');
+
+  // two packages with one output folder: the second is refused, naming both; a file no package placed is taken over
+  const box = { body: { type: 'box', params: { size: [0.5, 0.5, 0.5] } } };
+  const shared = '[params]\n\noutputs/folder="/Game/Shared"\n';
+  const one = pkg(game, 'one', box, { thing: { node: 'body', kind: 'mesh' } }, shared);
+  const two = pkg(game, 'two', { body: { type: 'box', params: { size: [0.3, 0.3, 0.3] } } }, { thing: { node: 'body', kind: 'mesh' } }, shared);
+  const sharedGlb = path.join(game, 'Saved', 'TopoTopo', 'Game', 'Shared', 'thing', 'thing.glb');
+  check((await cook([one, '--for', 'unreal'])).code === 0, 'a package cooks into a shared folder');
+  const firstGlb = fs.readFileSync(sharedGlb);
+  const tr = path.join(tmp, 'two.json');
+  const second = await cook([two, '--for', 'unreal', '--report', tr]);
+  const refusal = readJson(tr).outputs[0].errors[0]?.message ?? '';
+  check(second.code === 1 && /belongs to \/Game\/one\/one, and \/Game\/two\/two would write over it/.test(refusal) && fs.readFileSync(sharedGlb).equals(firstGlb),
+    `another package with that folder is refused, naming both, and the file stays (${refusal})`);
+  const stray = pkg(game, 'stray', { spots: { type: 'add', params: { points: [[0, 0, 0]] } } }, { pts: { node: 'spots', kind: 'points' } });
+  write(path.join(game, 'Saved', 'TopoTopo', 'Game', 'stray', 'outputs', 'pts', 'pts.points.csv'), 'left over\n');
+  check((await cook([stray, '--for', 'unreal'])).code === 0 && /^Name,/.test(fs.readFileSync(path.join(game, 'Saved', 'TopoTopo', 'Game', 'stray', 'outputs', 'pts', 'pts.points.csv'), 'utf8')),
+    'a file below Saved/TopoTopo/ that no package placed is taken over');
+  // flat: a texture named like a mesh would make two assets of one name
+  const clash = pkg(game, 'clash', {
+    body: { type: 'box', params: { size: [0.5, 0.5, 0.5] } },
+    noise: { type: 'tex_noise', params: { resolution: [8, 8], name: 'crate' } },
+  }, { crate: { node: 'body', kind: 'mesh' }, look: { node: 'noise', kind: 'textures' } }, '[params]\n\noutputs/per_output_folders=false\n');
+  const cr = path.join(tmp, 'clash.json');
+  const flat = await cook([clash, '--for', 'unreal', '--report', cr]);
+  const clashed = readJson(cr).outputs.find((o: any) => o.state === 'failed');
+  check(flat.code === 1 && clashed?.id === 'look' && /"crate" and "look" would both make the asset \/Game\/clash\/outputs\/crate/.test(clashed.errors[0].message),
+    `flat: an output whose asset is named like another's fails (${clashed?.errors[0]?.message})`);
 
   // collision pieces by name: Unreal's UCX_ for TopoTopo's -convcolonly / -colonly
   const hulls = path.join(game, 'Content', 'hulls');

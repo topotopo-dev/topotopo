@@ -12,7 +12,7 @@ import { SetupError, cookTargets, godotFlavour, godotJob, parseArgs, resPath } f
 import type { GivenOptions } from './godot.ts';
 import { GODOT_COMMANDS } from './godot-commands.ts';
 import { UNREAL_COMMANDS } from './unreal-commands.ts';
-import { contentPathOf, unrealFlavour, unrealJob, unrealProjectOf } from './unreal.ts';
+import { contentPathOf, isContentPath, unrealFlavour, unrealJob, unrealProjectOf } from './unreal.ts';
 import type { Io } from '../packages/commands.ts';
 
 /** An engine a package can be cooked for. */
@@ -39,7 +39,7 @@ const ENGINES: Record<string, CookEngine> = {
   },
   unreal: {
     name: 'unreal', job: unrealJob, flavour: unrealFlavour,
-    into: (t) => (/^\/[^/]/.test(t) ? t : path.resolve(t)),
+    into: (t) => (isContentPath(t) ? t : path.resolve(t)),
     where: (project, dir) => contentPathOf(project, dir),
     update: (topo) => `update the Unreal plugin: ${program()} unreal setup ${(topo && unrealProjectOf(path.dirname(path.resolve(topo)))) || '<project>'}`,
   },
