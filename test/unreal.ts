@@ -96,6 +96,12 @@ section('unreal setup');
   const w = await unreal(['setup', pcg, '--with-pcg']);
   const pcgPlugin = readJson(path.join(pcg, 'withpcg.uproject')).Plugins.find((p: any) => p.Name === 'TopoTopoPCG');
   check(w.code === 0 && fs.existsSync(path.join(pcg, 'Plugins', 'TopoTopoPCG', 'TopoTopoPCG.uplugin')) && pcgPlugin?.Enabled === true, '--with-pcg installs TopoTopoPCG too');
+  const pcgDescriptor = readJson(path.join(pcg, 'Plugins', 'TopoTopoPCG', 'TopoTopoPCG.uplugin'));
+  check(JSON.stringify(pcgPlugin?.SupportedTargetPlatforms) === JSON.stringify(pcgDescriptor.SupportedTargetPlatforms) && pcgDescriptor.SupportedTargetPlatforms?.length > 0,
+    `its entry names the descriptor's platforms, so 5.8 does not warn (${pcgPlugin?.SupportedTargetPlatforms})`);
+  const bare = '{"Plugins":[{"Name":"TopoTopoPCG","Enabled":true}]}';
+  check(JSON.parse(enableInUproject(bare, 'TopoTopoPCG', ['Win64'])!).Plugins[0].SupportedTargetPlatforms?.join() === 'Win64' && enableInUproject(enableInUproject(bare, 'TopoTopoPCG', ['Win64'])!, 'TopoTopoPCG', ['Win64']) === null,
+    'an enabled entry without the platforms gains them, once');
 
   const notAProject = path.join(tmp, 'nothing');
   fs.mkdirSync(notAProject);

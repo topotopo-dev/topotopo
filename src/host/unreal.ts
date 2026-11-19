@@ -555,16 +555,27 @@ function copyPlugin(from: string, to: string): number {
  * A .uproject's text with a plugin enabled in its "Plugins" list, in the file's own indent; null when it is enabled
  * already. Throws a SetupError for a file that is no JSON object.
  */
-export function enableInUproject(text: string, name: string): string | null {
+export function enableInUproject(text: string, name: string, platforms?: string[]): string | null {
   let raw: any;
   try { raw = JSON.parse(text.replace(/^﻿/, '')); } catch (e: any) { throw new SetupError(`the .uproject is no JSON: ${e.message}`); }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SetupError('the .uproject is no JSON object');
   const plugins: any[] = Array.isArray(raw.Plugins) ? raw.Plugins : (raw.Plugins = []);
   const have = plugins.find((p) => String(p?.Name).toLowerCase() === name.toLowerCase());
-  if (have?.Enabled === true) return null;
-  if (have) have.Enabled = true; else plugins.push({ Name: name, Enabled: true });
+  // a plugin whose descriptor names its target platforms needs the same list in its entry, or 5.8 warns at startup
+  const samePlatforms = !platforms || JSON.stringify(have?.SupportedTargetPlatforms) === JSON.stringify(platforms);
+  if (have?.Enabled === true && samePlatforms) return null;
+  if (have) { have.Enabled = true; if (platforms) have.SupportedTargetPlatforms = platforms; }
+  else plugins.push({ Name: name, Enabled: true, ...(platforms ? { SupportedTargetPlatforms: platforms } : {}) });
   const nl = text.includes('\r\n') ? '\r\n' : '\n';
   return JSON.stringify(raw, null, '\t').replace(/\n/g, nl) + nl;
+}
+
+/** The SupportedTargetPlatforms a plugin descriptor names, or undefined when it names none. */
+function pluginPlatforms(uplugin: string): string[] | undefined {
+  try {
+    const p = JSON.parse(fs.readFileSync(uplugin, 'utf8').replace(/^﻿/, '')).SupportedTargetPlatforms;
+    return Array.isArray(p) && p.every((x) => typeof x === 'string') ? p : undefined;
+  } catch { return undefined; }
 }
 
 export interface UnrealSetupOptions {
@@ -589,19 +600,19 @@ export function unrealSetup(project: string, o: UnrealSetupOptions = {}): string
   const said: string[] = [];
   const n = copyPlugin(source, path.join(proj, 'Plugins', PLUGIN_NAME));
   said.push(`copied the plugin (${n} files) into Plugins/${PLUGIN_NAME}/`);
-  const names = [PLUGIN_NAME];
+  const names: [string, string][] = [[PLUGIN_NAME, source]];
   if (o.pcg) {
     const pcg = o.pcgPlugin ?? PCG_PLUGIN_SOURCE;
     if (!isFile(path.join(pcg, `${PCG_PLUGIN_NAME}.uplugin`))) throw new SetupError(`this TopoTopo (${TOPOTOPO_VERSION}) carries no ${PCG_PLUGIN_NAME} plugin at ${pcg}`);
     said.push(`copied ${PCG_PLUGIN_NAME} (${copyPlugin(pcg, path.join(proj, 'Plugins', PCG_PLUGIN_NAME))} files) into Plugins/${PCG_PLUGIN_NAME}/: it places terrain outputs in a level`);
-    names.push(PCG_PLUGIN_NAME);
+    names.push([PCG_PLUGIN_NAME, pcg]);
   }
   const node = o.node ?? process.execPath, cli = o.cli ?? CLI_PATH;
   const cfg = setInstall({ node, cli });
   said.push(`recorded where TopoTopo is (node ${node}, ${cli}) in ${cfg} "install"`);
   if (o.enable !== false) {
-    for (const name of names) {
-      const text = fs.readFileSync(uproject, 'utf8'), next = enableInUproject(text, name);
+    for (const [name, from] of names) {
+      const text = fs.readFileSync(uproject, 'utf8'), next = enableInUproject(text, name, pluginPlatforms(path.join(from, `${name}.uplugin`)));
       if (next !== null) { writeAtomic(uproject, next); said.push(`enabled ${name} in ${path.basename(uproject)}`); }
       else said.push(`${name} is enabled in ${path.basename(uproject)} already`);
     }
