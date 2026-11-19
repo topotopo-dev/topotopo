@@ -200,11 +200,13 @@ try {
       lockPid = lock.pid;
       const url = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '';
       const res = url ? await fetch(url, { headers: { connection: 'close' }, signal: AbortSignal.timeout(20000) }).catch(() => null) : null;
-      check(/^opening http:\/\/127\.0\.0\.1:\d+\/l\/open-kit\/demo-kit\/$/m.test(said) && url === said.trim().replace(/^opening /, '') && lock.port === port && res?.status === 200, `open starts the web app from the installed dist/ and the package's page answers (${url}: ${res?.status})`);
+      check(/^opening http:\/\/127\.0\.0\.1:\d+\/l\/demo-kit\/$/m.test(said) && url === said.trim().replace(/^opening /, '') && lock.port === port && res?.status === 200, `open starts the web app from the installed dist/ and the package's page answers (${url}: ${res?.status})`);
       sh(`npm exec --no -- ${BIN} open "${kit}"`, app, openEnv);
       check(JSON.parse(fs.readFileSync(path.join(home, 'web.lock'), 'utf8')).pid === lockPid && fs.readFileSync(log, 'utf8').trim().split(String.fromCharCode(10)).length === 2, 'a second open reuses that web app');
     } finally {
-      if (lockPid) { try { if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(lockPid), '/T', '/F'], { stdio: 'ignore' }); else process.kill(lockPid); } catch { /* gone */ } }
+      // the installed command stops the web app it started (its health confirms the pid)
+      const stopped = spawnSync('npm', ['exec', '--no', '--', BIN, 'open', '--stop'], { cwd: app, env: openEnv, encoding: 'utf8', shell: process.platform === 'win32', timeout: 60000 });
+      check(/stopped the web app/.test(stopped.stdout ?? '') && !!lockPid && !fs.existsSync(path.join(home, 'web.lock')), `open --stop ends the web app from the installed dist/ (${(stopped.stdout ?? '').trim()})`);
     }
   }
 
