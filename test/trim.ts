@@ -2,6 +2,7 @@
 // one convention everywhere (u = distance / period from the path's start, whole repeats on closed paths, v filling
 // the band, never mirrored, upright on walls), the sheets carried through merge.
 //   node test/trim.ts
+import fs from 'node:fs';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
@@ -258,6 +259,63 @@ const straight = { type: 'curve', params: { points: [[0, 0, 0], [1.5, 0, 0], [3,
   const cols = (img: Float32Array, i0: number, i1: number) => { let s = 0, n = 0; for (let j = 0; j < 32; j++) for (let i = i0; i <= i1; i++) { s += img[j * 32 + i]; n++; } return s / n; };
   const openEnds = (cols(open, 0, 1) + cols(open, 30, 31)) / 2, shutEnds = (cols(shut, 0, 1) + cols(shut, 30, 31)) / 2;
   check(shutEnds < openEnds - 0.02, `tiling: the open ends of a tube darken once the next period is there (${openEnds.toFixed(3)} → ${shutEnds.toFixed(3)})`);
+}
+
+// ---------------------------------------------------------------- the example meshes have no coplanar overlapping faces
+// Two faces in one plane that overlap flicker (z-fight) in an engine, however the faces face. The trim examples are built
+// of boxes and tubes that overlap in volume, so a face of one must never lie in a face of another.
+{
+  const overlapPairs = (g: Geometry) => {
+    const faces = Array.from({ length: g.numPrims }, (_, p) => {
+      const pts = g.primPoints(p).map((i) => [g.P[i * 3], g.P[i * 3 + 1], g.P[i * 3 + 2]]);
+      const n = [0, 0, 0];
+      pts.forEach((a, i) => { const b = pts[(i + 1) % pts.length]; n[0] += (a[1] - b[1]) * (a[2] + b[2]); n[1] += (a[2] - b[2]) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]); });
+      const l = Math.hypot(n[0], n[1], n[2]) || 1;
+      const u = n.map((x) => x / l);
+      return { pts, n: u, d: u[0] * pts[0][0] + u[1] * pts[0][1] + u[2] * pts[0][2] };
+    });
+    const area = (q: number[][]) => q.reduce((a, p, i) => { const r = q[(i + 1) % q.length]; return a + (p[0] * r[1] - r[0] * p[1]) / 2; }, 0);
+    const clip = (subject: number[][], by: number[][]) => {
+      let out = subject;
+      for (let i = 0; i < by.length && out.length; i++) {
+        const a = by[i], b = by[(i + 1) % by.length];
+        const side = (p: number[]) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+        const cut = (p: number[], q: number[]) => { const sp = side(p), sq = side(q), t = sp / (sp - sq); return [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]; };
+        const from = out; out = [];
+        from.forEach((cur, j) => {
+          const prev = from[(j + from.length - 1) % from.length];
+          if (side(cur) >= 0) { if (side(prev) < 0) out.push(cut(prev, cur)); out.push(cur); } else if (side(prev) >= 0) out.push(cut(prev, cur));
+        });
+      }
+      return out;
+    };
+    let pairs = 0;
+    for (let i = 0; i < faces.length; i++) for (let j = i + 1; j < faces.length; j++) {
+      const a = faces[i], b = faces[j], dot = a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2];
+      if (Math.abs(Math.abs(dot) - 1) > 1e-6 || Math.abs(a.d - (dot > 0 ? b.d : -b.d)) > 1e-5) continue;
+      const ax = Math.abs(a.n[0]) > 0.9 ? [0, 1, 0] : [1, 0, 0];
+      const u = [a.n[1] * ax[2] - a.n[2] * ax[1], a.n[2] * ax[0] - a.n[0] * ax[2], a.n[0] * ax[1] - a.n[1] * ax[0]];
+      const ul = Math.hypot(u[0], u[1], u[2]);
+      const uu = u.map((x) => x / ul), vv = [a.n[1] * uu[2] - a.n[2] * uu[1], a.n[2] * uu[0] - a.n[0] * uu[2], a.n[0] * uu[1] - a.n[1] * uu[0]];
+      const flat = (pts: number[][]) => { const q = pts.map((p) => [p[0] * uu[0] + p[1] * uu[1] + p[2] * uu[2], p[0] * vv[0] + p[1] * vv[1] + p[2] * vv[2]]); return area(q) < 0 ? q.reverse() : q; };
+      const o = clip(flat(a.pts), flat(b.pts));
+      if (o.length > 2 && Math.abs(area(o)) > 1e-7) pairs++;
+    }
+    return pairs;
+  };
+  for (const name of ['stair_flight', 'corridor_panels']) {
+    const graph = JSON.parse(fs.readFileSync(new URL(`../examples/${name}.json`, import.meta.url), 'utf8'));
+    const ranges: Record<string, any>[] = [{}];
+    for (const [k, d] of Object.entries<any>(graph.params ?? {})) if (typeof d.min === 'number' && typeof d.max === 'number') ranges.push({ [k]: d.min }, { [k]: d.max });
+    let worstPairs = 0, cooked = 0;
+    for (const vars of ranges) {
+      const r = await engine.cook(graph, { vars });
+      if (!r.ok || !r.geo) continue;
+      cooked++;
+      worstPairs = Math.max(worstPairs, overlapPairs(r.geo));
+    }
+    check(cooked === ranges.length && worstPairs === 0, `${name}: no two faces lie in one plane and overlap, at the defaults and at each param's ends (${cooked} cooks, ${worstPairs} pairs)`);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

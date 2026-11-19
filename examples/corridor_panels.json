@@ -25,9 +25,9 @@
     "plate_named": { "type": "attrib_create", "in": ["plate_uv"], "params": { "name": "name", "class": "prim", "value": "frame" } },
     "plate_paint": { "type": "material", "in": ["plate_named"], "params": { "name": "frame", "base_color": [0.2, 0.22, 0.24], "metallic": 0.6, "roughness": 0.4 } },
 
-    "panel": { "type": "box", "params": { "size": ["=(width - gap * (columns + 1)) / columns", "=height - 2 * gap", 0.02], "center": ["=gap + (width - gap * (columns + 1)) / columns / 2", "=height / 2", 0.01] } },
+    "panel": { "type": "box", "params": { "size": ["=(width - gap * (columns + 1)) / columns", "=height - 2 * gap", 0.03], "center": ["=gap + (width - gap * (columns + 1)) / columns / 2", "=height / 2", 0.005] } },
     "panels": { "type": "copy_xform", "in": ["panel"], "params": { "count": "=columns", "translate": ["=(width - gap * (columns + 1)) / columns + gap", 0, 0], "copy_attrib": "" } },
-    "sign": { "type": "box", "params": { "size": [0.4, 0.2, 0.02], "center": ["=width - gap - 0.2", "=gap + 0.1", 0.025] } },
+    "sign": { "type": "box", "params": { "size": [0.4, 0.2, 0.02], "center": ["=width - gap - 0.22", "=gap + 0.12", 0.025] } },
     "fronts": { "type": "merge", "in": ["panels", "sign"] },
     "fronts_n": { "type": "normal", "in": ["fronts"], "params": { "class": "prim" } },
     "fitted": { "type": "hotspot", "in": ["fronts_n", "sheet"], "params": { "group": "@N.z>0.5", "max_stretch": 4, "seed": "=seed" } },

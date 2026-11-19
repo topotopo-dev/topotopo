@@ -30,7 +30,7 @@
       "vertex": []
     },
     "hashes": {
-      "P": "a39f405d3dabee17",
+      "P": "815556c9dc24d32b",
       "attributes": {
         "detail.materials": "1031f7756540d5bf",
         "detail.trim_sheets": "708fc790622f016e",
@@ -42,7 +42,7 @@
         "prim.name": "ed6f6be4e5bbb976",
         "prim.trim_band": "1ae1181c6f4e3e66",
         "prim.trim_sheet": "7056d0a5472001ff",
-        "vertex.uv": "aeae04c14eebee93"
+        "vertex.uv": "df6e0b09f99e7a73"
       },
       "topology": "f9c18878774998e2"
     }

@@ -20,19 +20,19 @@
       { "name": "cap", "height": 0.08, "kind": "cap", "tile": false }
     ] } },
 
-    "tread": { "type": "box", "params": { "size": ["=run", 0.04, "=width"], "center": ["=run / 2", "=rise - 0.02", "=width / 2"] } },
+    "tread": { "type": "box", "params": { "size": ["=run + 0.015", 0.04, "=width + 0.03"], "center": ["=(run - 0.015) / 2", "=rise - 0.02", "=(width - 0.03) / 2"] } },
     "treads": { "type": "copy_xform", "in": ["tread"], "params": { "count": "=steps", "translate": ["=run", "=rise", 0], "copy_attrib": "" } },
     "treads_uv": { "type": "trim_map", "in": ["treads", "sheet"], "params": { "band": "tread" } },
     "treads_named": { "type": "attrib_create", "in": ["treads_uv"], "params": { "name": "name", "class": "prim", "value": "tread" } },
     "treads_stone": { "type": "material", "in": ["treads_named"], "params": { "name": "stone", "base_color": [0.45, 0.43, 0.4], "roughness": 0.85 } },
 
-    "riser": { "type": "box", "params": { "size": [0.03, "=rise", "=width"], "center": [0.015, "=rise / 2", "=width / 2"] } },
+    "riser": { "type": "box", "params": { "size": [0.03, "=rise - 0.02", "=width + 0.01"], "center": [0.015, "=(rise - 0.02) / 2", "=(width - 0.03) / 2"] } },
     "risers": { "type": "copy_xform", "in": ["riser"], "params": { "count": "=steps", "translate": ["=run", "=rise", 0], "copy_attrib": "" } },
     "risers_uv": { "type": "trim_map", "in": ["risers", "sheet"], "params": { "band": "riser" } },
     "risers_named": { "type": "attrib_create", "in": ["risers_uv"], "params": { "name": "name", "class": "prim", "value": "riser" } },
     "risers_stone": { "type": "material", "in": ["risers_named"], "params": { "name": "stone", "base_color": [0.45, 0.43, 0.4], "roughness": 0.85 } },
 
-    "cheek": { "type": "box", "params": { "size": ["=steps * run", "=steps * rise", 0.06], "center": ["=steps * run / 2", "=steps * rise / 2", -0.03] } },
+    "cheek": { "type": "box", "params": { "size": ["=steps * run + 0.04", "=steps * rise + 0.09", 0.06], "center": ["=steps * run / 2", "=(steps * rise - 0.01) / 2", -0.03] } },
     "cheek_uv": { "type": "trim_map", "in": ["cheek", "sheet"], "params": { "band": "wall", "fit": "courses" } },
     "cheek_named": { "type": "attrib_create", "in": ["cheek_uv"], "params": { "name": "name", "class": "prim", "value": "cheek" } },
     "cheek_stone": { "type": "material", "in": ["cheek_named"], "params": { "name": "stone", "base_color": [0.45, 0.43, 0.4], "roughness": 0.85 } },
@@ -50,7 +50,7 @@
 
     "flight": { "type": "merge", "in": ["treads_stone", "risers_stone", "cheek_stone", "rail_metal", "posts_metal"] },
 
-    "bounds": { "type": "assert", "in": ["flight"], "params": { "label": "flight", "tolerance": 0.002, "bbox_min": ["=-rail_radius", 0, -0.06], "bbox_max": ["=steps * run + rail_radius", "=steps * rise + rail_height + rail_radius", "=width + 0.05 + rail_radius"] } },
+    "bounds": { "type": "assert", "in": ["flight"], "params": { "label": "flight", "tolerance": 0.002, "bbox_min": ["=-rail_radius", -0.05, -0.06], "bbox_max": ["=steps * run + rail_radius", "=steps * rise + rail_height + rail_radius", "=width + 0.05 + rail_radius"] } },
     "mapped": { "type": "assert", "in": ["bounds"], "params": { "label": "mapped", "attrib": "trim_band", "attrib_class": "prim" } },
     "sheet_carried": { "type": "assert", "in": ["mapped"], "params": { "label": "sheet", "attrib": "trim_sheets", "attrib_class": "detail" } },
     "named": { "type": "assert", "in": ["sheet_carried"], "params": { "label": "named", "attrib": "name", "attrib_class": "prim" } },
