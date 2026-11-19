@@ -29,11 +29,6 @@ void UTopoTopoInstancesActorFactory::PostSpawnActor(UObject* Asset, AActor* NewA
     }
 }
 
-void UTopoTopoInstancesActorFactory::PostCreateBlueprint(UObject* Asset, AActor* CDO)
-{
-    if (ATopoTopoInstancesActor* Actor = Cast<ATopoTopoInstancesActor>(CDO)) { Actor->Instances = Cast<UTopoTopoInstances>(Asset); }
-}
-
 UObject* UTopoTopoInstancesActorFactory::GetAssetFromActorInstance(AActor* ActorInstance)
 {
     const ATopoTopoInstancesActor* Actor = Cast<ATopoTopoInstancesActor>(ActorInstance);

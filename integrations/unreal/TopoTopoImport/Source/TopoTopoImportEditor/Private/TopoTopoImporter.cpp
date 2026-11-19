@@ -75,7 +75,7 @@ namespace
             const TSharedPtr<FJsonObject>* Map = nullptr;
             if (Json.TryGetObjectField(TEXT("meshes"), Map))
             {
-                for (const auto& It : (*Map)->Values) { Meshes.Add(It.Key, It.Value->AsString()); }
+                for (const auto& It : (*Map)->Values) { Meshes.Add(FString(*It.Key), It.Value->AsString()); }
             }
         }
 
@@ -414,7 +414,7 @@ namespace
             const TSharedPtr<FJsonObject>* O = nullptr;
             const TSharedPtr<FJsonObject>* Files = nullptr;
             if (!Output.Value->TryGetObject(O) || !(*O)->TryGetObjectField(TEXT("files"), Files)) { continue; }
-            for (const auto& File : (*Files)->Values) { Hashes.Add(File.Key, File.Value->AsString()); }
+            for (const auto& File : (*Files)->Values) { Hashes.Add(FString(*File.Key), File.Value->AsString()); }
         }
         return Hashes;
     }

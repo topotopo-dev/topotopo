@@ -27,7 +27,7 @@ namespace
     /** Whether importing now would not get in anyone's way. */
     bool EditorIsFree()
     {
-        return GEditor && !GEditor->PlayWorld && !GIsSlowTask && !GIsSavingPackage()
+        return GEditor && !GEditor->PlayWorld && !GIsSlowTask && !UE::IsSavingPackage()
             && !(FSlateApplication::IsInitialized() && FSlateApplication::Get().GetActiveModalWindow().IsValid())
             && !UInterchangeManager::GetInterchangeManager().IsInterchangeActive();
     }
