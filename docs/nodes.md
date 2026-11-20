@@ -2088,7 +2088,7 @@ Traces pixel-cell boundaries (not a bounding rectangle). Foreground is 4-connect
 | `threshold` | float | `0.5` |  |  |  | values at least this threshold are foreground |
 | `tolerance` | float | `0.5` | 0..8192 |  |  | maximum contour simplification error in source pixels; 0 only removes collinear points |
 | `min_area` | float | `0` | 0..16777216 |  |  | minimum connected foreground component area in pixels; 0 retains all components |
-| `extent` | float | `0` | 0.. |  |  | full image canvas width in metres; height follows image aspect (0 = the metres the image covers: its size) |
+| `extent` | float | `0` | 0.. |  |  | full image canvas width in metres; height follows image aspect (0 = the metres the image states it covers: texture_size set on its generator, or a bake; refused when it states none) |
 
 **Writes:** closed curves; point uv; prim class (component ID), contour_id and hole (0/1); detail image_size and image_width
 
@@ -2104,6 +2104,7 @@ Traces pixel-cell boundaries (not a bounding rectangle). Foreground is 4-connect
           64,
           32
         ],
+        "texture_size": 1,
         "shape": "disc",
         "falloff": 0
       }
@@ -13563,7 +13564,7 @@ Houdini COP: File; Substance: Bitmap. The image is named after this node, like e
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `layers` | enum | `"auto"` |  | `auto`, `grey`, `rgba` | `channels` | auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels |
 | `srgb` | bool | `true` |  |  |  | the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never) |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 
 **Writes:** image <name> (default: the node name): C grey or RGBA 0..1; A grey (the file's alpha, for a grey image of a file with alpha)
 
@@ -13887,7 +13888,7 @@ Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: r
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `blur` | float | `0.008` | 0.. |  | `blur_radius` | blur radius in metres (on an atlas: on every island, whatever its texel density) |
+| `blur` | float | `0.008` | 0.. |  | `blur_radius` | blur radius in metres (on an atlas: on every island, whatever its texel density). The default, 8 mm, is 4 pixels only on 512 pixels over 1 m: on another resolution or size it is another number of pixels |
 | `mode` | enum | `"gaussian"` |  | `gaussian`, `box` | `type`, `filter` | filter shape |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
@@ -13942,7 +13943,7 @@ None (generator).
 | `edge_width` | float | `0.1` | 0.001..1 |  | `width`, `border` | edges: border width (fraction of a cell) |
 | `metric` | enum | `"euclidean"` |  | `euclidean`, `manhattan`, `chebyshev` |  | distance metric (manhattan = diamond cells, chebyshev = square cells) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -14163,7 +14164,7 @@ Substance: Uniform Color; Houdini COP: Constant. channels grey fills layer C wit
 | `value` | float | `0.5` |  |  | `grey`, `level` | grey: the value of every pixel |
 | `color` | color | `[0.5,0.5,0.5]` |  |  | `rgb`, `colour` | rgba: the colour of every pixel |
 | `alpha` | float | `1` | 0..1 |  |  | rgba: the alpha of every pixel |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the size source) to use ("" = its only image; needed when it holds several) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -14426,7 +14427,7 @@ Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
-| `distance` | float | `0.016` | 0.. |  | `padding` | maximum Euclidean distance in metres from a valid source (on an atlas: on every island, whatever its texel density) |
+| `distance` | float | `0.016` | 0.. |  |  | maximum Euclidean distance in metres from a valid source (on an atlas: on every island, whatever its texel density). The default, 16 mm, is 8 pixels only on 512 pixels over 1 m: on another resolution or size it is another number of pixels |
 | `mask_image` | string | `""` |  |  |  | which image of input 1 (the mask) to use ("" = its only image; needed when it holds several) |
 | `mask_layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
 | `mask_channel` | enum | `"luminance"` |  | `alpha`, `luminance`, `r`, `g`, `b` |  | channel to read; alpha requires RGBA, luminance/R/G/B accept grey |
@@ -14724,7 +14725,7 @@ None (generator).
 | `angle` | float | `0` |  |  | `rotation`, `direction` | direction in degrees (linear, mirror) or start angle (angular) |
 | `center` | vec2 | `[0.5,0.5]` |  |  |  | centre in uv (radial, diamond, angular) |
 | `reach` | float | `0.5` | 0.001.. |  |  | radial / diamond: distance in metres from the centre where the gradient reaches 1 (a circle in metres whatever the image's shape) |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
 **Writes:** image <name> (default: the node name): C grey 0..1
@@ -14765,7 +14766,7 @@ None (generator).
 | `contrast` | float | `0.6` | 0..1 |  | `hardness` | edge hardness (1 = hard) |
 | `detail` | float | `0.4` | 0..1 |  | `breakup` | fine breakup mixed in (0 = smooth shapes) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -15345,7 +15346,7 @@ None (generator).
 | `jitter` | float | `1` | 0..1 |  |  | worley: randomness of the feature points (0 = regular grid) |
 | `shift` | vec2 | `[0,0]` |  |  | `translate` | shift of the noise field in metres (vary or animate without changing the seed) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -15680,7 +15681,7 @@ category: `texture`
 
 Pack named images into aligned atlases and output per-item UV placement attributes.
 
-items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. The atlas images carry a texel layer (the own texel size of each item) and an island layer (one island per item, its gutter included, background between them), so the filters after it work in metres on each item and tex_dilate pads inside it. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.
+items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. The atlas images carry a texel layer (the own texel size of each item) and an island layer (one island per item, its gutter included, background between them) and a mask layer (the own pixels of the item: its gutter is padding, so a blur does not pull the empty gutter into the item and a distance does not take it for surface), so the filters after it work in metres on each item and tex_dilate pads inside it. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.
 
 **Inputs**
 
@@ -15766,7 +15767,7 @@ None (generator).
 | `gap` | float | `0.06` | 0..1 |  | `mortar`, `spacing` | mortar / gap width as a fraction of the smaller cell side (dots: 1 - diameter) |
 | `bevel` | float | `0.08` | 0..1 |  | `smooth`, `roundness` | bevel width as a fraction of the smaller cell side (0 = hard antialiased edge) |
 | `variation` | float | `0` | 0..1 |  | `height_variation`, `luminance_random` | random darkening per cell (0 = all cells 1; not grid or checker) |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -15863,7 +15864,7 @@ None (generator).
 | `curvature` | float | `0.1` | 0..1 |  |  | sideways bend as a fraction of the length |
 | `intensity` | vec2 | `[0.4,1]` | 0.. |  |  | intensity range of a stroke |
 | `tileable` | bool | `true` |  |  | `tile`, `wrap` | strokes wrap at the borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -16115,7 +16116,7 @@ None (generator).
 | `rotation` | float | `0` |  |  | `angle`, `rotate` | rotation in degrees (counter-clockwise) |
 | `center` | vec2 | `[0.5,0.5]` |  |  | `position` | centre in each tile's uv (0.5, 0.5 = the middle) |
 | `tile` | ivec2 | `[1,1]` | 1..512 |  | `tiling`, `repeat`, `count` | repeats along u and v |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the grid of shapes continues past the borders (the field tiles) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -16228,7 +16229,7 @@ None (generator).
 | `rotation` | float | `0` |  |  | `angle`, `rotate` | rotation in degrees (counter-clockwise) |
 | `falloff` | float | `0` | 0..1 |  | `softness`, `blur` | soft edge as a fraction of the radius (0 = antialiased hard edge, 1 = a cone) |
 | `tile` | ivec2 | `[1,1]` | 1..512 |  | `tiling`, `repeat`, `count` | repeats along u and v |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
 **Writes:** image <name> (default: the node name): C grey 0..1
@@ -16347,7 +16348,7 @@ None (generator).
 | `intensity` | vec2 | `[0.5,1]` | 0.. |  |  | intensity range of a blob |
 | `combine` | enum | `"max"` |  | `max`, `add` | `blend` | how overlapping blobs combine |
 | `tileable` | bool | `true` |  |  | `tile`, `wrap` | blobs wrap at the borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -16393,7 +16394,7 @@ None (generator).
 | `text_height` | float | `0.2` | 0.00001.. |  |  | height of the text block in metres (shrunk to fit the width) |
 | `position` | vec2 | `[0.5,0.5]` |  |  | `center` | centre of the text in uv |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment of lines |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
 **Writes:** image <name> (default: the node name): C grey 0..1
@@ -16495,7 +16496,7 @@ Substance: Tile Sampler / Splatter Circular. One instance per grid cell: positio
 | `output` | enum | `"grey"` |  | `grey`, `id`, `color` | `mode`, `output_type` | grey = the stamps; id = a random grey per instance; color = a random colour per instance (alpha = the stamps) |
 | `stamps` | enum | `"one"` |  | `one`, `random` | `pattern_input`, `pattern_select` | one = the image picked by image; random = every image of input 0, one at random per instance |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | instances wrap at the borders (the result tiles) |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent |
 | `seed` | float | `0` |  |  |  | random seed |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the pattern) to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -16547,7 +16548,7 @@ category: `texture` · aliases: `image_to_heightfield`, `texture_to_heightfield`
 
 Bridge: an image (grey or luminance) becomes a heightfield of the same sample count (u → +X, v → −Z).
 
-Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. size sets the extent in metres along X (Z follows the image aspect). Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.
+Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. extent is the extent in metres along X (Z follows the image aspect): give it, or the image must state how many metres it covers (a bake writes it, a generator states it when its texture_size is set, 1 included; a generator left at the default states nothing), else the node refuses, as there is no default size. The samples sit on the grid nodes, so a heightfield of extent E and an image of w pixels have a cell of E / (w - 1), and heightfield_to_tex writes an image covering the extent: the round trip keeps it exactly. Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.
 
 **Inputs**
 
@@ -16559,7 +16560,7 @@ Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 =
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `extent` | float | `0` | 0.. |  |  | extent along X in metres (0 = the metres the image covers: its size) |
+| `extent` | float | `0` | 0.. |  |  | extent along X in metres; 0 = the metres the image covers (its size, when the image states one: a texture_size set on its generator, 1 included, or a bake), and a refusal when it states none |
 | `height_scale` | float | `1` |  |  | `amplitude` | metres per unit of image value |
 | `height_offset` | float | `0` |  |  |  | added height (metres) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
