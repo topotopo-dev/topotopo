@@ -92,7 +92,7 @@ Use `texture_to_material` to attach the atlas images.
 
 ## Padding and opacity
 
-`tex_dilate` copies the nearest valid source into a band of `radius` pixels. It uses RGBA alpha by default,
+`tex_dilate` copies the nearest valid source into a band of `distance` metres (the example gives the atlas's gutter in pixels as `padding` and divides by the atlas's texel size). It uses RGBA alpha by default,
 or an explicit same-sized mask through input 1 with `mask_image`, `mask_layer` and `mask_channel`.
 Validity is strictly greater than `mask_threshold`. Grey source images require an explicit mask.
 Like every texture filter it names its result after its own node; to pad one image of the atlas in place, set
