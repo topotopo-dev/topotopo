@@ -294,7 +294,7 @@ function cookMeasure(ctx: CookContext) {
     let sceneMade: RayScene | null = null;
     const scene = () => (sceneMade ??= surPolys ? RayScene.of(Geometry.merge([g, sur!])) : memoBake(g, 'rayscene', () => RayScene.of(g)));
     let CB: Uint8Array | null = null;
-    sub.push(() => seq(buriedOf(b, mesh, sc, scene, run, deadline), (B: Uint8Array | null) => { CB = B; }));
+    sub.push(() => seq(buriedOf(b, mesh, sc, scene, surPolys ? sur : null, run, deadline), (B: Uint8Array | null) => { CB = B; }));
     if (nr) sub.push(() => {
       const t0 = performance.now();
       const bias = rayBias(b.diag);

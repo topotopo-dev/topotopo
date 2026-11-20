@@ -502,6 +502,59 @@ section('occlusion up to a concave crease and a contact line, as bake_ao');
   check(lw < 0.015, `the post alone on the plate as surroundings: ${fmt(lv)} (worst ${f3(lw)} from bake_ao ≤ 0.015)`);
 }
 
+section('only closed solids that face outward bury: open containers, canopies, rooms, pipes and sheets do not');
+{
+  const res = 512;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+  /** bake_measure (occlusion within 0.25 m, visibility) and bake_ao on one mesh: buried points, and the region's means */
+  const probe = async (nodes: Nodes, mesh: string, sur: string | null, region: (p: number[]) => boolean) => {
+    const c = await cook({
+      ...nodes,
+      m: { type: 'bake_measure', in: sur ? [mesh, sur] : [mesh], params: { resolution: res, samples: 64, measures: [{ by: 'occlusion', max_distance: 0.25 }, { by: 'visibility' }] } },
+      ao: { type: 'bake_ao', in: [mesh], params: { resolution: res, samples: 64, max_distance: 0.25 } },
+      pos: { type: 'bake_position', in: [mesh], params: { resolution: res, mode: 'world', padding: 0 } },
+      all: { type: 'merge', in: ['m', 'ao', 'pos'] },
+    }, 'all', serial, 'm');
+    const st = c.stats, b = { m: img(c, 'm'), ao: img(c, 'ao'), pos: img(c, 'pos') };
+    const P = b.pos.layer('C')!, mk = b.m.layer('mask')!, am = b.ao.layer('mask')!;
+    const o: number[] = [], v: number[] = [], a: number[] = [];
+    for (let k = 0; k < mk.length; k++) {
+      if (!region([P[k * 4], P[k * 4 + 1], P[k * 4 + 2]])) continue;
+      if (mk[k] >= 1) { o.push(b.m.layer('occlusion')![k]); v.push(b.m.layer('visibility')![k]); }
+      if (am[k] >= 1) a.push(b.ao.layer('C')![k]);
+    }
+    return { buried: st.buried_points ?? 0, points: st.cloud_points, n: o.length, occ: mean(o), ao: mean(a), vis: mean(v) };
+  };
+  const like = (label: string, r: Awaited<ReturnType<typeof probe>>) =>
+    check(r.points > 0 && r.buried === 0 && r.n > 100 && Math.abs(r.occ - r.ao) < 0.015, `${label}: no point buried (of ${r.points}); occlusion ${f3(r.occ)}, bake_ao ${f3(r.ao)} on ${r.n} texels (± 0.015)`);
+  // a box standing in an open-top bin: the bin is open, so it buries nothing; the box's sides read as bake_ao
+  const bin = await probe({
+    bin0: { type: 'box', params: { size: [1, 0.5, 1], center: [0, 0.25, 0] } }, bin: { type: 'delete', in: ['bin0'], params: { group: '@P.y>0.49', class: 'prim' } },
+    bx: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.15, 0] } }, mg: { type: 'merge', in: ['bin', 'bx'] }, mu: { type: 'uv_unwrap', in: ['mg'] },
+  }, 'mu', null, (p) => near(Math.abs(p[0]), 0.15) && p[1] > 0.02 && p[1] < 0.28 && Math.abs(p[2]) < 0.13);
+  like('a box standing in an open-top bin, its sides', bin);
+  check(bin.vis > 0.4, `… and they are seen over the bin's rim (visibility ${f3(bin.vis)})`);
+  // a slab under a one-sided canopy 0.3 m up, beyond the reach: the same mesh, then the canopy as surroundings
+  const slab: Nodes = { slab0: { type: 'box', params: { size: [1, 0.1, 1], center: [0, 0.05, 0] } }, canopy: { type: 'grid', params: { size: [3, 3], center: [0, 0.4, 0] } } };
+  const top = (p: number[]) => near(p[1], 0.1) && Math.abs(p[0]) < 0.45 && Math.abs(p[2]) < 0.45;
+  like('a slab under a one-sided canopy (one mesh), its top', await probe({ ...slab, mg: { type: 'merge', in: ['slab0', 'canopy'] }, mu: { type: 'uv_unwrap', in: ['mg'] } }, 'mu', null, top));
+  like('… the canopy as surroundings', await probe({ ...slab, su: { type: 'uv_unwrap', in: ['slab0'] } }, 'su', 'canopy', top));
+  // a prop inside a closed box room given as surroundings: the room holds the whole model, so it is a room, not a solid
+  like('a prop inside a closed room (surroundings), its top', await probe({ p0: { type: 'box', params: { size: [0.4, 0.4, 0.4], center: [0, 0.2, 0] } }, pu: { type: 'uv_unwrap', in: ['p0'] }, room: { type: 'box', params: { size: [4, 3, 4], center: [0, 1.5, 0] } } }, 'pu', 'room',
+    (p) => near(p[1], 0.4) && Math.abs(p[0]) < 0.18 && Math.abs(p[2]) < 0.18));
+  // a part inside a closed part: buried, read covered
+  const inner = (p: number[]) => near(p[1], 0.6) && Math.abs(p[0]) < 0.09 && Math.abs(p[2]) < 0.09;
+  const nested = await probe({ o0: { type: 'box', params: { size: [1, 1, 1], center: [0, 0.5, 0] } }, i0: { type: 'box', params: { size: [0.2, 0.2, 0.2], center: [0, 0.5, 0] } }, mg: { type: 'merge', in: ['o0', 'i0'] }, mu: { type: 'uv_unwrap', in: ['mg'] } }, 'mu', null, inner);
+  check(nested.buried > 300 && nested.n > 100 && nested.occ === 0 && nested.vis === 0, `a part entirely inside a closed part: ${nested.buried} points buried, its top reads covered (occlusion ${f3(nested.occ)}, visibility ${f3(nested.vis)})`);
+  // the same outer box wound inward (a shell seen from inside) buries nothing
+  like('… the outer box wound inward', await probe({ o0: { type: 'box', params: { size: [1, 1, 1], center: [0, 0.5, 0] } }, o1: { type: 'reverse', in: ['o0'] }, i0: { type: 'box', params: { size: [0.2, 0.2, 0.2], center: [0, 0.5, 0] } }, mg: { type: 'merge', in: ['o1', 'i0'] }, mu: { type: 'uv_unwrap', in: ['mg'] } }, 'mu', null, inner));
+  // a part inside an open pipe
+  like('a part inside an open pipe, its top', await probe({ o0: { type: 'tube', params: { radius: 0.5, height: 1, cols: 32, caps: false, center: [0, 0.5, 0] } }, i0: { type: 'box', params: { size: [0.2, 0.2, 0.2], center: [0, 0.5, 0] } }, mg: { type: 'merge', in: ['o0', 'i0'] }, mu: { type: 'uv_unwrap', in: ['mg'] } }, 'mu', null, inner));
+  // a one-sided sheet resting on a solid: its seen side is not buried
+  like('a one-sided sheet resting on a solid, its top', await probe({ b0: { type: 'box', params: { size: [1, 0.1, 1], center: [0, 0.05, 0] } }, s0: { type: 'grid', params: { size: [0.4, 0.4], center: [0, 0.1, 0] } }, mg: { type: 'merge', in: ['b0', 's0'] }, mu: { type: 'uv_unwrap', in: ['mg'] } }, 'mu', null,
+    (p) => near(p[1], 0.1) && Math.abs(p[0]) < 0.18 && Math.abs(p[2]) < 0.18));
+}
+
 section('the contact rule is one-sided');
 {
   // a plate 0.2 mm above the ground (inside the contact distance): facing away from the ground it is open; facing it, covered

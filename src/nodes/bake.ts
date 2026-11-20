@@ -222,10 +222,10 @@ export function checkSurfaceRadius(b: Bake, r: number, what: string): void {
   if (r > 0.5 * b.diag) throw new NodeError(`${b.ctx.type}: ${what} ${+r.toPrecision(3)} m is more than half the model's size (bounding-box diagonal ${+b.diag.toPrecision(3)} m)`, `use a radius up to ${+(0.5 * b.diag).toPrecision(3)} m; a radius about the size of the wear or dirt you want reads best`);
 }
 
-/** Which cloud points lie inside another part (null for a mesh of one part with nothing around it). */
-export function buriedOf(b: Bake, mesh: SurfaceMesh, sc: SurfaceCloud, scene: () => RayScene, run: (kernel: string, job: any, o?: any) => any, deadline: number): Uint8Array | null | Promise<Uint8Array | null> {
+/** Which cloud points lie inside a solid (null when nothing can bury anything); `sur` the surroundings in the scene. */
+export function buriedOf(b: Bake, mesh: SurfaceMesh, sc: SurfaceCloud, scene: () => RayScene, sur: Geometry | null, run: (kernel: string, job: any, o?: any) => any, deadline: number): Uint8Array | null | Promise<Uint8Array | null> {
   const t0 = performance.now();
-  return afterRun(runBuried(run, sc, mesh, scene(), deadline), (B) => {
+  return afterRun(runBuried(run, sc, mesh, scene(), sur, deadline), (B) => {
     if (B) {
       let k = 0;
       for (let i = 0; i < B.length; i++) k += B[i];
@@ -548,7 +548,7 @@ defineBake({
       const k = Math.max(1, Math.min(4, mesh.median > 0 ? r / (2 * mesh.median) : 1));
       const sc = cloudOf(b, mesh, k);
       const { run, deadline } = surfaceRunner(ctx, 'a smaller radius or resolution; or raise the limit');
-      return afterRun(buriedOf(b, mesh, sc, () => memoBake(b.g, 'rayscene', () => RayScene.of(b.g)), run, deadline), (CB) => {
+      return afterRun(buriedOf(b, mesh, sc, () => memoBake(b.g, 'rayscene', () => RayScene.of(b.g)), null, run, deadline), (CB) => {
         let t0 = performance.now();
         return afterRun(runCurvature(run, sc, r, CB, deadline), (CV) => {
           ctx.stage('curvature', performance.now() - t0);

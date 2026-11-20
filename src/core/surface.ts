@@ -18,10 +18,12 @@
 //                      touch it does not lie in the neighbouring face's plane. Each point weighs the area it stands for
 //                      (its triangle's area over its points). Ties between triangles are settled by where they are, so
 //                      the cloud does not depend on prim order.
-//   buried points      a point inside another part (a post sunk into a plate, a bolt through a panel) is buried: 8 rays
-//                      over its side find no way out and leave the other part through its back. Buried points read
-//                      covered, are never a neighbour in curvature, and a texel takes their values only when it has no
-//                      point that is not buried near (it is buried itself).
+//   buried points      a point inside a solid (a post sunk into a plate, a bolt through a panel) is buried. A solid is a
+//                      closed piece that faces outward, of the mesh or of the surroundings; open pieces, one-sided
+//                      sheets and inward shells bury nothing (they only block rays), nor does a solid of the
+//                      surroundings that holds the whole model (a room). Inside is decided by counting crossings of that
+//                      solid along 3 rays. Buried points read covered, are never a neighbour in curvature, and a texel
+//                      takes their values only when it has no point that is not buried near (it is buried itself).
 //   rays               each cloud point casts `samples` cosine-weighted rays over its hemisphere once, from just above its
 //                      flat triangle; occlusion, cavity and visibility are counts over that one set (each with its own
 //                      distance limit). Shelter casts its own cone of rays around its direction in the same pass; the
@@ -53,7 +55,7 @@ import { bboxDiagonal } from './analysis.ts';
 import type { RayScene } from './analysis.ts';
 import type { TriBVH } from './spatial.ts';
 import { closestScratch } from './spatial.ts';
-import { resolveVertexNormals } from './topology.ts';
+import { resolveVertexNormals, triangulate } from './topology.ts';
 import { medianTexelSize, triangleTexelSizes } from './texelsize.ts';
 import { hash32, hashNumber } from './random.ts';
 import { fractal, makeNoise } from './noise.ts';
@@ -70,6 +72,8 @@ export interface Orientation {
   turned: number[];
   /** the first prim of each closed piece that faces inward and is measured so */
   inward: number[];
+  /** per piece: 1 for a closed piece that faces outward as measured (a solid: what lies inside it is buried) */
+  solid: Uint8Array;
   /** canonical point per point (points matched by position) */
   canon: Int32Array;
 }
@@ -216,7 +220,9 @@ export function measureOrientation(g: Geometry, tol: number, authoredN: Float64A
     for (let o = 0; o < pieces && !nested; o++) if (o !== c && !open[o] && pv[o] > 0 && within(c, o)) nested = true;
     if (!nested) inward.push(first[c]);
   }
-  return { flip, piece, pieces, turned, inward, canon };
+  const solid = new Uint8Array(pieces);
+  for (let c = 0; c < pieces; c++) solid[c] = !open[c] && pv[c] > 0 ? 1 : 0;
+  return { flip, piece, pieces, turned, inward, canon, solid };
 }
 
 /**
@@ -691,47 +697,65 @@ export function surfaceRaysRange(a: SurfaceRayArgs, A: Record<string, any>, scen
 
 // ---------------------------------------------------------------- buried points (kernel surface_buried)
 
-/** 8 directions over a hemisphere around +z: one tilted off the pole, seven 55° down, turned off the axes. */
+/** 3 fixed directions for the inside test, off the axes and off each other (a ray along a face or an edge of an
+ * axis-aligned model would graze it). */
 const BURY_DIRS = (() => {
-  const d: number[] = [];
-  const add = (th: number, ph: number) => d.push(Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th));
-  add(0.2, 0.7);
-  for (let k = 0; k < 7; k++) add((55 * Math.PI) / 180, 0.3 + (2 * Math.PI * k) / 7);
-  return d;
+  const d = [[0.5377, 0.8121, 0.2265], [-0.6731, 0.2489, 0.6964], [0.3091, -0.5743, -0.7581]];
+  return d.flatMap((v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; });
 })();
 
 /**
- * Cloud points [start, end) inside another part (A.B out: 1 = buried). From above its flat triangle, a point casts 8
- * rays over its side; it is buried when none escapes and at least half leave another part through its back (the hit
- * triangle faces along the ray: we were inside it). Hits on the point's own part do not vote. Shared: the scene's
- * T…triPt, per scene triangle its part SPc (-2 = the surroundings) and the sign of its outward side SSg (+1 as wound,
- * -1 turned); A.P, A.N, A.FN, A.CPiece per point.
+ * Cloud points [start, end) inside a solid (A.B out: 1 = buried). A solid is a closed piece that faces outward: another
+ * part of the mesh, or a closed piece of the surroundings that does not hold the whole model (one that does is a room
+ * around it). Open pieces, one-sided sheets and pieces that face inward bury nothing. From just above its flat triangle a
+ * point casts 3 rays and counts, along each, every crossing of each solid whose box holds it; it is inside a solid when
+ * at least 2 of the 3 counts are odd. Shared: the scene's T…triPt, per scene triangle its solid SSol (-1 = none), per
+ * solid its box SBox (6) and its piece SPc (the point's own piece never buries it); A.P, A.N, A.FN, A.CPiece per point.
  */
 export function surfaceBuriedRange(a: { bias: number; deadline?: number }, A: Record<string, any>, scene: RayScene, start: number, end: number): void {
   const P: Float64Array = A.P, N: Float64Array = A.N, FN: Float32Array = A.FN, CPiece: Int32Array = A.CPiece, B: Uint8Array = A.B;
-  const SPc: Int32Array = A.SPc, SSg: Int8Array = A.SSg, T: Float64Array = A.T;
-  const nd = BURY_DIRS.length / 3;
+  const SSol: Int32Array = A.SSol, SBox: Float64Array = A.SBox, SPc: Int32Array = A.SPc;
+  const ns = SPc.length, eps = Math.max(1e-9, a.bias * 1e-3);
+  const cand: number[] = [], odd = new Int8Array(ns), votes = new Int8Array(ns);
   for (let i = start; i < end; i++) {
     if (late(a.deadline, i - start)) throw new Error(PAST_DEADLINE);
+    B[i] = 0;
     let nx = FN[i * 3], ny = FN[i * 3 + 1], nz = FN[i * 3 + 2];
     if (!(nx || ny || nz)) { nx = N[i * 3]; ny = N[i * 3 + 1]; nz = N[i * 3 + 2]; }
-    if (!(nx || ny || nz)) continue;
-    const f = frame(nx, ny, nz), own = CPiece[i];
-    const ox = P[i * 3] + nx * a.bias, oy = P[i * 3 + 1] + ny * a.bias, oz = P[i * 3 + 2] + nz * a.bias;
-    let back = 0, front = 0, escaped = false;
-    for (let k = 0; k < nd; k++) {
-      const u = BURY_DIRS[k * 3], v = BURY_DIRS[k * 3 + 1], w = BURY_DIRS[k * 3 + 2];
-      const dx = f[0] * u + f[3] * v + nx * w, dy = f[1] * u + f[4] * v + ny * w, dz = f[2] * u + f[5] * v + nz * w;
-      const t = scene.nearest(ox, oy, oz, dx, dy, dz);
-      if (!(t < Infinity)) { escaped = true; break; }
-      const tr = scene.lastTri;
-      if (tr < 0 || SPc[tr] === own) continue;
-      const q = tr * 9;
-      const ux = T[q + 3] - T[q], uy = T[q + 4] - T[q + 1], uz = T[q + 5] - T[q + 2], wx = T[q + 6] - T[q], wy = T[q + 7] - T[q + 1], wz = T[q + 8] - T[q + 2];
-      const along = ((uy * wz - uz * wy) * dx + (uz * wx - ux * wz) * dy + (ux * wy - uy * wx) * dz) * SSg[tr];
-      if (along > 0) back++; else front++;
+    const ox = P[i * 3] + nx * a.bias, oy = P[i * 3 + 1] + ny * a.bias, oz = P[i * 3 + 2] + nz * a.bias, own = CPiece[i];
+    // the solids whose box holds the point
+    cand.length = 0;
+    for (let k = 0; k < ns; k++) {
+      if (SPc[k] === own) continue;
+      const b = k * 6;
+      if (ox >= SBox[b] && oy >= SBox[b + 1] && oz >= SBox[b + 2] && ox <= SBox[b + 3] && oy <= SBox[b + 4] && oz <= SBox[b + 5]) cand.push(k);
     }
-    B[i] = !escaped && back * 2 >= nd && back > front ? 1 : 0;
+    if (!cand.length) continue;
+    for (const k of cand) votes[k] = 0;
+    for (let r = 0; r < 3; r++) {
+      const dx = BURY_DIRS[r * 3], dy = BURY_DIRS[r * 3 + 1], dz = BURY_DIRS[r * 3 + 2];
+      // past every candidate's box no crossing changes a count
+      let tEnd = 0;
+      for (const k of cand) {
+        const b = k * 6;
+        const ex = dx > 0 ? (SBox[b + 3] - ox) / dx : dx < 0 ? (SBox[b] - ox) / dx : Infinity;
+        const ey = dy > 0 ? (SBox[b + 4] - oy) / dy : dy < 0 ? (SBox[b + 1] - oy) / dy : Infinity;
+        const ez = dz > 0 ? (SBox[b + 5] - oz) / dz : dz < 0 ? (SBox[b + 2] - oz) / dz : Infinity;
+        tEnd = Math.max(tEnd, Math.min(ex, ey, ez));
+        odd[k] = 0;
+      }
+      // every crossing along the ray (one per hit: a ray through a shared edge or corner counts it once)
+      let tmin = 0;
+      for (let h = 0; h < 4096; h++) {
+        const t = scene.nearest(ox, oy, oz, dx, dy, dz, tEnd + eps, tmin);
+        if (!(t < Infinity)) break;
+        const tr = scene.lastTri, k = tr >= 0 ? SSol[tr] : -1;
+        if (k >= 0) odd[k] ^= 1;
+        tmin = t + eps;
+      }
+      for (const k of cand) if (odd[k]) votes[k]++;
+    }
+    for (const k of cand) if (votes[k] >= 2) { B[i] = 1; break; }
   }
 }
 
@@ -1077,13 +1101,56 @@ export function surfaceCloud(mesh: SurfaceMesh, tris: Uint32Array, uv: Float64Ar
  * Which cloud points lie inside another part or the surroundings (1 = buried), or null when the scene has one part and
  * nothing else. `scene` holds the mesh's triangles first (RayScene.of(g) or of the mesh merged before its surroundings).
  */
-export function runBuried(run: RunKernel, sc: SurfaceCloud, mesh: SurfaceMesh, scene: RayScene, deadline = 0): Uint8Array | null | Promise<Uint8Array | null> {
-  const arr = scene.toArrays(), nS = arr.order.length, nt = mesh.triPiece.length;
-  if (nS < nt || (mesh.orient.pieces <= 1 && nS === nt)) return null;
-  const SPc = new Int32Array(nS).fill(-2), SSg = new Int8Array(nS).fill(1);
-  for (let t = 0; t < nt; t++) { SPc[t] = mesh.triPiece[t]; SSg[t] = mesh.orient.flip[mesh.triPrim[t]] ? -1 : 1; }
+/**
+ * Which cloud points lie inside a solid (see surfaceBuriedRange), or null when nothing can bury anything. `scene` holds
+ * the mesh's triangles first, then those of `sur` (the surroundings, or null), in triangulation order.
+ */
+export function runBuried(run: RunKernel, sc: SurfaceCloud, mesh: SurfaceMesh, scene: RayScene, sur: Geometry | null, deadline = 0): Uint8Array | null | Promise<Uint8Array | null> {
+  const arr = scene.toArrays(), nS = arr.order.length, nt = mesh.triPiece.length, o = mesh.orient;
+  // the surroundings' pieces and which of them are solids
+  let surTri: Int32Array | null = null, surOrient: Orientation | null = null;
+  if (sur && nS > nt) {
+    const st = triangulate(sur);
+    if (st.triPrim.length !== nS - nt) return null;
+    surOrient = measureOrientation(sur, 1e-6 * (bboxDiagonal(sur) || 1), null);
+    surTri = new Int32Array(st.triPrim.length);
+    for (let j = 0; j < st.triPrim.length; j++) surTri[j] = surOrient.piece[st.triPrim[j]];
+  } else if (nS !== nt) return null;
+  // solids: the mesh's closed outward pieces, then the surroundings'; a box per solid
+  const solidOf = new Int32Array(o.pieces + (surOrient?.pieces ?? 0)).fill(-1);
+  const SPcL: number[] = [];
+  for (let c = 0; c < o.pieces; c++) if (o.solid[c]) { solidOf[c] = SPcL.length; SPcL.push(c); }
+  if (surOrient) for (let c = 0; c < surOrient.pieces; c++) if (surOrient.solid[c]) { solidOf[o.pieces + c] = SPcL.length; SPcL.push(-3 - c); }
+  // a single piece cannot bury its own points
+  if (!SPcL.length || (SPcL.length === 1 && SPcL[0] >= 0 && o.pieces === 1)) return null;
+  const ns = SPcL.length, SSol = new Int32Array(nS).fill(-1), SBox = new Float64Array(ns * 6);
+  for (let k = 0; k < ns; k++) { SBox[k * 6] = SBox[k * 6 + 1] = SBox[k * 6 + 2] = Infinity; SBox[k * 6 + 3] = SBox[k * 6 + 4] = SBox[k * 6 + 5] = -Infinity; }
+  const T = arr.T;
+  for (let t = 0; t < nS; t++) {
+    const pc = t < nt ? mesh.triPiece[t] : surTri ? o.pieces + surTri[t - nt] : -1;
+    const k = pc >= 0 ? solidOf[pc] : -1;
+    SSol[t] = k;
+    if (k < 0) continue;
+    for (let v = 0; v < 3; v++) for (let q = 0; q < 3; q++) {
+      const x = T[t * 9 + v * 3 + q];
+      if (x < SBox[k * 6 + q]) SBox[k * 6 + q] = x;
+      if (x > SBox[k * 6 + 3 + q]) SBox[k * 6 + 3 + q] = x;
+    }
+  }
+  // a solid of the surroundings whose box holds the whole model is a room around it, not a solid it is buried in
+  let lx = Infinity, ly = Infinity, lz = Infinity, hx = -Infinity, hy = -Infinity, hz = -Infinity;
+  for (let t = 0; t < nt * 9; t += 3) { lx = Math.min(lx, T[t]); ly = Math.min(ly, T[t + 1]); lz = Math.min(lz, T[t + 2]); hx = Math.max(hx, T[t]); hy = Math.max(hy, T[t + 1]); hz = Math.max(hz, T[t + 2]); }
+  for (let k = 0; k < ns; k++) {
+    if (SPcL[k] >= 0) continue;
+    const b = k * 6;
+    if (SBox[b] <= lx && SBox[b + 1] <= ly && SBox[b + 2] <= lz && SBox[b + 3] >= hx && SBox[b + 4] >= hy && SBox[b + 5] >= hz) {
+      for (let t = 0; t < nS; t++) if (SSol[t] === k) SSol[t] = -1;
+      SBox[b] = SBox[b + 1] = SBox[b + 2] = Infinity; SBox[b + 3] = SBox[b + 4] = SBox[b + 5] = -Infinity;
+    }
+  }
+  const SPc = Int32Array.from(SPcL);
   const c = sc.cloud, B = new Uint8Array(c.n);
-  return afterRun(run('surface_buried', { count: c.n, args: { bias: rayBias(mesh.diag), deadline }, inputs: { P: c.P, N: c.N, FN: sc.FN, CPiece: c.piece }, results: { B }, shared: { ...arr, SPc, SSg } }, { minElements: 4096 }) as any, () => B);
+  return afterRun(run('surface_buried', { count: c.n, args: { bias: rayBias(mesh.diag), deadline }, inputs: { P: c.P, N: c.N, FN: sc.FN, CPiece: c.piece }, results: { B }, shared: { ...arr, SSol, SBox, SPc } }, { minElements: 4096 }) as any, () => B);
 }
 
 /** Ray measures per cloud point (hemisphere measures first, then cones): cloud.n × (hemi + cones) values. Buried points read covered. */
