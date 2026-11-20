@@ -1,0 +1,59 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "4c76a2e1b10f4efb",
+          "bare": "a149fcecc7721906",
+          "chip": "ac9b64204ffe7656",
+          "concave": "9005a1b59538744f",
+          "convex": "005833bc4c8d27c6",
+          "core": "9d42245ba4423aad",
+          "handled": "9005a1b59538744f",
+          "island": "0968c228a28f1b56",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
+        },
+        "name": "target"
+      }
+    ]
+  },
+  "name": "node.bake_edge_wear",
+  "ok": true,
+  "source": "fixture for node type \"bake_edge_wear\" (test/fixtures.ts)",
+  "warnings": []
+}

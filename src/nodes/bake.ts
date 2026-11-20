@@ -507,7 +507,7 @@ defineBake({
     'meshes do not read as edges, hard edges (split normals) still do, and each connected part is measured on its own ' +
     '(where parts intersect, cavity shows the seam); min_angle and intersections are for method ' +
     'dihedral, and it does not read a high-res input.',
-  aliases: ['curvature_bake', 'bake_edges', 'edge_wear_bake'],
+  aliases: ['curvature_bake', 'bake_edges'],
   params: {
     ...BAKE_PARAMS(),
     radius: { type: 'float', default: 0, min: 0, desc: 'how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal)', aliases: ['width', 'edge_width', 'distance'] },
