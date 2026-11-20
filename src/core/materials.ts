@@ -61,8 +61,8 @@ export const MATERIAL_KINDS = ['painted_metal', 'cast_metal', 'galvanised', 'bar
 
 /** The channels a packed map can hold (parsePacking). */
 export type PackedChannel = 'o' | 'r' | 'm' | 'h' | 's' | 'x';
-/** Named channel layouts of a packed map: the glTF / Unreal one, and common others. */
-export const PACKINGS: Readonly<Record<string, string>> = { orm: 'orm', arm: 'orm', hro: 'hro', rma: 'rma', mrao: 'mrox', mask_map: 'moxs' };
+/** Named channel layouts of a packed map: the glTF / Unreal one, and common others (in their names a = ambient occlusion, o). */
+export const PACKINGS: Readonly<Record<string, string>> = { orm: 'orm', arm: 'orm', hro: 'hro', rma: 'rmo', mrao: 'mrox', mask_map: 'moxs' };
 
 /**
  * A packed-map layout: one letter per channel (R, G, B and optionally A) from o (occlusion), r (roughness), m (metallic),
