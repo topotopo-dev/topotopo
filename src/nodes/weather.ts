@@ -78,6 +78,26 @@ function partsOf(g: Geometry): { id: string[]; names: string[] } {
   return { id, names: [...new Set(id)] };
 }
 
+/** The prims with no material. */
+function bareOf(g: Geometry): number[] {
+  const a = g.prims.get(MATERIAL_ATTRIB), out: number[] = [];
+  for (let i = 0; i < g.numPrims; i++) if (!a || !String(a.get(i) ?? '')) out.push(i);
+  return out;
+}
+
+const FALLBACK_MATERIAL = 'weather_part';
+/** weather_masks kind: the prims of g (a geometry of this cook) with no material get one of that kind. Whether any had none. */
+function fallbackMaterial(g: Geometry, kind: string): boolean {
+  const bare = bareOf(g);
+  if (!bare.length) return false;
+  const t = readMaterials(g);
+  t[FALLBACK_MATERIAL] = normalizeMaterial({ kind });
+  writeMaterials(g, t);
+  const a = g.prims.add(MATERIAL_ATTRIB, 'string', 1);
+  for (const i of bare) a.set(i, FALLBACK_MATERIAL);
+  return true;
+}
+
 function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; fallbackKind?: string }): Prepared {
   const { p } = ctx;
   const g = ctx.input(0);
@@ -88,6 +108,8 @@ function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; f
   const names = new Set<string>();
   if (matA) for (let i = 0; i < g.numPrims; i++) { const n = String(matA.get(i) ?? ''); if (n) names.add(n); }
   if (!names.size && !o.fallbackKind) throw new NodeError(`${T}: the input has no materials; it reads each part's material to choose how it ages`, `assign materials (material node, with its kind param)${T === T_M ? ', or say the kind of every part with kind' : ''}`);
+  const bare = bareOf(g);
+  if (T === T_M && bare.length && !o.fallbackKind) throw new NodeError(`${T}: ${bare.length} prims have no material; it reads each part's material to choose how it ages`, 'give them one (material node, with its kind), or say their kind with kind');
   // a kind per material, never guessed
   const kinds: Record<string, string> = {}, missing: string[] = [];
   for (const n of names) {
@@ -126,6 +148,8 @@ function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; f
     if (sel && !sel.some((v) => v)) throw new NodeError(`${T}: handled "${handled}" matches no prims`, partsHint);
   }
   const mesh = g.subsetPrims(weathered);
+  // prims with no material take the stated kind, on one material for the bakes to read
+  if (o.fallbackKind && fallbackMaterial(mesh, o.fallbackKind)) kinds[FALLBACK_MATERIAL] = o.fallbackKind;
   const kept = nw < g.numPrims ? g.subsetPrims(weathered.map((v) => 1 - v)) : null;
   // uv overlaps in the bake uv: every texel is painted once
   if (o.layout === 'keep') {
@@ -152,15 +176,6 @@ function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; f
     const r = RUST_SOURCES.includes(k) || (k === 'galvanised' && Number(p.rust) > 0.6) ? 1 : 0;
     wrust.set(i, r);
     rusting += r;
-  }
-  if (!matA || !names.size) {
-    // masks mode with a stated kind and no materials: one material for the bakes to read
-    const t = readMaterials(mesh);
-    t.weather_part = normalizeMaterial({ kind: o.fallbackKind });
-    writeMaterials(mesh, t);
-    const a = mesh.prims.add(MATERIAL_ATTRIB, 'string', 1);
-    for (let i = 0; i < mesh.numPrims; i++) a.set(i, 'weather_part');
-    kinds.weather_part = o.fallbackKind!;
   }
   const bbox = bboxOf(mesh);
   const ext = [0, 1, 2].map((i) => bbox.max[i] - bbox.min[i]);
@@ -520,7 +535,10 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     const pv = previewGraph(name, uv, Number(p.resolution), channels, p.under);
     const g = new Geometry();
     g.volumes.push(packedImgs[0]);
-    const r = await cookNested(ctx, T_M, pv, [{ geo: ctx.input(0), sig: sig('preview_mesh', [uv]) }, { geo: g, sig: sig('preview_masks', [p.seed, p.wear, p.dirt, p.rust, p.age, p.exposure, p.mount, p.above, joints, jw, p.channels, p.kinds, p.kind, p.leak_density]) }], {});
+    // the mesh with its own materials (prims with none take kind's)
+    let pmesh = ctx.input(0);
+    if (fallback && bareOf(pmesh).length) { pmesh = pmesh.clone(); fallbackMaterial(pmesh, fallback); }
+    const r = await cookNested(ctx, T_M, pv, [{ geo: pmesh, sig: sig('preview_mesh', [uv, fallback]) }, { geo: g, sig: sig('preview_masks', [p.seed, p.wear, p.dirt, p.rust, p.age, p.exposure, p.mount, p.above, joints, jw, p.channels, p.kinds, p.kind, p.leak_density]) }], {});
     const pm = r.geo!;
     const pimgs = pm.volumes.filter((v) => v.name.startsWith(`${name}_preview`));
     out.volumes.push(...pimgs);

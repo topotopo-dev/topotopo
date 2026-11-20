@@ -151,6 +151,7 @@ section('every refusal names the cause and a way out');
     ['masks: a piece attribute that does not exist', { ...painted(), w: { type: 'weather_masks', in: ['uv'], params: { ...FAST, uv: 'uv', piece: 'kit_piece' } } }, 'no prim attribute "kit_piece"', 'prim attributes'],
     ['masks: surroundings with pieces', { ...painted(), pc: { type: 'wrangle', in: ['uv'], params: { run_over: 'prims', code: 's@piece = @primnum < 3 ? "a" : "b";' } }, ground: { type: 'grid', params: { size: [4, 4] } }, w: { type: 'weather_masks', in: ['pc', 'ground'], params: { ...FAST, uv: 'uv', piece: 'piece' } } }, 'each piece is weathered alone', 'single piece'],
     ['masks: no materials and no kind', { b: { type: 'box' }, uv: { type: 'uv_unwrap', in: ['b'] }, w: { type: 'weather_masks', in: ['uv'], params: { ...FAST, uv: 'uv' } } }, 'has no materials', 'kind'],
+    ['masks: some prims with no material and no kind', { ...painted(), b2: { type: 'box', params: { size: [0.2, 0.2, 0.2], center: [0, 0.5, 0] } }, all: { type: 'merge', in: ['m', 'b2'] }, uv: { type: 'uv_unwrap', in: ['all'], params: { resolution: 128, padding: 2 } }, w: { type: 'weather_masks', in: ['uv'], params: { ...FAST, uv: 'uv' } } }, '6 prims have no material', 'kind'],
   ];
   for (const [label, nodes, msg, hint] of cases) {
     const e = await err(nodes, 'w');
@@ -269,6 +270,15 @@ section('weather_masks: one packed image per variant, materials unchanged');
   check(alone.stats.pieces === 2 && mean(img(alone, 'weather'), 'occlusion') > mean(img(joined, 'weather'), 'occlusion') + 0.005, `piece: each piece is weathered alone, the shelf no longer shades the wall (occlusion ${f3(mean(img(alone, 'weather'), 'occlusion'))}, joined ${f3(mean(img(joined, 'weather'), 'occlusion'))})`);
   const pv = await cook({ ...panel, w: { type: 'weather_masks', in: ['uv2'], params: { ...FAST, preview: true } } }, 'w');
   check(!!findImage(pv.geo, 'weather_preview_base_color') && pv.geo.prims.get(MATERIAL_ATTRIB)?.get(0) === 'weather_preview' && pv.warnings.some((x) => x.includes('for looking')), 'preview adds a material for looking, and says so');
+  // kind: a part with no material takes it, in the masks and in the preview
+  const sill: NodeSpec = { type: 'box', params: { size: [0.6, 0.04, 0.14], center: [0, 0.6, 0.13] } };
+  const bare: Nodes = { ...panel, s: sill, all: { type: 'merge', in: ['m', 's'] }, uv2: { ...panel.uv2, in: ['all'] } };
+  const given: Nodes = { ...bare, sm: { type: 'material', in: ['s'], params: { name: 'sill', kind: 'concrete' } }, all: { type: 'merge', in: ['m', 'sm'] } };
+  const covered = (c: Cooked) => img(c, 'weather').layer('mask')!.reduce((n, v) => n + (v > 0.5 ? 1 : 0), 0);
+  const kb = await serial.cook({ nodes: { ...bare, w: { type: 'weather_masks', in: ['uv2'], params: { ...FAST, kind: 'concrete', preview: true } } }, output: 'w' });
+  const kg = await cook({ ...given, w: { type: 'weather_masks', in: ['uv2'], params: FAST } }, 'w');
+  const kbc = kb.ok ? { geo: kb.geo!, stats: {}, warnings: [] } : null;
+  check(!!kbc && covered(kbc) === covered(kg) && !!findImage(kbc.geo, 'weather_preview_base_color'), `kind: a part with no material is weathered as that kind, preview included (${kb.ok ? `${covered(kbc!)} covered texels, ${covered(kg)} with a material of that kind` : kb.errors.map((e) => e.message).join('; ')})`);
 }
 
 section('the material\'s maps survive zero weathering; its normal map is carried');
