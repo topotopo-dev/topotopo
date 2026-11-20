@@ -12757,7 +12757,8 @@ Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bo
 | `step` | float | `0` | 0..5 |  | `step_size` | walking step in metres (0 = half the smallest width) |
 | `spill` | float | `0.05` | 0..50 |  | `spill_reach`, `overflow` | a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are |
 | `seed` | int | `0` | 0..2147483647 |  |  | seed of the run starts, lengths, widths, wander and gaps |
-| `stain` | float | `0` | 0..20 |  | `stain_width`, `halo` | a broad faint stain around each run, its half width this many times the run's head width (0 = none): layer stain, keeping its width down the run and widening by half instead of tapering, no gaps, fading sideways and toward the tail; the stronger stain holds where two meet |
+| `stain` | float | `0` | 0..20 |  | `stain_width`, `halo` | a broad faint stain around each run, its half width this many times the run's head width (0 = none): layer stain, keeping its width down the run and widening by half instead of tapering, no gaps, fading sideways and toward the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash |
+| `stain_skew` | float | `0` | 0..8 |  | `stain_contrast` | each run's stain times its strength (0..1; the longer runs are the stronger) to this power: 0 = every stain alike, 2 = most faint and a few strong |
 
 **Writes:** image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask (and stain when asked for)
 
