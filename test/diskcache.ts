@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { randomFillSync } from 'node:crypto';
 import zlib from 'node:zlib';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -60,6 +61,20 @@ try {
   }
 
   // ------------------------------------------------------------ a result, bit for bit
+  /** Rewrite the header of an entry with a checksum that is right: a file that is whole, and wrong. */
+  const rewriteHeader = (file: string, mutate: (h: any) => void) => {
+    const b = fs.readFileSync(file);
+    const hlen = b.readUInt32LE(8);
+    const h = JSON.parse(b.subarray(16, 16 + hlen).toString('utf8'));
+    mutate(h);
+    const hb = Buffer.from(JSON.stringify(h), 'utf8');
+    const head = Buffer.from(b.subarray(0, 16));
+    head.writeUInt32LE(hb.length, 8);
+    const arrays = b.subarray(16 + hlen, b.length - 4);
+    const tail = Buffer.alloc(4);
+    tail.writeUInt32LE(zlib.crc32(arrays, zlib.crc32(hb, zlib.crc32(head))) >>> 0, 0);
+    fs.writeFileSync(file, Buffer.concat([head, hb, arrays, tail]));
+  };
   /** The first difference between two geometries, or null: every array bit for bit, defaults, key orders, volumes. */
   const bytes = (v: ArrayBufferView) => Buffer.from(v.buffer, v.byteOffset, v.byteLength);
   const same = (a: ArrayBufferView, b: ArrayBufferView) => a.constructor === b.constructor && bytes(a).equals(bytes(b));
@@ -318,7 +333,14 @@ try {
     // size cap: the entries used longest ago go first; a load counts as a use
     const dir = folder();
     // a result of about 100 kB: an image of 100 × 250 pixels with every value v
-    const big = (v: number): StoredNode => { const g = new Geometry(); g.volumes.push(new Image(100, 250, 'i', new Map([['C', new Float32Array(25000).fill(v)]]))); return { geo: g, deps: [], warnings: [], cookMs: 1 }; };
+    const big = (v: number): StoredNode => {
+      // random bytes, which no codec shrinks, so an entry is as large as its pixels; the first four values name it
+      const px = new Float32Array(25000);
+      randomFillSync(new Uint8Array(px.buffer));
+      px.fill(v, 0, 4);
+      const g = new Geometry(); g.volumes.push(new Image(100, 250, 'i', new Map([['C', px]])));
+      return { geo: g, deps: [], warnings: [], cookMs: 1 };
+    };
     const store = openNodeCache({ dir, minMs: 0, maxBytes: 250_000, engine: 'e' })!;
     await store.save('A', big(1)); await store.save('B', big(2));
     const files = () => entries(dir).map((f) => path.join(dir, f));
@@ -446,6 +468,19 @@ try {
     }
   }
   {
+    // a result cooked while no store was attached is unknown, so unsafe: a store attached later keeps nothing made from it
+    const e = await engineWith(undefined);
+    const spy = new Spy();
+    const nodes: GraphSpec['nodes'] = { b: { type: 'box' }, s: { type: 'transform', in: ['b'], params: { translate: [1, 0, 0] } }, t: { type: 'transform', in: ['s'], params: { translate: [0, 1, 0] } } };
+    await cookOk(e, { nodes, output: 's' });
+    e.host.persist = spy;
+    await cookOk(e, { nodes, output: 't' });
+    check(spy.saved.size === 0, `what is made from results cooked before a store was attached is not offered to it (${spy.saved.size} offered)`);
+    const spy2 = new Spy();
+    await cookOk(await engineWith(spy2), { nodes, output: 't' });
+    check(spy2.saved.size === 3, 'while one attached from the start is offered all three');
+  }
+  {
     // the part of the signature that depends on state the node reads when its cook starts (the kernels loaded): the result
     // is kept under the one the cook used, even when the state changed while the store was asked
     const backend = { v: 'js' };
@@ -476,19 +511,7 @@ try {
     const pass = (g: Geometry) => ({ geo: g, deps: [], warnings: [], cookMs: 1 });
     const file = () => path.join(dir, entries(dir)[0]);
     /** Rewrite the header of the entry, with a checksum that is right: a file that is whole, and wrong */
-    const tamper = (mutate: (h: any) => void) => {
-      const b = fs.readFileSync(file());
-      const hlen = b.readUInt32LE(8);
-      const h = JSON.parse(b.subarray(16, 16 + hlen).toString('utf8'));
-      mutate(h);
-      const hb = Buffer.from(JSON.stringify(h), 'utf8');
-      const head = Buffer.from(b.subarray(0, 16));
-      head.writeUInt32LE(hb.length, 8);
-      const arrays = b.subarray(16 + hlen, b.length - 4);
-      const tail = Buffer.alloc(4);
-      tail.writeUInt32LE(zlib.crc32(arrays, zlib.crc32(hb, zlib.crc32(head))) >>> 0, 0);
-      fs.writeFileSync(file(), Buffer.concat([head, hb, arrays, tail]));
-    };
+    const tamper = (mutate: (h: any) => void) => rewriteHeader(file(), mutate);
     const cases: [string, (h: any) => void][] = [
       ['more points than the arrays hold', (h) => { h.geo.points.count++; }],
       ['fewer prims than the arrays hold', (h) => { h.geo.prims.count--; }],
@@ -507,6 +530,28 @@ try {
       check(good !== null && got === null, `an entry with ${what} is a miss`);
       for (const f of entries(dir)) fs.rmSync(path.join(dir, f));
     }
+  }
+  {
+    // arrays are stored compressed when that pays; a compressed array that unpacks to another size is a miss
+    const dir = folder();
+    const store = openNodeCache({ dir, minMs: 0, engine: 'x' })!;
+    const g = new Geometry();
+    g.volumes.push(new Image(256, 256, 'z', new Map([['C', new Float32Array(65536)]])));
+    g.points.add('Cd', 'float', 3);
+    await store.save('z', { geo: g, deps: [], warnings: [], cookMs: 1 });
+    const file = path.join(dir, entries(dir)[0]);
+    const back = await store.load('z');
+    check(fs.statSync(file).size < 20_000 && back !== null && diffGeo(g, back.geo) === null, `a compressible result is stored compressed (${fs.statSync(file).size} bytes for 262144 of pixels) and comes back bit for bit`);
+    rewriteHeader(file, (h) => { const a = h.arrays.find((x: number[]) => x[2] > 0); a[1] += 2; });
+    check((await store.load('z')) === null, 'a compressed array that unpacks to another size than its header says is a miss');
+    // one that is too small to pay, or random, is stored as it is
+    const px = new Float32Array(4096);
+    randomFillSync(new Uint8Array(px.buffer));
+    const r = new Geometry();
+    r.volumes.push(new Image(64, 64, 'r', new Map([['C', px]])));
+    await store.save('r', { geo: r, deps: [], warnings: [], cookMs: 1 });
+    const rb = await store.load('r');
+    check(rb !== null && diffGeo(r, rb.geo) === null, 'an array that does not shrink is stored raw and comes back');
   }
   {
     // the engine's identity is the code the process loaded: a process whose sources changed after it started keeps nothing
@@ -565,8 +610,10 @@ process.exit(0);
     };
     const [before, between, never] = await Promise.all([child('before'), child('between'), child('never')]);
     check(never.files === 2 && never.memo, `a process whose sources did not change keeps both results (${never.files})`);
+    const told = (o: string) => (o.match(/the disk cache is off for this process/g) ?? []).length;
     check(before.files === 0 && !before.memo && /"ok":true/.test(before.out), `sources changed after the process started, before its first use of the store: nothing kept, the cooks are fine (${before.files} files)`);
     check(between.files === 1 && /"ok":true/.test(between.out), `sources changed between two cooks: the first is kept, the second is not (${between.files} file)`);
+    check(told(before.out) === 1 && told(between.out) === 1 && told(never.out) === 0, `a process that switches its cache off says so once on stderr, one that does not says nothing (${told(before.out)}, ${told(between.out)}, ${told(never.out)})`);
   }
 
   // ------------------------------------------------------------ the CLI and the MCP server, in processes of their own
@@ -701,6 +748,49 @@ process.exit(0);
     fs.utimesSync(font, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
     const c = await run([g], env), plain = await run([g, '--no-cache'], env);
     check(c.code === 0 && !loaded(c.out) && summary(c.out) === summary(plain.out) && summary(c.out) !== summary(a.out), 'CLI: with the font replaced at the same path the next run is fresh, not the stored result');
+    return results;
+  })());
+
+  scenarios.push((async () => {
+    // the same graph with the same name in two folders, each with an m.obj of its own: a node below a foreach has the same
+    // signature in both, and must still be made from the files its own folder has
+    const results: [unknown, string][] = [];
+    const check = (ok: unknown, msg: string) => { results.push([ok, msg]); };
+    const dir = folder();
+    const env = { TOPOTOPO_NODE_CACHE_DIR: dir };
+    const graph = JSON.stringify({ nodes: { each: { type: 'foreach', params: { mode: 'count', count: 1, body: { nodes: { f: { type: 'file', params: { path: 'm.obj' } } }, output: 'f' } } }, slow: { type: 'slow_pass', in: ['each'], params: { ms: 700 } } }, output: 'slow' });
+    const obj = (x: number) => `v 0 0 0\nv ${x} 0 0\nv 0 1 0\nf 1 2 3\n`;
+    const place = (name: string, x: number, at = new Date('2022-02-02T00:00:00Z')) => {
+      const d = fs.mkdtempSync(path.join(tmp, `${name}-`));
+      fs.writeFileSync(path.join(d, 'g.json'), graph);
+      fs.writeFileSync(path.join(d, 'm.obj'), obj(x));
+      fs.utimesSync(path.join(d, 'm.obj'), at, at);
+      return d;
+    };
+    const A = place('a', 1), B = place('b', 5);
+    const inA = await run([path.join(A, 'g.json')], env);
+    const inB = await run([path.join(B, 'g.json')], env);
+    const plainB = await run([path.join(B, 'g.json'), '--no-cache'], env);
+    check(/max \(1\.000/.test(inA.out) && !loaded(inB.out) && /max \(5\.000/.test(inB.out) && summary(inB.out) === summary(plainB.out), 'CLI: the same graph in folder B (another m.obj, the same size and time) is not given the result made in folder A');
+    const againA = await run([path.join(A, 'g.json')], env), againB = await run([path.join(B, 'g.json')], env);
+    check(loaded(againA.out) && loaded(againB.out) && /max \(1\.000/.test(againA.out) && /max \(5\.000/.test(againB.out), 'CLI: and each folder then loads its own');
+    // two files of identical content at different paths: results alike, each its own entry
+    const C = place('c', 1), D = place('d', 1);
+    const inC = await run([path.join(C, 'g.json')], env), inD = await run([path.join(D, 'g.json')], env);
+    check(loaded(againA.out) && !loaded(inD.out) && summary(inC.out) === summary(inD.out), 'CLI: files with the same content at other paths give the same result, each kept apart');
+    // one folder, the file swapped back and forth
+    const E = place('e', 1);
+    const gE = path.join(E.toString(), 'g.json');
+    const put = (x: number, at: Date) => { fs.writeFileSync(path.join(E, 'm.obj'), obj(x)); fs.utimesSync(path.join(E, 'm.obj'), at, at); };
+    const t1 = new Date('2022-03-03T00:00:00Z'), t2 = new Date('2022-04-04T00:00:00Z');
+    put(1, t1);
+    const e1 = await run([gE], env);
+    put(5, t2);
+    const e2 = await run([gE], env);
+    put(1, t1);
+    const e3 = await run([gE], env);
+    check(/max \(1\.000/.test(e1.out) && /max \(5\.000/.test(e2.out) && /max \(1\.000/.test(e3.out) && !loaded(e2.out), 'CLI: one folder, m.obj swapped A, B, A: each run gives the result of the file in place');
+    check(loaded(e3.out), 'CLI: and the third, with the first file back as it was, loads the first result');
     return results;
   })());
 

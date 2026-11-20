@@ -307,6 +307,17 @@ const watchScope = (s: Scope, read: () => void, o: { hidden?: () => void; rec?: 
   };
 };
 
+/** The files of a Meta as one canonical string, for a key: path, kind and stamp, in order. */
+const depsDigests = new WeakMap<Meta, string>();
+function depsKey(m: Meta): string {
+  let d = depsDigests.get(m);
+  if (d === undefined) {
+    d = m.deps.map((x) => `${x.k}${x.p}\0${x.s}`).sort().join('\n');
+    depsDigests.set(m, d);
+  }
+  return d;
+}
+
 // ---------------------------------------------------------------- what a result was made from
 
 /**
@@ -1199,7 +1210,10 @@ export class Engine {
     const inputRes: (NodeResult | null)[] = [];
     let depTime = false;
     /** the result's Meta, once it has one: every result that is returned with geometry gets it */
-    const made = (m: Meta | undefined) => { metas.set(result, m ?? UNSAFE); };
+    // (a cook with no store watching its reads does not know what the result was made from: such a result is unsafe, whatever
+    // is attached to the host later)
+    const watching = !!this.host.persist;
+    const made = (m: Meta | undefined) => { metas.set(result, watching ? m ?? UNSAFE : UNSAFE); };
     // a node that picks its inputs by param (switch) resolves its params first and cooks only the inputs it reads
     const lazy = !!def.inputsUsed && !spec.bypass && def.type !== 'input';
     let used: boolean[] | null = null;
@@ -1273,7 +1287,7 @@ export class Engine {
     // the files this node reads, in its signature and in its cook
     const own = new Recorder();
     // (the files are only watched when a store keeps results: otherwise a node is given the scope's own files)
-    const recording = this.host.persist ? own : undefined;
+    const recording = watching ? own : undefined;
     const sigScope = watchScope(scope, () => { readScope = true; }, { rec: recording });
     let extra = '';
     try {
@@ -1320,7 +1334,10 @@ export class Engine {
     // reads them from) and the time of a node that depends on it
     const store = this.host.persist;
     const diskKey = store && !ownUnsafe && !inMeta.unsafe
-      ? (td: boolean, ex: string) => materialWith(ex) + (readScope ? `|S:${scope.id}|F:${scope.files.resolvePath('.')}` : '') + (td ? '|' + timeKey(time) : '')
+      ? (td: boolean, ex: string) => materialWith(ex) + (readScope ? `|S:${scope.id}|F:${scope.files.resolvePath('.')}` : '')
+        // the files the inputs were made from, which their signatures may not hold (what a graph inside a node reads): the
+        // same node of the same graph in another folder, or with another file in place, is another result
+        + (inMeta.deps.length ? '|I:' + depsKey(inMeta) : '') + (td ? '|' + timeKey(time) : '')
       : null;
     // about to cook: report it (the host may yield there), and stop here when the cook was asked to stop
     const progress: NodeProgress | null = opts.onNode ? { phase: 'start', node: name, type: def.type, depth, within: opts.within ?? [] } : null;
@@ -1488,7 +1505,8 @@ export class Engine {
       cookMs = now() - t0;
       // what the result was made from; unsafe when no key and no file stamp covers all of it: a node that read its scope
       // without its signature saying so is unsafe, and so is what a URL or a Blender conversion fed
-      const meta = mergeMeta([inMeta, nestedMeta], own, ownUnsafe || (hiddenRead && !signedScope));
+      // files the node read that its signature does not name are not in its key either (nor is the folder they were read from)
+      const meta = watching ? mergeMeta([inMeta, nestedMeta], own, ownUnsafe || (hiddenRead && !signedScope) || (own.deps.size > 0 && !signedScope)) : UNSAFE;
       made(meta);
       this.noteMeta(sig, meta);
       // a slow result is kept for the next run (a graph cooked inside the node is kept in its own nodes)

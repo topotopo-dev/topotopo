@@ -24,6 +24,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import { createHash, randomBytes } from 'node:crypto';
 import { Attribute, AttribTable, Geometry } from '../core/geometry.ts';
 import type { AttribType, Volume } from '../core/geometry.ts';
@@ -40,7 +41,12 @@ export const NODE_CACHE_MIN_MS = 500;
 /** The cache's size cap. */
 export const NODE_CACHE_MAX_BYTES = 4 * 2 ** 30;
 /** Bump when the file layout changes: older files then miss. */
-const FORMAT = 2;
+const FORMAT = 3;
+/** Arrays of at least this many bytes are compressed (zstd, level 1) when that saves a tenth or more. */
+const MIN_COMPRESS = 1024;
+const ZSTD_LEVEL = 1;
+const zstdCompress = promisify(zlib.zstdCompress);
+const zstdDecompress = promisify(zlib.zstdDecompress);
 const MAGIC = 'TTNODE1\0';
 const EXT = '.ttnode';
 const TMP = '.tmp';
@@ -89,6 +95,17 @@ function dependencyVersions(): string {
 /** The identity of the engine this process runs (stamp: the state of its files then), or 'off': it cannot be vouched for. */
 let engineMemo: { id: string; stamp: string } | 'off' | undefined;
 
+let toldOff = false;
+/** The store is off for the rest of the process; a cache that never works should not be a silent one, so it is said once. */
+function engineOff(): null {
+  engineMemo = 'off';
+  if (!toldOff) {
+    toldOff = true;
+    process.stderr.write('topotopo: the disk cache is off for this process, because engine files changed after it started (or are dated in the future); start it again to use the cache.\n');
+  }
+  return null;
+}
+
 /**
  * What a result depends on besides its identity: the engine's code hash (engine-code.ts), the Node version and platform
  * (a math function may differ in the last bit between them) and the libraries' versions. The hash reads every file of
@@ -105,14 +122,14 @@ function engineIdentity(dir: string): string | null {
   if (engineMemo === 'off') return null;
   if (engineMemo) return engineMemo.id;
   const { stamp, newest } = engineStamp();
-  if (newest > performance.timeOrigin) { engineMemo = 'off'; return null; }
+  if (newest > performance.timeOrigin) return engineOff();
   const memoFile = path.join(dir, 'engine.json');
   let known: Record<string, string> = {};
   try { known = JSON.parse(fs.readFileSync(memoFile, 'utf8')) ?? {}; } catch { /* none yet */ }
   let code = typeof known[stamp] === 'string' && /^[0-9a-f]{64}$/.test(known[stamp]) ? known[stamp] : '';
   if (!code) {
     code = engineSha256();
-    if (engineStamp().stamp !== stamp) { engineMemo = 'off'; return null; }
+    if (engineStamp().stamp !== stamp) return engineOff();
     const keep = Object.entries(known).slice(-7);
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -131,7 +148,7 @@ function engineHolds(): boolean {
   if (engineMemo === 'off') return false;
   if (!engineMemo) return true;
   if (engineStamp().stamp === engineMemo.stamp) return true;
-  engineMemo = 'off';
+  engineOff();
   return false;
 }
 
@@ -416,9 +433,13 @@ class DiskNodeStore implements NodeStore {
     if (h?.v !== FORMAT || h.id !== sha256(identity) || !Array.isArray(h.arrays)) return null;
     // the sizes the header names must be the file's size, before anything is allocated for them
     let total = HEAD + hlen + 4;
-    for (const [k, n] of h.arrays as [Kind, number][]) {
-      if (!(k in KINDS) || !Number.isSafeInteger(n) || n < 0) return null;
-      total += n * KINDS[k].BYTES_PER_ELEMENT;
+    for (const a of h.arrays as [Kind, number, number][]) {
+      if (!Array.isArray(a) || a.length !== 3) return null;
+      const [k, n, z] = a;
+      if (!(k in KINDS) || !Number.isSafeInteger(n) || n < 0 || !Number.isSafeInteger(z) || z < 0) return null;
+      // a compressed array is z bytes in the file and n values when read, which must be a size a result can have
+      if (z > 0 && n * KINDS[k].BYTES_PER_ELEMENT > 2 ** 32) return null;
+      total += z || n * KINDS[k].BYTES_PER_ELEMENT;
     }
     if (total !== size) return null;
     // another engine's result is whole, not broken: left for its engine, and written over when this one cooks the node
@@ -430,8 +451,19 @@ class DiskNodeStore implements NodeStore {
     let crc = zlib.crc32(head, 0);
     crc = zlib.crc32(hbuf, crc);
     const arrays: Typed[] = [];
+    const packed: { i: number; k: Kind; n: number; bytes: Buffer }[] = [];
     let pos = HEAD + hlen;
-    for (const [k, n] of h.arrays as [Kind, number][]) {
+    for (const [k, n, z] of h.arrays as [Kind, number, number][]) {
+      if (z > 0) {
+        // compressed: read as it is, unpacked once the checksum says the file is whole
+        const bytes = Buffer.allocUnsafe(z);
+        if (!(await readInto(fh, bytes, pos))) return null;
+        for (let o = 0; o < z; o += CHUNK) crc = zlib.crc32(bytes.subarray(o, Math.min(z, o + CHUNK)), crc);
+        pos += z;
+        packed.push({ i: arrays.length, k, n, bytes });
+        arrays.push(null as unknown as Typed);
+        continue;
+      }
       const a = new KINDS[k](n);
       const view = new Uint8Array(a.buffer, 0, a.byteLength);
       if (!(await readInto(fh, view, pos))) return null;
@@ -441,6 +473,16 @@ class DiskNodeStore implements NodeStore {
     }
     const tail = Buffer.alloc(4);
     if (!(await readInto(fh, tail, pos)) || tail.readUInt32LE(0) !== crc >>> 0) return null;
+    // the compressed arrays, on the thread pool, each to exactly the size its header names
+    await Promise.all(packed.map(async (p) => {
+      const C = KINDS[p.k], want = p.n * C.BYTES_PER_ELEMENT;
+      const raw = await zstdDecompress(p.bytes, { maxOutputLength: Math.max(want, 1) });
+      if (raw.length !== want) throw new Inconsistent('a compressed array has the wrong size');
+      // an array of its own: the buffer of a result is not shared with any other
+      arrays[p.i] = raw.byteOffset % C.BYTES_PER_ELEMENT === 0 && raw.buffer.byteLength === raw.length
+        ? new C(raw.buffer, raw.byteOffset, p.n)
+        : (() => { const a = new C(p.n); new Uint8Array(a.buffer).set(raw); return a; })();
+    }));
     return { geo: unpackGeometry(h.geo, arrays), deps, warnings: h.warnings ?? [], ...(h.stats ? { stats: h.stats } : {}), cookMs: Number(h.cookMs) || 0 };
   }
 
@@ -451,24 +493,34 @@ class DiskNodeStore implements NodeStore {
     const A = new Arrays();
     let geo: any;
     try { geo = packGeometry(node.geo, A); } catch (e) { if (e instanceof Unstorable) return; throw e; }
+    // the arrays as they are stored: compressed where that saves a tenth or more (z: their size in the file, 0 for raw)
+    const stored: Uint8Array[] = new Array(A.views.length);
+    const sizes: number[] = new Array(A.views.length).fill(0);
+    await Promise.all(A.views.map(async (v, i) => {
+      stored[i] = v;
+      if (v.byteLength < MIN_COMPRESS) return;
+      const c = await zstdCompress(v, { params: { [zlib.constants.ZSTD_c_compressionLevel]: ZSTD_LEVEL } });
+      if (c.length <= v.byteLength * 0.9) { stored[i] = c; sizes[i] = c.length; }
+    }));
+    const bytes = stored.reduce((t, v) => t + v.byteLength, 0);
     // one result may not take more than half of the cache
-    if (A.bytes > this.maxBytes / 2) return;
+    if (bytes > this.maxBytes / 2) return;
     const header = Buffer.from(JSON.stringify({
       v: FORMAT, id: sha256(identity), engine, deps: node.deps, cookMs: node.cookMs, warnings: node.warnings,
-      ...(node.stats ? { stats: node.stats } : {}), arrays: A.kinds, geo,
+      ...(node.stats ? { stats: node.stats } : {}), arrays: A.kinds.map(([k, n], i) => [k, n, sizes[i]]), geo,
     }), 'utf8');
     const file = this.fileOf(identity);
     const tmp = path.join(this.dir, `${path.basename(file, EXT)}.${process.pid}.${randomBytes(4).toString('hex')}${TMP}`);
     try {
       await fsp.mkdir(this.dir, { recursive: true });
-      await writeEntry(tmp, header, A.views);
+      await writeEntry(tmp, header, stored);
       // the rename replaces what is there; where that is refused (another process has it open) a whole file is in place
       try { await fsp.rename(tmp, file); } catch { await fsp.rm(tmp, { force: true }); }
     } catch {
       await fsp.rm(tmp, { force: true }).catch(() => {});
       return;
     }
-    this.written += A.bytes;
+    this.written += bytes;
     if (!this.pruned || this.written >= this.maxBytes / 16) { this.pruned = true; this.written = 0; await this.prune(); }
   }
 

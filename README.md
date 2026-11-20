@@ -226,7 +226,7 @@ Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`
 The server and the command line keep the result of every node that took half a second or more to cook in a cache folder
 (`topotopo/nodes` in your OS cache folder: `%LOCALAPPDATA%` on Windows, `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
 `~/.cache` elsewhere; at most 4 GB, least recently used first), and the next run that cooks the same node loads it instead.
-A cook report says which nodes came from it. `TOPOTOPO_NODE_CACHE_DIR` moves the folder, `TOPOTOPO_NODE_CACHE=off` (or
+Entries are compressed (zstd). A cook report says which nodes came from it. `TOPOTOPO_NODE_CACHE_DIR` moves the folder, `TOPOTOPO_NODE_CACHE=off` (or
 `--no-cache` on the command line) switches the cache off; deleting the folder clears it.
 
 A stored result is used when the node's type, params, inputs and engine code (and the Node and library versions) are the
