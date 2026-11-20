@@ -124,19 +124,93 @@ const bakeMemo = new WeakMap<object, Map<string, unknown>>();
 /** How often memoBake made a value and how often it reused one (tests read it). */
 export const bakeMemoStats = { made: 0, reused: 0 };
 
+/** The memo's limits: total bytes of the values it keeps and how many values (the oldest used are released first). */
+export const bakeMemoLimits = { bytes: 512 * 1024 * 1024, entries: 8 };
+
+interface MemoEntry { g: WeakRef<object>; key: string; bytes: number }
+/** Every kept value, least recently used first (a Map keeps insertion order). */
+const memoOrder = new Map<number, MemoEntry>();
+const memoIds = new WeakMap<object, Map<string, number>>();
+let memoBytes = 0, memoNext = 0;
+// a mesh that is collected takes its values with it: drop their entries from the count
+const memoGone = new FinalizationRegistry<number[]>((ids) => {
+  for (const id of ids) {
+    const e = memoOrder.get(id);
+    if (e) { memoBytes -= e.bytes; memoOrder.delete(id); }
+  }
+});
+const memoGoneIds = new WeakMap<object, number[]>();
+
+/** What the memo keeps now: the values and their bytes (typed arrays counted by their buffers). */
+export function bakeMemoUsage(): { entries: number; bytes: number } {
+  return { entries: memoOrder.size, bytes: memoBytes };
+}
+
+/** The bytes a memo value holds: its typed arrays, found through plain objects, arrays and class fields. */
+function bytesOf(v: unknown, seen = new Set<object>(), depth = 0): number {
+  if (!v || typeof v !== 'object' || seen.has(v) || depth > 6) return 0;
+  seen.add(v);
+  if (ArrayBuffer.isView(v)) return v.byteLength;
+  if (v instanceof ArrayBuffer) return v.byteLength;
+  let n = 0;
+  if (Array.isArray(v)) { for (const x of v) n += bytesOf(x, seen, depth + 1); return n; }
+  if (v instanceof Map) { for (const x of v.values()) n += bytesOf(x, seen, depth + 1); return n; }
+  for (const k of Object.keys(v)) n += bytesOf((v as any)[k], seen, depth + 1);
+  return n;
+}
+
+function memoForget(id: number): void {
+  const e = memoOrder.get(id);
+  if (!e) return;
+  memoOrder.delete(id);
+  memoBytes -= e.bytes;
+  const g = e.g.deref();
+  if (g) { bakeMemo.get(g)?.delete(e.key); memoIds.get(g)?.delete(e.key); }
+}
+
+/** Release the oldest values until the memo is within its limits; the newest value always stays. */
+function memoTrim(): void {
+  for (const id of memoOrder.keys()) {
+    if (memoOrder.size <= 1 || (memoBytes <= bakeMemoLimits.bytes && memoOrder.size <= bakeMemoLimits.entries)) break;
+    memoForget(id);
+  }
+}
+
 /**
  * A value derived from a mesh, made once per (mesh object, key) and shared by every bake that asks for it: the covered
- * samples of a uv raster and the per-sample positions and normals. Cooked geometry is immutable, so the object itself
- * is a safe key; the value lives as long as the mesh does. Callers must not write into what it returns. A `make` that
- * throws stores nothing.
+ * samples of a uv raster, the per-sample positions and normals, the surface cloud, the ray scene. Cooked geometry is
+ * immutable, so the object itself is a safe key. A value lives no longer than its mesh, and the memo keeps at most
+ * `bakeMemoLimits` (bytes and values): the least recently used values are released first. Callers must not write into
+ * what it returns. A `make` that throws stores nothing.
  */
 export function memoBake<T>(g: object, key: string, make: () => T): T {
   let m = bakeMemo.get(g);
   if (!m) { m = new Map(); bakeMemo.set(g, m); }
-  if (m.has(key)) { bakeMemoStats.reused++; return m.get(key) as T; }
+  let ids = memoIds.get(g);
+  if (!ids) {
+    ids = new Map();
+    memoIds.set(g, ids);
+    const gone: number[] = [];
+    memoGoneIds.set(g, gone);
+    memoGone.register(g, gone);
+  }
+  if (m.has(key)) {
+    bakeMemoStats.reused++;
+    // most recently used: to the back of the line
+    const id = ids.get(key);
+    const e = id === undefined ? undefined : memoOrder.get(id);
+    if (e) { memoOrder.delete(id!); memoOrder.set(id!, e); }
+    return m.get(key) as T;
+  }
   const v = make();
   m.set(key, v);
   bakeMemoStats.made++;
+  const id = memoNext++, bytes = bytesOf(v);
+  memoOrder.set(id, { g: new WeakRef(g), key, bytes });
+  ids.set(key, id);
+  memoGoneIds.get(g)!.push(id);
+  memoBytes += bytes;
+  memoTrim();
   return v;
 }
 
