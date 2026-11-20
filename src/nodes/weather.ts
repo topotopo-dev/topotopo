@@ -58,6 +58,8 @@ interface Prepared {
   present: string[];
   bbox: Box;
   scale: ReturnType<typeof weatherScale>;
+  /** the size of a texel, estimated from the area over about 60 % of the square */
+  texel: number;
   rustSources: boolean;
   galvSources: boolean;
   partsHint: string;
@@ -173,7 +175,7 @@ function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; f
   const res = Number(p.resolution) || 1024;
   // texel estimate: the area spread over about 60 % of the square
   const texel = Math.sqrt(area / (0.6 * res * res));
-  return { mesh, kept, kinds, present: [...present].filter((k) => k !== 'keep').sort(), bbox, scale: weatherScale(diag, ext[1], texel), rustSources: rusting > 0 && rusting < mesh.numPrims, galvSources: galv > 0 && galv < mesh.numPrims, partsHint };
+  return { mesh, kept, kinds, present: [...present].filter((k) => k !== 'keep').sort(), bbox, scale: weatherScale(diag, ext[1], texel), texel, rustSources: rusting > 0 && rusting < mesh.numPrims, galvSources: galv > 0 && galv < mesh.numPrims, partsHint };
 }
 
 /** Input 2: images whose layers replace weather masks. Returns one image "ov" holding them, and their names. */
@@ -205,6 +207,37 @@ function withKept(env: Geometry | null, kept: Geometry | null): Geometry | null 
   // the bakes read the weathered parts' attributes: the kept ones bring only their shape
   for (const a of [...k.prims.names()]) k.prims.delete?.(a);
   return env && env.numPrims ? Geometry.merge([env, k]) : k;
+}
+
+/**
+ * The masks images of groups of pieces cooked apart, as one: every texel from the group that covers it (the padding
+ * from the group whose value is largest there), island ids kept apart per group.
+ */
+function mergeByCoverage(parts: Image[]): Image {
+  const first = parts[0], n = first.width * first.height;
+  const out = new Image(first.width, first.height, first.name).takeSize(first);
+  const masks = parts.map((im) => im.layer('mask'));
+  const who = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) { let best = 0; for (let g = 0; g < parts.length; g++) { const m = masks[g]?.[i] ?? 0; if (m > best) { best = m; who[i] = g; } } }
+  // island ids: each group's own, moved past the ones before it
+  const islandShift: number[] = [];
+  let next = 0;
+  for (const im of parts) { islandShift.push(next); const a = im.layer('island'); if (a) { let mx = -1; for (const x of a) if (x > mx) mx = x; next += mx + 1; } }
+  for (const l of first.layers.keys()) {
+    const ch = first.channels(l), arrs = parts.map((im) => im.layer(l)), a = new Float32Array(n * ch);
+    for (let i = 0; i < n; i++) {
+      const g = who[i];
+      for (let c = 0; c < ch; c++) {
+        let v: number;
+        if (g >= 0) v = arrs[g]![i * ch + c];
+        else { v = arrs[0]![i * ch + c]; for (let k = 1; k < arrs.length; k++) v = Math.max(v, arrs[k]![i * ch + c]); }
+        if (l === 'island' && g >= 0 && v >= 0) v += islandShift[g];
+        a[i * ch + c] = v;
+      }
+    }
+    out.set(l, a);
+  }
+  return out;
 }
 
 /** The signature of a prepared input: what it was made from and how. */
@@ -462,51 +495,77 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   const shift = boxes.map((b, k) => [((k % cols) * gap) - (b.min[0] + b.max[0]) / 2 * (pieces.length > 1 ? 1 : 0), pieces.length > 1 ? -b.min[1] : 0, (Math.floor(k / cols) * gap) - (b.min[2] + b.max[2]) / 2 * (pieces.length > 1 ? 1 : 0)]);
   if (pieces.length > 1) for (let i = 0; i < mesh.numPoints; i++) { const s = shift[ptPiece[i]]; if (!s) continue; PP[i * 3] += s[0]; PP[i * 3 + 1] += s[1]; PP[i * 3 + 2] += s[2]; }
   const moved = boxes.map((b, k) => ({ min: b.min.map((v, c) => v + shift[k][c]), max: b.max.map((v, c) => v + shift[k][c]) }));
-  // the surroundings: input 1 (moved with the pieces when there is one piece), else per piece the stated mount and cover
-  const env: Geometry[] = [];
+  // the surroundings per piece: input 1 (a single piece only), else the stated mount and cover; and the parts of kind
+  // keep, which occlude and shelter too, moved with their piece (those of no weathered piece are left out)
+  const envOf: Geometry[][] = pieces.map(() => []);
   if (ctx.hasInput(1) && ctx.input(1).numPrims) {
     if (pieces.length > 1) throw new NodeError(`${T_M}: input 1 with ${pieces.length} pieces: each piece is weathered alone`, 'connect surroundings for a single piece, or state mount and above per kit');
-    env.push(ctx.input(1));
-  } else for (const b of moved) {
+    envOf[0].push(ctx.input(1));
+  } else moved.forEach((b, k) => {
     const m = mountPlane(b, p.mount, p.wall_side);
-    if (m) env.push(m);
-    if (p.above === 'covered') env.push(coverPlane(b));
-  }
-  // the parts of kind keep occlude and shelter too, moved with their piece (those of no weathered piece are left out)
+    if (m) envOf[k].push(m);
+    if (p.above === 'covered') envOf[k].push(coverPlane(b));
+  });
   if (prep.kept && prep.kept.numPrims) {
-    let kept = prep.kept;
-    if (pieces.length > 1) {
-      const a = kept.prims.get(pieceAttr), keepPr = new Uint8Array(kept.numPrims), kp = new Int32Array(kept.numPrims).fill(-1);
-      for (let i = 0; i < kept.numPrims; i++) { kp[i] = a ? pieces.indexOf(String(a.get(i) ?? '')) : -1; keepPr[i] = kp[i] >= 0 ? 1 : 0; }
-      const ptShift = new Int32Array(kept.numPoints).fill(-1);
-      for (let pr = 0; pr < kept.numPrims; pr++) for (let v = kept.primStart[pr]; v < kept.primStart[pr + 1]; v++) ptShift[kept.vertexPoint[v]] = kp[pr];
-      kept = kept.clone();
-      const KP = kept.P;
-      for (let i = 0; i < kept.numPoints; i++) { const sft = shift[ptShift[i]]; if (!sft) continue; KP[i * 3] += sft[0]; KP[i * 3 + 1] += sft[1]; KP[i * 3 + 2] += sft[2]; }
-      kept = kept.subsetPrims(keepPr);
-    }
-    const k = withKept(null, kept);
-    if (k) env.push(k);
+    const kept = prep.kept, a = pieceAttr ? kept.prims.get(pieceAttr) : null, kp = new Int32Array(kept.numPrims);
+    for (let i = 0; i < kept.numPrims; i++) kp[i] = pieces.length === 1 ? 0 : a ? pieces.indexOf(String(a.get(i) ?? '')) : -1;
+    pieces.forEach((_, k) => {
+      const sel = Uint8Array.from(kp, (x) => (x === k ? 1 : 0));
+      if (!sel.some((x) => x)) return;
+      const g = kept.subsetPrims(sel), sft = shift[k], G = g.P;
+      if (pieces.length > 1) for (let i = 0; i < g.numPoints; i++) { G[i * 3] += sft[0]; G[i * 3 + 1] += sft[1]; G[i * 3 + 2] += sft[2]; }
+      const w = withKept(null, g);
+      if (w) envOf[k].push(w);
+    });
   }
-  const envGeo = env.length ? Geometry.merge(env) : null;
-  const jointGeo = joints.length ? Geometry.merge(moved.flatMap((b) => jointPlanes(b, joints))) : null;
-  const leakParts = Number(p.leak_density) > 0 ? moved.map((b, k) => {
+  // each piece is sized as if alone (its own box), in quarter-octave steps so pieces of about one size share one cook
+  // of the nested graph; without pieces the whole input is the object
+  const q4 = (v: number) => 2 ** (Math.round(4 * Math.log2(Math.max(v, 1e-6))) / 4);
+  // and its texel from its own surface and uv area (in a kit atlas a piece has the texels it has)
+  const area3 = new Float64Array(pieces.length), areaUV = new Float64Array(pieces.length);
+  if (pieceAttr) {
+    const t = triangulate(mesh), U = vertexUV(mesh, uv)!, vp = mesh.vertexPoint;
+    for (let k = 0; k < t.tris.length; k += 3) {
+      const a0 = t.tris[k], a1 = t.tris[k + 1], a2 = t.tris[k + 2], pc = pieces.indexOf(pieceOf[t.triPrim[k / 3]]);
+      const i = vp[a0] * 3, j = vp[a1] * 3, l = vp[a2] * 3;
+      const ux = PP[j] - PP[i], uy = PP[j + 1] - PP[i + 1], uz = PP[j + 2] - PP[i + 2], wx = PP[l] - PP[i], wy = PP[l + 1] - PP[i + 1], wz = PP[l + 2] - PP[i + 2];
+      area3[pc] += Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2;
+      areaUV[pc] += Math.abs((U[a1 * 2] - U[a0 * 2]) * (U[a2 * 2 + 1] - U[a0 * 2 + 1]) - (U[a2 * 2] - U[a0 * 2]) * (U[a1 * 2 + 1] - U[a0 * 2 + 1])) / 2;
+    }
+  }
+  const res = Number(p.resolution) || 2048;
+  const scaleOf = boxes.map((b, k) => {
+    if (!pieceAttr) return prep.scale;
+    const ext = [0, 1, 2].map((i) => b.max[i] - b.min[i]);
+    const texel = areaUV[k] > 0 ? q4(Math.sqrt(area3[k] / areaUV[k]) / res) : prep.texel;
+    return weatherScale(q4(Math.hypot(ext[0], ext[1], ext[2])), q4(ext[1]), texel);
+  });
+  const keyOf = scaleOf.map((x) => JSON.stringify(x));
+  const groups = [...new Set(keyOf)].map((key) => ({ key, scale: scaleOf[keyOf.indexOf(key)], members: pieces.map((_, k) => k).filter((k) => keyOf[k] === key) }));
+  const leakOf = (seed: number) => Number(p.leak_density) > 0 ? moved.map((b, k) => {
     const sel = new Uint8Array(mesh.numPrims);
     for (let i = 0; i < mesh.numPrims; i++) sel[i] = pieceOf[i] === pieces[k] ? 1 : 0;
-    return leakSources(mesh, { density: Number(p.leak_density), seed: (Number(p.seed) || 0) + k * 7919, rain: p.exposure !== 'indoor', blockers: envGeo, prims: sel, topEdge: p.above === 'source' ? b : null, max: 8000 });
+    return leakSources(mesh, { density: Number(p.leak_density), seed: seed + k * 7919, rain: p.exposure !== 'indoor', blockers: envOf[k].length ? Geometry.merge(envOf[k]) : null, prims: sel, topEdge: p.above === 'source' ? b : null, max: 8000 }).points;
   }) : [];
-  const leakGeo = leakParts.length ? Geometry.merge(leakParts.map((l) => l.points)) : null;
   const over = overridesOf(ctx, T_M, 2, [...WEATHER_MASKS, ...PACKED_MASKS]);
   const sig = (what: string, extra: unknown) => sigOf(ctx, what, extra);
   const prepKey = [p.kinds, p.kind, p.handled, uv, pieceAttr];
-  const inputs: SubInput[] = [
-    { geo: mesh, sig: sig('mesh', prepKey) },
-    { geo: envGeo ?? new Geometry(), sig: sig('env', [prepKey, p.mount, p.wall_side, p.above]) },
-    { geo: leakGeo ?? new Geometry(), sig: 'none' },
-    { geo: new Geometry(), sig: 'none' },
-    { geo: jointGeo ?? new Geometry(), sig: sig('joints', [prepKey, joints]) },
-  ];
-  if (over.image) { const g = new Geometry(); g.volumes.push(over.image); inputs[3] = { geo: g, sig: sig('overrides', over.names) }; }
+  /** the nested graph's inputs for the pieces of one group (the leak points are set per variant) */
+  const groupInputs = groups.map((gr) => {
+    const inG = new Set(gr.members.map((k) => pieces[k]));
+    const gm = groups.length === 1 ? mesh : mesh.subsetPrims(Uint8Array.from(pieceOf, (x) => (inG.has(x) ? 1 : 0)));
+    const env = gr.members.flatMap((k) => envOf[k]), envGeo = env.length ? Geometry.merge(env) : null;
+    const jointGeo = joints.length ? Geometry.merge(gr.members.flatMap((k) => jointPlanes(moved[k], joints))) : null;
+    const inputs: SubInput[] = [
+      { geo: gm, sig: sig('mesh', [prepKey, gr.key]) },
+      { geo: envGeo ?? new Geometry(), sig: sig('env', [prepKey, gr.key, p.mount, p.wall_side, p.above]) },
+      { geo: new Geometry(), sig: 'none' },
+      { geo: new Geometry(), sig: 'none' },
+      { geo: jointGeo ?? new Geometry(), sig: sig('joints', [prepKey, gr.key, joints]) },
+    ];
+    if (over.image) { const g = new Geometry(); g.volumes.push(over.image); inputs[3] = { geo: g, sig: sig('overrides', over.names) }; }
+    return { inputs, env: !!envGeo, joints: !!jointGeo };
+  });
   const jw = Math.max(1e-4, Number(p.joint_width) || 0.03);
   const variants = Math.max(1, Math.min(8, Math.round(Number(p.variants) || 1)));
   const out = ctx.input(0).clone();
@@ -514,28 +573,31 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   for (let v = 0; v < variants; v++) {
     const seed = (Number(p.seed) || 0) + v * 1013;
     // the leak points move with the seed: thinned and jittered again
-    if (leakParts.length && v > 0) {
-      const lp = moved.map((b, k) => {
-        const sel = new Uint8Array(mesh.numPrims);
-        for (let i = 0; i < mesh.numPrims; i++) sel[i] = pieceOf[i] === pieces[k] ? 1 : 0;
-        return leakSources(mesh, { density: Number(p.leak_density), seed: seed + k * 7919, rain: p.exposure !== 'indoor', blockers: envGeo, prims: sel, topEdge: p.above === 'source' ? b : null, max: 8000 }).points;
-      });
-      inputs[2] = { geo: Geometry.merge(lp), sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.above]) };
-    } else if (leakGeo) inputs[2] = { geo: leakGeo, sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.above]) };
-    const opts: GraphOptions = {
-      mode: 'masks', resolution: Number(p.resolution), padding: Number(p.padding), layout: 'keep', uv, mapUV: 'uv',
-      kinds: prep.kinds, kindsPresent: prep.present, exposure: p.exposure as Exposure, handled: String(p.handled ?? '').trim(),
-      sun: p.sun, seed, scale: prep.scale, samples: Number(p.samples), env: !!envGeo, leaks: !!leakGeo && leakGeo.numPoints > 0,
-      images: !!over.image, joints: !!jointGeo, rustSources: prep.rustSources, galvSources: prep.galvSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
-      photos: [], overrides: {}, match: null, material: name,
-    };
-    const graph = weatherGraph(opts);
-    // joints: 1 at the border, 0 at joint_width (a distance measure with range 1 is reshaped here)
-    if (jointGeo) (graph.nodes.joints.params as any).measures = [{ by: 'distance', name: 'joint', target: 'input1', range: jw }];
-    const vars = weatherVars({ wear: p.wear, dirt: p.dirt, rust: p.rust, age: p.age, seed, exposure: p.exposure, mount: p.mount });
-    const r = await cookNested(ctx, T_M, graph, inputs, vars, undefined, budget);
-    budget.check();
-    const mi = findImage(r.geo!, `${name}_masks`)!;
+    const lp = leakOf(seed);
+    const parts: Image[] = [];
+    let nLeaks = 0, cooked: CookReport | null = null;
+    for (const [gi, gr] of groups.entries()) {
+      const { inputs, env, joints: hasJoints } = groupInputs[gi];
+      const leakGeo = lp.length ? Geometry.merge(gr.members.map((k) => lp[k])) : null;
+      inputs[2] = leakGeo ? { geo: leakGeo, sig: sig('leaks', [prepKey, gr.key, p.leak_density, seed, p.exposure, p.mount, p.above]) } : { geo: new Geometry(), sig: 'none' };
+      nLeaks += leakGeo?.numPoints ?? 0;
+      const opts: GraphOptions = {
+        mode: 'masks', resolution: Number(p.resolution), padding: Number(p.padding), layout: 'keep', uv, mapUV: 'uv',
+        kinds: prep.kinds, kindsPresent: prep.present, exposure: p.exposure as Exposure, handled: String(p.handled ?? '').trim(),
+        sun: p.sun, seed, scale: gr.scale, samples: Number(p.samples), env, leaks: !!leakGeo && leakGeo.numPoints > 0,
+        images: !!over.image, joints: hasJoints, rustSources: prep.rustSources, galvSources: prep.galvSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
+        photos: [], overrides: {}, match: null, material: name,
+      };
+      const graph = weatherGraph(opts);
+      // joints: 1 at the border, 0 at joint_width (a distance measure with range 1 is reshaped here)
+      if (hasJoints) (graph.nodes.joints.params as any).measures = [{ by: 'distance', name: 'joint', target: 'input1', range: jw }];
+      const vars = weatherVars({ wear: p.wear, dirt: p.dirt, rust: p.rust, age: p.age, seed, exposure: p.exposure, mount: p.mount });
+      const r = await cookNested(ctx, T_M, graph, inputs, vars, undefined, budget);
+      budget.check();
+      parts.push(findImage(r.geo!, `${name}_masks`)!);
+      cooked = r;
+    }
+    const mi = parts.length === 1 ? parts[0] : mergeByCoverage(parts);
     const im = new Image(mi.width, mi.height, v ? `${name}_${v + 1}` : name).takeSize(mi);
     const n = mi.width * mi.height, C = new Float32Array(n * 4);
     channels.forEach((c, k) => { const a = mi.layer(c)!; for (let i = 0; i < n; i++) C[i * 4 + k] = a[i]; im.set(c, a); });
@@ -544,10 +606,11 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     for (const l of ['texel', 'island', 'mask']) { const a = mi.layer(l); if (a) im.set(l, a); }
     packedImgs.push(im);
     if (v === 0) {
-      ctx.stat('leak_sources', inputs[2].geo.numPoints);
-      if (r.results) ctx.stat('texels_per_metre', texelsPerMetre(mi));
+      ctx.stat('leak_sources', nLeaks);
+      if (cooked?.results) ctx.stat('texels_per_metre', texelsPerMetre(mi));
     }
   }
+  ctx.stat('scale_groups', groups.length);
   out.volumes.push(...packedImgs);
   ctx.stat('pieces', pieces.length);
   ctx.stat('variants', variants);

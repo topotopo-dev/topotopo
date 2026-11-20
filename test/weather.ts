@@ -271,6 +271,41 @@ section('weather_masks: one packed image per variant, materials unchanged');
   const joined = await cook({ ...kit, w: { type: 'weather_masks', in: ['uv2'], params: { ...FAST, channels: 'occlusion' } } }, 'w');
   const alone = await cook({ ...kit, w: { type: 'weather_masks', in: ['uv2'], params: { ...FAST, channels: 'occlusion', piece: 'kit_piece' } } }, 'w');
   check(alone.stats.pieces === 2 && mean(img(alone, 'weather'), 'occlusion') > mean(img(joined, 'weather'), 'occlusion') + 0.005, `piece: each piece is weathered alone, the shelf no longer shades the wall (occlusion ${f3(mean(img(alone, 'weather'), 'occlusion'))}, joined ${f3(mean(img(joined, 'weather'), 'occlusion'))})`);
+  // a piece is sized as if alone: inside a kit with a far larger piece laid out metres away (its uv squeezed into a
+  // quarter of an atlas twice the size, so it keeps its texels) its masks are those it gets alone
+  {
+    const wallPiece: Nodes = {
+      a: { type: 'box', params: { size: [1, 1, 0.1], center: [0, 0.5, 0] } },
+      an: { type: 'wrangle', in: ['a'], params: { run_over: 'prims', code: 's@kit_piece = "wall";' } },
+      am: { type: 'material', in: ['an'], params: { name: 'precast', kind: 'concrete' } },
+      auv: { type: 'uv_unwrap', in: ['am'], params: { uv_attrib: 'uv2', resolution: 128, padding: 2 } },
+    };
+    const kitScene: Nodes = {
+      ...wallPiece,
+      aq: { type: 'wrangle', in: ['auv'], params: { run_over: 'vertices', code: 'v@uv2 = set(v@uv2.x * 0.5, v@uv2.y * 0.5, 0);' } },
+      b: { type: 'box', params: { size: [4, 0.3, 4], center: [6, 0.15, 3] } },
+      bn: { type: 'wrangle', in: ['b'], params: { run_over: 'prims', code: 's@kit_piece = "slab";' } },
+      bm: { type: 'material', in: ['bn'], params: { name: 'precast', kind: 'concrete' } },
+      buv: { type: 'uv_unwrap', in: ['bm'], params: { uv_attrib: 'uv2', resolution: 128, padding: 2 } },
+      bq: { type: 'wrangle', in: ['buv'], params: { run_over: 'vertices', code: 'v@uv2 = set(0.5 + v@uv2.x * 0.5, 0.5 + v@uv2.y * 0.5, 0);' } },
+      kit: { type: 'merge', in: ['aq', 'bq'] },
+    };
+    const P = { ...FAST, mount: 'ground', piece: 'kit_piece', channels: 'dirt leaks edges', wear: 0.8, dirt: 0.7 };
+    const alone = img(await cook({ ...wallPiece, w: { type: 'weather_masks', in: ['auv'], params: { ...P, resolution: 128 } } }, 'w'), 'weather');
+    const inKit = await cook({ ...kitScene, w: { type: 'weather_masks', in: ['kit'], params: { ...P, resolution: 256 } } }, 'w');
+    const kitIm = img(inKit, 'weather');
+    // the wall's quarter of the kit atlas: the one its coverage falls in
+    const quarterMean = (layer: string, oy: number) => {
+      const a = kitIm.layer(layer)!, m = kitIm.layer('mask')!;
+      let s = 0, k = 0;
+      for (let y = oy; y < oy + 128; y++) for (let x = 0; x < 128; x++) { const i = y * 256 + x; if (m[i] > 0.5) { s += a[i]; k++; } }
+      return { mean: k ? s / k : 0, k };
+    };
+    const oy = quarterMean('mask', 0).k > quarterMean('mask', 128).k ? 0 : 128;
+    const rows = ['dirt', 'leaks', 'edges'].map((l) => ({ l, a: mean(alone, l), b: quarterMean(l, oy).mean }));
+    const close = rows.every((r) => Math.abs(r.a - r.b) <= 0.25 * Math.max(r.a, r.b) + 0.01);
+    check(inKit.stats.scale_groups === 2 && close, `a piece weathers as if alone inside a kit laid out metres apart (${rows.map((r) => `${r.l} ${f3(r.a)} alone, ${f3(r.b)} in the kit`).join('; ')}; ${inKit.stats.scale_groups} size groups)`);
+  }
   const pv = await cook({ ...panel, w: { type: 'weather_masks', in: ['uv2'], params: { ...FAST, preview: true } } }, 'w');
   check(!!findImage(pv.geo, 'weather_preview_base_color') && pv.geo.prims.get(MATERIAL_ATTRIB)?.get(0) === 'weather_preview' && pv.warnings.some((x) => x.includes('for looking')), 'preview adds a material for looking, and says so');
 }
