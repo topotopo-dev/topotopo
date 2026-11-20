@@ -2,11 +2,13 @@
 // image (the height of tex_layers, a filter radius) can say the same thing at 1024 and at 2048.
 
 /**
- * The area-weighted median over the triangles of sqrt(3D area / uv area in texels): the texel size along the surface in
- * metres for an image of w × h texels. `positions` has 3 floats per vertex and `uv` 2, indexed by the values of `tris`;
- * `skip` leaves triangles out (unbaked prims). 0 when no triangle has both an area and a uv area.
+ * The median over the triangles of sqrt(3D area / uv area in texels): the texel size along the surface in metres for an
+ * image of w × h texels, weighted by 3D area (the default: a typical piece of the model) or by texels (`by: 'texels'`:
+ * a typical texel of the image, which a model with a few big hidden faces on coarse texels does not skew).
+ * `positions` has 3 floats per vertex and `uv` 2, indexed by the values of `tris`; `skip` leaves triangles out
+ * (unbaked prims). 0 when no triangle has both an area and a uv area.
  */
-export function medianTexelSize(positions: ArrayLike<number>, uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, skip?: Uint8Array | null): number {
+export function medianTexelSize(positions: ArrayLike<number>, uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, skip?: Uint8Array | null, by: 'area' | 'texels' = 'area'): number {
   const nt = Math.floor(tris.length / 3), items: { d: number; w: number }[] = [];
   for (let t = 0; t < nt; t++) {
     if (skip && skip[t]) continue;
@@ -17,7 +19,7 @@ export function medianTexelSize(positions: ArrayLike<number>, uv: ArrayLike<numb
     const du1 = uv[b * 2] - uv[a * 2], dv1 = uv[b * 2 + 1] - uv[a * 2 + 1], du2 = uv[c * 2] - uv[a * 2], dv2 = uv[c * 2 + 1] - uv[a * 2 + 1];
     const texels = 0.5 * Math.abs(du1 * dv2 - du2 * dv1) * w * h;
     if (!(area > 0) || !(texels > 1e-9)) continue;
-    items.push({ d: Math.sqrt(area / texels), w: area });
+    items.push({ d: Math.sqrt(area / texels), w: by === 'texels' ? texels : area });
   }
   if (!items.length) return 0;
   items.sort((x, y) => x.d - y.d);

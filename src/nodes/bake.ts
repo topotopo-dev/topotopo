@@ -114,12 +114,15 @@ function setup(ctx: CookContext): Bake {
   };
 }
 
-/** Metres the baked image's width covers: the median texel size of the baked triangles times the width (1 when none has an area). */
+/**
+ * Metres the baked image's width covers: the median texel size over the image's texels (weighted by texels, so a model with
+ * big hidden faces on coarse texels does not set the size of the pixels that show) times the width; 1 when no triangle has an area.
+ */
 function bakeSize(b: Bake): number {
   const sel = mask(b.g, 'prim', b.ctx.p.group);
   let skip: Uint8Array | null = null;
   if (sel) { skip = new Uint8Array(b.triPrim.length); for (let t = 0; t < skip.length; t++) skip[t] = sel[b.triPrim[t]] ? 0 : 1; }
-  const t = medianTexelSize(vertexPositions(b.g), b.uv, b.tris, b.s.W, b.s.H, skip);
+  const t = medianTexelSize(vertexPositions(b.g), b.uv, b.tris, b.s.W, b.s.H, skip, 'texels');
   return t > 0 ? t * b.s.W : 1;
 }
 
@@ -301,7 +304,7 @@ function defineBake(def: Omit<NodeDef, 'category' | 'inputs'> & { inputs?: NodeD
   defineNode({ category: 'texture', inputs: INPUTS, usesNodeName: NAMED_BY_NODE, ...def } as NodeDef);
 }
 
-const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. ';
+const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. ';
 
 // ---------------------------------------------------------------- ray bakes
 
@@ -786,7 +789,7 @@ defineBake({
     'one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. ' +
     BAKE_DOC + 'This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and ' +
     'island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about ' +
-    '(a texel they share holds the last one\'s values). Stats: size (metres the image width covers, the median texel size times the width) and texel_mm.',
+    '(a texel they share holds the last one\'s values). Stats: size (the metres the image width covers: the median texel size over the image\'s texels times the width, which the image carries for the filters after it) and texel_mm.',
   aliases: ['material_bake', 'bake_materials', 'bake_material_table'],
   inputs: [INPUTS[0]],
   params: {
@@ -971,10 +974,9 @@ defineBake({
     img.layers.delete('mask');
     for (const [k, v] of Object.entries(labels)) img.set(k, v);
     img.set('mask', coverage);
-    const texel = medianTexelSize(P3, b.uv, b.tris, b.s.W, b.s.H, skip);
     ctx.stat('materials', order.length);
-    ctx.stat('size', texel * b.s.W);
-    ctx.stat('texel_mm', texel * 1000);
+    ctx.stat('size', img.size);
+    ctx.stat('texel_mm', (img.size / b.s.W) * 1000);
     return wrapImage(b, img);
   },
 });

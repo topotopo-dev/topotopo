@@ -263,7 +263,9 @@ export function imageSummary(g: Geometry): string[] {
   const max = 16;
   for (const img of imgs.slice(0, max)) {
     const ls = [...img.layers.keys()].map((k) => layerDescription(img, k));
-    out.push(`image "${img.name}": ${img.width}×${img.height}, layers: ${ls.length ? ls.join(', ') : '(none)'}`);
+    // the metres the width covers, when it is not the default 1: what every length node after it works against
+    const covers = img.size !== 1 ? ` covering ${fmt(img.size)} m (${fmt((img.size / img.width) * 1000)} mm a texel)` : '';
+    out.push(`image "${img.name}": ${img.width}×${img.height}${covers}, layers: ${ls.length ? ls.join(', ') : '(none)'}`);
   }
   if (imgs.length > max) out.push(`… ${imgs.length - max} more image(s)`);
   return out;
