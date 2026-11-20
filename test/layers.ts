@@ -14,6 +14,7 @@ import { MATERIAL_KINDS, normalizeMaterial, readMaterials } from '../src/core/ma
 import { medianTexelSize } from '../src/core/texelsize.ts';
 import { HALF_STORED, f16round, toHalf } from '../src/core/half.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
+import { stackLimits } from '../src/nodes/layers.ts';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -754,6 +755,33 @@ section('tex_compact: the layers something reads, 0..1 ones in 16 bits');
   const stack = (from: string): Nodes => ({ ...nodes, mat: { type: 'material', in: ['uv'], params: { name: 'grey', base_color: '#808080' } }, base: { type: 'bake_material', in: ['mat'], params: { resolution: 64 } }, st: { type: 'tex_layers', in: ['base', from], params: { layers: [{ name: 'dust', mask: 'smoothstep(0.2, 0.8, a_top) * b_grain', color: '#a69d8b' }] } } });
   const s0 = img(await cook(stack('ab'), 'st'), 'st_base_color').layer('C')!, s1 = img(await cook(stack('k'), 'st'), 'st_base_color').layer('C')!;
   check(s0.every((v, i) => Math.abs(v - s1[i]) < 2e-3), 'a stack reading the compacted bakes makes the same maps within 0.002');
+}
+
+section('tex_layers: a cook after a var moved');
+{
+  // the expressions a moved var does not reach are kept from the cook before; the maps are those of a fresh engine
+  const scene = () => stackOf(flat(), {
+    masks: [{ name: 'm1', mask: 'smoothstep(0.2, 0.8, grad)' }, { name: 'm2', mask: 'm1 * k' }, { name: 'm3', mask: '0.25' }],
+    occlusion: '1 - 0.3 * m1',
+    layers: [
+      { name: 'a', mask: 'm2', color: '#ff0000', height: 0.01 },
+      { name: 'b', mask: 'grad * k', roughness: 0.9, metallic: 1 },
+      { name: 'c', mask: 'm3', color: [[0, '#000000'], [1, '#ffffff']], color_by: 'm1', color_mode: 'multiply' },
+      { name: 'd', mask: 'm1 * 2 - 0.5', roughness_offset: 0.2, signed: true },
+    ],
+  });
+  const layersOf = (r: Cooked) => ['stack_base_color', 'stack_orm', 'stack_normal', 'stack_height', 'stack_masks'].flatMap((nm) => { const im = img(r, nm); return [...im.layers.keys()].map((l) => [`${nm}/${l}`, im.layer(l)!] as const); });
+  await cook(scene(), 'stack', pooled, { k: 0.3 });
+  const moved = await cook(scene(), 'stack', pooled, { k: 0.7 });
+  const fresh = await cook(scene(), 'stack', new Engine(createNodeHost({ workers: 4, pool: { minElements: 1 } })), { k: 0.7 });
+  const onThread = await cook(scene(), 'stack', serial, { k: 0.7 });
+  stackLimits.resultBytes = 32 * 32 * 4 * 2;
+  const grouped = await cook(scene(), 'stack', new Engine(createNodeHost({ workers: 0 })), { k: 0.7 });
+  stackLimits.resultBytes = 768e6;
+  const a = layersOf(moved), b = layersOf(fresh), c = layersOf(onThread), d = layersOf(grouped);
+  const differs = (x: typeof a) => x.filter(([nm, v], i) => nm !== a[i][0] || !same(v, a[i][1])).map(([nm]) => nm);
+  check(!differs(b).length, `a stack cooked again after a var moved is the one a fresh engine cooks, every map and mask bit for bit (${differs(b).join(', ') || a.length + ' layers'})`);
+  check(!differs(c).length && !differs(d).length, `on the pool, on the cooking thread and layer group by layer group the maps are the same bit for bit (${[...differs(c), ...differs(d)].join(', ') || 'all same'})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

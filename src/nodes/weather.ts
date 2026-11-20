@@ -1,8 +1,9 @@
 // weather and weather_masks: one node each for weathering a model, built from the bakes and the layer stack. Both
 // prepare the mesh here (kinds, parts, the planes a stated mount or border adds, where water leaks from) and cook the
-// graph src/core/weather.ts builds with ctx.subcook, so every inner node is cached by its own signature: a slider
-// (dirt, rust, age) reaches only tex_layers and re-cooks only it; wear also re-cooks the chip threshold of the edge wear
-// bake (its wear field is kept); seed also re-cooks the noise bake, the edge wear and the runs.
+// graph src/core/weather.ts builds with ctx.subcook, so every inner node is cached by its own signature: dirt and rust
+// reach only tex_layers and re-cook only it (and in it only the expressions that read them); wear and age (age wears
+// the edges too) also re-cook the chip threshold of the edge wear bake (its wear field is kept); seed also re-cooks the
+// noise bake, the edge wear and the runs.
 //
 //   weather         the maps: base colour, normal and a packed map on one material over every weathered part, the
 //                   masks image beside them; parts of kind keep keep their own material
@@ -701,8 +702,8 @@ defineNode({
     '_masks holding every mask as a layer: ' + WEATHER_MASKS.join(', ') + ' (and the steps between them). Built from bakes ' +
     '(uv_layout, bake_material, bake_measure twice: rays and shape, then seeded noise; bake_edge_wear, bake_mask, bake_flow ' +
     'for rust and dirt runs, bake_triplanar per photo) and one tex_layers stack, cooked as a nested graph: each step is cached ' +
-    'by its own signature, so dirt, rust and age re-cook only the stack, wear also the chip threshold of the edge wear (its ' +
-    'wear field is kept), and seed also the noise, the edge wear and the runs. Worn edges are bake_edge_wear: its amount is ' +
+    'by its own signature, so dirt and rust re-cook only the stack, wear and age (age wears the edges too) also the chip ' +
+    'threshold of the edge wear (its wear field is kept), and seed also the noise, the edge wear and the runs. Worn edges are bake_edge_wear: its amount is ' +
     'the wear slider after age and exposure, its focus the handled parts, and chip, bare and core (nested, capped per face: at ' +
     'most about a third of any face chips) are the masks of the same names; edge_wear is its raw wear field. Runs are a dark ' +
     'narrow core in a broad faint stain (bake_flow stain), nearly straight on flat faces; their drip points gather at the ends ' +

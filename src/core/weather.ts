@@ -571,8 +571,8 @@ function compactBakes(nodes: Record<string, NodeSpec>, masks: string[], texts: s
 /**
  * The nested graph: (re-packed) atlas, material bake, one measure bake (rays, curvature, facing, height: independent
  * of the seed), one noise bake (seeded), the part hash, runs, joints and photos, then the layer stack; in maps mode
- * texture_to_material puts the maps on the mesh. Sliders reach only the stack (graph vars), so moving one re-cooks
- * only it.
+ * texture_to_material puts the maps on the mesh. Sliders reach the stack (graph vars), and wear and age the edge wear
+ * threshold, so moving one re-cooks only those.
  */
 export function weatherGraph(o: GraphOptions): GraphSpec {
   const nodes: Record<string, NodeSpec> = {};

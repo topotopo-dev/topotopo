@@ -6,9 +6,10 @@
 // chunks on the worker pool, all the expressions of a group of layers in one call (core/pixelexpr.ts).
 import { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER, imagesOf, resizeLayer, toGrey, toRGBA } from '../core/image.ts';
-import { COLOR_MODES, applyLayer, coveredIndices, finishStack, startStack } from '../core/layers.ts';
-import type { ColorLUT, ColorMode, LayerSource, LayerSpec } from '../core/layers.ts';
-import { applyPadding, paddingMap } from '../core/bake.ts';
+import { COLOR_MODES, applyLayer, coveredIndices, finishStack, padMaps, startStack } from '../core/layers.ts';
+import type { ColorLUT, ColorMode, LayerSource, LayerSpec, StackJobArgs, StackJobLayer } from '../core/layers.ts';
+import type { TypedArray } from '../core/kernels.ts';
+import { paddingMap } from '../core/bake.ts';
 import { PixelExprError, PixelSyntaxError, bindableName, realmHelperNames, runPixelExprs, usesName } from '../core/pixelexpr.ts';
 import { rampLUT } from '../core/texture.ts';
 import { defineNode } from '../graph/registry.ts';
@@ -19,7 +20,7 @@ import { NAMED_BY_NODE, imageParam, nameParam, outName, source } from './texture
 const FIELDS = ['name', 'mask', 'opacity', 'color', 'color_by', 'color_mode', 'roughness', 'roughness_offset', 'metallic', 'height', 'signed', 'image'];
 
 /** The results of the expressions in flight at once (bytes): past it the layers are composed in groups. */
-const RESULT_BUDGET = 768e6;
+export const stackLimits = { resultBytes: 768e6 };
 
 /** Cap on the names a hint lists. */
 const listNames = (names: string[], max = 14) => names.slice(0, max).join(', ') + (names.length > max ? `, … ${names.length - max} more` : '');
@@ -128,6 +129,70 @@ function expressionText(p: Record<string, any>): string {
 /** A layer of an image an expression can read: the layer as grey (luminance for colour), or one channel of a colour layer. */
 interface Entry { img: Image; layer: string; ch: -1 | 0 | 1 | 2 | 3 }
 
+/**
+ * Results of earlier cooks, kept for the next: an expression's values over the covered texels, a variable's grey copy
+ * of an image layer and a padded mask, each keyed by what it is made from (the expression, the identity of the arrays
+ * it reads, the graph vars it reads, the coverage). Moving one slider then evaluates only the expressions that read
+ * it, and what they feed. Arrays are never written once kept. Within the budget, what the latest cooks used stays:
+ * entries of older cooks go first, and a cook that does not fit keeps what it made first (the named masks the rest
+ * read).
+ */
+export const stackMemoLimits = { bytes: 2 * 1024 * 1024 * 1024 };
+interface MemoEntry { value: Float32Array; gen: number; bad: number; hidden: string[] }
+const stackMemo = new Map<string, MemoEntry>();
+let stackMemoBytes = 0, stackMemoGen = 0;
+const arrayIds = new WeakMap<object, number>();
+let nextArrayId = 1;
+const idOf = (a: object): number => { let i = arrayIds.get(a); if (i === undefined) { i = nextArrayId++; arrayIds.set(a, i); } return i; };
+/** what a coverage layer gives every cook: its covered texels (shared memory when there is any) and padding maps */
+interface CoverageInfo { covered: Uint32Array; mask: Uint8Array | null; padding: Map<number, Int32Array> }
+const coverageInfo = new WeakMap<object, CoverageInfo>();
+const fullCoverage = new Map<number, CoverageInfo>();
+const inShared = (bytes: number) => (typeof SharedArrayBuffer !== 'undefined' ? new SharedArrayBuffer(bytes) : new ArrayBuffer(bytes));
+function coverageOf(coverage: Float32Array | null, n: number): CoverageInfo {
+  let c = coverage ? coverageInfo.get(coverage) : fullCoverage.get(n);
+  if (c) return c;
+  const idx = coveredIndices(coverage, n), covered = new Uint32Array(inShared(idx.byteLength));
+  covered.set(idx);
+  let mask: Uint8Array | null = null;
+  if (coverage) { mask = new Uint8Array(n); for (let q = 0; q < covered.length; q++) mask[covered[q]] = 1; }
+  c = { covered, mask, padding: new Map() };
+  if (coverage) coverageInfo.set(coverage, c);
+  else { fullCoverage.clear(); fullCoverage.set(n, c); }
+  return c;
+}
+const texelOf = new WeakMap<object, { u: Float32Array; v: Float32Array }>();
+/** a read-only array in shared memory: itself, or a copy kept as long as the array lives (the workers read it without a copy per cook) */
+const sharedCopies = new WeakMap<object, TypedArray>();
+function sharedOf<T extends TypedArray>(a: T): T {
+  if (typeof SharedArrayBuffer === 'undefined' || a.buffer instanceof SharedArrayBuffer) return a;
+  let c = sharedCopies.get(a) as T | undefined;
+  if (!c) { c = new (a.constructor as any)(new SharedArrayBuffer(a.byteLength)) as T; c.set(a as any); sharedCopies.set(a, c); }
+  return c;
+}
+
+function memoGet(key: string, gen: number): MemoEntry | undefined {
+  const e = stackMemo.get(key);
+  if (e) { e.gen = gen; stackMemo.delete(key); stackMemo.set(key, e); }
+  return e;
+}
+function memoPut(key: string, gen: number, value: Float32Array, bad = 0, hidden: string[] = []): void {
+  const bytes = value.byteLength;
+  if (bytes > stackMemoLimits.bytes) return;
+  if (stackMemoBytes + bytes > stackMemoLimits.bytes) {
+    for (const [k, e] of stackMemo) {
+      if (stackMemoBytes + bytes <= stackMemoLimits.bytes) break;
+      if (e.gen >= gen) continue;
+      stackMemo.delete(k); stackMemoBytes -= e.value.byteLength;
+    }
+    if (stackMemoBytes + bytes > stackMemoLimits.bytes) return;
+  }
+  const had = stackMemo.get(key);
+  if (had) stackMemoBytes -= had.value.byteLength;
+  stackMemo.set(key, { value, gen, bad, hidden });
+  stackMemoBytes += bytes;
+}
+
 defineNode({
   type: 'tex_layers',
   category: 'texture',
@@ -200,6 +265,7 @@ defineNode({
     output: 'stack',
   },
   cook: async (ctx) => {
+    const gen = ++stackMemoGen;
     const { p, type } = ctx;
     const layers = parseLayers(p.layers);
     const named = parseMasks(p.masks);
@@ -223,9 +289,13 @@ defineNode({
     let texel: { u: Float32Array; v: Float32Array } | null = null;
     const tl = base.img.layer('texel');
     if (tl) {
-      const ch = base.img.channels('texel'), u = new Float32Array(n), v = new Float32Array(n);
-      for (let i = 0; i < n; i++) { u[i] = ch === 4 ? tl[i * 4] : tl[i]; v[i] = ch === 4 ? tl[i * 4 + 1] : tl[i]; }
-      texel = { u, v };
+      texel = texelOf.get(tl) ?? null;
+      if (!texel) {
+        const ch = base.img.channels('texel'), u = new Float32Array(inShared(n * 4)), v = new Float32Array(inShared(n * 4));
+        for (let i = 0; i < n; i++) { u[i] = ch === 4 ? tl[i * 4] : tl[i]; v[i] = ch === 4 ? tl[i * 4 + 1] : tl[i]; }
+        texel = { u, v };
+        texelOf.set(tl, texel);
+      }
     }
     const il = base.img.layer('island');
     const island = il && base.img.channels('island') === 1 ? il : null;
@@ -305,27 +375,59 @@ defineNode({
       if (a) return a;
       const { img, layer, ch } = entries.get(name)![0];
       const raw = img.layer(layer)!, chs = img.channels(layer);
+      const resized = img.width !== w || img.height !== h;
+      if (resized && !warned.has(img.name)) {
+        warned.add(img.name);
+        ctx.warn(`${type}: mask image "${img.name}" is ${img.width} × ${img.height}, the base ${w} × ${h}; it is resized`);
+      }
+      const vkey = `var|${idOf(raw)}|${ch}|${chs}|${img.width}x${img.height}|${w}x${h}`;
+      const kept = memoGet(vkey, gen);
+      if (kept) { arrays.set(name, kept.value); return kept.value; }
       let g: Float32Array;
       if (ch >= 0) { g = new Float32Array(img.count); for (let i = 0; i < g.length; i++) g[i] = raw[i * 4 + ch]; } else g = toGrey(raw, chs === 4 ? 4 : 1);
-      if (img.width !== w || img.height !== h) {
-        if (!warned.has(img.name)) {
-          warned.add(img.name);
-          ctx.warn(`${type}: mask image "${img.name}" is ${img.width} × ${img.height}, the base ${w} × ${h}; it is resized`);
-        }
-        g = resizeLayer(g, 1, img.width, img.height, w, h, false);
-      }
+      if (resized) g = resizeLayer(g, 1, img.width, img.height, w, h, false);
       if (typeof SharedArrayBuffer !== 'undefined') {
         a = new Float32Array(new SharedArrayBuffer(n * 4));
         a.set(g);
       } else a = g;
       arrays.set(name, a);
+      memoPut(vkey, gen, a);
       return a;
     };
-    const covered = coveredIndices(coverage, n);
-    let coveredMask: Uint8Array | null = null;
-    if (coverage) { coveredMask = new Uint8Array(n); for (let q = 0; q < covered.length; q++) coveredMask[covered[q]] = 1; }
+    const cov = coverageOf(coverage, n), covered = cov.covered, coveredMask = cov.mask;
+    const padMap = (): Int32Array | null => {
+      if (!coverage) return null;
+      const pad = Math.max(0, Math.round(p.padding));
+      let m = cov.padding.get(pad);
+      if (!m) { m = paddingMap(coverage, w, h, pad); cov.padding.set(pad, m); }
+      return m;
+    };
     /** evaluate the expressions `idxs` in one call; the results in the same order */
-    const evaluate = async (idxs: number[]): Promise<Float32Array[]> => {
+    const covId = coverage ? idOf(coverage) : 'all';
+    const graphVars = Object.keys(ctx.vars ?? {});
+    const keyOf = (c: Code): string => {
+      const src = c.vars.map((v) => { const nm = namedArrays.get(v); return `${v}:${nm ? idOf(nm) : idOf(variable(v))}`; }).join(',');
+      const gv = graphVars.filter((k) => usesName(c.code, k)).map((k) => `${k}=${JSON.stringify((ctx.vars as Record<string, unknown>)[k])}`).join(',');
+      return `expr|${idOf(ctx.engine.host)}|${n}|${covId}|${c.code}|${src}|${gv}`;
+    };
+    const evaluate = async (all: number[]): Promise<Float32Array[]> => {
+      const keys = all.map((i) => keyOf(codes[i])), got: (Float32Array | null)[] = all.map(() => null);
+      all.forEach((_, k) => {
+        const e = memoGet(keys[k], gen);
+        if (!e) return;
+        got[k] = e.value;
+        if (e.bad) ctx.warn(`${type}: ${codes[all[k]].label}: ${e.bad} texel(s) gave NaN, infinity or no number; written as 0`);
+        const fresh = e.hidden.filter((v) => !hiddenWarned.has(v));
+        if (fresh.length) { for (const v of fresh) hiddenWarned.add(v); ctx.warn(`${type}: ${fresh.join(', ')} in an expression ${fresh.length === 1 ? 'is' : 'are'} a mask variable, not the graph var of that name; rename the var to read it here`); }
+      });
+      const idxs = all.filter((_, k) => !got[k]);
+      if (!idxs.length) return got as Float32Array[];
+      const vals = await evaluateFresh(idxs);
+      let j = 0;
+      all.forEach((_, k) => { if (!got[k]) got[k] = vals[j++]; });
+      return got as Float32Array[];
+    };
+    const evaluateFresh = async (idxs: number[]): Promise<Float32Array[]> => {
       const exprs = idxs.map((i) => codes[i]);
       const inputs: Record<string, Float32Array> = {};
       for (const c of exprs) for (const v of c.vars) if (!inputs[v]) inputs[v] = variable(v);
@@ -334,6 +436,7 @@ defineNode({
         const r = await runPixelExprs({ host: ctx.engine.host, exprs, inputs, count: n, mask: coveredMask, covered, vars: ctx.vars, timeoutMs: ctx.engine.scriptTimeoutMs },
           (job, serial) => ctx.parallelMap('wrangle', job, { serial, minElements: 65536, timeoutMs: ctx.engine.scriptTimeoutMs + 10000 }));
         r.bad.forEach((c, i) => { if (c) ctx.warn(`${type}: ${exprs[i].label}: ${c} texel(s) gave NaN, infinity or no number; written as 0`); });
+        r.values.forEach((v, i) => memoPut(keyOf(exprs[i]), gen, v, r.bad[i] ?? 0, r.hidden));
         const fresh = r.hidden.filter((v) => !hiddenWarned.has(v));
         if (fresh.length) {
           for (const v of fresh) hiddenWarned.add(v);
@@ -367,8 +470,11 @@ defineNode({
         if (finite) { namedArrays.set(named[j].name, a); j++; continue; }
       }
       if (/^-?\d+(\.\d+)?$/.test(t)) {
+        const ckey = `const|${n}|${coverage ? idOf(coverage) : 'all'}|${t}`, kept = memoGet(ckey, gen);
+        if (kept) { namedArrays.set(named[j].name, kept.value); j++; continue; }
         const a = typeof SharedArrayBuffer !== 'undefined' ? new Float32Array(new SharedArrayBuffer(n * 4)) : new Float32Array(n);
         if (Number(t) !== 0) for (let q = 0; q < covered.length; q++) a[covered[q]] = Number(t);
+        memoPut(ckey, gen, a);
         namedArrays.set(named[j].name, a); j++; continue;
       }
       const group = new Set([named[j].name]);
@@ -411,47 +517,101 @@ defineNode({
       const imageNormals = layers.some((L) => L.image && imgOf(L).channels('normal') === 4);
       let flat: Float32Array | null = null;
       if (!baseNormal && imageNormals) { flat = new Float32Array(n * 4); for (let i = 0; i < n; i++) { flat[i * 4] = 0.5; flat[i * 4 + 1] = 0.5; flat[i * 4 + 2] = 1; flat[i * 4 + 3] = 1; } }
-      const stack = startStack(w, h, base.data, base.ch, rough, metal, covered, baseNormal ?? flat);
       const occ = occCode >= 0 ? (await evaluate([occCode]))[0] : null;
-      // the layers in groups whose expressions fit the memory budget: each group's distinct expressions in one call
-      const cap = Math.max(2, Math.floor(RESULT_BUDGET / (n * 4)));
-      const results = new Map<number, Float32Array>();
-      const lastUse = (name: string) => codes.reduce((m, c, i) => (c.vars.includes(name) && i !== occCode ? Math.max(m, c.last) : m), -1);
-      let li = 0;
-      while (li < layers.length) {
-        const fresh = new Set<number>();
-        let end = li;
-        while (end < layers.length) {
-          const need = [layerCodes[end].mask, layerCodes[end].by].filter((c) => c >= 0 && !results.has(c) && !fresh.has(c));
-          if (end > li && results.size + fresh.size + need.length > cap) break;
-          need.forEach((c) => fresh.add(c));
-          end++;
+      const cap = Math.max(2, Math.floor(stackLimits.resultBytes / (n * 4)));
+      const directx = p.normal_format === 'directx', stackNormal = baseNormal ?? flat;
+      const need = [...new Set(layerCodes.flatMap((lc) => [lc.mask, lc.by]).filter((c) => c >= 0))];
+      if (need.length <= cap) {
+        // every layer's arrays at once: the whole stack of each texel in one pass, on the worker threads in ranges of
+        // the covered texels (each texel's stack is its own), then the normal from the summed height the same way
+        const vals = await evaluate(need), A: Record<string, TypedArray> = { covered, base: base.data };
+        need.forEach((c, i) => { A[`e${c}`] = vals[i]; });
+        if (typeof rough !== 'number') A.roughness = rough;
+        if (typeof metal !== 'number') A.metallic = metal;
+        if (stackNormal) A.bnormal = stackNormal;
+        if (occ) A.occlusion = occ;
+        const jl: StackJobLayer[] = layers.map((L, k) => {
+          const lc = layerCodes[k], src = sourceOf(L);
+          const put = (a: Float32Array | null | undefined, tag: string) => { if (!a) return null; A[`${tag}${k}`] = a; return `${tag}${k}`; };
+          let mask = `e${lc.mask}`;
+          if (lc.direct) { mask = `v_${lc.direct}`; A[mask] = variable(lc.direct); }
+          const { name, color, mode, opacity, roughness, roughnessOffset, metallic, height, signed } = L;
+          return { spec: { name, color, mode, opacity, roughness, roughnessOffset, metallic, height, signed }, mask, by: lc.by >= 0 ? `e${lc.by}` : null, color: put(src?.color, 'sc'), roughness: put(src?.roughness, 'sr'), normal: put(src?.normal, 'sn') };
+        });
+        const f32 = (k: number) => new Float32Array(inShared(n * k * 4));
+        const R: Record<string, Float32Array> = { color: f32(4), sroughness: f32(1), smetallic: f32(1), relief: f32(1), baseColor: f32(4), orm: f32(4) };
+        if (stackNormal) R.snormal = f32(4);
+        const args: StackJobArgs = { w, h, baseCh: base.ch, roughness: typeof rough === 'number' ? rough : null, metallic: typeof metal === 'number' ? metal : null, layers: jl, normal: !!stackNormal, occlusion: !!occ };
+        // the inputs in shared memory, kept with their arrays, so a cook after a slider moved copies only what changed
+        for (const [k, a] of Object.entries(A)) A[k] = sharedOf(a);
+        await ctx.parallelMap('layer_stack', { count: covered.length, args, inputs: A, results: R });
+        const NA: Record<string, TypedArray> = { relief: R.relief, covered };
+        if (coverage) NA.coverage = sharedOf(coverage);
+        if (island) NA.island = sharedOf(island);
+        if (texel) { NA.texu = texel.u; NA.texv = texel.v; }
+        if (stackNormal) NA.snormal = R.snormal;
+        const normal = f32(4);
+        await ctx.parallelMap('layer_normal', { count: covered.length, args: { w, h, size: base.img.size, directx, texel: !!texel, overlay: !!stackNormal, coverage: !!coverage, island: !!island }, inputs: NA, results: { normal } });
+        const maps = padMaps({ baseColor: R.baseColor, normal, orm: R.orm, height: R.relief }, w, h, padMap());
+        out.volumes.push(make('base_color', maps.baseColor), make('normal', maps.normal), make('orm', maps.orm), make('height', maps.height));
+      } else {
+        const stack = startStack(w, h, base.data, base.ch, rough, metal, covered, stackNormal);
+        // more arrays than the memory budget holds at once: the layers in groups whose expressions fit it, each group's
+        // distinct expressions in one call
+        const results = new Map<number, Float32Array>();
+        const lastUse = (name: string) => codes.reduce((m, c, i) => (c.vars.includes(name) && i !== occCode ? Math.max(m, c.last) : m), -1);
+        let li = 0;
+        while (li < layers.length) {
+          const fresh = new Set<number>();
+          let end = li;
+          while (end < layers.length) {
+            const need = [layerCodes[end].mask, layerCodes[end].by].filter((c) => c >= 0 && !results.has(c) && !fresh.has(c));
+            if (end > li && results.size + fresh.size + need.length > cap) break;
+            need.forEach((c) => fresh.add(c));
+            end++;
+          }
+          if (fresh.size) {
+            const idxs = [...fresh], vals = await evaluate(idxs);
+            idxs.forEach((c, i) => results.set(c, vals[i]));
+          }
+          for (let k = li; k < end; k++) {
+            const lc = layerCodes[k];
+            applyLayer(stack, layers[k], lc.direct ? variable(lc.direct) : results.get(lc.mask)!, lc.by >= 0 ? results.get(lc.by)! : null, sourceOf(layers[k]));
+          }
+          // what no later layer reads is dropped
+          for (const c of [...results.keys()]) if (codes[c].last < end) results.delete(c);
+          for (const v of [...arrays.keys()]) if (lastUse(v) < end && !layerCodes.slice(end).some((x) => x.direct === v)) arrays.delete(v);
+          li = end;
         }
-        if (fresh.size) {
-          const idxs = [...fresh], vals = await evaluate(idxs);
-          idxs.forEach((c, i) => results.set(c, vals[i]));
-        }
-        for (let k = li; k < end; k++) {
-          const lc = layerCodes[k];
-          applyLayer(stack, layers[k], lc.direct ? variable(lc.direct) : results.get(lc.mask)!, lc.by >= 0 ? results.get(lc.by)! : null, sourceOf(layers[k]));
-        }
-        // what no later layer reads is dropped
-        for (const c of [...results.keys()]) if (codes[c].last < end) results.delete(c);
-        for (const v of [...arrays.keys()]) if (lastUse(v) < end && !layerCodes.slice(end).some((x) => x.direct === v)) arrays.delete(v);
-        li = end;
+        const maps = finishStack(stack, { occlusion: occ, coverage, padding: p.padding, texel, size: base.img.size, island, directx, paddingMap: padMap() ?? undefined });
+        out.volumes.push(make('base_color', maps.baseColor), make('normal', maps.normal), make('orm', maps.orm), make('height', maps.height));
       }
-      const maps = finishStack(stack, { occlusion: occ, coverage, padding: p.padding, texel, size: base.img.size, island, directx: p.normal_format === 'directx' });
-      out.volumes.push(make('base_color', maps.baseColor), make('normal', maps.normal), make('orm', maps.orm), make('height', maps.height));
     }
     if (named.length && p.outputs !== 'maps') {
       // the named masks as layers of one image, clamped to 0..1 and padded from the coverage like the maps
       const img = new Image(w, h, `${prefix}_masks`).takeSize(base.img);
-      const map = coverage ? paddingMap(coverage, w, h, Math.max(0, Math.round(p.padding))) : null;
+      // the texels padding writes (those not covered) and where each copies from: one list for every mask
+      let pads: Int32Array | null | undefined;
+      const padList = () => {
+        const map = padMap();
+        if (!map) return null;
+        let c = 0;
+        for (let k = 0; k < map.length; k++) if (map[k] !== k) c++;
+        const list = new Int32Array(c * 2);
+        c = 0;
+        for (let k = 0; k < map.length; k++) if (map[k] !== k) { list[c++] = k; list[c++] = map[k]; }
+        return list;
+      };
       for (const m of named) {
         if (!m.write) continue;
-        const src = namedArrays.get(m.name)!, a = new Float32Array(n);
+        const src = namedArrays.get(m.name)!, pkey = `pad|${idOf(src)}|${covId}|${Math.round(p.padding)}`;
+        const kept = memoGet(pkey, gen);
+        if (kept) { img.set(m.name, kept.value); continue; }
+        const a = new Float32Array(n);
         for (let q = 0; q < covered.length; q++) { const i = covered[q], v = src[i]; a[i] = v > 0 ? (v < 1 ? v : 1) : 0; }
-        if (map) applyPadding(a, 1, map, [0]);
+        if (pads === undefined) pads = padList();
+        if (pads) for (let q = 0; q < pads.length; q += 2) { const s = pads[q + 1]; a[pads[q]] = s >= 0 ? a[s] : 0; }
+        memoPut(pkey, gen, a);
         img.set(m.name, a);
       }
       for (const l of ['texel', 'island']) { const a = base.img.layer(l); if (a) img.set(l, a); }

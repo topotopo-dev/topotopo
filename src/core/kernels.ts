@@ -25,6 +25,8 @@ import type { StepArgs } from './particles.ts';
 import { getLoadedKernels } from '../wasm/kernels.ts';
 import { TriBVH } from './spatial.ts';
 import { bakeDistanceRange, bakeNoiseRange, edgeWearRange, surfaceBuriedRange, surfaceCurvatureRange, surfaceInterpRange, surfaceRaysRange, surfaceSpreadRange } from './surface.ts';
+import { stackNormalRange, stackRange } from './layers.ts';
+import type { StackJobArgs } from './layers.ts';
 import type { CurvatureCloudArgs, EdgeWearArgs, InterpArgs, NoiseArgs, SpreadArgs, SurfaceRayArgs } from './surface.ts';
 
 export type TypedArray =
@@ -340,6 +342,18 @@ const selftestSpin: Kernel = {
   },
 };
 
+/** tex_layers: the whole layer stack of a range of covered texels (src/core/layers.ts stackRange) */
+const layerStack: Kernel = {
+  minElements: 65536,
+  run(a: StackJobArgs, A, start, end) { stackRange(a, A, start, end); },
+};
+
+/** tex_layers: the normal map of the composed stack on a range of covered texels */
+const layerNormal: Kernel = {
+  minElements: 65536,
+  run(a, A, start, end) { stackNormalRange(a, A, start, end); },
+};
+
 /** a worker handles this one itself by exiting (crash recovery); on the cooking thread it only throws */
 const selftestCrash: Kernel = {
   minElements: 1 << 30,
@@ -360,6 +374,8 @@ export const KERNELS: Record<string, Kernel> = {
   surface_interp: surfaceInterp,
   surface_spread: surfaceSpread,
   edge_wear: edgeWear,
+  layer_stack: layerStack,
+  layer_normal: layerNormal,
   bake_noise: bakeNoiseK,
   bake_distance: bakeDistanceK,
   kd_build: kdBuild,
