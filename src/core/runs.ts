@@ -677,10 +677,18 @@ export interface RasterOpts {
   /**
    * The half width of a broad, faint stain around each run as a multiple of the run's head width (0 = none; out.stain):
    * it keeps that width down the run and widens by half toward the tail instead of tapering, has no gaps, fades
-   * sideways ((1 − d²/w²)²) and along the run to almost nothing at the tail; where stains of runs meet, the stronger
-   * one holds.
+   * sideways ((1 − d²/w²)²) and along the run to almost nothing at the tail; where stains of runs meet they add up
+   * (1 − Π(1 − v), one term per run), so many faint runs under an edge merge into a wash.
    */
   stain?: number;
+  /** each run's stain times its strength (0..1) to this power: 0 = all alike, 2 = most faint and a few strong */
+  stainSkew?: number;
+  /**
+   * Draw the stain exactly only at every step-th sample of the sample grid (both ways) and interpolate between them;
+   * a sample whose four lattice corners are not all on its island and its surface is drawn exactly. pix is each
+   * sample's index in the grid of gw × gh samples, island its uv island.
+   */
+  stainLattice?: { pix: Int32Array; gw: number; gh: number; step: number; island: ArrayLike<number> };
 }
 
 /**
@@ -838,6 +846,8 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
   const segs: number[] = [];
   for (let k = 0; k < ns; k++) if (rs.POOL[k] !== 1 && rs.AMP[k] > 0) segs.push(k);
   if (!segs.length) return;
+  const skew = Math.max(0, opts.stainSkew ?? 0), runW = new Float32Array(rs.runLen.length);
+  for (let r = 0; r < runW.length; r++) runW[r] = skew > 0 ? Math.max(0, Math.min(1, rs.strength[r])) ** skew : 1;
   /** the farthest the stain reaches from segment k (widest at the tail: 1.5 × its width), plus half a sample */
   const reach = (k: number) => 1.5 * K * headHW[rs.ID[k]] + 0.5 * tauCap;
   let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity, rMax = 0;
@@ -876,18 +886,18 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
     if ((m & 255) === 0) check?.();
     range(segs[m], (c) => { items[fill[c]++] = segs[m]; });
   }
-  for (let i = 0; i < n; i++) {
-    if ((i & 4095) === 0) check?.();
-    if (inp.skip && inp.skip[i]) continue;
+  /** the stain at sample i: per run its strongest segment, the runs added up (a cell lists a run's segments in a row) */
+  const stainAt = (i: number): number => {
     const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
     const ci = Math.floor((px - mnx) / cs), cj = Math.floor((py - mny) / cs), ck = Math.floor((pz - mnz) / cs);
-    if (ci < 0 || cj < 0 || ck < 0 || ci >= dx || cj >= dy || ck >= dz) continue;
+    if (ci < 0 || cj < 0 || ck < 0 || ci >= dx || cj >= dy || ck >= dz) return 0;
     const cell = (ck * dy + cj) * dx + ci, s0 = count[cell], s1 = count[cell + 1];
-    if (s0 === s1) continue;
+    if (s0 === s1) return 0;
     const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2];
-    let best = 0;
+    let rest = 1, run = -1, best = 0;
     for (let m = s0; m < s1; m++) {
       const k = items[m], o = k * 6, id = rs.ID[k];
+      if (id !== run) { rest *= 1 - Math.min(1, best); run = id; best = 0; }
       const ax = A[o], ay = A[o + 1], az = A[o + 2];
       const ex = A[o + 3] - ax, ey = A[o + 4] - ay, ez = A[o + 5] - az;
       const l2 = ex * ex + ey * ey + ez * ez;
@@ -904,10 +914,46 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
       // the sample lies on the same surface: its normal agrees with the run's there
       const mx = rs.NRM[o] + (rs.NRM[o + 3] - rs.NRM[o]) * t, my = rs.NRM[o + 1] + (rs.NRM[o + 4] - rs.NRM[o + 1]) * t, mz = rs.NRM[o + 2] + (rs.NRM[o + 5] - rs.NRM[o + 2]) * t;
       if (nx * mx + ny * my + nz * mz < 0.5 * Math.sqrt(mx * mx + my * my + mz * mz)) continue;
-      const q = 1 - d2 / (sw * sw), v = q * q * (1 - 0.95 * smoothstep(0.1, 1, along)) * rs.AMP[k];
+      const q = 1 - d2 / (sw * sw), v = q * q * (1 - 0.95 * smoothstep(0.1, 1, along)) * rs.AMP[k] * runW[id];
       if (v > best) best = v;
     }
-    stain[i] = Math.min(1, best);
+    rest *= 1 - Math.min(1, best);
+    return 1 - rest;
+  };
+  const lat = opts.stainLattice, f = lat ? Math.max(1, Math.floor(lat.step)) : 1;
+  if (!lat || f === 1) {
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 0) check?.();
+      if (!(inp.skip && inp.skip[i])) stain[i] = stainAt(i);
+    }
+    return;
+  }
+  // the lattice exactly, then every other sample from its four corners when they lie on its island and surface
+  const { pix, gw, gh, island } = lat;
+  const at = new Int32Array(gw * gh).fill(-1);
+  for (let i = 0; i < n; i++) at[pix[i]] = i;
+  const done = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if ((i & 4095) === 0) check?.();
+    const x = pix[i] % gw, y = (pix[i] - x) / gw;
+    if (x % f || y % f) continue;
+    done[i] = 1;
+    if (!(inp.skip && inp.skip[i])) stain[i] = stainAt(i);
+  }
+  const corner = (i: number, x: number, y: number): number => {
+    if (x >= gw || y >= gh) return -1;
+    const j = at[y * gw + x];
+    if (j < 0 || !done[j] || (inp.skip && inp.skip[j]) || island[j] !== island[i]) return -1;
+    return N[i * 3] * N[j * 3] + N[i * 3 + 1] * N[j * 3 + 1] + N[i * 3 + 2] * N[j * 3 + 2] >= 0.95 ? j : -1;
+  };
+  for (let i = 0; i < n; i++) {
+    if ((i & 4095) === 0) check?.();
+    if (done[i] || (inp.skip && inp.skip[i])) continue;
+    const x = pix[i] % gw, y = (pix[i] - x) / gw, x0 = x - (x % f), y0 = y - (y % f);
+    const a = corner(i, x0, y0), b = corner(i, x0 + f, y0), c = corner(i, x0, y0 + f), d = corner(i, x0 + f, y0 + f);
+    if (a < 0 || b < 0 || c < 0 || d < 0) { stain[i] = stainAt(i); continue; }
+    const tx = (x - x0) / f, ty = (y - y0) / f;
+    stain[i] = (stain[a] * (1 - tx) + stain[b] * tx) * (1 - ty) + (stain[c] * (1 - tx) + stain[d] * tx) * ty;
   }
 }
 

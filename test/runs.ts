@@ -5,6 +5,8 @@
 //         another, and do not depend on the order of the parts or on the parts that are added elsewhere
 //   grid: the texel grid gives what testing every segment gives (soft edges are not clipped); the time limit and the
 //         segment limit stop a bake
+//   stain: stains of many runs add up to a wash, skew makes most of them faint, the lattice gives nearly the exact stain
+//         and keeps to the islands
 //   node: charts of different texel density across a fold agree with the one-chart surface in 3D, the same bits for one
 //         seed, the layers (also with supersample), the same image at ten times the scale, every refusal, the example
 //   node test/runs.ts
@@ -347,10 +349,17 @@ section('node: a broad stain around the runs');
     if (v > 0.05) wide++;
     // half width 3 × the head (3 mm, swelling to 3.9 mm), 1.5 × that at the tail: 17.6 mm around runs from x 0.28 to 0.32
     if (v > 0 && (x < 0.28 - 0.0196 || x > 0.32 + 0.0196 || y > 0.45 + 0.002)) outside++;
-    if (Math.abs(x - 0.3) < 0.02 && y < 0.45 && y > 0.43) { top += v; nTop++; }
-    if (Math.abs(x - 0.3) < 0.02 && y < 0.37 && y > 0.35) { low += v; nLow++; }
   }
   check(wide > 1.5 * core && outside === 0, `the stain is wider than the runs (${wide} texels against ${core}) and stays within its reach (${outside} beyond)`);
+  // the fade of one run (few runs: where many meet, their stains add up to a wash)
+  const few = findImage((await cookOn(engines.pool, flow('uncut', { ...P, density: 15, stain: 3 }), 'f')).geo!, 'f')!.layer('stain')!;
+  top = nTop = low = nLow = 0;
+  for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
+    const k = j * R + i, x = ((i + 0.5) / R) / SPAN * SIDE, y = ((R - j - 0.5) / R) / SPAN * SIDE;
+    if (m[k] < 1 || Math.abs(x - 0.3) >= 0.02) continue;
+    if (y < 0.45 && y > 0.43) { top += few[k]; nTop++; }
+    if (y < 0.37 && y > 0.35) { low += few[k]; nLow++; }
+  }
   check(nTop > 0 && nLow > 0 && top / nTop > 2 * (low / nLow), `and fades toward the tail (${(top / nTop).toFixed(3)} near the source, ${(low / nLow).toFixed(3)} near the tail)`);
 }
 
@@ -430,6 +439,43 @@ const rasterScene = () => {
   limits.maxSegments = was;
   check(lim.errors.join('').includes('bake_flow: the runs would need more than 300 segments') && lim.errors.join('').includes('density'), `too many segments are refused with the params to lower: ${lim.errors.join('; ')}`);
   check(was === 400000, 'the segment limit is 400,000');
+}
+
+section('stain: adds up, skew, lattice');
+{
+  const g = build(wallParts());
+  const step = 0.001, xs = 100, ys = 150, n = xs * ys;
+  const P = new Float64Array(n * 3), N = new Float64Array(n * 3), tau = new Float32Array(n).fill(step), pix = new Int32Array(n);
+  for (let j = 0; j < ys; j++) for (let i = 0; i < xs; i++) { const k = j * xs + i; P[k * 3] = 0.4 + i * step; P[k * 3 + 1] = 0.66 + j * step; N[k * 3 + 2] = 1; pix[k] = k; }
+  const out = () => ({ C: new Float32Array(n), along: new Float32Array(n), head: new Float32Array(n), strength: new Float32Array(n), id: new Float32Array(n), stain: new Float32Array(n) });
+  const inp = { P, N, tau };
+  const mean = (a: Float32Array) => { let s = 0; for (const v of a) s += v; return s / a.length; };
+  const sparse = trace(g, { length: [0.1, 0.1], density: 10, seed: 3 }).runs, dense = trace(g, { length: [0.1, 0.1], density: 150, seed: 3 }).runs;
+  const a = out(), b = out();
+  rasterRuns(sparse, inp, 0, 3, a, { stain: 4 });
+  rasterRuns(dense, inp, 0, 3, b, { stain: 4 });
+  let peak = 0; for (const v of b.stain) peak = Math.max(peak, v);
+  check(mean(b.stain) > 3 * mean(a.stain) && peak > 0.95, `stains add up: many runs merge into a wash (mean ${mean(b.stain).toFixed(3)} against ${mean(a.stain).toFixed(3)} for a few, peak ${peak.toFixed(3)})`);
+  // skew: the stain of each run times its strength squared, so most are faint
+  const s2 = out();
+  rasterRuns(dense, inp, 0, 3, s2, { stain: 4, stainSkew: 2 });
+  let lower = true; for (let k = 0; k < n; k++) if (s2.stain[k] > b.stain[k] + 1e-6) lower = false;
+  check(lower && mean(s2.stain) < 0.8 * mean(b.stain), `skew 2 makes the stain fainter, never stronger (mean ${mean(s2.stain).toFixed(3)} against ${mean(b.stain).toFixed(3)})`);
+  // the lattice: drawn exactly every 4th sample, between them interpolated; close to drawing every sample
+  const l = out();
+  rasterRuns(dense, inp, 0, 3, l, { stain: 4, stainSkew: 2, stainLattice: { pix, gw: xs, gh: ys, step: 4, island: new Float32Array(n) } });
+  // (the line where the runs begin is a step in the exact stain: the lattice softens it over four samples)
+  let same = true, sum = 0; const d: number[] = [];
+  for (let k = 0; k < n; k++) { const x = Math.abs(l.stain[k] - s2.stain[k]); d.push(x); sum += x; if (l.C[k] !== s2.C[k]) same = false; }
+  d.sort((p, q) => p - q);
+  const p99 = d[Math.floor(n * 0.99)], avg = sum / n;
+  check(same && p99 < 0.1 && avg < 0.01, `a lattice of every 4th sample gives nearly the same stain (99 % of samples within ${p99.toFixed(3)}, mean difference ${avg.toFixed(4)}) and the same runs`);
+  // a sample whose lattice corners lie on another island is drawn exactly
+  const isl = new Float32Array(n); for (let k = 0; k < n; k++) isl[k] = k % xs < 50 ? 0 : 1;
+  const li = out();
+  rasterRuns(dense, inp, 0, 3, li, { stain: 4, stainSkew: 2, stainLattice: { pix, gw: xs, gh: ys, step: 4, island: isl } });
+  let exactAtSeam = true; for (let j = 0; j < ys; j++) for (const i of [48, 49, 50, 51]) { const k = j * xs + i; if (i % 4 && Math.abs(li.stain[k] - s2.stain[k]) > 1e-6 && (i === 49 || i === 50)) exactAtSeam = false; }
+  check(exactAtSeam, 'next to an island border the stain is drawn exactly, not taken from the other island');
 }
 
 // ---------------------------------------------------------------- randomness follows where things are

@@ -127,8 +127,15 @@ function cook(ctx: CookContext): Geometry {
   if (srcMask) { skipSamples = new Uint8Array(s.n); for (let k = 0; k < s.n; k++) skipSamples[k] = srcMask[triPrim[s.tri[k]]]; }
   const C = new Float32Array(s.n), along = new Float32Array(s.n), head = new Float32Array(s.n), strength = new Float32Array(s.n), id = new Float32Array(s.n);
   const stainK = Math.max(0, Number(p.stain) || 0), stain = stainK > 0 ? new Float32Array(s.n) : undefined;
+  // texel sizes and islands, as every bake writes them (the stain's lattice keeps to the islands)
+  const tl = texelLayers({ s, uv, tris, g } as unknown as Bake, pos);
+  // the stain is smooth: drawn exactly on a lattice of samples a third of its narrowest half width apart, between them
+  // interpolated
+  const medTau = (() => { const t: number[] = []; for (let k = 0; k < s.n; k += Math.max(1, Math.floor(s.n / 4096))) t.push(tau[k]); t.sort((a, b) => a - b); return t[t.length >> 1] || 1; })();
+  const latStep = Math.max(1, Math.min(8, Math.floor((stainK * 0.5 * Math.min(prm.width[0], prm.width[1])) / (3 * medTau))));
+  const stainLattice = stain && latStep > 1 ? { pix: s.pix, gw: W * S, gh: H * S, step: latStep, island: tl.island.vals } : undefined;
   const tRaster = performance.now();
-  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, { check: () => budget.check(), stain: stainK }); } catch (e) {
+  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, { check: () => budget.check(), stain: stainK, stainSkew: Math.max(0, Number(p.stain_skew) || 0), stainLattice }); } catch (e) {
     if (e instanceof FlowLimit) throw new NodeError(`${type}: the runs cover too many texel cells (${e.count.toLocaleString('en-US')} registrations)`, 'lower pool or width, or density');
     throw e;
   }
@@ -160,8 +167,6 @@ function cook(ctx: CookContext): Geometry {
     for (let i = 0; i < out.length; i++) out[i] = data[i * NL + c];
     img.set(name === 'C' ? MAIN_LAYER : name, out);
   });
-  // texel sizes and islands, as every bake writes them
-  const tl = texelLayers({ s, uv, tris, g } as unknown as Bake, pos);
   const T = resolve(s, tl.texel.vals, 4).data, I = resolve(s, tl.island.vals, 1).data;
   dilate(T, 4, W, H, first.coverage, pad, tl.texel.background);
   dilate(I, 1, W, H, first.coverage, pad, tl.island.background);
@@ -220,7 +225,8 @@ defineNode({
     step: { type: 'float', default: 0, min: 0, max: 5, desc: 'walking step in metres (0 = half the smallest width)', aliases: ['step_size'] },
     spill: { type: 'float', default: 0.05, min: 0, max: 50, desc: 'a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are', aliases: ['spill_reach', 'overflow'] },
     seed: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'seed of the run starts, lengths, widths, wander and gaps' },
-    stain: { type: 'float', default: 0, min: 0, max: 20, desc: 'a broad faint stain around each run, its half width this many times the run\'s head width (0 = none): layer stain, keeping its width down the run and widening by half instead of tapering, no gaps, fading sideways and toward the tail; the stronger stain holds where two meet', aliases: ['stain_width', 'halo'] },
+    stain: { type: 'float', default: 0, min: 0, max: 20, desc: 'a broad faint stain around each run, its half width this many times the run\'s head width (0 = none): layer stain, keeping its width down the run and widening by half instead of tapering, no gaps, fading sideways and toward the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash', aliases: ['stain_width', 'halo'] },
+    stain_skew: { type: 'float', default: 0, min: 0, max: 8, desc: 'each run\'s stain times its strength (0..1; the longer runs are the stronger) to this power: 0 = every stain alike, 2 = most faint and a few strong', aliases: ['stain_contrast'] },
   },
   outputs: 'image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask (and stain when asked for)',
   usesNodeName: NAMED_BY_NODE,
