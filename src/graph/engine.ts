@@ -662,6 +662,7 @@ export class Engine {
     this.concurrent = !!host.pool && host.pool.size > 0;
     if (host.limits?.scriptMs) this.scriptTimeoutMs = host.limits.scriptMs;
     if (host.limits?.simMs) this.simTimeoutMs = host.limits.simMs;
+    if (host.cacheBytes) this.cache.maxBytes = host.cacheBytes;
   }
 
   async init() {

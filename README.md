@@ -221,7 +221,8 @@ From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/t
 "--package", "C:/path/to/topotopo/package"]` (`node src/cli.ts mcp …` is the same server).
 
 Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_PACKAGE`,
-`TOPOTOPO_SCRIPT_TIMEOUT_MS`, `TOPOTOPO_SIM_TIMEOUT_MS` and `TOPOTOPO_WORKERS`. The server exits when the client closes its stdin.
+`TOPOTOPO_SCRIPT_TIMEOUT_MS`, `TOPOTOPO_SIM_TIMEOUT_MS`, `TOPOTOPO_WORKERS` and `TOPOTOPO_CACHE_MB` (the memory kept for cooked
+results; default a quarter of the machine's memory). The server exits when the client closes its stdin.
 
 The server and the command line keep the result of every node that took half a second or more to cook in a cache folder
 (`topotopo/nodes` in your OS cache folder: `%LOCALAPPDATA%` on Windows, `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
