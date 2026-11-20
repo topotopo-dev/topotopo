@@ -472,7 +472,7 @@ const failW = (msg: string, hint?: string) => new NodeError(`${TW}: ${msg}`, hin
  * radius at any radius, a smooth round only by radius / its own radius, so broad rounds (a sphere at a fifth of its
  * radius reads about 0.3) stay out and bevels and edges count.
  */
-const edgeField = (x: number) => { const t = (x - 0.35) / 0.5; return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
+const edgeField = (x: number) => { const t = (x - 0.3) / 0.4; return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
 /** Near the focus, wear reaches up to 1 + FOCUS_REACH × focus_amount times width in from an edge. */
 const FOCUS_REACH = 1.5;
 /** Softness of the chip, bare and core outlines, in units of the wear field. */
@@ -521,9 +521,10 @@ function cookEdgeWear(ctx: CookContext) {
   });
   if (surface) steps.push(() => {
     const med = mesh.median, r = p.radius;
-    // bake_measure's cloud (every 4 texels) when it is fine enough for the radius, so the two share it; else denser
+    // bake_measure's cloud (every 4 texels) when it is fine enough for the radius (four spacings or more across it), so
+    // the two share it; else denser, a quarter of the radius apart: on a coarser cloud the wear depends on the layout
     const kM = med > 0 ? Math.max(1, Math.max(0.0005, 4 * med) / med) : 1;
-    const k = kM * med <= r ? kM : Math.max(1, med > 0 ? r / (2 * med) : 1);
+    const k = 4 * kM * med <= r ? kM : Math.max(1, med > 0 ? r / (4 * med) : 1);
     const sc = cloudOf(b, mesh, k);
     const surG = surPolys ? sur! : null;
     const scene = () => (surG ? RayScene.of(Geometry.merge([g, surG])) : memoBake(g, 'rayscene', () => RayScene.of(g)));

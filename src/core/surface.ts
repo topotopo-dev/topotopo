@@ -1288,8 +1288,8 @@ export function runInterp(run: RunKernel, s: { n: number; tri: Int32Array; b1: F
 // ---------------------------------------------------------------- edge wear (bake_edge_wear)
 
 /**
- * Edge proximity per cloud point (kernel surface_spread), at two reaches: V[2i] the largest E[q] × (1 − d / width),
- * V[2i + 1] the largest E[q] × (1 − d / far), over the points q of the same part within reach that are not buried and
+ * Edge proximity per cloud point (kernel surface_spread), at two reaches: V[2i] the largest E[q] × (1 − (d / width)²),
+ * V[2i + 1] the largest E[q] × (1 − (d / far)²), over the points q of the same part within reach that are not buried and
  * do not face away (normals more than 120° apart: the far side of a thin plate), the point itself included (far ≥
  * width). E is the edge field (0..1); buried points read 0. Shared: the cloud's A.CP, A.CN, A.CPiece, A.CB, its grid
  * A.GH, A.GS, A.GI, A.GP, and A.E; A.V out (2 per point).
@@ -1298,7 +1298,7 @@ export function surfaceSpreadRange(a: { width: number; far: number; deadline?: n
   const CP: Float64Array = A.CP, CN: Float64Array = A.CN, CPiece: Int32Array = A.CPiece, CB: Uint8Array | undefined = A.CB, E: Float32Array = A.E, V: Float32Array = A.V;
   const GH: Float64Array = A.GH, GS: Int32Array = A.GS, GI: Int32Array = A.GI, GP: Float64Array = A.GP;
   const ox = GH[0], oy = GH[1], oz = GH[2], h = GH[3], gx = GH[4], gy = GH[5], gz = GH[6];
-  const w = a.width, f = Math.max(a.width, a.far), f2 = f * f;
+  const w = a.width, w2 = w * w, f = Math.max(a.width, a.far), f2 = f * f;
   for (let i = start; i < end; i++) {
     if (late(a.deadline, i - start)) throw new Error(PAST_DEADLINE);
     if (CB && CB[i]) { V[i * 2] = 0; V[i * 2 + 1] = 0; continue; }
@@ -1314,11 +1314,12 @@ export function surfaceSpreadRange(a: { width: number; far: number; deadline?: n
           const dx = GP[k * 3] - px, dy = GP[k * 3 + 1] - py, dz = GP[k * 3 + 2] - pz, d2 = dx * dx + dy * dy + dz * dz;
           if (d2 >= f2) continue;
           const q = GI[k], e = E[q];
-          if (e <= bestF || CPiece[q] !== pc || (CB && CB[q])) continue;
+          // e bounds both values q can give; best (the near one) is the smaller maximum
+          if (e <= best || CPiece[q] !== pc || (CB && CB[q])) continue;
           if (nx * CN[q * 3] + ny * CN[q * 3 + 1] + nz * CN[q * 3 + 2] < -0.5) continue;
-          const d = Math.sqrt(d2), vf = e * (1 - d / f);
+          const vf = e * (1 - d2 / f2);
           if (vf > bestF) bestF = vf;
-          if (d < w) { const v = e * (1 - d / w); if (v > best) best = v; }
+          if (d2 < w2) { const v = e * (1 - d2 / w2); if (v > best) best = v; }
         }
       }
     }
