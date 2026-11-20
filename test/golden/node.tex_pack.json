@@ -48,8 +48,7 @@
         "kind": "image",
         "layers": {
           "C": "8acb030878020892",
-          "island": "0ea4f725d471325f",
-          "mask": "90b9302588c4935f",
+          "island": "e5621d257af7a05f",
           "texel": "55fee96c89fd3b8e"
         },
         "name": "target_C"

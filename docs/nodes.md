@@ -13876,7 +13876,7 @@ category: `texture` · aliases: `blur`, `cop_blur`, `blur_hq`, `gaussian_blur`
 
 Blur an image: gaussian or box, separable, with the radius in metres; tileable images blur across their borders (the mean is preserved), an atlas inside each island.
 
-Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: radius = 2 sigma, three box passes of running sums, so the cost does not depend on the radius): the same real size at any resolution. On an atlas (the "island" and "texel" layers a bake writes) it is that size on every island whatever its texel density, and nothing is read across an island border.
+Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: radius = 2 sigma, three box passes of running sums, so the cost does not depend on the radius): the same real size at any resolution. On an atlas (the "island" and "texel" layers a bake writes) it is that size on every island whatever its texel density, and nothing is read across an island border. A texel of an island holds its whole-number id, the gutter around it (padding) the id plus a half, and a texel of no island -1.
 
 **Inputs**
 
@@ -15681,7 +15681,7 @@ category: `texture`
 
 Pack named images into aligned atlases and output per-item UV placement attributes.
 
-items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. The atlas images carry a texel layer (the own texel size of each item) and an island layer (one island per item, its gutter included, background between them) and a mask layer (the own pixels of the item: its gutter is padding, so a blur does not pull the empty gutter into the item and a distance does not take it for surface), so the filters after it work in metres on each item and tex_dilate pads inside it. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.
+items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. The atlas images carry a texel layer (the own texel size of each item) and an island layer (one island per item; its own pixels hold the number of the item and its gutter that number plus a half, so a filter treats the gutter as padding: a blur does not pull the empty gutter into the item and a distance does not take it for surface; background between the items is -1), so the filters after it work in metres on each item and tex_dilate pads inside it. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.
 
 **Inputs**
 
@@ -16548,7 +16548,7 @@ category: `texture` · aliases: `image_to_heightfield`, `texture_to_heightfield`
 
 Bridge: an image (grey or luminance) becomes a heightfield of the same sample count (u → +X, v → −Z).
 
-Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. extent is the extent in metres along X (Z follows the image aspect): give it, or the image must state how many metres it covers (a bake writes it, a generator states it when its texture_size is set, 1 included; a generator left at the default states nothing), else the node refuses, as there is no default size. The samples sit on the grid nodes, so a heightfield of extent E and an image of w pixels have a cell of E / (w - 1), and heightfield_to_tex writes an image covering the extent: the round trip keeps it exactly. Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.
+Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. extent is the extent in metres along X, first sample to last (Z follows the image aspect), so the cell is extent / (w - 1). Without one a sample is a texel of the image, so the cell is the texel of the image, its size / w: the image must state how many metres it covers (a bake writes it, a generator states it when its texture_size is set, 1 included; a generator left at the default states nothing), else the node refuses, as there is no default size. heightfield_to_tex writes an image of w x cell metres, whose texel is the cell, so a round trip through both keeps the cell exactly. Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.
 
 **Inputs**
 
@@ -16560,7 +16560,7 @@ Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 =
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `extent` | float | `0` | 0.. |  |  | extent along X in metres; 0 = the metres the image covers (its size, when the image states one: a texture_size set on its generator, 1 included, or a bake), and a refusal when it states none |
+| `extent` | float | `0` | 0.. |  |  | extent along X in metres, first sample to last; 0 = one sample per texel of the image (cell = its size / width, when the image states a size: a texture_size set on its generator, 1 included, or a bake), and a refusal when it states none |
 | `height_scale` | float | `1` |  |  | `amplitude` | metres per unit of image value |
 | `height_offset` | float | `0` |  |  |  | added height (metres) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |

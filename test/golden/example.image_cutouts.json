@@ -49,8 +49,7 @@
         "kind": "image",
         "layers": {
           "C": "fbf7e970bfa3a0d6",
-          "island": "036b8f97aa5a78fd",
-          "mask": "69715d5770ce523d",
+          "island": "d4466197846be4fd",
           "texel": "ded0699d25e83f97"
         },
         "name": "cutouts_color"
@@ -68,8 +67,7 @@
         "kind": "image",
         "layers": {
           "C": "0ca9bc7a65c4b664",
-          "island": "036b8f97aa5a78fd",
-          "mask": "69715d5770ce523d",
+          "island": "d4466197846be4fd",
           "texel": "ded0699d25e83f97"
         },
         "name": "cutouts_normal"
@@ -87,8 +85,7 @@
         "kind": "image",
         "layers": {
           "C": "6a4b4d4b0a37465d",
-          "island": "036b8f97aa5a78fd",
-          "mask": "69715d5770ce523d",
+          "island": "d4466197846be4fd",
           "texel": "ded0699d25e83f97"
         },
         "name": "cutouts_roughness"

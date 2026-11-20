@@ -39,7 +39,7 @@
         "kind": "image",
         "layers": {
           "C": "cc1c47bd4d09cdb7",
-          "island": "0968c228a28f1b56",
+          "island": "19727268b1d09f96",
           "mask": "5963c5b542beec4f",
           "texel": "cca48525b745925f"
         },
@@ -58,7 +58,7 @@
         "kind": "image",
         "layers": {
           "C": "c3c53fe902cbf53b",
-          "island": "0968c228a28f1b56",
+          "island": "19727268b1d09f96",
           "mask": "5963c5b542beec4f",
           "texel": "cca48525b745925f"
         },
@@ -77,7 +77,7 @@
         "kind": "image",
         "layers": {
           "C": "8edc34b0065345ae",
-          "island": "0968c228a28f1b56",
+          "island": "19727268b1d09f96",
           "mask": "5963c5b542beec4f",
           "texel": "cca48525b745925f"
         },
@@ -96,7 +96,7 @@
         "kind": "image",
         "layers": {
           "C": "ff9a69c43c799f7e",
-          "island": "0968c228a28f1b56",
+          "island": "19727268b1d09f96",
           "mask": "5963c5b542beec4f",
           "texel": "cca48525b745925f"
         },
