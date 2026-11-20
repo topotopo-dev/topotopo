@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "description": "Surface bakes on a model of several pieces: a plate, a bolt and a bevelled block standing flush on it, and a ball beside them. bake_measure reads occlusion, cavity and curvature at 2 cm and at 6 cm (the large radius reads the cloud merged into clusters); bake_edge_wear reads the same pieces. Faces pressed flush against another piece are buried and take no wear.",
+  "nodes": {
+    "plate": { "type": "box", "params": { "size": [0.4, 0.02, 0.3], "center": [0, 0.01, 0] } },
+    "bolt": { "type": "tube", "params": { "radius": 0.015, "height": 0.03, "cols": 6, "center": [-0.1, 0.035, 0] } },
+    "bolt_n": { "type": "normal", "in": ["bolt"], "params": { "cusp_angle": 30 } },
+    "block": { "type": "box", "params": { "size": [0.08, 0.06, 0.08], "center": [0.05, 0.05, 0.02] } },
+    "block_bevel": { "type": "poly_bevel", "in": ["block"], "params": { "offset": 0.003 } },
+    "ball": { "type": "sphere", "params": { "radius": 0.04, "rows": 16, "cols": 32, "center": [0.13, 0.06, -0.08] } },
+    "pieces": { "type": "merge", "in": ["plate", "bolt_n", "block_bevel", "ball"] },
+    "kit": { "type": "uv_unwrap", "in": ["pieces"] },
+    "measure": { "type": "bake_measure", "in": ["kit"], "params": { "resolution": 128, "samples": 8, "measures": [{ "by": "occlusion" }, { "by": "cavity" }, { "by": "curvature", "name": "edges", "radius": 0.02 }, { "by": "curvature", "name": "forms", "radius": 0.06 }] } },
+    "wear": { "type": "bake_edge_wear", "in": ["kit"], "params": { "resolution": 128, "amount": 0.6 } },
+    "bakes": { "type": "merge", "in": ["measure", "wear"] }
+  },
+  "output": "bakes"
+}

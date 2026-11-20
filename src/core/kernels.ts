@@ -24,8 +24,8 @@ import { particlesRange } from './particles.ts';
 import type { StepArgs } from './particles.ts';
 import { getLoadedKernels } from '../wasm/kernels.ts';
 import { TriBVH } from './spatial.ts';
-import { bakeDistanceRange, bakeNoiseRange, surfaceBuriedRange, surfaceCurvatureRange, surfaceInterpRange, surfaceRaysRange } from './surface.ts';
-import type { CurvatureCloudArgs, InterpArgs, NoiseArgs, SurfaceRayArgs } from './surface.ts';
+import { bakeDistanceRange, bakeNoiseRange, edgeWearRange, surfaceBuriedRange, surfaceCurvatureRange, surfaceInterpRange, surfaceRaysRange, surfaceSpreadRange } from './surface.ts';
+import type { CurvatureCloudArgs, EdgeWearArgs, InterpArgs, NoiseArgs, SpreadArgs, SurfaceRayArgs } from './surface.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -178,6 +178,20 @@ const surfaceInterp: Kernel = {
   minElements: 16384,
   chunksPerWorker: 4,
   run(a: InterpArgs, A, start, end) { surfaceInterpRange(a, A, start, end); },
+};
+
+/** bake_edge_wear: edge proximity per texel sample (the cloud's edge points and their grids shared). */
+const surfaceSpread: Kernel = {
+  minElements: 8192,
+  chunksPerWorker: 4,
+  run(a: SpreadArgs, A, start, end) { surfaceSpreadRange(a, A, start, end); },
+};
+
+/** bake_edge_wear: the wear field per texel sample (noise only near edges, so the cost varies). */
+const edgeWear: Kernel = {
+  minElements: 16384,
+  chunksPerWorker: 4,
+  run(a: EdgeWearArgs, A, start, end) { edgeWearRange(a, A, start, end); },
 };
 
 /** bake_measure noise: 3D noise at each texel sample's position. */
@@ -344,6 +358,8 @@ export const KERNELS: Record<string, Kernel> = {
   surface_buried: surfaceBuried,
   surface_curvature: surfaceCurvature,
   surface_interp: surfaceInterp,
+  surface_spread: surfaceSpread,
+  edge_wear: edgeWear,
   bake_noise: bakeNoiseK,
   bake_distance: bakeDistanceK,
   kd_build: kdBuild,

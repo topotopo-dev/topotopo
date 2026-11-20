@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-266 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+267 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_edge_wear](#bake_edge_wear) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -12549,7 +12549,7 @@ Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping 
 
 ### bake_curvature
 
-category: `texture` · aliases: `curvature_bake`, `bake_edges`, `edge_wear_bake`
+category: `texture` · aliases: `curvature_bake`, `bake_edges`
 
 Bake edge curvature into uv space: 0.5 flat, brighter on convex edges and bevels, darker in concave creases (edge wear and dirt masks).
 
@@ -12622,6 +12622,94 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
     }
   },
   "output": "curv"
+}
+```
+
+### bake_edge_wear
+
+category: `texture` · aliases: `edge_wear`, `edge_wear_bake`, `bake_wear`, `bake_chips`
+
+Paint wear on edges into uv space: edges measured on the shape at a radius, broken up in 3D into worn stretches and ragged chips, with nested chip, bare and core layers and more wear on the edges near handled parts.
+
+Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. C is the wear field 0..1 (continuous), as the shape gives it: amount and the cap below never change it, so a mask can read it as a stable field. The layers chip (the top coat is gone: 1 where C passes the threshold set by amount), bare (down to the substrate, bare_step deeper into the field) and core (the deepest part of each chip, core_step deeper: where rust starts) lie inside one another texel for texel (the primer ring is chip − bare); convex and concave (curvature at radius, 0..1: 1 = a 90° edge or crease; with method surface gentle bends, under about 0.2, may read 0), handled (the focus field, 1 on the focus prims fading to 0 at focus_radius), texel, island and mask. A larger amount only adds wear. Edges come from method surface (how the shading normals turn within radius, on a cloud of surface points as bake_measure curvature, made denser along the bends the mesh itself shows, so the result does not depend on the uv layout or the texel density: smooth-shaded facets read as the round they stand for, hard edges count, a junction between parts reads concave and gets no chips) or dihedral (the mesh's edge angles within max(radius, reach), as bake_curvature; there reach only widens that radius, with no falloff, and the focus does not extend it). With method surface wear reaches reach in from an edge inside its part, never past halfway to the edge across from it, fading out smoothly; large 3D patches (patch_size, patchiness) decide which stretches of edge wear, and a 3D noise at chip_size, its outline warped by raggedness, breaks them into chips, so the outlines follow the shape in 3D, never the triangles, and are the same on both sides of a uv seam and wherever the part is placed. No face wears through: on every face (the surface between hard edges or bends of 20° or more; a bevel or round belongs to the face it leads to; a piece with no face at all, a bar a few radii across, counts as one) chips cover at most a third of its area from amount 0.8 (a sixth at 0.4; held at the sample points, so counted in texels a face can read a few hundredths more, up to about 0.36), its most worn texels: corners first, then the edges, so a small feature (a boss, a nut, a bar) keeps paint on its faces while a large body is never held back. Where that cap holds, more amount still wears deeper: bare and core grow toward the chip outline inside the same share. C is the raw wear field and is never capped (a small part can read about 0.96 all over it), so a preset or layer stack takes the cap from chip, bare and core. Faces pressed flush against another face (lying on each other within 0.1 mm, facing opposite ways: stacked boxes, a part on a plate; never the front and back of a sheet) are buried and take no wear, so the seam between them is no edge. focus multiplies the edge wear near the focus prims (focus_amount, within focus_radius), makes the chip outlines there more ragged, lets wear reach up to (1 + 1.5 × focus_amount) × reach in from the edges there, and adds only a light rub (0.12 × focus_amount in C) to flats, which never chip. Input 1 (surroundings) buries the points inside it, as in bake_measure, and lets the two bakes share their work. Warns once when hard-shaded facets of curved parts would chip (bending 24° or more, at a radius under twice their size), naming the worst three. Refuses a radius that would place more than 6 million points along the bends. Stats chip_share, bare_share, core_share (covered samples at 0.5 or more), capped_faces (faces held under the cap), dense_points. Stops at the time limit of long-running nodes, counted from the end of the setup every bake shares (sampling the atlas, which always finishes: at 2048 a few hundred ms); a cook that changes only amount reuses the wear field.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
+| 1 | `surroundings` | yes | no | optional: geometry around the mesh (a wall, the ground); points inside it are buried and do not wear |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `amount` | float | `0.5` | 0..1 |  | `wear`, `strength` | how much of the edge length wears (moves the chip threshold: 0 none, 1 every edge out to reach; at most about a third of any face chips) |
+| `radius` | float | `0.004` | 0.. |  | `edge_radius` | the scale edges are measured at (metres): 4 mm catches 1 to 3 mm bevels on sheet metal; cast parts want 6 to 8 mm |
+| `method` | enum | `"surface"` |  | `surface`, `dihedral` | `mode`, `curvature_method` | surface: from the shading normals over radius (smooth-shaded facets do not count; decimated, isosurface and clean meshes); dihedral: the mesh's edge angles, as bake_curvature |
+| `reach` | float | `0.008` | 0.. |  | `wear_reach` | how far wear reaches in from an edge at amount 1 (metres; with method dihedral it only widens the radius the edge angles are read over) |
+| `chip_size` | float | `0.006` | 0.. |  | `chip_scale`, `breakup_size` | size of the chips that break the wear up (metres) |
+| `raggedness` | float | `0.5` | 0..1 |  | `ragged`, `warp` | how ragged the chip outlines are (domain warp) |
+| `patchiness` | float | `0.5` | 0..1 |  | `patches` | how strongly large patches decide which stretches of edge wear (0: every edge alike) |
+| `patch_size` | float | `0.15` | 0.. |  | `patch_scale` | size of those patches (metres) |
+| `bare_step` | float | `0.12` | 0..1 |  |  | how much deeper into the wear field bare starts (a thin primer ring around it) |
+| `core_step` | float | `0.3` | 0..1 |  |  | how much deeper core starts (at least bare_step: small cores inside the bare metal) |
+| `focus` | group (prim) | `""` |  |  |  | prims touched by hands or tools ("@name=latch"): edges near them wear more |
+| `focus_radius` | float | `0.1` | 0.. |  |  | reach of the focus (metres; 0 = the focus prims only) |
+| `focus_amount` | float | `0.5` | 0..1 |  |  | extra wear near the focus: edges there wear up to 1 + focus_amount times as much |
+| `seed` | float | `0` |  |  |  | changes the patches and chips, not the amount |
+
+**Writes:** image <name> (default: the node name): C = wear field, chip, bare, core, convex, concave, handled, texel, island, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.4,
+          0.3,
+          0.3
+        ]
+      }
+    },
+    "bevel": {
+      "type": "poly_bevel",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "offset": 0.004
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "bevel"
+      ]
+    },
+    "wear": {
+      "type": "bake_edge_wear",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256,
+        "amount": 0.6
+      }
+    }
+  },
+  "output": "wear"
 }
 ```
 
