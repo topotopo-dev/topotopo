@@ -33,6 +33,7 @@
         },
         "image": {
           "height": 128,
+          "size": 0.629898,
           "width": 128
         },
         "kind": "image",
@@ -41,7 +42,7 @@
           "cavity": "bec20906b910fc44",
           "edges": "48f333fc4e61ba16",
           "forms": "678b0087280b232d",
-          "island": "276206e35ca3af4d",
+          "island": "ad2413ef5ff1c5c9",
           "mask": "43252545bec9d71f",
           "occlusion": "59190f758b291b57",
           "texel": "27f6800f796d827d"
@@ -55,6 +56,7 @@
         },
         "image": {
           "height": 128,
+          "size": 0.629898,
           "width": 128
         },
         "kind": "image",
@@ -66,7 +68,7 @@
           "convex": "094924346bfa6d56",
           "core": "e4ecfc9c0e111b6a",
           "handled": "36a0b025a9c5935f",
-          "island": "276206e35ca3af4d",
+          "island": "ad2413ef5ff1c5c9",
           "mask": "43252545bec9d71f",
           "texel": "27f6800f796d827d"
         },
