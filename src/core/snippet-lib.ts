@@ -41,6 +41,19 @@ export function installSnippetLib(g: any, host: any): (api: any) => void {
   acc('x', 0); acc('y', 1); acc('z', 2); acc('w', 3);
   acc('r', 0); acc('g', 1); acc('b', 2); acc('a', 3);
   acc('u', 0); acc('v', 1);
+  // Vectors are plain arrays and JS has no operator overloading: `-v`, `v * 2`, `v += w` would turn the array into NaN or
+  // a string ("1,2,3" + 1) and write that into the attribute without a word. Arithmetic and comparison convert the
+  // array to a primitive (hints "number" and "default"), so those fail with what to write instead; String(v), `${v}`
+  // and join keep working (hint "string").
+  Object.defineProperty(AP, Symbol.toPrimitive, {
+    value: function (hint: string) {
+      if (hint === 'string') return Array.prototype.join.call(this, ',');
+      throw new TypeError('vectors and arrays have no operators (- * / + == <): use neg(v), mul(v, s), div(v, s), add(a, b), sub(a, b), or work on a component (v.x)');
+    },
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
 
   const isA = Array.isArray;
   const toArr = (v: any) => (v == null ? v : isA(v) || ArrayBuffer.isView(v) ? Array.from(v as any) : v);
@@ -383,6 +396,8 @@ export function installSnippetLib(g: any, host: any): (api: any) => void {
   // array attribute element i as a realm array (a copy; the kernel writes it back with attr.set)
   L.__ga = (attr: any, i: number) => attr.getArray(i, []);
   L.__arr = toArr;
+  // a float attribute assigned an array takes its first entry (an empty array gives 0)
+  L.__n1 = (v: any) => (typeof v === 'number' ? v : isA(v) ? (v[0] == null ? 0 : +v[0]) : +v);
 
   for (const k of Object.keys(L)) g[k] = L[k];
   g.__snippetLibNames = Object.keys(L).filter((k) => !k.startsWith('__'));

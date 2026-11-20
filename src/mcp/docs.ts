@@ -409,7 +409,7 @@ ARRAYS (variable length per element): f[]@ float[], i[]@ int[], s[]@ string[]; p
 Specials: @ptnum @primnum @vtxnum @elemnum @numpt @numprim @numvtx @numelem; time: @Frame @Time @TimeInc (only then is the wrangle re-cooked per frame)
 Groups: @group_top = 1 (membership of the current element: point, prim or vertex group by run_over). Inputs: @opinput1_P reads input 1 at the same index.
 Prim mode: @P = centroid (read-only), @N = face normal (read-only) when no prim attrib exists.
-VECTORS are JS arrays with .x .y .z .w (.r .g .b) accessors. NO operator overloading: use
+VECTORS are JS arrays with .x .y .z .w (.r .g .b) accessors. NO operator overloading (-v, v * 2, v += w, v + w stop the node with an error): use
   add(a,b,...) sub(a,b) mul(a,b,...) div(a,b) (vector/scalar broadcasting) neg dot cross length length2 distance normalize
   lerp/mix fit fit01 fit11 efit clamp smoothstep min max abs floor ceil frac mod pow sqrt sin cos… avg sum reflect project
   vec2 vec3 vec4 set radians degrees PI TAU
