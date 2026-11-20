@@ -180,6 +180,22 @@ function memoTrim(): void {
 }
 
 /**
+ * A memo value that grew after it was stored (a lazily filled field): count its bytes again and keep the memo within
+ * its limits. It becomes the most recently used.
+ */
+export function bakeMemoGrew(g: object, key: string): void {
+  const id = memoIds.get(g)?.get(key), e = id === undefined ? undefined : memoOrder.get(id);
+  const v = bakeMemo.get(g)?.get(key);
+  if (!e || v === undefined) return;
+  const bytes = bytesOf(v);
+  memoBytes += bytes - e.bytes;
+  e.bytes = bytes;
+  memoOrder.delete(id!);
+  memoOrder.set(id!, e);
+  memoTrim();
+}
+
+/**
  * A value derived from a mesh, made once per (mesh object, key) and shared by every bake that asks for it: the covered
  * samples of a uv raster, the per-sample positions and normals, the surface cloud, the ray scene. Cooked geometry is
  * immutable, so the object itself is a safe key. A value lives no longer than its mesh, and the memo keeps at most

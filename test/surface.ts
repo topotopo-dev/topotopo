@@ -787,17 +787,36 @@ section('the bake memo keeps at most its limits and releases the oldest values')
   check(bakeMemoStats.made === made + 1, 'asked again, a released value is made again');
   for (let i = 0; i < 4; i++) memoBake({}, `n${i}`, () => new Float64Array(8));
   check(bakeMemoUsage().entries === 3, `small values: at most ${bakeMemoLimits.entries} kept (${bakeMemoUsage().entries})`);
-  // six versions of a mesh baked at 512: the memo stays within 10 MB, releasing as it goes
-  bakeMemoLimits.bytes = 10 * 2 ** 20;
-  bakeMemoLimits.entries = 8;
-  let peak = 0;
-  const made0 = bakeMemoStats.made;
-  for (let i = 0; i < 6; i++) {
-    await cook({ b0: { type: 'box', params: { size: [1 + i * 0.01, 1, 1], center: [0, 0.5, 0] } }, bu: { type: 'uv_unwrap', in: ['b0'] }, m: { type: 'bake_measure', in: ['bu'], params: { resolution: 512, samples: 8, measures: [{ by: 'occlusion' }, { by: 'curvature', radius: 0.05 }] } } }, 'm');
-    peak = Math.max(peak, bakeMemoUsage().bytes);
-  }
-  const madeN = bakeMemoStats.made - made0;
-  check(peak <= 10 * 2 ** 20 && bakeMemoUsage().entries < madeN, `six mesh versions at 512: ${madeN} values made, ${bakeMemoUsage().entries} kept, at most ${(peak / 2 ** 20).toFixed(1)} MB (limit 10 MB)`);
+  // real memory: twelve versions of a mesh baked (bake_ao at 512, its per-sample positions and normals filled after the
+  // samples are stored), each in an engine of its own that is then dropped; the meshes are kept, as an editor keeps them,
+  // so the memo may keep their values (the meshes themselves are under 1 MB); after a garbage collection the array
+  // buffers still held are what the memo holds
+  const kept: Geometry[] = [];
+  const held = async (limit: number, first: number) => {
+    // empty the memo first (a limit of 0 keeps only the newest value, a tiny one)
+    bakeMemoLimits.bytes = 0;
+    memoBake({}, 'empty', () => 0);
+    bakeMemoLimits.bytes = limit;
+    bakeMemoLimits.entries = 64;
+    await new Promise((r) => setTimeout(r, 20));
+    gc(); gc();
+    const base = process.memoryUsage().arrayBuffers;
+    for (let i = 0; i < 12; i++) {
+      const e = new Engine(createNodeHost({ workers: 0 }));
+      await e.init();
+      const r = await e.cook({ nodes: { b0: { type: 'sphere', params: { radius: 0.5 + (first + i) * 0.001, rows: 24, cols: 48 } }, bu: { type: 'uv_unwrap', in: ['b0'] }, ao: { type: 'bake_ao', in: ['bu'], params: { resolution: 512, samples: 4 } } }, output: 'ao' });
+      if (!r.ok) throw new Error(r.errors.map((x) => x.message).join('; '));
+      kept.push((r.results.get('bu') as any).geo);
+    }
+    await new Promise((r) => setTimeout(r, 20));
+    gc(); gc();
+    return { real: process.memoryUsage().arrayBuffers - base, counted: bakeMemoUsage().bytes };
+  };
+  const MB = (x: number) => (x / 2 ** 20).toFixed(1);
+  const loose = await held(Infinity, 100);
+  const tight = await held(32 * 2 ** 20, 200);
+  check(loose.real > 64 * 2 ** 20 && Math.abs(loose.counted - loose.real) < 0.15 * loose.real, `twelve versions, no limit: ${MB(loose.real)} MB really held, ${MB(loose.counted)} MB counted (within 15 %)`);
+  check(tight.real <= 32 * 2 ** 20 * 1.15 && tight.counted <= 32 * 2 ** 20, `limit 32 MB: ${MB(tight.real)} MB really held after twelve versions (≤ 32 MB + 15 %), ${MB(tight.counted)} MB counted`);
   Object.assign(bakeMemoLimits, saved);
   check(saved.bytes === 512 * 2 ** 20 && saved.entries === 8, 'the limits: 512 MB and 8 values (about two versions of a mesh)');
 }

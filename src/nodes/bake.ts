@@ -11,7 +11,7 @@ import { MATERIAL_KINDS, primMaterials, readMaterials, resolveKind } from '../co
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import { medianTexelSize, triangleTexelSizes } from '../core/texelsize.ts';
 import {
-  applyPadding, averagedVertexNormals, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
+  applyPadding, averagedVertexNormals, bakeMemoGrew, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
@@ -100,7 +100,8 @@ export function setup(ctx: CookContext): Bake {
   // one rasterisation per mesh, uv, size and group, shared by every bake of this cook and the next: cooked
   // geometry is immutable, so the mesh object itself is the key
   const group = String(p.group ?? '');
-  const r = memoBake(g, `samples|${p.uv_attrib || 'uv'}|${W}|${H}|${S}|${group}`, () => {
+  const key = `samples|${p.uv_attrib || 'uv'}|${W}|${H}|${S}|${group}`;
+  const r = memoBake(g, key, () => {
     const { tris, triPrim } = triangulate(g);
     if (!tris.length) throw new NodeError(`${type}: input 0 has no polygons to bake`, 'bakes need a mesh with uv (e.g. box → uv_unwrap → bake_ao)');
     const uv = readUVNamed(g, p.uv_attrib);
@@ -117,9 +118,13 @@ export function setup(ctx: CookContext): Bake {
   if (!s.n) ctx.warn(`${type}: no texel is covered (uv collapsed or outside 0..1)`);
   return {
     ctx, g, tris, triPrim, uv, skip: r.skip, s, diag: bboxDiagonal(g) || 1,
-    get P() { return (r.P ??= interpolate(s, tris, vertexPositions(g), 3)); },
+    // filled on first use: the memo counts them then
+    get P() {
+      if (!r.P) { r.P = interpolate(s, tris, vertexPositions(g), 3); bakeMemoGrew(g, key); }
+      return r.P;
+    },
     get N() {
-      if (!r.N) { const N = interpolate(s, tris, resolveVertexNormals(g, 60), 3); normalize3(N); r.N = N; }
+      if (!r.N) { const N = interpolate(s, tris, resolveVertexNormals(g, 60), 3); normalize3(N); r.N = N; bakeMemoGrew(g, key); }
       return r.N;
     },
   };
