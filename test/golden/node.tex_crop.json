@@ -33,6 +33,7 @@
         },
         "image": {
           "height": 10,
+          "size": 0.625,
           "width": 20
         },
         "kind": "image",

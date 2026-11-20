@@ -42,6 +42,7 @@
         },
         "image": {
           "height": 256,
+          "size": 0.1,
           "width": 256
         },
         "kind": "image",
@@ -57,6 +58,7 @@
         },
         "image": {
           "height": 256,
+          "size": 0.1,
           "width": 256
         },
         "kind": "image",
@@ -72,6 +74,7 @@
         },
         "image": {
           "height": 256,
+          "size": 0.1,
           "width": 256
         },
         "kind": "image",

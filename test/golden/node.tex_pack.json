@@ -42,6 +42,7 @@
         },
         "image": {
           "height": 128,
+          "size": 2,
           "width": 128
         },
         "kind": "image",
