@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-264 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+265 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -12619,6 +12619,128 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
     }
   },
   "output": "curv"
+}
+```
+
+### bake_flow
+
+category: `texture` · aliases: `flow_bake`, `bake_runs`, `bake_drips`, `bake_streaks`, `bake_rust_runs`
+
+Bake runs that flow down the surface under gravity from source parts (rust under bolts, rain streaks under a ledge): traced in 3D across uv seams, varied in length and width, thin, breaking up, pooling on ledges.
+
+Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bolt* @name=hinge*"; or points or a mesh on input 1) where they touch another surface within 1 cm, one every 1 / density metres along each part (at least one per part), and walk down the receiving surface (every prim that is not a source): gravity projected onto the surface, bent sideways by 3D noise (wobble), snapped back onto the mesh, over edges and across uv seams, around bosses and over the underside of a lip. A surface whose normal is within ledge degrees of up stops the run, where it pools; a pool whose ledge has an edge within the spill reach (metres) spills over the edge nearest to it and the run goes on below with less strength; a source standing on a ledge starts a pool and does the same; at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); strength = the run's random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. Water goes down the geometry, not down authored normals: the flow direction comes from face normals, smoothed only between faces that meet within 40°, so a face wound the wrong way reads as turned down and lets water through. The bottom of a groove whose sides are steeper than ledge pools, and runs on along it when it slopes. The metre constants of a run (gaps, wander, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh with uv; its prims that are not sources are the surface the runs flow on |
+| 1 | `sources` | yes | no | where runs start (points or a mesh) when sources is empty |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `sources` | group (prim) | `""` |  |  |  | prims of input 0 the runs start from, e.g. "@name=bolt* @name=hinge*" ("" = input 1); they bake 0 and the runs flow on every other prim |
+| `density` | float | `40` | 0..2000 |  | `count`, `runs_per_metre`, `frequency` | runs per metre of source part where it meets the surface (40 = one every 2.5 cm: a bolt gets one or two, a hinge four or five) |
+| `direction` | vec3 | `[0,-1,0]` |  |  | `gravity`, `dir` | gravity: the way the runs flow |
+| `length` | vec2 | `[0.05,0.25]` | 0..100 |  | `run_length`, `length_range` | range of the drawn length per run in metres, from where it comes out from under its source (the longer runs are the stronger) |
+| `width` | vec2 | `[0.003,0.01]` | 0..5 |  | `run_width`, `width_range` | range of the run width at the head in metres; runs taper to 30 % at the tail |
+| `wobble` | float | `0.3` | 0..1 |  | `meander`, `wander`, `spread` | sideways wander of a run (3D noise on its walking direction); 0 = ruler-straight |
+| `breakup` | float | `0.4` | 0..1 |  | `break_up`, `gaps`, `raggedness` | gaps along a run and a wandering width (3D noise); the gaps grow toward the tail; 0 = unbroken |
+| `ledge` | float | `30` | 0..90 |  | `ledge_angle`, `stop_angle` | a surface whose normal is within this many degrees of up stops the run, which pools there (a 30° slope still sheds water) |
+| `pool` | float | `1.5` | 1..10 |  | `pool_width`, `puddle` | width multiplier of the pool where a run stops on a ledge |
+| `drip` | bool | `true` |  |  | `drips` | a run reaching an overhang (a face turned down) falls along the direction to the next surface below and goes on; off: it ends there |
+| `step` | float | `0` | 0..5 |  | `step_size` | walking step in metres (0 = half the smallest width) |
+| `spill` | float | `0.05` | 0..50 |  | `spill_reach`, `overflow` | a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are |
+| `seed` | int | `0` | 0..2147483647 |  |  | seed of the run starts, lengths, widths, wander and gaps |
+
+**Writes:** image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "wall": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.6,
+          0.6,
+          0.05
+        ]
+      }
+    },
+    "wall_named": {
+      "type": "attrib_create",
+      "in": [
+        "wall"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "wall"
+      }
+    },
+    "bolt": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.03,
+          0.03,
+          0.012
+        ],
+        "center": [
+          0,
+          0.1,
+          0.03
+        ]
+      }
+    },
+    "bolt_named": {
+      "type": "attrib_create",
+      "in": [
+        "bolt"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "bolt"
+      }
+    },
+    "parts": {
+      "type": "merge",
+      "in": [
+        "wall_named",
+        "bolt_named"
+      ]
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "parts"
+      ]
+    },
+    "runs": {
+      "type": "bake_flow",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "sources": "@name=bolt",
+        "resolution": 256
+      }
+    }
+  },
+  "output": "runs"
 }
 ```
 

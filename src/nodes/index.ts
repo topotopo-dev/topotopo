@@ -29,6 +29,7 @@ import './pcg.ts';
 import './texture.ts';
 import './imageops.ts';
 import './bake.ts';
+import './runs.ts';
 import './layers.ts';
 import './particles.ts';
 import './rbd.ts';
