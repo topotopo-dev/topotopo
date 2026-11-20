@@ -9,12 +9,15 @@ import type { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER, imageRef, referenceableImages, sampleUV } from '../core/image.ts';
 import { MATERIAL_KINDS, primMaterials, readMaterials, resolveKind } from '../core/materials.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
-import { medianTexelSize } from '../core/texelsize.ts';
+import { medianTexelSize, triangleTexelSizes } from '../core/texelsize.ts';
 import {
-  applyPadding, averagedVertexNormals, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
+  applyPadding, averagedVertexNormals, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
+import { bakeMemoStats } from '../core/bake.ts';
+import { runCurvature, runInterp, surfaceCloud, surfaceMesh, then } from '../core/surface.ts';
+import type { SurfaceCloud, SurfaceMesh } from '../core/surface.ts';
 import { RayScene, bboxDiagonal } from '../core/analysis.ts';
 import type { RaySampleOptions } from '../core/analysis.ts';
 import { pointNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
@@ -33,7 +36,7 @@ const MAX_SAMPLES = 4096 * 4096;
 
 // ---------------------------------------------------------------- shared params
 
-const BAKE_PARAMS = (): Record<string, ParamDef> => ({
+export const BAKE_PARAMS = (): Record<string, ParamDef> => ({
   resolution: resolutionParam(1024),
   supersample: { type: 'int', default: 1, min: 1, max: 4, desc: 'samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work)', aliases: ['ssaa', 'antialiasing', 'subsampling'] },
   padding: { type: 'int', default: 4, min: 0, max: 256, desc: 'dilate islands by this many texels (no background bleeding in mipmaps)', aliases: ['dilation', 'margin', 'edge_padding'] },
@@ -58,12 +61,14 @@ const HIGH_PARAMS = (): Record<string, ParamDef> => ({
 });
 
 /** The setup every bake shares: triangles, uv, covered samples, per-sample position and normal. */
-interface Bake {
+export interface Bake {
   ctx: CookContext;
   g: Geometry;
   tris: Uint32Array;
   triPrim: Uint32Array;
   uv: Float64Array;
+  /** per triangle, 1 where `group` leaves it out (null: every triangle is baked) */
+  skip: Uint8Array | null;
   s: BakeSamples;
   /** per-sample world position and unit normal of the low mesh */
   readonly P: Float64Array;
@@ -86,30 +91,36 @@ function readUVNamed(g: Geometry, name: string): Float64Array | null {
   return out;
 }
 
-function setup(ctx: CookContext): Bake {
+export function setup(ctx: CookContext): Bake {
   const { p, type } = ctx;
   const g = ctx.input(0);
   const [W, H] = size2(p, type);
   const S = Math.max(1, Math.min(4, Math.round(p.supersample)));
   if (W * H * S * S > MAX_SAMPLES) throw new NodeError(`${type}: ${W} × ${H} at supersample ${S} is ${(W * H * S * S).toLocaleString('en-US')} samples (at most ${MAX_SAMPLES.toLocaleString('en-US')})`, 'lower resolution or supersample');
-  const { tris, triPrim } = triangulate(g);
-  if (!tris.length) throw new NodeError(`${type}: input 0 has no polygons to bake`, 'bakes need a mesh with uv (e.g. box → uv_unwrap → bake_ao)');
-  const uv = readUVNamed(g, p.uv_attrib);
-  if (!uv) throw new NodeError(`${type}: input 0 has no "${p.uv_attrib || 'uv'}" attribute`, 'unwrap it first: uv_unwrap (xatlas), uv_flatten + uv_layout, or uv_project for simple shapes; islands must not overlap');
-  const sel = mask(g, 'prim', p.group);
-  let skip: Uint8Array | null = null;
-  if (sel) { skip = new Uint8Array(triPrim.length); for (let t = 0; t < triPrim.length; t++) skip[t] = sel[triPrim[t]] ? 0 : 1; }
-  const s = bakeSamples(uv, tris, W, H, S, skip);
+  // one rasterisation per mesh, uv, size and group, shared by every bake of this cook and the next: cooked
+  // geometry is immutable, so the mesh object itself is the key
+  const group = String(p.group ?? '');
+  const r = memoBake(g, `samples|${p.uv_attrib || 'uv'}|${W}|${H}|${S}|${group}`, () => {
+    const { tris, triPrim } = triangulate(g);
+    if (!tris.length) throw new NodeError(`${type}: input 0 has no polygons to bake`, 'bakes need a mesh with uv (e.g. box → uv_unwrap → bake_ao)');
+    const uv = readUVNamed(g, p.uv_attrib);
+    if (!uv) throw new NodeError(`${type}: input 0 has no "${p.uv_attrib || 'uv'}" attribute`, 'unwrap it first: uv_unwrap (xatlas), uv_flatten + uv_layout, or uv_project for simple shapes; islands must not overlap');
+    const sel = mask(g, 'prim', group);
+    let skip: Uint8Array | null = null;
+    if (sel) { skip = new Uint8Array(triPrim.length); for (let t = 0; t < triPrim.length; t++) skip[t] = sel[triPrim[t]] ? 0 : 1; }
+    const s = bakeSamples(uv, tris, W, H, S, skip);
+    // per-sample positions and normals, interpolated on first use (id, mask and colour bakes do not need them)
+    return { tris, triPrim, uv, skip, s, P: null as Float64Array | null, N: null as Float64Array | null };
+  });
+  const { tris, triPrim, uv, s } = r;
   if (s.outside) ctx.warn(`${type}: ${s.outside} triangle(s) reach outside the 0..1 uv square (clipped; UDIM tiles are not baked)`);
   if (!s.n) ctx.warn(`${type}: no texel is covered (uv collapsed or outside 0..1)`);
-  // per-sample positions and normals, interpolated on first use (id, mask and colour bakes do not need them)
-  let P: Float64Array | null = null, N: Float64Array | null = null;
   return {
-    ctx, g, tris, triPrim, uv, s, diag: bboxDiagonal(g) || 1,
-    get P() { return (P ??= interpolate(s, tris, vertexPositions(g), 3)); },
+    ctx, g, tris, triPrim, uv, skip: r.skip, s, diag: bboxDiagonal(g) || 1,
+    get P() { return (r.P ??= interpolate(s, tris, vertexPositions(g), 3)); },
     get N() {
-      if (!N) { N = interpolate(s, tris, resolveVertexNormals(g, 60), 3); normalize3(N); }
-      return N;
+      if (!r.N) { const N = interpolate(s, tris, resolveVertexNormals(g, 60), 3); normalize3(N); r.N = N; }
+      return r.N;
     },
   };
 }
@@ -118,7 +129,7 @@ function setup(ctx: CookContext): Bake {
  * Resolve per-sample values into the output image (C + mask + extra layers) and pad it: one padding map (from the
  * coverage) serves every layer. Returns the image with its coverage and the padding map.
  */
-function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, background: number[], extra: Record<string, { vals: ArrayLike<number>; ch: number; background: number[] }> = {}): { img: Image; coverage: Float32Array; map: Int32Array } {
+export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, background: number[], extra: Record<string, { vals: ArrayLike<number>; ch: number; background: number[] }> = {}): { img: Image; coverage: Float32Array; map: Int32Array } {
   const { ctx, s } = b, p = ctx.p;
   const { data, coverage } = resolve(s, vals, ch);
   const img = new Image(s.W, s.H, outName(ctx));
@@ -147,7 +158,62 @@ function finish(b: Bake, vals: ArrayLike<number>, ch: number, background: number
   return wrapImage(b, img);
 }
 
-function wrapImage(b: Bake, img: Image): Geometry {
+/**
+ * The layers a bake adds so later nodes work in metres and stay on one island: "texel" (RGBA: R metres one texel covers
+ * along u, G along v, at each sample's triangle) and "island" (the uv island; the first sample of a texel decides).
+ * `first` maps each texel to its first sample when supersampled (null at supersample 1).
+ */
+export function texelLayers(b: Bake, P3: Float64Array): { texel: { vals: Float32Array; ch: number; background: number[] }; island: { vals: Float32Array; ch: number; background: number[] }; first: Int32Array | null } {
+  const n = b.s.n, nt = b.s.W * b.s.H;
+  const triTexel = triangleTexelSizes(P3, b.uv, b.tris, b.s.W, b.s.H);
+  const isl = uvIslands(b.g, b.uv, b.tris);
+  const T = new Float32Array(n * 4), ID = new Float32Array(n);
+  const first = b.s.S > 1 ? new Int32Array(nt).fill(-1) : null;
+  if (first) for (let i = 0; i < n; i++) if (first[b.s.texel[i]] < 0) first[b.s.texel[i]] = i;
+  for (let i = 0; i < n; i++) {
+    const f = first ? first[b.s.texel[i]] : i, t = b.s.tri[i];
+    T[i * 4] = triTexel[t * 2]; T[i * 4 + 1] = triTexel[t * 2 + 1]; T[i * 4 + 3] = 1;
+    ID[i] = isl.triIsland[b.s.tri[f]];
+  }
+  return { texel: { vals: T, ch: 4, background: [0, 0, 0, 1] }, island: { vals: ID, ch: 1, background: [-1] }, first };
+}
+
+/** The surface-measure setup of a bake's mesh, uv and size (core/surface.ts), made once and shared by every bake. */
+export function surfaceOf(b: Bake): SurfaceMesh {
+  const p = b.ctx.p, key = `surface|${p.uv_attrib || 'uv'}|${b.s.W}|${b.s.H}|${String(p.group ?? '')}`;
+  const t0 = performance.now();
+  const made = bakeMemoStats.made;
+  const m = memoBake(b.g, key, () => surfaceMesh(b.g, b.tris, b.triPrim, b.uv, b.skip, b.s.W, b.s.H));
+  if (bakeMemoStats.made !== made) b.ctx.stage('surface setup', performance.now() - t0);
+  return m;
+}
+
+/** The cloud every k texels over a bake's atlas (shared like surfaceOf). */
+export function cloudOf(b: Bake, mesh: SurfaceMesh, k: number): SurfaceCloud {
+  const p = b.ctx.p, key = `cloud|${p.uv_attrib || 'uv'}|${b.s.W}|${b.s.H}|${String(p.group ?? '')}|${k}`;
+  const t0 = performance.now();
+  const made = bakeMemoStats.made;
+  const c = memoBake(b.g, key, () => surfaceCloud(mesh, b.tris, b.uv, b.skip, b.s.W, b.s.H, k));
+  if (bakeMemoStats.made !== made) b.ctx.stage('cloud', performance.now() - t0);
+  b.ctx.stat('cloud_points', c.cloud.n);
+  return c;
+}
+
+/** One line naming the parts that hold `prims` ("" when the mesh has no prim names). */
+export function partsText(g: Geometry, prims: number[]): string {
+  const s = partsOf(g, prims);
+  return s ? ` (parts ${s})` : '';
+}
+
+/** The warnings of a surface setup: faces turned to agree with their neighbours, inward pieces, normals turned. */
+export function surfaceWarnings(b: Bake, mesh: SurfaceMesh) {
+  const { ctx, g } = b, o = mesh.orient;
+  if (o.turned.length) ctx.warn(`${ctx.type}: ${o.turned.length} face(s) are wound against their neighbours or their normals${partsText(g, o.turned)}; they are measured turned`);
+  if (o.inward.length) ctx.warn(`${ctx.type}: ${o.inward.length} closed piece(s) face inward (normals into the solid)${partsText(g, o.inward)}; they are measured so: reverse them if that is not intended`);
+  if (mesh.turnedVertices) ctx.warn(`${ctx.type}: ${mesh.turnedVertices} vertex normal(s) point into their face and are measured turned to the face's side`);
+}
+
+export function wrapImage(b: Bake, img: Image): Geometry {
   if (!b.ctx.p.keep_mesh) return imageGeo(img);
   const g = b.ctx.input(0).clone();
   g.volumes.push(img);
@@ -291,7 +357,7 @@ function defineBake(def: Omit<NodeDef, 'category' | 'inputs'> & { inputs?: NodeD
   defineNode({ category: 'texture', inputs: INPUTS, usesNodeName: NAMED_BY_NODE, ...def } as NodeDef);
 }
 
-const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. ';
+export const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. ';
 
 // ---------------------------------------------------------------- ray bakes
 
@@ -394,14 +460,19 @@ defineBake({
     'default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet ' +
     'or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt ' +
     'gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, ' +
-    'on "concave" a dirt or cavity mask.',
+    'on "concave" a dirt or cavity mask. method surface measures how the shading normals turn within radius instead, on ' +
+    'a cloud of surface points interpolated in 3D (as bake_measure curvature): the facets of decimated and isosurface ' +
+    'meshes do not read as edges, hard edges (split normals) still do, and each connected part is measured on its own ' +
+    '(where parts intersect, cavity shows the seam); min_angle and intersections are for method ' +
+    'dihedral, and it does not read a high-res input.',
   aliases: ['curvature_bake', 'bake_edges', 'edge_wear_bake'],
   params: {
     ...BAKE_PARAMS(),
     radius: { type: 'float', default: 0, min: 0, desc: 'how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal)', aliases: ['width', 'edge_width', 'distance'] },
     strength: { type: 'float', default: 1, min: 0, desc: 'contrast multiplier', aliases: ['intensity', 'contrast'] },
-    min_angle: { type: 'float', default: 0.5, min: 0, max: 179, desc: 'edges bending less than this (degrees) are ignored' },
-    intersections: { type: 'bool', default: true, desc: 'also find the concave creases where separate parts cut into each other (kitbashed meshes)', aliases: ['crossings', 'intersection_creases'] },
+    method: { type: 'enum', options: ['dihedral', 'surface'], default: 'dihedral', desc: 'dihedral: the angles of the mesh edges near the texel; surface: how the shading normals turn within radius (facets smaller than radius do not show: decimated and isosurface meshes)', aliases: ['mode', 'curvature_method'] },
+    min_angle: { type: 'float', default: 0.5, min: 0, max: 179, desc: 'dihedral: edges bending less than this (degrees) are ignored' },
+    intersections: { type: 'bool', default: true, desc: 'dihedral: also find the concave creases where separate parts cut into each other (kitbashed meshes)', aliases: ['crossings', 'intersection_creases'] },
     tile: { type: 'bool', default: true, desc: 'trim sheets: a band that tiles is copied one period past each open end, so curvature does not fade there (no effect without trim bands). Help topic trim_sheets.' },
     ...HIGH_PARAMS(),
   },
@@ -418,6 +489,37 @@ defineBake({
   cook: (ctx) => {
     const b = setup(ctx), p = ctx.p;
     const high = highOf(ctx);
+    const shape = (V: ArrayLike<number>) => {
+      const k = p.strength, n = b.s.n;
+      const C = new Float32Array(n), cx = new Float32Array(n), cc = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const v = V[i] * k;
+        C[i] = Math.max(0, Math.min(1, 0.5 + 0.5 * v));
+        cx[i] = Math.max(0, Math.min(1, v));
+        cc[i] = Math.max(0, Math.min(1, -v));
+      }
+      return finish(b, C, 1, [0.5], { convex: { vals: cx, ch: 1, background: [0] }, concave: { vals: cc, ch: 1, background: [0] } });
+    };
+    if (p.method === 'surface') {
+      if (high) throw new NodeError(`${ctx.type}: method surface reads the mesh's own shading normals; a high-res input 1 is not read`, 'disconnect input 1, or use method dihedral to sample the high-res mesh');
+      const r = p.radius > 0 ? p.radius : 0.01 * b.diag;
+      if (!b.s.n) return shape(new Float32Array(0));
+      const mesh = surfaceOf(b);
+      surfaceWarnings(b, mesh);
+      // the cloud at least twice as dense as the radius, at most every 4 texels
+      const k = Math.max(1, Math.min(4, mesh.median > 0 ? r / (2 * mesh.median) : 1));
+      const sc = cloudOf(b, mesh, k);
+      const run = (kernel: string, job: any, o?: any) => ctx.parallelMap(kernel, job, o);
+      let t0 = performance.now();
+      return then(runCurvature(run, sc, r), (CV) => {
+        ctx.stage('curvature', performance.now() - t0);
+        t0 = performance.now();
+        return then(runInterp(run, b.s, b.tris, mesh, sc, CV, 1), (V) => {
+          ctx.stage('interpolation', performance.now() - t0);
+          return shape(V);
+        });
+      });
+    }
     const go = (P: Float64Array, N: Float64Array, src: Geometry) => {
       const r = p.radius > 0 ? p.radius : 0.01 * b.diag;
       const counts = { shared: 0, crossing: 0, capped: false };
@@ -431,17 +533,7 @@ defineBake({
       const run = ctx.parallelMap('bake_curvature', {
         count: b.s.n, args, inputs: { P, N }, results: { V }, shared: { E: edges.E, D: edges.D, K: edges.K, FN: edges.FN, start: grid.start, items: grid.items },
       });
-      return andThen(run, () => {
-        const k = p.strength, n = b.s.n;
-        const C = new Float32Array(n), cx = new Float32Array(n), cc = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-          const v = V[i] * k;
-          C[i] = Math.max(0, Math.min(1, 0.5 + 0.5 * v));
-          cx[i] = Math.max(0, Math.min(1, v));
-          cc[i] = Math.max(0, Math.min(1, -v));
-        }
-        return finish(b, C, 1, [0.5], { convex: { vals: cx, ch: 1, background: [0] }, concave: { vals: cc, ch: 1, background: [0] } });
-      });
+      return andThen(run, () => shape(V));
     };
     if (!high) return go(b.P, b.N, p.tile ? tiledScene(b.g) : b.g);
     return chain(onHigh(b, high), (h) => go(h.P, h.N, high));
@@ -675,10 +767,10 @@ defineBake({
   params: {
     ...BAKE_PARAMS(),
     mask_group: { type: 'group', default: '', groupClass: 'prim', desc: 'prims that read 1 (e.g. "planks", "@P.y>0.5")', aliases: ['from_group', 'mask_prims'] },
-    attrib: { type: 'string', default: '', desc: 'numeric attribute to bake when mask_group is empty', aliases: ['attribute', 'from_attrib'] },
+    attrib: { type: 'string', default: '', desc: 'numeric attribute to bake when mask_group is empty; a comma list ("wear, dirt") bakes one layer per attribute, named after it, C = the first', aliases: ['attribute', 'from_attrib'] },
     component: { type: 'int', default: 0, min: -1, max: 15, desc: 'vector component of attrib (-1 = luminance of the first three)' },
   },
-  outputs: 'image <name> (default: the node name): C grey, mask',
+  outputs: 'image <name> (default: the node name): C grey, mask; with an attrib list also one layer per attribute',
   example: {
     nodes: {
       box: { type: 'box' },
@@ -700,13 +792,25 @@ defineBake({
       const hit = rasterizeUV(b.uv, b.tris, b.s.W * b.s.S, b.s.H * b.s.S, false, skipG);
       for (let i = 0; i < n; i++) C[i] = hit.tri[b.s.pix[i]] >= 0 || sel[b.triPrim[b.s.tri[i]]] ? 1 : 0;
     } else if (String(p.attrib ?? '').trim()) {
-      const f = b.g.findAttrib(p.attrib, ['vertex', 'point', 'prim', 'detail']);
-      if (!f || f.attr.type === 'string' || f.attr.isArray) throw new NodeError(`${ctx.type}: no numeric attribute "${p.attrib}"`, 'bake_mask reads float/int point, vertex, prim or detail attributes');
-      const size = f.attr.size;
-      const vals = vertexValues(b.g, p.attrib, size)!;
-      const I = interpolate(b.s, b.tris, vals, size);
-      const comp = p.component < 0 ? -1 : Math.min(size - 1, p.component);
-      for (let i = 0; i < n; i++) C[i] = comp >= 0 ? I[i * size + comp] : size >= 3 ? I[i * size] * 0.2126 + I[i * size + 1] * 0.7152 + I[i * size + 2] * 0.0722 : I[i * size];
+      // a comma list bakes one layer per attribute (named after it), C = the first
+      const names = String(p.attrib).split(',').map((s) => s.trim()).filter(Boolean);
+      const layers: Record<string, { vals: Float32Array; ch: number; background: number[] }> = {};
+      names.forEach((name, k) => {
+        const f = b.g.findAttrib(name, ['vertex', 'point', 'prim', 'detail']);
+        if (!f || f.attr.type === 'string' || f.attr.isArray) throw new NodeError(`${ctx.type}: no numeric attribute "${name}"`, 'bake_mask reads float/int point, vertex, prim or detail attributes');
+        const size = f.attr.size;
+        const vals = vertexValues(b.g, name, size)!;
+        const I = interpolate(b.s, b.tris, vals, size);
+        const comp = p.component < 0 ? -1 : Math.min(size - 1, p.component);
+        const out = k === 0 ? C : new Float32Array(n);
+        for (let i = 0; i < n; i++) out[i] = comp >= 0 ? I[i * size + comp] : size >= 3 ? I[i * size] * 0.2126 + I[i * size + 1] * 0.7152 + I[i * size + 2] * 0.0722 : I[i * size];
+        if (names.length > 1) {
+          const layer = identifier(name);
+          if (layer === 'C' || layer === 'mask' || layers[layer]) throw new NodeError(`${ctx.type}: attribute "${name}" would write layer "${layer}" twice or over a reserved layer`, 'list each attribute once; C and mask are written by the node');
+          layers[layer] = { vals: out, ch: 1, background: [0] };
+        }
+      });
+      return finish(b, C, 1, [0], layers);
     } else C.fill(1);
     return finish(b, C, 1, [0]);
   },
@@ -912,38 +1016,15 @@ defineBake({
       C[i * 4] = r; C[i * 4 + 1] = gr; C[i * 4 + 2] = bl; C[i * 4 + 3] = al;
       R[i] = rough; M[i] = metal;
     }
-    // texel size per triangle: metres along u and along v that one texel covers
-    const P3 = vertexPositions(g), nTri = b.tris.length / 3, triTexel = new Float32Array(nTri * 2);
-    for (let t = 0; t < nTri; t++) {
-      const a = b.tris[t * 3], c1 = b.tris[t * 3 + 1], c2 = b.tris[t * 3 + 2];
-      const du1 = b.uv[c1 * 2] - b.uv[a * 2], dv1 = b.uv[c1 * 2 + 1] - b.uv[a * 2 + 1], du2 = b.uv[c2 * 2] - b.uv[a * 2], dv2 = b.uv[c2 * 2 + 1] - b.uv[a * 2 + 1];
-      const det = du1 * dv2 - du2 * dv1;
-      if (!(Math.abs(det) > 1e-18)) continue;
-      let lu = 0, lv = 0;
-      for (let q = 0; q < 3; q++) {
-        const e1 = P3[c1 * 3 + q] - P3[a * 3 + q], e2 = P3[c2 * 3 + q] - P3[a * 3 + q];
-        const pu = (e1 * dv2 - e2 * dv1) / det, pv = (e2 * du1 - e1 * du2) / det;
-        lu += pu * pu; lv += pv * pv;
-      }
-      triTexel[t * 2] = Math.sqrt(lu) / b.s.W; triTexel[t * 2 + 1] = Math.sqrt(lv) / b.s.H;
-    }
-    const isl = uvIslands(g, b.uv, b.tris);
-    const T = new Float32Array(n * 4), ID = new Float32Array(n);
-    // the first sample of a texel decides the labels (and the island)
-    const first = S > 1 ? new Int32Array(nt).fill(-1) : null;
-    if (first) for (let i = 0; i < n; i++) if (first[b.s.texel[i]] < 0) first[b.s.texel[i]] = i;
+    const P3 = vertexPositions(g);
+    const { texel: texelLayer, island: islandLayer, first } = texelLayers(b, P3);
     const texMat = new Int32Array(nt).fill(-1);
-    for (let i = 0; i < n; i++) {
-      const f = first ? first[b.s.texel[i]] : i, t = b.s.tri[i];
-      T[i * 4] = triTexel[t * 2]; T[i * 4 + 1] = triTexel[t * 2 + 1]; T[i * 4 + 3] = 1;
-      ID[i] = isl.triIsland[b.s.tri[f]];
-      if (f === i) texMat[b.s.texel[i]] = sampleMat[i];
-    }
+    for (let i = 0; i < n; i++) if ((first ? first[b.s.texel[i]] : i) === i) texMat[b.s.texel[i]] = sampleMat[i];
     const { img, map } = finishImage(b, C, 4, [0, 0, 0, 1], {
       roughness: { vals: R, ch: 1, background: [0.5] },
       metallic: { vals: M, ch: 1, background: [0] },
-      texel: { vals: T, ch: 4, background: [0, 0, 0, 1] },
-      island: { vals: ID, ch: 1, background: [-1] },
+      texel: texelLayer,
+      island: islandLayer,
     });
     // the labels from one material index per texel, padded through the same map as every layer
     const labels: Record<string, Float32Array> = {};
