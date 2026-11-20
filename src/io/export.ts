@@ -12,7 +12,7 @@ import { exportCSV, exportPointsJSON } from './points.ts';
 import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, decomposeXform, expandForExport, isolatedMask, packedPrims, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
 import { DEFAULT_TRANSFER, expandPacked, flattenSource, stripPacked } from '../core/packed.ts';
-import { mergeMaterialTables, normalizeMaterial, primMaterials } from '../core/materials.ts';
+import { mergeMaterialTables, normalizeMaterial, packedSources, primMaterials } from '../core/materials.ts';
 import type { MaterialTable } from '../core/materials.ts';
 import { heightmapBytes } from './heightmap.ts';
 import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
@@ -258,6 +258,10 @@ function usdaMaterials(table: MaterialTable, o: ExportOptions, out: string[]): M
     paths.set(name, mp);
     const tex = m.textures ?? {};
     const file = (t: string) => usdAsset(o.texturePath ? o.texturePath(t) : t);
+    // the packed map's channels in its stated layout (Material.packing; default occlusion R, roughness G, metallic B)
+    const at = packedSources(m.packing) ?? { o: 0, r: 1, m: 2, smooth: false };
+    const chan = (c: number) => 'rgba'[c];
+    const roughOut = at.smooth ? `${mp}/smoothness_map.outputs:${chan(at.r)}` : `${mp}/orm_map.outputs:${chan(at.r)}`;
     const I = '            ';
     out.push(`        def Material "${id}"`, '        {', `            token outputs:surface.connect = <${mp}/surface.outputs:surface>`, '');
     out.push(`${I}def Shader "surface"`, `${I}{`, `${I}    uniform token info:id = "UsdPreviewSurface"`);
@@ -265,11 +269,13 @@ function usdaMaterials(table: MaterialTable, o: ExportOptions, out: string[]): M
     if (tex.baseColor) out.push(`${I}    color3f inputs:diffuseColor.connect = <${mp}/base_color_map.outputs:rgb>`);
     out.push(`${I}    color3f inputs:emissiveColor = ${tupColor(m.emissive, 0, 3)}`);
     out.push(`${I}    float inputs:metallic = ${fmt(m.metallic)}`);
-    if (tex.orm) out.push(`${I}    float inputs:metallic.connect = <${mp}/orm_map.outputs:b>`);
+    if (tex.orm && at.m >= 0) out.push(`${I}    float inputs:metallic.connect = <${mp}/orm_map.outputs:${chan(at.m)}>`);
     out.push(`${I}    float inputs:roughness = ${fmt(m.roughness)}`);
     // an orm map (occlusion R, roughness G, metallic B) drives occlusion, roughness and metallic and wins over a roughness map
-    if (tex.orm) out.push(`${I}    float inputs:roughness.connect = <${mp}/orm_map.outputs:g>`, `${I}    float inputs:occlusion.connect = <${mp}/orm_map.outputs:r>`);
-    else if (tex.roughness) out.push(`${I}    float inputs:roughness.connect = <${mp}/roughness_map.outputs:r>`);
+    if (tex.orm) {
+      if (at.r >= 0) out.push(`${I}    float inputs:roughness.connect = <${roughOut}>`);
+      if (at.o >= 0) out.push(`${I}    float inputs:occlusion.connect = <${mp}/orm_map.outputs:${chan(at.o)}>`);
+    } else if (tex.roughness) out.push(`${I}    float inputs:roughness.connect = <${mp}/roughness_map.outputs:r>`);
     if (tex.normal) out.push(`${I}    normal3f inputs:normal.connect = <${mp}/normal_map.outputs:rgb>`);
     out.push(`${I}    float inputs:opacity = ${fmt(m.alpha)}`);
     out.push(`${I}    int inputs:useSpecularWorkflow = 0`);
@@ -283,8 +289,15 @@ function usdaMaterials(table: MaterialTable, o: ExportOptions, out: string[]): M
       };
       if (tex.baseColor) texShader('base_color_map', tex.baseColor, 'sRGB', 'float3 outputs:rgb');
       if (tex.roughness && !tex.orm) texShader('roughness_map', tex.roughness, 'raw', 'float outputs:r');
-      if (tex.orm) texShader('orm_map', tex.orm, 'raw', 'float outputs:r', ['float outputs:g', 'float outputs:b']);
-      if (tex.normal) texShader('normal_map', tex.normal, 'raw', 'float3 outputs:rgb', ['float4 inputs:scale = (2, 2, 2, 1)', 'float4 inputs:bias = (-1, -1, -1, 0)']);
+      if (tex.orm) {
+        const used = [at.o, at.m, at.smooth ? -1 : at.r].filter((c) => c >= 0).sort();
+        if (used.length) texShader('orm_map', tex.orm, 'raw', `float outputs:${chan(used[0])}`, used.slice(1).map((c) => `float outputs:${chan(c)}`));
+        // smoothness: the same file read as 1 − value
+        if (at.smooth) texShader('smoothness_map', tex.orm, 'raw', `float outputs:${chan(at.r)}`, ['float4 inputs:scale = (-1, -1, -1, -1)', 'float4 inputs:bias = (1, 1, 1, 1)']);
+      }
+      // a DirectX normal map (green down) is read with its green flipped
+      const flip = m.normalFormat === 'directx';
+      if (tex.normal) texShader('normal_map', tex.normal, 'raw', 'float3 outputs:rgb', [`float4 inputs:scale = (2, ${flip ? -2 : 2}, 2, 1)`, `float4 inputs:bias = (-1, ${flip ? 1 : -1}, -1, 0)`]);
     }
     out.push('        }');
   }

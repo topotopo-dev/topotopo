@@ -79,6 +79,35 @@ export function parsePacking(code: unknown): PackedChannel[] | string {
   return letters;
 }
 
+/** Where glTF's occlusion, roughness and metallic sit in a packed map: channel index (−1 = not in it); `smooth` = the
+ *  roughness channel holds smoothness (1 − roughness). */
+export interface PackedSources { o: number; r: number; m: number; smooth: boolean }
+
+/** The channels of a material's packed map other than glTF's own layout (orm); null for orm or no stated layout. */
+export function packedSources(packing: string | undefined): PackedSources | null {
+  if (!packing) return null;
+  const letters = parsePacking(packing);
+  if (typeof letters === 'string' || letters.join('') === 'orm') return null;
+  const s = letters.indexOf('s');
+  return { o: letters.indexOf('o'), r: s >= 0 ? s : letters.indexOf('r'), m: letters.indexOf('m'), smooth: s >= 0 };
+}
+
+/**
+ * The texels of a packed map (n texels of ch interleaved channels; `one` = the value of 1, 255 for 8 bits) in glTF's
+ * layout, written to out as RGBA: occlusion R, roughness G, metallic B, 1 in A. A channel the layout lacks is 1, so the
+ * material's own factor holds alone.
+ */
+export function toOrmLayout(src: ArrayLike<number>, n: number, ch: number, one: number, at: PackedSources, out: { [i: number]: number }): void {
+  const get = (i: number, c: number) => (c < 0 ? one : ch === 1 ? src[i] : c < ch ? src[i * ch + c] : one);
+  for (let i = 0; i < n; i++) {
+    out[i * 4] = get(i, at.o);
+    const r = get(i, at.r);
+    out[i * 4 + 1] = at.smooth && at.r >= 0 ? one - r : r;
+    out[i * 4 + 2] = get(i, at.m);
+    out[i * 4 + 3] = one;
+  }
+}
+
 export interface MaterialTextures { baseColor?: string; normal?: string; roughness?: string; orm?: string }
 
 /** Texture slots in table order. */

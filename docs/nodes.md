@@ -3737,8 +3737,8 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none) |
 | `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel |
 | `packed_map` | path | `""` |  |  | `orm_map`, `mask_map`, `arm_map` | packed map (PNG/JPEG path or "image:<name>"; "" = none) whose channels packing names; the glTF / Unreal occlusion-roughness-metallic map by default |
-| `packing` | string | `"orm"` |  |  | `packed_layout`, `channel_layout` | channel layout of packed_map, one letter per channel R, G, B (A): o occlusion, r roughness, m metallic, h height, s smoothness, x unused; "orm" (glTF, Unreal), "hro" (R height, G roughness, B occlusion), "rma", "moxs" (a Unity HDRP mask map); exporters write the map as it is, so only "orm" reads right in glTF |
-| `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` | `normal_convention` | green-channel convention of normal_map: opengl (+Y up: glTF, Blender) or directx (Unreal); bakes read it, exporters write the map as it is |
+| `packing` | string | `"orm"` |  |  | `packed_layout`, `channel_layout` | channel layout of packed_map, one letter per channel R, G, B (A): o occlusion, r roughness, m metallic, h height, s smoothness, x unused; "orm" (glTF, Unreal), "hro" (R height, G roughness, B occlusion), "rma", "moxs" (a Unity HDRP mask map); glTF and usda exports and the preview read it by this layout (glTF holds the map rewritten as orm) |
+| `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` | `normal_convention` | green-channel convention of normal_map: opengl (+Y up: glTF, Blender) or directx (Unreal); bakes, the preview and the glTF and usda exports read it (glTF holds the map rewritten as opengl) |
 | `tile` | float | `0` | 0.. |  | `tile_size`, `tiling_metres`, `texture_size` | metres one repeat of the maps covers on a metric uv (1 uv unit = 1 m), e.g. 3 for a concrete map tiling every 3 m; 0 = the maps fill 0..1 of the uv. Bakes read the maps at uv / tile; exporters write uv and maps as they are (the engine material does the tiling) |
 
 **Writes:** prim "material" (string), detail "materials" (JSON table); with a source, the images its maps use
@@ -16955,7 +16955,7 @@ Input 0: a mesh with uv and materials, each with a kind. The maps of the materia
 | `overrides` | json | `{}` |  |  | `override` | per layer of the stack: {"painted_metal_rust": {"color": "#5a2a14"}, "dust": {"opacity": 0}, "grime": {"image": "oil_photo", "size": 0.6}}; fields color, opacity, roughness, roughness_offset, metallic, height, color_mode, image, normal, roughness_image, size |
 | `reference` | json | `{}` |  |  | `target_look` | route B: what the base is pulled toward before weathering: {"color": "#6b665c", "roughness": 0.85} or {"image": "name"} (input 3); {} = none |
 | `match` | float | `0.6` | 0..1 |  | `pull` | route B: how far toward the reference (0 = not at all) |
-| `packing` | string | `"orm"` |  |  | `packed_layout` | channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma, mrox |
+| `packing` | string | `"orm"` |  |  | `packed_layout` | channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma, mrox; glTF and usda exports read it by this layout |
 | `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` |  | green channel of the normal map: opengl (glTF, Blender) or directx (Unreal) |
 
 **Writes:** the mesh with the weathered material; images <material>_base_color, _normal, the packed map, _height, _masks

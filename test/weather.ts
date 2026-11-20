@@ -14,7 +14,11 @@ import type { NodeProgress } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import { Image, findImage, sampleUV } from '../src/core/image.ts';
-import { MATERIAL_ATTRIB, readMaterials } from '../src/core/materials.ts';
+import { MATERIAL_ATTRIB, readMaterials, writeMaterials } from '../src/core/materials.ts';
+import { exportGeometry, exportGeometryAsync } from '../src/io/export.ts';
+import { importGLTFAsync } from '../src/io/gltf.ts';
+import { renderGeometryAsync } from '../src/render/raster.ts';
+import { renderArgs } from '../src/render/options.ts';
 import { vertexUV } from '../src/core/tangents.ts';
 import { triangulate } from '../src/core/topology.ts';
 import { WEATHER_MASKS, leakSources } from '../src/core/weather.ts';
@@ -359,6 +363,26 @@ section('packing and the normal convention');
   let flipped = true, tilted = 0;
   for (let i = 1; i < gl.length; i += 4) { flipped &&= Math.abs(dx[i] - (1 - gl[i])) < 1e-6 && dx[i - 1] === gl[i - 1]; if (Math.abs(gl[i] - 0.5) > 0.002) tilted++; }
   check(flipped && tilted > 0, `the directx normal's green is 1 − the opengl one on every texel (${tilted} tilted texels)`);
+
+  // exporters and the preview read the stated layout: glTF holds its own convention, so the maps are rewritten in it
+  const glb = async (g: Geometry) => importGLTFAsync(await exportGeometryAsync(g, 'glb'));
+  const mrao = await cook({ ...CAB, w: W({ ...CAB_W, packing: 'mrao', normal_format: 'directx' }) }, 'w');
+  const [back, ref] = [await glb(mrao.geo), await glb(cab.geo)];
+  const bt = readMaterials(back).weathered;
+  // within one 8-bit step for the normal: 1 − g rounds the other way at exact halves
+  const same = (a: Image | null, b: Image | null, tol = 1e-6) => !!a && !!b && a.layer('C')!.every((v, i) => Math.abs(v - b.layer('C')![i]) < tol);
+  check(same(findImage(back, 'weathered_mrox_gltf'), findImage(ref, 'weathered_orm')) && same(findImage(back, 'weathered_normal_gltf'), findImage(ref, 'weathered_normal'), 1.01 / 255)
+    && bt.packing === undefined && bt.normalFormat === undefined && bt.textures?.orm === 'image:weathered_mrox_gltf',
+  'glb: the mrao map is written as the orm of glTF and the directx normal as opengl, the same maps as the default layout; the material read back names them');
+  const usda = new TextDecoder().decode(exportGeometry(hro.geo, 'usda'));
+  check(/inputs:roughness\.connect = <[^>]*orm_map\.outputs:g>/.test(usda) && /inputs:occlusion\.connect = <[^>]*orm_map\.outputs:b>/.test(usda) && !/inputs:metallic\.connect/.test(usda)
+    && /inputs:scale = \(2, -2, 2, 1\)/.test(usda), 'usda: roughness from G and occlusion from B of the hro map, no metallic channel, the directx normal read with green flipped');
+  const smooth = hro.geo.clone();
+  writeMaterials(smooth, { ...readMaterials(smooth), weathered: { ...t, packing: 'mask_map' } });
+  check(/inputs:roughness\.connect = <[^>]*smoothness_map\.outputs:a>/.test(new TextDecoder().decode(exportGeometry(smooth, 'usda'))), 'usda: smoothness in A is read inverted');
+  const shot = async (g: Geometry) => (await renderGeometryAsync(g, renderArgs({ shading: 'pbr', textures: true, views: 'persp', size: 96, grid: false, footer: false }))).rgba;
+  const [a, b] = [await shot(mrao.geo), await shot(cab.geo)];
+  check(a.every((v, i) => Math.abs(v - b[i]) <= 1), 'the preview of the mrao + directx maps is the preview of the default layout');
 }
 
 section('route B: unique maps pulled toward a stated reference');

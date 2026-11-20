@@ -599,7 +599,7 @@ defineNode({
     overrides: { type: 'json', default: {}, desc: 'per layer of the stack: {"painted_metal_rust": {"color": "#5a2a14"}, "dust": {"opacity": 0}, "grime": {"image": "oil_photo", "size": 0.6}}; fields ' + OVERRIDE_FIELDS.join(', '), aliases: ['override'] },
     reference: { type: 'json', default: {}, desc: 'route B: what the base is pulled toward before weathering: {"color": "#6b665c", "roughness": 0.85} or {"image": "name"} (input 3); {} = none', aliases: ['target_look'] },
     match: { type: 'float', default: 0.6, min: 0, max: 1, desc: 'route B: how far toward the reference (0 = not at all)', aliases: ['pull'] },
-    packing: { type: 'string', default: 'orm', desc: 'channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma, mrox', aliases: ['packed_layout'] },
+    packing: { type: 'string', default: 'orm', desc: 'channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma, mrox; glTF and usda exports read it by this layout', aliases: ['packed_layout'] },
     normal_format: { type: 'enum', options: ['opengl', 'directx'], default: 'opengl', desc: 'green channel of the normal map: opengl (glTF, Blender) or directx (Unreal)' },
   },
   outputs: 'the mesh with the weathered material; images <material>_base_color, _normal, the packed map, _height, _masks',
