@@ -1727,12 +1727,14 @@ const STRONG_LO = 0.25, STRONG_HI = 0.75;
 export const strength = (e: number) => { const t = (e - STRONG_LO) / (STRONG_HI - STRONG_LO); return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
 /** The look across: an edge point straight across counts fully, one 45° or more off not at all (cosines). */
 const ACROSS_HI = Math.cos(Math.PI / 12), ACROSS_LO = Math.cos(Math.PI / 4);
+/** How much an edge point counts by how its normal agrees with the sample's (cosine): 1 from 0.5 (60°), 0 at 0 (90°) and below. */
+const facing = (c: number) => { const t = c / 0.5; return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
 
 /**
  * Edge proximity at texel samples [start, end) (kernel surface_spread), at two reaches: V[2i] the largest
  * E[q] × (1 − (d / w')²), V[2i + 1] the largest E[q] × (1 − (d / f')²), over the edge points q of the cloud (E > 0, not
- * buried) of the sample's part within reach that do not face away (normals more than 120° apart: the far side of a thin
- * plate). The reaches are width and far (far only where the sample is handled, A.HD > 0; elsewhere both read width),
+ * buried) of the sample's part within reach, E weighed by how the normals agree (fully within 60°, nothing from 90°:
+ * the floor at the foot of a standing edge and the far side of a thin plate get nothing). The reaches are width and far (far only where the sample is handled, A.HD > 0; elsewhere both read width),
  * limited by the part itself: with d1 the distance to the nearest edge point and d2 to the nearest one on the opposite
  * side (read from the edge points merged into clusters of half the radius on a lattice fixed in the world, up to 2 × the
  * reach − d1), wear never passes the midline (d1 + d2) / 2 between the two edges, so a narrow face keeps paint along its
@@ -1822,8 +1824,13 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
       for (let k = GS[row + x0], ke = GS[row + x1 + 1]; k < ke; k++) {
         const dx = GP[k * 3] - px, dy = GP[k * 3 + 1] - py, dz = GP[k * 3 + 2] - pz, d2 = dx * dx + dy * dy + dz * dz;
         if (d2 >= f2) continue;
-        const q = GI[k], e = E[q];
-        if (CPiece[q] !== pc || nx * CN[q * 3] + ny * CN[q * 3 + 1] + nz * CN[q * 3 + 2] < -0.5 * nl) continue;
+        const q = GI[k];
+        if (CPiece[q] !== pc) continue;
+        // only edge points that face the sample's way: fully within 60°, none from 90° (the floor at the foot of a
+        // standing edge, across a concave corner, and the far side of a thin plate get nothing from it)
+        const fw = facing((nx * CN[q * 3] + ny * CN[q * 3 + 1] + nz * CN[q * 3 + 2]) / nl);
+        if (!(fw > 0)) continue;
+        const e = E[q] * fw;
         if (nv >= cap) {
           const grow = (x: Float64Array) => { const y = new Float64Array(cap * 2); y.set(x); return y; };
           vd = grow(vd); ve = grow(ve); cap *= 2;

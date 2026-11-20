@@ -486,6 +486,9 @@ section('what a face is: flush stacks are no edge, a small boss is held, a large
     nest(t.im);
     const top = region(t, ([, y]) => Math.abs(y - 0.32) < 1e-4), bodyRim = region(t, ([x, y, z]) => Math.abs(y - 0.3) < 1e-4 && (Math.abs(x) > 0.146 || Math.abs(z) > 0.146));
     check(top.length > 500 && chipped(t, top) < WEAR_CAP + 0.03 && chipped(t, bodyRim) > (amount < 1 ? 0.8 : 0.95) && t.c.stats.capped_faces === 5, `welded boss, amount ${amount}: its top ${f3(chipped(t, top))} chipped (its 5 faces held, under a third within 0.03 at texel level), the body's rim ${f3(chipped(t, bodyRim))}`);
+    // the body's top around the foot of each standing boss edge lies across a concave corner from it: no wear there
+    const foot = region(t, ([x, y, z]) => Math.abs(y - 0.3) < 1e-4 && (Math.abs(x) > 0.0205 || Math.abs(z) > 0.0205) && Math.hypot(Math.abs(x) - 0.02, Math.abs(z) - 0.02) < 0.012);
+    check(foot.length > 200 && max(foot.map((k) => t.at('chip', k))) === 0, `welded boss, amount ${amount}: the body's top within 12 mm of the boss's corners has no chip (${foot.length} texels)`);
   }
   // a grille of 12 bars 6 × 6 mm, 20 cm long: corners first, paint along the bars at moderate amounts
   const bars: Nodes = Object.assign({}, ...Array.from({ length: 12 }, (_, i) => ({ [`g${i}`]: { type: 'box', params: { size: [0.006, 0.006, 0.2], center: [(i - 5.5) * 0.015, 0.003, 0] } } })));
