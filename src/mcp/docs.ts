@@ -841,7 +841,7 @@ SEE IT: render of a geometry holding only images shows the "texture" view; rende
   colour maps on the mesh (texture × Cd, like glTF). inspect lists every image with size and per-layer ranges.
 EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metallicRoughnessTexture); usda writes
   <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
-  <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
+  <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers; "*" leaves out the bakes' texel layer, and the island layer is a 16-bit grey, island number + 1); json keeps images losslessly; geo/obj/… skip them.
 RECIPE (brick wall + worn crate; tileable stone, wood and metal from texture nodes: help {examples:["material_set"]}):
   bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15, texture_size:1.6} · ids = tex_output(bricks) {layer:"id"}
   color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)

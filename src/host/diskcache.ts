@@ -166,7 +166,16 @@ class Arrays {
   views: Uint8Array[] = [];
   kinds: [Kind, number][] = [];
   bytes = 0;
+  /** an array that several images share (the texel and island layers of the bakes of one mesh) is stored once */
+  private seen = new Map<ArrayBufferView, number>();
   add(a: ArrayBufferView): number {
+    const had = this.seen.get(a);
+    if (had !== undefined) return had;
+    const index = this.store(a);
+    this.seen.set(a, index);
+    return index;
+  }
+  private store(a: ArrayBufferView): number {
     const kind: Kind | undefined = a instanceof Float64Array ? 'f64' : a instanceof Float32Array ? 'f32' : a instanceof Int32Array ? 'i32' : a instanceof Uint8Array ? 'u8' : undefined;
     if (!kind) throw new Unstorable(`an array of a kind that is not stored (${a.constructor?.name})`);
     this.views.push(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));

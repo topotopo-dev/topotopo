@@ -317,18 +317,26 @@ export function opaque(a: Float32Array, ch: number): boolean {
 // ---------------------------------------------------------------- JSON (io/json.ts)
 
 /** Layers as base64 of their little-endian float32 bytes (compact and exact); grey/RGBA follows from the length. */
-export function imageToJSON(img: Image): Record<string, any> {
-  const layers: Record<string, string> = {};
-  for (const [k, a] of img.layers) layers[k] = f32ToBase64(a);
+export function imageToJSON(img: Image, index = 0, written?: Map<Float32Array, [number, string]>): Record<string, any> {
+  // a layer that an earlier image of the same geometry holds too (the bakes of one mesh share their texel and island
+  // layers) is written once and named by that image's position afterwards
+  const layers: Record<string, string | { same: [number, string] }> = {};
+  for (const [k, a] of img.layers) {
+    const had = written?.get(a);
+    if (had) layers[k] = { same: had };
+    else { layers[k] = f32ToBase64(a); written?.set(a, [index, k]); }
+  }
   return { name: img.name, width: img.width, height: img.height, ...(img.size !== 1 || img.sizeStated ? { size: img.size } : {}), layers };
 }
 
 /** An image from imageToJSON output (layers as base64 float32, or plain number arrays). */
-export function imageFromJSON(j: any): Image {
+export function imageFromJSON(j: any, before: Image[] = []): Image {
   const img = new Image(Number(j?.width), Number(j?.height), String(j?.name ?? 'image'));
   if (Number(j?.size) > 0) img.setSize(Number(j.size)); // a written size was stated
   for (const [k, v] of Object.entries(j?.layers ?? {})) {
-    const a = typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);
+    const same = (v as any)?.same;
+    const a = same ? before[same[0]]?.layer(same[1]) : typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);
+    if (!a) throw new Error(`image "${img.name}" layer "${k}" repeats a layer of image ${same?.[0]} that is not there`);
     if (!channelsOf(a, img.count)) throw new Error(`image "${img.name}" layer "${k}": ${a.length} values for ${img.width} × ${img.height} pixels`);
     img.layers.set(k, a);
   }

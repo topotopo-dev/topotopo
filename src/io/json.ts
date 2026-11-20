@@ -4,6 +4,7 @@ import type { AttribType } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
 import { imageFromJSON, imageToJSON, imagesOf } from '../core/image.ts';
+import type { Image } from '../core/image.ts';
 import { gridFromJSON, gridToJSON, gridsOf } from '../core/sdfgrid.ts';
 
 function tableToJSON(t: AttribTable) {
@@ -80,7 +81,7 @@ export function geoToJSON(g: Geometry) {
   if (hfs.length) out.heightfields = hfs.map((h) => ({ name: h.name, width: h.width, height: h.height, cellSize: h.cellSize, origin: h.origin, layers: Object.fromEntries([...h.layers].map(([k, a]) => [k, Array.from(a)])) }));
   // image volumes (written only when present): size + layers as base64 float32 (core/image.ts)
   const imgs = imagesOf(g);
-  if (imgs.length) out.images = imgs.map(imageToJSON);
+  if (imgs.length) { const written = new Map<Float32Array, [number, string]>(); out.images = imgs.map((im, i) => imageToJSON(im, i, written)); }
   const grids = gridsOf(g);
   if (grids.length) {
     out.grids = grids.map(gridToJSON);
@@ -148,7 +149,8 @@ export function geoFromJSON(j: any): Geometry {
     }
     g.volumes.push(hf);
   }
-  for (const im of j.images ?? []) g.volumes.push(imageFromJSON(im));
+  const read: Image[] = [];
+  for (const im of j.images ?? []) { const img = imageFromJSON(im, read); read.push(img); g.volumes.push(img); }
   for (const grid of j.grids ?? []) g.volumes.push(gridFromJSON(grid));
   if (j.volumeOrder !== undefined) {
     if (!Array.isArray(j.volumeOrder) || j.volumeOrder.length !== g.volumes.length) throw new Error('native JSON volumeOrder must list every stored volume');
