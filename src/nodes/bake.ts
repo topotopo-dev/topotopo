@@ -114,6 +114,15 @@ function setup(ctx: CookContext): Bake {
   };
 }
 
+/** Metres the baked image's width covers: the median texel size of the baked triangles times the width (1 when none has an area). */
+function bakeSize(b: Bake): number {
+  const sel = mask(b.g, 'prim', b.ctx.p.group);
+  let skip: Uint8Array | null = null;
+  if (sel) { skip = new Uint8Array(b.triPrim.length); for (let t = 0; t < skip.length; t++) skip[t] = sel[b.triPrim[t]] ? 0 : 1; }
+  const t = medianTexelSize(vertexPositions(b.g), b.uv, b.tris, b.s.W, b.s.H, skip);
+  return t > 0 ? t * b.s.W : 1;
+}
+
 /**
  * Resolve per-sample values into the output image (C + mask + extra layers) and pad it: one padding map (from the
  * coverage) serves every layer. Returns the image with its coverage and the padding map.
@@ -122,6 +131,7 @@ function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, background: n
   const { ctx, s } = b, p = ctx.p;
   const { data, coverage } = resolve(s, vals, ch);
   const img = new Image(s.W, s.H, outName(ctx));
+  img.size = bakeSize(b);
   const pad = Math.max(0, Math.round(p.padding));
   const map = paddingMap(coverage, s.W, s.H, pad);
   applyPadding(data, ch, map, background);

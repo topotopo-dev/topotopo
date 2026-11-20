@@ -12,6 +12,10 @@
 //                 those numbers): a base colour image written to PNG then has the same bytes as the colours that
 //                 made it, and glTF / USD read it as sRGB, as both require. So no image needs a colour-space tag,
 //                 and the texture view shows what the files will hold.
+//   size          metres the image's width covers on the model (default 1): one texel is size / width metres along u and
+//                 along v, which every texture node reads to turn its lengths in metres into texels. A bake that knows
+//                 its uv also writes a layer "texel" (metres per texel along u and v) and "island" (uv island ids), and
+//                 then a node converts per texel and keeps every island to itself (core/texscale.ts)
 //   layers        "C" is the image itself (Houdini COP plane name); nodes add others: "id" (per-cell random value of
 //                 patterns and cells), "mask" (bake coverage), "convex" / "concave" (curvature bakes), user layers
 //
@@ -38,6 +42,8 @@ export class Image implements ImageVolume {
   width: number;
   height: number;
   layers: Map<string, Float32Array>;
+  /** metres the width covers (see the header); 1 unless a generator, a file or a bake says otherwise */
+  size = 1;
 
   constructor(width: number, height: number, name = 'image', layers?: Map<string, Float32Array>) {
     if (!(Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1)) throw new Error(`image needs at least 1 × 1 pixels (got ${width} × ${height})`);
@@ -73,10 +79,13 @@ export class Image implements ImageVolume {
     return this;
   }
 
-  clone(): Image { return new Image(this.width, this.height, this.name, new Map(this.layers)); }
+  clone(): Image { const c = new Image(this.width, this.height, this.name, new Map(this.layers)); c.size = this.size; return c; }
 
   /** The same size and name without layers. */
-  emptyLike(name = this.name): Image { return new Image(this.width, this.height, name); }
+  emptyLike(name = this.name): Image { const c = new Image(this.width, this.height, name); c.size = this.size; return c; }
+
+  /** Metres one texel covers where nothing says otherwise: size / width (texels are square). */
+  get texel(): number { return this.size / this.width; }
 }
 
 export function isImage(v: Volume): v is ImageVolume {
@@ -85,7 +94,10 @@ export function isImage(v: Volume): v is ImageVolume {
 
 /** The Image class behind an image volume (wraps foreign implementations of the interface). */
 export function asImage(v: ImageVolume): Image {
-  return v instanceof Image ? v : new Image(v.width, v.height, v.name, new Map(v.layers));
+  if (v instanceof Image) return v;
+  const img = new Image(v.width, v.height, v.name, new Map(v.layers));
+  if (v.size > 0) img.size = v.size;
+  return img;
 }
 
 /** The images of a geometry, in volume order. */
@@ -294,12 +306,13 @@ export function opaque(a: Float32Array, ch: number): boolean {
 export function imageToJSON(img: Image): Record<string, any> {
   const layers: Record<string, string> = {};
   for (const [k, a] of img.layers) layers[k] = f32ToBase64(a);
-  return { name: img.name, width: img.width, height: img.height, layers };
+  return { name: img.name, width: img.width, height: img.height, ...(img.size !== 1 ? { size: img.size } : {}), layers };
 }
 
 /** An image from imageToJSON output (layers as base64 float32, or plain number arrays). */
 export function imageFromJSON(j: any): Image {
   const img = new Image(Number(j?.width), Number(j?.height), String(j?.name ?? 'image'));
+  if (Number(j?.size) > 0) img.size = Number(j.size);
   for (const [k, v] of Object.entries(j?.layers ?? {})) {
     const a = typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);
     if (!channelsOf(a, img.count)) throw new Error(`image "${img.name}" layer "${k}": ${a.length} values for ${img.width} × ${img.height} pixels`);

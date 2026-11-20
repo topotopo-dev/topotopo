@@ -334,6 +334,7 @@ defineNode({
     const prefix = outName(ctx);
     const make = (suffix: string, data: Float32Array) => {
       const img = new Image(w, h, `${prefix}_${suffix}`).set(MAIN_LAYER, data);
+      img.size = base.img.size;
       if (coverage) img.set('mask', coverage);
       return img;
     };

@@ -467,6 +467,8 @@ export interface ImageVolume {
   /** pixels along v (rows, row 0 at the top: v = 1) */
   height: number;
   layers: Map<string, Float32Array>;
+  /** metres the width covers (one texel is size / width along u and v); 1 unless said otherwise */
+  size: number;
   /** always an empty box (min +Infinity, max -Infinity): an image is not placed in space */
   readonly bounds: { min: Vec3; max: Vec3 };
   /** a copy with its own layer map that shares the layer arrays */
@@ -480,7 +482,7 @@ export function cloneVolumes(vs: Volume[]): Volume[] {
   return vs.map((v) => (v.kind === 'heightfield' || v.kind === 'image' || v.kind === 'grid' ? v.clone() : v));
 }
 
-/** Two images with the same name, size and layers, every layer equal value for value (shared arrays compare at once). */
+/** Two images with the same name, size, metres covered and layers, every layer equal value for value (shared arrays compare at once). */
 export function sameImage(a: ImageVolume, b: ImageVolume): boolean {
   return a === b || (a.name === b.name && samePixels(a, b));
 }
@@ -488,7 +490,7 @@ export function sameImage(a: ImageVolume, b: ImageVolume): boolean {
 /** Two images of the same size and layers, every layer equal value for value, whatever their names. */
 export function samePixels(a: ImageVolume, b: ImageVolume): boolean {
   if (a === b) return true;
-  if (a.width !== b.width || a.height !== b.height || a.layers.size !== b.layers.size) return false;
+  if (a.width !== b.width || a.height !== b.height || a.size !== b.size || a.layers.size !== b.layers.size) return false;
   for (const [k, x] of a.layers) {
     const y = b.layers.get(k);
     if (!y || y.length !== x.length) return false;

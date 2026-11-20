@@ -203,7 +203,7 @@ function packVolume(v: Volume, A: Arrays) {
   if (v.kind === 'sdf') throw new Unstorable('an SDF volume is a function');
   if (v.kind === 'grid') return { k: 'grid', name: v.name, dims: v.dims, origin: encAll(v.origin), voxel: enc(v.voxel), values: A.add(v.values) };
   const layers = [...v.layers].map(([k, a]) => [k, A.add(a)]);
-  if (v.kind === 'image') return { k: 'image', name: v.name, width: v.width, height: v.height, layers };
+  if (v.kind === 'image') return { k: 'image', name: v.name, width: v.width, height: v.height, size: enc(v.size), layers };
   return { k: 'heightfield', name: v.name, width: v.width, height: v.height, cellSize: enc(v.cellSize), origin: encAll(v.origin), layers };
 }
 
@@ -321,7 +321,7 @@ function unpackGeometry(j: any, arrays: Typed[]): Geometry {
       must(a.length === count || (v.k === 'image' && a.length === count * 4), `layer ${k}: ${a.length} values for ${v.width} × ${v.height}`);
       return [k, a];
     }));
-    if (v.k === 'image') return new Image(v.width, v.height, v.name, layers);
+    if (v.k === 'image') { const img = new Image(v.width, v.height, v.name, layers); if (v.size !== undefined) img.size = dec(v.size); return img; }
     return new Heightfield(v.width, v.height, dec(v.cellSize), decAll(v.origin) as [number, number], layers, v.name);
   });
   return g;
