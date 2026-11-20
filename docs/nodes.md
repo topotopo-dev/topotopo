@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-265 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+266 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -12482,7 +12482,7 @@ category: `texture` · aliases: `ao_bake`, `bake_ambient_occlusion`, `bake_occlu
 
 Bake ambient occlusion into uv space: white = open sky, dark in gaps, corners and contact areas.
 
-Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` cosine-weighted rays over the hemisphere of its normal against the mesh (or the high-res input, sampled at the projected point); C = 1 - the fraction that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.
+Substance Painter / Marmoset "Ambient Occlusion". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` cosine-weighted rays over the hemisphere of its normal against the mesh (or the high-res input, sampled at the projected point); C = 1 - the fraction that hit within max_distance. Combine with bake_curvature for edge wear and dirt masks; pack into ORM with tex_channel.
 
 **Inputs**
 
@@ -12551,7 +12551,7 @@ category: `texture` · aliases: `curvature_bake`, `bake_edges`, `edge_wear_bake`
 
 Bake edge curvature into uv space: 0.5 flat, brighter on convex edges and bevels, darker in concave creases (edge wear and dirt masks).
 
-Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask.
+Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask. method surface measures how the shading normals turn within radius instead, on a cloud of surface points interpolated in 3D (as bake_measure curvature): the facets of decimated and isosurface meshes do not read as edges, hard edges (split normals) still do, and each connected part is measured on its own (where parts intersect, cavity shows the seam); min_angle and intersections are for method dihedral, and it does not read a high-res input.
 
 **Inputs**
 
@@ -12573,8 +12573,9 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `radius` | float | `0` | 0.. |  | `width`, `edge_width`, `distance` | how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal) |
 | `strength` | float | `1` | 0.. |  | `intensity`, `contrast` | contrast multiplier |
-| `min_angle` | float | `0.5` | 0..179 |  |  | edges bending less than this (degrees) are ignored |
-| `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | also find the concave creases where separate parts cut into each other (kitbashed meshes) |
+| `method` | enum | `"dihedral"` |  | `dihedral`, `surface` | `mode`, `curvature_method` | dihedral: the angles of the mesh edges near the texel; surface: how the shading normals turn within radius (facets smaller than radius do not show: decimated and isosurface meshes; other parts count where they are not buried, so junctions read concave; radius at most half the size of the model) |
+| `min_angle` | float | `0.5` | 0..179 |  |  | dihedral: edges bending less than this (degrees) are ignored |
+| `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | dihedral: also find the concave creases where separate parts cut into each other (kitbashed meshes) |
 | `tile` | bool | `true` |  |  |  | trim sheets: a band that tiles is copied one period past each open end, so curvature does not fade there (no effect without trim bands). Help topic trim_sheets. |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
@@ -12750,7 +12751,7 @@ category: `texture` · aliases: `height_bake`, `bake_displacement`, `displacemen
 
 Bake the height of a high-res mesh (input 1) above the low mesh along its normals: a displacement / height map.
 
-Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Rays along the low normals within ±cage find the high surface; layer "distance" holds the signed distance in metres (0 on a miss) and C maps it to 0..1: mode cage = 0.5 + d / (2 cage) (0.5 = on the low surface), normalize = the min..max of the hits (stats height_min / height_max). Feed tex_normal_from_height or use it as displacement.
+Substance Painter "Height". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Rays along the low normals within ±cage find the high surface; layer "distance" holds the signed distance in metres (0 on a miss) and C maps it to 0..1: mode cage = 0.5 + d / (2 cage) (0.5 = on the low surface), normalize = the min..max of the hits (stats height_min / height_max). Feed tex_normal_from_height or use it as displacement.
 
 **Inputs**
 
@@ -12840,7 +12841,7 @@ category: `texture` · aliases: `island_id_bake`, `bake_id`, `id_bake`, `bake_uv
 
 Bake uv islands as random flat colours (an ID map for masking per island), with the island number in layer "id".
 
-Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).
+Substance Painter "ID" (by uv island). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Islands are triangles connected through corners that share a point and a uv. C is a random colour per island (seed), layer "id" the island number 0..n-1 (the stat islands counts them).
 
 **Inputs**
 
@@ -12897,7 +12898,7 @@ category: `texture` · aliases: `mask_bake`, `bake_group`, `bake_attribute`, `at
 
 Bake a mask into uv space from a prim group (1 inside) or a numeric attribute (its value), e.g. to paint per-part materials.
 
-Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mask_group (a prim group pattern) gives 1 where any of its prims covers the texel and 0 elsewhere, so overlapping region prims add up instead of the topmost one winning; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
+Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mask_group (a prim group pattern) gives 1 where any of its prims covers the texel and 0 elsewhere, so overlapping region prims add up instead of the topmost one winning; else attrib (point, vertex, prim or detail; component picks one of a vector, -1 = luminance) is interpolated as it is; with neither, C is the coverage itself.
 
 **Inputs**
 
@@ -12917,10 +12918,10 @@ Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv 
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `mask_group` | group (prim) | `""` |  |  | `from_group`, `mask_prims` | prims that read 1 (e.g. "planks", "@P.y>0.5") |
-| `attrib` | string | `""` |  |  | `attribute`, `from_attrib` | numeric attribute to bake when mask_group is empty |
+| `attrib` | string | `""` |  |  | `attribute`, `from_attrib` | numeric attribute to bake when mask_group is empty; a comma list ("wear, dirt") bakes one layer per attribute, named after it, C = the first |
 | `component` | int | `0` | -1..15 |  |  | vector component of attrib (-1 = luminance of the first three) |
 
-**Writes:** image <name> (default: the node name): C grey, mask
+**Writes:** image <name> (default: the node name): C grey, mask; with an attrib list also one layer per attribute
 
 **Example**
 
@@ -12958,7 +12959,7 @@ category: `texture` · aliases: `material_bake`, `bake_materials`, `bake_materia
 
 Bake the material table into uv space: base colour, roughness and metallic from each prim's material, a 0/1 mask per material and per kind, and the texel size and uv island of every texel.
 
-Reads the prim attribute "material" and the detail table "materials" (the material node) and writes, in the uv space of the mesh (uv_attrib): C = the base colour (RGBA; where a material's base colour map is an "image:<name>" the geometry carries, the colour it shows), layer "roughness" and layer "metallic" (the material's values; a packed orm map gives roughness from its green and metallic from its blue channel times the factors, a roughness map its green channel), a 0/1 layer "mat_<material>" per material the baked prims use and a 0/1 layer "kind_<kind>" per kind present (masks: all, materials, kinds or none), layer "texel" (R = metres one texel covers along u, G along v, at that texel: tex_layers builds its normal map from it, so a step has the same slope at any resolution and on any shape of image) and layer "island" (the uv island, so a filter can stay on one). Maps are read with the mesh's "uv" attribute (the uv a material's maps use), whatever uv_attrib the bake is laid out with. A material's normal map is not carried (its detail is not in the stack yet: a warning names the material), nor is the occlusion of an orm map: give tex_layers an occlusion expression. Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning lists the renames and two materials never share a name). A texel that two materials share takes the first sample's material for the labels (as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is, in this order, the `kinds` entry for its name, its own `kind` field (the material node's kind param), its whole name when that is a kind or one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about (a texel they share holds the last one's values). Stats: size (the metres the image width covers: the median texel size over the image's texels times the width, which the image carries for the filters after it) and texel_mm.
+Reads the prim attribute "material" and the detail table "materials" (the material node) and writes, in the uv space of the mesh (uv_attrib): C = the base colour (RGBA; where a material's base colour map is an "image:<name>" the geometry carries, the colour it shows), layer "roughness" and layer "metallic" (the material's values; a packed orm map gives roughness from its green and metallic from its blue channel times the factors, a roughness map its green channel), a 0/1 layer "mat_<material>" per material the baked prims use and a 0/1 layer "kind_<kind>" per kind present (masks: all, materials, kinds or none), layer "texel" (R = metres one texel covers along u, G along v, at that texel: tex_layers builds its normal map from it, so a step has the same slope at any resolution and on any shape of image) and layer "island" (the uv island, so a filter can stay on one). Maps are read with the mesh's "uv" attribute (the uv a material's maps use), whatever uv_attrib the bake is laid out with. A material's normal map is not carried (its detail is not in the stack yet: a warning names the material), nor is the occlusion of an orm map: give tex_layers an occlusion expression. Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning lists the renames and two materials never share a name). A texel that two materials share takes the first sample's material for the labels (as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is, in this order, the `kinds` entry for its name, its own `kind` field (the material node's kind param), its whole name when that is a kind or one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about (a texel they share holds the last one's values). Stats: size (metres the image width covers, the median texel size times the width) and texel_mm.
 
 **Inputs**
 
@@ -13037,13 +13038,112 @@ Reads the prim attribute "material" and the detail table "materials" (the materi
 }
 ```
 
+### bake_measure
+
+category: `texture` · aliases: `bake_measures`, `bake_noise`, `bake_distance`, `bake_cavity`, `bake_shelter`, `bake_visibility`
+
+Measure the model in 3D at every texel into named layers: facing, height, distance to parts, 3D noise, occlusion, cavity, shelter, visibility, curvature at a radius, group. Ray measures share one set of rays; uv seams never show.
+
+Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. measures is a list of objects, each {"by": kind, "name": layer, …}; the image gets one layer per measure (C = the first), then "texel" (metres per texel along u and v), "island" (uv island) and "mask". Kinds and their own 0..1: facing (1 toward direction, 0 away; band units: degrees between the normal and direction), height (0 at input 0's lowest point, 1 at its highest along up; metres), distance (1 at the target, 0 at range; metres), noise (3D, 0..1, continuous across seams and triangles), occlusion (1 = open, as bake_ao), cavity (1 = in a crevice), shelter (1 = covered from direction within cone; the part of the cone behind the surface counts as covered), visibility (1 = seen from outside: a quarter of the hemisphere escaping the model and input 1 counts as fully seen), curvature (as bake_curvature method surface; band units: the signed value, 1 = a 90° convex edge; radius at most half the model's size), group (1 on pattern). Each value is shaped like the point mask node: min/max/falloff make a band in the measure's units (unset = its own 0..1), then ramp, then invert, then where (0 outside). Facing, height, distance, noise and group are evaluated per texel; occlusion, cavity, shelter, visibility and curvature on a cloud of surface points every `spacing` metres (default 4 texels at this resolution, at least 0.5 mm; denser where the atlas gives more texels, never sparser than spacing where it gives fewer) and taken to each texel from the cloud points of its own part within 2 × spacing that face its way, so values do not bleed around edges or onto the far side of a plate. A point inside another part (a post sunk into a plate) is buried: it reads covered and no texel that is seen takes its value; curvature counts the points of every part that are not buried, so a junction between parts reads concave. Every ray measure counts over one set of `samples` cosine-weighted rays per cloud point; shelter casts its own cone. Input 1 (surroundings: a wall, the ground) blocks rays, and a face lying flat against it and facing it counts as covered. Results do not depend on prim order. Faces wound against their neighbours are measured turned and reported; a closed part that faces inward is reported, not turned. Stops at the time limit of long-running nodes. Fields: name (layer name (default: the by value)); min (band in the measure's units: 1 inside [min, max]); max (band in the measure's units: 1 inside [min, max]); falloff (linear fade to 0 outside the band, in the measure's units); ramp (reshape the 0..1 value); invert (write 1 − value); where (prims where the measure applies; 0 elsewhere); direction (facing, shelter: the direction measured against); cone (shelter: half-angle of the cone around direction (degrees)); up (height: the axis); target (distance: prims of input 0 ("@name=bolt*") or "input1"); range (distance: metres at which the unbanded value reaches 0); max_distance (ray measures: hits farther than this do not count (metres; 0 = occlusion 0.25, cavity 0.02, shelter and visibility unlimited)); noise (noise: the basis); fractal (noise: how octaves combine); size (noise: feature size in metres per axis ([0.005, 0.15, 0.005] = vertical streaks)); octaves (noise: octaves); roughness (noise: amplitude kept per octave); radius (curvature: the scale the shape is measured at (metres)); side (curvature: both (0.5 = flat), convex or concave (0..1)); pattern (group: prims that read 1).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
+| 1 | `surroundings` | yes | no | optional: geometry that blocks rays (a wall, the ground, neighbours) and can be a distance target ("input1") |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `measures` | json | `[{"by":"occlusion"}]` |  |  | `measure`, `masks`, `layers` | the measures: [{"by": "occlusion"}, {"by": "facing", "name": "top", "min": 0, "max": 30, "falloff": 15}, {"by": "noise", "name": "grain", "size": [0.005, 0.15, 0.005]}] |
+| `samples` | int | `32` | 4..256 |  | `rays` | rays per cloud point, shared by every ray measure (each texel averages several cloud points) |
+| `spacing` | float | `0` | 0.. |  | `cloud_spacing` | distance between cloud points for ray and curvature measures (metres; 0 = 4 texels at this resolution, at least 0.5 mm) |
+| `seed` | float | `0` |  |  |  | ray and noise seed |
+
+**Writes:** image <name> (default: the node name): C = the first measure, one layer per measure, texel, island, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "pocket": {
+      "type": "poly_extrude",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "group": "@P.y>0.4",
+        "distance": -0.2,
+        "inset": 0.15
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "pocket"
+      ]
+    },
+    "measure": {
+      "type": "bake_measure",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256,
+        "samples": 16,
+        "measures": [
+          {
+            "by": "occlusion"
+          },
+          {
+            "by": "facing",
+            "name": "top",
+            "min": 0,
+            "max": 30,
+            "falloff": 20
+          },
+          {
+            "by": "noise",
+            "name": "grain",
+            "size": [
+              0.1,
+              0.1,
+              0.1
+            ]
+          },
+          {
+            "by": "curvature",
+            "name": "edges",
+            "radius": 0.05
+          }
+        ]
+      }
+    }
+  },
+  "output": "measure"
+}
+```
+
 ### bake_normal
 
 category: `texture` · aliases: `normal_bake`, `bake_tangent_normal`, `bake_normal_map`
 
 Bake a tangent-space normal map from a high-res mesh (input 1) onto the uv of the low mesh: OpenGL or DirectX.
 
-Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's MikkTSpace tangent frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
+Substance Painter / Marmoset "Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. For each texel a ray from cage above the low surface along -N finds the high-res surface (within cage below); its interpolated normal is written in the low mesh's MikkTSpace tangent frame as 0.5 + 0.5 n: the frame glTF export writes as TANGENT and Blender, Unreal and Unity compute, so the map decodes the same everywhere (N interpolated and normalised, T the interpolated MikkTSpace tangent made perpendicular to N, B = w · N × T). Misses and a missing input 1 give the flat (0.5, 0.5, 1). glTF and Blender read OpenGL; Unreal DirectX (or flip green on import).
 
 **Inputs**
 
@@ -13123,7 +13223,7 @@ category: `texture` · aliases: `position_bake`, `bake_world_position`
 
 Bake world position into uv space as RGB (bbox-normalised by default): gradients, masks by height or direction.
 
-Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mode bbox maps each axis of the bounding box to 0..1 (R = X, G = Y, B = Z), uniform maps the largest axis to 0..1 and keeps the proportions (centred), world writes metres as they are (data, beyond 0..1). Feed tex_channel extract (channel g) for a bottom-to-top gradient.
+Substance Painter "Position". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. mode bbox maps each axis of the bounding box to 0..1 (R = X, G = Y, B = Z), uniform maps the largest axis to 0..1 and keeps the proportions (centred), world writes metres as they are (data, beyond 0..1). Feed tex_channel extract (channel g) for a bottom-to-top gradient.
 
 **Inputs**
 
@@ -13180,7 +13280,7 @@ category: `texture` · aliases: `thickness_bake`, `bake_thick`
 
 Bake thickness into uv space: rays into the mesh measure how thick it is under each texel (white = thick).
 
-Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` rays in a cone around its inward normal; C = the mean distance to the far side divided by max_distance (misses count as max_distance). invert gives white where thin (translucency, subsurface masks).
+Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Each texel casts `samples` rays in a cone around its inward normal; C = the mean distance to the far side divided by max_distance (misses count as max_distance). invert gives white where thin (translucency, subsurface masks).
 
 **Inputs**
 
@@ -13249,7 +13349,7 @@ category: `texture` · aliases: `vertex_color_bake`, `bake_color`, `bake_cd`, `c
 
 Bake a colour attribute (Cd, with Alpha) into uv space as an RGBA image.
 
-Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. attrib (point, vertex, prim or detail; 1 or 3+ floats) is interpolated across the triangles; alpha_attrib fills A when present. Values are written as they are, the same numbers the renderer shows.
+Substance Painter "Color Map from Mesh". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. attrib (point, vertex, prim or detail; 1 or 3+ floats) is interpolated across the triangles; alpha_attrib fills A when present. Values are written as they are, the same numbers the renderer shows.
 
 **Inputs**
 
@@ -13321,7 +13421,7 @@ category: `texture` · aliases: `world_normal_bake`, `bake_worldspace_normal`
 
 Bake world-space normals into uv space as RGB (0.5 + 0.5 n): the mesh's own, or the high-res input's along the cage.
 
-Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Without input 1 the mesh's interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.
+Substance Painter "World Space Normal". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Without input 1 the mesh's interpolated vertex normals (N, else computed with a 60° cusp); with a high-res input its normals where the cage rays hit it. Green-channel masks (tex_channel extract g) give "facing up" for dust and snow.
 
 **Inputs**
 
@@ -13446,7 +13546,7 @@ category: `texture` · aliases: `image_read`, `png_read`, `texture_file`
 
 Load a PNG (8 or 16 bit, grey or colour) as an image: your own textures and masks into the texture nodes and materials.
 
-Houdini COP: File; Substance: Bitmap. The image is named after this node, like every image a node makes, unless name is set; layer C holds it, grey or RGBA (layers), and a grey image keeps the file's alpha, when it has one, in layer "A". Values are samples / 255 (16-bit files / 65535: their precision is kept). Colour layers hold display values, as every colour in the engine does ("#a5462e" is 0.65, 0.27, 0.18), so srgb (on by default) keeps the numbers the file stores: a PNG this engine wrote reads back unchanged, and masks, heights, normal and roughness maps load as they are. Turn srgb off only for a file holding linear-light colour (a linear render): grey and RGB are then encoded to display values, alpha never (unlike Unreal's sRGB checkbox, off does not mean "data"). With input 0 connected the image is added to that geometry, replacing an image of the same name, so image_file nodes chain. The file node reads .png files the same way (with these defaults), naming the image after the file. texture_size is the metres the picture's width covers on the model (a file knows no size): every length node after it works against it.
+Houdini COP: File; Substance: Bitmap. The image is named after this node, like every image a node makes, unless name is set; layer C holds it, grey or RGBA (layers), and a grey image keeps the file's alpha, when it has one, in layer "A". Values are samples / 255 (16-bit files / 65535: their precision is kept). Colour layers hold display values, as every colour in the engine does ("#a5462e" is 0.65, 0.27, 0.18), so srgb (on by default) keeps the numbers the file stores: a PNG this engine wrote reads back unchanged, and masks, heights, normal and roughness maps load as they are. Turn srgb off only for a file holding linear-light colour (a linear render): grey and RGB are then encoded to display values, alpha never (unlike Unreal's sRGB checkbox, off does not mean "data"). With input 0 connected the image is added to that geometry, replacing an image of the same name, so image_file nodes chain. The file node reads .png files the same way (with these defaults), naming the image after the file.
 
 **Inputs**
 
@@ -13462,7 +13562,6 @@ Houdini COP: File; Substance: Bitmap. The image is named after this node, like e
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `layers` | enum | `"auto"` |  | `auto`, `grey`, `rgba` | `channels` | auto = grey for grey PNGs (1–2 channels), RGBA for colour ones; grey = the luminance of a colour file; rgba = always four channels |
 | `srgb` | bool | `true` |  |  |  | the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never) |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 
 **Writes:** image <name> (default: the node name): C grey or RGBA 0..1; A grey (the file's alpha, for a grey image of a file with alpha)
 
@@ -13522,7 +13621,7 @@ category: `texture` · aliases: `ao_texture`, `gtao`, `height_ao`, `ambient_occl
 
 Ambient occlusion of a height image in physical units (ground-truth style, cosine-weighted): 1 on any plane, dark in pits, gaps and at the foot of walls; the same at any resolution.
 
-Substance: Ambient Occlusion (RTAO / HBAO); Houdini COP: Ambient Occlusion. A value of 1 stands `depth` metres high (as in tex_normal_from_height), and the search reaches `radius` metres: for each of `directions` slices through a pixel the highest horizon on both sides is found from bilinear samples (closer together near the pixel, fading out over the last 40 % of the radius) and the cosine-weighted sky between them is integrated exactly. Unlike tex_height_to_ao (image-width units, nearest samples, any slope reads as shadow) a tilted plane stays white and the result does not change with the resolution. strength scales the darkening (1 = as measured). More directions and steps = smoother, slower.
+Substance: Ambient Occlusion (RTAO / HBAO); Houdini COP: Ambient Occlusion. A value of 1 stands `depth` metres high on an image `size` metres wide (as in tex_normal_from_height), and the search reaches `radius` metres: for each of `directions` slices through a pixel the highest horizon on both sides is found from bilinear samples (closer together near the pixel, fading out over the last 40 % of the radius) and the cosine-weighted sky between them is integrated exactly. Unlike tex_height_to_ao (image-width units, nearest samples, any slope reads as shadow) a tilted plane stays white and the result does not change with the resolution. strength scales the darkening (1 = as measured). More directions and steps = smoother, slower.
 
 **Inputs**
 
@@ -13539,6 +13638,7 @@ Substance: Ambient Occlusion (RTAO / HBAO); Houdini COP: Ambient Occlusion. A va
 | `directions` | int | `8` | 1..32 |  | `dirs`, `slices` | slices per pixel (each looks both ways) |
 | `steps` | int | `8` | 1..32 |  |  | samples along each way |
 | `strength` | float | `1` | 0..4 |  | `intensity`, `amount` | darkening multiplier (0 = none, 1 = as measured) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -13636,7 +13736,7 @@ category: `texture` · aliases: `bevel_texture`, `texture_bevel`, `cop_bevel`, `
 
 Bevel a mask into a height: 0 on the outline rising to 1 at a distance in metres inside (or outward), through a linear, smooth, round or custom profile.
 
-Substance: Bevel; Houdini COP: Bevel. The mask's outline (where it crosses threshold) is measured to a tenth of a pixel, so the bevel is `distance` metres wide at any resolution (on an atlas on every island). A positive distance bevels inward (0 on the outline, 1 on the plateau); a negative one bevels outward (1 inside, falling to 0 at |distance| outside). round is a quarter circle (a rolled edge), smooth an S-curve, linear a chamfer, ramp your curve. Inner corners stay sharp, outer corners of an outward bevel round off. Feed tex_normal_from_height and tex_curvature or tex_ao.
+Substance: Bevel; Houdini COP: Bevel. The mask's outline (where it crosses threshold) is measured to a tenth of a pixel, so the bevel is `distance` metres wide at any resolution. A positive distance bevels inward (0 on the outline, 1 on the plateau); a negative one bevels outward (1 inside, falling to 0 at |distance| outside). round is a quarter circle (a rolled edge), smooth an S-curve, linear a chamfer, ramp your curve. Inner corners stay sharp, outer corners of an outward bevel round off. Feed tex_normal_from_height (with the same size) and tex_curvature or tex_ao.
 
 **Inputs**
 
@@ -13652,6 +13752,7 @@ Substance: Bevel; Houdini COP: Bevel. The mask's outline (where it crosses thres
 | `profile` | enum | `"smooth"` |  | `linear`, `smooth`, `round`, `ramp` | `curve_type` | profile from the outline to the plateau |
 | `ramp` | ramp | `[[0,0],[1,1]]` |  |  | `curve` | profile ramp: height [[t, value], …] from the outline (t 0) to the full distance (t 1) |
 | `threshold` | float | `0.5` |  |  | `level`, `cut` | the value where the mask's outline runs (inside = at or above it) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -13735,7 +13836,7 @@ Substance: Blend; Houdini COP: Blend / Composite. result = mix(background, mode(
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.33
+        "scale": 3
       }
     },
     "metal": {
@@ -13772,9 +13873,9 @@ Substance: Blend; Houdini COP: Blend / Composite. result = mix(background, mode(
 
 category: `texture` · aliases: `blur`, `cop_blur`, `blur_hq`, `gaussian_blur`
 
-Blur an image: gaussian or box, separable, with the radius in metres; tileable images blur across their borders (the mean is preserved), an atlas inside each island.
+Blur an image: gaussian or box, separable; tileable images blur across their borders (the mean is preserved).
 
-Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: radius = 2 sigma, three box passes of running sums, so the cost does not depend on the radius): the same real size at any resolution. On an atlas (the "island" and "texel" layers a bake writes) it is that size on every island whatever its texel density, and nothing is read across an island border.
+Substance: Blur HQ; Houdini COP: Blur. radius in pixels (gaussian: radius = 2 sigma, three box passes of running sums, so the cost does not depend on the radius).
 
 **Inputs**
 
@@ -13786,7 +13887,7 @@ Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: r
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `blur` | float | `0.008` | 0.. |  | `blur_radius` | blur radius in metres (on an atlas: on every island, whatever its texel density) |
+| `radius` | float | `4` | 0.. |  | `intensity`, `size` | blur radius in pixels |
 | `mode` | enum | `"gaussian"` |  | `gaussian`, `box` | `type`, `filter` | filter shape |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
@@ -13810,7 +13911,7 @@ Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: r
         "bricks"
       ],
       "params": {
-        "blur": 0.004
+        "radius": 2
       }
     }
   },
@@ -13822,9 +13923,9 @@ Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: r
 
 category: `texture` · aliases: `voronoi_texture`, `cells`, `worley`, `cellular`, `crystals`, `cop_worley`
 
-Voronoi cells image: distance to the cell site, cell edges, random id per cell or crackle; cells in metres, tileable.
+Voronoi cells image: distance to the cell site, cell edges, random id per cell or crackle; tileable.
 
-Substance: Cells / Voronoi / Crystal; Houdini COP: Worley Noise. Layer C holds the chosen output and layer "id" a random 0..1 per cell (per-cell colour or height). cell is the size of a cell in metres (texture_size / cell of them across the image; whole numbers when tileable). edges is 0 on the cell borders rising to 1 at edge_width (a fraction of a cell): stones, scales, cracked mud. crackle (F2 - F1) is bright along the borders. crystal gives every cell a flat facet with a random tilt and level (Substance Crystal: shards, faceted stone, a per-facet roughness or normal). Runs in chunks on the worker pool for large images.
+Substance: Cells / Voronoi / Crystal; Houdini COP: Worley Noise. Layer C holds the chosen output and layer "id" a random 0..1 per cell (per-cell colour or height). edges is 0 on the cell borders rising to 1 at edge_width (a fraction of a cell): stones, scales, cracked mud. crackle (F2 - F1) is bright along the borders. crystal gives every cell a flat facet with a random tilt and level (Substance Crystal: shards, faceted stone, a per-facet roughness or normal). Runs in chunks on the worker pool for large images.
 
 **Inputs**
 
@@ -13836,12 +13937,11 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `output` | enum | `"edges"` |  | `distance`, `edges`, `id`, `crackle`, `crystal` | `mode`, `type` | what C holds (crystal = a tilted flat facet per cell) |
-| `cell` | float | `0.125` | 0.000001.. |  | `cell_size`, `feature` | size of one cell in metres (the image has texture_size / cell of them across its width; whole numbers when tileable) |
+| `scale` | float | `8` | 0.01.. |  | `frequency`, `freq`, `count` | cells across the image width (whole numbers when tileable) |
 | `jitter` | float | `1` | 0..1 |  | `randomness`, `disorder` | randomness of the sites (0 = square grid) |
 | `edge_width` | float | `0.1` | 0.001..1 |  | `width`, `border` | edges: border width (fraction of a cell) |
 | `metric` | enum | `"euclidean"` |  | `euclidean`, `manhattan`, `chebyshev` |  | distance metric (manhattan = diamond cells, chebyshev = square cells) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -13854,7 +13954,7 @@ None (generator).
   "type": "tex_cells",
   "params": {
     "output": "edges",
-    "cell": 0.1,
+    "scale": 10,
     "edge_width": 0.08
   }
 }
@@ -13898,7 +13998,7 @@ Substance: RGBA Merge / RGBA Split / Channel Shuffle; Houdini COP: Channel Copy.
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.33
+        "scale": 3
       }
     },
     "rough": {
@@ -14045,7 +14145,7 @@ category: `texture` · aliases: `constant_texture`, `uniform_color`, `solid_colo
 
 Constant image: one grey value or one RGBA colour everywhere, sized by resolution or by an input image.
 
-Substance: Uniform Color; Houdini COP: Constant. channels grey fills layer C with value (a flat roughness, metallic or height, a mask of 1); rgba with color (display values like every colour param: "#a5462e" comes out of the PNG as #a5462e) and alpha. With input 0 connected the image takes the size of an image there (image picks one when it holds several) and resolution is ignored, and the constant covers the same metres as that image (texture_size is ignored too); the output holds only the new image either way. Blend over it, pack it into an ORM channel, or give a material a flat map.
+Substance: Uniform Color; Houdini COP: Constant. channels grey fills layer C with value (a flat roughness, metallic or height, a mask of 1); rgba with color (display values like every colour param: "#a5462e" comes out of the PNG as #a5462e) and alpha. With input 0 connected the image takes the size of an image there (image picks one when it holds several) and resolution is ignored; the output holds only the new image either way. Blend over it, pack it into an ORM channel, or give a material a flat map.
 
 **Inputs**
 
@@ -14062,7 +14162,6 @@ Substance: Uniform Color; Houdini COP: Constant. channels grey fills layer C wit
 | `value` | float | `0.5` |  |  | `grey`, `level` | grey: the value of every pixel |
 | `color` | color | `[0.5,0.5,0.5]` |  |  | `rgb`, `colour` | rgba: the colour of every pixel |
 | `alpha` | float | `1` | 0..1 |  |  | rgba: the alpha of every pixel |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the size source) to use ("" = its only image; needed when it holds several) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -14114,7 +14213,7 @@ category: `texture`
 
 Extract an exact pixel rectangle, optionally resize it; all image layers stay aligned.
 
-Origin is [x,y] from the top left, in pixels (a crop addresses pixels). Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. The result covers the same surface the pixels did: its size in metres is the crop's share of the source's, and a "texel" layer follows a resize. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. The result takes this node's name unless name is set; other geometry/images pass through.
+Origin is [x,y] from the top left. Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. The result takes this node's name unless name is set; other geometry/images pass through.
 
 **Inputs**
 
@@ -14176,7 +14275,7 @@ category: `texture` · aliases: `curvature_texture`, `curvature_from_normal`, `n
 
 Curvature from a normal map in physical units: 0.5 flat, bright on convex edges and bumps, dark in creases; layers convex and concave.
 
-Substance: Curvature / Curvature Smooth; Houdini COP: Curvature. The mean curvature (the divergence of the normals, in 1/metres): C = 0.5 + 0.5 × curvature × radius, so bends of radius `radius` metres or tighter read full white (convex) or black (concave), the same at any resolution. blur (metres) smooths the normals first to measure broader curvature (Curvature Smooth). Layers convex and concave hold the two sides 0..1, like bake_curvature: tex_output {layer: "convex"} → tex_histogram_scan gives edge wear, concave gives dirt. Needs a normal map (tex_normal_from_height of a height, bake_normal).
+Substance: Curvature / Curvature Smooth; Houdini COP: Curvature. The mean curvature (the divergence of the normals, in 1/metres of an image `size` metres wide): C = 0.5 + 0.5 × curvature × radius, so bends of radius `radius` metres or tighter read full white (convex) or black (concave), the same at any resolution. blur (metres) smooths the normals first to measure broader curvature (Curvature Smooth). Layers convex and concave hold the two sides 0..1, like bake_curvature: tex_output {layer: "convex"} → tex_histogram_scan gives edge wear, concave gives dirt. Needs a normal map (tex_normal_from_height of a height, bake_normal).
 
 **Inputs**
 
@@ -14191,6 +14290,7 @@ Substance: Curvature / Curvature Smooth; Houdini COP: Curvature. The mean curvat
 | `radius` | float | `0.02` | 0.000001.. |  | `range`, `intensity` | bend radius in metres that reads full white / black (larger = more contrast) |
 | `blur` | float | `0` | 0.. |  | `smooth`, `smoothing` | smooth the normals over this many metres first (broader curvature) |
 | `format` | enum | `"opengl"` |  | `opengl`, `directx` | `convention` | green channel convention of the normal map |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -14309,7 +14409,7 @@ category: `texture`
 
 Extend nearest valid image values into an invalid band, preserving opacity by default.
 
-Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond distance (metres) are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding. The distance is the same real size at any resolution; on an atlas (the "island" and "texel" layers a bake writes) it is that size on every island and a texel only takes values from its own island. The result takes this node's name unless name is set.
+Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond radius are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding. The result takes this node's name unless name is set.
 
 **Inputs**
 
@@ -14325,7 +14425,7 @@ Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
-| `distance` | float | `0.016` | 0.. |  | `padding` | maximum Euclidean distance in metres from a valid source (on an atlas: on every island, whatever its texel density) |
+| `radius` | int | `8` | 0..8192 |  |  | maximum Euclidean distance in pixels from a valid source |
 | `mask_image` | string | `""` |  |  |  | which image of input 1 (the mask) to use ("" = its only image; needed when it holds several) |
 | `mask_layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
 | `mask_channel` | enum | `"luminance"` |  | `alpha`, `luminance`, `r`, `g`, `b` |  | channel to read; alpha requires RGBA, luminance/R/G/B accept grey |
@@ -14353,7 +14453,7 @@ Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need
         "img"
       ],
       "params": {
-        "distance": 0.09
+        "radius": 3
       }
     }
   },
@@ -14367,7 +14467,7 @@ category: `texture` · aliases: `directional_blur`, `motion_blur`, `blur_directi
 
 Directional (motion) blur along an angle, length in metres: brushed metal from noise, streaks, rain and speed lines.
 
-Substance: Directional Blur / Motion Blur; Houdini COP: Blur (directional). Every pixel averages the image along a line `length` metres long at angle (0 = +u, 90 = +v): centred on the pixel when symmetric, else trailing behind it, so bright marks streak along the angle. length is in metres, so a blur looks the same at any resolution (and on every island of an atlas). Brushed metal: tex_noise {feature: 0.0167} → tex_directional_blur {length: 0.2} → tex_levels. Grey or RGBA (alpha blurs too).
+Substance: Directional Blur / Motion Blur; Houdini COP: Blur (directional). Every pixel averages the image along a line `length` metres long at angle (0 = +u, 90 = +v): centred on the pixel when symmetric, else trailing behind it, so bright marks streak along the angle. length is in metres of an image `size` metres wide, so a blur looks the same at any resolution. Brushed metal: tex_noise {scale: 60} → tex_directional_blur {length: 0.2} → tex_levels. Grey or RGBA (alpha blurs too).
 
 **Inputs**
 
@@ -14382,6 +14482,7 @@ Substance: Directional Blur / Motion Blur; Houdini COP: Blur (directional). Ever
 | `length` | float | `0.05` | 0.. |  | `distance`, `intensity` | blur length in metres |
 | `angle` | float | `0` |  |  | `direction`, `rotation` | direction in degrees (0 = +u, 90 = +v) |
 | `symmetric` | bool | `true` |  |  | `centered` | blur both ways around each pixel (off = a one-sided trail along angle) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -14396,7 +14497,7 @@ Substance: Directional Blur / Motion Blur; Houdini COP: Blur (directional). Ever
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.0167,
+        "scale": 60,
         "octaves": 3,
         "seed": 4
       }
@@ -14422,7 +14523,7 @@ category: `texture` · aliases: `distance_texture`, `grow_mask`, `mask_distance`
 
 Grow a mask by a distance in metres: a falloff gradient or a hard grown mask; with a source, carry its values (colours, ids) out into the grown area.
 
-Substance: Distance. gradient: 1 inside the mask (value ≥ threshold) falling linearly to 0 at `distance` metres outside (glows, soft dirt around shapes, fall-off masks). grow: the mask grown by `distance` metres, antialiased. With a source image on input 1, C is instead the source's value at the nearest mask pixel, carried out to `distance` (0 beyond, inside the mask the source itself): per-tile colours or ids bled into the gaps, texture padding in metres; layer "mask" holds the gradient or grown mask. Distances in metres, so the same at any resolution (and on every island of an atlas, never across its border); with tileable they cross the borders.
+Substance: Distance. gradient: 1 inside the mask (value ≥ threshold) falling linearly to 0 at `distance` metres outside (glows, soft dirt around shapes, fall-off masks). grow: the mask grown by `distance` metres, antialiased. With a source image on input 1, C is instead the source's value at the nearest mask pixel, carried out to `distance` (0 beyond, inside the mask the source itself): per-tile colours or ids bled into the gaps, texture padding in metres; layer "mask" holds the gradient or grown mask. Distances in metres of an image `size` metres wide, so the same at any resolution; with tileable they cross the borders.
 
 **Inputs**
 
@@ -14438,6 +14539,7 @@ Substance: Distance. gradient: 1 inside the mask (value ≥ threshold) falling l
 | `distance` | float | `0.05` | 0.. |  | `radius`, `grow` | how far the mask grows, in metres |
 | `mode` | enum | `"gradient"` |  | `gradient`, `grow` | `type` | gradient = linear falloff to 0 at distance; grow = hard edge at distance |
 | `threshold` | float | `0.5` |  |  | `level`, `cut` | the value where the mask's outline runs (inside = at or above it) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image` | which image of input 0 (the mask) to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -14490,7 +14592,7 @@ category: `texture` · aliases: `edge_detect`, `edges_texture`, `sobel`, `cop_ed
 
 Edge detection: Sobel gradient magnitude, or lines of a set width in metres along a mask's outline (centred, inside or outside), flat or rounded.
 
-Substance: Edge Detect; Houdini COP: Edge Detect. sobel: the gradient magnitude of the (grey) image per texel; a 0 → 1 step gives about 1 at strength 1, and grow thickens the lines by that many metres (max filter). outline, inner and outer draw a line line_width metres wide along where the image crosses threshold (centred on it, just inside, just outside), from its signed distance to a tenth of a pixel, so the line is the same width in metres at any resolution: panel seams, grout lines, the rim of a decal, edge wear bands. roundness 0 gives a flat antialiased line, 1 a rounded ridge (a height: feed tex_normal_from_height).
+Substance: Edge Detect; Houdini COP: Edge Detect. sobel: the gradient magnitude of the (grey) image; a 0 → 1 step gives about 1 at strength 1, and width grows the lines by that many pixels (max filter). outline, inner and outer draw a line line_width metres wide along where the image crosses threshold (centred on it, just inside, just outside), from its signed distance to a tenth of a pixel, so the line is the same width in metres at any resolution: panel seams, grout lines, the rim of a decal, edge wear bands. roundness 0 gives a flat antialiased line, 1 a rounded ridge (a height: feed tex_normal_from_height).
 
 **Inputs**
 
@@ -14504,10 +14606,11 @@ Substance: Edge Detect; Houdini COP: Edge Detect. sobel: the gradient magnitude 
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"sobel"` |  | `sobel`, `outline`, `inner`, `outer` | `type`, `method` | sobel = gradient magnitude; outline / inner / outer = a line of line_width metres along the mask's outline |
 | `strength` | float | `1` | 0.. |  | `intensity`, `contrast` | sobel: multiplier of the gradient magnitude |
-| `grow` | float | `0` | 0.. |  |  | sobel: thicken the edges by this many metres |
+| `width` | float | `0` | 0..64 |  |  | sobel: thicken the edges by this many pixels |
 | `line_width` | float | `0.01` | 0.. |  | `edge_width`, `thickness` | outline / inner / outer: line width in metres |
 | `roundness` | float | `0` | 0..1 |  | `edge_roundness` | outline / inner / outer: 0 = flat line, 1 = rounded ridge |
 | `threshold` | float | `0.5` |  |  | `tolerance` | outline / inner / outer: the value where the outline runs |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -14530,7 +14633,7 @@ Substance: Edge Detect; Houdini COP: Edge Detect. sobel: the gradient magnitude 
         "bricks"
       ],
       "params": {
-        "grow": 0.002
+        "width": 1
       }
     }
   },
@@ -14562,6 +14665,7 @@ Substance: Flood Fill + Flood Fill to Random Grayscale / Random Color / Gradient
 | `angle` | float | `0` |  |  | `direction` | gradient: direction in degrees (0 = +u, 90 = +v) |
 | `angle_random` | float | `0` | 0..180 |  | `angle_variation` | gradient: random turn per tile, ± degrees |
 | `seed` | float | `0` |  |  |  | random seed |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | tiles continue across the borders |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -14608,7 +14712,7 @@ category: `texture` · aliases: `gradient`, `ramp_texture`, `gradient_linear`, `
 
 Gradient image: linear, mirror, radial, angular or diamond, 0..1.
 
-Substance: Gradient Linear / Radial / Axial; Houdini COP: Ramp. linear runs along angle (0 = left → right, 90 = bottom → top) and spans the image corner to corner; mirror rises to 1 in the middle; radial and diamond grow from center (a position in uv) over radius metres; angular sweeps once around center.
+Substance: Gradient Linear / Radial / Axial; Houdini COP: Ramp. linear runs along angle (0 = left → right, 90 = bottom → top) and spans the image corner to corner; mirror rises to 1 in the middle; radial and diamond grow from center over radius (uv units); angular sweeps once around center.
 
 **Inputs**
 
@@ -14622,8 +14726,7 @@ None (generator).
 | `mode` | enum | `"linear"` |  | `linear`, `mirror`, `radial`, `angular`, `diamond` | `type` | gradient shape |
 | `angle` | float | `0` |  |  | `rotation`, `direction` | direction in degrees (linear, mirror) or start angle (angular) |
 | `center` | vec2 | `[0.5,0.5]` |  |  |  | centre in uv (radial, diamond, angular) |
-| `radius` | float | `0.5` | 0.001.. |  |  | radial / diamond: distance in metres from the centre where the gradient reaches 1 |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `radius` | float | `0.5` | 0.001.. |  |  | radial / diamond: distance (uv) where the gradient reaches 1 |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
 **Writes:** image <name> (default: the node name): C grey 0..1
@@ -14647,7 +14750,7 @@ category: `texture` · aliases: `grunge_generator`, `dirt_texture`, `leaks`, `ru
 
 Grunge mask: dirt patches, vertical leaks or scattered spots, with a set coverage and edge hardness; tileable.
 
-Substance: Grunge Map / Dirt / Leaks / Rust spots. dirt is blotchy domain-warped noise with speckle; leaks are vertical runs streaking down from random sources (rain marks, rust runs under bolts: mask them with an AO or cavity map); spots are round stains and pits of random size. coverage is the fraction of the image that turns white, measured on the mask's own histogram like tex_histogram_scan, so 0.2 is a fifth whatever the style or seed; contrast is the edge hardness (1 = hard); detail mixes in fine breakup. feature = the size of a feature in metres (texture_size / feature of them across the width, at most 256). Built from noise over uv, so the same at any resolution.
+Substance: Grunge Map / Dirt / Leaks / Rust spots. dirt is blotchy domain-warped noise with speckle; leaks are vertical runs streaking down from random sources (rain marks, rust runs under bolts: mask them with an AO or cavity map); spots are round stains and pits of random size. coverage is the fraction of the image that turns white, measured on the mask's own histogram like tex_histogram_scan, so 0.2 is a fifth whatever the style or seed; contrast is the edge hardness (1 = hard); detail mixes in fine breakup. scale = features across the image width. Built from noise over uv, so the same at any resolution.
 
 **Inputs**
 
@@ -14659,12 +14762,11 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `style` | enum | `"dirt"` |  | `dirt`, `leaks`, `spots` | `type`, `mode` | dirt patches, vertical leaks or round spots |
-| `feature` | float | `0.25` | 0.000001.. |  | `feature_size`, `wavelength` | size of a feature in metres (the image has texture_size / feature of them across its width, at most 256: a smaller feature is clamped to texture_size / 256) |
+| `scale` | float | `4` | 0.1..256 |  | `frequency` | features across the image width (1 to 256: larger values are clamped to 256) |
 | `coverage` | float | `0.35` | 0..1 |  | `amount`, `density` | fraction of the image that turns white |
 | `contrast` | float | `0.6` | 0..1 |  | `hardness` | edge hardness (1 = hard) |
 | `detail` | float | `0.4` | 0..1 |  | `breakup` | fine breakup mixed in (0 = smooth shapes) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -14678,7 +14780,7 @@ None (generator).
   "params": {
     "resolution": 256,
     "style": "leaks",
-    "feature": 0.16,
+    "scale": 6,
     "coverage": 0.3,
     "seed": 2
   }
@@ -14691,7 +14793,7 @@ category: `texture` · aliases: `height_from_normal`, `normal_to_height`, `norma
 
 Height from a normal map: integrate its slopes back into a height in physical units (the inverse of tex_normal_from_height).
 
-Substance: Normal to Height; Houdini COP: Normal to Height. The slopes of the normals are integrated by solving a Poisson equation over the whole image (FFT when tileable, else with mirrored borders), so the height is the one whose normal map best matches, in metres: tex_normal_from_height {depth} then this node with the same depth gives the height back (up to an offset) on an image of the same size. It works on the whole image with its (median) texel size, atlas islands included. range depth writes (height − lowest) / depth (0 at the lowest point; a relief deeper than depth runs past 1); normalize fits lowest..highest to 0..1. The stat relief is the height range in metres. Use it for AO and curvature from a baked or downloaded normal map, or to blend normals as heights.
+Substance: Normal to Height; Houdini COP: Normal to Height. The slopes of the normals are integrated by solving a Poisson equation over the whole image (FFT when tileable, else with mirrored borders), so the height is the one whose normal map best matches, in metres of an image `size` metres wide: tex_normal_from_height {depth, size} then this node with the same depth and size gives the height back (up to an offset). range depth writes (height − lowest) / depth (0 at the lowest point; a relief deeper than depth runs past 1); normalize fits lowest..highest to 0..1. The stat relief is the height range in metres. Use it for AO and curvature from a baked or downloaded normal map, or to blend normals as heights.
 
 **Inputs**
 
@@ -14704,6 +14806,7 @@ Substance: Normal to Height; Houdini COP: Normal to Height. The slopes of the no
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `depth` | float | `0.01` | 1e-9.. |  | `height`, `height_scale`, `relief` | metres a height value of 1 stands for |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (the texel size is size / width) |
 | `format` | enum | `"opengl"` |  | `opengl`, `directx` | `convention` | green channel convention of the input |
 | `range` | enum | `"depth"` |  | `depth`, `normalize` | `fit` | depth = (height − lowest) / depth; normalize = lowest..highest to 0..1 |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the normal map tiles (integrated as periodic) |
@@ -14722,7 +14825,7 @@ Substance: Normal to Height; Houdini COP: Normal to Height. The slopes of the no
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.16,
+        "scale": 6,
         "octaves": 3
       }
     },
@@ -14755,7 +14858,7 @@ category: `texture` · aliases: `height_to_ao`, `hbao`, `ao_from_height`, `textu
 
 Ambient occlusion of a height image (horizon based): white = open, dark in pits, gaps and mortar.
 
-Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `steps` samples up to radius metres and keep the highest horizon; depth sets how tall a height of 1 is, in metres. For the physical version (a tilted plane stays white) use tex_ao.
+Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `steps` samples up to radius (a fraction of the image width) and keep the highest horizon; depth sets how tall a height of 1 is (in image widths).
 
 **Inputs**
 
@@ -14767,8 +14870,8 @@ Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `st
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `radius` | float | `0.05` | 0.000001.. |  |  | search radius in metres |
-| `depth` | float | `0.05` | 0.. |  | `height_depth` | height of a value of 1 in metres (larger = deeper shadows) |
+| `radius` | float | `0.05` | 0.0001..1 |  |  | search radius as a fraction of the image width |
+| `depth` | float | `0.05` | 0.. |  | `height_depth` | height of a value of 1 in image widths (larger = deeper shadows) |
 | `directions` | int | `8` | 1..32 |  | `dirs` | directions per pixel |
 | `steps` | int | `6` | 1..64 |  |  | samples along each direction |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
@@ -14888,7 +14991,7 @@ Substance: Histogram Scan. coverage is the fraction of the image that turns whit
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.25
+        "scale": 4
       }
     },
     "out": {
@@ -15200,7 +15303,7 @@ Substance: Make It Tile Photo / Patch. Along u, then along v, the image is blend
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.18,
+        "scale": 5.5,
         "tileable": false
       }
     },
@@ -15223,9 +15326,9 @@ Substance: Make It Tile Photo / Patch. Along u, then along v, the image is blend
 
 category: `texture` · aliases: `noise_texture`, `perlin_noise`, `clouds`, `fractal_sum`, `cop_noise`, `fractalnoise`
 
-Noise image: perlin, simplex, value or worley, layered as fbm, ridged or turbulence; features in metres, tileable by default.
+Noise image: perlin, simplex, value or worley, layered as fbm, ridged or turbulence; tileable by default.
 
-Substance: Perlin Noise / Clouds / Fractal Sum; Houdini COP: Noise. Grey 0..1 in layer C. feature = the size of one cell at the first octave in metres, on an image texture_size metres wide (so there are texture_size / feature cells across it, at any resolution); each octave multiplies the frequency by lacunarity and the amplitude by roughness. tileable rounds every octave to whole cells (simplex samples 4D noise on a torus) so the image repeats seamlessly: the feature is then the nearest size that fits a whole number of times. shift moves the field in metres. Runs in chunks on the worker pool for large images.
+Substance: Perlin Noise / Clouds / Fractal Sum; Houdini COP: Noise. Grey 0..1 in layer C. scale = cells across the image width at the first octave; each octave multiplies the frequency by lacunarity and the amplitude by roughness. tileable rounds every octave to whole cells (simplex samples 4D noise on a torus) so the image repeats seamlessly. Runs in chunks on the worker pool for large images.
 
 **Inputs**
 
@@ -15238,14 +15341,13 @@ None (generator).
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `noise` | enum | `"perlin"` |  | `perlin`, `simplex`, `value`, `worley` | `type`, `basis`, `noise_type` | base noise |
 | `fractal` | enum | `"fbm"` |  | `none`, `fbm`, `ridged`, `turbulence` |  | octave layering (ridged = sharp crests, turbulence = billows) |
-| `feature` | float | `0.25` | 0.000001.. |  | `cell_size`, `element_size`, `wavelength` | size of one cell at the first octave, in metres (the image has texture_size / feature of them across; whole numbers when tileable) |
+| `scale` | float | `4` | 0.01.. |  | `frequency`, `freq`, `element_size` | cells across the image width at the first octave (whole numbers when tileable) |
 | `octaves` | int | `5` | 1..12 |  |  | number of octaves |
 | `roughness` | float | `0.5` | 0..1 |  | `persistence`, `gain` | amplitude gain per octave (persistence) |
 | `lacunarity` | float | `2` | 1..4 |  |  | frequency gain per octave |
 | `jitter` | float | `1` | 0..1 |  |  | worley: randomness of the feature points (0 = regular grid) |
-| `shift` | vec2 | `[0,0]` |  |  | `translate` | shift of the noise field in metres (vary or animate without changing the seed) |
+| `offset` | vec2 | `[0,0]` |  |  |  | shift in cells (vary or animate without changing the seed) |
 | `tileable` | bool | `true` |  |  | `tile`, `tiling`, `seamless` | repeat seamlessly at the image borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -15258,7 +15360,7 @@ None (generator).
   "type": "tex_noise",
   "params": {
     "resolution": 512,
-    "feature": 0.16,
+    "scale": 6,
     "fractal": "ridged",
     "seed": 2
   }
@@ -15326,7 +15428,7 @@ Substance: Normal Combine / Normal Blend; Unreal: BlendAngleCorrectedNormals. Th
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.025,
+        "scale": 40,
         "octaves": 3
       }
     },
@@ -15359,9 +15461,9 @@ Substance: Normal Combine / Normal Blend; Unreal: BlendAngleCorrectedNormals. Th
 
 category: `texture` · aliases: `normal_from_height`, `height_to_normal`, `normal_map`, `bump_to_normal`, `cop_bumptonormal`
 
-Normal map from a height image (Sobel) in physical units (relief depth in metres, texel size from the image): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).
+Normal map from a height image (Sobel) in physical units (relief depth and texture size in metres): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).
 
-Substance: Normal (from height); Houdini COP: Bump to Normal. The slope is real: a value of 1 stands `depth` metres high and one texel is the image's own texel size (texture_size / width; per island on an atlas), so the normal tilts by atan(height step × depth / texel size). The same graph gives the same normals at any resolution, and a value you can measure picks the strength: 0.0003 for paint and cast grain, 0.002 for hammered metal, 0.01 to 0.02 for brick and mortar. For bake_height's "distance" layer (metres already) use depth 1. Steps narrower than a texel (hard pattern edges, thresholds) stay steeper at higher resolutions, as a finer step is physically steeper; give them a bevel or a blur in metres first. A flat image gives (0.5, 0.5, 1). glTF and Blender use OpenGL; Unreal uses DirectX (or flip green on import). Combine with another normal map in tex_normal_blend.
+Substance: Normal (from height); Houdini COP: Bump to Normal. The slope is real: a value of 1 stands `depth` metres high and the image spans `size` metres on the model, so one texel is size / width metres and the normal tilts by atan(height step × depth / texel size). The same graph gives the same normals at any resolution, and a value you can measure picks the strength: 0.0003 for paint and cast grain, 0.002 for hammered metal, 0.01 to 0.02 for brick and mortar. For bake_height's "distance" layer (metres already) use depth 1 and the size the uv square covers. Steps narrower than a texel (hard pattern edges, thresholds) stay steeper at higher resolutions, as a finer step is physically steeper; give them a bevel or blur them in uv units. A flat image gives (0.5, 0.5, 1). glTF and Blender use OpenGL; Unreal uses DirectX (or flip green on import). Combine with another normal map in tex_normal_blend.
 
 **Inputs**
 
@@ -15374,6 +15476,7 @@ Substance: Normal (from height); Houdini COP: Bump to Normal. The slope is real:
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `depth` | float | `0.01` |  |  | `height`, `height_scale`, `bump_depth`, `relief` | relief: metres a height value of 1 stands above 0 (negative inverts the relief) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (the texel size is size / width) |
 | `format` | enum | `"opengl"` |  | `opengl`, `directx` | `convention` | green channel convention |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
@@ -15397,7 +15500,8 @@ Substance: Normal (from height); Houdini COP: Bump to Normal. The slope is real:
         "bricks"
       ],
       "params": {
-        "depth": 0.015
+        "depth": 0.015,
+        "size": 1
       }
     }
   },
@@ -15510,7 +15614,7 @@ Substance: Normal Normalize. Blurring, resizing, tex_blend or levels on a normal
         "n"
       ],
       "params": {
-        "blur": 0.012
+        "radius": 3
       }
     },
     "out": {
@@ -15649,7 +15753,7 @@ category: `texture` · aliases: `tile_generator`, `bricks`, `brick`, `checker`, 
 
 Tiling pattern image: bricks, tiles, checker, stripes, hex, dots, or a grid line mask, with gap (mortar), bevel and per-cell random id.
 
-Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); stripes are vertical (u count), and with a u count of 1 the v count makes horizontal stripes; bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly. A cell is texture_size / count metres: for bricks of a given size in metres, count = texture_size / brick size.
+Substance: Tile Generator / Bricks / Checker; Houdini COP: Pattern. For bricks, tiles, stripes, hex and dots C is a height-like profile: 1 on the cells, 0 in the gaps, a smooth bevel between (feed tex_normal_from_height for bricks with depth). grid is the opposite, a line mask: 1 on the lines (gap is their width), 0 inside the cells, so multiplying a material by it darkens all but the lines; for cells separated by grooves use tiles (grid is 1 - tiles without variation). checker alternates 1 and 0. Layer "id" holds a random 0..1 per cell (tex_colorize it with layer "id" for per-brick colour). count = cells along u (columns) and v (rows); stripes are vertical (u count), and with a u count of 1 the v count makes horizontal stripes; bricks and dots shift every other row by offset (keep the row count even for seamless tiling); hex uses offset for its staggered rows. gap and bevel are fractions of the smaller cell side; variation darkens cells randomly.
 
 **Inputs**
 
@@ -15666,7 +15770,6 @@ None (generator).
 | `gap` | float | `0.06` | 0..1 |  | `mortar`, `spacing` | mortar / gap width as a fraction of the smaller cell side (dots: 1 - diameter) |
 | `bevel` | float | `0.08` | 0..1 |  | `smooth`, `roundness` | bevel width as a fraction of the smaller cell side (0 = hard antialiased edge) |
 | `variation` | float | `0` | 0..1 |  | `height_variation`, `luminance_random` | random darkening per cell (0 = all cells 1; not grid or checker) |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -15744,7 +15847,7 @@ category: `texture` · aliases: `scratches`, `scratch_generator`, `directional_s
 
 Seeded scratches: thin tapered strokes along a direction with random spread, length and intensity.
 
-Substance: Scratches Generator / Directional Scratches. Strokes are slightly bent, thin at both ends, combined with max; they wrap at the borders (tileable). length and width are in metres on an image texture_size metres wide (a stroke is never thinner than about one texel, so a hairline is a one-texel line at any resolution). count is the number of strokes in the whole image. Blend over a roughness or base colour map with tex_blend.
+Substance: Scratches Generator / Directional Scratches. Strokes are slightly bent, thin at both ends, combined with max; they wrap at the borders (tileable). length and width are fractions of the image width. Blend over a roughness or base colour map with tex_blend.
 
 **Inputs**
 
@@ -15756,14 +15859,13 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `count` | int | `200` | 0..100000 |  | `number`, `amount` | number of strokes |
-| `length` | vec2 | `[0.05,0.25]` | 0.. |  |  | stroke length range in metres |
-| `width` | float | `0.003` | 0.. |  |  | stroke width in metres (at least about one texel) |
+| `length` | vec2 | `[0.05,0.25]` | 0.. |  |  | stroke length range (fractions of the image width) |
+| `width` | float | `0.003` | 0.. |  |  | stroke width (fraction of the image width; at least about one pixel) |
 | `angle` | float | `20` |  |  |  | mean direction in degrees (0 = along u) |
 | `spread` | float | `30` | 0..180 |  |  | random deviation from angle in degrees |
 | `curvature` | float | `0.1` | 0..1 |  |  | sideways bend as a fraction of the length |
 | `intensity` | vec2 | `[0.4,1]` | 0.. |  |  | intensity range of a stroke |
 | `tileable` | bool | `true` |  |  | `tile`, `wrap` | strokes wrap at the borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -15869,7 +15971,7 @@ category: `texture` · aliases: `sdf_from_mask`, `mask_to_sdf`, `sdf_from_mono`,
 
 SDF from a mask: the signed distance in metres (negative inside) to where a grey image crosses threshold, accurate to about a tenth of a pixel.
 
-Houdini COP: SDF from Mono; Substance: Distance / SDF. The outline is found between pixels by interpolation, so antialiased masks (tex_pattern, tex_shape, tex_text, a threshold with softness) give smooth distances that are the same in metres at any resolution (on an atlas on every island, at its texel size); an exact distance transform carries them across the image. With tileable distances are measured across the borders. A mask without any outline (all inside or all outside) gives ± the image's width + height in texels. Feed tex_sdf_op, tex_sdf_boolean and tex_sdf_to_mask.
+Houdini COP: SDF from Mono; Substance: Distance / SDF. The outline is found between pixels by interpolation, so antialiased masks (tex_pattern, tex_shape, tex_text, a threshold with softness) give smooth distances that are the same in metres at any resolution; an exact distance transform carries them across the image. With tileable distances are measured across the borders. A mask without any outline (all inside or all outside) gives ± the image's width + height in texels. Feed tex_sdf_op, tex_sdf_boolean and tex_sdf_to_mask.
 
 **Inputs**
 
@@ -15882,6 +15984,7 @@ Houdini COP: SDF from Mono; Substance: Distance / SDF. The outline is found betw
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `threshold` | float | `0.5` |  |  | `level`, `cut` | the value where the mask's outline runs (inside = at or above it) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -15902,7 +16005,7 @@ Houdini COP: SDF from Mono; Substance: Distance / SDF. The outline is found betw
           128
         ],
         "text": "SDF",
-        "height": 0.15
+        "size": 0.6
       }
     },
     "sdf": {
@@ -15911,6 +16014,7 @@ Houdini COP: SDF from Mono; Substance: Distance / SDF. The outline is found betw
         "word"
       ],
       "params": {
+        "size": 1,
         "tileable": false
       }
     }
@@ -15925,7 +16029,7 @@ category: `texture` · aliases: `sdf_op`, `sdf_operation`, `sdf_texture_offset`,
 
 Operate on an SDF image in metres: offset (grow or shrink), round convex corners, fillet concave ones, stroke (an outline band), invert, redistance.
 
-Houdini COP: SDF Offset / Round; Substance: SDF operations. An SDF image holds the signed distance in metres in C (negative inside, 0 on the outline), as tex_sdf_shape and tex_sdf_from_mask make it. offset grows the shape by amount metres (negative shrinks); round rounds its convex corners with radius amount and fillet its concave ones (shrink or grow, measure again, return); stroke turns it into a band amount wide centred on the outline (rings from discs, frames from boxes, then tex_sdf_to_mask); invert swaps inside and outside; redistance measures the distance to the outline again after smooth booleans or a morph. Distances are in metres.
+Houdini COP: SDF Offset / Round; Substance: SDF operations. An SDF image holds the signed distance in metres in C (negative inside, 0 on the outline), as tex_sdf_shape and tex_sdf_from_mask make it. offset grows the shape by amount metres (negative shrinks); round rounds its convex corners with radius amount and fillet its concave ones (shrink or grow, measure again, return); stroke turns it into a band amount wide centred on the outline (rings from discs, frames from boxes, then tex_sdf_to_mask); invert swaps inside and outside; redistance measures the distance to the outline again after smooth booleans or a morph. Distances are metres of an image `size` metres wide.
 
 **Inputs**
 
@@ -15939,6 +16043,7 @@ Houdini COP: SDF Offset / Round; Substance: SDF operations. An SDF image holds t
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"offset"` |  | `offset`, `round`, `fillet`, `stroke`, `invert`, `redistance` | `operation`, `type` | operation |
 | `amount` | float | `0.01` |  |  | `distance`, `radius`, `width` | offset distance, corner radius or stroke width in metres |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -15995,7 +16100,7 @@ category: `texture` · aliases: `sdf_shape_texture`, `cop_sdfshape`, `shape_sdf`
 
 SDF shape image: the signed distance in metres to a disc, box, polygon, star, capsule or cross (or a grid of them), for SDF offsets, booleans, bevels and outlines.
 
-Houdini COP: SDF Shape; Substance: Shape (as a distance field). C holds the signed distance in metres (negative inside, 0 on the outline) on an image whose width covers texture_size metres, so every distance node downstream (tex_sdf_op, tex_sdf_boolean, tex_sdf_to_mask) works in metres and gives the same result at any resolution. radius sizes disc, polygon and star; extent sizes box (width, height), capsule (length, thickness) and cross (arm length, thickness); corner rounds box, polygon and cross. tile repeats the shape (center places it in each tile, in the tile's uv); with tileable the grid continues past the borders, so the field tiles and shapes cut by a border continue on the other side. Panels, plates, rivets, slots, vents, decals. See it with tex_sdf_to_mask.
+Houdini COP: SDF Shape; Substance: Shape (as a distance field). C holds the signed distance in metres (negative inside, 0 on the outline) on an image whose width covers `size` metres, so every distance node downstream (tex_sdf_op, tex_sdf_boolean, tex_sdf_to_mask) works in metres and gives the same result at any resolution. radius sizes disc, polygon and star; extent sizes box (width, height), capsule (length, thickness) and cross (arm length, thickness); corner rounds box, polygon and cross. tile repeats the shape (center places it in each tile, in the tile's uv); with tileable the grid continues past the borders, so the field tiles and shapes cut by a border continue on the other side. Panels, plates, rivets, slots, vents, decals. See it with tex_sdf_to_mask.
 
 **Inputs**
 
@@ -16015,7 +16120,7 @@ None (generator).
 | `rotation` | float | `0` |  |  | `angle`, `rotate` | rotation in degrees (counter-clockwise) |
 | `center` | vec2 | `[0.5,0.5]` |  |  | `position` | centre in each tile's uv (0.5, 0.5 = the middle) |
 | `tile` | ivec2 | `[1,1]` | 1..512 |  | `tiling`, `repeat`, `count` | repeats along u and v |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the grid of shapes continues past the borders (the field tiles) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -16065,6 +16170,7 @@ Houdini COP: SDF to Mono; Substance: SDF to mask. An SDF image holds the signed 
 | `softness` | float | `0` | 0.. |  | `falloff`, `blur` | fill and outline: edge softness in metres (0 = antialiased over a texel) |
 | `profile` | enum | `"smooth"` |  | `linear`, `smooth`, `round`, `ramp` | `curve_type` | bevel: profile from the outline inward |
 | `ramp` | ramp | `[[0,0],[1,1]]` |  |  | `curve` | bevel with profile ramp: height [[t, value], …] from the outline (t 0) to width inside (t 1) |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | name of the result ("" = this node's name; an image already so called is replaced); materials reference it as "image:<name>" |
@@ -16110,7 +16216,7 @@ category: `texture` · aliases: `shape_texture`, `cop_shape`, `polygon_shape`, `
 
 Shape image: disc, square, polygon, star or ring with a soft falloff, optionally repeated in a grid.
 
-Substance: Shape; Houdini COP: Shape. 1 inside, 0 outside; falloff (fraction of the radius) ramps the edge inward, so falloff 1 gives a cone or pyramid usable as a height stamp. fill is the radius relative to half a tile, so a tile of texture_size / tile metres holds a shape of fill × half of that. tile repeats the shape (a tileable stud or rivet grid). Use as a mask, a stamp for tex_tile_sampler, or a bump through tex_normal_from_height; for a shape of a size in metres use tex_sdf_shape.
+Substance: Shape; Houdini COP: Shape. 1 inside, 0 outside; falloff (fraction of the radius) ramps the edge inward, so falloff 1 gives a cone or pyramid usable as a height stamp. size is the radius relative to half a tile. tile repeats the shape (a tileable stud or rivet grid). Use as a mask, a stamp for tex_tile_sampler, or a bump through tex_normal_from_height.
 
 **Inputs**
 
@@ -16122,13 +16228,12 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `shape` | enum | `"disc"` |  | `disc`, `square`, `polygon`, `star`, `ring` | `type` | shape |
-| `fill` | float | `0.8` | 0.001..2 |  | `scale` | radius as a fraction of half a tile (1 touches the tile border) |
+| `size` | float | `0.8` | 0.001..2 |  | `radius`, `scale` | radius as a fraction of half a tile (1 touches the tile border) |
 | `sides` | int | `6` | 3..64 |  |  | polygon / star: sides or points |
 | `inner_radius` | float | `0.5` | 0..1 |  | `inner` | star: inner / outer radius; ring: hole / outer radius |
 | `rotation` | float | `0` |  |  | `angle`, `rotate` | rotation in degrees (counter-clockwise) |
 | `falloff` | float | `0` | 0..1 |  | `softness`, `blur` | soft edge as a fraction of the radius (0 = antialiased hard edge, 1 = a cone) |
 | `tile` | ivec2 | `[1,1]` | 1..512 |  | `tiling`, `repeat`, `count` | repeats along u and v |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
 **Writes:** image <name> (default: the node name): C grey 0..1
@@ -16156,7 +16261,7 @@ category: `texture` · aliases: `slope_blur`, `slopeblur`, `slope_blur_grayscale
 
 Slope blur: smear an image along the slopes of a second grey image (blur, min or max): flowing edges, melted and eroded looks, organic paint wear.
 
-Substance: Slope Blur Grayscale / Color. Every pixel walks down (or up) the slope of the grey map on input 1 for `distance` metres in `samples` steps, re-reading the slope at each step, and combines what it meets: blur (the mean: flowing smears), min (eats bright areas along the flow: eroded, chipped edges) or max (grows them). Where the map is flatter than half its average slope the steps shrink in proportion, so flat areas stay put. Distances in metres, so the same at any resolution. Typical: a histogram_scan wear mask slope-blurred by tex_noise for ragged paint edges. Grey or RGBA (alpha is kept).
+Substance: Slope Blur Grayscale / Color. Every pixel walks down (or up) the slope of the grey map on input 1 for `distance` metres in `samples` steps, re-reading the slope at each step, and combines what it meets: blur (the mean: flowing smears), min (eats bright areas along the flow: eroded, chipped edges) or max (grows them). Where the map is flatter than half its average slope the steps shrink in proportion, so flat areas stay put. Distances in metres of an image `size` metres wide, so the same at any resolution. Typical: a histogram_scan wear mask slope-blurred by tex_noise for ragged paint edges. Grey or RGBA (alpha is kept).
 
 **Inputs**
 
@@ -16173,6 +16278,7 @@ Substance: Slope Blur Grayscale / Color. Every pixel walks down (or up) the slop
 | `samples` | int | `16` | 1..64 |  | `steps` | steps along the slope (more = smoother) |
 | `mode` | enum | `"blur"` |  | `blur`, `min`, `max` | `type` | blur = mean, min = erode bright areas, max = grow them |
 | `direction` | enum | `"downhill"` |  | `downhill`, `uphill` |  | follow the slope down (default) or up |
+| `size` | float | `1` | 0.000001.. |  | `texture_size`, `world_size`, `tile_size` | metres the image width covers on the model (one texel is size / width metres); the distances of this node are in metres |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -16203,7 +16309,7 @@ Substance: Slope Blur Grayscale / Color. Every pixel walks down (or up) the slop
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.125,
+        "scale": 8,
         "seed": 3
       }
     },
@@ -16229,7 +16335,7 @@ category: `texture` · aliases: `splatter`, `blobs`, `stains`, `dirt_map`, `grun
 
 Seeded splatter: ragged soft blobs (stains, dirt, paint drops) scattered over the image.
 
-Substance: Splatter / Dirt / Grunge Map. radius is the blob radius range in metres on an image texture_size metres wide; irregularity makes the outlines ragged (0 = discs); softness is the edge blur as a fraction of the radius; blobs wrap at the borders (tileable) and combine with max, or add (clamped to 1). count is the number of blobs in the whole image. For strokes use tex_scratches.
+Substance: Splatter / Dirt / Grunge Map. irregularity makes the outlines ragged (0 = discs); softness is the edge blur as a fraction of the radius; blobs wrap at the borders (tileable) and combine with max, or add (clamped to 1). For strokes use tex_scratches.
 
 **Inputs**
 
@@ -16241,13 +16347,12 @@ None (generator).
 |---|---|---|---|---|---|---|
 | `resolution` | ivec2 | `[512,512]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
 | `count` | int | `60` | 0..100000 |  | `number`, `amount` | number of blobs |
-| `radius` | vec2 | `[0.02,0.08]` | 0.. |  |  | blob radius range in metres |
+| `size` | vec2 | `[0.02,0.08]` | 0.. |  | `radius` | radius range (fractions of the image width) |
 | `irregularity` | float | `0.6` | 0..1 |  | `roughness`, `disorder` | ragged outline (0 = discs) |
 | `softness` | float | `0.4` | 0..1 |  | `falloff`, `blur` | edge blur as a fraction of the radius |
 | `intensity` | vec2 | `[0.5,1]` | 0.. |  |  | intensity range of a blob |
 | `combine` | enum | `"max"` |  | `max`, `add` | `blend` | how overlapping blobs combine |
 | `tileable` | bool | `true` |  |  | `tile`, `wrap` | blobs wrap at the borders |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `seed` | float | `0` |  |  |  | random seed |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
@@ -16261,7 +16366,7 @@ None (generator).
   "params": {
     "resolution": 512,
     "count": 40,
-    "radius": [
+    "size": [
       0.03,
       0.1
     ],
@@ -16276,7 +16381,7 @@ category: `texture` · aliases: `text_texture`, `label_texture`, `stencil`
 
 Text image: a line (or lines) of text from the bundled font (or a named one), filled and antialiased.
 
-Substance: Text. Uses the text node's glyph outlines (bundled DejaVu Sans by default, identical on every machine), fits the text block's height to `height` metres (shrunk to fit the width of an image texture_size metres wide) and places its centre at `position` (uv). Labels, stencils, decals, serial numbers.
+Substance: Text. Uses the text node's glyph outlines (bundled DejaVu Sans by default, identical on every machine), fits the text block's height to `size` (a fraction of the image height, shrunk to fit the width) and places its centre at `position` (uv). Labels, stencils, decals, serial numbers.
 
 **Inputs**
 
@@ -16290,10 +16395,9 @@ None (generator).
 | `text` | string | `"TOPOTOPO"` |  |  |  | text (use \\n for new lines) |
 | `font` | string | `""` |  |  |  | font file or family ("" = the bundled DejaVu Sans) |
 | `weight` | float | `400` | 1..1000 |  | `wght`, `font_weight` | font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold (see the text node; a font without a wght axis is drawn at its own weight) |
-| `height` | float | `0.2` | 0.00001.. |  | `font_size` | height of the text block in metres (shrunk to fit the width) |
+| `size` | float | `0.2` | 0.001.. |  | `height`, `font_size` | height of the text block as a fraction of the image height (shrunk to fit the width) |
 | `position` | vec2 | `[0.5,0.5]` |  |  | `center` | centre of the text in uv |
 | `align` | enum | `"center"` |  | `left`, `center`, `right` |  | horizontal alignment of lines |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 
 **Writes:** image <name> (default: the node name): C grey 0..1
@@ -16309,7 +16413,7 @@ None (generator).
       128
     ],
     "text": "EXIT",
-    "height": 0.175
+    "size": 0.7
   }
 }
 ```
@@ -16395,7 +16499,6 @@ Substance: Tile Sampler / Splatter Circular. One instance per grid cell: positio
 | `output` | enum | `"grey"` |  | `grey`, `id`, `color` | `mode`, `output_type` | grey = the stamps; id = a random grey per instance; color = a random colour per instance (alpha = the stamps) |
 | `stamps` | enum | `"one"` |  | `one`, `random` | `pattern_input`, `pattern_select` | one = the image picked by image; random = every image of input 0, one at random per instance |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | instances wrap at the borders (the result tiles) |
-| `texture_size` | float | `1` | 0.000001.. |  | `world_size`, `tile_size`, `image_width` | metres the image's width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it |
 | `seed` | float | `0` |  |  |  | random seed |
 | `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the pattern) to use ("" = its only image; needed when it holds several) |
 | `layer` | string | `""` |  |  | `plane`, `channel_layer` | layer to process ("" = the main layer "C"; others: "id", "mask", …) |
@@ -16479,7 +16582,7 @@ Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 =
       "params": {
         "resolution": 129,
         "fractal": "ridged",
-        "feature": 0.33
+        "scale": 3
       }
     },
     "hf": {
@@ -16503,7 +16606,7 @@ category: `texture` · aliases: `transform_texture`, `transformation_2d`, `offse
 
 Offset, rotate, scale and tile an image (2D transform with wrap).
 
-Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (metres of the image: half of its texture_size is half the image); tiling is about the lower-left corner, so cell 0 starts at uv (0, 0) and offset 0 keeps the cells aligned with the image edges. With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.
+Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (uv); tiling is about the lower-left corner, so cell 0 starts at uv (0, 0) and offset 0 keeps the cells aligned with the image edges. With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.
 
 **Inputs**
 
@@ -16515,7 +16618,7 @@ Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `t
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `offset` | vec2 | `[0,0]` |  |  | `translate`, `t` | shift in metres (half the image's texture_size is half the image) |
+| `offset` | vec2 | `[0,0]` |  |  | `translate`, `t` | shift in uv (0.5 = half the image) |
 | `rotate` | float | `0` |  |  | `rotation`, `r`, `angle` | rotation in degrees (counter-clockwise) |
 | `scale` | vec2 | `[1,1]` |  |  | `s`, `zoom` | zoom (> 1 enlarges the content) |
 | `tile` | vec2 | `[1,1]` | 0.001.. |  | `tiling`, `repeat` | repeats of the content along u and v; cells start at the lower-left corner (uv 0, 0), so [1, 2] gives two stacked cells, each the whole image |
@@ -16560,7 +16663,7 @@ category: `texture` · aliases: `warp`, `directional_warp`, `vector_warp`, `cop_
 
 Warp an image by a second image: directional, along its slope, by an RG vector map, with a per-pixel angle map (non-uniform), or in several directions at once.
 
-Substance: Warp / Directional Warp / Vector Warp / Non-Uniform Directional Warp / Multi-Directional Warp; Houdini COP: Displace. intensity is the largest offset in metres, so a warp looks the same at any resolution (and on every island of an atlas). directional moves each pixel by intensity × warp value along angle; slope along the warp image's gradient (normalised so the steepest slope moves intensity); vector by (R, G) × 2 − 1 of an RGBA warp image; nonuniform like directional, with the angle map on input 2 (grey 0..1 = 0..360°) added to angle per pixel (flow along a pattern: wood grain around knots, fibres, brushed swirls); multi averages `directions` directional warps whose angles split the circle evenly from angle (a soft, direction-free smear: melted edges, worn paint borders).
+Substance: Warp / Directional Warp / Vector Warp / Non-Uniform Directional Warp / Multi-Directional Warp; Houdini COP: Displace. intensity is the largest offset as a fraction of the image width (metres when the image spans one metre), so a warp looks the same at any resolution. directional moves each pixel by intensity × warp value along angle; slope along the warp image's gradient (normalised so the steepest slope moves intensity); vector by (R, G) × 2 − 1 of an RGBA warp image; nonuniform like directional, with the angle map on input 2 (grey 0..1 = 0..360°) added to angle per pixel (flow along a pattern: wood grain around knots, fibres, brushed swirls); multi averages `directions` directional warps whose angles split the circle evenly from angle (a soft, direction-free smear: melted edges, worn paint borders).
 
 **Inputs**
 
@@ -16575,7 +16678,7 @@ Substance: Warp / Directional Warp / Vector Warp / Non-Uniform Directional Warp 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"slope"` |  | `directional`, `slope`, `vector`, `nonuniform`, `multi` | `type` | how the warp image moves pixels |
-| `intensity` | float | `0.02` |  |  | `amount`, `strength` | largest offset in metres |
+| `intensity` | float | `0.02` |  |  | `amount`, `strength` | largest offset as a fraction of the image width |
 | `angle` | float | `0` |  |  |  | directional, nonuniform, multi: direction in degrees (0 = +u) |
 | `directions` | int | `4` | 1..32 |  |  | multi: number of directions averaged |
 | `tileable` | bool | `true` |  |  | `wrap`, `seamless` | the image tiles: filters read across the opposite border (keep a tileable texture tileable) |
@@ -16602,7 +16705,7 @@ Substance: Warp / Directional Warp / Vector Warp / Non-Uniform Directional Warp 
       "type": "tex_noise",
       "params": {
         "resolution": 256,
-        "feature": 0.25
+        "scale": 4
       }
     },
     "out": {
