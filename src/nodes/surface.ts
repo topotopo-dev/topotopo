@@ -632,7 +632,8 @@ defineNode({
     'reaches width in from an edge inside its part; large 3D patches (patch_size, patchiness) decide which stretches of ' +
     'edge wear, and a 3D noise at chip_size, its outline warped by raggedness, breaks them into chips, so the outlines ' +
     'follow the shape in 3D, never the triangles, and are the same on both sides of a uv seam and at any texel density. ' +
-    'focus multiplies the edge wear near the focus prims (focus_amount, within focus_radius) and adds only a light rub ' +
+    'focus multiplies the edge wear near the focus prims (focus_amount, within focus_radius), lets it reach up to ' +
+    '(1 + 1.5 × focus_amount) × width in from the edges there, and adds only a light rub ' +
     '(0.12 × focus_amount in C) to flats, which never chip. Input 1 (surroundings) buries the points inside it, as in ' +
     'bake_measure, and lets the two bakes share their work. Warns when the radius is under twice the facets of a curved ' +
     'part. Stats chip_share, bare_share, core_share (covered samples at 0.5 or more). Stops at the time limit of ' +
