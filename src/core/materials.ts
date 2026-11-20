@@ -208,3 +208,50 @@ export function primMaterials(g: Geometry): string[] | null {
   if (h && h.type === 'string') return (h.data as string[]).map(materialBasename);
   return null;
 }
+
+/**
+ * The whole names (lower case, as a material is called) that stand for a kind when nothing says it: a material called
+ * "painted_steel" or "Paint" is painted metal. Whole names only: "worn_metal" or "dark_iron" could be several kinds.
+ */
+export const KIND_NAMES: Readonly<Record<string, readonly string[]>> = {
+  painted_metal: ['painted_metal', 'painted_steel', 'paint'],
+  cast_metal: ['cast_metal', 'cast_iron', 'cast'],
+  galvanised: ['galvanised', 'galvanized', 'zinc', 'galvanised_steel'],
+  bare_steel: ['bare_steel', 'steel', 'iron', 'bare_metal'],
+  stainless: ['stainless', 'stainless_steel'],
+  plastic: ['plastic'],
+  rubber: ['rubber'],
+  concrete: ['concrete'],
+  painted_wood: ['painted_wood', 'wood_painted'],
+  decal: ['decal', 'label', 'sticker', 'sign', 'print'],
+  keep: ['keep'],
+};
+
+export interface ResolvedKind {
+  /** the kind ("" = none could be told) */
+  kind: string;
+  /** where it came from: the `kinds` map, the material's own kind field, or its whole name */
+  from: 'kinds' | 'material' | 'name' | 'none';
+  /** a kind that was written (kinds map or the material's field) but is not one of MATERIAL_KINDS */
+  unknown?: string;
+}
+
+/**
+ * The kind of a material, in this order: the entry for its name in `kinds`, its own `kind` field, its whole name
+ * (case-insensitive) when that is a kind or one of its names (KIND_NAMES); else none. A written kind that is not in
+ * MATERIAL_KINDS is reported in `unknown` and not replaced by a guess.
+ */
+export function resolveKind(name: string, material: Material | undefined, kinds?: Record<string, unknown> | null): ResolvedKind {
+  const written = (v: unknown, from: 'kinds' | 'material'): ResolvedKind | null => {
+    if (v === undefined || v === null || v === '') return null;
+    const s = String(v);
+    return (MATERIAL_KINDS as readonly string[]).includes(s) ? { kind: s, from } : { kind: '', from, unknown: s };
+  };
+  const a = kinds && Object.hasOwn(kinds, name) ? written(kinds[name], 'kinds') : null;
+  if (a) return a;
+  const b = written(material?.kind, 'material');
+  if (b) return b;
+  const lower = name.trim().toLowerCase();
+  for (const [k, names] of Object.entries(KIND_NAMES)) if (names.includes(lower)) return { kind: k, from: 'name' };
+  return { kind: '', from: 'none' };
+}
