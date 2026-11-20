@@ -9,13 +9,13 @@ import { interpolate, memoBake, normalize3 } from '../core/bake.ts';
 import { band } from '../core/pcg.ts';
 import { hashNumber, hashString } from '../core/random.ts';
 import { triangulate } from '../core/topology.ts';
-import { runCurvature, runDistance, runInterp, runNoise, runRays, afterRun } from '../core/surface.ts';
+import { rayBias, runCurvature, runDistance, runInterp, runNoise, runRays, afterRun } from '../core/surface.ts';
 import type { ConeMeasure, HemiMeasure, SurfaceRayArgs } from '../core/surface.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { coerce, didYouMean, evalRamp } from '../graph/params.ts';
-import { BAKE_DOC, BAKE_PARAMS, cloudOf, finishImage, setup, surfaceOf, surfaceWarnings, texelLayers, wrapImage } from './bake.ts';
+import { BAKE_DOC, BAKE_PARAMS, buriedOf, checkSurfaceRadius, cloudOf, finishImage, setup, surfaceOf, surfaceRunner, surfaceWarnings, texelLayers, wrapImage } from './bake.ts';
 import type { Bake } from './bake.ts';
 import { P, mask } from './util.ts';
 import { NAMED_BY_NODE } from './texture.ts';
@@ -212,6 +212,7 @@ function cookMeasure(ctx: CookContext) {
       targets.set(m, new TriBVH(sel ? g.subsetPrims(sel) : g));
     }
   }
+  for (const m of ms) if (m.by === 'curvature') checkSurfaceRadius(b, m.f.radius, `measure "${m.name}": curvature radius`);
   const raw: Arr[] = ms.map(() => new Float32Array(n));
   const extents = ms.map(() => 0);
   const out = () => finishMeasure(ctx, b, ms, raw, extents);
@@ -220,12 +221,12 @@ function cookMeasure(ctx: CookContext) {
   if (n >= 65536 && ms.some((m) => !['facing', 'height', 'group'].includes(m.by))) void ctx.engine.host.pool?.warm(true);
   const mesh = surfaceOf(b);
   surfaceWarnings(b, mesh);
-  const run = (kernel: string, job: any, o?: any) => ctx.parallelMap(kernel, job, o);
+  const { run, deadline, check } = surfaceRunner(ctx, 'fewer measures, fewer samples, a smaller curvature radius or a lower resolution; or raise the limit');
   const P = b.P;
   let N: Float64Array | null = null;
   const normals = () => { if (!N) { N = interpolate(s, b.tris, mesh.VN, 3); normalize3(N); } return N; };
   const steps: (() => unknown)[] = [];
-  const timed = (label: string, f: () => unknown) => steps.push(() => { const t0 = performance.now(); return seq(f(), () => ctx.stage(label, performance.now() - t0)); });
+  const timed = (label: string, f: () => unknown) => steps.push(() => { check(); const t0 = performance.now(); return seq(f(), () => ctx.stage(label, performance.now() - t0)); });
   ms.forEach((m, j) => {
     const R = raw[j];
     if (m.by === 'facing') timed(`facing ${m.name}`, () => {
@@ -248,11 +249,11 @@ function cookMeasure(ctx: CookContext) {
     });
     else if (m.by === 'noise') timed(`noise ${m.name}`, () => {
       const seed = hashString(m.name, hashNumber(Number(p.seed) || 0)) & 0x7fffffff;
-      return seq(runNoise(run, s, b.tris, mesh.VP, { noise: m.f.noise, fractal: m.f.fractal, octaves: m.f.octaves, roughness: m.f.roughness, size: m.f.size, seed }), (V: Arr) => R.set(V));
+      return seq(runNoise(run, s, b.tris, mesh.VP, { noise: m.f.noise, fractal: m.f.fractal, octaves: m.f.octaves, roughness: m.f.roughness, size: m.f.size, seed, deadline }), (V: Arr) => R.set(V));
     });
     else if (m.by === 'distance') timed(`distance ${m.name}`, () => {
       const hi = m.band ? m.band.hi + m.band.fall : m.f.range;
-      return seq(runDistance(run, s, b.tris, mesh.VP, targets.get(m)!, hi === Infinity ? Infinity : Math.max(0, hi)), (V: Arr) => R.set(V));
+      return seq(runDistance(run, s, b.tris, mesh.VP, targets.get(m)!, hi === Infinity ? Infinity : Math.max(0, hi), deadline), (V: Arr) => R.set(V));
     });
   });
   // the cloud measures: one ray pass for every ray measure, one curvature pass per radius, one interpolation
@@ -289,25 +290,29 @@ function cookMeasure(ctx: CookContext) {
       });
     };
     const sub: (() => unknown)[] = [];
+    // the mesh first, then the surroundings: the buried test reads the mesh's triangles by their index
+    let sceneMade: RayScene | null = null;
+    const scene = () => (sceneMade ??= surPolys ? RayScene.of(Geometry.merge([g, sur!])) : memoBake(g, 'rayscene', () => RayScene.of(g)));
+    let CB: Uint8Array | null = null;
+    sub.push(() => seq(buriedOf(b, mesh, sc, scene, run, deadline), (B: Uint8Array | null) => { CB = B; }));
     if (nr) sub.push(() => {
       const t0 = performance.now();
-      const bias = Math.min(1e-4 * b.diag, 0.001);
-      const scene = surPolys ? RayScene.of(Geometry.merge([g, sur!])) : memoBake(g, 'rayscene', () => RayScene.of(g));
+      const bias = rayBias(b.diag);
       const contact = surPolys ? new TriBVH(sur!) : null;
-      const args: SurfaceRayArgs = { samples: Math.round(p.samples), bias, seed: Number(p.seed) || 0, hemi, cones, contact: contact ? 2 * bias : 0 };
+      const args: SurfaceRayArgs = { samples: Math.round(p.samples), bias, seed: Number(p.seed) || 0, hemi, cones, contact: contact ? 2 * bias : 0, deadline };
       ctx.stat('rays', c.n * args.samples * (1 + cones.length));
-      return seq(runRays(run, sc, scene, contact, args), (V: Arr) => {
+      return seq(runRays(run, sc, scene(), contact, args, CB), (V: Arr) => {
         for (let col = 0; col < nr; col++) fill('ray', col, V, nr);
         ctx.stage('rays', performance.now() - t0);
       });
     });
     radii.forEach((r, ri) => sub.push(() => {
       const t0 = performance.now();
-      return seq(runCurvature(run, sc, r), (V: Arr) => { fill('curv', ri, V, 1); ctx.stage(`curvature ${mm(r)}`, performance.now() - t0); });
+      return seq(runCurvature(run, sc, r, CB, deadline), (V: Arr) => { fill('curv', ri, V, 1); ctx.stage(`curvature ${mm(r)}`, performance.now() - t0); });
     }));
     sub.push(() => {
       const t0 = performance.now();
-      return seq(runInterp(run, s, b.tris, mesh, sc, CV, M), (V: Arr) => {
+      return seq(runInterp(run, s, b.tris, mesh, sc, CV, M, CB, deadline), (V: Arr) => {
         cloudMs.forEach((m) => {
           const j = ms.indexOf(m), R = raw[j], q = cloudMs.indexOf(m);
           for (let i = 0; i < n; i++) R[i] = V[i * M + q];
@@ -379,16 +384,20 @@ defineNode({
     'triangles), occlusion (1 = open, as bake_ao), cavity (1 = in a crevice), shelter (1 = covered from direction within cone; ' +
     'the part of the cone behind the surface counts as covered), visibility (1 = seen from outside: a quarter of the ' +
     'hemisphere escaping the model and input 1 counts as fully seen), curvature (as bake_curvature method surface; band units: ' +
-    'the signed value, 1 = a 90° convex edge), group (1 on pattern). Each value is shaped like the point mask node: min/max/' +
-    'falloff make a band in the measure\'s units (unset = its own 0..1), then ramp, then invert, then where (0 outside). ' +
-    'Facing, height, distance, noise and group are evaluated per texel; occlusion, cavity, shelter, visibility and curvature ' +
-    'on a cloud of surface points every `spacing` metres (default 4 texels at this resolution, at least 0.5 mm; denser where ' +
-    'the atlas gives more texels) and taken to each texel from the cloud points of its own part within 2 × spacing that face ' +
-    'its way, so values do not bleed around edges or onto the far side of a plate. Every ray measure counts over one set of ' +
-    '`samples` cosine-weighted rays per cloud point; shelter casts its own cone. Input 1 (surroundings: a wall, the ground) ' +
-    'blocks rays, and a face lying flat against it counts as covered. Faces wound against their neighbours are measured turned ' +
-    'and reported; a closed part that faces inward is reported, not turned. Fields: ' + FIELD_DOC + '.',
-  aliases: ['bake_measures', 'bake_noise', 'bake_distance', 'bake_cavity', 'bake_masks', 'bake_mesh_mask', 'bake_shelter', 'bake_visibility'],
+    'the signed value, 1 = a 90° convex edge; radius at most half the model\'s size), group (1 on pattern). Each value is ' +
+    'shaped like the point mask node: min/max/falloff make a band in the measure\'s units (unset = its own 0..1), then ramp, ' +
+    'then invert, then where (0 outside). Facing, height, distance, noise and group are evaluated per texel; occlusion, ' +
+    'cavity, shelter, visibility and curvature on a cloud of surface points every `spacing` metres (default 4 texels at this ' +
+    'resolution, at least 0.5 mm; denser where the atlas gives more texels, never sparser than spacing where it gives fewer) ' +
+    'and taken to each texel from the cloud points of its own part within 2 × spacing that face its way, so values do not ' +
+    'bleed around edges or onto the far side of a plate. A point inside another part (a post sunk into a plate) is buried: ' +
+    'it reads covered and no texel that is seen takes its value; curvature counts the points of every part that are not ' +
+    'buried, so a junction between parts reads concave. Every ray measure counts over one set of `samples` cosine-weighted ' +
+    'rays per cloud point; shelter casts its own cone. Input 1 (surroundings: a wall, the ground) blocks rays, and a face ' +
+    'lying flat against it and facing it counts as covered. Results do not depend on prim order. Faces wound against their ' +
+    'neighbours are measured turned and reported; a closed part that faces inward is reported, not turned. Stops at the time ' +
+    'limit of long-running nodes. Fields: ' + FIELD_DOC + '.',
+  aliases: ['bake_measures', 'bake_noise', 'bake_distance', 'bake_cavity', 'bake_shelter', 'bake_visibility'],
   inputs: [
     { name: 'geo', desc: 'mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout)' },
     { name: 'surroundings', desc: 'optional: geometry that blocks rays (a wall, the ground, neighbours) and can be a distance target ("input1")', optional: true },

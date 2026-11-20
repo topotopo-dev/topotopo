@@ -16,7 +16,7 @@ import {
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
 import { bakeMemoStats } from '../core/bake.ts';
-import { runCurvature, runInterp, surfaceCloud, surfaceMesh, afterRun } from '../core/surface.ts';
+import { PAST_DEADLINE, runBuried, runCurvature, runInterp, surfaceCloud, surfaceMesh, afterRun } from '../core/surface.ts';
 import type { SurfaceCloud, SurfaceMesh } from '../core/surface.ts';
 import { RayScene, bboxDiagonal } from '../core/analysis.ts';
 import type { RaySampleOptions } from '../core/analysis.ts';
@@ -28,7 +28,7 @@ import { andThen } from '../graph/parallel.ts';
 import { didYouMean } from '../graph/params.ts';
 import { partsOf, primWhere } from '../core/report.ts';
 import { tiledScene } from '../core/trimtile.ts';
-import { P, mask } from './util.ts';
+import { P, mask, simBudget } from './util.ts';
 import { NAMED_BY_NODE, imageGeo, nameParam, outName, resolutionParam, size2 } from './texture.ts';
 
 /** Most samples a bake may rasterise (output texels × supersample²): 4096², about 1 GB of per-sample arrays at full coverage. */
@@ -197,6 +197,43 @@ export function cloudOf(b: Bake, mesh: SurfaceMesh, k: number): SurfaceCloud {
   if (bakeMemoStats.made !== made) b.ctx.stage('cloud', performance.now() - t0);
   b.ctx.stat('cloud_points', c.cloud.n);
   return c;
+}
+
+/**
+ * A kernel runner for the surface measures under the time limit of long-running nodes: `deadline` goes into every
+ * kernel's args (a kernel past it stops, on the pool or on this thread), and either way the node fails with the time
+ * limit's error.
+ */
+export function surfaceRunner(ctx: CookContext, hint: string): { run: (kernel: string, job: any, o?: any) => any; deadline: number; check: () => void } {
+  const budget = simBudget(ctx, hint), deadline = Date.now() + budget.left();
+  const fail = (e: unknown): never => { if (String((e as any)?.message ?? e).includes(PAST_DEADLINE)) throw budget.error(); throw e; };
+  const run = (kernel: string, job: any, o?: any) => {
+    budget.check();
+    try {
+      const r = ctx.parallelMap(kernel, job, o);
+      return r instanceof Promise ? r.catch(fail) : r;
+    } catch (e) { return fail(e); }
+  };
+  return { run, deadline, check: () => budget.check() };
+}
+
+/** Curvature radius limit of the surface method: half the model's bounding-box diagonal. */
+export function checkSurfaceRadius(b: Bake, r: number, what: string): void {
+  if (r > 0.5 * b.diag) throw new NodeError(`${b.ctx.type}: ${what} ${+r.toPrecision(3)} m is more than half the model's size (bounding-box diagonal ${+b.diag.toPrecision(3)} m)`, `use a radius up to ${+(0.5 * b.diag).toPrecision(3)} m; a radius about the size of the wear or dirt you want reads best`);
+}
+
+/** Which cloud points lie inside another part (null for a mesh of one part with nothing around it). */
+export function buriedOf(b: Bake, mesh: SurfaceMesh, sc: SurfaceCloud, scene: () => RayScene, run: (kernel: string, job: any, o?: any) => any, deadline: number): Uint8Array | null | Promise<Uint8Array | null> {
+  const t0 = performance.now();
+  return afterRun(runBuried(run, sc, mesh, scene(), deadline), (B) => {
+    if (B) {
+      let k = 0;
+      for (let i = 0; i < B.length; i++) k += B[i];
+      b.ctx.stat('buried_points', k);
+      b.ctx.stage('buried', performance.now() - t0);
+    }
+    return B;
+  });
 }
 
 /** One line naming the parts that hold `prims` ("" when the mesh has no prim names). */
@@ -470,7 +507,7 @@ defineBake({
     ...BAKE_PARAMS(),
     radius: { type: 'float', default: 0, min: 0, desc: 'how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal)', aliases: ['width', 'edge_width', 'distance'] },
     strength: { type: 'float', default: 1, min: 0, desc: 'contrast multiplier', aliases: ['intensity', 'contrast'] },
-    method: { type: 'enum', options: ['dihedral', 'surface'], default: 'dihedral', desc: 'dihedral: the angles of the mesh edges near the texel; surface: how the shading normals turn within radius (facets smaller than radius do not show: decimated and isosurface meshes)', aliases: ['mode', 'curvature_method'] },
+    method: { type: 'enum', options: ['dihedral', 'surface'], default: 'dihedral', desc: 'dihedral: the angles of the mesh edges near the texel; surface: how the shading normals turn within radius (facets smaller than radius do not show: decimated and isosurface meshes; other parts count where they are not buried, so junctions read concave; radius at most half the size of the model)', aliases: ['mode', 'curvature_method'] },
     min_angle: { type: 'float', default: 0.5, min: 0, max: 179, desc: 'dihedral: edges bending less than this (degrees) are ignored' },
     intersections: { type: 'bool', default: true, desc: 'dihedral: also find the concave creases where separate parts cut into each other (kitbashed meshes)', aliases: ['crossings', 'intersection_creases'] },
     tile: { type: 'bool', default: true, desc: 'trim sheets: a band that tiles is copied one period past each open end, so curvature does not fade there (no effect without trim bands). Help topic trim_sheets.' },
@@ -503,20 +540,23 @@ defineBake({
     if (p.method === 'surface') {
       if (high) throw new NodeError(`${ctx.type}: method surface reads the mesh's own shading normals; a high-res input 1 is not read`, 'disconnect input 1, or use method dihedral to sample the high-res mesh');
       const r = p.radius > 0 ? p.radius : 0.01 * b.diag;
+      checkSurfaceRadius(b, r, 'radius');
       if (!b.s.n) return shape(new Float32Array(0));
       const mesh = surfaceOf(b);
       surfaceWarnings(b, mesh);
       // the cloud at least twice as dense as the radius, at most every 4 texels
       const k = Math.max(1, Math.min(4, mesh.median > 0 ? r / (2 * mesh.median) : 1));
       const sc = cloudOf(b, mesh, k);
-      const run = (kernel: string, job: any, o?: any) => ctx.parallelMap(kernel, job, o);
-      let t0 = performance.now();
-      return afterRun(runCurvature(run, sc, r), (CV) => {
-        ctx.stage('curvature', performance.now() - t0);
-        t0 = performance.now();
-        return afterRun(runInterp(run, b.s, b.tris, mesh, sc, CV, 1), (V) => {
-          ctx.stage('interpolation', performance.now() - t0);
-          return shape(V);
+      const { run, deadline } = surfaceRunner(ctx, 'a smaller radius or resolution; or raise the limit');
+      return afterRun(buriedOf(b, mesh, sc, () => memoBake(b.g, 'rayscene', () => RayScene.of(b.g)), run, deadline), (CB) => {
+        let t0 = performance.now();
+        return afterRun(runCurvature(run, sc, r, CB, deadline), (CV) => {
+          ctx.stage('curvature', performance.now() - t0);
+          t0 = performance.now();
+          return afterRun(runInterp(run, b.s, b.tris, mesh, sc, CV, 1, CB, deadline), (V) => {
+            ctx.stage('interpolation', performance.now() - t0);
+            return shape(V);
+          });
         });
       });
     }
