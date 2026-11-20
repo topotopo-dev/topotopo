@@ -357,6 +357,20 @@ defineNode({
     // other are evaluated in one call
     const t0 = performance.now();
     for (let j = 0; j < named.length;) {
+      // a mask that is one variable it may read is that variable; a number is that number everywhere: nothing to evaluate
+      const t = named[j].mask.trim(), c = codes[maskCodes[j]];
+      if (c.vars.length === 1 && c.vars[0] === t) {
+        // as evaluating it would give, so only when it is a finite number on every covered texel (else it warns and writes 0)
+        const a = variable(t);
+        let finite = true;
+        for (let q = 0; q < covered.length && finite; q++) finite = Number.isFinite(a[covered[q]]);
+        if (finite) { namedArrays.set(named[j].name, a); j++; continue; }
+      }
+      if (/^-?\d+(\.\d+)?$/.test(t)) {
+        const a = typeof SharedArrayBuffer !== 'undefined' ? new Float32Array(new SharedArrayBuffer(n * 4)) : new Float32Array(n);
+        if (Number(t) !== 0) for (let q = 0; q < covered.length; q++) a[covered[q]] = Number(t);
+        namedArrays.set(named[j].name, a); j++; continue;
+      }
       const group = new Set([named[j].name]);
       let end = j + 1;
       while (end < named.length && !codes[maskCodes[end]].vars.some((v) => group.has(v))) group.add(named[end++].name);
