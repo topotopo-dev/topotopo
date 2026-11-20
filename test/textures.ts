@@ -184,7 +184,7 @@ section('generators: deterministic, seeded, tileable');
   check(shp.layer('C')![32 * 64 + 32] === 1 && shp.layer('C')![0] === 0, 'tex_shape: 1 inside the disc, 0 in the corner');
   const sp1 = await image({ n: { type: 'tex_splatter', params: { resolution: 64, seed: 2 } } }), sp2 = await image({ n: { type: 'tex_splatter', params: { resolution: 64, seed: 2 } } });
   check(maxDiff(sp1.layer('C')!, sp2.layer('C')!) === 0 && mean(sp1.layer('C')!) > 0.01, 'tex_splatter deterministic and non-empty');
-  const txt = await image({ n: { type: 'tex_text', params: { resolution: [128, 32], text: 'AB', height: 0.2 } } });
+  const txt = await image({ n: { type: 'tex_text', params: { resolution: [128, 32], text: 'AB', text_height: 0.2 } } });
   check(mean(txt.layer('C')!) > 0.03 && mean(txt.layer('C')!) < 0.6, `tex_text fills glyphs (coverage ${f3(mean(txt.layer('C')!))})`);
 
   // weight: the wght axis of a variable font (a generated test font whose bar is 20, 100 and 300 units wide at 100,
@@ -226,7 +226,7 @@ section('generators: deterministic, seeded, tileable');
   const found = ['sign', 'lettering', 'label', 'font', 'engrave'].filter((w) => / {2}text\b/.test(catalogText(allNodeDefs(), { search: w })));
   check(found.length === 5, `the catalog finds text by sign, lettering, label, font and engrave (${found.join(', ')})`);
   const cover = async (weight: number) => {
-    const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, height: 0.8 } } });
+    const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, text_height: 0.8 } } });
     return { c: mean(findImage(r.geo, '')!.layer('C')!), warnings: r.warnings };
   };
   const thin = await cover(100), heavy = await cover(900), clampedTex = await cover(950);
@@ -317,7 +317,7 @@ section('filters: blend modes, levels, blur, normals');
   }
   const ed = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, e: { type: 'tex_edge_detect', in: ['p'] } }, 'e');
   check(Math.abs(ed.layer('C')![10 * 64 + 31] - 1) < 0.05 && ed.layer('C')![10 * 64 + 10] === 0, 'tex_edge_detect: about 1 on a 0 → 1 step, 0 on flat areas');
-  const ao = await image({ p: { type: 'tex_pattern', params: { resolution: 128, gap: 0.15, bevel: 0 } }, a: { type: 'tex_height_to_ao', in: ['p'], params: { radius: 0.05, depth: 0.05 } } }, 'a');
+  const ao = await image({ p: { type: 'tex_pattern', params: { resolution: 128, gap: 0.15, bevel: 0 } }, a: { type: 'tex_height_to_ao', in: ['p'], params: { reach: 0.05, relief_depth: 0.05 } } }, 'a');
   check(ao.layer('C')![0] < 0.8 && ao.layer('C')![(8 + 0) * 128 + 16] > 0.95, 'tex_height_to_ao: mortar dark, brick tops open');
   const col = await image({ g: { type: 'tex_gradient', params: { resolution: 16 } }, c: { type: 'tex_colorize', in: ['g'], params: { ramp: [[0, '#ff0000'], [1, '#0000ff']] } } }, 'c');
   check(col.layer('C')!.length === 16 * 16 * 4 && col.layer('C')![0] > 0.9 && col.layer('C')![15 * 4 + 2] > 0.9, 'tex_colorize: ramp colours as they are (#ff0000 → red 1)');
@@ -325,7 +325,7 @@ section('filters: blend modes, levels, blur, normals');
   check(orm.name === 'orm' && orm.width === 16 && orm.layer('C')![2] === 0 && orm.layer('C')![3] === 1, 'tex_channel pack: R, G from inputs (resized to the largest), B and A from fill');
   const ex = await image({ a: { type: 'tex_colorize', in: ['g'], params: { ramp: [[0, '#336699'], [1, '#336699']] } }, g: { type: 'tex_gradient', params: { resolution: 4 } }, x: { type: 'tex_channel', in: ['a'], params: { mode: 'extract', channel: 'b' } } }, 'x');
   check(Math.abs(ex.layer('C')![0] - 0x99 / 255) < 1e-6 && ex.layer('C')!.length === 16, 'tex_channel extract: one channel as grey');
-  const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { offset: [0.5, 0] } } }, 't');
+  const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { shift: [0.5, 0] } } }, 't');
   const p0 = genPattern({ pattern: 'checker', count: [2, 2], offset: 0.5, gap: 0, bevel: 0, variation: 0, seed: 0 }, 64, 64).C;
   check(maxDiff(tr.layer('C')!, p0.map((x) => 1 - x)) < 1e-6, 'tex_transform: half an image offset of a 2 × 2 checker inverts it');
   const grad = { g: { type: 'tex_gradient', params: { resolution: 32 } } };
@@ -345,7 +345,7 @@ section('filters: blend modes, levels, blur, normals');
   const out = await geo({ p: { type: 'tex_pattern', params: { resolution: 16 } }, o: { type: 'tex_output', in: ['p'], params: { name: 'brick_ids', layer: 'id' } } }, 'o');
   check(imagesOf(out).map((i) => i.name).join(',') === 'p,brick_ids', 'tex_output with a layer adds it as a new image');
   check((await cookErr({ b: { type: 'box' }, l: { type: 'tex_levels', in: ['b'] } }, 'l')).includes('has no image'), 'a filter on a mesh fails with a hint');
-  const hf = await geo({ n: { type: 'tex_noise', params: { resolution: 33 } }, h: { type: 'tex_to_heightfield', in: ['n'], params: { size: 4, height_scale: 2 } }, t: { type: 'heightfield_to_tex', in: ['h'], params: { normalize: false } } }, 't');
+  const hf = await geo({ n: { type: 'tex_noise', params: { resolution: 33 } }, h: { type: 'tex_to_heightfield', in: ['n'], params: { extent: 4, height_scale: 2 } }, t: { type: 'heightfield_to_tex', in: ['h'], params: { normalize: false } } }, 't');
   const back = findImage(hf)!, srcN = (await image({ n: { type: 'tex_noise', params: { resolution: 33 } } })).layer('C')!;
   check(back.width === 33 && maxDiff(back.layer('C')!, srcN.map((x) => x * 2)) < 1e-5, 'tex_to_heightfield → heightfield_to_tex round trip (height = value × scale)');
 }

@@ -93,7 +93,7 @@ async function shiftDiff(nodes: Nodes, inputs: string[], out: string, layer = 'C
     const ins = Array.isArray(spec.in) ? spec.in.map((x) => (x && inputs.includes(x) ? `${x}__shift` : x)) : spec.in;
     shifted[k] = { ...spec, ...(ins ? { in: ins } : {}) };
   }
-  for (const k of inputs) shifted[`${k}__shift`] = { type: 'tex_transform', in: [k], params: { offset: [0.5, 0.5], name: k } };
+  for (const k of inputs) shifted[`${k}__shift`] = { type: 'tex_transform', in: [k], params: { shift: [0.5, 0.5], name: k } };
   const b = await image(shifted, out);
   const w = a.width, h = a.height, ch = a.channels(layer), A = C(a, layer), B = C(b, layer);
   let m = 0;
@@ -397,7 +397,7 @@ section('directional and slope blur, warps');
     c: { type: 'tex_pattern', params: { resolution: 128, pattern: 'checker', count: [8, 8] } },
     n: { type: 'tex_noise', params: { resolution: 128, feature: 1 / 3 } },
     ...(angleMap ? { a: angleMap } : {}),
-    w: { type: 'tex_warp', in: angleMap ? ['c', 'n', 'a'] : ['c', 'n'], params: { mode, intensity: 0.04, angle: 30, ...extra } },
+    w: { type: 'tex_warp', in: angleMap ? ['c', 'n', 'a'] : ['c', 'n'], params: { mode, distance: 0.04, angle: 30, ...extra } },
   });
   const dir = await image(warp('directional'), 'w'), nu0 = await image(warp('nonuniform', {}, { type: 'tex_constant', params: { resolution: 128, value: 0 } }), 'w');
   let eq = 0;
