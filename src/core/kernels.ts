@@ -102,7 +102,9 @@ const occlusion: Kernel = {
   chunksPerWorker: 4,
   run(a: { mode: any; samples: number; maxDistance: number; bias: number; coneAngle: number; seed: number }, A, start, end, ctx) {
     const scene = ctx.memo('rayscene:' + ctx.sharedKey, () => RayScene.fromArrays(A as any));
-    rayMeasure(A.P, A.N, scene, a, A.sel ?? null, A.out, start, end);
+    // the visibility measure shares a second scene (the surroundings) as the arrays o_T, o_nodes, o_child, o_order, o_triPt
+    const behind = A.o_T ? ctx.memo('rayscene-behind:' + ctx.sharedKey, () => RayScene.fromArrays({ T: A.o_T, nodes: A.o_nodes, child: A.o_child, order: A.o_order, triPt: A.o_triPt } as any)) : null;
+    rayMeasure(A.P, A.N, scene, a, A.sel ?? null, A.out, start, end, behind);
   },
 };
 

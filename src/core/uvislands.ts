@@ -30,21 +30,39 @@ function primMeasures(g: Geometry, uv: ArrayLike<number>, labels: ArrayLike<numb
   return { a3, aUV, cu, cv };
 }
 
+/** The least texel density a face gets from `visibility_weight`, as a share of the density of an open face. */
+export const MIN_VISIBLE_SHARE = 0.05;
+
+/**
+ * Per prim texel scale from how visible each face is (core faceVisibility, 0..1): lerp(1, max(0.05, visible), weight),
+ * so weight 0 leaves every face at 1, weight 1 gives a hidden face 0.05 and an open one 1.
+ */
+export function visibilityScale(visible: ArrayLike<number>, weight: number): Float64Array {
+  const w = Math.max(0, Math.min(1, Number(weight) || 0)), out = new Float64Array(visible.length);
+  for (let p = 0; p < out.length; p++) {
+    const v = Number(visible[p]);
+    out[p] = 1 + (Math.max(MIN_VISIBLE_SHARE, Number.isFinite(v) ? Math.min(1, v) : 1) - 1) * w;
+  }
+  return out;
+}
+
 /**
  * Per island texel weight from a numeric prim attribute (its first component), the mean over the island's prims
  * weighted by 3D area; values <= 0 or not finite count as 1, so an attribute set on a group (attrib_create with group)
- * weights only those parts. null when the attribute is missing.
+ * weights only those parts. `scale` (per prim, e.g. visibilityScale) multiplies each prim's weight first. null when
+ * the attribute is missing and there is no scale.
  */
-export function islandWeights(g: Geometry, labels: ArrayLike<number>, count: number, attrib: string): Float64Array | null {
+export function islandWeights(g: Geometry, labels: ArrayLike<number>, count: number, attrib: string, scale?: ArrayLike<number> | null): Float64Array | null {
   const a = attrib ? g.prims.get(attrib) : undefined;
-  if (!a || a.type === 'string' || a.isArray) return null;
-  const d = a.data as Float64Array | Int32Array, sz = a.size;
+  const usable = !!a && a.type !== 'string' && !a.isArray;
+  if (!usable && !scale) return null;
+  const d = usable ? (a!.data as Float64Array | Int32Array) : null, sz = usable ? a!.size : 1;
   const sum = new Float64Array(count), wsum = new Float64Array(count);
   for (let p = 0; p < g.numPrims; p++) {
     const k = labels[p];
     if (k < 0) continue;
-    const x = Number(d[p * sz]), w = Math.max(primArea(g, p), 1e-30);
-    sum[k] += (Number.isFinite(x) && x > 0 ? x : 1) * w; wsum[k] += w;
+    const x = d ? Number(d[p * sz]) : 1, w = Math.max(primArea(g, p), 1e-30);
+    sum[k] += (Number.isFinite(x) && x > 0 ? x : 1) * (scale ? scale[p] : 1) * w; wsum[k] += w;
   }
   return Float64Array.from(sum, (s, k) => (wsum[k] > 0 ? s / wsum[k] : 1));
 }
