@@ -29,7 +29,7 @@ pixels and removes an entire component, retaining the holes of surviving compone
 
 The output is closed XY curves with point `uv`, primitive `class` (stable row-major component ID),
 `contour_id` and `hole` (0/1). IDs may have gaps after filtering. Outer contours are counter-clockwise in XY,
-holes clockwise. The canvas starts at (0,0), has `width` metres along X, and follows the original aspect along Y.
+holes clockwise. The canvas starts at (0,0), has `extent` metres along X (0, the default, is the metres the image covers), and follows the original aspect along Y.
 Transparent margins are retained. Detail `image_size` is [widthPixels,heightPixels]; `image_width` is metres.
 Simplification only accepts removals that do not cross or swallow another boundary and whose accumulated
 distance error stays within `tolerance` pixels. It can retain more vertices than a plain polyline simplifier.

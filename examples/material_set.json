@@ -13,7 +13,7 @@
   "nodes": {
     "stone_blocks": {"type": "tex_pattern", "params": {"resolution": "=resolution", "texture_size": "=tile_size", "pattern": "bricks", "count": [2, 4], "gap": 0.07, "bevel": 0.1, "seed": "=seed"}},
     "stone_wobble": {"type": "tex_noise", "params": {"resolution": "=resolution / 4", "texture_size": "=tile_size", "feature": 0.25, "octaves": 5, "roughness": 0.55, "seed": "=seed + 11"}},
-    "stone_shape": {"type": "tex_warp", "in": ["stone_blocks", "stone_wobble"], "params": {"mode": "slope", "intensity": 0.012}},
+    "stone_shape": {"type": "tex_warp", "in": ["stone_blocks", "stone_wobble"], "params": {"mode": "slope", "distance": 0.012}},
     "stone_ids": {"type": "tex_output", "in": ["stone_blocks"], "params": {"layer": "id", "keep_only": true}},
     "stone_grain": {"type": "tex_noise", "params": {"resolution": "=resolution", "texture_size": "=tile_size", "feature": 0.125, "octaves": 6, "roughness": 0.6, "seed": "=seed + 5"}},
     "stone_facets": {"type": "tex_cells", "params": {"resolution": "=resolution / 4", "texture_size": "=tile_size", "output": "crystal", "cell": 0.1111, "seed": "=seed + 7"}},
