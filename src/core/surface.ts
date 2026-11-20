@@ -1564,6 +1564,12 @@ export function runBuried(run: RunKernel, sc: SurfaceCloud, mesh: SurfaceMesh, s
 }
 
 /**
+ * How close two faces facing each other lie to count as pressed together (metres): a fixed 0.1 mm, well under any real
+ * sheet, so the front and back of a thin plate are never partners and a part far away changes nothing.
+ */
+export const CONTACT_GAP = 1e-4;
+
+/**
  * Cloud points on a face pressed against another (1 = buried): a scene triangle in the same plane within `delta`, facing
  * the other way, under the point. Whatever the pieces: two boxes stacked flush are one piece when their corners meet,
  * and the faces between them are hidden all the same. The mesh's triangles come first in the scene (`scene` as for
@@ -1728,7 +1734,11 @@ export const strength = (e: number) => { const t = (e - STRONG_LO) / (STRONG_HI 
 /** The look across: an edge point straight across counts fully, one 45° or more off not at all (cosines). */
 const ACROSS_HI = Math.cos(Math.PI / 12), ACROSS_LO = Math.cos(Math.PI / 4);
 /** How much an edge point counts by how its normal agrees with the sample's (cosine): 1 from 0.5 (60°), 0 at 0 (90°) and below. */
-const facing = (c: number) => { const t = c / 0.5; return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
+/** Smoothstep on 0..1, clamped. */
+const ramp = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+const facing = (c: number) => ramp(c / 0.5);
+/** How far above the sample's plane an edge point may lie, as a share of its distance: fully below UP_LO, not from UP_HI. */
+const UP_LO = 0.05, UP_HI = 0.15;
 
 /**
  * Edge proximity at texel samples [start, end) (kernel surface_spread), at two reaches: V[2i] the largest
@@ -1776,6 +1786,11 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
     const px = VP[ia] * w0 + VP[ib] * w1 + VP[ic] * w2, py = VP[ia + 1] * w0 + VP[ib + 1] * w1 + VP[ic + 1] * w2, pz = VP[ia + 2] * w0 + VP[ib + 2] * w1 + VP[ic + 2] * w2;
     const nx = VN[ia] * w0 + VN[ib] * w1 + VN[ic] * w2, ny = VN[ia + 1] * w0 + VN[ib + 1] * w1 + VN[ic + 1] * w2, nz = VN[ia + 2] * w0 + VN[ib + 2] * w1 + VN[ic + 2] * w2;
     const nl = Math.hypot(nx, ny, nz) || 1, pc = TPiece[t];
+    // the triangle's own plane (its shading normal leans toward its corners on a smooth-shaded box), turned to its side
+    const ux0 = VP[ib] - VP[ia], uy0 = VP[ib + 1] - VP[ia + 1], uz0 = VP[ib + 2] - VP[ia + 2], vx0 = VP[ic] - VP[ia], vy0 = VP[ic + 1] - VP[ia + 1], vz0 = VP[ic + 2] - VP[ia + 2];
+    let gnx = uy0 * vz0 - uz0 * vy0, gny = uz0 * vx0 - ux0 * vz0, gnz = ux0 * vy0 - uy0 * vx0;
+    const gl = Math.hypot(gnx, gny, gnz), gs = gl > 0 ? ((gnx * nx + gny * ny + gnz * nz) < 0 ? -1 : 1) / gl : 0;
+    if (gs) { gnx *= gs; gny *= gs; gnz *= gs; } else { gnx = nx / nl; gny = ny / nl; gnz = nz / nl; }
     if (rf0 > 0 && FGH) {
       // convex and concave: the weighted mean of the dense points within rf0 that face the sample's way (buried ones
       // only where nothing else is near), as surfaceInterpRange
@@ -1830,7 +1845,12 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
         // standing edge, across a concave corner, and the far side of a thin plate get nothing from it)
         const fw = facing((nx * CN[q * 3] + ny * CN[q * 3 + 1] + nz * CN[q * 3 + 2]) / nl);
         if (!(fw > 0)) continue;
-        const e = E[q] * fw;
+        // and only edges of the sample's own surface: an edge point above its plane (the rim of a step raised from
+        // the floor, across the concave corner) counts fully to 0.05 of its distance up, not at all from 0.15; below
+        // the plane is how a convex surface falls away and counts
+        const up = d2 > 0 ? (dx * gnx + dy * gny + dz * gnz) / Math.sqrt(d2) : 0, aw = 1 - ramp((up - UP_LO) / (UP_HI - UP_LO));
+        if (!(aw > 0)) continue;
+        const e = E[q] * fw * aw;
         if (nv >= cap) {
           const grow = (x: Float64Array) => { const y = new Float64Array(cap * 2); y.set(x); return y; };
           vd = grow(vd); ve = grow(ve); cap *= 2;

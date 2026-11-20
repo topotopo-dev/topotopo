@@ -11,7 +11,7 @@ import type { CurvatureArgs } from '../core/bake.ts';
 import { band } from '../core/pcg.ts';
 import { hashNumber, hashString } from '../core/random.ts';
 import { triangulate } from '../core/topology.ts';
-import { bendSamples, contactBuried, denseEstimate, edgeField, late, PAST_DEADLINE, facetSizes, wearRegions, MAX_DENSE, rayBias, refineCloud, runBuried, TOO_DENSE, runCurvature, runDistance, runEdgeWear, runInterp, runNoise, runRays, runSpread, afterRun } from '../core/surface.ts';
+import { bendSamples, CONTACT_GAP, contactBuried, denseEstimate, edgeField, late, PAST_DEADLINE, facetSizes, wearRegions, MAX_DENSE, rayBias, refineCloud, runBuried, TOO_DENSE, runCurvature, runDistance, runEdgeWear, runInterp, runNoise, runRays, runSpread, afterRun } from '../core/surface.ts';
 import type { ConeMeasure, EdgeWearArgs, HemiMeasure, RefinedCloud, SurfaceCloud, SurfaceMesh, SurfaceRayArgs } from '../core/surface.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
@@ -630,7 +630,7 @@ function refinedOf(b: Bake, mesh: SurfaceMesh, sc0: SurfaceCloud, CB0: Uint8Arra
     const CB = perCloudMemo(R.sc, `buried|${surId(sur)}`, () => {
       const c = R.sc.cloud, k = R.kept, B = new Uint8Array(c.n);
       // every dense point tests contact itself (a face pressed against another: sharp at any spacing)
-      const PC = contactBuried(R.sc, mesh, b.tris, scene(), 4 * rayBias(mesh.diag), deadline);
+      const PC = contactBuried(R.sc, mesh, b.tris, scene(), CONTACT_GAP, deadline);
       if (PC) for (let i = k; i < c.n; i++) B[i] = PC[i] << 1;
       if (!CB0) return PC ? B : null;
       for (let j = 0; j < k; j++) B[j] = CB0[R.of[j]];
@@ -808,7 +808,7 @@ defineNode({
   summary: 'Paint wear on edges into uv space: edges measured on the shape at a radius, broken up in 3D into worn stretches and ragged chips, with nested chip, bare and core layers and more wear on the edges near handled parts.',
   description:
     BAKE_DOC + 'C is the wear field 0..1 (continuous), as the shape gives it: amount and the cap below never change it, ' +
-    'so presets and masks can read it. The layers chip (the top coat is gone: 1 where C passes the threshold set by ' +
+    'so a mask can read it as a stable field. The layers chip (the top coat is gone: 1 where C passes the threshold set by ' +
     'amount), bare (down to the substrate, bare_step deeper into the field) and core (the deepest part of each chip, ' +
     'core_step deeper: where rust starts) lie inside one another texel for texel (the primer ring is chip − bare); ' +
     'convex and concave (curvature at radius, 0..1: 1 = a 90° edge or crease; with method surface gentle bends, under ' +
@@ -824,19 +824,22 @@ defineNode({
     'breaks them into chips, so the outlines follow the shape in 3D, never the triangles, and are the same on both ' +
     'sides of a uv seam and wherever the part is placed. No face wears through: on every face (the surface between hard ' +
     'edges or bends of 20° or more; a bevel or round belongs to the face it leads to; a piece with no face at all, a bar ' +
-    'a few radii across, counts as one) chips cover less than a third of its area from amount 0.8 (a sixth at 0.4), ' +
+    'a few radii across, counts as one) chips cover at most a third of its area from amount 0.8 (a sixth at 0.4; held ' +
+    'at the sample points, so counted in texels a face can read a few hundredths more, up to about 0.36), ' +
     'its most worn texels: corners first, then the edges, so a small feature (a boss, a nut, a bar) keeps paint on its ' +
     'faces while a large body is never held back. Where that cap holds, more amount still wears deeper: bare and core ' +
-    'grow toward the chip outline inside the same share. The cap applies to chip, bare and core only, never to C. ' +
-    'Faces pressed flush against another piece (lying on each other, facing opposite ways: stacked boxes, a part on a ' +
-    'plate) are buried and take no wear, so the seam between them is no edge. focus multiplies the edge wear near the ' +
+    'grow toward the chip outline inside the same share. C is the raw wear field and is never capped (a small part ' +
+    'can read about 0.96 all over it), so a preset or layer stack takes the cap from chip, bare and core. ' +
+    'Faces pressed flush against another face (lying on each other within 0.1 mm, facing opposite ways: stacked boxes, a ' +
+    'part on a plate; never the front and back of a sheet) are buried and take no wear, so the seam between them is no edge. focus multiplies the edge wear near the ' +
     'focus prims (focus_amount, within focus_radius), makes the chip outlines there more ragged, lets wear reach up to ' +
     '(1 + 1.5 × focus_amount) × reach in from the edges there, and adds only a light rub (0.12 × focus_amount in C) ' +
     'to flats, which never chip. Input 1 (surroundings) buries the points inside it, as in bake_measure, and lets the ' +
     'two bakes share their work. Warns once when hard-shaded facets of curved parts would chip (bending 24° or more, at ' +
     'a radius under twice their size), naming the worst three. Refuses a radius that would place more than 6 million ' +
     'points along the bends. Stats chip_share, bare_share, core_share (covered samples at 0.5 or more), capped_faces ' +
-    '(faces held under the cap), dense_points. Stops at the time limit of long-running nodes; a cook that changes only ' +
+    '(faces held under the cap), dense_points. Stops at the time limit of long-running nodes, counted from the end of the ' +
+    'setup every bake shares (sampling the atlas, which always finishes: at 2048 a few hundred ms); a cook that changes only ' +
     'amount reuses the wear field.',
   aliases: ['edge_wear', 'edge_wear_bake', 'bake_wear', 'bake_chips'],
   inputs: [
@@ -845,7 +848,7 @@ defineNode({
   ],
   params: {
     ...BAKE_PARAMS(),
-    amount: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how much of the edge length wears (moves the chip threshold: 0 none, 1 every edge out to reach; under a third of any face chips)', aliases: ['wear', 'strength'] },
+    amount: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how much of the edge length wears (moves the chip threshold: 0 none, 1 every edge out to reach; at most about a third of any face chips)', aliases: ['wear', 'strength'] },
     radius: { type: 'float', default: 0.004, min: 0, desc: 'the scale edges are measured at (metres): 4 mm catches 1 to 3 mm bevels on sheet metal; cast parts want 6 to 8 mm', aliases: ['edge_radius'] },
     method: { type: 'enum', options: ['surface', 'dihedral'], default: 'surface', desc: 'surface: from the shading normals over radius (smooth-shaded facets do not count; decimated, isosurface and clean meshes); dihedral: the mesh\'s edge angles, as bake_curvature', aliases: ['mode', 'curvature_method'] },
     reach: { type: 'float', default: 0.008, min: 0, desc: 'how far wear reaches in from an edge at amount 1 (metres; with method dihedral it only widens the radius the edge angles are read over)', aliases: ['wear_reach'] },

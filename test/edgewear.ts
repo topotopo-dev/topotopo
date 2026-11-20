@@ -485,7 +485,7 @@ section('what a face is: flush stacks are no edge, a small boss is held, a large
     const t = await texels(boss, 'bu', { resolution: 1024, amount });
     nest(t.im);
     const top = region(t, ([, y]) => Math.abs(y - 0.32) < 1e-4), bodyRim = region(t, ([x, y, z]) => Math.abs(y - 0.3) < 1e-4 && (Math.abs(x) > 0.146 || Math.abs(z) > 0.146));
-    check(top.length > 500 && chipped(t, top) < WEAR_CAP + 0.03 && chipped(t, bodyRim) > (amount < 1 ? 0.8 : 0.95) && t.c.stats.capped_faces === 5, `welded boss, amount ${amount}: its top ${f3(chipped(t, top))} chipped (its 5 faces held, under a third within 0.03 at texel level), the body's rim ${f3(chipped(t, bodyRim))}`);
+    check(top.length > 500 && chipped(t, top) < WEAR_CAP + 0.03 && chipped(t, bodyRim) > (amount < 1 ? 0.8 : 0.95) && t.c.stats.capped_faces === 5, `welded boss, amount ${amount}: its top ${f3(chipped(t, top))} chipped (its 5 faces held: a third at the sample points, up to about 0.36 counted in texels, as the help says), the body's rim ${f3(chipped(t, bodyRim))}`);
     // the body's top around the foot of each standing boss edge lies across a concave corner from it: no wear there
     const foot = region(t, ([x, y, z]) => Math.abs(y - 0.3) < 1e-4 && (Math.abs(x) > 0.0205 || Math.abs(z) > 0.0205) && Math.hypot(Math.abs(x) - 0.02, Math.abs(z) - 0.02) < 0.012);
     check(foot.length > 200 && max(foot.map((k) => t.at('chip', k))) === 0, `welded boss, amount ${amount}: the body's top within 12 mm of the boss's corners has no chip (${foot.length} texels)`);
@@ -499,6 +499,45 @@ section('what a face is: flush stacks are no edge, a small boss is held, a large
   console.log(`  grille: ends ${f3(ends(g6))} / middle ${f3(mid(g6))} chipped at 0.6, ${f3(ends(g1))} / ${f3(mid(g1))} at 1`);
   check(ends(g6) > 1.3 * mid(g6) && mid(g6) < 0.2 && mid(g1) < WEAR_CAP, 'bars: the ends wear first, the middle keeps most of its paint at 0.6 and some at full amount');
 }
+section('thin sheets keep their wear; the floor around a low step does not chip');
+{
+  // a 2 × 1.5 m sheet: its two faces are never pressed against each other, however thin
+  const rimOf = (t: Texels, th: number) => t.idx.filter((k) => { const [x, y, z] = t.p(k); return Math.abs(y - th) < 1e-5 && Math.max(Math.abs(x) - 1, Math.abs(z) - 0.75) > -0.003; });
+  const sheet = (th: number): Nodes => ({ s0: { type: 'box', params: { size: [2, th, 1.5], center: [0, th / 2, 0] } }, su: { type: 'uv_unwrap', in: ['s0'] } });
+  for (const th of [0.0005, 0.0008, 0.003]) {
+    const t = await texels(sheet(th), 'su', { resolution: 2048, amount: 0.6 });
+    nest(t.im);
+    const rim = rimOf(t, th), C = mean(rim.map((k) => t.at('C', k))), ch = share(rim.map((k) => t.at('chip', k)));
+    check(rim.length > 10000 && C > 0.35 && ch > 0.3, `a sheet ${th * 1000} mm thick, amount 0.6: the face within 3 mm of its rim reads C ${f3(C)}, ${(ch * 100).toFixed(0)}% chipped`);
+  }
+  // the 3 mm sheet in the lower-left quarter of the uv square, a box 30 m away in the upper-right: the sheet unchanged
+  const far: Nodes = {
+    ...sheet(0.003),
+    a: { type: 'uv_transform', in: ['su'], params: { scale: [0.5, 0.5], pivot: [0, 0] } },
+    f0: { type: 'box', params: { size: [0.5, 0.5, 0.5], center: [30, 0.25, 0] } }, fu: { type: 'uv_unwrap', in: ['f0'] },
+    b: { type: 'uv_transform', in: ['fu'], params: { scale: [0.5, 0.5], pivot: [0, 0], translate: [0.5, 0.5] } },
+    ab: { type: 'merge', in: ['a', 'b'] },
+  };
+  const alone = await texels(far, 'a', { resolution: 1024, amount: 0.6 }), both = await texels(far, 'ab', { resolution: 1024, amount: 0.6 });
+  const chippedAlone = alone.idx.filter((k) => alone.at('chip', k) >= 0.5).length, moved = alone.idx.filter((k) => alone.at('C', k) !== both.at('C', k) || alone.at('chip', k) !== both.at('chip', k)).length;
+  check(chippedAlone > 1000 && moved === 0, `a box 30 m away added: the 3 mm sheet's wear unchanged, texel for texel (${chippedAlone} chipped texels, ${moved} differ)`);
+  // a 10 × 10 cm block raised from a 40 cm slab (one welded piece): its own rim chips, the slab around its foot does not
+  for (const h of [0.001, 0.003, 0.006, 0.02]) {
+    const step: Nodes = {
+      s: { type: 'box', params: { size: [0.4, 0.05, 0.4], center: [0, 0.025, 0] } },
+      i: { type: 'poly_extrude', in: ['s'], params: { group: '@P.y>0.049', distance: 0, inset: 0.15 } },
+      x: { type: 'poly_extrude', in: ['i'], params: { group: 'front', distance: h } },
+      xu: { type: 'uv_unwrap', in: ['x'] },
+    };
+    const t = await texels(step, 'xu', { resolution: 1024, amount: 0.8 });
+    nest(t.im);
+    const floor = t.idx.filter((k) => { const [x, y, z] = t.p(k), d = Math.max(Math.abs(x), Math.abs(z)) - 0.05; return Math.abs(y - 0.05) < 1e-5 && d > 0.0005 && d < 0.004; });
+    const rim = t.idx.filter((k) => { const [x, y, z] = t.p(k); return Math.abs(y - 0.05 - h) < 1e-5 && Math.max(Math.abs(x), Math.abs(z)) > 0.047; });
+    const fc = max(floor.map((k) => t.at('chip', k))), rc = share(rim.map((k) => t.at('chip', k)));
+    check(floor.length > 1000 && fc === 0 && rc > 0.8, `a step ${h * 1000} mm high, amount 0.8: the slab 0.5 to 4 mm from its foot has no chip (${floor.length} texels, C ${f3(mean(floor.map((k) => t.at('C', k))))}), its own rim ${(rc * 100).toFixed(0)}% chipped`);
+  }
+}
+
 section('the bake memo holds the per-cloud values too: memory is released, oldest first');
 {
   setFlagsFromString('--expose-gc');
@@ -558,6 +597,8 @@ section('refusals, warnings, names');
 
 section('the time limit of long-running nodes stops it, on this thread and on the pool');
 {
+  // the limit counts from the end of the setup every bake shares (sampling the 2048 atlas, a few hundred ms that always
+  // finish), so the cook stops a few hundred ms after it starts, not 40 ms; only the stop and its message are checked
   const nodes: Nodes = { s0: { type: 'sphere', params: { radius: 0.5, rows: 32, cols: 64 } }, su: { type: 'uv_unwrap', in: ['s0'] } };
   for (const [label, engine] of [['on this thread', serial], ['on 4 workers', pooled]] as const) {
     for (const method of ['surface', 'dihedral']) {

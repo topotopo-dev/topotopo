@@ -17,7 +17,7 @@ import {
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
 import { bakeMemoStats } from '../core/bake.ts';
-import { contactBuried, PAST_DEADLINE, rayBias, runBuried, runCurvature, runInterp, surfaceCloud, surfaceMesh, afterRun } from '../core/surface.ts';
+import { CONTACT_GAP, contactBuried, PAST_DEADLINE, runBuried, runCurvature, runInterp, surfaceCloud, surfaceMesh, afterRun } from '../core/surface.ts';
 import type { SurfaceCloud, SurfaceMesh } from '../core/surface.ts';
 import { RayScene, bboxDiagonal } from '../core/analysis.ts';
 import type { RaySampleOptions } from '../core/analysis.ts';
@@ -272,7 +272,7 @@ export function buriedOf(b: Bake, mesh: SurfaceMesh, sc: SurfaceCloud, scene: ()
   const S = scene();
   return afterRun(runBuried(run, sc, mesh, S, sur, deadline), (B0) => {
     // and the points on faces pressed against another face (stacked flush, a part sunk into the ground)
-    const P = contactBuried(sc, mesh, b.tris, S, 4 * rayBias(mesh.diag), deadline);
+    const P = contactBuried(sc, mesh, b.tris, S, CONTACT_GAP, deadline);
     let B = B0;
     // bit 1: inside another part (rays), bit 2: pressed against another face (a refined cloud's dense points take the
     // first from their neighbours and test the second themselves)
