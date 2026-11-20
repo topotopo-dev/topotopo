@@ -32,20 +32,21 @@ interface ParsedLayer extends LayerSpec {
 }
 
 /** The named masks param: [{name, mask}], each an expression; checked like layers. */
-function parseMasks(raw: unknown): { name: string; mask: string }[] {
+function parseMasks(raw: unknown): { name: string; mask: string; write: boolean }[] {
   if (raw === undefined || raw === null || (Array.isArray(raw) && !raw.length)) return [];
   if (!Array.isArray(raw)) throw new NodeError('tex_layers: masks must be a list of {"name", "mask"} objects', 'e.g. [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top) * grain"}]; a layer then reads it as dust');
   const seen = new Set<string>();
   return raw.map((m, i) => {
     if (!m || typeof m !== 'object' || Array.isArray(m)) throw new NodeError(`tex_layers: mask ${i + 1} is not an object`, 'fields: name, mask');
     const o = m as Record<string, unknown>;
-    for (const k of Object.keys(o)) if (k !== 'name' && k !== 'mask') throw new NodeError(`tex_layers: mask ${i + 1}: unknown field "${k}"`, 'fields: name, mask');
+    for (const k of Object.keys(o)) if (k !== 'name' && k !== 'mask' && k !== 'write') throw new NodeError(`tex_layers: mask ${i + 1}: unknown field "${k}"`, 'fields: name, mask, write');
+    if (o.write !== undefined && typeof o.write !== 'boolean') throw new NodeError(`tex_layers: mask ${show(o.name)}: write must be true or false`, 'write: false computes the mask for what follows without writing it to the masks image');
     const name = typeof o.name === 'string' ? o.name.trim() : '';
     if (!bindableName(name, new Set(['k']))) throw new NodeError(`tex_layers: mask name ${show(o.name)} is not a name an expression can read`, 'letters, digits and _, not starting with a digit');
     if (seen.has(name)) throw new NodeError(`tex_layers: two masks are called "${name}"`, 'mask names must be unique');
     seen.add(name);
     if (typeof o.mask !== 'string' || !o.mask.trim()) throw new NodeError(`tex_layers: mask "${name}" has no expression`, 'e.g. {"name": "dust", "mask": "smoothstep(0.4, 0.8, top)"}');
-    return { name, mask: o.mask };
+    return { name, mask: o.mask, write: o.write !== false };
   });
 }
 
@@ -166,7 +167,7 @@ defineNode({
   ],
   params: {
     layers: { type: 'json', default: [], desc: 'the layers, bottom to top: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top)", "opacity": 1, "color": "#a69d8b" | [r, g, b] | [[0, "#5c2a14"], [1, "#9a4a20"]], "color_by": "0", "color_mode": "normal" | "multiply" | "overlay" | "lighten", "roughness": 0.95, "roughness_offset": 0, "metallic": 0, "height": 0.0003, "signed": false}]; name and mask are required, the rest optional (a field left out leaves that channel alone)', aliases: ['stack'] },
-    masks: { type: 'json', default: [], desc: 'named masks, computed first in order: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top) * grain"}]; every later mask, layer mask, color_by and the occlusion read each by its name (computed once however many read it), and they are written as the layers of image <name>_masks (clamped to 0..1)', aliases: ['named_masks'] },
+    masks: { type: 'json', default: [], desc: 'named masks, computed first in order: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top) * grain"}]; every later mask, layer mask, color_by and the occlusion read each by its name (computed once however many read it), and they are written as the layers of image <name>_masks (clamped to 0..1; "write": false leaves one out: a step between masks)', aliases: ['named_masks'] },
     outputs: { type: 'enum', options: ['both', 'maps', 'masks'], default: 'both', desc: 'what to write: the maps, the masks image (when masks are named), or both', aliases: ['output'] },
     occlusion: { type: 'code', default: '', desc: 'expression for ORM red (occlusion 0..1) over the same variables ("" = 1)', aliases: ['ao', 'occlusion_expression'] },
     base_roughness: { type: 'float', default: -1, min: -1, max: 1, desc: 'roughness of the whole base, 0..1 (-1 = read the base\'s layer "roughness"; an error when it has none)', aliases: ['roughness'] },
@@ -425,6 +426,7 @@ defineNode({
       const img = new Image(w, h, `${prefix}_masks`).takeSize(base.img);
       const map = coverage ? paddingMap(coverage, w, h, Math.max(0, Math.round(p.padding))) : null;
       for (const m of named) {
+        if (!m.write) continue;
         const src = namedArrays.get(m.name)!, a = new Float32Array(n);
         for (let q = 0; q < covered.length; q++) { const i = covered[q], v = src[i]; a[i] = v > 0 ? (v < 1 ? v : 1) : 0; }
         if (map) applyPadding(a, 1, map, [0]);

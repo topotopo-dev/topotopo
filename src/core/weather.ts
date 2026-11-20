@@ -554,7 +554,10 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
       return out;
     });
   }
-  nodes.stack = { type: 'tex_layers', in: ['base', 'mask_images'], params: { masks: named, layers, outputs: o.mode === 'masks' ? 'masks' : 'both', padding: pad, name: o.material } };
+  // only the masks people read are written (the steps between them stay in memory): an image layer each is a lot at 4K
+  const keep: readonly string[] = o.mode === 'masks' ? PACKABLE : WEATHER_MASKS;
+  const written = named.map((m) => (keep.includes(m.name) ? m : { ...m, write: false }));
+  nodes.stack = { type: 'tex_layers', in: ['base', 'mask_images'], params: { masks: written, layers, outputs: o.mode === 'masks' ? 'masks' : 'both', padding: pad, name: o.material } };
   if (o.mode === 'masks') return { nodes, output: 'stack' };
   const m = o.material;
   nodes.out = { type: 'texture_to_material', in: [atlas, 'stack'], params: { material: m, base_color: `${m}_base_color`, normal: `${m}_normal`, orm: `${m}_orm` } };

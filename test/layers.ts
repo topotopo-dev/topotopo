@@ -675,6 +675,8 @@ section('tex_layers: named masks, the masks image, image layers, the base normal
   const half = px(img(nc, 'stack_base_color'), 'C', 32, 32);
   check(near(half[0], (grey[0] + 1) / 2, 1e-4) && near(half[1], grey[1] / 2, 1e-4), `a layer mask that names a mask uses it (${half.slice(0, 3).map((v) => v.toFixed(3)).join(', ')})`);
   check(mi.layers.has('mask') && mi.layers.has('texel') && mi.layers.has('island'), 'the masks image keeps coverage, texel and island');
+  const quiet = img(await cook({ ...base, stack: { type: 'tex_layers', in: ['base'], params: { masks: [{ name: 'a', mask: '0.25', write: false }, { name: 'b', mask: 'a * 2' }], layers: [] } } }, 'stack'), 'stack_masks');
+  check(!quiet.layers.has('a') && Math.abs(px(quiet, 'b', 32, 32)[0] - 0.5) < 1e-6, 'write false: a mask is read by the next without being written');
   const only = await cook({ ...named, stack: { ...named.stack, params: { ...named.stack.params, outputs: 'masks' } } }, 'stack');
   check(only.geo.volumes.length === 1 && only.geo.volumes[0].name === 'stack_masks', `outputs masks writes the masks image alone (${only.geo.volumes.map((v) => v.name).join(', ')})`);
   const maps = await cook({ ...named, stack: { ...named.stack, params: { ...named.stack.params, outputs: 'maps' } } }, 'stack');

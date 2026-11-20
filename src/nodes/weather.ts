@@ -282,15 +282,16 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
   const graph = weatherGraph(opts);
   const r = await cookNested(ctx, T_W, graph, inputs, vars);
   budget.check();
-  const rs = await cookNested(ctx, T_W, graph, inputs, vars, 'stack');
+  // the stack's own result (its masks and height) from the same cook
+  const stackGeo = r.results.get('stack')?.geo ?? null;
   let out = r.geo!.clone();
-  const masksImg = findImage(rs.geo!, `${material}_masks`);
+  const masksImg = stackGeo ? findImage(stackGeo, `${material}_masks`) : null;
   if (masksImg) out.volumes.push(masksImg);
   // the packed map in the stated layout, the normal in the stated convention
   const table = readMaterials(out);
   const entry: Material = { ...(table[material] ?? {}) };
   if (packing.join('') !== 'orm') {
-    const orm = findImage(out, `${material}_orm`)!, hgt = findImage(out, `${material}_height`) ?? findImage(rs.geo!, `${material}_height`)!;
+    const orm = findImage(out, `${material}_orm`)!, hgt = findImage(out, `${material}_height`) ?? findImage(stackGeo!, `${material}_height`)!;
     const im = repack(orm, hgt, packing as PackedChannel[], `${material}_${packing.join('')}`);
     out.volumes = out.volumes.filter((v) => v.name !== orm.name);
     out.volumes.push(im);
