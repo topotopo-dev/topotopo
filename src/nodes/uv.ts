@@ -277,8 +277,9 @@ defineNode({
     texel_weight: { type: 'string', default: 'texel_weight', desc: 'prim attribute scaling the texel density of each chart (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1' },
     visibility_weight: VISIBILITY_WEIGHT,
     iterations: { type: 'int', default: 4, min: 1, max: 64, desc: 'chart orders the packer tries; the densest wins' },
+    uv_attrib: { type: 'string', default: 'uv', desc: 'the vertex uv set to write (e.g. "uv2" for a second set of masks or lightmaps; the uv the materials use stays as it is)', aliases: ['uv_name', 'output_uv'] },
   },
-  outputs: 'vertex uv, prim chart, prim atlas (fit stack with several atlases), prim visibility (visibility_weight above 0)',
+  outputs: 'vertex uv (or the uv_attrib set), prim chart, prim atlas (fit stack with several atlases), prim visibility (visibility_weight above 0)',
   example: {
     nodes: {
       // a noisy, decimated rock: unwrapped as it is it shatters into ~30 charts; chart_smoothing makes 6
@@ -331,7 +332,18 @@ defineNode({
       texelWeight: String(p.texel_weight ?? ''), visibilityWeight: weight, iterations: Math.max(1, Math.min(64, Math.floor(p.iterations) || 1)), realP,
     });
     const out = r.geo;
+    // a uv set of another name: the new uv goes there and an existing uv stays as it is
+    const name = String(p.uv_attrib ?? 'uv').trim() || 'uv';
+    const keepPt = name !== 'uv' ? out.points.get('uv') : undefined, keepVx = name !== 'uv' ? out.vertices.get('uv') : undefined;
     writeUV(out, r.uv);
+    if (name !== 'uv') {
+      const a = out.vertices.get('uv')!;
+      out.vertices.delete('uv');
+      out.points.delete(name);
+      out.vertices.set(name, a);
+      if (keepPt) out.points.set('uv', keepPt);
+      if (keepVx) out.vertices.set('uv', keepVx);
+    }
     writePrimInt(out, 'chart', r.chart);
     out.prims.delete('atlas');
     if (r.atlas) writePrimInt(out, 'atlas', r.atlas);

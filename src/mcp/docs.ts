@@ -1445,7 +1445,7 @@ per chart 5 % / median / 95 %, the lowest and highest chart and where; texels/m 
 per_piece:true when every prim "name" has its own 0..1 layout (the objects of a multi-object OBJ, each with its own
 texture): overlaps are tested within each piece only, each piece lists its overlapping pairs and covered share
 (utilization is the mean over the pieces), and a whole file is checked in one call.
-CLI: --inspect uv --uv-resolution 1024 [--uv-per-piece] [--json].
+CLI: --inspect uv --uv-resolution 1024 [--uv-attrib uv2] [--uv-per-piece] [--json] (--uv-attrib reports another uv set).
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
   render: `RENDER (pick the overlay that answers your question; everything is off by default)
