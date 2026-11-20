@@ -178,6 +178,7 @@ defineNode({
     const texelL = new Float32Array(w * h * 4), islandL = new Float32Array(w * h).fill(-1);
     for (let k = 0; k < w * h; k++) texelL[k * 4 + 3] = 1;
     const weights: { d: number; w: number }[] = [];
+    let stated = 0;
     const atlases = labels.map((label, i) => new Image(w, h, prefix + '_' + label).set('C', new Float32Array(w * h * channels[i])));
     items.forEach((item, i) => {
       const x = places[i].x + p.padding, y = places[i].y + p.padding, iw = sources[i][0].width, ih = sources[i][0].height;
@@ -185,6 +186,7 @@ defineNode({
       g.P[i * 3] = (x + iw / 2) / w; g.P[i * 3 + 1] = 1 - (y + ih / 2) / h;
       const first = sources[i][0], tu = first.texel, tv = first.texel;
       weights.push({ d: first.texel, w: iw * ih });
+      if (first.sizeStated) stated++;
       for (let row = -p.padding; row < ih + p.padding; row++)
         for (let col = -p.padding; col < iw + p.padding; col++) {
           const px = x + col, py = y + row;
@@ -206,7 +208,9 @@ defineNode({
     for (const q of weights) total += q.w;
     let run = 0, typical = weights[0].d;
     for (const q of weights) { run += q.w; if (run >= total / 2) { typical = q.d; break; } }
-    for (const a of atlases) { a.setSize(typical * w); a.set('texel', texelL).set('island', islandL); }
+    // the atlas states its size only when an item did: packing images that say nothing about their metres says nothing either
+    if (stated && stated < items.length) ctx.warn(`tex_pack: ${stated} of ${items.length} items state how many metres they cover, the others are taken at the default 1 m, so the atlas's typical texel is a guess`);
+    for (const a of atlases) { a.setSize(typical * w, stated > 0); a.set('texel', texelL).set('island', islandL); }
     g.volumes = atlases;
     g.detail.add('atlas_size', 'int', 2).set(0, [w, h]);
     return g;
