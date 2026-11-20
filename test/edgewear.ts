@@ -1,10 +1,11 @@
 // bake_edge_wear. Checks what it promises: on a decimated sphere with a rim, no chips on the facets at a radius of twice
-// their edges and chips on the rim; a box chips on its edges only, its flats read 0; a larger amount only adds wear; core
-// inside bare inside chip, texel for texel; the focus raises wear on the edges near a handle more than on the flat beside
-// it, which never chips; the same wear on both sides of a uv seam and at two texel densities across an edge; a part keeps
-// its chips when another part is added or the prims are reordered; seeds differ; the same bits with and without the
-// worker pool; a bolt standing on a plate makes the plate concave around it, not chipped; every refusal and the warning;
-// the time limit.
+// their edges and chips on the rim; the facet warning only where facets chip, once per bake; a box chips on its edges
+// only, its flats read 0; small parts under full focus chip on less than a third of their area and keep paint on their
+// faces; a larger amount only adds wear; core inside bare inside chip, texel for texel; the focus raises
+// wear on the edges near a handle more than on the flat beside it, which never chips; the same wear on both sides of a uv
+// seam and at two texel densities across an edge; a part keeps its chips when another part is added or the prims are
+// reordered; seeds differ; the same bits with and without the worker pool; a bolt standing on a plate makes the plate
+// concave around it, not chipped; every refusal; the time limit.
 //   node test/edgewear.ts
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
@@ -13,7 +14,7 @@ import { findImage } from '../src/core/image.ts';
 import type { Image } from '../src/core/image.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
-import { wearThreshold } from '../src/nodes/surface.ts';
+import { wearCap, wearThreshold, WEAR_CAP } from '../src/nodes/surface.ts';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -118,9 +119,69 @@ section('a decimated sphere with a rim: no chips on the facets at radius 2 × ed
   console.log(`  median edge ${(edge * 1000).toFixed(0)} mm, radius ${(r * 1000).toFixed(0)} mm, amount ${amount}: sphere C max ${f3(max(ballC))} (threshold ${f3(wearThreshold(amount))}), rim chipped ${f3(share(rim))}`);
   check(ball.length > 5000 && max(ball) === 0, `the faceted sphere: no chip on ${ball.length} texels (C at most ${f3(max(ballC))})`);
   check(rim.length > 200 && share(rim) > 0.4, `the rim: ${(share(rim) * 100).toFixed(0)}% of ${rim.length} texels within 4 mm chipped (> 40%)`);
-  check(!t.c.warnings.some((w) => w.includes('facet size')), 'no facet warning at radius 2 × edge');
   const small = await cook({ ...nodes, m: { type: 'bake_edge_wear', in: ['sph'], params: { resolution: 64, radius: edge / 4 } } }, 'm');
-  check(small.warnings.some((w) => /bake_edge_wear: radius \d+ mm is under twice the facet size of piece \d+ \(\d+ mm\); its facets will read as edges: raise radius to \d+ mm or more/.test(w)), `radius a quarter of an edge: ${small.warnings.find((w) => w.includes('facet')) ?? 'no facet warning'}`);
+  check(![t.c, small].some((c) => c.warnings.some((w) => w.includes('facet'))), 'no facet warning at radius 2 × edge or a quarter edge: its shading is smooth, its facets read as the round');
+}
+
+section('the facet warning: only for facets that chip, once per bake');
+{
+  // prisms 10 cm in radius, 40 cm tall: n sides, hard or smooth shading; the side away from the caps
+  const prism = (n: number, cusp: number, name = 'prism', x = 0): Nodes => ({
+    ...named(name, `${name}0`, { type: 'tube', params: { radius: 0.1, height: 0.4, cols: n, rows: 4, center: [x, 0, 0] } }),
+    [`${name}s`]: { type: 'normal', in: [name], params: { cusp_angle: cusp } },
+  });
+  const side = async (n: number, cusp: number) => {
+    const fw = 0.2 * Math.sin(Math.PI / n), r = fw / 4;
+    const nodes: Nodes = { ...prism(n, cusp), pu: { type: 'uv_unwrap', in: ['prisms'] } };
+    const t = await texels(nodes, 'pu', { resolution: 512, radius: r, width: 2 * r, chip_size: 1.5 * r, amount: 1 });
+    const ch = t.idx.filter((k) => Math.abs(t.p(k)[1]) < 0.12).map((k) => t.at('chip', k));
+    return { chip: share(ch), warn: t.c.warnings.filter((w) => w.includes('facet')) };
+  };
+  const hard12 = await side(12, 5), hard16 = await side(16, 5), smooth12 = await side(12, 60);
+  console.log(`  radius a quarter facet, amount 1: hard 30° facets ${(hard12.chip * 100).toFixed(1)}% chipped, hard 22.5° ${(hard16.chip * 100).toFixed(1)}%, smooth 30° ${(smooth12.chip * 100).toFixed(1)}%`);
+  check(hard12.chip > 0.05 && hard12.warn.length === 1, `hard 30° facets chip and warn: ${hard12.warn[0] ?? 'no warning'}`);
+  check(hard16.chip === 0 && !hard16.warn.length, 'hard 22.5° facets: no chip, no warning');
+  check(smooth12.chip === 0 && !smooth12.warn.length, 'the same 30° facets with smooth shading: no chip, no warning');
+  // four hard prisms in one bake: one warning with the count and the three sharpest
+  const nodes: Nodes = { ...prism(12, 5, 'a'), ...prism(13, 5, 'b', 0.3), ...prism(14, 5, 'c', 0.6), ...prism(12, 5, 'd', 0.9), ...prism(40, 5, 'e', 1.2), m4: { type: 'merge', in: ['as', 'bs', 'cs', 'ds', 'es'] }, mu: { type: 'uv_unwrap', in: ['m4'] } };
+  const c = await cook({ ...nodes, m: { type: 'bake_edge_wear', in: ['mu'], params: { resolution: 64, radius: 0.005 } } }, 'm');
+  const w = c.warnings.filter((x) => x.includes('facet'));
+  check(w.length === 1 && /^bake_edge_wear: 4 faceted piece\(s\) will chip along their facets at radius 5 mm: part "(a|d)" \(facets \d+ mm, 30°\), part "(a|d)" \(facets \d+ mm, 30°\), part "b" \(facets \d+ mm, 28°\) and 1 more; raise radius to \d+ mm or more, smooth their normals or give them more polygons$/.test(w[0]), `four hard prisms and a fine one: ${w.join(' | ') || 'no warning'}`);
+}
+
+section('small parts never wear through: under a third chipped at full focus, their faces keep paint');
+{
+  // a 3 cm cube with 1 mm bevels, a hex nut 2.4 cm across and a cap 6 cm across with 1.5 mm bevels, all of them handled
+  const nodes: Nodes = {
+    c0: { type: 'box', params: { size: [0.03, 0.03, 0.03], center: [-0.06, 0.015, 0] } },
+    c1: { type: 'poly_bevel', in: ['c0'], params: { offset: 0.001 } },
+    n0: { type: 'tube', params: { radius: 0.012, height: 0.01, cols: 6, center: [0, 0.005, 0] } },
+    n1: { type: 'normal', in: ['n0'], params: { cusp_angle: 30 } },
+    d0: { type: 'tube', params: { radius: 0.03, height: 0.015, cols: 48, center: [0.08, 0.0075, 0] } },
+    d1: { type: 'poly_bevel', in: ['d0'], params: { offset: 0.0015 } },
+    all: { type: 'merge', in: ['c1', 'n1', 'd1'] },
+    kit: { type: 'uv_unwrap', in: ['all'] },
+  };
+  const parts = ['cube', 'nut', 'cap'], at: Record<number, Texels> = {};
+  for (const amount of [0.4, 0.6, 0.8]) {
+    const t = (at[amount] = await texels(nodes, 'kit', { resolution: 512, amount, focus: '@P.y>-1', focus_amount: 1 }));
+    nest(t.im);
+    const tx = t.im.layer('texel')!, A = [0, 0, 0], C = [0, 0, 0], centre: number[][] = [[], [], []];
+    for (const k of t.idx) {
+      const [x, y, z] = t.p(k), p = x < -0.03 ? 0 : x < 0.04 ? 1 : 2, a = tx[k * 4] * tx[k * 4 + 1];
+      A[p] += a;
+      if (t.at('chip', k) >= 0.5) C[p] += a;
+      // the middle of each top face: 3 mm around the cube's and the nut's, 6 mm around the cap's
+      const [cx, top, rad] = [[-0.06, 0.03, 0.003], [0, 0.01, 0.003], [0.08, 0.015, 0.006]][p];
+      if (Math.abs(y - top) < 1e-4 && Math.hypot(x - cx, z) < rad) centre[p].push(t.at('chip', k));
+    }
+    const sh = C.map((c, p) => c / A[p]), cap = wearCap(amount);
+    check(sh.every((v) => v > 0.6 * cap && v < cap) && cap <= WEAR_CAP, `amount ${amount}: chipped share of the area ${parts.map((n, p) => `${n} ${f3(sh[p])}`).join(', ')} (under ${f3(cap)}, the cap at this amount; a third from 0.8)`);
+    check(centre.every((v) => v.length > 50 && max(v) === 0), `… the middle of every top face keeps its paint (${centre.map((v) => v.length).join(' / ')} texels)`);
+  }
+  let bad = 0;
+  for (const k of at[0.4].idx) if (at[0.6].at('chip', k) < at[0.4].at('chip', k) || at[0.8].at('chip', k) < at[0.6].at('chip', k)) bad++;
+  check(bad === 0, 'every texel chipped at 0.4 is chipped at 0.6 and 0.8');
 }
 
 section('a box chips on its edges only; a larger amount only adds wear');
@@ -292,8 +353,9 @@ section('a part keeps its chips when another part is added or the prims are reor
 
 section('seeds differ; the same bits with and without the pool');
 {
-  const a = img(await cook({ ...BOX, m: { type: 'bake_edge_wear', in: ['bx'], params: { resolution: 256, amount: 0.7, seed: 0 } } }, 'm'), 'm');
-  const b = img(await cook({ ...BOX, m: { type: 'bake_edge_wear', in: ['bx'], params: { resolution: 256, amount: 0.7, seed: 7 } } }, 'm'), 'm');
+  // at amount 0.5 (higher amounts chip the middle of every edge whatever the seed)
+  const a = img(await cook({ ...BOX, m: { type: 'bake_edge_wear', in: ['bx'], params: { resolution: 256, amount: 0.5, seed: 0 } } }, 'm'), 'm');
+  const b = img(await cook({ ...BOX, m: { type: 'bake_edge_wear', in: ['bx'], params: { resolution: 256, amount: 0.5, seed: 7 } } }, 'm'), 'm');
   const ca = a.layer('chip')!, cb = b.layer('chip')!;
   let both = 0, either = 0;
   for (let k = 0; k < ca.length; k++) { const x = ca[k] >= 0.5, y = cb[k] >= 0.5; if (x || y) either++; if (x && y) both++; }
