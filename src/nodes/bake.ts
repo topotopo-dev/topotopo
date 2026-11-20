@@ -599,8 +599,9 @@ defineBake({
       // the cloud at least twice as dense as the radius, at most every 4 texels
       const k = Math.max(1, Math.min(4, mesh.median > 0 ? r / (2 * mesh.median) : 1));
       const sc = cloudOf(b, mesh, k);
-      const { run, deadline } = surfaceRunner(ctx, 'a smaller radius or resolution; or raise the limit');
-      return afterRun(buriedOf(b, mesh, sc, () => memoBake(b.g, 'rayscene', () => RayScene.of(b.g)), null, run, deadline), (CB) => {
+      const { run, deadline, guard } = surfaceRunner(ctx, 'a smaller radius or resolution; or raise the limit');
+      // the deadline can pass between the jobs too (in the work on this thread): the same message there
+      return guard(() => afterRun(buriedOf(b, mesh, sc, () => memoBake(b.g, 'rayscene', () => RayScene.of(b.g)), null, run, deadline), (CB) => {
         let t0 = performance.now();
         return afterRun(runCurvature(run, sc, r, CB, deadline), (CV) => {
           ctx.stage('curvature', performance.now() - t0);
@@ -610,7 +611,7 @@ defineBake({
             return shape(V);
           });
         });
-      });
+      }));
     }
     const go = (P: Float64Array, N: Float64Array, src: Geometry) => {
       const r = p.radius > 0 ? p.radius : 0.01 * b.diag;
