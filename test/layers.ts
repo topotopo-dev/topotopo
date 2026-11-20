@@ -1,0 +1,392 @@
+// The material kind, bake_material, tex_layers and the shared per-sample expression compile. Checks what each promises:
+// the kind field kept through the material table (and absent when not said), bake_material's colours, roughness,
+// metallic and 0/1 masks per material and per kind, its maps and its stats; tex_layers' colour modes, ramps, heights, the
+// normal map that does not depend on the resolution, composition on covered texels only (nothing outside the islands
+// survives padding), expressions that run the same with and without the worker pool, every refusal with its hint, the
+// size warning for mask images; and tex_channel packing to the largest input.
+//   node test/layers.ts
+import '../src/nodes/index.ts';
+import { Engine } from '../src/graph/engine.ts';
+import { createNodeHost } from '../src/host/node.ts';
+import type { Geometry } from '../src/core/geometry.ts';
+import { Image, findImage, resizeLayer } from '../src/core/image.ts';
+import { MATERIAL_KINDS, normalizeMaterial, readMaterials } from '../src/core/materials.ts';
+import { medianTexelSize } from '../src/core/texelsize.ts';
+import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
+
+let fail = 0, pass = 0;
+const check = (ok: unknown, msg: string) => {
+  if (ok) pass++; else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
+};
+const section = (s: string) => console.log(`\n== ${s}`);
+const near = (a: number, b: number, tol = 1e-4) => Math.abs(a - b) <= tol;
+
+type Nodes = Record<string, NodeSpec>;
+const serial = new Engine(createNodeHost({ workers: 0 }));
+await serial.init();
+const pooled = new Engine(createNodeHost({ workers: 4, pool: { minElements: 1 } }));
+await pooled.init();
+
+interface Cooked { geo: Geometry; stats: Record<string, number>; warnings: string[] }
+async function cook(nodes: Nodes, output: string, engine = serial, vars?: Record<string, any>): Promise<Cooked> {
+  const graph: GraphSpec = { nodes, output, ...(vars ? { vars } : {}) };
+  const r = await engine.cook(graph);
+  if (!r.ok || !r.geo) throw new Error(`cook failed: ${r.errors.map((x) => `[${x.node}] ${x.message}`).join('; ')}`);
+  return { geo: r.geo, stats: (r.results.get(r.target) as any).stats ?? {}, warnings: r.warnings.map((w) => w.message) };
+}
+/** The text of the error a cook ends with (message and hint), '' when it cooks. */
+async function err(nodes: Nodes, output: string): Promise<string> {
+  const r = await serial.cook({ nodes, output });
+  return r.ok ? '' : r.errors.map((e) => e.message + (e.hint ? ` (${e.hint})` : '')).join('; ');
+}
+const img = (c: Cooked, name: string): Image => {
+  const i = findImage(c.geo, name);
+  if (!i) throw new Error(`no image "${name}"`);
+  return i;
+};
+/** Pixel (i, j) of a layer: its channels. */
+const px = (im: Image, layer: string, i: number, j: number): number[] => {
+  const ch = im.channels(layer), a = im.layer(layer)!, o = (j * im.width + i) * ch;
+  return Array.from(a.subarray(o, o + ch));
+};
+const same = (a: Float32Array, b: Float32Array) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+
+// ---------------------------------------------------------------- the model: a 2 × 2 m grid, two materials, uv over the middle quarter
+
+const SCENE: Nodes = {
+  quad: { type: 'grid', params: { size: [2, 2], divisions: [2, 2] } },
+  m1: { type: 'material', in: ['quad'], params: { name: 'paint', base_color: '#ff0000', roughness: 0.7, kind: 'painted_metal', group: '@P.x<0' } },
+  m2: { type: 'material', in: ['m1'], params: { name: 'steel', base_color: '#00ff00', metallic: 1, roughness: 0.3, group: '@P.x>0' } },
+  uv: { type: 'uv_project', in: ['m2'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } },
+};
+const RES = 64;
+const bakeNodes = (params: Record<string, any> = {}): Nodes => ({ ...SCENE, base: { type: 'bake_material', in: ['uv'], params: { resolution: RES, padding: 2, ...params } } });
+
+section('material kind');
+{
+  check(normalizeMaterial({ kind: ' painted_metal ' }).kind === 'painted_metal', 'normalizeMaterial keeps a kind, trimmed');
+  check(!('kind' in normalizeMaterial({})) && !('kind' in normalizeMaterial({ kind: '' })) && !('kind' in normalizeMaterial({ kind: 3 })), 'an absent, empty or non-text kind is not written, so tables and fingerprints stay the same');
+  check(JSON.stringify(normalizeMaterial({ baseColor: '#ff0000' as any })) === JSON.stringify({ baseColor: [0.8, 0.8, 0.8], metallic: 0, roughness: 0.8, emissive: [0, 0, 0], alpha: 1, doubleSided: false, unlit: false }), 'a material without a kind serialises as it always did');
+  check(MATERIAL_KINDS.length === 11 && MATERIAL_KINDS.includes('keep'), 'eleven kinds, keep among them');
+  const g = (await cook(SCENE, 'uv')).geo;
+  const t = readMaterials(g);
+  check(t.paint.kind === 'painted_metal' && !('kind' in t.steel), 'the material node writes its kind param into the table, and nothing when it is empty');
+  const copy = await cook({ ...SCENE, tab: { type: 'material', in: ['quad', 'm1'], params: { from: 'paint', name: 'copy' } } }, 'tab');
+  check(readMaterials(copy.geo).copy.kind === 'painted_metal', 'a material copied from input 1 keeps its kind');
+  const over = await cook({ ...SCENE, tab: { type: 'material', in: ['quad', 'm1'], params: { from: 'paint', name: 'copy', kind: 'rubber' } } }, 'tab');
+  check(readMaterials(over.geo).copy.kind === 'rubber', 'a kind on the material node applies to a copied material too');
+  check(/kind/.test(await err({ m: { type: 'material', params: { kind: 'galvanized' } } }, 'm')), 'a kind outside the list is refused by the material node');
+}
+
+section('bake_material');
+{
+  const c = await cook(bakeNodes(), 'base');
+  const b = img(c, 'base');
+  check(eq(Array.from(b.layers.keys()), ['C', 'roughness', 'metallic', 'mat_paint', 'mat_steel', 'kind_painted_metal', 'mask']), `layers C, roughness, metallic, mat_paint, mat_steel, kind_painted_metal, mask (${[...b.layers.keys()].join(', ')})`);
+  // the grid covers x, z in [-1, 1]; uv = position / 4 + 0.5, so texels 16..47 are covered; x < 0 is the left half
+  const left = px(b, 'C', 20, 32), right = px(b, 'C', 43, 32);
+  check(near(left[0], 1) && near(left[1], 0) && near(left[3], 1), 'the paint half bakes its base colour');
+  check(near(right[0], 0) && near(right[1], 1), 'the steel half bakes its base colour');
+  check(near(px(b, 'roughness', 20, 32)[0], 0.7) && near(px(b, 'roughness', 43, 32)[0], 0.3), 'roughness bakes per material');
+  check(near(px(b, 'metallic', 20, 32)[0], 0) && near(px(b, 'metallic', 43, 32)[0], 1), 'metallic bakes per material');
+  check(px(b, 'mat_paint', 20, 32)[0] === 1 && px(b, 'mat_paint', 43, 32)[0] === 0 && px(b, 'mat_steel', 43, 32)[0] === 1, 'a 0/1 mask per material');
+  check(px(b, 'kind_painted_metal', 20, 32)[0] === 1 && px(b, 'kind_painted_metal', 43, 32)[0] === 0, 'a 0/1 mask per kind present; a material without a kind has none');
+  const cov = b.layer('mask')!, mp = b.layer('mat_paint')!, ms = b.layer('mat_steel')!;
+  let ok = true, covered = 0;
+  for (let i = 0; i < cov.length; i++) if (cov[i] > 0) { covered++; if (mp[i] + ms[i] !== 1) ok = false; }
+  check(ok && covered === 34 * 34, `every covered texel belongs to exactly one material (${covered} covered)`);
+  check(near(c.stats.size, 4) && near(c.stats.texel_mm, 4 / RES * 1000), `stat size is the metres the image width covers (${c.stats.size} m, ${c.stats.texel_mm} mm per texel)`);
+  const hi = await cook(bakeNodes({ resolution: 128 }), 'base');
+  check(near(hi.stats.size, c.stats.size), 'the size stat is the same at twice the resolution');
+
+  const kinds = await cook(bakeNodes({ kinds: { steel: 'bare_steel', paint: 'cast_metal' } }), 'base');
+  const kl = [...img(kinds, 'base').layers.keys()].filter((k) => k.startsWith('kind_'));
+  check(eq(kl.sort(), ['kind_bare_steel', 'kind_cast_metal']), `the kinds param wins over the material's own kind (${kl.join(', ')})`);
+  for (const [masks, want] of [['materials', ['mat_paint', 'mat_steel']], ['kinds', ['kind_painted_metal']], ['none', []]] as const) {
+    const r = await cook(bakeNodes({ masks }), 'base');
+    const ls = [...img(r, 'base').layers.keys()].filter((k) => k.startsWith('mat_') || k.startsWith('kind_'));
+    check(eq(ls, want), `masks ${masks}: ${ls.join(', ') || 'no mask layers'}`);
+  }
+  const ss = await cook(bakeNodes({ supersample: 2 }), 'base');
+  const sb = img(ss, 'base');
+  check(Array.from(sb.layer('mat_paint')!).every((v) => v === 0 || v === 1) && Array.from(sb.layer('kind_painted_metal')!).every((v) => v === 0 || v === 1), 'with supersampling the labels stay 0 or 1 (the first sample of a texel decides)');
+
+  // maps: an image the geometry carries is read at the texel's uv
+  const mapped: Nodes = {
+    tint: { type: 'tex_constant', params: { resolution: 16, channels: 'rgba', color: '#336699' } },
+    ramp: { type: 'tex_gradient', params: { resolution: 64 } },
+    quad: SCENE.quad,
+    withmaps: { type: 'merge', in: ['quad', 'tint', 'ramp'] },
+    mat: { type: 'material', in: ['withmaps'], params: { name: 'tile', base_color_map: 'image:tint', roughness_map: 'image:ramp' } },
+    uv: SCENE.uv && { type: 'uv_project', in: ['mat'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } },
+    base: { type: 'bake_material', in: ['uv'], params: { resolution: RES, padding: 2 } },
+  };
+  const m = img(await cook(mapped, 'base'), 'base');
+  const col = px(m, 'C', 30, 30);
+  check(near(col[0], 0.2, 0.01) && near(col[1], 0.4, 0.01) && near(col[2], 0.6, 0.01), `a base colour map bakes its colour (${col.slice(0, 3).map((x) => x.toFixed(3)).join(', ')})`);
+  const r1 = px(m, 'roughness', 18, 32)[0], r2 = px(m, 'roughness', 45, 32)[0];
+  check(r1 !== r2 && Math.abs(r1 - r2) > 0.05, `a roughness map is read at the texel's uv (${r1.toFixed(2)} at the left, ${r2.toFixed(2)} at the right)`);
+}
+
+section('bake_material refusals');
+{
+  const bare: Nodes = { quad: SCENE.quad, uv: { type: 'uv_project', in: ['quad'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } }, base: { type: 'bake_material', in: ['uv'], params: { resolution: 32 } } };
+  let e = await err(bare, 'base');
+  check(e.includes('bake_material: input 0 has no prim attribute "material"') && e.includes('assign materials first (material node); colours carried as Cd bake with bake_vertex_color'), 'no material attribute: ' + e);
+  const ghost: Nodes = { ...SCENE, bad: { type: 'attrib_create', in: ['uv'], params: { name: 'material', class: 'prim', type: 'string', value: 'ghost', group: '@P.x<0' } }, base: { type: 'bake_material', in: ['bad'], params: { resolution: 32 } } };
+  e = await err(ghost, 'base');
+  check(e.includes('bake_material: prims use material "ghost", which the material table does not define') && e.includes('materials: paint, steel'), 'a material the table does not define: ' + e);
+  const file: Nodes = { quad: SCENE.quad, mat: { type: 'material', in: ['quad'], params: { name: 'brick', base_color_map: 'tex/brick.png' } }, uv: { type: 'uv_project', in: ['mat'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } }, base: { type: 'bake_material', in: ['uv'], params: { resolution: 32 } } };
+  e = await err(file, 'base');
+  check(e.includes('bake_material: material "brick" has its base colour map in a file ("tex/brick.png"); bakes read only images the geometry carries') && e.includes('load it with image_file and set the map to "image:<name>"'), 'a base colour map in a file: ' + e);
+  e = await err(bakeNodes({ kinds: { steel: 'galvanized' } }), 'base');
+  check(e.includes('bake_material: unknown kind "galvanized" for material "steel"') && e.includes('kinds: painted_metal, cast_metal') && e.includes('did you mean "galvanised"?'), 'an unknown kind, with the near one: ' + e);
+  e = await err(bakeNodes({ kinds: { ghost: 'rubber' } }), 'base');
+  check(e.includes('bake_material: kinds names material "ghost", which the material table does not define'), 'kinds naming a material the table lacks: ' + e);
+  const half: Nodes = { ...SCENE, base: { type: 'bake_material', in: ['uv'], params: { resolution: 32 } } };
+  delete (half as any).m2;
+  half.uv = { type: 'uv_project', in: ['m1'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } };
+  e = await err(half, 'base');
+  check(e.includes('bake_material: 2 prims have no material'), 'prims without a material: ' + e);
+  check(!(await err({ ...half, base: { type: 'bake_material', in: ['uv'], params: { resolution: 32, group: '@P.x<0' } } }, 'base')), 'a group that leaves the unassigned prims out bakes');
+}
+
+// ---------------------------------------------------------------- tex_layers
+
+/** A base image of one colour (RGBA) and every texel covered; masks are separate images. */
+const flat = (color = '#808080', res = 32): Nodes => ({
+  base: { type: 'tex_constant', params: { resolution: res, channels: 'rgba', color } },
+  ones: { type: 'tex_constant', params: { resolution: res, value: 1 } },
+  grad: { type: 'tex_gradient', params: { resolution: res } },
+  masks: { type: 'merge', in: ['ones', 'grad'] },
+});
+const stackOf = (nodes: Nodes, params: Record<string, any>): Nodes => ({ ...nodes, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { base_roughness: 0.5, base_metallic: 0, coverage: '', ...params } } });
+
+section('tex_layers: colour modes');
+{
+  const below = [0.5, 0.4, 0.2], c = [0.8, 0.2, 0.6], a = 0.5;
+  const hex = (v: number[]) => '#' + v.map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+  const bb = [0.5, 0.4, 0.2].map((x) => Math.round(x * 255) / 255), cc = c.map((x) => Math.round(x * 255) / 255);
+  const mix = (x: number, y: number) => x + (y - x) * a;
+  const expect: Record<string, (x: number, y: number) => number> = {
+    normal: (x, y) => mix(x, y),
+    multiply: (x, y) => mix(x, x * y),
+    lighten: (x, y) => mix(x, Math.max(x, y)),
+    overlay: (x, y) => mix(x, x < 0.5 ? 2 * x * y : 1 - 2 * (1 - x) * (1 - y)),
+  };
+  for (const mode of Object.keys(expect)) {
+    const r = await cook(stackOf(flat(hex(below)), { layers: [{ name: 'l', mask: 'ones', color: hex(c), color_mode: mode, opacity: a }] }), 'stack');
+    const got = px(img(r, 'stack_base_color'), 'C', 7, 9);
+    const want = bb.map((x, i) => expect[mode](x, cc[i]));
+    check(got.slice(0, 3).every((v, i) => near(v, want[i], 2e-6)) && got[3] === 1, `colour mode ${mode}: ${got.slice(0, 3).map((x) => x.toFixed(3)).join(', ')} = ${want.map((x) => x.toFixed(3)).join(', ')}`);
+  }
+  const r = await cook(stackOf(flat('#808080'), { layers: [{ name: 'zero', mask: '0', color: '#ff0000' }] }), 'stack');
+  check(near(px(img(r, 'stack_base_color'), 'C', 3, 3)[0], 128 / 255), 'a layer with an empty mask leaves the base');
+}
+
+section('tex_layers: ramps');
+{
+  const nodes = flat('#000000');
+  const r = await cook(stackOf(nodes, { layers: [{ name: 'ramp', mask: 'ones', color: [[0, '#ff0000'], [0.5, '#00ff00'], [1, '#0000ff']], color_by: 'grad' }] }), 'stack');
+  const out = img(r, 'stack_base_color'), g = img(await cook(nodes, 'grad'), 'grad').layer('C')!;
+  let worst = 0;
+  for (let k = 0; k < g.length; k++) {
+    const t = g[k], e = t < 0.5 ? [1 - 2 * t, 2 * t, 0] : [0, 1 - 2 * (t - 0.5), 2 * (t - 0.5)];
+    for (let ch = 0; ch < 3; ch++) worst = Math.max(worst, Math.abs(out.layer('C')![k * 4 + ch] - e[ch]));
+  }
+  check(worst < 0.01, `a three-key ramp reads its colours along color_by (largest difference ${worst.toFixed(4)})`);
+  const lo = Array.from(g).indexOf(Math.min(...g)), hi = Array.from(g).indexOf(Math.max(...g));
+  const a = out.layer('C')!;
+  check(a[lo * 4] > 0.95 && a[hi * 4 + 2] > 0.95, 'the ends of the ramp are its first and last colour');
+  const flatRamp = await cook(stackOf(nodes, { layers: [{ name: 'ramp', mask: 'ones', color: [[0, '#336699'], [1, '#ffffff']] }] }), 'stack');
+  const fr = px(img(flatRamp, 'stack_base_color'), 'C', 1, 1);
+  check(near(fr[0], 0.2, 0.002) && near(fr[1], 0.4, 0.002) && near(fr[2], 0.6, 0.002), 'color_by defaults to 0: the first colour');
+}
+
+section('tex_layers: roughness, metallic, occlusion, graph vars');
+{
+  const r = await cook(stackOf(flat(), {
+    occlusion: 'amount * grad',
+    layers: [
+      { name: 'a', mask: 'ones', roughness: 0.9, metallic: 1, opacity: 0.5 },
+      { name: 'b', mask: 'ones', roughness_offset: 0.1 },
+    ],
+  }), 'stack', serial, { amount: 0.5 });
+  const orm = img(r, 'stack_orm'), g = img(await cook(flat(), 'grad'), 'grad').layer('C')!;
+  const o = px(orm, 'C', 5, 5), k = 5 * 32 + 5;
+  check(near(o[0], 0.5 * g[k], 1e-6) && near(o[1], 0.5 + (0.9 - 0.5) * 0.5 + 0.1, 1e-6) && near(o[2], 0.5, 1e-6) && o[3] === 1, `ORM: occlusion from its expression and a graph var, roughness replaced then offset, metallic replaced at half opacity (${o.map((x) => x.toFixed(3)).join(', ')})`);
+  const r2 = await cook(stackOf(flat(), { occlusion: 'amount * grad', layers: [] }), 'stack', serial, { amount: 1 });
+  const r3 = await cook(stackOf(flat(), { occlusion: 'amount * grad', layers: [] }), 'stack', serial, { amount: 0.25 });
+  check(!same(img(r2, 'stack_orm').layer('C')!, img(r3, 'stack_orm').layer('C')!), 'a graph var the expressions name changes the result (and re-cooks)');
+  const roughRead = await cook({ ...flat(), stack: { type: 'tex_layers', in: ['base', 'masks'], params: { base_roughness: 0.3, base_metallic: 0.1, coverage: '', layers: [] } } }, 'stack');
+  const ro = px(img(roughRead, 'stack_orm'), 'C', 0, 0);
+  check(near(ro[1], 0.3) && near(ro[2], 0.1), 'base_roughness and base_metallic set the whole base');
+}
+
+section('tex_layers: height and normal');
+{
+  const sceneAt = (res: number): Nodes => stackOf(flat('#808080', res), { size: 1, layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] });
+  const lo = await cook(sceneAt(128), 'stack'), hi = await cook(sceneAt(256), 'stack');
+  const nLo = img(lo, 'stack_normal'), nHi = img(hi, 'stack_normal');
+  const down = resizeLayer(nHi.layer('C')!, 4, 256, 256, 128, 128, false);
+  let diff = 0, tilt = 0, count = 0;
+  for (let i = 0; i < 128 * 128; i++) for (let c = 0; c < 2; c++) { diff += Math.abs(down[i * 4 + c] - nLo.layer('C')![i * 4 + c]); tilt += Math.abs(nLo.layer('C')![i * 4 + c] - 0.5); count++; }
+  check(tilt / count > 0.05, `the step tilts the normal (mean tilt ${(tilt / count).toFixed(3)})`);
+  check(diff / count < 0.01, `the same step at 128 and 256 gives the same normal after resampling (mean difference ${(diff / count).toFixed(4)})`);
+  const wide = await cook(stackOf(flat('#808080', 128), { size: 2, layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] }), 'stack');
+  const tilt2 = Array.from(img(wide, 'stack_normal').layer('C')!).reduce((s, v, i) => s + (i % 4 < 2 ? Math.abs(v - 0.5) : 0), 0) / count;
+  check(tilt2 < (tilt / count) * 0.75, `a larger size (metres per image) gives a gentler slope (${tilt2.toFixed(3)} < ${(tilt / count).toFixed(3)})`);
+  const h = img(lo, 'stack_height').layer('C')!;
+  check(near(Math.max(...h), 0.3, 1e-4) && near(Math.min(...h), 0, 1e-4), 'the height image holds metres');
+  const dx = await cook(stackOf(flat('#808080', 128), { size: 1, normal_format: 'directx', layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] }), 'stack');
+  const a = img(lo, 'stack_normal'), b = img(dx, 'stack_normal');
+  check(near(a.layer('C')![(64 * 128 + 64) * 4 + 1] + b.layer('C')![(64 * 128 + 64) * 4 + 1], 1, 1e-4), 'directx flips the green channel');
+}
+
+section('tex_layers: covered texels only, then padding');
+{
+  // the grid's uv covers the middle quarter; a mask that is 1 everywhere, outside the islands too
+  const nodes: Nodes = {
+    ...bakeNodes(),
+    ones: { type: 'tex_constant', params: { resolution: RES, value: 1 } },
+    masks: { type: 'merge', in: ['ones'] },
+    stack: {
+      type: 'tex_layers', in: ['base', 'masks'],
+      params: { padding: 3, size: 4, layers: [{ name: 'all', mask: 'ones', color: '#0000ff', roughness: 0.2, metallic: 1, height: 0.01 }], occlusion: '0.5' },
+    },
+  };
+  const r = await cook(nodes, 'stack');
+  const col = img(r, 'stack_base_color'), orm = img(r, 'stack_orm'), nrm = img(r, 'stack_normal'), hei = img(r, 'stack_height');
+  const cov = col.layer('mask')!;
+  check(!!cov && [orm, nrm, hei].every((i) => i.layer('mask') === cov || same(i.layer('mask')!, cov)), 'every output keeps the base\'s coverage as layer mask');
+  // the squared distance of every texel to the nearest covered one
+  const cx: number[] = [], cy: number[] = [];
+  for (let k = 0; k < cov.length; k++) if (cov[k] > 0) { cx.push(k % RES); cy.push(Math.floor(k / RES)); }
+  const d2of = (i: number, j: number) => { let m = Infinity; for (let q = 0; q < cx.length; q++) m = Math.min(m, (cx[q] - i) ** 2 + (cy[q] - j) ** 2); return m; };
+  let farOk = true, nearOk = true, coveredOk = true, flatOk = true, farCount = 0, nearCount = 0;
+  for (let j = 0; j < RES; j++) for (let i = 0; i < RES; i++) {
+    const d2 = d2of(i, j);
+    const c = px(col, 'C', i, j), o = px(orm, 'C', i, j), n = px(nrm, 'C', i, j), h = px(hei, 'C', i, j)[0];
+    if (cov[j * RES + i] > 0) {
+      if (!(c[2] === 1 && c[0] === 0 && near(o[1], 0.2) && o[2] === 1 && near(o[0], 0.5) && near(h, 0.01, 1e-6))) coveredOk = false;
+      if (!(near(n[0], 0.5, 1e-4) && near(n[1], 0.5, 1e-4) && n[2] > 0.999)) flatOk = false;
+    } else if (d2 > 9) {
+      farCount++;
+      if (!(c[0] === 0 && c[1] === 0 && c[2] === 0 && c[3] === 1 && o[0] === 1 && o[1] === 0.5 && o[2] === 0 && n[0] === 0.5 && n[1] === 0.5 && n[2] === 1 && h === 0)) farOk = false;
+    } else {
+      nearCount++;
+      if (!(c[2] === 1 && near(o[1], 0.2) && near(h, 0.01, 1e-6))) nearOk = false;
+    }
+  }
+  check(coveredOk, 'covered texels hold the composed values');
+  check(flatOk, 'a constant height gives a flat normal on every covered texel, also at the border of an island');
+  check(nearOk && nearCount > 0, `texels within the padding copy the nearest covered texel (${nearCount} texels)`);
+  check(farOk && farCount > 0, `no value from outside the coverage survives: every texel beyond the padding is the neutral background (${farCount} texels)`);
+  const noPad = await cook({ ...nodes, stack: { ...nodes.stack, params: { ...nodes.stack.params, padding: 0 } } }, 'stack');
+  const cp = img(noPad, 'stack_base_color'), cc = cp.layer('mask')!;
+  let bg = true;
+  for (let k = 0; k < cc.length; k++) if (cc[k] === 0 && !(cp.layer('C')![k * 4] === 0 && cp.layer('C')![k * 4 + 2] === 0)) bg = false;
+  check(bg, 'padding 0 leaves every uncovered texel at the background');
+}
+
+section('tex_layers: workers');
+{
+  const layers = [
+    { name: 'a', mask: 'smoothstep(0.2, 0.8, grad) * amount', color: [[0, '#5c2a14'], [1, '#9a4a20']], color_by: 'grad', roughness: 0.9, metallic: 0, height: -0.001 },
+    { name: 'b', mask: 'ones - grad', color: '#a69d8b', color_mode: 'lighten', opacity: 0.6, roughness_offset: 0.05, height: 0.0005 },
+    { name: 'c', mask: 'fit(grad, 0, 1, 0, 1) * 0.5', color: '#222222', color_mode: 'overlay' },
+  ];
+  const nodes = stackOf(flat('#6f8fae', 128), { layers, occlusion: 'ones * 0.75 + grad * 0.25', size: 1 });
+  const before = pooled.poolStats.parallel;
+  const a = await cook(nodes, 'stack', serial, { amount: 0.8 }), b = await cook(nodes, 'stack', pooled, { amount: 0.8 });
+  check(pooled.poolStats.parallel > before, 'the expressions ran on the worker pool');
+  for (const nm of ['base_color', 'normal', 'orm', 'height']) check(same(img(a, `stack_${nm}`).layer('C')!, img(b, `stack_${nm}`).layer('C')!), `${nm} is bit-identical with the pool and without it`);
+  const again = await cook(nodes, 'stack', serial, { amount: 0.8 });
+  check(same(img(a, 'stack_orm').layer('C')!, img(again, 'stack_orm').layer('C')!), 'a second cook gives the same bits');
+}
+
+section('tex_layers: refusals and warnings');
+{
+  const base = flat();
+  let e = await err(stackOf(base, { layers: [{ name: 'rust', mask: 'smoothstep(0.2, 0.5, runs_rust)' }] }), 'stack');
+  check(e.includes('tex_layers: layer "rust": its mask names "runs_rust", which no image in input 1 holds') && e.includes('variables: ') && e.includes('grad') && e.includes('ones'), 'a mask naming a missing layer, with the variables: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'rust', mask: '1', color: [[0, '#fff'], [1, '#000']], color_by: 'noise_a' }] }), 'stack');
+  check(e.includes('layer "rust": its color_by names "noise_a"'), 'color_by naming a missing layer: ' + e);
+  e = await err(stackOf(base, { occlusion: 'ao_missing' }), 'stack');
+  check(e.includes('occlusion names "ao_missing", which no image in input 1 holds'), 'occlusion naming a missing layer: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'dust', mask: '1' }, { name: 'dust', mask: '1' }] }), 'stack');
+  check(e.includes('tex_layers: two layers are called "dust"'), 'two layers with one name: ' + e);
+  e = await err({ ...base, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { coverage: '', layers: [] } } }, 'stack');
+  check(e.includes('tex_layers: the base has no "roughness" layer') && e.includes('bake the base with bake_material, or set base_roughness'), 'a base without roughness: ' + e);
+  e = await err({ ...base, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { coverage: '', base_roughness: 0.5, layers: [] } } }, 'stack');
+  check(e.includes('tex_layers: the base has no "metallic" layer') && e.includes('set base_metallic'), 'a base without metallic: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'fade', mask: '1', color: '#zzz' }] }), 'stack');
+  check(e.includes('tex_layers: layer "fade": color "#zzz" is not a colour'), 'a colour that is none: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'fade', mask: '1', color: [[0, '#fff'], [1, 'zzz']] }] }), 'stack');
+  check(e.includes('layer "fade": color "zzz" is not a colour'), 'a ramp key that is none: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'fade', mask: '1', colour: '#fff' }] }), 'stack');
+  check(e.includes('layer "fade": unknown field "colour"') && e.includes('did you mean "color"?'), 'an unknown field: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'fade' }] }), 'stack');
+  check(e.includes('layer "fade" has no mask'), 'a layer without a mask: ' + e);
+  e = await err(stackOf(base, { layers: [{ mask: '1' }] }), 'stack');
+  check(e.includes('layer 1 has no name'), 'a layer without a name: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'x', mask: '1 +* 2' }] }), 'stack');
+  check(e.includes('layer "x" mask: expression syntax error'), 'a syntax error names the layer: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'x', mask: '1', color_mode: 'dodge' }] }), 'stack');
+  check(e.includes('color_mode "dodge" is not one of normal, multiply, overlay, lighten'), 'a colour mode that is none: ' + e);
+  e = await err(stackOf(base, { layers: [{ name: 'x', mask: '1', roughness: 3 }] }), 'stack');
+  check(e.includes('layer "x": roughness 3 is not a number in 0..1'), 'a roughness outside 0..1: ' + e);
+  e = await err(stackOf(base, { coverage: 'nothing', layers: [] }), 'stack');
+  check(e.includes('the base has no coverage layer "nothing"'), 'a coverage layer the base lacks: ' + e);
+  const small: Nodes = { ...flat(), tiny: { type: 'tex_constant', params: { resolution: 16, value: 1, name: 'ao' } }, masks: { type: 'merge', in: ['ones', 'tiny'] } };
+  const w = await cook(stackOf(small, { layers: [{ name: 'a', mask: 'ao * 0.5', color: '#ff0000' }] }), 'stack');
+  check(w.warnings.some((m) => m.includes('tex_layers: mask image "ao" is 16 × 16, the base 32 × 32; it is resized')), 'a mask image of another size is resized with a warning');
+  check(near(px(img(w, 'stack_base_color'), 'C', 10, 10)[0], 128 / 255 + (1 - 128 / 255) * 0.5, 0.01), 'the resized mask still composes');
+  const hidden = await cook(stackOf(base, { layers: [{ name: 'a', mask: 'grad * 0.5' }, { name: 'b', mask: 'grad * 0.5' }] }), 'stack', serial, { grad: 3 });
+  check(hidden.warnings.filter((m) => m.includes('grad in an expression is a mask variable, not the graph var of that name')).length === 1, 'a graph var that a mask image hides is said once, and the image wins');
+  const none = await cook(stackOf(base, { layers: [] }), 'stack');
+  check(['base_color', 'normal', 'orm', 'height'].every((s) => !!findImage(none.geo, `stack_${s}`)), 'with no layers the base comes through as four images');
+  const nan = await cook(stackOf(base, { layers: [{ name: 'n', mask: 'sqrt(-1)', color: '#ff0000' }] }), 'stack');
+  check(nan.warnings.some((m) => m.includes('layer "n" mask: 1024 texel(s) gave NaN')), 'NaN is written as 0 with a warning');
+}
+
+section('tex_layers: a stop on a runaway expression');
+{
+  const limited = new Engine(createNodeHost({ workers: 0 }));
+  limited.scriptTimeoutMs = 300;
+  await limited.init();
+  const r = await limited.cook({ nodes: stackOf(flat(), { layers: [{ name: 'loop', mask: 'while (true) {} return 1;' }] }), output: 'stack' });
+  check(!r.ok && r.errors.some((x) => /layer "loop" mask: expression exceeded 300 ms/.test(x.message)), 'an endless expression stops at the script time limit: ' + r.errors.map((x) => x.message).join('; '));
+}
+
+section('tex_channel: inputs of different sizes');
+{
+  const nodes: Nodes = {
+    ao: { type: 'tex_constant', params: { resolution: 32, value: 0.25, name: 'ao' } },
+    rough: { type: 'tex_constant', params: { resolution: 64, value: 0.75, name: 'rough' } },
+    orm: { type: 'tex_channel', in: ['ao', 'rough'] },
+  };
+  const r = await cook(nodes, 'orm');
+  const o = img(r, 'orm');
+  check(o.width === 64 && o.height === 64, `the pack takes the largest input's size, not the first's (${o.width} × ${o.height})`);
+  check(near(px(o, 'C', 3, 3)[0], 0.25) && near(px(o, 'C', 3, 3)[1], 0.75), 'both channels keep their values after the resize');
+  check(r.warnings.some((m) => m.includes('tex_channel: input 0 "ao" is 32 × 32, the largest is 64 × 64; it is resized')), 'the resize is a warning: ' + r.warnings.join('; '));
+  const same2 = await cook({ ...nodes, rough: { type: 'tex_constant', params: { resolution: 32, value: 0.75, name: 'rough' } } }, 'orm');
+  check(same2.warnings.length === 0 && img(same2, 'orm').width === 32, 'inputs of one size pack without a warning');
+}
+
+section('texel size');
+{
+  // a 1 m square covering the whole uv square at 100 × 100 texels: 1 cm per texel
+  const pos = [0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1];
+  const uv = [0, 0, 1, 0, 1, 1, 0, 1];
+  const t = medianTexelSize(pos, uv, [0, 1, 2, 0, 2, 3], 100, 100);
+  check(near(t, 0.01, 1e-9), `a 1 m square over 100 texels is 1 cm per texel (${t})`);
+  check(medianTexelSize(pos, uv, [0, 1, 2, 0, 2, 3], 100, 100, Uint8Array.of(1, 1)) === 0, 'no triangle left: 0');
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);
+
+function eq(a: unknown, b: unknown): boolean { return JSON.stringify(a) === JSON.stringify(b); }
