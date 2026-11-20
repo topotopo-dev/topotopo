@@ -5,9 +5,10 @@
 // end. The compose is core/layers.ts; the mask expressions are compiled once (identical texts once per cook) and run in
 // chunks on the worker pool, all the expressions of a group of layers in one call (core/pixelexpr.ts).
 import { Geometry } from '../core/geometry.ts';
-import { Image, MAIN_LAYER, imagesOf, resizeLayer, toGrey } from '../core/image.ts';
+import { Image, MAIN_LAYER, imagesOf, resizeLayer, toGrey, toRGBA } from '../core/image.ts';
 import { COLOR_MODES, applyLayer, coveredIndices, finishStack, startStack } from '../core/layers.ts';
-import type { ColorLUT, ColorMode, LayerSpec } from '../core/layers.ts';
+import type { ColorLUT, ColorMode, LayerSource, LayerSpec } from '../core/layers.ts';
+import { applyPadding, paddingMap } from '../core/bake.ts';
 import { PixelExprError, PixelSyntaxError, bindableName, realmHelperNames, runPixelExprs, usesName } from '../core/pixelexpr.ts';
 import { rampLUT } from '../core/texture.ts';
 import { defineNode } from '../graph/registry.ts';
@@ -15,7 +16,7 @@ import { NodeError } from '../graph/types.ts';
 import { didYouMean, evalRamp, parseColor } from '../graph/params.ts';
 import { NAMED_BY_NODE, imageParam, nameParam, outName, source } from './texture.ts';
 
-const FIELDS = ['name', 'mask', 'opacity', 'color', 'color_by', 'color_mode', 'roughness', 'roughness_offset', 'metallic', 'height', 'signed'];
+const FIELDS = ['name', 'mask', 'opacity', 'color', 'color_by', 'color_mode', 'roughness', 'roughness_offset', 'metallic', 'height', 'signed', 'image'];
 
 /** The results of the expressions in flight at once (bytes): past it the layers are composed in groups. */
 const RESULT_BUDGET = 768e6;
@@ -26,6 +27,26 @@ const listNames = (names: string[], max = 14) => names.slice(0, max).join(', ') 
 interface ParsedLayer extends LayerSpec {
   mask: string;
   colorBy: string;
+  /** an image the layer takes its colour (C), roughness and normal (its layers of those names) from, per texel */
+  image: string | null;
+}
+
+/** The named masks param: [{name, mask}], each an expression; checked like layers. */
+function parseMasks(raw: unknown): { name: string; mask: string }[] {
+  if (raw === undefined || raw === null || (Array.isArray(raw) && !raw.length)) return [];
+  if (!Array.isArray(raw)) throw new NodeError('tex_layers: masks must be a list of {"name", "mask"} objects', 'e.g. [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top) * grain"}]; a layer then reads it as dust');
+  const seen = new Set<string>();
+  return raw.map((m, i) => {
+    if (!m || typeof m !== 'object' || Array.isArray(m)) throw new NodeError(`tex_layers: mask ${i + 1} is not an object`, 'fields: name, mask');
+    const o = m as Record<string, unknown>;
+    for (const k of Object.keys(o)) if (k !== 'name' && k !== 'mask') throw new NodeError(`tex_layers: mask ${i + 1}: unknown field "${k}"`, 'fields: name, mask');
+    const name = typeof o.name === 'string' ? o.name.trim() : '';
+    if (!bindableName(name, new Set(['k']))) throw new NodeError(`tex_layers: mask name ${show(o.name)} is not a name an expression can read`, 'letters, digits and _, not starting with a digit');
+    if (seen.has(name)) throw new NodeError(`tex_layers: two masks are called "${name}"`, 'mask names must be unique');
+    seen.add(name);
+    if (typeof o.mask !== 'string' || !o.mask.trim()) throw new NodeError(`tex_layers: mask "${name}" has no expression`, 'e.g. {"name": "dust", "mask": "smoothstep(0.4, 0.8, top)"}');
+    return { name, mask: o.mask };
+  });
 }
 
 const show = (v: unknown) => (typeof v === 'string' ? `"${v}"` : JSON.stringify(v));
@@ -85,7 +106,10 @@ function parseLayers(raw: unknown): ParsedLayer[] {
     }
     const colorBy = o.color_by === undefined ? '0' : o.color_by;
     if (typeof colorBy !== 'string' || !colorBy.trim()) throw new NodeError(`tex_layers: ${who}: color_by must be an expression`, 'e.g. "grain" or "0.5"');
+    if (o.image !== undefined && o.image !== null && (typeof o.image !== 'string' || !o.image.trim())) throw new NodeError(`tex_layers: ${who}: image must name an image`, 'the name of an image in input 1 (e.g. a bake_triplanar result): the layer takes its colour from C, its roughness and normal from its layers of those names');
+    if (o.image && o.color !== undefined && o.color !== null) throw new NodeError(`tex_layers: ${who} has both color and image`, 'a layer takes its colour from one of them');
     return {
+      image: typeof o.image === 'string' ? o.image.trim() : null,
       name, mask: o.mask, colorBy, color, mode: mode as ColorMode, opacity: num('opacity', 1, 0, 1),
       roughness: orNull('roughness'), roughnessOffset: num('roughness_offset', 0), metallic: orNull('metallic'), height: num('height', 0), signed: o.signed === true,
     };
@@ -96,6 +120,7 @@ function parseLayers(raw: unknown): ParsedLayer[] {
 function expressionText(p: Record<string, any>): string {
   const parts: string[] = [String(p.occlusion ?? '')];
   if (Array.isArray(p.layers)) for (const l of p.layers) if (l && typeof l === 'object') parts.push(String((l as any).mask ?? ''), String((l as any).color_by ?? ''));
+  if (Array.isArray(p.masks)) for (const m of p.masks) if (m && typeof m === 'object') parts.push(String((m as any).mask ?? ''));
   return parts.join('\n');
 }
 
@@ -141,6 +166,8 @@ defineNode({
   ],
   params: {
     layers: { type: 'json', default: [], desc: 'the layers, bottom to top: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top)", "opacity": 1, "color": "#a69d8b" | [r, g, b] | [[0, "#5c2a14"], [1, "#9a4a20"]], "color_by": "0", "color_mode": "normal" | "multiply" | "overlay" | "lighten", "roughness": 0.95, "roughness_offset": 0, "metallic": 0, "height": 0.0003, "signed": false}]; name and mask are required, the rest optional (a field left out leaves that channel alone)', aliases: ['stack'] },
+    masks: { type: 'json', default: [], desc: 'named masks, computed first in order: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top) * grain"}]; every later mask, layer mask, color_by and the occlusion read each by its name (computed once however many read it), and they are written as the layers of image <name>_masks (clamped to 0..1)', aliases: ['named_masks'] },
+    outputs: { type: 'enum', options: ['both', 'maps', 'masks'], default: 'both', desc: 'what to write: the maps, the masks image (when masks are named), or both', aliases: ['output'] },
     occlusion: { type: 'code', default: '', desc: 'expression for ORM red (occlusion 0..1) over the same variables ("" = 1)', aliases: ['ao', 'occlusion_expression'] },
     base_roughness: { type: 'float', default: -1, min: -1, max: 1, desc: 'roughness of the whole base, 0..1 (-1 = read the base\'s layer "roughness"; an error when it has none)', aliases: ['roughness'] },
     base_metallic: { type: 'float', default: -1, min: -1, max: 1, desc: 'metallic of the whole base, 0..1 (-1 = read the base\'s layer "metallic"; an error when it has none)', aliases: ['metallic'] },
@@ -174,6 +201,7 @@ defineNode({
   cook: async (ctx) => {
     const { p, type } = ctx;
     const layers = parseLayers(p.layers);
+    const named = parseMasks(p.masks);
     const base = source(ctx, 0, p.image, '', 'image');
     const w = base.img.width, h = base.img.height, n = w * h;
     const covName = String(p.coverage ?? '').trim();
@@ -220,7 +248,12 @@ defineNode({
       }
     }
     if (unnamed.size) ctx.warn(`${type}: mask layers that an expression cannot name, because they are no identifiers: ${[...unnamed].slice(0, 8).map((x) => `"${x}"`).join(', ')}${unnamed.size > 8 ? `, … ${unnamed.size - 8} more` : ''}; rename the image or the layer`);
-    const varNames = [...entries.keys()];
+    for (const m of named) {
+      const e = entries.get(m.name);
+      if (e) throw new NodeError(`${type}: mask "${m.name}" has the name of image layer ${e[0].img.name}/${e[0].layer}`, 'rename the mask so an expression knows which one it reads');
+    }
+    const namedSet = new Set(named.map((m) => m.name));
+    const varNames = [...entries.keys(), ...named.map((m) => m.name)];
     const hint = () => `variables: ${listNames(varNames) || '(no mask images: connect them to input 1)'}`;
     // the distinct expression texts of the stack: each is evaluated once per cook, whoever uses it
     interface Code { code: string; label: string; subject: string; last: number; vars: string[] }
@@ -231,24 +264,42 @@ defineNode({
       else codes[i].last = Math.max(codes[i].last, layer);
       return i;
     };
-    const occCode = String(p.occlusion ?? '').trim() ? codeOf(String(p.occlusion), 'occlusion', 'occlusion', -1) : -1;
-    const layerCodes = layers.map((L, li) => {
+    // a named mask reads only the masks before it
+    const maskCodes = named.map((m, j) => {
+      const i = codes.length, before = new Set(named.slice(0, j).map((x) => x.name));
+      codes.push({ code: m.mask, label: `mask "${m.name}"`, subject: `mask "${m.name}"`, last: -1, vars: varNames.filter((v) => (!namedSet.has(v) || before.has(v)) && usesName(m.mask, v)) });
+      return i;
+    });
+    const masksOnly = p.outputs === 'masks';
+    const occCode = !masksOnly && String(p.occlusion ?? '').trim() ? codeOf(String(p.occlusion), 'occlusion', 'occlusion', -1) : -1;
+    // a mask that is one variable's name is that variable, with nothing to evaluate
+    const layerCodes = (masksOnly ? [] : layers).map((L, li) => {
       const ramp = L.color && !Array.isArray(L.color);
+      const t = L.mask.trim();
+      const direct = varNames.includes(t) ? t : null;
       return {
-        mask: codeOf(L.mask, `layer "${L.name}" mask`, `layer "${L.name}": its mask`, li),
+        direct,
+        mask: direct ? -1 : codeOf(L.mask, `layer "${L.name}" mask`, `layer "${L.name}": its mask`, li),
         by: ramp ? codeOf(L.colorBy, `layer "${L.name}" color_by`, `layer "${L.name}": its color_by`, li) : -1,
       };
     });
     // names the expressions use must be unambiguous and must not hide a helper function
     const helpers = realmHelperNames(ctx.engine.host);
-    for (const name of new Set(codes.flatMap((c) => c.vars))) {
+    for (const name of new Set([...codes.flatMap((c) => c.vars), ...layerCodes.map((c) => c.direct).filter((x): x is string => !!x)])) {
+      if (namedSet.has(name)) {
+        if (helpers.has(name)) throw new NodeError(`${type}: mask "${name}" is called like the helper function ${name}, so an expression cannot read both`, 'rename the mask');
+        continue;
+      }
       const list = entries.get(name)!;
       if (list.length > 1) throw new NodeError(`${type}: two mask layers are called "${name}" (${list.map((e) => `${e.img.name}/${e.layer}`).join(', ')})`, 'rename an image or a layer so a name an expression uses belongs to one');
       if (helpers.has(name)) throw new NodeError(`${type}: the image "${list[0].img.name}" is called like the helper function ${name}, so an expression cannot read both`, 'rename the image: the name param of the node that made it, or the node itself');
     }
     // one variable as a grey array of the base's size, in shared memory when there is any
     const arrays = new Map<string, Float32Array>(), warned = new Set<string>(), hiddenWarned = new Set<string>();
+    const namedArrays = new Map<string, Float32Array>();
     const variable = (name: string): Float32Array => {
+      const nm = namedArrays.get(name);
+      if (nm) return nm;
       let a = arrays.get(name);
       if (a) return a;
       const { img, layer, ch } = entries.get(name)![0];
@@ -301,33 +352,10 @@ defineNode({
         throw e;
       }
     };
-    const stack = startStack(w, h, base.data, base.ch, rough, metal, covered);
-    const occ = occCode >= 0 ? (await evaluate([occCode]))[0] : null;
-    // the layers in groups whose expressions fit the memory budget: each group's distinct expressions in one call
-    const cap = Math.max(2, Math.floor(RESULT_BUDGET / (n * 4)));
-    const results = new Map<number, Float32Array>();
-    const lastUse = (name: string) => codes.reduce((m, c, i) => (c.vars.includes(name) && i !== occCode ? Math.max(m, c.last) : m), -1);
-    let li = 0;
-    while (li < layers.length) {
-      const fresh = new Set<number>();
-      let end = li;
-      while (end < layers.length) {
-        const need = [layerCodes[end].mask, layerCodes[end].by].filter((c) => c >= 0 && !results.has(c) && !fresh.has(c));
-        if (end > li && results.size + fresh.size + need.length > cap) break;
-        need.forEach((c) => fresh.add(c));
-        end++;
-      }
-      if (fresh.size) {
-        const idxs = [...fresh], vals = await evaluate(idxs);
-        idxs.forEach((c, i) => results.set(c, vals[i]));
-      }
-      for (let k = li; k < end; k++) applyLayer(stack, layers[k], results.get(layerCodes[k].mask)!, layerCodes[k].by >= 0 ? results.get(layerCodes[k].by)! : null);
-      // what no later layer reads is dropped
-      for (const c of [...results.keys()]) if (codes[c].last < end) results.delete(c);
-      for (const v of [...arrays.keys()]) if (lastUse(v) < end) arrays.delete(v);
-      li = end;
-    }
-    const maps = finishStack(stack, { occlusion: occ, coverage, padding: p.padding, texel, size: base.img.size, island, directx: p.normal_format === 'directx' });
+    // the named masks first, in order: each becomes a variable for what follows
+    const t0 = performance.now();
+    for (let j = 0; j < named.length; j++) namedArrays.set(named[j].name, (await evaluate([maskCodes[j]]))[0]);
+    if (named.length) ctx.stage('masks', performance.now() - t0);
     const prefix = outName(ctx);
     const make = (suffix: string, data: Float32Array) => {
       const img = new Image(w, h, `${prefix}_${suffix}`).set(MAIN_LAYER, data);
@@ -338,9 +366,77 @@ defineNode({
       return img;
     };
     const out = new Geometry();
-    out.volumes = [make('base_color', maps.baseColor), make('normal', maps.normal), make('orm', maps.orm), make('height', maps.height)];
+    if (!masksOnly) {
+      // per-texel colour, roughness and normal of the layers that take them from an image
+      const imgOf = (L: ParsedLayer): Image => {
+        const im = [...maskImgs, base.img].find((x) => x.name === L.image);
+        if (!im) throw new NodeError(`${type}: layer "${L.name}": image "${L.image}" is not in input 1`, `images: ${listNames([...new Set([...maskImgs, base.img].map((x) => x.name))])}`);
+        return im;
+      };
+      const fit = (im: Image, a: Float32Array, ch: number) => (im.width === w && im.height === h ? a : resizeLayer(a, ch, im.width, im.height, w, h, false));
+      const sourceOf = (L: ParsedLayer): LayerSource | null => {
+        if (!L.image) return null;
+        const im = imgOf(L), c = im.layer(im.mainLayer)!, r = im.layer('roughness'), nm = im.layer('normal');
+        return {
+          color: fit(im, toRGBA(c, im.channels(im.mainLayer)), 4),
+          roughness: r ? fit(im, toGrey(r, im.channels('roughness')), 1) : null,
+          normal: nm && im.channels('normal') === 4 ? fit(im, nm, 4) : null,
+        };
+      };
+      for (const L of layers) if (L.image) imgOf(L);
+      const bn = base.img.layer('normal'), baseNormal = bn && base.img.channels('normal') === 4 ? bn : null;
+      const imageNormals = layers.some((L) => L.image && imgOf(L).channels('normal') === 4);
+      let flat: Float32Array | null = null;
+      if (!baseNormal && imageNormals) { flat = new Float32Array(n * 4); for (let i = 0; i < n; i++) { flat[i * 4] = 0.5; flat[i * 4 + 1] = 0.5; flat[i * 4 + 2] = 1; flat[i * 4 + 3] = 1; } }
+      const stack = startStack(w, h, base.data, base.ch, rough, metal, covered, baseNormal ?? flat);
+      const occ = occCode >= 0 ? (await evaluate([occCode]))[0] : null;
+      // the layers in groups whose expressions fit the memory budget: each group's distinct expressions in one call
+      const cap = Math.max(2, Math.floor(RESULT_BUDGET / (n * 4)));
+      const results = new Map<number, Float32Array>();
+      const lastUse = (name: string) => codes.reduce((m, c, i) => (c.vars.includes(name) && i !== occCode ? Math.max(m, c.last) : m), -1);
+      let li = 0;
+      while (li < layers.length) {
+        const fresh = new Set<number>();
+        let end = li;
+        while (end < layers.length) {
+          const need = [layerCodes[end].mask, layerCodes[end].by].filter((c) => c >= 0 && !results.has(c) && !fresh.has(c));
+          if (end > li && results.size + fresh.size + need.length > cap) break;
+          need.forEach((c) => fresh.add(c));
+          end++;
+        }
+        if (fresh.size) {
+          const idxs = [...fresh], vals = await evaluate(idxs);
+          idxs.forEach((c, i) => results.set(c, vals[i]));
+        }
+        for (let k = li; k < end; k++) {
+          const lc = layerCodes[k];
+          applyLayer(stack, layers[k], lc.direct ? variable(lc.direct) : results.get(lc.mask)!, lc.by >= 0 ? results.get(lc.by)! : null, sourceOf(layers[k]));
+        }
+        // what no later layer reads is dropped
+        for (const c of [...results.keys()]) if (codes[c].last < end) results.delete(c);
+        for (const v of [...arrays.keys()]) if (lastUse(v) < end && !layerCodes.slice(end).some((x) => x.direct === v)) arrays.delete(v);
+        li = end;
+      }
+      const maps = finishStack(stack, { occlusion: occ, coverage, padding: p.padding, texel, size: base.img.size, island, directx: p.normal_format === 'directx' });
+      out.volumes.push(make('base_color', maps.baseColor), make('normal', maps.normal), make('orm', maps.orm), make('height', maps.height));
+    }
+    if (named.length && p.outputs !== 'maps') {
+      // the named masks as layers of one image, clamped to 0..1 and padded from the coverage like the maps
+      const img = new Image(w, h, `${prefix}_masks`).takeSize(base.img);
+      const map = coverage ? paddingMap(coverage, w, h, Math.max(0, Math.round(p.padding))) : null;
+      for (const m of named) {
+        const src = namedArrays.get(m.name)!, a = new Float32Array(n);
+        for (let q = 0; q < covered.length; q++) { const i = covered[q], v = src[i]; a[i] = v > 0 ? (v < 1 ? v : 1) : 0; }
+        if (map) applyPadding(a, 1, map, [0]);
+        img.set(m.name, a);
+      }
+      for (const l of ['texel', 'island']) { const a = base.img.layer(l); if (a) img.set(l, a); }
+      if (coverage) img.set('mask', coverage);
+      out.volumes.push(img);
+    }
     ctx.stat('layers', layers.length);
-    ctx.stat('texels', stack.covered.length);
+    ctx.stat('masks', named.length);
+    ctx.stat('texels', covered.length);
     return out;
   },
 });

@@ -68,7 +68,7 @@ section('material kind');
   check(normalizeMaterial({ kind: ' painted_metal ' }).kind === 'painted_metal', 'normalizeMaterial keeps a kind, trimmed');
   check(!('kind' in normalizeMaterial({})) && !('kind' in normalizeMaterial({ kind: '' })) && !('kind' in normalizeMaterial({ kind: 3 })), 'an absent, empty or non-text kind is not written, so tables and fingerprints stay the same');
   check(JSON.stringify(normalizeMaterial({ baseColor: '#ff0000' as any })) === JSON.stringify({ baseColor: [0.8, 0.8, 0.8], metallic: 0, roughness: 0.8, emissive: [0, 0, 0], alpha: 1, doubleSided: false, unlit: false }), 'a material without a kind serialises as it always did');
-  check(MATERIAL_KINDS.length === 11 && MATERIAL_KINDS.includes('keep'), 'eleven kinds, keep among them');
+  check(MATERIAL_KINDS.length === 16 && MATERIAL_KINDS.includes('keep'), 'sixteen kinds, keep among them');
   const g = (await cook(SCENE, 'uv')).geo;
   const t = readMaterials(g);
   check(t.paint.kind === 'painted_metal' && !('kind' in t.brushed), 'the material node writes its kind param into the table, and nothing when it is empty');
@@ -396,6 +396,20 @@ const plane = (size: [number, number] = [2, 2], res: number | [number, number] =
   base: { type: 'bake_material', in: ['uv'], params: { resolution: res, padding: 2, ...extra } },
 });
 
+/** A flat 2 m grid with a constant tangent-space normal map (0.6, 2g − 1, 0.8) on uv = (x, z) / 4 + 0.5, baked on bakeUV. */
+const tilted = (format: string, g: number, bakeUV: string): Nodes => ({
+  r: { type: 'tex_constant', params: { resolution: 8, value: 0.8 } },
+  nm: { type: 'tex_channel', in: ['r'], params: { fill: [0, g, 0.9, 1] } },
+  quad: { type: 'grid', params: { size: [2, 2], divisions: [2, 2] } },
+  withmap: { type: 'merge', in: ['quad', 'nm'] },
+  mat: { type: 'material', in: ['withmap'], params: { name: 'bumpy', normal_map: 'image:nm', normal_format: format } },
+  uv: { type: 'uv_project', in: ['mat'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } },
+  uv2: { type: 'wrangle', in: ['uv'], params: { run_over: 'points', code: 'v@uv2 = set(@P.z / 2 + 0.5, -@P.x / 2 + 0.5, 0);' } },
+  base: { type: 'bake_material', in: ['uv2'], params: { resolution: RES, padding: 2, uv_attrib: bakeUV } },
+});
+/** a unit-vector component as a normal map stores it */
+const enc = (v: number) => 0.5 + 0.5 * v;
+
 section('bake_material: packed maps, uv, names');
 {
   // texture_to_material packs roughness and metallic into <material>_orm and sets both factors to 1
@@ -414,10 +428,21 @@ section('bake_material: packed maps, uv, names');
   const only: Nodes = { ...packed, pk: { type: 'texture_to_material', in: ['quad', 'imgs'], params: { material: 'pk', roughness: 'rgh' } } };
   const ob = img(await cook(only, 'base'), 'base');
   check(near(px(ob, 'roughness', 30, 30)[0], 0.2, 1e-5), 'a roughness map alone gives its value');
-  // a normal map is named in a warning
-  const withNormal: Nodes = { ...packed, pk: { type: 'texture_to_material', in: ['quad', 'imgs'], params: { material: 'bumpy', normal: 'rgh', roughness: 'rgh' } } };
-  const wn = await cook(withNormal, 'base');
-  check(wn.warnings.some((m) => m.includes('bake_material: material "bumpy" has a normal map; its detail is not carried')), 'a normal map is named in a warning: ' + wn.warnings.join('; '));
+  // a normal map is carried, re-expressed in the tangent frame of the bake's uv. Known case: a flat grid (N = +y), maps
+  // on uv = (x, z) / 4 + 0.5 (tangent +x, bitangent +z), a constant map tilted toward its tangent: (0.6, 0, 0.8), so the
+  // world normal is (0.6, 0.8, 0). Baked on the same uv it comes back as it was; baked on uv2 = (z, −x) / 2 + 0.5
+  // (tangent +z, bitangent −x) it reads (0, −0.6, 0.8); a DirectX map (green down) tilts the other way along v.
+  const nAt = async (nodes: Nodes) => { const c = await cook(nodes, 'base'); return { n: px(img(c, 'base'), 'normal', 32, 32), warnings: c.warnings }; };
+  const sameUV = await nAt(tilted('opengl', 0.5, 'uv'));
+  check(near(sameUV.n[0], enc(0.6), 0.01) && near(sameUV.n[1], enc(0), 0.01) && near(sameUV.n[2], enc(0.8), 0.01), `a normal map baked on its own uv comes back as it was (${sameUV.n.slice(0, 3).map((v) => v.toFixed(3)).join(', ')})`);
+  check(!sameUV.warnings.some((m) => m.includes('normal')), 'and no warning about it: ' + sameUV.warnings.join('; '));
+  const turned = await nAt(tilted('opengl', 0.5, 'uv2'));
+  check(near(turned.n[0], enc(0), 0.01) && near(turned.n[1], enc(-0.6), 0.01) && near(turned.n[2], enc(0.8), 0.01), `on a turned uv it is re-expressed in that frame: (0, −0.6, 0.8) (${turned.n.slice(0, 3).map((v) => v.toFixed(3)).join(', ')})`);
+  const dx = await nAt(tilted('directx', 0.2, 'uv'));
+  const k = 0.6 / Math.hypot(0.6, 0.6, 0.8); // (0.6, 0.6, 0.8) normalised
+  check(near(dx.n[0], enc(k), 0.01) && near(dx.n[1], enc(k), 0.01), `a DirectX map has its green flipped: (0.6, −0.6) reads (0.6, 0.6), normalised (${dx.n.slice(0, 3).map((v) => v.toFixed(3)).join(', ')})`);
+  const noMap = img(await cook(packed, 'base'), 'base');
+  check(!noMap.layers.has('normal'), 'no material with a normal map: no normal layer');
 
   // maps on "uv", a bake laid out on "uv2"
   const two: Nodes = {
@@ -636,6 +661,58 @@ section('tex_layers: the pool\'s limits and errors');
   e = await run('1 +* 2');
   check(e.includes('layer "x" mask: expression syntax error'), 'a syntax error is found before the pool is used');
   check(limited.poolStats.parallel >= 0, 'pool stats exist');
+}
+
+section('tex_layers: named masks, the masks image, image layers, the base normal');
+{
+  const base = plane();
+  const masks = [{ name: 'a', mask: '0.25' }, { name: 'b', mask: 'a * 2' }];
+  const named: Nodes = { ...base, stack: { type: 'tex_layers', in: ['base'], params: { masks, layers: [{ name: 'red', mask: 'b', color: '#ff0000' }] } } };
+  const nc = await cook(named, 'stack');
+  const mi = img(nc, 'stack_masks');
+  check(near(px(mi, 'a', 32, 32)[0], 0.25) && near(px(mi, 'b', 32, 32)[0], 0.5), `named masks are written as layers of <name>_masks, a later one reading an earlier one (${px(mi, 'a', 32, 32)[0]}, ${px(mi, 'b', 32, 32)[0]})`);
+  const grey = px(img(await cook({ ...base, stack: { type: 'tex_layers', in: ['base'], params: { layers: [] } } }, 'stack'), 'stack_base_color'), 'C', 32, 32);
+  const half = px(img(nc, 'stack_base_color'), 'C', 32, 32);
+  check(near(half[0], (grey[0] + 1) / 2, 1e-4) && near(half[1], grey[1] / 2, 1e-4), `a layer mask that names a mask uses it (${half.slice(0, 3).map((v) => v.toFixed(3)).join(', ')})`);
+  check(mi.layers.has('mask') && mi.layers.has('texel') && mi.layers.has('island'), 'the masks image keeps coverage, texel and island');
+  const only = await cook({ ...named, stack: { ...named.stack, params: { ...named.stack.params, outputs: 'masks' } } }, 'stack');
+  check(only.geo.volumes.length === 1 && only.geo.volumes[0].name === 'stack_masks', `outputs masks writes the masks image alone (${only.geo.volumes.map((v) => v.name).join(', ')})`);
+  const maps = await cook({ ...named, stack: { ...named.stack, params: { ...named.stack.params, outputs: 'maps' } } }, 'stack');
+  check(!maps.geo.volumes.some((v) => v.name === 'stack_masks'), 'outputs maps leaves it out');
+  const ser = img(await cook(named, 'stack', serial), 'stack_masks'), poo = img(await cook(named, 'stack', pooled), 'stack_masks');
+  check(same(ser.layer('b')!, poo.layer('b')!), 'named masks are bit-identical with the pool and without it');
+  const bad = async (m: unknown, layers: unknown[] = []) => err({ ...base, stack: { type: 'tex_layers', in: ['base'], params: { masks: m, layers } } }, 'stack');
+  let e = await bad([{ name: 'a', mask: '1' }, { name: 'a', mask: '0' }]);
+  check(e.includes('"a"') && /twice|more than once|unique/.test(e), 'two masks of one name are refused: ' + e);
+  e = await bad([{ name: 'fit', mask: '1' }, { name: 'b', mask: 'fit * 2' }]);
+  check(e.includes('mask "fit" is called like the helper function'), 'a mask named like a helper is refused where an expression reads it: ' + e);
+  e = await bad([{ name: 'a' }]);
+  check(e.includes('"a"'), 'a mask without an expression is refused: ' + e);
+
+  // an image layer: colour and roughness from a projected image, mixed in by its mask
+  const tex: Nodes = {
+    ...base,
+    n: { type: 'tex_noise', params: { resolution: 64, texture_size: 0.5 } },
+    rg: { type: 'tex_constant', params: { resolution: 8, value: 0.35 } },
+    imgs: { type: 'merge', in: ['n', 'rg'] },
+    proj: { type: 'bake_triplanar', in: ['uv', 'imgs'], params: { resolution: RES, padding: 2, color: 'n', roughness: 'rg' } },
+    stack: { type: 'tex_layers', in: ['base', 'proj'], params: { layers: [{ name: 'photo', mask: '1', image: 'proj' }] } },
+  };
+  const tc = await cook(tex, 'stack'), pr = img(await cook(tex, 'proj'), 'proj');
+  const c1 = px(img(tc, 'stack_base_color'), 'C', 20, 40), p1 = px(pr, 'C', 20, 40);
+  check(near(c1[0], p1[0], 1e-4) && near(c1[1], p1[1], 1e-4), `an image layer at mask 1 takes the image's colour (${c1[0].toFixed(3)} for ${p1[0].toFixed(3)})`);
+  check(near(px(img(tc, 'stack_orm'), 'C', 20, 40)[1], 0.35, 1e-4), 'and its roughness');
+  e = await err({ ...tex, stack: { ...tex.stack, params: { layers: [{ name: 'photo', mask: '1', image: 'nope' }] } } }, 'stack');
+  check(e.includes('image "nope"') && e.includes('proj'), 'an image layer naming no image is refused with the images listed: ' + e);
+  e = await err({ ...tex, stack: { ...tex.stack, params: { layers: [{ name: 'photo', mask: '1', image: 'proj', color: '#ff0000' }] } } }, 'stack');
+  check(e.includes('photo'), 'a layer with both color and image is refused: ' + e);
+
+  // the base normal (a carried normal map) is kept under the stack's own relief
+  const nb: Nodes = { ...tilted('opengl', 0.5, 'uv'), stack: { type: 'tex_layers', in: ['base'], params: { layers: [] } } };
+  const sn = px(img(await cook(nb, 'stack'), 'stack_normal'), 'C', 32, 32);
+  check(near(sn[0], enc(0.6), 0.01) && near(sn[2], enc(0.8), 0.01), `the base normal comes through the stack (${sn.slice(0, 3).map((v) => v.toFixed(3)).join(', ')})`);
+  const flatBase = px(img(await cook({ ...base, stack: { type: 'tex_layers', in: ['base'], params: { layers: [] } } }, 'stack'), 'stack_normal'), 'C', 32, 32);
+  check(near(flatBase[0], 0.5, 1e-4) && near(flatBase[1], 0.5, 1e-4), 'without a base normal the normal stays flat');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

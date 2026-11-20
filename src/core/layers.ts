@@ -47,6 +47,17 @@ export interface Stack {
   relief: Float32Array;
   /** indices of the covered pixels, ascending */
   covered: Uint32Array;
+  /** tangent-space normal (RGBA, OpenGL) under the height: the base's normal map and the layers' image normals, or null when none */
+  normal: Float32Array | null;
+}
+
+/** Per-texel values a layer takes from an image instead of its constants (each of the base's size, or null). */
+export interface LayerSource {
+  /** RGBA colour */
+  color: Float32Array | null;
+  roughness: Float32Array | null;
+  /** RGBA tangent-space normal (OpenGL) */
+  normal: Float32Array | null;
 }
 
 const clamp01 = (x: number) => (x > 0 ? (x < 1 ? x : 1) : 0);
@@ -65,7 +76,7 @@ export function coveredIndices(coverage: Float32Array | null, n: number): Uint32
  * A stack over the base: colour (RGBA or grey, as the layer's channels say), roughness and metallic (1 channel, or a
  * constant when a number) on the covered pixels. Values outside the coverage stay 0.
  */
-export function startStack(w: number, h: number, base: Float32Array, baseCh: number, roughness: Float32Array | number, metallic: Float32Array | number, covered: Uint32Array): Stack {
+export function startStack(w: number, h: number, base: Float32Array, baseCh: number, roughness: Float32Array | number, metallic: Float32Array | number, covered: Uint32Array, normal: Float32Array | null = null): Stack {
   const n = w * h, count = covered.length;
   const color = new Float32Array(n * 4), rough = new Float32Array(n), metal = new Float32Array(n), relief = new Float32Array(n);
   for (let q = 0; q < count; q++) {
@@ -75,7 +86,12 @@ export function startStack(w: number, h: number, base: Float32Array, baseCh: num
     rough[i] = typeof roughness === 'number' ? roughness : roughness[i];
     metal[i] = typeof metallic === 'number' ? metallic : metallic[i];
   }
-  return { width: w, height: h, color, roughness: rough, metallic: metal, relief, covered };
+  let nrm: Float32Array | null = null;
+  if (normal) {
+    nrm = new Float32Array(n * 4);
+    for (let q = 0; q < count; q++) { const o = covered[q] * 4; nrm[o] = normal[o]; nrm[o + 1] = normal[o + 1]; nrm[o + 2] = normal[o + 2]; nrm[o + 3] = 1; }
+  }
+  return { width: w, height: h, color, roughness: rough, metallic: metal, relief, covered, normal: nrm };
 }
 
 /**
@@ -83,15 +99,16 @@ export function startStack(w: number, h: number, base: Float32Array, baseCh: num
  * -1..1 for roughness_offset and height of a signed layer) and `colorBy` the value that picks the ramp position (null
  * when the colour is not a ramp).
  */
-export function applyLayer(s: Stack, L: LayerSpec, mask: Float32Array, colorBy: Float32Array | null): void {
+export function applyLayer(s: Stack, L: LayerSpec, mask: Float32Array, colorBy: Float32Array | null, src: LayerSource | null = null): void {
   const { color, roughness, metallic, relief, covered } = s;
+  const srcC = src?.color ?? null, srcR = L.roughness === null ? src?.roughness ?? null : null, srcN = src?.normal ?? null, nrm = s.normal;
   const col = L.color;
   const lut = col && !Array.isArray(col) ? col.lut : null, lutMax = col && !Array.isArray(col) ? col.n - 1 : 0;
   const flat = col && Array.isArray(col) ? col : null;
   const fr = flat ? flat[0] : 0, fg = flat ? flat[1] : 0, fb = flat ? flat[2] : 0;
   const rough = L.roughness, off = L.roughnessOffset, metal = L.metallic, hgt = L.height, op = L.opacity, signed = L.signed;
   const mode = L.mode === 'multiply' ? 1 : L.mode === 'lighten' ? 2 : L.mode === 'overlay' ? 3 : 0;
-  const hasRough = rough !== null, hasMetal = metal !== null, offsets = off !== 0 || hgt !== 0, count = covered.length;
+  const hasRough = rough !== null || !!srcR, hasMetal = metal !== null, offsets = off !== 0 || hgt !== 0, count = covered.length;
   for (let q = 0; q < count; q++) {
     const i = covered[q];
     const m = mask[i];
@@ -100,9 +117,10 @@ export function applyLayer(s: Stack, L: LayerSpec, mask: Float32Array, colorBy: 
     const sa = signed ? (m > -1 ? (m < 1 ? m : 1) : -1) * op : a;
     if (!(a > 0)) { if (!(signed && offsets && sa !== 0)) continue; }
     else {
-      if (col) {
+      if (col || srcC) {
         let r = fr, g = fg, b = fb;
-        if (lut) {
+        if (srcC) { r = srcC[i * 4]; g = srcC[i * 4 + 1]; b = srcC[i * 4 + 2]; }
+        else if (lut) {
           const t = colorBy ? colorBy[i] : 0, k = Math.round((t > 0 ? (t < 1 ? t : 1) : 0) * lutMax) * 3;
           r = lut[k]; g = lut[k + 1]; b = lut[k + 2];
         }
@@ -120,8 +138,16 @@ export function applyLayer(s: Stack, L: LayerSpec, mask: Float32Array, colorBy: 
         }
         color[o] = br + (tr - br) * a; color[o + 1] = bg + (tg - bg) * a; color[o + 2] = bb + (tb - bb) * a;
       }
-      if (hasRough) roughness[i] += (rough - roughness[i]) * a;
+      if (hasRough) roughness[i] += ((srcR ? srcR[i] : rough!) - roughness[i]) * a;
       if (hasMetal) metallic[i] += (metal - metallic[i]) * a;
+      if (srcN && nrm) {
+        // the normal turns toward the image's by the mask (renormalised)
+        const o = i * 4;
+        let x = nrm[o] * 2 - 1, y = nrm[o + 1] * 2 - 1, z = nrm[o + 2] * 2 - 1;
+        x += (srcN[o] * 2 - 1 - x) * a; y += (srcN[o + 1] * 2 - 1 - y) * a; z += (srcN[o + 2] * 2 - 1 - z) * a;
+        const l = Math.hypot(x, y, z) || 1;
+        nrm[o] = 0.5 + (0.5 * x) / l; nrm[o + 1] = 0.5 + (0.5 * y) / l; nrm[o + 2] = 0.5 + (0.5 * z) / l;
+      }
     }
     if (off !== 0) roughness[i] += off * sa;
     if (hgt !== 0) relief[i] += hgt * sa;
@@ -194,6 +220,22 @@ export function normalFromRelief(relief: Float32Array, w: number, h: number, cov
 }
 
 /**
+ * The relief's normal laid over a normal map (both RGBA, OpenGL, tangent space) on the covered texels, by the whiteout
+ * blend: n = normalize(b.xy + r.xy, b.z · r.z), so a flat relief keeps the map exactly and a chip tilts the detail
+ * with it. directx flips the green channel of the result. Writes into `relief` and returns it.
+ */
+export function overlayNormals(base: Float32Array, relief: Float32Array, covered: Uint32Array, directx: boolean): Float32Array {
+  for (let q = 0; q < covered.length; q++) {
+    const o = covered[q] * 4;
+    const bx = base[o] * 2 - 1, by = base[o + 1] * 2 - 1, bz = base[o + 2] * 2 - 1;
+    const rx = relief[o] * 2 - 1, ry = relief[o + 1] * 2 - 1, rz = relief[o + 2] * 2 - 1;
+    const x = bx + rx, y = by + ry, z = bz * rz, l = Math.hypot(x, y, z) || 1;
+    relief[o] = 0.5 + (0.5 * x) / l; relief[o + 1] = 0.5 + (0.5 * y * (directx ? -1 : 1)) / l; relief[o + 2] = 0.5 + (0.5 * z) / l;
+  }
+  return relief;
+}
+
+/**
  * The maps of a composed stack: base colour, normal (from the summed height, see normalFromRelief), ORM and height,
  * each padded from the covered texels through one padding map (the nearest covered texel within `padding`, a neutral
  * background beyond).
@@ -209,7 +251,8 @@ export function finishStack(s: Stack, o: FinishOptions): FinishedMaps {
     baseColor[c] = clamp01(s.color[c]); baseColor[c + 1] = clamp01(s.color[c + 1]); baseColor[c + 2] = clamp01(s.color[c + 2]); baseColor[c + 3] = 1;
     orm[c] = o.occlusion ? clamp01(o.occlusion[i]) : 1; orm[c + 1] = clamp01(s.roughness[i]); orm[c + 2] = clamp01(s.metallic[i]); orm[c + 3] = 1;
   }
-  const normal = normalFromRelief(s.relief, w, h, covered, { coverage: o.coverage, island: o.island, texel: o.texel, size: o.size, directx: o.directx });
+  let normal = normalFromRelief(s.relief, w, h, covered, { coverage: o.coverage, island: o.island, texel: o.texel, size: o.size, directx: s.normal ? false : o.directx });
+  if (s.normal) normal = overlayNormals(s.normal, normal, covered, o.directx);
   const height = s.relief;
   if (o.coverage) {
     const map = paddingMap(o.coverage, w, h, pad);
