@@ -16,7 +16,7 @@ import {
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
 import { bakeMemoStats } from '../core/bake.ts';
-import { PAST_DEADLINE, runBuried, runCurvature, runInterp, surfaceCloud, surfaceMesh, afterRun } from '../core/surface.ts';
+import { contactBuried, PAST_DEADLINE, rayBias, runBuried, runCurvature, runInterp, surfaceCloud, surfaceMesh, afterRun } from '../core/surface.ts';
 import type { SurfaceCloud, SurfaceMesh } from '../core/surface.ts';
 import { RayScene, bboxDiagonal } from '../core/analysis.ts';
 import type { RaySampleOptions } from '../core/analysis.ts';
@@ -209,7 +209,7 @@ export function cloudOf(b: Bake, mesh: SurfaceMesh, k: number): SurfaceCloud {
  * kernel's args (a kernel past it stops, on the pool or on this thread), and either way the node fails with the time
  * limit's error.
  */
-export function surfaceRunner(ctx: CookContext, hint: string): { run: (kernel: string, job: any, o?: any) => any; deadline: number; check: () => void } {
+export function surfaceRunner(ctx: CookContext, hint: string): { run: (kernel: string, job: any, o?: any) => any; deadline: number; check: () => void; guard: <T>(f: () => T) => T } {
   const budget = simBudget(ctx, hint), deadline = Date.now() + budget.left();
   const fail = (e: unknown): never => { if (String((e as any)?.message ?? e).includes(PAST_DEADLINE)) throw budget.error(); throw e; };
   const run = (kernel: string, job: any, o?: any) => {
@@ -219,7 +219,15 @@ export function surfaceRunner(ctx: CookContext, hint: string): { run: (kernel: s
       return r instanceof Promise ? r.catch(fail) : r;
     } catch (e) { return fail(e); }
   };
-  return { run, deadline, check: () => budget.check() };
+  // the work done outside the kernels (the refinement, the contact test, the settling) stops at the deadline too: its
+  // stop reads as the node's time limit
+  const guard = <T,>(f: () => T): T => {
+    try {
+      const r = f();
+      return (r instanceof Promise ? r.catch(fail) : r) as T;
+    } catch (e) { return fail(e); }
+  };
+  return { run, deadline, check: () => budget.check(), guard };
 }
 
 /** Curvature radius limit of the surface method: half the model's bounding-box diagonal. */
@@ -230,10 +238,17 @@ export function checkSurfaceRadius(b: Bake, r: number, what: string): void {
 /** Which cloud points lie inside a solid (null when nothing can bury anything); `sur` the surroundings in the scene. */
 export function buriedOf(b: Bake, mesh: SurfaceMesh, sc: SurfaceCloud, scene: () => RayScene, sur: Geometry | null, run: (kernel: string, job: any, o?: any) => any, deadline: number): Uint8Array | null | Promise<Uint8Array | null> {
   const t0 = performance.now();
-  return afterRun(runBuried(run, sc, mesh, scene(), sur, deadline), (B) => {
+  const S = scene();
+  return afterRun(runBuried(run, sc, mesh, S, sur, deadline), (B0) => {
+    // and the points on faces pressed against another face (stacked flush, a part sunk into the ground)
+    const P = contactBuried(sc, mesh, b.tris, S, 4 * rayBias(mesh.diag), deadline);
+    let B = B0;
+    // bit 1: inside another part (rays), bit 2: pressed against another face (a refined cloud's dense points take the
+    // first from their neighbours and test the second themselves)
+    if (P) { B ??= new Uint8Array(P.length); for (let i = 0; i < P.length; i++) B[i] |= P[i] << 1; }
     if (B) {
       let k = 0;
-      for (let i = 0; i < B.length; i++) k += B[i];
+      for (let i = 0; i < B.length; i++) if (B[i]) k++;
       b.ctx.stat('buried_points', k);
       b.ctx.stage('buried', performance.now() - t0);
     }

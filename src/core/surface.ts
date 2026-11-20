@@ -324,7 +324,7 @@ export function measureNormals(g: Geometry, o: Orientation, shading: Float64Arra
 /** Thrown by a surface kernel whose args.deadline (Date.now() milliseconds, 0 = none) has passed; nodes turn it into their time-limit error. */
 export const PAST_DEADLINE = 'surface measure: past the deadline';
 /** Every 256 elements: has the deadline passed? (the same on the pool and on the cooking thread) */
-const late = (deadline: number | undefined, i: number) => !!deadline && (i & 255) === 0 && Date.now() > deadline;
+export const late = (deadline: number | undefined, i: number) => !!deadline && (i & 255) === 0 && Date.now() > deadline;
 
 /** The ray offset for a model of bounding-box diagonal `diag`: 10⁻⁴ of it, at most 1 mm. */
 export const rayBias = (diag: number) => Math.min(1e-4 * (diag || 1), 0.001);
@@ -860,8 +860,10 @@ export function thinCloud(c: Cloud, CB: Uint8Array | null, h: number): { n: numb
     if (x < lx) lx = x; if (x > hx) hx = x; if (y < ly) ly = y; if (y > hy) hy = y; if (z < lz) lz = z; if (z > hz) hz = z;
     if (c.piece[i] >= np) np = c.piece[i] + 1;
   }
-  // a number per cell, side and part (a string where that number would not be exact)
-  const nx = Math.floor((hx - lx) / h) + 1, ny = Math.floor((hy - ly) / h) + 1, nz = Math.floor((hz - lz) / h) + 1;
+  // a number per cell, side and part (a string where that number would not be exact); cells on a lattice fixed in the
+  // world (cell i spans [i h, (i + 1) h)), so a part's cells do not move when other parts are added
+  const bx = Math.floor(lx / h), by = Math.floor(ly / h), bz = Math.floor(lz / h);
+  const nx = Math.floor(hx / h) - bx + 1, ny = Math.floor(hy / h) - by + 1, nz = Math.floor(hz / h) - bz + 1;
   const exact = nx * ny * nz * 6 * np < Number.MAX_SAFE_INTEGER;
   const ids = new Map<number | string, number>();
   for (let i = 0; i < c.n; i++) {
@@ -870,7 +872,7 @@ export function thinCloud(c: Cloud, CB: Uint8Array | null, h: number): { n: numb
     const x = c.P[i * 3], y = c.P[i * 3 + 1], z = c.P[i * 3 + 2], nx_ = c.N[i * 3], ny_ = c.N[i * 3 + 1], nz_ = c.N[i * 3 + 2];
     const ax = Math.abs(nx_), ay = Math.abs(ny_), az = Math.abs(nz_);
     const side = ax >= ay && ax >= az ? (nx_ > 0 ? 0 : 1) : ay >= az ? (ny_ > 0 ? 2 : 3) : nz_ > 0 ? 4 : 5;
-    const ix = Math.floor((x - lx) / h), iy = Math.floor((y - ly) / h), iz = Math.floor((z - lz) / h);
+    const ix = Math.floor(x / h) - bx, iy = Math.floor(y / h) - by, iz = Math.floor(z / h) - bz;
     const key = exact ? (((iz * ny + iy) * nx + ix) * 6 + side) * np + c.piece[i] : `${ix},${iy},${iz},${c.piece[i]},${side}`;
     let j = ids.get(key);
     if (j === undefined) { j = W.length; ids.set(key, j); P.push(0, 0, 0); N.push(0, 0, 0); W.push(0); piece.push(c.piece[i]); }
@@ -916,6 +918,9 @@ export function cloudGrid(P: Float64Array, n: number, h: number): { GH: Float64A
   let s = Math.max(h, 1e-9);
   const cells = (q: number) => (Math.floor((hx - lx) / q) + 1) * (Math.floor((hy - ly) / q) + 1) * (Math.floor((hz - lz) / q) + 1);
   while (cells(s) > 8e6) s *= 1.5;
+  // cells on a lattice fixed in the world: a part's points meet in the same cells, in the same order, whatever else the
+  // cloud holds (sums over them come out the same to the bit)
+  lx = Math.floor(lx / s) * s; ly = Math.floor(ly / s) * s; lz = Math.floor(lz / s) * s;
   const nx = Math.floor((hx - lx) / s) + 1, ny = Math.floor((hy - ly) / s) + 1, nz = Math.floor((hz - lz) / s) + 1;
   const cellOf = new Int32Array(n), GS = new Int32Array(nx * ny * nz + 1);
   for (let i = 0; i < n; i++) {
@@ -1217,6 +1222,101 @@ function flatNormals(VP: Float64Array, tris: Uint32Array, tri: Int32Array, N: Fl
   return FN;
 }
 
+/**
+ * How fast a triangle's shading normals turn (radians per metre): the fastest along any of its edges, so a long thin
+ * bevel triangle turns across its short side. Vertex offsets a, b, c into VP and VN.
+ */
+function turnRate(VP: Float64Array | Float32Array, VN: Float64Array | Float32Array, a: number, b: number, c: number): number {
+  let rate = 0;
+  for (const [p, q] of [[a, b], [b, c], [c, a]]) {
+    const l = Math.hypot(VP[p] - VP[q], VP[p + 1] - VP[q + 1], VP[p + 2] - VP[q + 2]);
+    if (l > 0) rate = Math.max(rate, Math.acos(Math.max(-1, Math.min(1, VN[p] * VN[q] + VN[p + 1] * VN[q + 1] + VN[p + 2] * VN[q + 2]))) / l);
+  }
+  return rate;
+}
+
+/** Faces bending this much (radians) between two triangles part two wear regions. */
+const REGION_BEND = (20 * Math.PI) / 180;
+/** A triangle whose shading turns fast enough to read this at the radius is part of an edge, not a face (wearRegions). */
+const EDGE_READ = 0.3;
+
+/**
+ * The faces of a model for the wear cap, from the mesh (so they depend neither on the uv layout nor on the texel
+ * density): triangles that do not read as an edge at radius r, joined across mesh edges where neither the shading
+ * breaks (HARD_TURN) nor the faces bend by REGION_BEND or more; then every edge triangle (a bevel, a crease) joins the
+ * nearest face across the mesh. A piece with no such face is one region. Returns the region of every triangle (-1 when
+ * skipped) and how many there are.
+ */
+export function wearRegions(g: Geometry, mesh: SurfaceMesh, tris: Uint32Array, skip: Uint8Array | null, r: number, deadline = 0): { triRegion: Int32Array; count: number } {
+  const VP = mesh.VP, VN = mesh.VN, vp = g.vertexPoint, nt = mesh.triPiece.length;
+  const ang = (a: number, b: number) => Math.acos(Math.max(-1, Math.min(1, VN[a] * VN[b] + VN[a + 1] * VN[b + 1] + VN[a + 2] * VN[b + 2])));
+  const FN = new Float64Array(nt * 3), edge = new Uint8Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const a = tris[t * 3] * 3, b = tris[t * 3 + 1] * 3, c = tris[t * 3 + 2] * 3;
+    const ux = VP[b] - VP[a], uy = VP[b + 1] - VP[a + 1], uz = VP[b + 2] - VP[a + 2], wx = VP[c] - VP[a], wy = VP[c + 1] - VP[a + 1], wz = VP[c + 2] - VP[a + 2];
+    const x = uy * wz - uz * wy, y = uz * wx - ux * wz, z = ux * wy - uy * wx, l = Math.hypot(x, y, z);
+    if (l > 0) { FN[t * 3] = x / l; FN[t * 3 + 1] = y / l; FN[t * 3 + 2] = z / l; }
+    if (1.5 * r * turnRate(VP, VN, a, b, c) >= EDGE_READ) edge[t] = 1;
+  }
+  // union-find over the face triangles; neighbours of every triangle for the edge triangles
+  const parent = new Int32Array(nt);
+  for (let t = 0; t < nt; t++) parent[t] = t;
+  const find = (t: number): number => { while (parent[t] !== t) { parent[t] = parent[parent[t]]; t = parent[t]; } return t; };
+  const nbr: number[][] = Array.from({ length: nt }, () => []);
+  const first = new Map<number, number>(), cosBend = Math.cos(REGION_BEND);
+  for (let t = 0; t < nt; t++) {
+    if (late(deadline, t)) throw new Error(PAST_DEADLINE);
+    if (skip && skip[t]) continue;
+    for (let e = 0; e < 3; e++) {
+      const va = tris[t * 3 + e], vb = tris[t * 3 + ((e + 1) % 3)], pa = vp[va], pb = vp[vb];
+      if (pa === pb) continue;
+      const key = pa < pb ? pa * 4294967296 + pb : pb * 4294967296 + pa;
+      const o = first.get(key);
+      if (o === undefined) { first.set(key, t); continue; }
+      if (mesh.triPiece[o] !== mesh.triPiece[t] || (skip && skip[o])) continue;
+      nbr[t].push(o); nbr[o].push(t);
+      if (edge[t] || edge[o]) continue;
+      if (FN[t * 3] * FN[o * 3] + FN[t * 3 + 1] * FN[o * 3 + 1] + FN[t * 3 + 2] * FN[o * 3 + 2] < cosBend) continue;
+      let oa = -1, ob = -1;
+      for (let q = 0; q < 3; q++) { const w = tris[o * 3 + q]; if (vp[w] === pa) oa = w; else if (vp[w] === pb) ob = w; }
+      if (oa >= 0 && ob >= 0 && (ang(va * 3, oa * 3) >= HARD_TURN || ang(vb * 3, ob * 3) >= HARD_TURN)) continue;
+      const ra = find(t), rb = find(o);
+      if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+    }
+  }
+  const triRegion = new Int32Array(nt).fill(-1), id = new Map<number, number>();
+  for (let t = 0; t < nt; t++) {
+    if ((skip && skip[t]) || edge[t]) continue;
+    const root = find(t);
+    let k = id.get(root);
+    if (k === undefined) id.set(root, (k = id.size));
+    triRegion[t] = k;
+  }
+  // edge triangles join the nearest face across the mesh (breadth first, from every face triangle at once; ties to the
+  // lower triangle index)
+  let front: number[] = [];
+  for (let t = 0; t < nt; t++) if (triRegion[t] >= 0) front.push(t);
+  while (front.length) {
+    const next: number[] = [];
+    for (const t of front) for (const o of nbr[t]) if (triRegion[o] < 0 && !(skip && skip[o])) { triRegion[o] = triRegion[t]; next.push(o); }
+    front = next;
+  }
+  // a piece with no face: one region
+  const pieceRegion = new Map<number, number>();
+  for (let t = 0; t < nt; t++) {
+    if (triRegion[t] >= 0 || (skip && skip[t])) continue;
+    const pc = mesh.triPiece[t];
+    let k = pieceRegion.get(pc);
+    if (k === undefined) pieceRegion.set(pc, (k = id.size + pieceRegion.size));
+    triRegion[t] = k;
+  }
+  return { triRegion, count: id.size + pieceRegion.size };
+}
+
+/** The most dense points a refined cloud may hold; past it refineCloud throws TOO_DENSE. */
+export const MAX_DENSE = 6_000_000;
+export const TOO_DENSE = 'too many dense points';
+
 /** A refined cloud: its kept ordinary points first, then `fine` dense ones. */
 export interface RefinedCloud {
   sc: SurfaceCloud;
@@ -1225,35 +1325,96 @@ export interface RefinedCloud {
   of: Int32Array;
 }
 
+/** Shading normals turning by this much (radians) across a mesh edge make it a hard edge for the bend zones. */
+const HARD_TURN = (10 * Math.PI) / 180;
+/** A triangle is in a bend zone when its shading normals turn fast enough to read this at the radius (1.5 r turnRate). */
+const TURN_READ = 0.1;
+
 /**
- * The cloud `sc` refined where the shape bends: space within mark[i] metres of a point (0: none) gets dense points
+ * Where the shape bends at radius r, read from the mesh itself (so it depends neither on the uv layout nor on the texel
+ * density): every mesh edge across which the shading normals of one piece turn by HARD_TURN or more, and every
+ * triangle whose own shading normals turn fast enough (turnRate) to read TURN_READ at the radius (a bevel, a fillet,
+ * a small round). Returns points on them at most `step` apart (gap: how far a point of them can be from the nearest),
+ * with the length of the hard edges and the area of the turning triangles.
+ */
+export function bendSamples(g: Geometry, mesh: SurfaceMesh, tris: Uint32Array, skip: Uint8Array | null, r: number, step: number, deadline = 0): { P: Float64Array; gap: number; length: number; area: number } {
+  const VP = mesh.VP, VN = mesh.VN, vp = g.vertexPoint, nt = mesh.triPiece.length, out: number[] = [];
+  const ang = (a: number, b: number) => Math.acos(Math.max(-1, Math.min(1, VN[a] * VN[b] + VN[a + 1] * VN[b + 1] + VN[a + 2] * VN[b + 2])));
+  const el = (a: number, b: number) => Math.hypot(VP[a] - VP[b], VP[a + 1] - VP[b + 1], VP[a + 2] - VP[b + 2]);
+  let length = 0, area = 0;
+  const seg = (a: number, b: number) => {
+    const l = el(a, b), m = Math.max(1, Math.ceil(l / step));
+    length += l;
+    for (let k = 0; k <= m; k++) { const f = k / m; out.push(VP[a] + (VP[b] - VP[a]) * f, VP[a + 1] + (VP[b + 1] - VP[a + 1]) * f, VP[a + 2] + (VP[b + 2] - VP[a + 2]) * f); }
+  };
+  const first = new Map<number, number>();
+  for (let t = 0; t < nt; t++) {
+    if (late(deadline, t)) throw new Error(PAST_DEADLINE);
+    if (skip && skip[t]) continue;
+    const v = [tris[t * 3] * 3, tris[t * 3 + 1] * 3, tris[t * 3 + 2] * 3];
+    let lo = 0, L = 0;
+    for (let e = 0; e < 3; e++) { const l = el(v[e], v[(e + 1) % 3]); if (l > L) { L = l; lo = e; } }
+    if (L > 0 && 1.5 * r * turnRate(VP, VN, v[0], v[1], v[2]) >= TURN_READ) {
+      // the whole triangle: rows along its longest edge a b, at most `step` apart both ways, toward the third corner c
+      const a = v[lo], b = v[(lo + 1) % 3], c = v[(lo + 2) % 3];
+      const ux = (VP[b] - VP[a]) / L, uy = (VP[b + 1] - VP[a + 1]) / L, uz = (VP[b + 2] - VP[a + 2]) / L;
+      const cx = VP[c] - VP[a], cy = VP[c + 1] - VP[a + 1], cz = VP[c + 2] - VP[a + 2], along = cx * ux + cy * uy + cz * uz;
+      const H = Math.hypot(cx - along * ux, cy - along * uy, cz - along * uz), mv = Math.max(1, Math.ceil(H / step));
+      area += 0.5 * L * H;
+      for (let i = 0; i <= mv; i++) {
+        const f = i / mv, mu = Math.max(1, Math.ceil((L * (1 - f)) / step));
+        // the row from a + f (c − a) to b + f (c − b)
+        for (let j = 0; j <= mu; j++) {
+          const g2 = j / mu;
+          for (let q = 0; q < 3; q++) { const s0 = VP[a + q] + f * (VP[c + q] - VP[a + q]), s1 = VP[b + q] + f * (VP[c + q] - VP[b + q]); out.push(s0 + g2 * (s1 - s0)); }
+        }
+      }
+    }
+    // hard edges: the same two points on another triangle of the piece with other shading normals
+    for (let e = 0; e < 3; e++) {
+      const va = tris[t * 3 + e], vb = tris[t * 3 + ((e + 1) % 3)], pa = vp[va], pb = vp[vb];
+      if (pa === pb) continue;
+      const key = pa < pb ? pa * 4294967296 + pb : pb * 4294967296 + pa;
+      const o = first.get(key);
+      if (o === undefined) { first.set(key, t * 3 + e); continue; }
+      const ot = Math.floor(o / 3);
+      if (mesh.triPiece[ot] !== mesh.triPiece[t] || (skip && skip[ot])) continue;
+      // the other triangle's vertices at the same two points
+      let oa = -1, ob = -1;
+      for (let q = 0; q < 3; q++) { const w = tris[ot * 3 + q]; if (vp[w] === pa) oa = w; else if (vp[w] === pb) ob = w; }
+      if (oa < 0 || ob < 0) continue;
+      if (ang(va * 3, oa * 3) >= HARD_TURN || ang(vb * 3, ob * 3) >= HARD_TURN) seg(va * 3, vb * 3);
+    }
+  }
+  return { P: Float64Array.from(out), gap: step, length, area };
+}
+
+/** About how many dense points refineCloud makes for these bends (bendSamples) with this margin and step. */
+export const denseEstimate = (Z: { length: number; area: number }, margin: number, step: number) => (2 * margin * Z.length + Z.area) / (step * step);
+
+/**
+ * The cloud `sc` refined where the shape bends: space within `margin` of a bend sample (bendSamples) gets dense points
  * `step` apart, laid evenly in 3D over each triangle (rows across its longest edge), so they depend neither on the uv
  * layout nor on the texel density; elsewhere the ordinary points stay. The same test decides both, so the two sets meet
  * without a gap.
  */
-export function refineCloud(sc: SurfaceCloud, mesh: SurfaceMesh, tris: Uint32Array, skip: Uint8Array | null, mark: Float32Array, step: number): RefinedCloud {
+export function refineCloud(sc: SurfaceCloud, mesh: SurfaceMesh, tris: Uint32Array, skip: Uint8Array | null, MP: Float64Array, margin: number, step: number, deadline = 0, coarse = step): RefinedCloud {
   const c = sc.cloud, VP = mesh.VP, VN = mesh.VN, nt = mesh.triPiece.length;
-  // the marked points in a grid of cells the largest margin across
-  let margin = 0;
-  const mk: number[] = [];
-  for (let i = 0; i < c.n; i++) if (mark[i] > 0) { mk.push(i); if (mark[i] > margin) margin = mark[i]; }
-  const nm = mk.length, MP = new Float64Array(nm * 3), MR = new Float64Array(nm);
-  mk.forEach((i, j) => { MP[j * 3] = c.P[i * 3]; MP[j * 3 + 1] = c.P[i * 3 + 1]; MP[j * 3 + 2] = c.P[i * 3 + 2]; MR[j] = mark[i] * mark[i]; });
+  const nm = MP.length / 3, M2 = margin * margin;
   const G = cloudGrid(MP, nm, Math.max(margin, 1e-9));
   const ox = G.GH[0], oy = G.GH[1], oz = G.GH[2], h = G.GH[3], gx = G.GH[4], gy = G.GH[5], gz = G.GH[6];
-  /** within its margin of a marked point (`grow` added to every margin) */
+  /** within the margin (+ grow) of a bend sample */
   const near = (x: number, y: number, z: number, grow = 0) => {
     if (!nm) return false;
-    const m = margin + grow;
+    const m = margin + grow, m2 = grow ? m * m : M2;
     const x0 = Math.max(0, Math.floor((x - m - ox) / h)), x1 = Math.min(gx - 1, Math.floor((x + m - ox) / h));
     const y0 = Math.max(0, Math.floor((y - m - oy) / h)), y1 = Math.min(gy - 1, Math.floor((y + m - oy) / h));
     const z0 = Math.max(0, Math.floor((z - m - oz) / h)), z1 = Math.min(gz - 1, Math.floor((z + m - oz) / h));
     for (let cz = z0; cz <= z1; cz++) for (let cy = y0; cy <= y1; cy++) {
       const row = (cz * gy + cy) * gx;
       for (let k = G.GS[row + x0], ke = G.GS[row + x1 + 1]; k < ke; k++) {
-        const dx = G.GP[k * 3] - x, dy = G.GP[k * 3 + 1] - y, dz = G.GP[k * 3 + 2] - z, d2 = dx * dx + dy * dy + dz * dz;
-        const r2 = grow ? (Math.sqrt(MR[G.GI[k]]) + grow) ** 2 : MR[G.GI[k]];
-        if (d2 <= r2) return true;
+        const dx = G.GP[k * 3] - x, dy = G.GP[k * 3 + 1] - y, dz = G.GP[k * 3 + 2] - z;
+        if (dx * dx + dy * dy + dz * dz <= m2) return true;
       }
     }
     return false;
@@ -1275,6 +1436,7 @@ export function refineCloud(sc: SurfaceCloud, mesh: SurfaceMesh, tris: Uint32Arr
     const cx = (VP[v[0]] + VP[v[1]] + VP[v[2]]) / 3, cy = (VP[v[0] + 1] + VP[v[1] + 1] + VP[v[2] + 1]) / 3, cz = (VP[v[0] + 2] + VP[v[1] + 2] + VP[v[2] + 2]) / 3;
     let rad = 0;
     for (const a of v) rad = Math.max(rad, Math.hypot(VP[a] - cx, VP[a + 1] - cy, VP[a + 2] - cz));
+    if (late(deadline, t)) throw new Error(PAST_DEADLINE);
     if (rad < 4 * margin && !near(cx, cy, cz, rad)) continue;
     const el = (a: number, b: number) => Math.hypot(VP[a] - VP[b], VP[a + 1] - VP[b + 1], VP[a + 2] - VP[b + 2]);
     const e = [el(v[1], v[2]), el(v[2], v[0]), el(v[0], v[1])];
@@ -1284,8 +1446,13 @@ export function refineCloud(sc: SurfaceCloud, mesh: SurfaceMesh, tris: Uint32Arr
     const wx = VP[v[2]] - VP[v[0]], wy = VP[v[2] + 1] - VP[v[0] + 1], wz = VP[v[2] + 2] - VP[v[0] + 2];
     const area = 0.5 * Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx);
     if (!(area > 0) || !(len > 0)) continue;
-    const st = step, ht = (2 * area) / len, rows = Math.max(1, Math.round(ht / st));
-    for (let q = 0; q < 3; q++) mins[q] = Math.min(0.3, (inset[t] * e[q]) / (2 * area));
+    // `step` apart, or as far apart as the texels where they are coarser (a finer cloud would not show in the image),
+    // up to `coarse` (the curvature needs neighbours within its radius)
+    const st = Math.max(step, Math.min(coarse, Math.max(mesh.triTexel[t * 2], mesh.triTexel[t * 2 + 1]))), ht = (2 * area) / len, rows = Math.max(1, Math.round(ht / st));
+    // kept in from the edges as the ordinary points, but never by more than a quarter step: on a large part the
+    // ordinary inset can be wider than the zone around a small radius, which would leave the zone empty
+    const ins = Math.min(inset[t], 0.25 * st);
+    for (let q = 0; q < 3; q++) mins[q] = Math.min(0.3, (ins * e[q]) / (2 * area));
     let made = 0;
     for (let j = 0; j < rows; j++) {
       const s = (j + 0.5) / rows, m = Math.max(1, Math.round(((1 - s) * len) / st)), w = (ht / rows) * (((1 - s) * len) / m);
@@ -1306,6 +1473,7 @@ export function refineCloud(sc: SurfaceCloud, mesh: SurfaceMesh, tris: Uint32Arr
         if (!inZone(px, py, pz)) continue;
         T.push(t); B.push(bs[1], bs[2]); Wt.push(w);
         made++;
+        if (T.length > MAX_DENSE) throw new Error(TOO_DENSE);
       }
     }
     if (made) TRF[t] = 2 * st;
@@ -1395,6 +1563,66 @@ export function runBuried(run: RunKernel, sc: SurfaceCloud, mesh: SurfaceMesh, s
   return afterRun(run('surface_buried', { count: c.n, args: { bias: rayBias(mesh.diag), deadline }, inputs: { P: c.P, N: c.N, FN: sc.FN, CPiece: c.piece }, results: { B }, shared: { ...arr, SSol, SBox, SPc } }, { minElements: 4096 }) as any, () => B);
 }
 
+/**
+ * Cloud points on a face pressed against another (1 = buried): a scene triangle in the same plane within `delta`, facing
+ * the other way, under the point. Whatever the pieces: two boxes stacked flush are one piece when their corners meet,
+ * and the faces between them are hidden all the same. The mesh's triangles come first in the scene (`scene` as for
+ * runBuried); a triangle finds its partners once, then only its own points are tested.
+ */
+export function contactBuried(sc: SurfaceCloud, mesh: SurfaceMesh, tris: Uint32Array, scene: RayScene, delta: number, deadline = 0): Uint8Array | null {
+  const { T, nodes, child, order } = scene.toArrays(), nt = mesh.triPiece.length, nS = order.length;
+  const c = sc.cloud, VP = mesh.VP;
+  const fn = (t: number, o: number[]) => {
+    const b = t * 9, ux = T[b + 3] - T[b], uy = T[b + 4] - T[b + 1], uz = T[b + 5] - T[b + 2], wx = T[b + 6] - T[b], wy = T[b + 7] - T[b + 1], wz = T[b + 8] - T[b + 2];
+    const x = uy * wz - uz * wy, y = uz * wx - ux * wz, z = ux * wy - uy * wx, l = Math.hypot(x, y, z);
+    o[0] = l > 0 ? x / l : 0; o[1] = l > 0 ? y / l : 0; o[2] = l > 0 ? z / l : 0;
+    return l > 0;
+  };
+  const na = [0, 0, 0], nb = [0, 0, 0], stack: number[] = [];
+  let B: Uint8Array | null = null;
+  for (let t = 0; t < nt && t < nS; t++) {
+    if (late(deadline, t)) throw new Error(PAST_DEADLINE);
+    if (c.start[t + 1] === c.start[t] || !fn(t, na)) continue;
+    const a = tris[t * 3] * 3, b = tris[t * 3 + 1] * 3, cc = tris[t * 3 + 2] * 3;
+    const lo = [0, 1, 2].map((q) => Math.min(VP[a + q], VP[b + q], VP[cc + q]) - delta), hi = [0, 1, 2].map((q) => Math.max(VP[a + q], VP[b + q], VP[cc + q]) + delta);
+    const d0 = na[0] * VP[a] + na[1] * VP[a + 1] + na[2] * VP[a + 2];
+    // the scene triangles in the same plane, facing the other way, whose box meets this one's
+    const partners: number[] = [];
+    stack.length = 0; stack.push(0);
+    while (stack.length) {
+      const n = stack.pop()!, o = n * 6;
+      if (nodes[o] > hi[0] || nodes[o + 1] > hi[1] || nodes[o + 2] > hi[2] || nodes[o + 3] < lo[0] || nodes[o + 4] < lo[1] || nodes[o + 5] < lo[2]) continue;
+      const c0 = child[n * 2], c1 = child[n * 2 + 1];
+      if (c0 >= 0) { stack.push(c0, c1); continue; }
+      for (let k = -1 - c0, ke = k + c1; k < ke; k++) {
+        const u = order[k];
+        if (u === t || !fn(u, nb) || na[0] * nb[0] + na[1] * nb[1] + na[2] * nb[2] > -0.99) continue;
+        let near = true;
+        for (let v = 0; v < 3 && near; v++) near = Math.abs(na[0] * T[u * 9 + v * 3] + na[1] * T[u * 9 + v * 3 + 1] + na[2] * T[u * 9 + v * 3 + 2] - d0) <= delta;
+        if (near) partners.push(u);
+      }
+    }
+    if (!partners.length) continue;
+    // the points of this triangle that lie over a partner (within delta of its outline)
+    for (let k = c.start[t]; k < c.start[t + 1]; k++) {
+      const i = c.pts[k], px = c.P[i * 3], py = c.P[i * 3 + 1], pz = c.P[i * 3 + 2];
+      for (const u of partners) {
+        const o = u * 9;
+        let inside = true;
+        for (let e = 0; e < 3 && inside; e++) {
+          const p0 = o + e * 3, p1 = o + ((e + 1) % 3) * 3;
+          const ex = T[p1] - T[p0], ey = T[p1 + 1] - T[p0 + 1], ez = T[p1 + 2] - T[p0 + 2];
+          // e × n (n = -na, the partner's normal) points out of the partner across this edge; delta of slack
+          const sx = ey * -na[2] + ez * na[1], sy = ez * -na[0] + ex * na[2], sz = ex * -na[1] + ey * na[0], sl = Math.hypot(sx, sy, sz) || 1;
+          inside = ((px - T[p0]) * sx + (py - T[p0 + 1]) * sy + (pz - T[p0 + 2]) * sz) / sl <= delta;
+        }
+        if (inside) { (B ??= new Uint8Array(c.n))[i] = 1; break; }
+      }
+    }
+  }
+  return B;
+}
+
 /** Ray measures per cloud point (hemisphere measures first, then cones): cloud.n × (hemi + cones) values. Buried points read covered. */
 export function runRays(run: RunKernel, sc: SurfaceCloud, scene: RayScene, contact: TriBVH | null, args: SurfaceRayArgs, CB: Uint8Array | null = null): Float32Array | Promise<Float32Array> {
   const m = args.hemi.length + args.cones.length, c = sc.cloud;
@@ -1482,29 +1710,47 @@ export interface SpreadArgs {
   deadline?: number;
 }
 
-/** Edge field at or above this is an edge for the midline limit of the spread (surfaceSpreadRange). */
-export const SPREAD_STRONG = 0.5;
+/** Convex curvature where the edge field starts. */
+const EDGE_START = 0.3;
+/**
+ * The edge field from convex curvature at radius (1 = a 90° edge): an edge turns the surface by much of that within the
+ * radius at any radius, a smooth round only by radius / its own radius, so broad rounds (a sphere at a fifth of its
+ * radius reads about 0.3) stay out and bevels and edges count.
+ */
+export const edgeField = (x: number) => { const t = (x - EDGE_START) / 0.4; return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
+
+/**
+ * How much an edge point counts for the midline limit of the spread (surfaceSpreadRange): 0 for an edge field of
+ * STRONG_LO or less, 1 from STRONG_HI, smooth between (so the limit never switches on or off).
+ */
+const STRONG_LO = 0.25, STRONG_HI = 0.75;
+export const strength = (e: number) => { const t = (e - STRONG_LO) / (STRONG_HI - STRONG_LO); return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
+/** The look across: an edge point straight across counts fully, one 45° or more off not at all (cosines). */
+const ACROSS_HI = Math.cos(Math.PI / 12), ACROSS_LO = Math.cos(Math.PI / 4);
 
 /**
  * Edge proximity at texel samples [start, end) (kernel surface_spread), at two reaches: V[2i] the largest
  * E[q] × (1 − (d / w')²), V[2i + 1] the largest E[q] × (1 − (d / f')²), over the edge points q of the cloud (E > 0, not
  * buried) of the sample's part within reach that do not face away (normals more than 120° apart: the far side of a thin
  * plate). The reaches are width and far (far only where the sample is handled, A.HD > 0; elsewhere both read width),
- * limited by the part itself: with d1 the distance to the nearest edge point (E ≥ SPREAD_STRONG) and d2 to the nearest
- * one on the opposite side (within 30° of straight across, up to 2 × the reach − d1, read from the edge points merged into
- * clusters of half the radius), wear never passes the midline (d1 + d2) / 2 between the two edges, so a narrow face keeps
- * paint along its middle; the limit fades in over the first radius from the edge, where the direction across is not yet
- * defined. Samples from A.tri, A.b1, A.b2 (shared A.tris, A.VP, A.VN, A.TPiece; A.TNear 0 for a triangle no edge point
- * reaches: its samples read 0); edge points in the grid A.SGH, A.SGS (A.SNear 1 for a cell an edge point may reach),
+ * limited by the part itself: with d1 the distance to the nearest edge point and d2 to the nearest one on the opposite
+ * side (read from the edge points merged into clusters of half the radius on a lattice fixed in the world, up to 2 × the
+ * reach − d1), wear never passes the midline (d1 + d2) / 2 between the two edges, so a narrow face keeps paint along its
+ * middle. Every switch is smooth: an edge point counts at distance d / strength(E), an opposite one at d / (strength ×
+ * how straight across it is, 1 within 15°, 0 from 45°), and the limit fades in over the first radius from the edge,
+ * where the direction across is not yet defined. V also carries d1 and d2 (those effective distances; Infinity where
+ * none). Samples from A.tri, A.b1, A.b2 (shared A.tris, A.VP, A.VN, A.TPiece; A.TNear 0 for a triangle no edge
+ * point reaches: its samples read 0); edge points in the grid A.SGH, A.SGS (A.SNear 1 for a cell an edge point may reach),
  * A.SGI (their index in the cloud), A.SGP with the cloud's A.CN, A.CPiece, A.E; clusters in A.TGH, A.TGS, A.TGI, A.TGP
- * with A.TN, A.TPc. A.V out (2 per sample). With a.curvature (a refined cloud) 4 per sample, the last two convex and
- * concave read from the dense points within A.TRF of the sample's triangle (their own grid A.FGH, A.FGS, A.FGI with
- * cloud indices, A.FGP; A.CP, A.CW, A.CB, two values each in A.CV), 0 where none is near.
+ * with A.TN, A.TPc, A.TS (their strength). A.V out (4 per sample: near, far, d1, d2). With a.curvature (a refined cloud)
+ * 6 per sample, the last two convex and concave read from the dense points within A.TRF of the sample's triangle
+ * (their own grid A.FGH, A.FGS, A.FGI with cloud indices, A.FGP; A.CP, A.CW, A.CB, two values each in A.CV), 0 where
+ * none is near.
  */
 export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start: number, end: number): void {
   const tri: Int32Array = A.tri, b1: Float32Array = A.b1, b2: Float32Array = A.b2, HD: Float32Array | undefined = A.HD, V: Float32Array = A.V;
-  // with a refined cloud also convex and concave at the sample (stride 4): its dense points within their radius
-  const st = a.curvature ? 4 : 2, TRF: Float64Array = A.TRF, CP: Float64Array = A.CP, CW: Float32Array = A.CW, CB: Uint8Array | undefined = A.CB, CV: Float32Array = A.CV, kept = a.kept ?? 0;
+  // with a refined cloud also convex and concave at the sample (stride 6): its dense points within their radius
+  const st = a.curvature ? 6 : 4, TRF: Float64Array = A.TRF, CP: Float64Array = A.CP, CW: Float32Array = A.CW, CB: Uint8Array | undefined = A.CB, CV: Float32Array = A.CV, kept = a.kept ?? 0;
   const FGH: Float64Array | undefined = A.FGH, FGS: Int32Array = A.FGS, FGI: Int32Array = A.FGI, FGP: Float64Array = A.FGP;
   const acc = new Float64Array(4);
   const tris: Uint32Array = A.tris, VP: Float64Array = A.VP, VN: Float64Array = A.VN, TPiece: Int32Array = A.TPiece, TNear: Uint8Array = A.TNear;
@@ -1514,14 +1760,15 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
   const TGH: Float64Array = A.TGH, TGS: Int32Array = A.TGS, TGI: Int32Array = A.TGI, TGP: Float64Array = A.TGP, TN: Float64Array = A.TN, TPc: Int32Array = A.TPc;
   const tox = TGH[0], toy = TGH[1], toz = TGH[2], th = TGH[3], tgx = TGH[4], tgy = TGH[5], tgz = TGH[6];
   const w = a.width, fa = Math.max(a.width, a.far), rr = a.radius > 0 ? a.radius : 1e-9;
-  const COS = Math.cos(Math.PI / 6);
+  const TS: Float32Array = A.TS;
   // the candidates within reach of one sample: distance² and edge field
   let cap = 256, vd = new Float64Array(cap), ve = new Float64Array(cap);
   for (let i = start; i < end; i++) {
     if (late(a.deadline, i - start)) throw new Error(PAST_DEADLINE);
     for (let c = 0; c < st; c++) V[i * st + c] = 0;
+    V[i * st + 2] = V[i * st + 3] = Infinity;
     const t = tri[i], w1 = b1[i], w2 = b2[i], w0 = 1 - w1 - w2;
-    const rf0 = st === 4 ? TRF[t] : 0;
+    const rf0 = a.curvature ? TRF[t] : 0;
     if (!TNear[t] && !(rf0 > 0)) continue;
     const ia = tris[t * 3] * 3, ib = tris[t * 3 + 1] * 3, ic = tris[t * 3 + 2] * 3;
     const px = VP[ia] * w0 + VP[ib] * w1 + VP[ic] * w2, py = VP[ia + 1] * w0 + VP[ib + 1] * w1 + VP[ic + 1] * w2, pz = VP[ia + 2] * w0 + VP[ib + 2] * w1 + VP[ic + 2] * w2;
@@ -1549,20 +1796,27 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
           sw += wq; acc[0] += wq * CV[q * 2]; acc[1] += wq * CV[q * 2 + 1];
         }
       }
-      if (sw > 0) { V[i * 4 + 2] = acc[0] / sw; V[i * 4 + 3] = acc[1] / sw; }
-      else if (swB > 0) { V[i * 4 + 2] = acc[2] / swB; V[i * 4 + 3] = acc[3] / swB; }
+      if (sw > 0) { V[i * st + 4] = acc[0] / sw; V[i * st + 5] = acc[1] / sw; }
+      else if (swB > 0) { V[i * st + 4] = acc[2] / swB; V[i * st + 5] = acc[3] / swB; }
+      // the sample's own edge field counts at distance 0, so a sample on an edge reads it however far apart the edge
+      // points lie (with a radius much larger than width they lie farther apart than width)
+      V[i * st] = V[i * st + 1] = edgeField(V[i * st + 4]);
     }
     if (!TNear[t]) continue;
     {
       // one lookup rejects a sample no edge point reaches
+      // (a sample outside the grid, as on the outer side of a bevel, is looked at in full unless it is past the reach)
       const cx = Math.floor((px - ox) / h), cy = Math.floor((py - oy) / h), cz = Math.floor((pz - oz) / h);
-      if (cx < 0 || cy < 0 || cz < 0 || cx >= gx || cy >= gy || cz >= gz || !SNear[(cz * gy + cy) * gx + cx]) continue;
+      if (cx < 0 || cy < 0 || cz < 0 || cx >= gx || cy >= gy || cz >= gz) {
+        const dx = Math.max(ox - px, 0, px - (ox + gx * h)), dy = Math.max(oy - py, 0, py - (oy + gy * h)), dz = Math.max(oz - pz, 0, pz - (oz + gz * h));
+        if (dx * dx + dy * dy + dz * dz > fa * fa) continue;
+      } else if (!SNear[(cz * gy + cy) * gx + cx]) continue;
     }
     const f = HD && HD[i] > 0 ? fa : w, f2 = f * f;
     const x0 = Math.max(0, Math.floor((px - f - ox) / h)), x1 = Math.min(gx - 1, Math.floor((px + f - ox) / h));
     const y0 = Math.max(0, Math.floor((py - f - oy) / h)), y1 = Math.min(gy - 1, Math.floor((py + f - oy) / h));
     const z0 = Math.max(0, Math.floor((pz - f - oz) / h)), z1 = Math.min(gz - 1, Math.floor((pz + f - oz) / h));
-    let nv = 0, d1 = Infinity, ux = 0, uy = 0, uz = 0;
+    let nv = 0, d1 = Infinity, q1 = -1, ux = 0, uy = 0, uz = 0;
     for (let cz = z0; cz <= z1; cz++) for (let cy = y0; cy <= y1; cy++) {
       const row = (cz * gy + cy) * gx;
       for (let k = GS[row + x0], ke = GS[row + x1 + 1]; k < ke; k++) {
@@ -1575,16 +1829,19 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
           vd = grow(vd); ve = grow(ve); cap *= 2;
         }
         vd[nv] = d2; ve[nv] = e; nv++;
-        if (e >= SPREAD_STRONG && d2 < d1) { d1 = d2; ux = dx; uy = dy; uz = dz; }
+        // the nearest by effective distance; on a tie the lower cloud index (not the order the grid lists them in)
+        const g = strength(e), de = g > 0 ? d2 / (g * g) : Infinity;
+        if (de < d1 || (de === d1 && q < q1)) { d1 = de; q1 = q; ux = dx; uy = dy; uz = dz; }
       }
     }
     if (!nv) continue;
     // the midline across to the opposite edge
-    let lim = Infinity;
+    let lim = Infinity, d2e = Infinity;
     if (d1 < Infinity && d1 > 0) {
       d1 = Math.sqrt(d1);
+      const ul = Math.hypot(ux, uy, uz);
       // an opposite edge farther than 2 f − d1 leaves the midline past f: no limit
-      const S = 2 * f - d1, S2 = S * S;
+      const S = Math.max(0, 2 * f - d1), S2 = S * S;
       const x0 = Math.max(0, Math.floor((px - S - tox) / th)), x1 = Math.min(tgx - 1, Math.floor((px + S - tox) / th));
       const y0 = Math.max(0, Math.floor((py - S - toy) / th)), y1 = Math.min(tgy - 1, Math.floor((py + S - toy) / th));
       const z0 = Math.max(0, Math.floor((pz - S - toz) / th)), z1 = Math.min(tgz - 1, Math.floor((pz + S - toz) / th));
@@ -1594,14 +1851,19 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
         for (let k = TGS[row + x0], ke = TGS[row + x1 + 1]; k < ke; k++) {
           const dx = TGP[k * 3] - px, dy = TGP[k * 3 + 1] - py, dz = TGP[k * 3 + 2] - pz, dd = dx * dx + dy * dy + dz * dz;
           if (dd >= d2b) continue;
-          if (dx * ux + dy * uy + dz * uz > -COS * Math.sqrt(dd) * d1) continue;
           const q = TGI[k];
           if (TPc[q] !== pc || nx * TN[q * 3] + ny * TN[q * 3 + 1] + nz * TN[q * 3 + 2] < -0.5 * nl) continue;
-          d2b = dd;
+          // how straight across (from the nearest edge point through the sample) and how strong
+          const ca = -(dx * ux + dy * uy + dz * uz) / (Math.sqrt(dd) * ul || 1), ta = (ca - ACROSS_LO) / (ACROSS_HI - ACROSS_LO);
+          const wq = (ta <= 0 ? 0 : ta >= 1 ? 1 : ta * ta * (3 - 2 * ta)) * TS[q];
+          if (!(wq > 0) || dd >= d2b * wq * wq) continue;
+          d2b = dd / (wq * wq);
         }
       }
-      if (d2b < S2) lim = 0.5 * (d1 + Math.sqrt(d2b));
+      if (d2b < S2) { d2e = Math.sqrt(d2b); lim = 0.5 * (d1 + d2e); }
     }
+    V[i * st + 2] = d1;
+    V[i * st + 3] = d2e;
     let rw = w, rf = f;
     if (lim < f) {
       const s = d1 >= rr ? 1 : d1 / rr;
@@ -1609,7 +1871,7 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
       rf = f + (lim - f) * s;
     }
     const iw2 = 1 / (rw * rw), if2 = 1 / (rf * rf);
-    let best = 0, bestF = 0;
+    let best = V[i * st], bestF = V[i * st + 1];
     for (let j = 0; j < nv; j++) {
       const e = ve[j], d2 = vd[j];
       if (e <= best && e <= bestF) continue;
@@ -1624,7 +1886,7 @@ export function surfaceSpreadRange(a: SpreadArgs, A: Record<string, any>, start:
 
 /** Edge proximity at every texel sample (2 per sample; see surfaceSpreadRange) from the edge field E per cloud point. */
 export function runSpread(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, mesh: SurfaceMesh, sc: SurfaceCloud, E: Float32Array, HD: Float32Array | null, width: number, far: number, radius: number, CB: Uint8Array | null = null, deadline = 0, CV2: Float32Array | null = null): Float32Array | Promise<Float32Array> {
-  const c = sc.cloud, curvature = !!(CV2 && sc.TRF), V = new Float32Array(s.n * (curvature ? 4 : 2));
+  const c = sc.cloud, curvature = !!(CV2 && sc.TRF), V = new Float32Array(s.n * (curvature ? 6 : 4));
   // the grid of the edge points only (flats are most of the cloud and never spread), and of the strong ones merged
   // into clusters for the look across
   const src: number[] = [];
@@ -1635,10 +1897,16 @@ export function runSpread(run: RunKernel, s: { n: number; tri: Int32Array; b1: F
   for (let j = 0; j < src.length; j++) { const i = src[j]; SP[j * 3] = c.P[i * 3]; SP[j * 3 + 1] = c.P[i * 3 + 1]; SP[j * 3 + 2] = c.P[i * 3 + 2]; }
   const G = cloudGrid(SP, src.length, reach / 2);
   for (let k = 0; k < G.GI.length; k++) G.GI[k] = src[G.GI[k]];
-  const strong = src.filter((i) => E[i] >= SPREAD_STRONG);
+  const strong = src.filter((i) => strength(E[i]) > 0);
   const pick = <T extends Float64Array | Float32Array | Int32Array>(A: T, m: number): T => { const o = new (A.constructor as any)(strong.length * m); strong.forEach((i, j) => { for (let q = 0; q < m; q++) o[j * m + q] = A[i * m + q]; }); return o; };
-  const sub: Cloud = { n: strong.length, P: pick(c.P, 3), N: pick(c.N, 3), tri: pick(c.tri, 1), piece: pick(c.piece, 1), wt: pick(c.wt, 1), start: new Int32Array(1), pts: new Int32Array(0), cols: 0, rows: 0, lat: new Int32Array(0) };
+  // weighted by strength: a cluster's position and strength move smoothly as the edge field does
+  const swt = new Float32Array(strong.length);
+  strong.forEach((i, j) => { swt[j] = c.wt[i] * strength(E[i]); });
+  const sub: Cloud = { n: strong.length, P: pick(c.P, 3), N: pick(c.N, 3), tri: pick(c.tri, 1), piece: pick(c.piece, 1), wt: swt, start: new Int32Array(1), pts: new Int32Array(0), cols: 0, rows: 0, lat: new Int32Array(0) };
   const K = thinCloud(sub, null, Math.max(radius / 2, 0.5 * sc.spacing));
+  const TS = new Float32Array(K.n), TA = new Float64Array(K.n);
+  strong.forEach((i, j) => { const q = K.of[j]; if (q >= 0) TA[q] += c.wt[i]; });
+  for (let q = 0; q < K.n; q++) TS[q] = TA[q] > 0 ? K.W[q] / TA[q] : 0;
   const TG = cloudGrid(K.P, K.n, width / 2);
   // the grid's cells an edge point may reach: the occupied ones grown by the reach in cells (a sample's cell decides)
   const SNear = new Uint8Array(G.GS.length - 1);
@@ -1680,7 +1948,7 @@ export function runSpread(run: RunKernel, s: { n: number; tri: Int32Array; b1: F
     }
     TNear[t] = hit;
   }
-  const shared: Record<string, any> = { tris, VP: mesh.VP, VN: mesh.VN, TPiece: mesh.triPiece, TNear, SNear, SGH: G.GH, SGS: G.GS, SGI: G.GI, SGP: G.GP, TGH: TG.GH, TGS: TG.GS, TGI: TG.GI, TGP: TG.GP, TN: K.N, TPc: K.piece, CN: c.N, CPiece: c.piece, E };
+  const shared: Record<string, any> = { tris, VP: mesh.VP, VN: mesh.VN, TPiece: mesh.triPiece, TNear, SNear, SGH: G.GH, SGS: G.GS, SGI: G.GI, SGP: G.GP, TGH: TG.GH, TGS: TG.GS, TGI: TG.GI, TGP: TG.GP, TN: K.N, TPc: K.piece, TS, CN: c.N, CPiece: c.piece, E };
   if (HD) shared.HD = HD;
   const args: SpreadArgs = { width, far, radius, deadline };
   if (curvature) {

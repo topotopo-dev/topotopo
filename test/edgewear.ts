@@ -15,6 +15,9 @@ import type { Image } from '../src/core/image.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { wearCap, wearThreshold, WEAR_CAP } from '../src/nodes/surface.ts';
+import { bakeMemoLimits, bakeMemoUsage, memoBake } from '../src/core/bake.ts';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -133,7 +136,7 @@ section('the facet warning: only for facets that chip, once per bake');
   const side = async (n: number, cusp: number) => {
     const fw = 0.2 * Math.sin(Math.PI / n), r = fw / 4;
     const nodes: Nodes = { ...prism(n, cusp), pu: { type: 'uv_unwrap', in: ['prisms'] } };
-    const t = await texels(nodes, 'pu', { resolution: 512, radius: r, width: 2 * r, chip_size: 1.5 * r, amount: 1 });
+    const t = await texels(nodes, 'pu', { resolution: 512, radius: r, reach: 2 * r, chip_size: 1.5 * r, amount: 1 });
     const ch = t.idx.filter((k) => Math.abs(t.p(k)[1]) < 0.12).map((k) => t.at('chip', k));
     return { chip: share(ch), warn: t.c.warnings.filter((w) => w.includes('facet')) };
   };
@@ -182,7 +185,18 @@ section('small parts never wear through: under a third chipped at full focus, th
   let bad = 0;
   for (const k of at[0.4].idx) if (at[0.6].at('chip', k) < at[0.4].at('chip', k) || at[0.8].at('chip', k) < at[0.6].at('chip', k)) bad++;
   check(bad === 0, 'every texel chipped at 0.4 is chipped at 0.6 and 0.8');
-}
+  // past the point where the cap holds (no focus, so hands do not hold core back): C is the field as the shape gives
+  // it, chips never shrink, bare and core still grow inside the same share
+  const up: Record<number, Texels> = {};
+  for (const amount of [0.8, 0.9, 1]) { up[amount] = await texels(nodes, 'kit', { resolution: 512, amount }); nest(up[amount].im); }
+  check(up[0.8].c.stats.capped_faces > 0 && same(up[0.8].im.layer('C')!, up[1].im.layer('C')!) && same(at[0.4].im.layer('C')!, at[0.8].im.layer('C')!), `capped (${up[0.8].c.stats.capped_faces} faces held): C the same at every amount, with and without focus held`);
+  let shrink = 0;
+  for (const l of ['chip', 'bare', 'core']) for (const k of up[0.8].idx) if (up[0.9].at(l, k) < up[0.8].at(l, k) - 1e-6 || up[1].at(l, k) < up[0.9].at(l, k) - 1e-6) shrink++;
+  const sh = (a: number, l: string) => share(up[a].idx.map((k) => up[a].at(l, k)));
+  const row = (l: string) => [0.8, 0.9, 1].map((a) => f3(sh(a, l))).join(' / ');
+  console.log(`  no focus, amount 0.8 / 0.9 / 1: chip ${row('chip')}, bare ${row('bare')}, core ${row('core')}`);
+  check(shrink === 0, 'from 0.8 to 1 no texel of chip, bare or core loses wear');
+  check(sh(0.8, 'bare') < sh(0.9, 'bare') && sh(0.9, 'bare') < sh(1, 'bare') && sh(0.8, 'core') < sh(1, 'core') && sh(1, 'chip') < WEAR_CAP, 'held at the cap, more amount still wears deeper: bare and core grow, chips stay under a third');}
 
 section('a box chips on its edges only; a larger amount only adds wear');
 {
@@ -199,7 +213,7 @@ section('a box chips on its edges only; a larger amount only adds wear');
   }
   check(flat.length > 10000 && max(flatC) === 0 && max(flat) === 0, `amount 0.9: the flats more than 3 cm from an edge read 0 (${flat.length} texels, C max ${max(flatC)})`);
   check(share(edge) > 0.3, `… ${(share(edge) * 100).toFixed(0)}% of the texels within 4 mm of an edge chipped`);
-  check(far < 0.008 + 0.004 + 0.004, `… no chip farther than ${(far * 1000).toFixed(1)} mm from an edge (width + radius + 4 mm = 16 mm)`);
+  check(far < 0.008 + 0.004 + 0.004, `… no chip farther than ${(far * 1000).toFixed(1)} mm from an edge (reach + radius + 4 mm = 16 mm)`);
   const C3 = at[0.3].im.layer('C')!, C6 = at[0.6].im.layer('C')!;
   check(same(C3, C6), 'the wear field C does not depend on amount');
   for (const l of ['chip', 'bare', 'core']) {
@@ -259,7 +273,7 @@ section('the same wear across uv seams and at two texel densities across an edge
     c1: { type: 'wrangle', in: ['c0'], params: { run_over: 'prims', code: 'i@chart = @primnum; f@face = abs(@P.x) > 0.49 ? (@P.x > 0 ? 1 : 0) : (abs(@P.y) > 0.49 ? (@P.y > 0 ? 3 : 2) : (@P.z > 0 ? 5 : 4));' } },
     cube: { type: 'uv_flatten', in: ['c1'], params: { chart_attrib: 'chart', resolution: 512, padding: 2 } },
   };
-  const wear = { resolution: 512, radius: 0.04, width: 0.05, chip_size: 0.03, patch_size: 0.4, amount: 0.6 };
+  const wear = { resolution: 512, radius: 0.04, reach: 0.05, chip_size: 0.03, patch_size: 0.4, amount: 0.6 };
   const t = await texels(cube, 'cube', wear);
   nest(t.im);
   const texel = t.im.layer('texel')!, island = t.im.layer('island')!;
@@ -315,13 +329,56 @@ section('the same wear across uv seams and at two texel densities across an edge
   check(d.every((x) => Math.abs(x.C - d[0].C) < 0.03 && Math.abs(x.chip - d[0].chip) < 0.05), `the top within 3 cm of the edge: C ${d.map((x) => f3(x.C)).join(' / ')}, chipped ${d.map((x) => f3(x.chip)).join(' / ')} at side densities 1 / 0.5 / 0.25 (within 0.03 and 0.05)`);
 }
 
+section('an edge wears the same in two unwraps from 256 to 2048 texels; a bevel narrower than the cloud spacing');
+{
+  // the +x/+y edge of a 1 m cube: uv_unwrap, and +x and +y as one chart (the edge inside an island)
+  const base: Nodes = { c0: { type: 'box', params: { size: [1, 1, 1] } } };
+  const unwraps: Record<string, Nodes> = {
+    unwrap: { u: { type: 'uv_unwrap', in: ['c0'] } },
+    joined: { c1: { type: 'wrangle', in: ['c0'], params: { run_over: 'prims', code: 'i@chart = @P.x > 0.49 || @P.y > 0.49 ? 0 : 1 + @primnum;' } }, u: { type: 'uv_flatten', in: ['c1'], params: { chart_attrib: 'chart', resolution: 1024, padding: 2 } } },
+  };
+  const edge: number[] = [], band: number[] = [], rows: string[] = [];
+  let low = 0, few = Infinity;
+  for (const res of [256, 512, 1024, 2048]) {
+    for (const [name, uv] of Object.entries(unwraps)) {
+      const t = await texels({ ...base, ...uv }, 'u', { resolution: res, amount: 0.6 });
+      nest(t.im);
+      const e1: number[] = [], e6: number[] = [];
+      for (const k of t.idx) {
+        const [x, y, z] = t.p(k);
+        if (Math.abs(z) > 0.4 || x < 0.45 || y < 0.45) continue;
+        const d = Math.hypot(0.5 - x, 0.5 - y);
+        if (d < 0.0015) { e1.push(t.at('C', k)); if (t.at('C', k) < 0.05) low++; }
+        if (d < 0.006) e6.push(t.at('C', k));
+      }
+      few = Math.min(few, e1.length);
+      edge.push(mean(e1)); band.push(mean(e6));
+      rows.push(`${res} ${name} ${f3(mean(e1))}/${f3(mean(e6))}`);
+    }
+  }
+  const spread = (v: number[]) => max(v) - Math.min(...v);
+  console.log(`  C within 1.5 / 6 mm of the edge: ${rows.join(', ')}`);
+  check(few >= 60 && low === 0 && spread(edge) <= 0.03 && Math.min(...edge) > 0.75, `within 1.5 mm of the edge C reads ${f3(Math.min(...edge))}..${f3(max(edge))} in all 8 bakes (within 0.03), no texel under 0.05`);
+  check(spread(band) <= 0.2, `within 6 mm C reads ${f3(Math.min(...band))}..${f3(max(band))} (within 0.2: the noise, and the fade over texels coarser than the reach)`);
+  // 0.5 mm bevels on the example box at 256 texels (a cloud spacing of centimetres): the bevel still wears as at 1024
+  const nb: Nodes = { n0: { type: 'box', params: { size: [0.4, 0.3, 0.3] } }, n1: { type: 'poly_bevel', in: ['n0'], params: { offset: 0.0005 } }, nx: { type: 'uv_unwrap', in: ['n1'] } };
+  const at = async (res: number) => {
+    const t = await texels(nb, 'nx', { resolution: res, amount: 0.6 });
+    nest(t.im);
+    const v = t.idx.filter((k) => toEdge(t.p(k)) < 0.002).map((k) => t.at('C', k));
+    return { C: mean(v), n: v.length };
+  };
+  const n256 = await at(256), n1024 = await at(1024);
+  check(n256.n > 50 && n256.C > 0.6 && Math.abs(n256.C - n1024.C) < 0.1, `a 0.5 mm bevel: C within 2 mm of the edge ${f3(n256.C)} at 256 texels, ${f3(n1024.C)} at 1024 (within 0.1)`);
+}
 section('a part keeps its chips when another part is added or the prims are reordered');
 {
-  // the example box in the lower-left quarter of the uv square; a copy 1 m away in the upper-right quarter
+  // the example box in the lower-left quarter of the uv square; a copy of it beside it in the upper-right quarter
   const nodes: Nodes = {
     ...BOX,
     a: { type: 'uv_transform', in: ['bx'], params: { scale: [0.5, 0.5], pivot: [0, 0] } },
-    mv: { type: 'transform', in: ['bx'], params: { translate: [1, 0, 0] } },
+    // an offset that puts the copy on no common lattice with the box (cells are fixed in the world)
+    mv: { type: 'transform', in: ['bx'], params: { translate: [-1.0137, -0.6071, -0.3313] } },
     b: { type: 'uv_transform', in: ['mv'], params: { scale: [0.5, 0.5], pivot: [0, 0], translate: [0.5, 0.5] } },
     ab: { type: 'merge', in: ['a', 'b'] },
     ba: { type: 'merge', in: ['b', 'a'] },
@@ -370,7 +427,7 @@ section('seeds differ; the same bits with and without the pool');
     ground: { type: 'box', params: { size: [2, 0.1, 2], center: [0, -0.05, 0] } },
   };
   const layers = ['C', 'chip', 'bare', 'core', 'convex', 'concave', 'handled', 'texel', 'island', 'mask'];
-  const bake = (res: number, method = 'surface'): Nodes => ({ ...nodes, m: { type: 'bake_edge_wear', in: ['door', 'ground'], params: { resolution: res, radius: 0.02, width: 0.03, chip_size: 0.02, method, focus: '@name=latch', seed: 3 } } });
+  const bake = (res: number, method = 'surface'): Nodes => ({ ...nodes, m: { type: 'bake_edge_wear', in: ['door', 'ground'], params: { resolution: res, radius: 0.02, reach: 0.03, chip_size: 0.02, method, focus: '@name=latch', seed: 3 } } });
   const s = img(await cook(bake(128), 'm', serial), 'm'), p = img(await cook(bake(128), 'm', pooled), 'm');
   check(layers.every((l) => same(s.layer(l)!, p.layer(l)!)), `every layer bit-identical on the cooking thread and on 4 workers (${layers.join(', ')})`);
   const s2 = img(await cook(bake(96), 'm', serial), 'm'), p2 = img(await cook(bake(96), 'm', pooled2), 'm');
@@ -402,13 +459,80 @@ section('a bolt standing on a plate: the plate concave around it, not chipped');
   check(share(top) > 0.3, `the bolt's own top edges chip (${(share(top) * 100).toFixed(0)}%)`);
 }
 
+section('what a face is: flush stacks are no edge, a small boss is held, a large body never is, bars wear at their corners');
+{
+  const region = (t: Texels, f: (p: [number, number, number]) => boolean) => t.idx.filter((k) => f(t.p(k)));
+  const chipped = (t: Texels, ks: number[]) => share(ks.map((k) => t.at('chip', k)));
+  // two 30 cm boxes stacked flush: the seam between them is no edge
+  const stack: Nodes = {
+    a: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.15, 0] } },
+    b: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.45, 0] } },
+    ab: { type: 'merge', in: ['a', 'b'] }, st: { type: 'uv_unwrap', in: ['ab'] },
+  };
+  const s = await texels(stack, 'st', { resolution: 1024, amount: 0.8 });
+  nest(s.im);
+  const seam = region(s, ([x, y, z]) => Math.abs(y - 0.3) < 0.004 && ((Math.abs(Math.abs(x) - 0.15) < 1e-4 && Math.abs(z) < 0.13) || (Math.abs(Math.abs(z) - 0.15) < 1e-4 && Math.abs(x) < 0.13)));
+  const rim = region(s, ([x, y, z]) => y > 0.596 && (Math.abs(x) > 0.146 || Math.abs(z) > 0.146));
+  check(seam.length > 1000 && max(seam.map((k) => s.at('C', k))) === 0 && chipped(s, rim) > 0.9 && s.c.stats.capped_faces === 0, `stacked boxes, amount 0.8: the seam reads C 0 (${seam.length} texels), the top rim ${f3(chipped(s, rim))} chipped, no face held`);
+  // a 4 × 4 × 2 cm boss grown from the top of a 30 cm body (one piece): the boss is held, the body is not
+  const boss: Nodes = {
+    a: { type: 'box', params: { size: [0.3, 0.3, 0.3], center: [0, 0.15, 0] } },
+    i: { type: 'poly_extrude', in: ['a'], params: { group: '@P.y>0.29', distance: 0, inset: 0.13 } },
+    bo: { type: 'poly_extrude', in: ['i'], params: { group: 'front', distance: 0.02 } },
+    bu: { type: 'uv_unwrap', in: ['bo'] },
+  };
+  for (const amount of [0.6, 1]) {
+    const t = await texels(boss, 'bu', { resolution: 1024, amount });
+    nest(t.im);
+    const top = region(t, ([, y]) => Math.abs(y - 0.32) < 1e-4), bodyRim = region(t, ([x, y, z]) => Math.abs(y - 0.3) < 1e-4 && (Math.abs(x) > 0.146 || Math.abs(z) > 0.146));
+    check(top.length > 500 && chipped(t, top) < WEAR_CAP + 0.03 && chipped(t, bodyRim) > (amount < 1 ? 0.8 : 0.95) && t.c.stats.capped_faces === 5, `welded boss, amount ${amount}: its top ${f3(chipped(t, top))} chipped (its 5 faces held, under a third within 0.03 at texel level), the body's rim ${f3(chipped(t, bodyRim))}`);
+  }
+  // a grille of 12 bars 6 × 6 mm, 20 cm long: corners first, paint along the bars at moderate amounts
+  const bars: Nodes = Object.assign({}, ...Array.from({ length: 12 }, (_, i) => ({ [`g${i}`]: { type: 'box', params: { size: [0.006, 0.006, 0.2], center: [(i - 5.5) * 0.015, 0.003, 0] } } })));
+  const grille: Nodes = { ...bars, gm: { type: 'merge', in: Object.keys(bars) }, gu: { type: 'uv_unwrap', in: ['gm'] } };
+  const g6 = await texels(grille, 'gu', { resolution: 1024, amount: 0.6 }), g1 = await texels(grille, 'gu', { resolution: 1024, amount: 1 });
+  nest(g6.im); nest(g1.im);
+  const ends = (t: Texels) => chipped(t, region(t, ([, , z]) => Math.abs(z) > 0.094)), mid = (t: Texels) => chipped(t, region(t, ([, , z]) => Math.abs(z) < 0.06));
+  console.log(`  grille: ends ${f3(ends(g6))} / middle ${f3(mid(g6))} chipped at 0.6, ${f3(ends(g1))} / ${f3(mid(g1))} at 1`);
+  check(ends(g6) > 1.3 * mid(g6) && mid(g6) < 0.2 && mid(g1) < WEAR_CAP, 'bars: the ends wear first, the middle keeps most of its paint at 0.6 and some at full amount');
+}
+section('the bake memo holds the per-cloud values too: memory is released, oldest first');
+{
+  setFlagsFromString('--expose-gc');
+  const gc = runInNewContext('gc') as () => void;
+  const saved = { ...bakeMemoLimits }, limit = 48 * 2 ** 20;
+  // empty the memo, then bake one part at eight radii (each a refined cloud, its curvature and the texels' spread)
+  bakeMemoLimits.bytes = 0;
+  memoBake({}, 'empty', () => 0);
+  bakeMemoLimits.bytes = limit;
+  await new Promise((r) => setTimeout(r, 20));
+  gc(); gc();
+  const base = process.memoryUsage().arrayBuffers;
+  // each in an engine of its own that is then dropped (its cache with it); the meshes are kept, as an editor keeps
+  // them, so the memo may keep every value of theirs: what is still held after a collection is what the memo holds
+  let peak = 0;
+  const kept: Geometry[] = [];
+  for (const [i, radius] of [0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01].entries()) {
+    const e = new Engine(createNodeHost({ workers: 0 }));
+    await e.init();
+    const r = await e.cook({ nodes: { b0: { type: 'box', params: { size: [0.4 + i * 0.001, 0.3, 0.3] } }, b1: { type: 'poly_bevel', in: ['b0'], params: { offset: 0.004 } }, bx: { type: 'uv_unwrap', in: ['b1'] }, m: { type: 'bake_edge_wear', in: ['bx'], params: { resolution: 1024, radius } } }, output: 'm' });
+    if (!r.ok) throw new Error(r.errors.map((x) => x.message).join('; '));
+    kept.push((r.results.get('bx') as any).geo);
+    peak = Math.max(peak, bakeMemoUsage().bytes);
+  }
+  await new Promise((r) => setTimeout(r, 20));
+  gc(); gc();
+  const real = process.memoryUsage().arrayBuffers - base, MB = (x: number) => (x / 2 ** 20).toFixed(1);
+  Object.assign(bakeMemoLimits, saved);
+  check(kept.length === 8 && peak <= limit * 1.5 && real > 0 && real <= limit * 1.15, `eight meshes and radii against a ${MB(limit)} MB memo: at most ${MB(peak)} MB counted, ${MB(real)} MB really held after (within the limit + 15 %)`);
+}
 section('refusals, warnings, names');
 {
   const UV: Nodes = { u0: { type: 'box', params: { size: [1, 1, 1] } }, ub: { type: 'uv_unwrap', in: ['u0'] } };
   const w = (params: Record<string, unknown>, extra: Nodes = UV, src = 'ub') => err({ ...extra, m: { type: 'bake_edge_wear', in: [src], params: { resolution: 32, ...params } } }, 'm');
   const has = async (p: Promise<string>, want: string) => { const e = await p; check(e.includes(want), `"${want}"${e.includes(want) ? '' : ` — got: ${e}`}`); };
   await has(w({ radius: 0 }), 'bake_edge_wear: radius must be above 0 (radius: 0.004 measures edges at 4 mm)');
-  await has(w({ width: 0 }), 'bake_edge_wear: width must be above 0 (width: 0.008 lets wear reach 8 mm in from an edge)');
+  await has(w({ reach: 0 }), 'bake_edge_wear: reach must be above 0 (reach: 0.008 lets wear reach 8 mm in from an edge)');
   await has(w({ chip_size: -1 }), 'bake_edge_wear: chip_size must be above 0');
   await has(w({ patch_size: 0 }), 'bake_edge_wear: patch_size must be above 0');
   const kit: Nodes = { ...named('plate', 'p0', { type: 'box', params: { size: [0.3, 0.02, 0.3] } }), ...named('bolt', 'q0', { type: 'box', params: { size: [0.03, 0.02, 0.03], center: [0, 0.02, 0] } }), pq: { type: 'merge', in: ['plate', 'bolt'] }, kit: { type: 'uv_unwrap', in: ['pq'] } };
@@ -417,6 +541,11 @@ section('refusals, warnings, names');
   await has(w({ radius: 1 }), 'bake_edge_wear: radius 1 m is more than half the model\'s size');
   check((await w({ radius: 1, method: 'dihedral' })) === '', 'method dihedral takes any radius');
   check((await w({ radius: 0.8 })) === '', 'a radius just under half the size cooks');
+  // a radius that would put too many points along the bends: refused before the work, naming the radius
+  const facets: Nodes = { f0: { type: 'sphere', params: { radius: 2, rows: 16, cols: 32 } }, f1: { type: 'normal', in: ['f0'], params: { cusp_angle: 1 } }, fu: { type: 'uv_unwrap', in: ['f1'] } };
+  const t0 = performance.now();
+  await has(w({ radius: 0.0005 }, facets, 'fu'), 'bake_edge_wear: radius 0.5 mm would make more than 6 million points along the bends (raise radius, or bake the parts separately)');
+  check(performance.now() - t0 < 5000, `… refused in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   // the names: edge_wear_bake belongs to this node now
   for (const a of ['edge_wear', 'edge_wear_bake', 'bake_wear', 'bake_chips']) {
     const c = await cook({ ...UV, m: { type: a, in: ['ub'], params: { resolution: 32 } } as any }, 'm');
@@ -432,7 +561,7 @@ section('the time limit of long-running nodes stops it, on this thread and on th
       const saved = engine.simTimeoutMs;
       engine.simTimeoutMs = 40;
       const t0 = performance.now();
-      const r = await engine.cook({ nodes: { ...nodes, m: { type: 'bake_edge_wear', in: ['su'], params: { resolution: 2048, radius: 0.05, width: 0.05, method, focus: '@P.y>0.3', focus_radius: 0.3 } } }, output: 'm' });
+      const r = await engine.cook({ nodes: { ...nodes, m: { type: 'bake_edge_wear', in: ['su'], params: { resolution: 2048, radius: 0.05, reach: 0.05, method, focus: '@P.y>0.3', focus_radius: 0.3 } } }, output: 'm' });
       const ms = performance.now() - t0;
       engine.simTimeoutMs = saved;
       const msg = r.errors.map((e) => e.message).join('; ');

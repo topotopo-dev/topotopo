@@ -6,12 +6,12 @@
 import { Geometry } from '../core/geometry.ts';
 import { RayScene } from '../core/analysis.ts';
 import { TriBVH } from '../core/spatial.ts';
-import { curvatureEdges, edgeGrid, interpolate, memoBake, normalize3 } from '../core/bake.ts';
+import { bakeMemoDrop, curvatureEdges, edgeGrid, interpolate, memoBake, normalize3 } from '../core/bake.ts';
 import type { CurvatureArgs } from '../core/bake.ts';
 import { band } from '../core/pcg.ts';
 import { hashNumber, hashString } from '../core/random.ts';
 import { triangulate } from '../core/topology.ts';
-import { facetSizes, rayBias, refineCloud, runBuried, runCurvature, runDistance, runEdgeWear, runInterp, runNoise, runRays, runSpread, afterRun } from '../core/surface.ts';
+import { bendSamples, contactBuried, denseEstimate, edgeField, late, PAST_DEADLINE, facetSizes, wearRegions, MAX_DENSE, rayBias, refineCloud, runBuried, TOO_DENSE, runCurvature, runDistance, runEdgeWear, runInterp, runNoise, runRays, runSpread, afterRun } from '../core/surface.ts';
 import type { ConeMeasure, EdgeWearArgs, HemiMeasure, RefinedCloud, SurfaceCloud, SurfaceMesh, SurfaceRayArgs } from '../core/surface.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
@@ -223,7 +223,7 @@ function cookMeasure(ctx: CookContext) {
   if (n >= 65536 && ms.some((m) => !['facing', 'height', 'group'].includes(m.by))) void ctx.engine.host.pool?.warm(true);
   const mesh = surfaceOf(b);
   surfaceWarnings(b, mesh);
-  const { run, deadline, check } = surfaceRunner(ctx, 'fewer measures, fewer samples, a smaller curvature radius or a lower resolution; or raise the limit');
+  const { run, deadline, check, guard } = surfaceRunner(ctx, 'fewer measures, fewer samples, a smaller curvature radius or a lower resolution; or raise the limit');
   const P = b.P;
   let N: Float64Array | null = null;
   const normals = () => { if (!N) { N = interpolate(s, b.tris, mesh.VN, 3); normalize3(N); } return N; };
@@ -324,7 +324,7 @@ function cookMeasure(ctx: CookContext) {
     });
     return chainSteps(sub);
   });
-  return seq(chainSteps(steps), out);
+  return guard(() => seq(chainSteps(steps), out));
 }
 
 /** Run the steps in order, each after the previous one's result (synchronous while every step is). */
@@ -434,39 +434,35 @@ defineNode({
 
 /**
  * Buried points (per surroundings) and curvature (per radius and surroundings) of one cloud, made once for every
- * bake_measure and bake_edge_wear of the mesh: the cloud lives in the bake memo, and these die with it.
+ * bake_measure and bake_edge_wear of the mesh: kept in the bake memo, owned by the cloud, so they count against its
+ * byte budget with everything else, are released oldest first and die with the cloud.
  */
-const perCloud = new WeakMap<object, Map<string, unknown>>();
+/** A number per surroundings geometry (0: none), for the keys. */
 const surIds = new WeakMap<Geometry, number>();
 let surNext = 1;
 const surId = (sur: Geometry | null) => { if (!sur) return 0; let i = surIds.get(sur); if (i === undefined) surIds.set(sur, i = surNext++); return i; };
+
 function perCloudMemo<T>(sc: object, key: string, make: () => T | Promise<T>): T | Promise<T> {
-  let m = perCloud.get(sc);
-  if (!m) perCloud.set(sc, (m = new Map()));
-  if (m.has(key)) return m.get(key) as T | Promise<T>;
-  const v = make();
-  m.set(key, v);
-  // a cook stopped by its time limit leaves nothing behind
-  if (v instanceof Promise) v.catch(() => m!.delete(key));
-  return v;
+  return memoBake(sc, `cloud|${key}`, make);
 }
+
+/** The key each perCloudLatest slot holds now, per cloud. */
+const latestKey = new WeakMap<object, Map<string, string>>();
 
 /** perCloudMemo with one slot: the value for `key`, made anew (and the old one let go) when the key changes. */
 function perCloudLatest<T>(sc: object, slot: string, key: string, make: () => T | Promise<T>): T | Promise<T> {
-  let m = perCloud.get(sc);
-  if (!m) perCloud.set(sc, (m = new Map()));
-  const had = m.get(slot) as { key: string; v: T | Promise<T> } | undefined;
-  if (had && had.key === key) return had.v;
-  const v = make();
-  m.set(slot, { key, v });
-  if (v instanceof Promise) v.catch(() => { if ((m!.get(slot) as any)?.v === v) m!.delete(slot); });
-  return v;
+  let m = latestKey.get(sc);
+  if (!m) latestKey.set(sc, (m = new Map()));
+  const had = m.get(slot);
+  if (had !== undefined && had !== key) bakeMemoDrop(sc, `latest|${slot}|${had}`);
+  m.set(slot, key);
+  return memoBake(sc, `latest|${slot}|${key}`, make);
 }
 
 /** Buried cloud points with these surroundings (null: the mesh alone), shared per cloud. */
 function buriedShared(b: Bake, mesh: SurfaceMesh, sc: SurfaceCloud, scene: () => RayScene, sur: Geometry | null, run: (kernel: string, job: any, o?: any) => any, deadline: number): Uint8Array | null | Promise<Uint8Array | null> {
   return seq(perCloudMemo(sc, `buried|${surId(sur)}`, () => buriedOf(b, mesh, sc, scene, sur, run, deadline)), (B: Uint8Array | null) => {
-    if (B) { let k = 0; for (let i = 0; i < B.length; i++) k += B[i]; b.ctx.stat('buried_points', k); }
+    if (B) { let k = 0; for (let i = 0; i < B.length; i++) if (B[i]) k++; b.ctx.stat('buried_points', k); }
     return B;
   }) as Uint8Array | null | Promise<Uint8Array | null>;
 }
@@ -478,16 +474,10 @@ const curvatureShared = (sc: SurfaceCloud, r: number, sur: Geometry | null, CB: 
 // ---------------------------------------------------------------- bake_edge_wear
 
 const TW = 'bake_edge_wear';
+/** What bake_edge_wear builds per texel sample: the wear field W, the layers it publishes, and from the spread the proximity PX (near, far) and DD (distance to the nearest edge and to the one across; null for method dihedral). */
+interface WearLayers { W: Float32Array; convex: Float32Array; concave: Float32Array; handled: Float32Array; PX: Float32Array; DD: Float32Array | null }
 const failW = (msg: string, hint?: string) => new NodeError(`${TW}: ${msg}`, hint);
-/** Convex curvature where the edge field starts. */
-const EDGE_START = 0.3;
-/**
- * The edge field from convex curvature at radius (1 = a 90° edge): an edge turns the surface by much of that within the
- * radius at any radius, a smooth round only by radius / its own radius, so broad rounds (a sphere at a fifth of its
- * radius reads about 0.3) stay out and bevels and edges count.
- */
-const edgeField = (x: number) => { const t = (x - EDGE_START) / 0.4; return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
-/** Near the focus, wear reaches up to 1 + FOCUS_REACH × focus_amount times width in from an edge. */
+/** Near the focus, wear reaches up to 1 + FOCUS_REACH × focus_amount times reach in from an edge. */
 const FOCUS_REACH = 1.5;
 /** Softness of the chip, bare and core outlines, in units of the wear field. */
 const WEAR_EDGE = 0.03;
@@ -497,7 +487,7 @@ export const wearThreshold = (amount: number) => 1 - 0.85 * Math.max(0, Math.min
 
 function cookEdgeWear(ctx: CookContext) {
   const p = ctx.p;
-  for (const [k, h] of [['radius', 'radius: 0.004 measures edges at 4 mm'], ['width', 'width: 0.008 lets wear reach 8 mm in from an edge'], ['chip_size', 'chip_size: 0.006 breaks the outline up at 6 mm'], ['patch_size', 'patch_size: 0.15 decides which stretches of edge wear at 15 cm']] as const)
+  for (const [k, h] of [['radius', 'radius: 0.004 measures edges at 4 mm'], ['reach', 'reach: 0.008 lets wear reach 8 mm in from an edge'], ['chip_size', 'chip_size: 0.006 breaks the outline up at 6 mm'], ['patch_size', 'patch_size: 0.15 decides which stretches of edge wear at 15 cm']] as const)
     if (!(p[k] > 0)) throw failW(`${k} must be above 0`, h);
   const b = setup(ctx), g = b.g, s = b.s, n = s.n;
   const sur = ctx.hasInput(1) ? ctx.input(1) : null;
@@ -513,17 +503,19 @@ function cookEdgeWear(ctx: CookContext) {
   }
   const surface = p.method !== 'dihedral';
   if (surface) checkSurfaceRadius(b, p.radius, 'radius');
-  const amount = p.amount, t = wearThreshold(amount), bareT = t + Math.max(0, p.bare_step), coreT = t + Math.max(p.bare_step, p.core_step);
-  const L: { W: Float32Array; convex: Float32Array; concave: Float32Array; handled: Float32Array; PX: Float32Array } = { W: new Float32Array(n), convex: new Float32Array(n), concave: new Float32Array(n), handled: new Float32Array(n), PX: new Float32Array(n * 2) };
+  const amount = p.amount, t = wearThreshold(amount), bareStep = Math.max(0, p.bare_step), coreStep = Math.max(bareStep, p.core_step);
+  const L: WearLayers = { W: new Float32Array(n), convex: new Float32Array(n), concave: new Float32Array(n), handled: new Float32Array(n), PX: new Float32Array(n * 2), DD: null };
   // near the focus wear reaches farther in from the edges, up to this
-  const far = p.width * (1 + FOCUS_REACH * (focusSel ? p.focus_amount : 0));
-  const out = () => finishEdgeWear(ctx, b, L, amount, t, bareT, coreT);
+  const far = p.reach * (1 + FOCUS_REACH * (focusSel ? p.focus_amount : 0));
+  let stopAt = 0;
+  const out = () => finishEdgeWear(ctx, b, L, amount, t, bareStep, coreStep, p.radius, stopAt);
   if (!n) return out();
   if (n >= 65536) void ctx.engine.host.pool?.warm(true);
   const mesh = surfaceOf(b);
   surfaceWarnings(b, mesh);
   facetWarning(b, mesh, p.radius);
-  const { run, deadline, check } = surfaceRunner(ctx, 'a smaller radius or width, or a lower resolution; or raise the limit');
+  const { run, deadline, check, guard } = surfaceRunner(ctx, 'a smaller radius or reach, or a lower resolution; or raise the limit');
+  stopAt = deadline;
   const steps: (() => unknown)[] = [];
   const timed = (label: string, f: () => unknown) => steps.push(() => { check(); const t0 = performance.now(); return seq(f(), () => ctx.stage(label, performance.now() - t0)); });
   let focusTree: TriBVH | null = null;
@@ -545,11 +537,10 @@ function cookEdgeWear(ctx: CookContext) {
     const kM = med > 0 ? Math.max(1, Math.max(0.0005, 4 * med) / med) : 1;
     const sc0 = cloudOf(b, mesh, kM);
     const surG = surPolys ? sur! : null;
-    const scene = () => (surG ? RayScene.of(Geometry.merge([g, surG])) : memoBake(g, 'rayscene', () => RayScene.of(g)));
+    let sceneV: RayScene | null = null;
+    const scene = () => (sceneV ??= surG ? RayScene.of(Geometry.merge([g, surG])) : memoBake(g, 'rayscene', () => RayScene.of(g)));
     return seq(buriedShared(b, mesh, sc0, scene, surG, run, deadline), (CB0: Uint8Array | null) => {
-      const step = r / 3;
-      const fine = !(kM * med <= r / 4);
-      const got: any = fine ? refinedOf(b, mesh, sc0, CB0, r, step, surG, scene, run, deadline) : { sc: sc0, CB: CB0 };
+      const got: any = refinedOf(b, mesh, sc0, CB0, r, Math.min(r / 3, sc0.spacing), surG, scene, run, deadline);
       return seq(got, ({ sc, CB }: { sc: SurfaceCloud; CB: Uint8Array | null }) => {
         b.ctx.stat('cloud_points', sc.cloud.n);
         let t0 = performance.now();
@@ -569,33 +560,27 @@ function cookEdgeWear(ctx: CookContext) {
             return E;
           };
           // the proximity at the texels does not depend on amount, seed or the noise: kept for the last reach
-          const key = `${r}|${p.width}|${far}|${focus}|${p.focus_radius}|${surId(surG)}`;
+          const key = `${r}|${p.reach}|${far}|${focus}|${p.focus_radius}|${surId(surG)}`;
           const HD = focusSel ? L.handled : null;
-          if (sc.TRF) {
-            // a refined cloud: convex, concave and the proximity in one pass over the texels
-            const V = perCloudLatest(sc, 'texels', key, () => runSpread(run, s, b.tris, mesh, sc, E(), HD, p.width, far, r, CB, deadline, M()));
-            return seq(V, (V: Float32Array) => {
-              const PX = new Float32Array(n * 2);
-              for (let i = 0; i < n; i++) { PX[i * 2] = V[i * 4]; PX[i * 2 + 1] = V[i * 4 + 1]; L.convex[i] = V[i * 4 + 2]; L.concave[i] = V[i * 4 + 3]; }
-              L.PX = PX;
-              ctx.stage('spread', performance.now() - t0);
-            });
-          }
-          const cv = perCloudLatest(sc, 'interp', `${r}|${surId(surG)}`, () => runInterp(run, s, b.tris, mesh, sc, M(), 2, CB, deadline));
-          return seq(cv, (V: Float32Array) => {
-            for (let i = 0; i < n; i++) { L.convex[i] = V[i * 2]; L.concave[i] = V[i * 2 + 1]; }
-            ctx.stage('interpolation', performance.now() - t0);
-            t0 = performance.now();
-            const spread = perCloudLatest(sc, 'spread', key, () => runSpread(run, s, b.tris, mesh, sc, E(), HD, p.width, far, r, CB, deadline));
-            return seq(spread, (PX: Float32Array) => { L.PX = PX; ctx.stage('spread', performance.now() - t0); });
+          // convex, concave and the proximity in one pass over the texels
+          const V = perCloudLatest(sc, 'texels', key, () => runSpread(run, s, b.tris, mesh, sc, E(), HD, p.reach, far, r, CB, deadline, M()));
+          return seq(V, (V: Float32Array) => {
+            const PX = new Float32Array(n * 2), DD = new Float32Array(n * 2);
+            for (let i = 0; i < n; i++) {
+              PX[i * 2] = V[i * 6]; PX[i * 2 + 1] = V[i * 6 + 1]; DD[i * 2] = V[i * 6 + 2]; DD[i * 2 + 1] = V[i * 6 + 3];
+              L.convex[i] = V[i * 6 + 4]; L.concave[i] = V[i * 6 + 5];
+            }
+            L.PX = PX;
+            L.DD = DD;
+            ctx.stage('spread', performance.now() - t0);
           });
         });
       });
     });
   });
   else timed('dihedral', () => {
-    // the mesh's edge angles near each texel, reaching max(radius, width)
-    const r = Math.max(p.radius, p.width);
+    // the mesh's edge angles near each texel, reaching max(radius, reach)
+    const r = Math.max(p.radius, p.reach);
     const edges = curvatureEdges(g, 1e-6 * b.diag, 0.5, true);
     const grid = edgeGrid(edges, r);
     const args: CurvatureArgs = { radius: r, facing: 0.25, origin: grid.origin, cell: grid.cell, dims: grid.dims };
@@ -606,42 +591,52 @@ function cookEdgeWear(ctx: CookContext) {
   });
   timed('wear', () => {
     const args: EdgeWearArgs = { seed: Number(p.seed) || 0, chipSize: p.chip_size, patchSize: p.patch_size, raggedness: p.raggedness, patchiness: p.patchiness, focusAmount: focusSel ? p.focus_amount : 0, deadline };
-    return seq(runEdgeWear(run, s, b.tris, mesh.VP, L.PX, focusSel ? L.handled : null, args), (W: Float32Array) => { L.W = W; });
+    // the wear field does not depend on amount: kept for the last everything else, so a cook that changes only amount
+    // settles the kept field again
+    const key = JSON.stringify([p.method, p.radius, p.reach, far, focus, p.focus_radius, surPolys ? surId(sur) : 0, { ...args, deadline: 0 }]);
+    const W = perCloudLatest(s, 'wear', key, () => runEdgeWear(run, s, b.tris, mesh.VP, L.PX, focusSel ? L.handled : null, args));
+    return seq(W, (W: Float32Array) => { L.W = W; });
   });
-  return seq(chainSteps(steps), out);
+  return guard(() => seq(chainSteps(steps), out));
 }
 
-/** Curvature on the ordinary cloud above this (either sign) marks where the shape bends, for the refinement. */
-const BEND = 0.2;
-
 /**
- * bake_measure's cloud refined near the bends for edge wear at radius r: curvature on it at rm = max(r, 1.5 spacings)
- * marks the points that are not flat (a bend reads at least as much at rm as at r, so every edge point at radius r is
- * near a marked one), and space within r of a marked one gets points `step` apart (refineCloud): the curvature is
- * measured there at the full density, the edge points come from it, and the wear spreads from them to the texels. Kept
- * with the ordinary cloud (its per-cloud store), so it never competes with it in the bake memo, with its buried points:
- * the ordinary cloud's, and for each dense point that of the nearest ordinary point of its part (rays where none is
- * near).
+ * bake_measure's cloud refined near the bends for edge wear at radius r: the bends come from the mesh (bendSamples), and
+ * space within r of them gets points `step` apart (refineCloud), where the curvature is measured at the full density;
+ * the edge points come from it, and the wear spreads from them to the texels. Kept with the ordinary cloud (in the bake
+ * memo, owned by it), with its buried points: the ordinary cloud's, and for each dense point that of the nearest
+ * ordinary point of its part (rays where none is near).
  */
 function refinedOf(b: Bake, mesh: SurfaceMesh, sc0: SurfaceCloud, CB0: Uint8Array | null, r: number, step: number, sur: Geometry | null, scene: () => RayScene, run: (kernel: string, job: any, o?: any) => any, deadline: number) {
-  const ctx = b.ctx, s0 = sc0.spacing, rm = Math.max(r, 1.5 * s0);
-  return seq(curvatureShared(sc0, rm, sur, CB0, run, deadline), (CV0: Float32Array) => {
+  const ctx = b.ctx, s0 = sc0.spacing;
+  {
     const t0 = performance.now(), made = { now: false };
-    const R = perCloudMemo(sc0, `refine|${rm}|${r}|${step}|${surId(sur)}`, () => {
-      made.now = true;
-      const c = sc0.cloud, mark = new Float32Array(c.n);
-      for (let i = 0; i < c.n; i++) if (Math.abs(CV0[i]) >= BEND) mark[i] = r;
-      return refineCloud(sc0, mesh, b.tris, b.skip, mark, step);
-    }) as RefinedCloud;
+    let R: RefinedCloud;
+    try {
+      R = perCloudMemo(sc0, `refine|${r}|${step}`, () => {
+        made.now = true;
+        const Z = bendSamples(b.g, mesh, b.tris, b.skip, r, step, deadline);
+        // refused before the work when it would plainly pass the bound (refineCloud stops at it too)
+        if (denseEstimate(Z, r + Z.gap, step) > MAX_DENSE) throw new Error(TOO_DENSE);
+        return refineCloud(sc0, mesh, b.tris, b.skip, Z.P, r + Z.gap, step, deadline, Math.max(step, r / 2));
+      }) as RefinedCloud;
+    } catch (e) {
+      if (e instanceof Error && e.message === TOO_DENSE) throw failW(`radius ${mm(r)} would make more than ${MAX_DENSE / 1e6} million points along the bends`, 'raise radius, or bake the parts separately');
+      throw e;
+    }
     if (made.now) ctx.stage('refine', performance.now() - t0);
     ctx.stat('dense_points', R.sc.cloud.n - R.kept);
     const t1 = performance.now();
     const CB = perCloudMemo(R.sc, `buried|${surId(sur)}`, () => {
-      if (!CB0) return null;
       const c = R.sc.cloud, k = R.kept, B = new Uint8Array(c.n);
+      // every dense point tests contact itself (a face pressed against another: sharp at any spacing)
+      const PC = contactBuried(R.sc, mesh, b.tris, scene(), 4 * rayBias(mesh.diag), deadline);
+      if (PC) for (let i = k; i < c.n; i++) B[i] = PC[i] << 1;
+      if (!CB0) return PC ? B : null;
       for (let j = 0; j < k; j++) B[j] = CB0[R.of[j]];
-      // a dense point takes the flag of the nearest ordinary point of its part (within 1.25 spacings: the contact
-      // outlines are as sharp as bake_measure's); rays where there is none
+      // and takes being inside another part from the nearest ordinary point of its part facing its way (within 1.25
+      // spacings: the outline of a part sunk into another is as sharp as bake_measure's; the nearest of any facing
+      // where none does), rays where there is none
       const near = 1.25 * s0, n2 = near * near, G = sc0.grid, c0 = sc0.cloud, ask: number[] = [];
       const ox = G.GH[0], oy = G.GH[1], oz = G.GH[2], h = G.GH[3], gx = G.GH[4], gy = G.GH[5], gz = G.GH[6];
       for (let i = k; i < c.n; i++) {
@@ -649,15 +644,19 @@ function refinedOf(b: Bake, mesh: SurfaceMesh, sc0: SurfaceCloud, CB0: Uint8Arra
         const x0 = Math.max(0, Math.floor((x - near - ox) / h)), x1 = Math.min(gx - 1, Math.floor((x + near - ox) / h));
         const y0 = Math.max(0, Math.floor((y - near - oy) / h)), y1 = Math.min(gy - 1, Math.floor((y + near - oy) / h));
         const z0 = Math.max(0, Math.floor((z - near - oz) / h)), z1 = Math.min(gz - 1, Math.floor((z + near - oz) / h));
-        let bd = n2, bq = -1;
+        const nx = c.N[i * 3], ny = c.N[i * 3 + 1], nz = c.N[i * 3 + 2];
+        let bd = n2, bq = -1, ad = n2, aq = -1;
         for (let cz = z0; cz <= z1; cz++) for (let cy = y0; cy <= y1; cy++) {
           const row = (cz * gy + cy) * gx;
           for (let q = G.GS[row + x0], qe = G.GS[row + x1 + 1]; q < qe; q++) {
-            const dx = G.GP[q * 3] - x, dy = G.GP[q * 3 + 1] - y, dz = G.GP[q * 3 + 2] - z, d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 < bd && c0.piece[G.GI[q]] === c.piece[i]) { bd = d2; bq = G.GI[q]; }
+            const dx = G.GP[q * 3] - x, dy = G.GP[q * 3 + 1] - y, dz = G.GP[q * 3 + 2] - z, d2 = dx * dx + dy * dy + dz * dz, j = G.GI[q];
+            if (d2 >= ad || c0.piece[j] !== c.piece[i]) continue;
+            if (d2 < bd) { bd = d2; bq = j; }
+            if (c0.N[j * 3] * nx + c0.N[j * 3 + 1] * ny + c0.N[j * 3 + 2] * nz > 0.7) { ad = d2; aq = j; }
           }
         }
-        if (bq >= 0) B[i] = CB0[bq];
+        if (aq >= 0) B[i] |= CB0[aq] & 1;
+        else if (bq >= 0) B[i] |= CB0[bq] & 1;
         else ask.push(i);
       }
       ctx.stat('dense_rays', ask.length);
@@ -665,13 +664,13 @@ function refinedOf(b: Bake, mesh: SurfaceMesh, sc0: SurfaceCloud, CB0: Uint8Arra
       const pick = (A: Float64Array | Float32Array | Int32Array, m: number) => { const o = new (A.constructor as any)(ask.length * m); ask.forEach((i, j) => { for (let q = 0; q < m; q++) o[j * m + q] = A[i * m + q]; }); return o; };
       const sub = { cloud: { n: ask.length, P: pick(c.P, 3), N: pick(c.N, 3), piece: pick(c.piece, 1) }, FN: pick(R.sc.FN, 3) } as unknown as SurfaceCloud;
       return seq(runBuried(run, sub, mesh, scene(), sur, deadline), (BF: Uint8Array | null) => {
-        if (BF) ask.forEach((i, j) => { B[i] = BF[j]; });
+        if (BF) ask.forEach((i, j) => { B[i] |= BF[j] & 1; });
         ctx.stage('buried', performance.now() - t1);
         return B;
       });
     }) as Uint8Array | null | Promise<Uint8Array | null>;
     return seq(CB, (B: Uint8Array | null) => ({ sc: R.sc, CB: B }));
-  });
+  }
 }
 
 /** Hard facets bending this much (degrees) or more take chips when the radius is under twice their size. */
@@ -698,78 +697,87 @@ function facetWarning(b: Bake, mesh: SurfaceMesh, r: number) {
   b.ctx.warn(`${TW}: ${hit.length} faceted piece(s) will chip along their facets at radius ${mm(r)}: ${worst}${hit.length > 3 ? ` and ${hit.length - 3} more` : ''}; raise radius to ${mm(need)} or more, smooth their normals or give them more polygons`);
 }
 
-/** On any part, chips never cover this share of its area or more, however much it wears (amount, focus). */
+/** On any face, chips never cover this share of its area or more, however much it wears (amount, focus). */
 export const WEAR_CAP = 1 / 3;
-/** The most of a part's area that chips at an amount: WEAR_CAP from amount 0.8, less below (a third at 0.8, a sixth at 0.4). */
+/** The most of a face's area that chips at an amount: WEAR_CAP from amount 0.8, less below (a third at 0.8, a sixth at 0.4). */
 export const wearCap = (amount: number) => WEAR_CAP * Math.max(0, Math.min(1, amount / 0.8));
 /**
- * The chipped share a part keeps for the share s its wear field would give, under the cap of its amount: up to half the
+ * The chipped share a face keeps for the share s its wear field would give, under the cap of its amount: up to half the
  * cap unchanged, above that bending smoothly toward the cap, never reaching it.
  */
 export const cappedShare = (s: number, cap: number) => {
   const knee = cap / 2;
   return s <= knee ? s : knee + (cap - knee) * (1 - Math.exp(-(s - knee) / (cap - knee)));
 };
+/** Once a face's cap binds, amount from here to 1 brings bare and core up to the chip level, down to this much of their steps. */
+const DEEPEN_FROM = 0.6, DEEPEN_TO = 0.25;
 
 /**
- * The wear field with each part's share settled: where the field passes the chip threshold t on more than half the cap
- * of the amount (wearCap) of a part's area (a small part, all edges, or a handled one), the part's field is lowered by
- * one constant until the share is cappedShare of it. The order within the part stays, so the most worn texels (the
- * edges) stay chipped and its faces keep paint; a larger amount lowers it less, so it still only adds wear. Area per
- * sample from its triangle's texel size. Returns the clamped field (0..1) and how many parts were lowered.
+ * Per face (wearRegions) the level its chips start at: the threshold t of the amount, or where the wear field passes t
+ * on more than half the cap of the amount (wearCap) of the face's area, the field value above which the area is
+ * cappedShare of it, so its most worn texels (the edges, the corners first) chip and its middle keeps paint; a larger
+ * amount never raises it. With it, how far the cap binds (0 at half the cap, 1 at the cap), which brings bare and core
+ * closer to the chip level as amount rises past DEEPEN_FROM: wear still grows on a face held at its cap. Area per sample
+ * from its triangle's texel size.
  */
-function settleShares(b: Bake, mesh: SurfaceMesh, Wu: Float32Array, t: number, amount: number): { W: Float32Array; capped: number } {
-  const s = b.s, n = s.n, np = mesh.orient.pieces, tt = mesh.triTexel;
-  const area = new Float64Array(np), over = new Float64Array(np);
+function faceLevels(b: Bake, mesh: SurfaceMesh, R: { triRegion: Int32Array; count: number }, Wu: Float32Array, t: number, amount: number, deadline = 0): { level: Float64Array; bind: Float64Array; capped: number } {
+  const s = b.s, n = s.n, nr = R.count, tt = mesh.triTexel, reg = R.triRegion;
+  const area = new Float64Array(nr), over = new Float64Array(nr);
   for (let i = 0; i < n; i++) {
-    const tr = s.tri[i], c = mesh.triPiece[tr], a = tt[tr * 2] * tt[tr * 2 + 1];
+    if (late(deadline, i)) throw new Error(PAST_DEADLINE);
+    const tr = s.tri[i], c = reg[tr];
+    if (c < 0) continue;
+    const a = tt[tr * 2] * tt[tr * 2 + 1];
     area[c] += a;
     if (Wu[i] >= t) over[c] += a;
   }
-  const shift = new Float64Array(np), cap = wearCap(amount);
+  const level = new Float64Array(nr).fill(t), bind = new Float64Array(nr), cap = wearCap(amount);
   const lists: number[][] = [];
   let capped = 0;
-  if (cap > 0) for (let c = 0; c < np; c++) if (area[c] > 0 && over[c] > (cap / 2) * area[c]) { lists[c] = []; capped++; }
+  if (cap > 0) for (let c = 0; c < nr; c++) if (area[c] > 0 && over[c] > (cap / 2) * area[c]) { lists[c] = []; capped++; }
   if (capped) {
-    for (let i = 0; i < n; i++) { const c = mesh.triPiece[s.tri[i]]; if (lists[c] && Wu[i] >= t) lists[c].push(i); }
-    for (let c = 0; c < np; c++) {
+    for (let i = 0; i < n; i++) { const c = reg[s.tri[i]]; if (c >= 0 && lists[c] && Wu[i] >= t) lists[c].push(i); }
+    for (let c = 0; c < nr; c++) {
       const L = lists[c];
       if (!L) continue;
-      const keep = cappedShare(over[c] / area[c], cap) * area[c];
-      L.sort((x, y) => Wu[y] - Wu[x]);
+      const sh = over[c] / area[c], keep = cappedShare(sh, cap) * area[c];
+      bind[c] = Math.min(1, (sh - cap / 2) / (cap / 2));
+      L.sort((x, y) => Wu[y] - Wu[x] || x - y);
       // the level where the area at or above it reaches the share kept
-      let acc = 0, level = Wu[L[0]];
-      for (const i of L) { const tr = s.tri[i], a = tt[tr * 2] * tt[tr * 2 + 1]; if (acc + a > keep) break; acc += a; level = Wu[i]; }
-      shift[c] = Math.max(0, level - t);
+      let acc = 0, lv = Wu[L[0]];
+      for (const i of L) { const tr = s.tri[i], a = tt[tr * 2] * tt[tr * 2 + 1]; if (acc + a > keep) break; acc += a; lv = Wu[i]; }
+      level[c] = Math.max(t, lv);
     }
   }
-  const W = new Float32Array(n);
-  for (let i = 0; i < n; i++) { const v = Wu[i] - shift[mesh.triPiece[s.tri[i]]]; W[i] = v <= 0 ? 0 : v >= 1 ? 1 : v; }
-  return { W, capped };
+  return { level, bind, capped };
 }
 
-function finishEdgeWear(ctx: CookContext, b: Bake, L: { W: Float32Array; convex: Float32Array; concave: Float32Array; handled: Float32Array }, amount: number, t: number, bareT: number, coreT: number) {
+function finishEdgeWear(ctx: CookContext, b: Bake, L: WearLayers, amount: number, t: number, bareStep: number, coreStep: number, radius: number, deadline: number) {
   const n = b.s.n;
   let t0 = performance.now();
+  const chip = new Float32Array(n), bare = new Float32Array(n), core = new Float32Array(n), C = new Float32Array(n);
+  let nc = 0, nb = 0, nk = 0;
   if (n) {
-    const settled = settleShares(b, surfaceOf(b), L.W, t, amount);
-    L.W = settled.W;
-    ctx.stat('capped_parts', settled.capped);
+    const mesh = surfaceOf(b);
+    const R = perCloudMemo(b.s, `regions|${radius}`, () => wearRegions(b.g, mesh, b.tris, b.skip, radius, deadline)) as ReturnType<typeof wearRegions>;
+    const F = faceLevels(b, mesh, R, L.W, t, amount, deadline);
+    ctx.stat('capped_faces', F.capped);
     ctx.stage('settle', performance.now() - t0);
     t0 = performance.now();
-  }
-  const chip = new Float32Array(n), bare = new Float32Array(n), core = new Float32Array(n);
-  let nc = 0, nb = 0, nk = 0;
-  for (let i = 0; i < n; i++) {
-    const w = L.W[i];
-    // hands keep the metal bright: no core where the part is handled
-    const a = (w - t) / WEAR_EDGE, c = (w - bareT) / WEAR_EDGE, d = (w - coreT - L.handled[i]) / WEAR_EDGE;
-    chip[i] = a <= 0 ? 0 : a >= 1 ? 1 : a;
-    bare[i] = c <= 0 ? 0 : c >= 1 ? 1 : c;
-    core[i] = d <= 0 ? 0 : d >= 1 ? 1 : d;
-    if (chip[i] >= 0.5) nc++;
-    if (bare[i] >= 0.5) nb++;
-    if (core[i] >= 0.5) nk++;
+    const deepen = Math.max(0, Math.min(1, (amount - DEEPEN_FROM) / (1 - DEEPEN_FROM))) * (1 - DEEPEN_TO), reg = R.triRegion;
+    for (let i = 0; i < n; i++) {
+      if (late(deadline, i)) throw new Error(PAST_DEADLINE);
+      const w = L.W[i], c = reg[b.s.tri[i]], lv = c >= 0 ? F.level[c] : t, q = c >= 0 ? 1 - deepen * F.bind[c] : 1;
+      C[i] = w <= 0 ? 0 : w >= 1 ? 1 : w;
+      // hands keep the metal bright: no core where the part is handled
+      const x = (w - lv) / WEAR_EDGE, y = (w - lv - bareStep * q) / WEAR_EDGE, z = (w - lv - coreStep * q - L.handled[i]) / WEAR_EDGE;
+      chip[i] = x <= 0 ? 0 : x >= 1 ? 1 : x;
+      bare[i] = y <= 0 ? 0 : y >= 1 ? 1 : y;
+      core[i] = z <= 0 ? 0 : z >= 1 ? 1 : z;
+      if (chip[i] >= 0.5) nc++;
+      if (bare[i] >= 0.5) nb++;
+      if (core[i] >= 0.5) nk++;
+    }
   }
   ctx.stat('chip_share', n ? nc / n : 0);
   ctx.stat('bare_share', n ? nb / n : 0);
@@ -788,7 +796,7 @@ function finishEdgeWear(ctx: CookContext, b: Bake, L: { W: Float32Array; convex:
   }
   ctx.stage('masks', performance.now() - t0);
   t0 = performance.now();
-  const { img } = finishImage(b, L.W, 1, [0], layers);
+  const { img } = finishImage(b, C, 1, [0], layers);
   ctx.stage('image', performance.now() - t0);
   return wrapImage(b, img);
 }
@@ -799,28 +807,37 @@ defineNode({
   usesNodeName: NAMED_BY_NODE,
   summary: 'Paint wear on edges into uv space: edges measured on the shape at a radius, broken up in 3D into worn stretches and ragged chips, with nested chip, bare and core layers and more wear on the edges near handled parts.',
   description:
-    BAKE_DOC + 'C is the wear field 0..1 (continuous); layers chip (the top coat is gone: 1 where C passes the threshold set ' +
-    'by amount), bare (down to the substrate, bare_step deeper into the field), core (the deepest part of each chip, ' +
-    'core_step deeper: where rust starts), so core lies inside bare inside chip texel for texel and the primer ring is ' +
-    'chip − bare; convex and concave (curvature at radius, 0..1: 1 = a 90° edge or crease; with method surface gentle ' +
-    'bends, under about 0.2, may read 0), handled (the focus field, 1 on the focus prims fading to 0 at focus_radius), ' +
-    'texel, island and mask. A larger amount only adds wear. Edges come from method surface (how the shading normals ' +
-    'turn within radius, on a cloud of surface points as bake_measure curvature, made denser near the bends so the ' +
-    'result does not depend on the uv layout: smooth-shaded facets read as the round they stand for, hard edges count, ' +
-    'a junction between parts reads concave and gets no chips) or dihedral (the mesh\'s edge angles within max(radius, ' +
-    'width), as bake_curvature). Wear reaches width in from an edge inside its part, never past halfway to the edge ' +
-    'across from it; large 3D patches (patch_size, patchiness) decide which stretches of edge wear, and a 3D noise at ' +
-    'chip_size, its outline warped by raggedness, breaks them into chips, so the outlines follow the shape in 3D, never ' +
-    'the triangles, and are the same on both sides of a uv seam and at any texel density. No part wears through: chips ' +
-    'cover less than a third of any part\'s area (from amount 0.8; a sixth at 0.4), its most worn texels, so a small ' +
-    'or handled part wears at its edges and keeps paint on its faces (a part with no paint at all is a material, not ' +
-    'wear). focus multiplies the edge wear near the focus prims (focus_amount, within focus_radius), makes the chip ' +
-    'outlines there more ragged, lets wear reach up to (1 + 1.5 × focus_amount) × width in from the edges there, and ' +
-    'adds only a light rub (0.12 × focus_amount in C) to flats, which never chip. Input 1 (surroundings) buries the ' +
-    'points inside it, as in bake_measure, and lets the two bakes share their work. Warns once when hard-shaded facets ' +
-    'of curved parts would chip (bending 24° or more, at a radius under twice their size), naming the worst three. ' +
-    'Stats chip_share, bare_share, core_share (covered samples at 0.5 or more), capped_parts (parts held under the ' +
-    'cap). Stops at the time limit of long-running nodes.',
+    BAKE_DOC + 'C is the wear field 0..1 (continuous), as the shape gives it: amount and the cap below never change it, ' +
+    'so presets and masks can read it. The layers chip (the top coat is gone: 1 where C passes the threshold set by ' +
+    'amount), bare (down to the substrate, bare_step deeper into the field) and core (the deepest part of each chip, ' +
+    'core_step deeper: where rust starts) lie inside one another texel for texel (the primer ring is chip − bare); ' +
+    'convex and concave (curvature at radius, 0..1: 1 = a 90° edge or crease; with method surface gentle bends, under ' +
+    'about 0.2, may read 0), handled (the focus field, 1 on the focus prims fading to 0 at focus_radius), texel, ' +
+    'island and mask. A larger amount only adds wear. Edges come from method surface (how the shading normals turn ' +
+    'within radius, on a cloud of surface points as bake_measure curvature, made denser along the bends the mesh itself ' +
+    'shows, so the result does not depend on the uv layout or the texel density: smooth-shaded facets read as the round ' +
+    'they stand for, hard edges count, a junction between parts reads concave and gets no chips) or dihedral (the ' +
+    "mesh's edge angles within max(radius, reach), as bake_curvature; there reach only widens that radius, with no " +
+    'falloff, and the focus does not extend it). With method surface wear reaches reach in from an edge inside its ' +
+    'part, never past halfway to the edge across from it, fading out smoothly; large 3D patches (patch_size, ' +
+    'patchiness) decide which stretches of edge wear, and a 3D noise at chip_size, its outline warped by raggedness, ' +
+    'breaks them into chips, so the outlines follow the shape in 3D, never the triangles, and are the same on both ' +
+    'sides of a uv seam and wherever the part is placed. No face wears through: on every face (the surface between hard ' +
+    'edges or bends of 20° or more; a bevel or round belongs to the face it leads to; a piece with no face at all, a bar ' +
+    'a few radii across, counts as one) chips cover less than a third of its area from amount 0.8 (a sixth at 0.4), ' +
+    'its most worn texels: corners first, then the edges, so a small feature (a boss, a nut, a bar) keeps paint on its ' +
+    'faces while a large body is never held back. Where that cap holds, more amount still wears deeper: bare and core ' +
+    'grow toward the chip outline inside the same share. The cap applies to chip, bare and core only, never to C. ' +
+    'Faces pressed flush against another piece (lying on each other, facing opposite ways: stacked boxes, a part on a ' +
+    'plate) are buried and take no wear, so the seam between them is no edge. focus multiplies the edge wear near the ' +
+    'focus prims (focus_amount, within focus_radius), makes the chip outlines there more ragged, lets wear reach up to ' +
+    '(1 + 1.5 × focus_amount) × reach in from the edges there, and adds only a light rub (0.12 × focus_amount in C) ' +
+    'to flats, which never chip. Input 1 (surroundings) buries the points inside it, as in bake_measure, and lets the ' +
+    'two bakes share their work. Warns once when hard-shaded facets of curved parts would chip (bending 24° or more, at ' +
+    'a radius under twice their size), naming the worst three. Refuses a radius that would place more than 6 million ' +
+    'points along the bends. Stats chip_share, bare_share, core_share (covered samples at 0.5 or more), capped_faces ' +
+    '(faces held under the cap), dense_points. Stops at the time limit of long-running nodes; a cook that changes only ' +
+    'amount reuses the wear field.',
   aliases: ['edge_wear', 'edge_wear_bake', 'bake_wear', 'bake_chips'],
   inputs: [
     { name: 'geo', desc: 'mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout)' },
@@ -828,10 +845,10 @@ defineNode({
   ],
   params: {
     ...BAKE_PARAMS(),
-    amount: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how much of the edge length wears (moves the chip threshold: 0 none, 1 every edge out to width; under a third of any part chips)', aliases: ['wear', 'strength'] },
+    amount: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how much of the edge length wears (moves the chip threshold: 0 none, 1 every edge out to reach; under a third of any face chips)', aliases: ['wear', 'strength'] },
     radius: { type: 'float', default: 0.004, min: 0, desc: 'the scale edges are measured at (metres): 4 mm catches 1 to 3 mm bevels on sheet metal; cast parts want 6 to 8 mm', aliases: ['edge_radius'] },
     method: { type: 'enum', options: ['surface', 'dihedral'], default: 'surface', desc: 'surface: from the shading normals over radius (smooth-shaded facets do not count; decimated, isosurface and clean meshes); dihedral: the mesh\'s edge angles, as bake_curvature', aliases: ['mode', 'curvature_method'] },
-    width: { type: 'float', default: 0.008, min: 0, desc: 'how far wear reaches in from an edge at amount 1 (metres)', aliases: ['reach', 'edge_width'] },
+    reach: { type: 'float', default: 0.008, min: 0, desc: 'how far wear reaches in from an edge at amount 1 (metres; with method dihedral it only widens the radius the edge angles are read over)', aliases: ['wear_reach'] },
     chip_size: { type: 'float', default: 0.006, min: 0, desc: 'size of the chips that break the wear up (metres)', aliases: ['chip_scale', 'breakup_size'] },
     raggedness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how ragged the chip outlines are (domain warp)', aliases: ['ragged', 'warp'] },
     patchiness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how strongly large patches decide which stretches of edge wear (0: every edge alike)', aliases: ['patches'] },

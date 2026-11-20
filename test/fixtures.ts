@@ -340,7 +340,7 @@ export const PARAMS: Record<string, any> = {
   bake_vertex_color: { resolution: 64, supersample: 2 },
   bake_material: { resolution: 64 },
   bake_measure: { resolution: 64, samples: 8 },
-  bake_edge_wear: { resolution: 64, radius: 0.05, width: 0.08, chip_size: 0.03, amount: 0.7 },
+  bake_edge_wear: { resolution: 64, radius: 0.05, reach: 0.08, chip_size: 0.03, amount: 0.7 },
   tex_layers: { layers: [{ name: 'chips', mask: 'smoothstep(0.15, 0.4, MATCURV_convex)', color: '#9a9a96', roughness: 0.4, metallic: 1, height: -0.0005 }, { name: 'grime', mask: 'MATBASE_kind_painted_metal * smoothstep(0.1, 0.5, MATCURV_concave)', color: '#3d3529', color_mode: 'multiply', opacity: 0.8 }] },
   bake_flow: { resolution: 64, sources: '@P.y>0.4' },
   particles: { steps: 24, emit_rate: 1, velocity_var: 1, life: 0.8, noise: 1, collide: 'bounce', trails: 4, seed: 1 },
