@@ -8,6 +8,7 @@
 // be written says "preview failed"), and the Host/Origin checks. The page's
 // browser-free logic is tested in test/viewer-logic.ts.
 //   node test/viewer.ts
+import './cache-guard.ts';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';

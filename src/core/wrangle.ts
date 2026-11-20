@@ -138,7 +138,7 @@ export interface WrangleJob {
   outputs: Record<string, TypedArray>;
 }
 
-const CROSS_ELEMENT = new RegExp(String.raw`\b(${GEOMETRY_FUNCTIONS.join('|')}|globalThis|this|eval|Function)\b`);
+export const CROSS_ELEMENT = new RegExp(String.raw`\b(${GEOMETRY_FUNCTIONS.join('|')}|globalThis|this|eval|Function)\b`);
 
 /**
  * Run a wrangle, letting `par` execute a point wrangle in chunks: par(job, serial) runs the job on worker threads

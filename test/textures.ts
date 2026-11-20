@@ -322,7 +322,7 @@ section('filters: blend modes, levels, blur, normals');
   const col = await image({ g: { type: 'tex_gradient', params: { resolution: 16 } }, c: { type: 'tex_colorize', in: ['g'], params: { ramp: [[0, '#ff0000'], [1, '#0000ff']] } } }, 'c');
   check(col.layer('C')!.length === 16 * 16 * 4 && col.layer('C')![0] > 0.9 && col.layer('C')![15 * 4 + 2] > 0.9, 'tex_colorize: ramp colours as they are (#ff0000 → red 1)');
   const orm = await image({ a: { type: 'tex_gradient', params: { resolution: 8 } }, b: { type: 'tex_shape', params: { resolution: 16 } }, o: { type: 'tex_channel', in: ['a', 'b'], params: { name: 'orm' } } }, 'o');
-  check(orm.name === 'orm' && orm.width === 8 && orm.layer('C')![2] === 0 && orm.layer('C')![3] === 1, 'tex_channel pack: R, G from inputs (resized to the first), B and A from fill');
+  check(orm.name === 'orm' && orm.width === 16 && orm.layer('C')![2] === 0 && orm.layer('C')![3] === 1, 'tex_channel pack: R, G from inputs (resized to the largest), B and A from fill');
   const ex = await image({ a: { type: 'tex_colorize', in: ['g'], params: { ramp: [[0, '#336699'], [1, '#336699']] } }, g: { type: 'tex_gradient', params: { resolution: 4 } }, x: { type: 'tex_channel', in: ['a'], params: { mode: 'extract', channel: 'b' } } }, 'x');
   check(Math.abs(ex.layer('C')![0] - 0x99 / 255) < 1e-6 && ex.layer('C')!.length === 16, 'tex_channel extract: one channel as grey');
   const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { offset: [0.5, 0] } } }, 't');

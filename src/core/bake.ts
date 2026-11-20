@@ -214,10 +214,11 @@ export function resolve(s: BakeSamples, vals: ArrayLike<number>, ch: number): { 
  * Padding (edge dilation): every texel with coverage 0 within `padding` texels of a covered texel copies the nearest
  * covered texel; the rest get `background`. A front grows ring by ring from the island borders (8-neighbours, each
  * texel keeping the Euclidean-nearest source among the neighbours that reach it), so the cost follows the padded band,
- * not the image (the exact distance transform is used for very wide padding). Writes vals in place; returns the number
- * of texels filled by padding.
+ * not the image (the exact distance transform is used for very wide padding). paddingMap() returns, per texel, the texel it copies (itself when covered, -1 when nothing is within reach)
+ * so one map pads every layer of an image (applyPadding); dilate() does both for one layer, in place, and returns the
+ * number of texels filled by padding.
  */
-export function dilate(vals: Float32Array, ch: number, w: number, h: number, coverage: Float32Array, padding: number, background: number[]): number {
+export function paddingMap(coverage: Float32Array, w: number, h: number, padding: number): Int32Array {
   const n = w * h;
   const src = new Int32Array(n).fill(-1);
   let front: number[] = [];
@@ -258,16 +259,24 @@ export function dilate(vals: Float32Array, ch: number, w: number, h: number, cov
       front = next;
     }
   }
+  for (let k = 0; k < n; k++) src[k] = src[k] >= 0 ? k : src[k] <= -2 ? -2 - src[k] : -1;
+  return src;
+}
+
+/** Copy every texel of vals (ch values each) from the texel its padding map names; texels with none get `background`. Returns the number of texels filled from another texel. */
+export function applyPadding(vals: Float32Array, ch: number, map: Int32Array, background: number[]): number {
   let filled = 0;
-  for (let k = 0; k < n; k++) {
-    if (src[k] >= 0) continue;
-    if (src[k] <= -2) {
-      const s = -2 - src[k];
-      for (let c = 0; c < ch; c++) vals[k * ch + c] = vals[s * ch + c];
-      filled++;
-    } else for (let c = 0; c < ch; c++) vals[k * ch + c] = background[c] ?? 0;
+  for (let k = 0; k < map.length; k++) {
+    const s = map[k];
+    if (s === k) continue;
+    if (s >= 0) { for (let c = 0; c < ch; c++) vals[k * ch + c] = vals[s * ch + c]; filled++; }
+    else for (let c = 0; c < ch; c++) vals[k * ch + c] = background[c] ?? 0;
   }
   return filled;
+}
+
+export function dilate(vals: Float32Array, ch: number, w: number, h: number, coverage: Float32Array, padding: number, background: number[]): number {
+  return applyPadding(vals, ch, paddingMap(coverage, w, h, padding), background);
 }
 
 /** Normalise 3-vectors in place (zero vectors stay zero). */

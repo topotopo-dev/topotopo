@@ -2,7 +2,8 @@
 // TopoTopo MCP server (stdio). Exposes the geometry engine as tools for LLM agents.
 //   node src/mcp/server.ts [--package <dir>] [--viewer]
 //   topotopo mcp [--package <dir>] [--viewer]   (installed package: src/cli.ts dispatches here)
-// Env: TOPOTOPO_PACKAGE, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_SIM_TIMEOUT_MS, TOPOTOPO_WORKERS
+// Env: TOPOTOPO_PACKAGE, TOPOTOPO_VIEWER=1, TOPOTOPO_PORT, TOPOTOPO_SCRIPT_TIMEOUT_MS, TOPOTOPO_SIM_TIMEOUT_MS, TOPOTOPO_WORKERS,
+//      TOPOTOPO_NODE_CACHE_DIR (the folder of the disk cook cache), TOPOTOPO_NODE_CACHE=off (no disk cache)
 // stdout carries the MCP protocol — log only to stderr.
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -57,7 +58,8 @@ const ensureViewer = async () => {
 };
 const workspaceTools = workspaceTool({ session: () => ws, packages: () => packages, open: (dir) => openSession(dir) });
 async function openSession(dir: string) {
-  const e = new Engine(createNodeHost({ baseDir: dir }));
+  // slow node results are kept on disk between runs (TOPOTOPO_NODE_CACHE=off switches it off, TOPOTOPO_NODE_CACHE_DIR moves it)
+  const e = new Engine(createNodeHost({ baseDir: dir, nodeCache: true }));
   await e.init();
   const { session: w, packages: pk, loaded } = openPackage(e, dir, { watch: true });
   log(`session ${dir}: ${loaded.graphs} graphs, ${loaded.assets} assets${pk.dir ? `; package ${pk.dir}, ${Object.keys(pk.uses()).length} packages used` : '; in no package'}`);

@@ -22,7 +22,7 @@ import { lscm, readUV } from './uv.ts';
 import { xatlasCharts } from './xatlas.ts';
 import type { XatlasChartOptions } from './xatlas.ts';
 import { packCharts } from './uvpack.ts';
-import { cutLongCharts, islandWeights, mergeThinCharts, packsDenser, worldAngles } from './uvislands.ts';
+import { cutLongCharts, islandWeights, mergeThinCharts, packsDenser, visibilityScale, worldAngles } from './uvislands.ts';
 import { OVERLAP_REL, triIntersectionArea, uvOverlapCheck, uvOverlapPairs, uvTriangleAreas } from './uvoverlap.ts';
 
 export interface UnwrapOptions {
@@ -46,6 +46,8 @@ export interface UnwrapOptions {
   mergeThin: boolean;
   /** prim attribute with a texel weight per polygon ("" = none) */
   texelWeight: string;
+  /** 0..1: the prim attribute `visibility` (0..1) scales each polygon's texel density by lerp(1, max(0.05, visibility), weight); 0 = off */
+  visibilityWeight?: number;
   /** island orders the packer tries */
   iterations: number;
   /**
@@ -413,6 +415,8 @@ function finishUnwrap(g: Geometry, o: UnwrapOptions, chart: Int32Array, uv: Floa
     if (mt.merged) { newChart = mt.labels; count = mt.count; merged = mt.merged; }
   }
   const spill = o.texelsPerUnit > 0 && o.fit !== 'atlas';
+  const vis = (o.visibilityWeight ?? 0) > 0 ? g.prims.get('visibility') : undefined;
+  const scale = vis ? visibilityScale(vis.data as Float64Array, o.visibilityWeight!) : null;
   const solid = new Uint8Array(nt);
   for (let t = 0; t < nt; t++) {
     const a = vp[T[t * 3]] * 3, b = vp[T[t * 3 + 1]] * 3, d = vp[T[t * 3 + 2]] * 3;
@@ -438,7 +442,7 @@ function finishUnwrap(g: Geometry, o: UnwrapOptions, chart: Int32Array, uv: Floa
       const k = lab[p];
       if (k >= 0) for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) isl[k].verts.push(v);
     }
-    const weights = o.texelWeight ? islandWeights(g, lab, n, o.texelWeight) : null;
+    const weights = o.texelWeight || scale ? islandWeights(g, lab, n, o.texelWeight, scale) : null;
     const angles = o.orient === 'world' ? worldAngles(g, uv, lab, n) : null;
     const run = (padding: number) => packCharts(uv, isl, {
       resolution: o.resolution, padding, turns: o.orient === 'min_rect', orient: o.orient === 'min_rect' ? 'min_rect' : 'keep', scaleMode: 'uniform',

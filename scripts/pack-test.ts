@@ -63,6 +63,8 @@ const sh = (cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): str
 };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `${NAME}-pack-`));
+// the packed CLI keeps slow node results in a cache folder: this run's own, removed with the temp directory
+process.env.TOPOTOPO_NODE_CACHE_DIR = path.join(tmp, 'node-cache');
 const app = path.join(tmp, 'app');
 fs.mkdirSync(app);
 console.log(`temp directory ${tmp}`);

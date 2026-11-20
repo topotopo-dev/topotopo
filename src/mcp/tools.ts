@@ -62,7 +62,8 @@ function reportText(name: string, r: CookReport, scriptLimitMs: number, extraNot
   const lines: string[] = [];
   const nodes = [...r.results.values()];
   const cooked = nodes.filter((n) => !n.cached && !n.error).length;
-  if (r.ok) lines.push(`✓ graph "${name}" → "${r.target}" cooked${atFrame(r)} in ${r.ms.toFixed(0)} ms (${nodes.length} nodes: ${cooked} cooked, ${nodes.length - cooked} cached/skipped)`);
+  const disk = nodes.filter((n) => n.disk).length;
+  if (r.ok) lines.push(`✓ graph "${name}" → "${r.target}" cooked${atFrame(r)} in ${r.ms.toFixed(0)} ms (${nodes.length} nodes: ${cooked} cooked, ${nodes.length - cooked} cached/skipped${disk ? `, ${disk} of them from the disk cache` : ''})`);
   else lines.push(`✗ graph "${name}" failed${r.target ? ` at "${r.target}"` : ''}${atFrame(r)} — ${r.errors.length} error(s):`);
   for (const e of r.errors) lines.push(`  [${e.node}] ${e.message}${e.hint ? `\n     hint: ${e.hint}` : ''}`);
   for (const n of [...r.notes, ...extraNotes]) lines.push(`note: ${n}`);

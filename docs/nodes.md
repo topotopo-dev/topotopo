@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-263 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+265 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -3731,6 +3731,7 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `alpha_cutoff` | float | `0.5` | 0..1 |  |  | mask: discard where material alpha × texture alpha × vertex Alpha is below this value |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
+| `kind` | enum | `""` |  | ``, `painted_metal`, `cast_metal`, `galvanised`, `bare_steel`, `stainless`, `plastic`, `rubber`, `concrete`, `painted_wood`, `decal`, `keep` | `material_kind` | what the material is made of and how it ages ("" = not said): painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, or keep (leave the part as it is); stored in the table, ignored by exporters, read by bake_material (a kind written here also applies to a material copied from input 1) |
 | `base_color_map` | path | `""` |  |  | `basecolor_map`, `albedo_map`, `diffuse_map`, `color_map`, `basecolor_texture`, `base_color_texture` | base colour texture (sRGB PNG/JPEG path, or "image:<name>" for an image the geometry carries; "" = none); uses the uv attribute |
 | `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none) |
 | `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel |
@@ -4070,7 +4071,7 @@ category: `measure` · aliases: `ambient_occlusion`, `ao`, `thickness`
 
 Ray-cast per-point measures: ambient occlusion (0 open … 1 enclosed), thickness in metres, or cavity (0..1).
 
-Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone around the point normal and tests them against the geometry itself plus the optional occluder input (a triangle BVH). occlusion → "ao": fraction of rays blocked within max_distance. cavity → "cavity": occlusion over a short range where near walls count most (crevices and inner corners light up, flat and convex areas are 0). thickness → "thickness": mean distance to the opposite wall along rays cast inward (against the normal) in metres, so it needs closed or double-walled geometry with outward normals; normalize divides by max_distance. The alias "thickness" still defaults to mode occlusion: set mode. Points outside `group` keep their values.
+Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone around the point normal and tests them against the geometry itself plus the optional occluder input (a triangle BVH). occlusion → "ao": fraction of rays blocked within max_distance. cavity → "cavity": occlusion over a short range where near walls count most (crevices and inner corners light up, flat and convex areas are 0). thickness → "thickness": mean distance to the opposite wall along rays cast inward (against the normal) in metres, so it needs closed or double-walled geometry with outward normals; normalize divides by max_distance. The alias "thickness" still defaults to mode occlusion: set mode. class prim measures each polygon instead of each point: `face_points` points spread over it (more on large faces, by area) cast the rays along the polygon normal, and the mean of them is written as a prim attribute, so a large face that is half covered reads half enclosed where its corner points would read open. Points (or prims) outside `group` keep their values.
 
 **Inputs**
 
@@ -4084,6 +4085,8 @@ Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"occlusion"` |  | `occlusion`, `thickness`, `cavity` |  | what to measure |
+| `class` | enum | `"point"` |  | `point`, `prim` |  | point = one value per point (rays along the point normal); prim = one value per polygon, the mean over `face_points` points spread over it (rays along its normal) |
+| `face_points` | int | `8` | 1..256 |  |  | class prim: points per polygon, at least (large polygons get one per 0.002 m², up to 256) |
 | `samples` | int | `32` | 1..1024 |  | `rays`, `count` | rays per point (stratified; more = smoother) |
 | `max_distance` | float | `0` | 0.. |  | `maxdist`, `distance`, `radius` | hits farther than this are ignored; 0 = auto (occlusion: unlimited, cavity: 5% of the scene diagonal, thickness: the scene diagonal) |
 | `bias` | float | `0` | 0.. |  |  | ray start offset along the normal against self-hits; 0 = auto (1e-4 of the scene diagonal) |
@@ -4091,10 +4094,10 @@ Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone
 | `seed` | float | `0` |  |  |  | random seed |
 | `invert` | bool | `false` |  |  |  | write 1 - value (thickness: max_distance - value), e.g. exposure instead of occlusion |
 | `normalize` | bool | `false` |  |  |  | thickness: divide by max_distance to get 0..1 (occlusion and cavity are always 0..1) |
-| `group` | group (point) | `""` |  |  |  | points to measure ("" = all); the others keep their values |
-| `name` | string | `""` |  |  | `attrib`, `attribute` | output point attribute ("" = ao, thickness or cavity by mode) |
+| `group` | group (point) | `""` |  |  |  | points (class point) or prims (class prim) to measure ("" = all); the others keep their values |
+| `name` | string | `""` |  |  | `attrib`, `attribute` | output attribute ("" = ao, thickness or cavity by mode) |
 
-**Writes:** point float ao | thickness | cavity (or <name>)
+**Writes:** point float ao | thickness | cavity (or <name>); class prim: the same as a prim attribute
 
 **Example**
 
@@ -9391,13 +9394,14 @@ category: `uv` · aliases: `uvlayout`, `uvpack`, `uv_pack`, `pack_uv`
 
 Pack UV islands into the 0..1 square (or UDIM tiles) without overlaps: rotate to minimal bounds (or keep, or align to the world), equalise texel density, fill every gap.
 
-Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is oriented (orient: its minimum-area bounding rectangle, as it is, or world up to +v), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area, times the texel_weight attribute) and placed on the texel grid of `resolution`: bottom-left, into any gap its shape fits (inside rings, between the arms of other islands), `padding` texels from every other island and half of it from the tile border, so islands never overlap. The scale is the largest at which every island fits (or texels_per_unit); iterations tries other island orders and keeps the densest. fit atlas keeps everything in the 0..1 tile; fit udim fills UDIM tiles 1001, 1002, … (u offset, ten per row; an island goes to the first tile it fits), up to udims. cut_long cuts islands longer than the tile, and rings and arcs, into parts when the parts pack denser (each cut is a seam). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the part they are in; islands that do not fit at any scale leave the uv unchanged, with a warning.
+Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is oriented (orient: its minimum-area bounding rectangle, as it is, or world up to +v), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area, times the texel_weight attribute) and placed on the texel grid of `resolution`: bottom-left, into any gap its shape fits (inside rings, between the arms of other islands), `padding` texels from every other island and half of it from the tile border, so islands never overlap. The scale is the largest at which every island fits (or texels_per_unit); iterations tries other island orders and keeps the densest. fit atlas keeps everything in the 0..1 tile; fit udim fills UDIM tiles 1001, 1002, … (u offset, ten per row; an island goes to the first tile it fits), up to udims. cut_long cuts islands longer than the tile, and rings and arcs, into parts when the parts pack denser (each cut is a seam). visibility_weight gives the faces that show more texels: the density of each polygon is scaled by how much of its hemisphere is open (rays from points spread over it, against the geometry and the optional surroundings input; a quarter of the hemisphere counts as fully open, a wall flush with a face blocks it), so the back of a wall-mounted part or the inside of a closed one shrinks to a twentieth and the rest of the atlas grows. It measures openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called `visibility` is replaced when the weight is above 0. Prim visibility is written; the stats count the faces at the minimum, and a warning says so when a quarter of the area is hidden with no surroundings connected (normals facing inwards). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the part they are in; islands that do not fit at any scale leave the uv unchanged, with a warning.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | geometry with uv |
+| 1 | `surroundings` | yes | no | what stands around the geometry (a wall, the floor, other parts) and blocks its rays for visibility_weight; not laid out and not changed |
 
 **Parameters**
 
@@ -9408,6 +9412,7 @@ Islands are polygon regions whose uv is continuous across shared edges, or the v
 | `orient` | enum | `"min_rect"` |  | `min_rect`, `keep`, `world` |  | island orientation: min_rect = turned to its minimum bounding rectangle, with 90° turns while packing (densest); keep = as it is, no turns; world = world up (+Y) points to +v (horizontal islands: +X to +u), no turns. Rotations keep the uv winding |
 | `scale_mode` | enum | `"uniform"` |  | `uniform`, `keep` |  | uniform = same texel density on every island (by 3D area); keep = keep the relative uv scale |
 | `texel_weight` | string | `"texel_weight"` |  |  |  | prim attribute scaling the texel density of each island (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1 |
+| `visibility_weight` | float | `0` | 0..1 |  |  | texel density by visibility, 0..1: texels per metre of each polygon times lerp(1, max(0.05, open), weight), where open is how much of its hemisphere is not blocked by the geometry or the surroundings input (rays from points spread over the polygon by area, unlimited; a quarter of the hemisphere counts as fully open): faces against a wall (also one flush with them) or inside a closed part get a twentieth of the density, open faces keep it, and the rest of the atlas grows. It is openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called visibility is replaced when the weight is above 0. 0 = off (the layout is as without it). Writes prim visibility; stats count the faces and the share of the area at the minimum, and a warning says so when a quarter of the area reads hidden with no surroundings connected (normals facing inwards) |
 | `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv"); half of it, rounded up, to the tile border |
 | `units` | enum | `"texels"` |  | `texels`, `uv` |  | unit of padding |
 | `resolution` | int | `1024` | 16..16384 |  |  | texture size: padding is in its texels, and islands are placed on its texel grid (at most 2048 cells per tile) |
@@ -9425,14 +9430,55 @@ Islands are polygon regions whose uv is continuous across shared edges, or the v
 
 ```json
 {
-  "type": "uv_layout",
-  "in": [
-    "geo"
-  ],
-  "params": {
-    "padding": 8,
-    "resolution": 2048
-  }
+  "nodes": {
+    "cabinet": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.6,
+          1,
+          0.3
+        ],
+        "center": [
+          0,
+          0.5,
+          0.15
+        ]
+      }
+    },
+    "wall": {
+      "type": "grid",
+      "params": {
+        "size": [
+          6,
+          6
+        ],
+        "divisions": [
+          1,
+          1
+        ],
+        "plane": "xy",
+        "center": [
+          0,
+          0.5,
+          -0.001
+        ]
+      }
+    },
+    "out": {
+      "type": "uv_layout",
+      "in": [
+        "cabinet",
+        "wall"
+      ],
+      "params": {
+        "visibility_weight": 1,
+        "padding": 8,
+        "resolution": 2048
+      }
+    }
+  },
+  "output": "out"
 }
 ```
 
@@ -9539,13 +9585,14 @@ category: `uv` · aliases: `uvunwrap`, `autouv`, `xatlas`, `uv_auto`, `unwrap`
 
 Automatic UV unwrap: xatlas cuts and flattens charts per connected piece; they are packed without overlaps into the 0..1 square. Polygons are kept.
 
-Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the weights: chart_smoothing cuts and flattens the charts on a smoothed copy and keeps the uv on the real shape. Writes prim chart (and atlas with fit stack).
+Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute (and, with visibility_weight, times how open each polygon is: against the geometry and the optional surroundings input, so hidden faces get a twentieth of the texels; it is openness, so a face deep inside a recess gets less; a chart that mixes hidden and visible faces is weighted by its mean; an existing prim attribute called `visibility` is replaced when the weight is above 0), never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the weights: chart_smoothing cuts and flattens the charts on a smoothed copy and keeps the uv on the real shape. Writes prim chart (and atlas with fit stack).
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | polygon geometry (polylines are skipped) |
+| 1 | `surroundings` | yes | no | what stands around the geometry (a wall, the floor, other parts) and blocks its rays for visibility_weight; not unwrapped and not changed |
 
 **Parameters**
 
@@ -9571,9 +9618,10 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 | `merge_thin` | bool | `true` |  |  |  | join thin charts (bevel strips, narrow bands: narrower than three paddings) onto a neighbouring chart where their shared seam lines up and nothing overlaps, so fewer charts lose space to padding (and fewer seams); off = the charts as cut |
 | `cut_long` | bool | `true` |  |  |  | cut charts longer than the tile, and rings and arcs whose hull is mostly empty, across their length into parts, when that packs denser (each cut is a seam); off = charts stay whole |
 | `texel_weight` | string | `"texel_weight"` |  |  |  | prim attribute scaling the texel density of each chart (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1 |
+| `visibility_weight` | float | `0` | 0..1 |  |  | texel density by visibility, 0..1: texels per metre of each polygon times lerp(1, max(0.05, open), weight), where open is how much of its hemisphere is not blocked by the geometry or the surroundings input (rays from points spread over the polygon by area, unlimited; a quarter of the hemisphere counts as fully open): faces against a wall (also one flush with them) or inside a closed part get a twentieth of the density, open faces keep it, and the rest of the atlas grows. It is openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called visibility is replaced when the weight is above 0. 0 = off (the layout is as without it). Writes prim visibility; stats count the faces and the share of the area at the minimum, and a warning says so when a quarter of the area reads hidden with no surroundings connected (normals facing inwards) |
 | `iterations` | int | `4` | 1..64 |  |  | chart orders the packer tries; the densest wins |
 
-**Writes:** vertex uv, prim chart, prim atlas (fit stack with several atlases)
+**Writes:** vertex uv, prim chart, prim atlas (fit stack with several atlases), prim visibility (visibility_weight above 0)
 
 **Example**
 
@@ -12904,6 +12952,91 @@ Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv 
 }
 ```
 
+### bake_material
+
+category: `texture` · aliases: `material_bake`, `bake_materials`, `bake_material_table`
+
+Bake the material table into uv space: base colour, roughness and metallic from each prim's material, a 0/1 mask per material and per kind, and the texel size and uv island of every texel.
+
+Reads the prim attribute "material" and the detail table "materials" (the material node) and writes, in the uv space of the mesh (uv_attrib): C = the base colour (RGBA; where a material's base colour map is an "image:<name>" the geometry carries, the colour it shows), layer "roughness" and layer "metallic" (the material's values; a packed orm map gives roughness from its green and metallic from its blue channel times the factors, a roughness map its green channel), a 0/1 layer "mat_<material>" per material the baked prims use and a 0/1 layer "kind_<kind>" per kind present (masks: all, materials, kinds or none), layer "texel" (R = metres one texel covers along u, G along v, at that texel: tex_layers builds its normal map from it, so a step has the same slope at any resolution and on any shape of image) and layer "island" (the uv island, so a filter can stay on one). Maps are read with the mesh's "uv" attribute (the uv a material's maps use), whatever uv_attrib the bake is laid out with. A material's normal map is not carried (its detail is not in the stack yet: a warning names the material), nor is the occlusion of an orm map: give tex_layers an occlusion expression. Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning lists the renames and two materials never share a name). A texel that two materials share takes the first sample's material for the labels (as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is, in this order, the `kinds` entry for its name, its own `kind` field (the material node's kind param), its whole name when that is a kind or one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about (a texel they share holds the last one's values). Stats: size (metres the image width covers, the median texel size times the width) and texel_mm.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `kinds` | json | `{}` |  |  | `material_kinds` | kind per material name, e.g. {"zinc_steel": "galvanised"}; wins over the material's own kind (kinds: painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, keep) |
+| `masks` | enum | `"all"` |  | `all`, `materials`, `kinds`, `none` | `mask_layers`, `labels` | which 0/1 mask layers to write: mat_<material>, kind_<kind>, both or neither |
+
+**Writes:** image <name> (default: the node name): C base colour RGBA, roughness, metallic, mat_<material> (0/1 per material), kind_<kind> (0/1 per kind present), texel (RGBA: R metres per texel along u, G along v), island, mask; stats size, texel_mm, texels, coverage
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "paint": {
+      "type": "material",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "paint",
+        "base_color": "#6f8fae",
+        "roughness": 0.55,
+        "kind": "painted_metal",
+        "group": "@P.y>0.4"
+      }
+    },
+    "steel": {
+      "type": "material",
+      "in": [
+        "paint"
+      ],
+      "params": {
+        "name": "steel",
+        "base_color": "#9a9a96",
+        "roughness": 0.35,
+        "metallic": 1,
+        "kind": "bare_steel",
+        "group": "@P.y<0.4"
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "steel"
+      ]
+    },
+    "base": {
+      "type": "bake_material",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    }
+  },
+  "output": "base"
+}
+```
+
 ### bake_normal
 
 category: `texture` · aliases: `normal_bake`, `bake_tangent_normal`, `bake_normal_map`
@@ -14869,6 +15002,114 @@ Invert: 1 - value (grey or RGB; alpha untouched).
     }
   },
   "output": "out"
+}
+```
+
+### tex_layers
+
+category: `texture` · aliases: `layers`, `material_layers`, `texture_layers`, `layer_stack`
+
+A layer stack over a base: each layer is a mask expression with a colour or ramp, roughness, metallic and height; writes base colour, normal, ORM and height together on the covered texels, then pads.
+
+Input 0 is the base: an image whose C is the base colour and whose layers "roughness" and "metallic" hold the base values (bake_material gives exactly this), or any colour image with base_roughness / base_metallic set; its layer "mask" is the coverage (coverage param), its layers "texel" (metres per texel along u and v) and "island" give the normal map its slopes and keep it on one island. Input 1 holds the mask images (merge the bakes). A layer's mask is an expression over the layers of the images in both inputs: an image's main layer is a variable named like the image, each other layer <image>_<layer> (an image "edges" with layers convex and concave gives edges, edges_convex, edges_concave; the base image's own layers too: base_kind_painted_metal); a grey layer is its value, a colour layer its luminance and its channels <name>_r, <name>_g, <name>_b, <name>_a; the wrangle helpers (smoothstep, fit, clamp, min, max, pow …) and the graph vars are there, and a bare layer name is an expression too. Layer names that are no identifier cannot be read: a warning lists them. A name two layers share is an error only where an expression uses it, as is an image called like a helper function (noise, fit …). Layers run bottom to top; a = clamp(mask, 0, 1) × opacity. color is "#rrggbb", a name, [r, g, b] or a ramp [[t, colour], …] read at the expression color_by (0..1; a noise image for varied rust); color_mode normal replaces, multiply darkens by the colour, overlay overlays it, lighten keeps the lighter of the two (a fade toward a pale colour). roughness and metallic replace the values below where the mask is, roughness_offset adds to roughness (clamped to 0..1 after every layer); height is metres added where the mask is (negative = a step down: chips). A layer with signed true reads its mask as -1..1 for roughness_offset and height alone (one mask makes both bumps and dents, rougher and smoother). The normal map is made from the summed height at the texel size of every texel (the base's "texel" layer; without one size, the metres the image width covers, and a layer with a height refuses until one is given), so a 0.15 mm step has the same slope at 1024 and 2048 and on a non-square image, and a texel only reads neighbours of its own island, so a chip never leaves a ridge on the island next to it. Only covered texels are composed and expressions run on them only, so nothing a mask holds outside the islands reaches the maps; at the end every map is padded from the covered texels by padding texels (a neutral value beyond). Mask images of another size than the base are resized, with a warning. Expressions are compiled once per distinct text and run in chunks on the worker pool for large images (code that reads globalThis, this or geometry functions runs in one piece), with identical results without it. Outputs: images <name>_base_color, <name>_normal, <name>_orm (R occlusion, G roughness, B metallic) and <name>_height (metres), each keeping the coverage as layer "mask"; texture_to_material makes a material of the first three.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `base` | no | no | the base: colour in C, layers roughness, metallic, texel, island and mask (bake_material) |
+| 1 | `masks` | yes | no | geometry holding the images the mask expressions name (merge the bake outputs) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layers` | json | `[]` |  |  | `stack` | the layers, bottom to top: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top)", "opacity": 1, "color": "#a69d8b" \| [r, g, b] \| [[0, "#5c2a14"], [1, "#9a4a20"]], "color_by": "0", "color_mode": "normal" \| "multiply" \| "overlay" \| "lighten", "roughness": 0.95, "roughness_offset": 0, "metallic": 0, "height": 0.0003, "signed": false}]; name and mask are required, the rest optional (a field left out leaves that channel alone) |
+| `occlusion` | code | `""` |  |  | `ao`, `occlusion_expression` | expression for ORM red (occlusion 0..1) over the same variables ("" = 1) |
+| `base_roughness` | float | `-1` | -1..1 |  | `roughness` | roughness of the whole base, 0..1 (-1 = read the base's layer "roughness"; an error when it has none) |
+| `base_metallic` | float | `-1` | -1..1 |  | `metallic` | metallic of the whole base, 0..1 (-1 = read the base's layer "metallic"; an error when it has none) |
+| `coverage` | string | `"mask"` |  |  | `coverage_layer` | the base layer that holds the coverage (texels above 0 are composed and padded from; "" = every texel counts) |
+| `padding` | int | `8` | 0..256 |  | `dilation`, `margin` | texels to pad from the coverage at the end (the nearest covered texel; a neutral value beyond) |
+| `size` | float | `0` | 0.. |  | `texture_size`, `world_size` | only read when the base has no "texel" layer: the metres the image width covers (one texel is size / width along both axes), for the slope of the normal map; 0 = none, and a layer with a height then refuses |
+| `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` | `format`, `convention` | green channel convention of the normal map (glTF and Blender read OpenGL, Unreal DirectX) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the base) to use ("" = its only image; needed when it holds several) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | prefix of the output images ("" = this node's name): <name>_base_color, <name>_normal, <name>_orm, <name>_height |
+
+**Writes:** images <name>_base_color (RGBA), <name>_normal (RGBA, tangent space), <name>_orm (R occlusion, G roughness, B metallic) and <name>_height (grey, metres), each with layer mask (the coverage)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "paint": {
+      "type": "material",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "paint",
+        "base_color": "#6f8fae",
+        "roughness": 0.55,
+        "kind": "painted_metal"
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "paint"
+      ]
+    },
+    "base": {
+      "type": "bake_material",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    },
+    "curv": {
+      "type": "bake_curvature",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    },
+    "stack": {
+      "type": "tex_layers",
+      "in": [
+        "base",
+        "curv"
+      ],
+      "params": {
+        "layers": [
+          {
+            "name": "chips",
+            "mask": "smoothstep(0.15, 0.4, curv_convex)",
+            "color": "#9a9a96",
+            "roughness": 0.4,
+            "metallic": 1,
+            "height": -0.0005
+          },
+          {
+            "name": "grime",
+            "mask": "smoothstep(0.1, 0.5, curv_concave)",
+            "color": "#3d3529",
+            "color_mode": "multiply",
+            "roughness": 0.9,
+            "opacity": 0.8
+          }
+        ]
+      }
+    }
+  },
+  "output": "stack"
 }
 ```
 
