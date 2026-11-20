@@ -509,8 +509,14 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     writeMaterials(out, t);
     const a = out.prims.add(MATERIAL_ATTRIB, 'string', 1);
     for (let i = 0; i < out.numPrims; i++) a.set(i, `${name}_preview`);
-    // the preview reads its maps on the mask uv: point the material's uv there
-    ctx.warn(`${T_M}: preview assigns material "${name}_preview" (on uv "${uv}") for looking; export the masks, not the preview`);
+    // the preview's maps lie on the mask uv: it becomes uv (the tiling uv is kept as uv_tiling)
+    if (uv !== 'uv') {
+      const f = out.findAttrib(uv, ['vertex', 'point'])!, t = out.findAttrib('uv', ['vertex', 'point']);
+      if (t) out.table(t.cls).set('uv_tiling', t.attr.clone());
+      if (t && t.cls !== f.cls) out.table(t.cls).delete?.('uv');
+      out.table(f.cls).set('uv', f.attr.clone());
+    }
+    ctx.warn(`${T_M}: preview assigns material "${name}_preview" and shows it on uv "${uv}" (the tiling uv is kept as uv_tiling) for looking; export the masks, not the preview`);
   }
   return out;
 }
@@ -553,7 +559,7 @@ function defaultGraph(mode: 'maps' | 'masks'): string {
 
 const KIND_DOC = 'Kinds (the material node\'s kind, or kinds here; never guessed from names): painted ones lose their coat (painted_metal: chips to primer, bare steel, rust in the chip cores; cast_metal: larger chips, pitting, iron, heavier rust; painted_concrete: chips to concrete; painted_plaster: peels in larger sheets, water marks; painted_wood: flakes to wood that greys; decal: fades and scratches), bare ones stain, darken or grey through the whole surface and only wear lighter at edges (concrete: damp, stains, efflorescence below runs, worn arrises, moss; bare_steel: mill scale, flash and heavy rust, and it sources rust runs onto what is below; galvanised: dulls, white bloom, red rust on edges above rust 0.6; stainless: smudges where handled, tea stain; plastic: chalks in the sun, scuffs; rubber: greys; bare_wood: greys in the sun, damp low down; asphalt: fades, stains pool on flats; ceramic: chips to bisque); keep leaves a part as it is. Shared over every kind: film (sheltered paint duller), grime, dust, splash (mount ground), dirt runs, rust runs, moss on growing kinds outdoors, and blotch and grain on roughness.';
 
-const LEAK_DOC = 'Dirt runs start where the shape sheds water, measured, not named: the outer edge of every face turned up that meets a steep face below at a convex edge (copings, parapets, sills, ledges, plate and canopy tops) and the wall under a face turned down that meets it at a concave edge (under a balcony slab or canopy), one point every 1 / leak_density metres, kept with the chance of the rain that reaches its ledge (rays up against the model and its surroundings; indoors a fixed chance, as water below windows). Named parts add to them: handled parts wear, rust sources (bare_steel, and galvanised above rust 0.6) run rust onto what is below. mount and exposure scale them.';
+const LEAK_DOC = 'Dirt runs start where the shape sheds water, measured, not named: the outer edge of every face turned up that meets a steep face below at a convex edge (copings, parapets, sills, ledges, plate and canopy tops) and the wall under a face turned down that meets it at a concave edge (under a balcony slab or canopy), or, when the wall is a separate piece, the wall that short level rays from just below the lip of an overhang reach (under a coping or sill that is its own box), one point every 1 / leak_density metres, kept with the chance of the rain that reaches its ledge (rays up against the model and its surroundings; indoors a fixed chance, as water below windows). Named parts add to them: handled parts wear, rust sources (bare_steel, and galvanised above rust 0.6) run rust onto what is below. mount and exposure scale them.';
 
 defineNode({
   type: T_W,

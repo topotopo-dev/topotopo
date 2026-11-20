@@ -192,7 +192,7 @@ export function namedMasks(o: MaskInputs, packed = false): { name: string; mask:
     { name: 'blotch', mask: 'n_blotch' }, { name: 'grain', mask: 'n_grain' },
     { name: 'grime', mask: 'clamp(k_dirt * (cavity * 1.1 + (1 - m_occ) * 0.9) * (0.4 + 0.9 * n_blotch) * (0.7 + 0.6 * (1 - m_ht)) * pv + handled * k_dirt * 0.35 * n_patch, 0, 1)' },
     { name: 'dust', mask: `clamp(k_dirt * x_dust * smoothstep(0.15, 0.8, m_top) * (1 - x_wash + x_wash * m_shel) * (0.35 + 0.9 * n_grain) ${o.wallNear ? '+ k_wall * m_wallnear * m_top * k_dirt * 0.5' : ''}, 0, 1)` },
-    { name: 'splash', mask: 'k_ground * clamp(x_splash * k_dirt * 1.6, 0, 1) * smoothstep(0.45, 0.62, m_low * (0.35 + 1.3 * n_ragged)) * (0.55 + 0.6 * n_blotch)' },
+    { name: 'splash', mask: 'k_ground * clamp(x_splash * k_dirt * 1.2, 0, 1) * smoothstep(0.45, 0.62, m_low * (0.35 + 1.3 * n_ragged)) * (0.55 + 0.6 * n_blotch)' },
     { name: 'fade', mask: 'clamp(k_fade * m_sun * m_vis * (0.7 + 0.6 * n_blotch), 0, 1)' },
     { name: 'rust', mask: 'clamp(k_rust * x_rust * (0.45 + 0.8 * n_blotch) * (0.7 + 0.5 * cavity + 0.3 * m_top + 0.3 * m_low), 0, 1)' },
     { name: 'runs_rust', mask: o.rustRuns ? 'rr * clamp(k_rust * x_runs_rust * 1.4, 0, 1)' : '0' },
@@ -252,7 +252,7 @@ export const OVERRIDE_FIELDS = ['color', 'opacity', 'roughness', 'roughness_offs
 /** Sizes that follow the object: run widths and lengths, noise features, the splash band and the edge radius. */
 export function weatherScale(diag: number, height: number, texel: number): { s: number; splash: number; edge: number; cavity: number } {
   const s = Math.min(4, Math.max(0.5, diag / 1.2));
-  return { s, splash: Math.min(0.6, Math.max(0.06, 0.2 * height)), edge: Math.max(Math.min(0.03, 0.004 * s), 5 * texel), cavity: Math.max(0.02, 4 * texel) };
+  return { s, splash: Math.min(0.45, Math.max(0.06, 0.2 * height)), edge: Math.max(Math.min(0.03, 0.004 * s), 6 * texel), cavity: Math.max(0.02, 4 * texel) };
 }
 
 // ---------------------------------------------------------------- planes
@@ -368,7 +368,8 @@ export function leakSources(g: Geometry, o: LeakOptions): LeakSources {
       ed.prims.push(p);
     }
   }
-  const scene = o.rain ? RayScene.of(o.blockers ? Geometry.merge([g, o.blockers]) : g) : null;
+  const world = RayScene.of(o.blockers ? Geometry.merge([g, o.blockers]) : g);
+  const scene = o.rain ? world : null;
   const rain = (x: number, y: number, z: number): number => {
     if (!scene) return 0.35;
     let open = 0;
@@ -378,6 +379,7 @@ export function leakSources(g: Geometry, o: LeakOptions): LeakSources {
   };
   const pts: number[] = [], wts: number[] = [];
   const count = { ledge: 0, under: 0, top: 0 };
+  const under: { a: number[]; b: number[]; w: number[] }[] = [];
   let h = (o.seed * 2654435761) >>> 0;
   const rnd = () => { h = (h + 0x6d2b79f5) >>> 0; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const step = 1 / Math.max(1e-6, o.density);
@@ -415,6 +417,26 @@ export function leakSources(g: Geometry, o: LeakOptions): LeakSources {
       const off = [(into[0] / il) * 0.004, (into[1] / il) * 0.004, (into[2] / il) * 0.004];
       if (u[1] > COS_UP && convex) along(a, b, off, (x, y, z) => rain(x, y, z), 'ledge');
       else if (u[1] < -COS_UP && !convex) along(a, b, off, () => 0.5, 'under');
+      else if (u[1] < -COS_UP && convex) under.push({ a, b, w });
+    }
+  }
+  // the lip of an overhang (a face turned down meeting a steep face above it) over a wall that is a separate piece:
+  // water creeps back under it to the wall, found with short level rays from just below the lip
+  for (const { a, b, w } of under) {
+    const hl = Math.hypot(w[0], w[2]);
+    if (!(hl > 1e-6)) continue;
+    const dx = -w[0] / hl, dz = -w[2] / hl;
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    if (!(L > 1e-6)) continue;
+    const n = Math.max(1, Math.floor(L / step + rnd()));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.2 + 0.6 * rnd()) / n;
+      const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t - 0.003, z = a[2] + (b[2] - a[2]) * t;
+      const d = world.nearest(x, y, z, dx, 0, dz, 0.6, 0.002);
+      if (!(d < 0.6) || rnd() > 0.5) continue;
+      pts.push(x + dx * (d - 0.003), y - 0.004, z + dz * (d - 0.003));
+      wts.push(0.5);
+      count.under++;
     }
   }
   if (o.topEdge) {

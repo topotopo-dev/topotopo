@@ -341,6 +341,8 @@ section('leak sources: a wall with a sill and a coping');
   for (let i = 0; i < l.points.numPoints; i++) ys.push(P[i * 3 + 1]);
   const onSill = ys.filter((y) => Math.abs(y - 1.025) < 0.01).length, onCoping = ys.filter((y) => Math.abs(y - 2.86) < 0.01).length;
   check(l.count.ledge > 0 && onSill > 0 && onCoping > 0, `ledges found: ${onSill} on the sill, ${onCoping} on the coping (${l.count.ledge} ledge points)`);
+  const underCoping = ys.filter((y) => y > 2.78 && y < 2.8).length, underSill = ys.filter((y) => y > 0.96 && y < 0.975).length;
+  check(l.count.under > 0 && underCoping > 0 && underSill > 0, `the wall under the coping and under the sill (separate pieces) is a source: ${underCoping}, ${underSill}`);
   check(!ys.some((y) => y < 0.9), 'nothing on the plain wall below the sill');
   const w = l.points.points.get('w');
   check(!!w && [...Array(l.points.numPoints).keys()].every((i) => (w.get(i) as number) > 0 && (w.get(i) as number) <= 1), 'each source carries its rain weight w');
