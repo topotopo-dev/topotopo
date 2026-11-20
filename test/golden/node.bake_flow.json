@@ -1,0 +1,55 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "4ea8fa4f71b05b25",
+          "along": "1b0bbe5fb21de90d",
+          "head": "17a82816cf38a8cc",
+          "id": "87d35c4aafec0b38",
+          "mask": "5963c5b542beec4f",
+          "strength": "c461b971294431a3"
+        },
+        "name": "target"
+      }
+    ]
+  },
+  "name": "node.bake_flow",
+  "ok": true,
+  "source": "fixture for node type \"bake_flow\" (test/fixtures.ts)",
+  "warnings": []
+}

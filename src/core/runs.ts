@@ -1,0 +1,554 @@
+// Runs: water, rust and dirt that flow down a surface under gravity from source parts (rust under a bolt, rain streaks
+// under a ledge). They are traced in 3D over the receiving surface, so a run crosses uv seams and edges without seeing
+// them and works on a box, a cylinder or a creature alike (nodes/runs.ts bakes them into uv space).
+//
+//   start points   points on the source parts, moved to the closest point of the receiving surface (every prim that is
+//                  not a source), kept within TOUCH of the source and off ledges, thinned to `density` runs per metre
+//                  (random order, minimum spacing 1 / density between runs, every connected piece of a source gets one)
+//   walking        a step of `step` metres along gravity projected onto the tangent plane of the smooth surface normal,
+//                  bent sideways by 3D noise (wobble), then snapped back onto the surface (closest point). A step that
+//                  ends in the air beyond a convex edge takes the direction of the gap as the surface normal there
+//   ledge          a surface whose normal is within `ledge` degrees of up stops the run; it pools there (a lens along
+//                  the ledge, `pool` times the run's width). Overhang: a surface turned down (normal·gravity above
+//                  OVERHANG) is left by a drip: a ray along gravity to the next surface below, where the run goes on
+//   emergence      the part of a run under its source part (within the run's own width of it) is not drawn: a run
+//                  begins where it comes out from under the part
+//   per texel      the closest run segments within the widest run (a grid over the segments), accepted where the
+//                  texel's normal agrees with the segment's: coverage of a stripe of the run's width over the texel
+//                  (so thin runs stay thin at any resolution), gaps along the run from 3D noise, per run width wander
+//
+// Everything a texel reads is a function of its 3D position and normal, so both sides of a uv seam give one value.
+// Single-threaded and deterministic (hash-seeded, no Math.random).
+import type { Geometry } from './geometry.ts';
+import { RayScene } from './analysis.ts';
+import { makeNoise } from './noise.ts';
+import { hashNumber, randN } from './random.ts';
+import { TriBVH, closestOnTri, closestScratch } from './spatial.ts';
+import { resolveVertexNormals, triangulate } from './topology.ts';
+
+/** A source part touches the surface when it is within this of it (metres). */
+export const TOUCH = 0.01;
+/** A surface turned down this much (normal · gravity) is an overhang: runs drip off it (about 15° past vertical). */
+export const OVERHANG = 0.26;
+/** Most runs a node traces (a warning says when the density was thinned to fit). */
+export const MAX_RUNS = 20000;
+/** Spatial frequency of the sideways wander (per metre): it changes direction about every 8 cm. */
+const WOBBLE_FREQ = 12;
+/** Most drips one run may take. */
+const MAX_DRIPS = 6;
+
+export interface FlowParams {
+  density: number;
+  direction: [number, number, number];
+  /** length range per run (metres, drawn part: from where it comes out from under its source) */
+  length: [number, number];
+  /** width range at the head (metres); runs taper to 30 % at the tail */
+  width: [number, number];
+  wobble: number;
+  breakup: number;
+  /** degrees: a surface whose normal is within this of up is a ledge */
+  ledge: number;
+  pool: number;
+  drip: boolean;
+  /** walking step in metres (0 = half the smallest width) */
+  step: number;
+  seed: number;
+}
+
+// ---------------------------------------------------------------- sources
+
+export interface Candidates {
+  /** start candidates, 3 per candidate */
+  P: Float64Array;
+  /** part of each candidate */
+  part: Int32Array;
+  /** name of each part (the prim name, else "part N" or "point N") */
+  names: string[];
+}
+
+/**
+ * Points over the surface of the source parts (triangles by area: spacing `spacing`, at least one per triangle) and
+ * the source's loose points. Parts are the connected pieces of the source (labelled by their prim name when it has
+ * them); each loose point is a part of its own.
+ */
+export function sampleSources(g: Geometry, seed: number, maxCount = 300000): Candidates {
+  const { tris, triPrim } = triangulate(g);
+  const nt = tris.length / 3, P = g.P, vp = g.vertexPoint;
+  // parts
+  const nameAttr = g.prims.get('name');
+  const named = nameAttr && nameAttr.type === 'string';
+  const parent = new Int32Array(g.numPoints);
+  for (let i = 0; i < parent.length; i++) parent[i] = i;
+  const find = (x: number) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const used = new Uint8Array(g.numPoints);
+  for (let p = 0; p < g.numPrims; p++) {
+    if (!g.primClosed[p]) continue;
+    const s = g.primStart[p], e = g.primStart[p + 1];
+    for (let v = s; v < e; v++) {
+      used[vp[v]] = 1;
+      const a = find(vp[s]), b = find(vp[v]);
+      if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+    }
+  }
+  const partOf = new Map<string, number>(), names: string[] = [];
+  const part = (key: string, label: string) => {
+    let i = partOf.get(key);
+    if (i === undefined) { i = names.length; partOf.set(key, i); names.push(label); }
+    return i;
+  };
+  const primPart = new Int32Array(g.numPrims).fill(-1);
+  for (let p = 0; p < g.numPrims; p++) {
+    if (!g.primClosed[p]) continue;
+    const root = find(vp[g.primStart[p]]), nm = named ? String(nameAttr!.get(p) ?? '') : '';
+    primPart[p] = part(`c:${root}`, nm || `part ${root}`);
+  }
+  // triangle areas and the sampling spacing
+  const area = new Float64Array(nt);
+  let total = 0;
+  for (let t = 0; t < nt; t++) {
+    const a = vp[tris[t * 3]] * 3, b = vp[tris[t * 3 + 1]] * 3, c = vp[tris[t * 3 + 2]] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], wx = P[c] - P[a], wy = P[c + 1] - P[a + 1], wz = P[c + 2] - P[a + 2];
+    area[t] = 0.5 * Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx);
+    total += area[t];
+  }
+  const sp = Math.max(0.003, Math.sqrt(total / maxCount));
+  const out: number[] = [], pp: number[] = [];
+  const sd = hashNumber(seed);
+  for (let t = 0; t < nt; t++) {
+    const a = vp[tris[t * 3]] * 3, b = vp[tris[t * 3 + 1]] * 3, c = vp[tris[t * 3 + 2]] * 3;
+    const want = area[t] / (sp * sp);
+    const n = Math.max(1, Math.floor(want + randN(sd, t, 77)));
+    for (let k = 0; k < n; k++) {
+      const u = Math.sqrt(randN(sd, t * 7 + 1, k)), v = randN(sd, t * 7 + 2, k);
+      const w0 = 1 - u, w1 = u * (1 - v), w2 = u * v;
+      out.push(P[a] * w0 + P[b] * w1 + P[c] * w2, P[a + 1] * w0 + P[b + 1] * w1 + P[c + 1] * w2, P[a + 2] * w0 + P[b + 2] * w1 + P[c + 2] * w2);
+      pp.push(primPart[triPrim[t]]);
+    }
+  }
+  for (let i = 0; i < g.numPoints; i++) {
+    if (used[i]) continue;
+    out.push(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]);
+    pp.push(part(`p:${i}`, `point ${i}`));
+  }
+  return { P: Float64Array.from(out), part: Int32Array.from(pp), names };
+}
+
+// ---------------------------------------------------------------- the runs
+
+/** Run segments in struct-of-arrays form (what the per-texel pass reads). */
+export interface RunSet {
+  /** runs traced (ids 1..count) */
+  count: number;
+  /** segments, each drawn as a stripe between its ends */
+  segs: number;
+  /** 6 per segment: end a, end b */
+  A: Float64Array;
+  /** 6 per segment: surface normal at a and b */
+  NRM: Float32Array;
+  /** 2 per segment: half width at a and b (metres) */
+  HW: Float32Array;
+  /** 2 per segment: drawn arc length from where the run emerged, at a and b (metres) */
+  SS: Float32Array;
+  /** run of each segment (1-based) */
+  ID: Int32Array;
+  /** 1 = a pool lens (no gaps) */
+  POOL: Uint8Array;
+  /** drawn length of each run (index 0 unused) */
+  runLen: Float32Array;
+  /** a random 0..1 per run (index 0 unused) */
+  strength: Float32Array;
+  /** 1 = the run ended in a pool (index 0 unused); the others fade out toward their tail */
+  pooled: Uint8Array;
+}
+
+export interface TraceStats {
+  /** candidate points sampled on the sources */
+  candidates: number;
+  /** candidates within TOUCH of the receiving surface */
+  touching: number;
+  /** touching candidates on a ledge or an overhang (no run starts there) */
+  ledgeRejected: number;
+  /** runs started (some never come out from under their source and leave no run) */
+  started: number;
+  /** runs that stopped on a ledge, ended by length, dripped off an overhang, or were lost (left the surface, buried) */
+  ended: { ledge: number; length: number; fell: number; lost: number };
+  /** drips that landed on a surface below */
+  drips: number;
+  /** the density was thinned to the run limit */
+  capped: boolean;
+  /** parts that touch the surface (names) */
+  touchingParts: string[];
+}
+
+export interface Traced { runs: RunSet; stats: TraceStats }
+
+class SegList {
+  A: number[] = []; NRM: number[] = []; HW: number[] = []; SS: number[] = []; ID: number[] = []; POOL: number[] = [];
+  push(a: ArrayLike<number>, b: ArrayLike<number>, na: ArrayLike<number>, nb: ArrayLike<number>, hwa: number, hwb: number, sa: number, sb: number, id: number, pool: number) {
+    this.A.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    this.NRM.push(na[0], na[1], na[2], nb[0], nb[1], nb[2]);
+    this.HW.push(hwa, hwb); this.SS.push(sa, sb); this.ID.push(id); this.POOL.push(pool);
+  }
+}
+
+const norm3 = (v: number[]) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; v[0] /= l; v[1] /= l; v[2] /= l; return v; };
+
+/**
+ * Trace the runs of `cands` over `recv` (the receiving surface: polygons, uv not needed). `src` (the source parts as
+ * geometry) lets a run begin where it leaves them; without it (points as sources) runs begin at their start point.
+ * `check` is called now and then and may throw (a time limit).
+ */
+export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidates, prm: FlowParams, check?: () => void): Traced {
+  const bvh = new TriBVH(recv), rays = new RayScene(bvh);
+  const vn = resolveVertexNormals(recv, 60);
+  const srcBvh = src && triangulate(src).tris.length ? new TriBVH(src) : null;
+  const gl = Math.hypot(prm.direction[0], prm.direction[1], prm.direction[2]);
+  const G: [number, number, number] = [prm.direction[0] / gl, prm.direction[1] / gl, prm.direction[2] / gl];
+  const up: [number, number, number] = [-G[0], -G[1], -G[2]];
+  const ledgeCos = Math.cos((Math.max(0, Math.min(90, prm.ledge)) * Math.PI) / 180);
+  const [lmin, lmax] = [Math.max(1e-4, Math.min(prm.length[0], prm.length[1])), Math.max(1e-4, Math.max(prm.length[0], prm.length[1]))];
+  const [wmin, wmax] = [Math.max(1e-5, Math.min(prm.width[0], prm.width[1])), Math.max(1e-5, Math.max(prm.width[0], prm.width[1]))];
+  const h = Math.max(1e-4, prm.step > 0 ? prm.step : 0.5 * wmin);
+  const sd = hashNumber(prm.seed);
+  const noise = makeNoise('perlin', Math.floor(prm.seed * 131) + 17);
+  const diag = (() => { const b = recv.bbox(); return Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1; })();
+  const sc = closestScratch();
+  const stats: TraceStats = { started: 0, candidates: cands.part.length, touching: 0, ledgeRejected: 0, ended: { ledge: 0, length: 0, fell: 0, lost: 0 }, drips: 0, capped: false, touchingParts: [] };
+
+  /** smooth surface normal of triangle t at barycentric (b0, b1, b2), unit, into out */
+  const smooth = (t: number, b0: number, b1: number, b2: number, out: number[]) => {
+    const v0 = bvh.triVtx[t * 3] * 3, v1 = bvh.triVtx[t * 3 + 1] * 3, v2 = bvh.triVtx[t * 3 + 2] * 3;
+    out[0] = vn[v0] * b0 + vn[v1] * b1 + vn[v2] * b2;
+    out[1] = vn[v0 + 1] * b0 + vn[v1 + 1] * b1 + vn[v2 + 1] * b2;
+    out[2] = vn[v0 + 2] * b0 + vn[v1 + 2] * b1 + vn[v2 + 2] * b2;
+    return norm3(out);
+  };
+  const dot = (a: ArrayLike<number>, b: ArrayLike<number>) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+  // ---- start points: touching the surface, off ledges
+  interface Start { q: [number, number, number]; part: number; key: number }
+  const starts: Start[] = [];
+  const tn = [0, 0, 0];
+  const touchingParts = new Set<number>();
+  for (let i = 0; i < cands.part.length; i++) {
+    const t = bvh.closestInto(cands.P[i * 3], cands.P[i * 3 + 1], cands.P[i * 3 + 2], TOUCH, sc);
+    if (t < 0) continue;
+    stats.touching++;
+    touchingParts.add(cands.part[i]);
+    smooth(t, sc.b0, sc.b1, sc.b2, tn);
+    if (dot(tn, up) >= ledgeCos || dot(tn, G) > OVERHANG) { stats.ledgeRejected++; continue; }
+    starts.push({ q: [sc.x, sc.y, sc.z], part: cands.part[i], key: randN(sd, i, 5) });
+  }
+  stats.touchingParts = [...touchingParts].sort((a, b) => a - b).map((i) => cands.names[i]);
+
+  // ---- thinning: random order, minimum spacing 1 / density between runs; a piece of a source that has none gets one
+  starts.sort((a, b) => a.key - b.key || a.part - b.part);
+  const cellSize = prm.density > 0 ? 1 / prm.density : 1, minD2 = cellSize * cellSize;
+  const grid = new Map<string, Start[]>();
+  const keyOf = (i: number, j: number, k: number) => `${i},${j},${k}`;
+  const chosen: Start[] = [], partHas = new Set<number>();
+  const take = (s: Start) => {
+    const k = keyOf(Math.floor(s.q[0] / cellSize), Math.floor(s.q[1] / cellSize), Math.floor(s.q[2] / cellSize));
+    const l = grid.get(k);
+    if (l) l.push(s); else grid.set(k, [s]);
+    chosen.push(s); partHas.add(s.part);
+  };
+  const crowded = (s: Start) => {
+    const i = Math.floor(s.q[0] / cellSize), j = Math.floor(s.q[1] / cellSize), k = Math.floor(s.q[2] / cellSize);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+      const l = grid.get(keyOf(i + a, j + b, k + c));
+      if (!l) continue;
+      for (const o of l) { const dx = o.q[0] - s.q[0], dy = o.q[1] - s.q[1], dz = o.q[2] - s.q[2]; if (dx * dx + dy * dy + dz * dz < minD2) return true; }
+    }
+    return false;
+  };
+  if (prm.density > 0) {
+    for (const s of starts) {
+      if (chosen.length >= MAX_RUNS) { stats.capped = true; break; }
+      if (!crowded(s)) take(s);
+    }
+    for (const s of starts) {
+      if (chosen.length >= MAX_RUNS) { stats.capped = true; break; }
+      if (!partHas.has(s.part)) take(s);
+    }
+  }
+
+  stats.started = chosen.length;
+  // ---- walk
+  const segs = new SegList();
+  const runLen: number[] = [0], strength: number[] = [0], pooled: number[] = [0];
+  const tp = [0, 0, 0], tb = [0, 0, 0];
+  const x = [0, 0, 0], n = [0, 0, 0], nq = [0, 0, 0], d = [0, 0, 0], tx = [0, 0, 0], dir = [0, 0, 0], q = [0, 0, 0], e = [0, 0, 0], neff = [0, 0, 0], lastDir = [0, 0, 0], nPrev = [0, 0, 0];
+  const noiseAt = (px: number, py: number, pz: number, ox: number, oy: number, oz: number) => noise(px * WOBBLE_FREQ + ox, py * WOBBLE_FREQ + oy, pz * WOBBLE_FREQ + oz);
+
+  for (let r = 0; r < chosen.length; r++) {
+    if ((r & 63) === 0) check?.();
+    const id = r + 1, st = chosen[r];
+    const u1 = randN(sd, id, 1), u2 = randN(sd, id, 2), u3 = randN(sd, id, 3);
+    // longer runs are the stronger ones: a threshold on strength drops the short ones first
+    const L = lmin + (lmax - lmin) * Math.pow(0.45 * u1 + 0.55 * u2, 1.6);
+    const w0 = wmin + (wmax - wmin) * u3;
+    const hw0 = 0.5 * w0, hwAt = (s: number) => hw0 * (1 - 0.7 * Math.min(1, s / L));
+    const bias = (randN(sd, id, 4) - 0.5) * 0.5;
+    const ox = randN(sd, id, 6) * 97, oy = randN(sd, id, 7) * 97, oz = randN(sd, id, 8) * 97;
+    const exitR = Math.max(0.0015, 1.2 * hw0);
+    const maxHidden = Math.max(0.3, 2 * lmax);
+    const first = segs.ID.length;
+    // state
+    x[0] = st.q[0]; x[1] = st.q[1]; x[2] = st.q[2];
+    const t0 = bvh.closestInto(x[0], x[1], x[2], 1e-3, sc);
+    if (t0 < 0) continue;
+    smooth(t0, sc.b0, sc.b1, sc.b2, n);
+    let emerged = !srcBvh || srcBvh.closestInto(x[0], x[1], x[2], exitR, sc) < 0;
+    let s = 0, hidden = 0, stuck = 0, drips = 0, reason: 'length' | 'ledge' | 'fell' | 'lost' = 'lost';
+    let pa: number[] | null = emerged ? [x[0], x[1], x[2]] : null, na = [n[0], n[1], n[2]];
+    lastDir[0] = G[0]; lastDir[1] = G[1]; lastDir[2] = G[2];
+    const maxSteps = Math.ceil((L + maxHidden) / h) + 200;
+    let ledgeHit = false;
+    for (let step = 0; step < maxSteps; step++) {
+      // flow: gravity on the tangent plane, bent sideways by noise
+      const gn = dot(G, n);
+      d[0] = G[0] - gn * n[0]; d[1] = G[1] - gn * n[1]; d[2] = G[2] - gn * n[2];
+      const dl = Math.hypot(d[0], d[1], d[2]);
+      if (dl < 1e-3) { reason = 'ledge'; ledgeHit = true; break; }
+      d[0] /= dl; d[1] /= dl; d[2] /= dl;
+      tx[0] = n[1] * d[2] - n[2] * d[1]; tx[1] = n[2] * d[0] - n[0] * d[2]; tx[2] = n[0] * d[1] - n[1] * d[0];
+      norm3(tx);
+      const lat = (noiseAt(x[0], x[1], x[2], ox, oy, oz) * 1.2 + bias) * prm.wobble;
+      dir[0] = d[0] + tx[0] * lat; dir[1] = d[1] + tx[1] * lat; dir[2] = d[2] + tx[2] * lat;
+      norm3(dir);
+      // a surface that rises across the step (a shelf, a boss, a part sunk into the wall: the wall's own face goes on
+      // buried inside it) is where the run goes on; else step and snap back onto the surface
+      let air = false;
+      const th = rays.nearest(x[0] + n[0] * 1e-4, x[1] + n[1] * 1e-4, x[2] + n[2] * 1e-4, dir[0], dir[1], dir[2], 1.05 * h, 1e-6);
+      if (th < Infinity) {
+        const tt = rays.lastTri;
+        closestOnTri(bvh.T, tt * 9, x[0] + n[0] * 1e-4 + dir[0] * th, x[1] + n[1] * 1e-4 + dir[1] * th, x[2] + n[2] * 1e-4 + dir[2] * th, tp, tb);
+        q[0] = tp[0]; q[1] = tp[1]; q[2] = tp[2];
+        smooth(tt, tb[0], tb[1], tb[2], nq);
+        neff[0] = nq[0]; neff[1] = nq[1]; neff[2] = nq[2];
+      } else {
+        const sx = x[0] + dir[0] * h, sy = x[1] + dir[1] * h, sz = x[2] + dir[2] * h;
+        const t2 = bvh.closestInto(sx, sy, sz, 4 * h, sc);
+        if (t2 < 0) { reason = 'lost'; break; }
+        q[0] = sc.x; q[1] = sc.y; q[2] = sc.z;
+        smooth(t2, sc.b0, sc.b1, sc.b2, nq);
+        e[0] = sx - q[0]; e[1] = sy - q[1]; e[2] = sz - q[2];
+        const de = Math.hypot(e[0], e[1], e[2]);
+        // beyond a convex edge the gap points out of the surface: that is the normal there
+        air = de > 0.3 * h && dot(e, nq) > -0.2 * de;
+        if (air) { neff[0] = e[0] / de; neff[1] = e[1] / de; neff[2] = e[2] / de; } else { neff[0] = nq[0]; neff[1] = nq[1]; neff[2] = nq[2]; }
+      }
+      if (dot(nq, n) < -0.2) { reason = 'lost'; break; } // the far side of a thin plate
+      const move = Math.hypot(q[0] - x[0], q[1] - x[1], q[2] - x[2]);
+      stuck = move < 0.1 * h ? stuck + 1 : 0;
+      if (stuck >= 3) { reason = 'lost'; break; }
+      lastDir[0] = (q[0] - x[0]) / (move || 1); lastDir[1] = (q[1] - x[1]) / (move || 1); lastDir[2] = (q[2] - x[2]) / (move || 1);
+      nPrev[0] = n[0]; nPrev[1] = n[1]; nPrev[2] = n[2];
+      x[0] = q[0]; x[1] = q[1]; x[2] = q[2];
+      n[0] = nq[0]; n[1] = nq[1]; n[2] = nq[2];
+      // draw
+      if (!emerged) {
+        hidden += move;
+        if (hidden > maxHidden) { reason = 'lost'; break; }
+        if (srcBvh!.closestInto(x[0], x[1], x[2], exitR, sc) < 0) { emerged = true; pa = [x[0], x[1], x[2]]; na = [n[0], n[1], n[2]]; s = 0; }
+      } else {
+        const s1 = s + move;
+        if (pa) segs.push(pa, x, na, n, hwAt(s), hwAt(s1), s, s1, id, 0);
+        s = s1; pa = [x[0], x[1], x[2]]; na = [n[0], n[1], n[2]];
+      }
+      if (dot(neff, up) >= ledgeCos) { reason = 'ledge'; ledgeHit = true; break; }
+      if (dot(neff, G) > OVERHANG) {
+        // overhang: drip along gravity onto the surface below
+        if (!prm.drip || drips >= MAX_DRIPS || !emerged) { reason = 'fell'; break; }
+        const ex = x[0] + neff[0] * 2e-4, ey = x[1] + neff[1] * 2e-4, ez = x[2] + neff[2] * 2e-4;
+        const tt = rays.nearest(ex, ey, ez, G[0], G[1], G[2], diag, 0);
+        if (!(tt < Infinity)) { reason = 'fell'; break; }
+        drips++; stats.drips++;
+        const lx = ex + G[0] * tt, ly = ey + G[1] * tt, lz = ez + G[2] * tt;
+        const t3 = bvh.closestInto(lx, ly, lz, 1e-3 + 1e-6 * diag, sc);
+        if (t3 < 0) { reason = 'fell'; break; }
+        x[0] = sc.x; x[1] = sc.y; x[2] = sc.z;
+        smooth(t3, sc.b0, sc.b1, sc.b2, n);
+        pa = [x[0], x[1], x[2]]; na = [n[0], n[1], n[2]];
+        lastDir[0] = G[0]; lastDir[1] = G[1]; lastDir[2] = G[2];
+        nPrev[0] = n[0]; nPrev[1] = n[1]; nPrev[2] = n[2];
+        if (dot(n, up) >= ledgeCos) { reason = 'ledge'; ledgeHit = true; break; }
+        continue;
+      }
+      if (emerged && s >= L) { reason = 'length'; break; }
+    }
+    if (!emerged && reason !== 'lost') reason = 'lost';
+    // a pool where the run stopped on a ledge: a lens along the ledge, `pool` times the run's width there
+    if (ledgeHit && emerged) {
+      const hp = hwAt(s) * Math.max(1, prm.pool);
+      // sideways on the ledge: perpendicular to the way the run came and to the surface it came down
+      let lx = lastDir[1] * nPrev[2] - lastDir[2] * nPrev[1], ly = lastDir[2] * nPrev[0] - lastDir[0] * nPrev[2], lz = lastDir[0] * nPrev[1] - lastDir[1] * nPrev[0];
+      if (Math.hypot(lx, ly, lz) < 1e-6) { lx = n[1] * G[2] - n[2] * G[1]; ly = n[2] * G[0] - n[0] * G[2]; lz = n[0] * G[1] - n[1] * G[0]; }
+      const ld = lx * n[0] + ly * n[1] + lz * n[2];
+      const lv = norm3([lx - ld * n[0], ly - ld * n[1], lz - ld * n[2]]);
+      const a = 2.5 * hp;
+      segs.push([x[0] - lv[0] * a, x[1] - lv[1] * a, x[2] - lv[2] * a], [x[0] + lv[0] * a, x[1] + lv[1] * a, x[2] + lv[2] * a], n, n, hp, hp, s, s, id, 1);
+    }
+    const drawn = segs.ID.length > first;
+    if (!drawn) continue; // never came out from under its source
+    runLen.push(Math.max(s, 1e-6)); strength.push(u1); pooled.push(ledgeHit ? 1 : 0);
+    stats.ended[reason]++;
+    // the run number must match its slot: runs that never emerged leave no slot, so renumber this run's segments
+    const slot = runLen.length - 1;
+    if (slot !== id) for (let i = first; i < segs.ID.length; i++) segs.ID[i] = slot;
+  }
+
+  const rs: RunSet = {
+    count: runLen.length - 1, segs: segs.ID.length,
+    A: Float64Array.from(segs.A), NRM: Float32Array.from(segs.NRM), HW: Float32Array.from(segs.HW), SS: Float32Array.from(segs.SS),
+    ID: Int32Array.from(segs.ID), POOL: Uint8Array.from(segs.POOL), runLen: Float32Array.from(runLen), strength: Float32Array.from(strength), pooled: Uint8Array.from(pooled),
+  };
+  return { runs: rs, stats };
+}
+
+// ---------------------------------------------------------------- per texel
+
+export interface RasterIn {
+  /** sample positions and unit normals, 3 per sample */
+  P: Float64Array;
+  N: Float64Array;
+  /** size of one sample in metres along the surface (the texel size over the supersampling) */
+  tau: ArrayLike<number>;
+  /** 1 = write nothing for this sample (the source parts themselves) */
+  skip?: Uint8Array | null;
+}
+
+export interface RasterOut {
+  C: Float32Array;
+  along: Float32Array;
+  head: Float32Array;
+  strength: Float32Array;
+  id: Float32Array;
+}
+
+const smoothstep = (a: number, b: number, x: number) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/**
+ * The run values at every sample: the strongest run there (a stripe of the run's width, box-filtered over the sample
+ * size, with gaps from 3D noise along the run and a wandering width); along, head, strength and id of that run.
+ */
+export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: number, out: RasterOut): void {
+  const n = inp.P.length / 3;
+  out.C.fill(0); out.along.fill(0); out.head.fill(0); out.strength.fill(0); out.id.fill(0);
+  if (!rs.segs || !n) return;
+  const A = rs.A, ns = rs.segs;
+  // the filter margin: half a typical sample (the median; a few coarse triangles do not set it)
+  const stride = Math.max(1, Math.floor(n / 4096)), tv: number[] = [];
+  for (let i = 0; i < n; i += stride) tv.push(inp.tau[i]);
+  tv.sort((a, b) => a - b);
+  const med = tv[tv.length >> 1] || 0;
+  const margin = 0.5 * Math.min(tv[tv.length - 1] || 0, 3 * med);
+  // grid over the segments
+  let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity, maxHw = 0;
+  for (let k = 0; k < ns; k++) {
+    const hw = Math.max(rs.HW[k * 2], rs.HW[k * 2 + 1]);
+    if (hw > maxHw) maxHw = hw;
+    for (let e = 0; e < 2; e++) {
+      const x = A[k * 6 + e * 3], y = A[k * 6 + e * 3 + 1], z = A[k * 6 + e * 3 + 2];
+      mnx = Math.min(mnx, x - hw); mny = Math.min(mny, y - hw); mnz = Math.min(mnz, z - hw);
+      mxx = Math.max(mxx, x + hw); mxy = Math.max(mxy, y + hw); mxz = Math.max(mxz, z + hw);
+    }
+  }
+  const pad = margin + 1e-6;
+  mnx -= pad; mny -= pad; mnz -= pad; mxx += pad; mxy += pad; mxz += pad;
+  let cs = Math.max(2 * (maxHw + margin), 1e-4);
+  const dimsFor = (c: number) => [Math.max(1, Math.ceil((mxx - mnx) / c)), Math.max(1, Math.ceil((mxy - mny) / c)), Math.max(1, Math.ceil((mxz - mnz) / c))];
+  let dims = dimsFor(cs);
+  while (dims[0] * dims[1] * dims[2] > 2_000_000) { cs *= 1.4; dims = dimsFor(cs); }
+  const [dx, dy, dz] = dims, cells = dx * dy * dz;
+  const count = new Int32Array(cells + 1);
+  const range = (k: number, f: (ix: number, iy: number, iz: number) => void) => {
+    const hw = Math.max(rs.HW[k * 2], rs.HW[k * 2 + 1]) + pad;
+    const x0 = Math.min(A[k * 6], A[k * 6 + 3]) - hw, x1 = Math.max(A[k * 6], A[k * 6 + 3]) + hw;
+    const y0 = Math.min(A[k * 6 + 1], A[k * 6 + 4]) - hw, y1 = Math.max(A[k * 6 + 1], A[k * 6 + 4]) + hw;
+    const z0 = Math.min(A[k * 6 + 2], A[k * 6 + 5]) - hw, z1 = Math.max(A[k * 6 + 2], A[k * 6 + 5]) + hw;
+    const i0 = Math.max(0, Math.floor((x0 - mnx) / cs)), i1 = Math.min(dx - 1, Math.floor((x1 - mnx) / cs));
+    const j0 = Math.max(0, Math.floor((y0 - mny) / cs)), j1 = Math.min(dy - 1, Math.floor((y1 - mny) / cs));
+    const k0 = Math.max(0, Math.floor((z0 - mnz) / cs)), k1 = Math.min(dz - 1, Math.floor((z1 - mnz) / cs));
+    for (let kk = k0; kk <= k1; kk++) for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) f(ii, jj, kk);
+  };
+  for (let k = 0; k < ns; k++) range(k, (i, j, kk) => { count[(kk * dy + j) * dx + i + 1]++; });
+  for (let c = 0; c < cells; c++) count[c + 1] += count[c];
+  const items = new Int32Array(count[cells]), fill = count.slice(0, cells);
+  for (let k = 0; k < ns; k++) range(k, (i, j, kk) => { items[fill[(kk * dy + j) * dx + i]++] = k; });
+
+  const noise = makeNoise('perlin', Math.floor(seed * 131) + 91);
+  const FA = 1 / 0.05, FB = 1 / 0.025, FW = 1 / 0.015;
+  const P = inp.P, N = inp.N;
+  for (let i = 0; i < n; i++) {
+    if (inp.skip && inp.skip[i]) continue;
+    const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
+    const ci = Math.floor((px - mnx) / cs), cj = Math.floor((py - mny) / cs), ck = Math.floor((pz - mnz) / cs);
+    if (ci < 0 || cj < 0 || ck < 0 || ci >= dx || cj >= dy || ck >= dz) continue;
+    const cell = (ck * dy + cj) * dx + ci;
+    const s0 = count[cell], s1 = count[cell + 1];
+    if (s0 === s1) continue;
+    const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2], tau = Math.max(1e-6, inp.tau[i]);
+    let best = 0, bk = -1, bAlong = 0;
+    for (let m = s0; m < s1; m++) {
+      const k = items[m], o = k * 6;
+      const ax = A[o], ay = A[o + 1], az = A[o + 2];
+      const ex = A[o + 3] - ax, ey = A[o + 4] - ay, ez = A[o + 5] - az;
+      const l2 = ex * ex + ey * ey + ez * ez;
+      let t = l2 > 0 ? ((px - ax) * ex + (py - ay) * ey + (pz - az) * ez) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const cx = ax + ex * t - px, cy = ay + ey * t - py, cz = az + ez * t - pz;
+      const dist = Math.hypot(cx, cy, cz);
+      let hw = rs.HW[k * 2] + (rs.HW[k * 2 + 1] - rs.HW[k * 2]) * t;
+      if (dist > hw * 1.6 + tau) continue; // beyond the widest the run gets (width wander) plus the filter
+      // the texel lies on the same surface: its normal agrees with the run's there
+      const mx = rs.NRM[o] + (rs.NRM[o + 3] - rs.NRM[o]) * t, my = rs.NRM[o + 1] + (rs.NRM[o + 4] - rs.NRM[o + 1]) * t, mz = rs.NRM[o + 2] + (rs.NRM[o + 5] - rs.NRM[o + 2]) * t;
+      if (nx * mx + ny * my + nz * mz < 0.5 * Math.hypot(mx, my, mz)) continue;
+      const id = rs.ID[k], pool = rs.POOL[k] === 1;
+      const sAbs = rs.SS[k * 2] + (rs.SS[k * 2 + 1] - rs.SS[k * 2]) * t;
+      const along = Math.min(1, sAbs / rs.runLen[id]);
+      let gate = 1;
+      if (!pool && breakup > 0) {
+        // gaps along the run (3D noise in drawn length and sideways offset), a width that wanders
+        const side = (cx * (rs.NRM[o + 1] * ez - rs.NRM[o + 2] * ey) + cy * (rs.NRM[o + 2] * ex - rs.NRM[o] * ez) + cz * (rs.NRM[o] * ey - rs.NRM[o + 1] * ex)) > 0 ? -1 : 1;
+        const u = 0.5 + 0.6 * noise(sAbs * FA + 0.37, side * dist * FB + 0.21, id * 1.37 + 0.31);
+        // the share of the run that is a gap grows toward the tail; u has a spread of about 0.17 around 0.5
+        const thr = 0.5 + 0.425 * (breakup * (0.35 + 0.5 * along) - 0.5);
+        gate = smoothstep(thr, thr + 0.12, u);
+        hw *= 1 + 0.5 * breakup * noise(sAbs * FW + 0.13, 0.5, id * 0.77 + 0.11);
+      }
+      if (gate <= 0) continue;
+      // box-filtered coverage of the stripe [-hw, hw] over a window of the sample's size
+      const lo = Math.max(-hw, dist - 0.5 * tau), hi = Math.min(hw, dist + 0.5 * tau);
+      // a run that does not end in a pool fades out over its last part
+      const fade = pool || rs.pooled[id] ? 1 : 1 - 0.85 * smoothstep(0.55, 1, along);
+      const cov = hi > lo ? ((hi - lo) / tau) * gate * fade : 0;
+      if (cov > best) { best = cov; bk = id; bAlong = along; }
+    }
+    if (bk < 0) continue;
+    const v = Math.min(1, best);
+    out.C[i] = v; out.along[i] = bAlong;
+    const hd = Math.max(0, 1 - bAlong / 0.35);
+    out.head[i] = v * hd * hd; out.strength[i] = rs.strength[bk]; out.id[i] = bk;
+  }
+}
+
+// ---------------------------------------------------------------- texel size
+
+/**
+ * Metres per texel of each triangle: sqrt(3D area / uv area in texels) (NaN where the uv area is 0). `uv` is two floats
+ * per vertex of the triangulation, `tris` its vertex triples, `pos` three floats per vertex.
+ */
+export function triTexelSizes(pos: ArrayLike<number>, uv: ArrayLike<number>, tris: ArrayLike<number>, W: number, H: number): Float32Array {
+  const nt = tris.length / 3, out = new Float32Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
+    const ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+    const wx = pos[c * 3] - pos[a * 3], wy = pos[c * 3 + 1] - pos[a * 3 + 1], wz = pos[c * 3 + 2] - pos[a * 3 + 2];
+    const a3 = 0.5 * Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx);
+    const au = 0.5 * Math.abs((uv[b * 2] - uv[a * 2]) * (uv[c * 2 + 1] - uv[a * 2 + 1]) - (uv[b * 2 + 1] - uv[a * 2 + 1]) * (uv[c * 2] - uv[a * 2])) * W * H;
+    out[t] = au > 1e-12 ? Math.sqrt(a3 / au) : NaN;
+  }
+  return out;
+}
