@@ -13,7 +13,7 @@ import { edgeWhere, pointWhere, primWhere } from '../core/report.ts';
 import {
   CURVATURE_TYPES, RayScene, SurfaceQuery, bboxDiagonal, faceMeans, faceSamples, fmt, curvatureOfType, discreteCurvature, duplicatePoints,
   fillFromNearestValid, newNearest, nonManifoldPoints, percentileFit, pieceReport, rayMeasure, selfIntersections,
-  shortEdges, smoothPointValues, visibilityFromRays, visibilityRays,
+  shortEdges, smoothPointValues, visibilityFromRays, visibilityRays, VISIBILITY_POINTS, VISIBILITY_RAYS,
 } from '../core/analysis.ts';
 import type { FaceSamples, PieceReport, RayMode, RaySampleOptions } from '../core/analysis.ts';
 import type { CookContext } from '../graph/types.ts';
@@ -83,23 +83,26 @@ defineNode({
 // ---------------------------------------------------------------- occlusion / thickness / cavity
 
 /** Ray measure of points `s` (positions and normals) against `scene`: the kernel "occlusion" in chunks on the worker pool (the same bits with or without workers). */
-function castRays(parallelMap: CookContext['parallelMap'], s: { P: Float64Array; N: Float64Array }, scene: RayScene, opts: RaySampleOptions): Float64Array | Promise<Float64Array> {
+function castRays(parallelMap: CookContext['parallelMap'], s: { P: Float64Array; N: Float64Array }, scene: RayScene, opts: RaySampleOptions, behind: RayScene | null = null): Float64Array | Promise<Float64Array> {
   if (scene.empty) return rayMeasure(s.P, s.N, scene, opts);
   const v = new Float64Array(s.P.length / 3);
+  const shared: Record<string, Float64Array | Int32Array> = { ...scene.toArrays() };
+  if (behind && !behind.empty) for (const [k, a] of Object.entries(behind.toArrays())) shared['o_' + k] = a;
   const run = parallelMap('occlusion', {
-    count: v.length, args: opts, inputs: { P: s.P, N: s.N, sel: null }, results: { out: v }, shared: scene.toArrays(),
+    count: v.length, args: opts, inputs: { P: s.P, N: s.N, sel: null }, results: { out: v }, shared,
   }, { minElements: Math.ceil(32768 / Math.max(1, opts.samples)) });
   return andThen(run, () => v);
 }
 
 /**
- * How much of the sky each polygon of `g` sees (core faceVisibility), the rays against `g` and the optional
- * `surroundings`, on the worker pool: per prim 0..1, 1 for prims outside `faces`, not polygons or with no area.
+ * How open each polygon of `g` is (core faceVisibility), the rays against `g` and the optional `surroundings` (which
+ * block from the face's own plane on), on the worker pool: per prim 0..1, 1 for prims outside `faces`, not polygons or
+ * with no area.
  */
-export function faceVisibilityRun(ctx: CookContext, g: Geometry, surroundings: Geometry | null, faces: ArrayLike<number> | null, perFace = 4, rays = 32): Float64Array | Promise<Float64Array> {
-  const scene = RayScene.of(surroundings && surroundings.numPrims ? Geometry.merge([g, surroundings]) : g);
-  const s = faceSamples(g, perFace, faces);
-  return andThen(castRays(ctx.parallelMap, s, scene, visibilityRays(g, rays)), (blocked) => visibilityFromRays(g, s, blocked));
+export function faceVisibilityRun(ctx: CookContext, g: Geometry, surroundings: Geometry | null, faces: ArrayLike<number> | null): Float64Array | Promise<Float64Array> {
+  const own = RayScene.of(g), outside = surroundings && surroundings.numPrims ? RayScene.of(surroundings) : null;
+  const s = faceSamples(g, VISIBILITY_POINTS, faces);
+  return andThen(castRays(ctx.parallelMap, s, own, visibilityRays(g, VISIBILITY_RAYS), outside), (blocked) => visibilityFromRays(g, s, blocked));
 }
 
 const RAY_NAMES: Record<RayMode, string> = { occlusion: 'ao', thickness: 'thickness', cavity: 'cavity' };
@@ -126,7 +129,7 @@ defineNode({
   params: {
     mode: { type: 'enum', options: ['occlusion', 'thickness', 'cavity'], default: 'occlusion', desc: 'what to measure' },
     class: { type: 'enum', options: ['point', 'prim'], default: 'point', desc: 'point = one value per point (rays along the point normal); prim = one value per polygon, the mean over `face_points` points spread over it (rays along its normal)' },
-    face_points: { type: 'int', default: 4, min: 1, max: 64, desc: 'class prim: points per polygon, at least (large polygons get more in proportion to their area, up to 64 times this)' },
+    face_points: { type: 'int', default: 8, min: 1, max: 256, desc: 'class prim: points per polygon, at least (large polygons get one per 0.002 m², up to 256)' },
     samples: { type: 'int', default: 32, min: 1, max: 1024, desc: 'rays per point (stratified; more = smoother)', aliases: ['rays', 'count'] },
     max_distance: { type: 'float', default: 0, min: 0, desc: 'hits farther than this are ignored; 0 = auto (occlusion: unlimited, cavity: 5% of the scene diagonal, thickness: the scene diagonal)', aliases: ['maxdist', 'distance', 'radius'] },
     bias: { type: 'float', default: 0, min: 0, desc: 'ray start offset along the normal against self-hits; 0 = auto (1e-4 of the scene diagonal)' },

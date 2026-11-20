@@ -567,6 +567,12 @@ export function rayMeasure(
   P: ArrayLike<number>, N: ArrayLike<number>, scene: RayScene, o: RaySampleOptions, mask?: ArrayLike<number> | null,
   /** write into this array instead of a new one (points outside [start, end) are left alone: chunked runs) */
   into?: Float64Array, start = 0, end?: number,
+  /**
+   * occlusion mode only: a second scene (the surroundings) whose rays start `o.bias` BEHIND the point instead of in
+   * front of it, so geometry that lies in the face's plane, or within the bias behind or in front of it, blocks; a ray is
+   * blocked when either scene blocks it. The first scene keeps the offset in front, so a face never blocks itself.
+   */
+  behind?: RayScene | null,
 ): Float64Array {
   const n = Math.floor(P.length / 3), out = into ?? new Float64Array(n);
   const i0 = Math.max(0, start), i1 = Math.min(n, end ?? n);
@@ -598,6 +604,7 @@ export function rayMeasure(
     tx /= tl; ty /= tl; tz /= tl;
     const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx;
     const ox = P[i * 3] + nx * o.bias, oy = P[i * 3 + 1] + ny * o.bias, oz = P[i * 3 + 2] + nz * o.bias;
+    const qx = P[i * 3] - nx * o.bias, qy = P[i * 3 + 1] - ny * o.bias, qz = P[i * 3 + 2] - nz * o.bias;
     const h1 = hash32(Math.imul(i, 0x9e3779b1) ^ seedH), h2 = hash32(h1 ^ 0x68e31da4);
     const a1 = h1 / 4294967296, a2 = h2 / 4294967296;
     let acc = 0;
@@ -617,6 +624,7 @@ export function rayMeasure(
       }
       if (o.mode === 'occlusion') {
         let m = scene.occludedPacket(ox, oy, oz, D, ID, cnt, maxD);
+        if (behind && !behind.empty) m |= behind.occludedPacket(qx, qy, qz, D, ID, cnt, maxD);
         while (m) { acc++; m &= m - 1; }
         continue;
       }
@@ -634,6 +642,10 @@ export function rayMeasure(
 
 // ---------------------------------------------------------------- per face rays
 
+/** Area (m²) per sample point on a large polygon, and the most points on one. */
+export const FACE_POINT_AREA = 0.002;
+export const MAX_FACE_POINTS = 256;
+
 /** Points spread over polygons, each with its polygon's normal: the origins of per-face ray measures. */
 export interface FaceSamples {
   P: Float64Array;
@@ -644,9 +656,9 @@ export interface FaceSamples {
 }
 
 /**
- * Points spread over the faces: at least `perFace` on each polygon (area above zero) and more in proportion to its
- * area on large ones (as many as `perFace` times its area over the mean area, at most 64 times `perFace`), so a large
- * polygon is sampled all over and not at its corners. The points of a face are placed by a low discrepancy sequence
+ * Points spread over the faces: at least `perFace` on each polygon (area above zero) and one per FACE_POINT_AREA of
+ * area (0.005 m², a point every 7 cm) on large ones, at most 256, so a large polygon is sampled all over and not at
+ * its corners. The points of a face are placed by a low discrepancy sequence
  * over its triangles, by area; nothing is random, so the result is the same on every run. `faces` (a prim mask)
  * limits the polygons.
  */
@@ -662,20 +674,17 @@ export function faceSamples(g: Geometry, perFace = 4, faces?: ArrayLike<number> 
   }
   // triangles of a polygon are consecutive (triangulate walks the prims in order)
   const runs: number[] = [];
-  let total = 0, faceCount = 0;
   for (let t0 = 0; t0 < nt;) {
     let t1 = t0, area = 0;
     while (t1 < nt && triPrim[t1] === triPrim[t0]) area += triA[t1++];
     runs.push(t0, t1, area);
-    if (area > 0) { total += area; faceCount++; }
     t0 = t1;
   }
-  const mean = faceCount ? total / faceCount : 0;
   const outP: number[] = [], outN: number[] = [], outF: number[] = [];
   for (let r = 0; r < runs.length; r += 3) {
     const t0 = runs[r], t1 = runs[r + 1], area = runs[r + 2];
     if (!(area > 0)) continue;
-    const prim = triPrim[t0], n = Math.min(per * 64, Math.max(per, Math.ceil((per * area) / mean)));
+    const prim = triPrim[t0], n = Math.min(Math.max(per, MAX_FACE_POINTS), Math.max(per, Math.ceil(area / FACE_POINT_AREA)));
     let t = t0, acc = triA[t0];
     for (let j = 0; j < n; j++) {
       const x = ((j + 0.5) / n) * area;
@@ -700,16 +709,30 @@ export function faceMeans(s: FaceSamples, v: ArrayLike<number>, numPrims: number
   return out;
 }
 
-/** What `faceVisibility` casts: rays over the whole hemisphere, unlimited, from a hair above the face. */
-export function visibilityRays(g: Geometry, rays = 32): RaySampleOptions {
-  return { mode: 'occlusion', samples: rays, maxDistance: 0, bias: 1e-4 * (bboxDiagonal(g) || 1), coneAngle: 90, seed: 0 };
+/** Points per polygon (at least) and rays per point that the visibility measure uses. */
+export const VISIBILITY_POINTS = 8;
+export const VISIBILITY_RAYS = 64;
+
+/** The ray offset of the visibility measure, in metres: a hair, 1e-4 of the model's diagonal and at most 1 mm. */
+export function visibilityBias(g: Geometry): number {
+  return Math.min(1e-3, 1e-4 * (bboxDiagonal(g) || 1));
 }
 
 /**
- * A point that sees this share of its hemisphere (or more) counts as fully open: a face standing on a wall or the floor
- * sees a half-space at most, and is no less visible for it.
+ * What `faceVisibility` casts: rays over the whole hemisphere, unlimited. The rays against the part itself start
+ * `bias` above the face (so a face never blocks itself), the rays against the surroundings `bias` below it (rayMeasure
+ * `behind`), so a wall flush with the face, or within the bias, blocks it.
  */
-export const OPEN_SHARE = 0.5;
+export function visibilityRays(g: Geometry, rays = VISIBILITY_RAYS): RaySampleOptions {
+  return { mode: 'occlusion', samples: rays, maxDistance: 0, bias: visibilityBias(g), coneAngle: 90, seed: 0 };
+}
+
+/**
+ * A point that sees this share of its hemisphere (or more) counts as fully open, and below it less in proportion: a
+ * face on a wall or the floor, in a corner of a room, in a shallow recess still shows. What it measures is openness, so
+ * a face deep inside a recess, which sees little of the sky, counts as less visible.
+ */
+export const OPEN_SHARE = 0.25;
 
 /**
  * Per prim, how open it is from the rays of its samples (`blocked`: the share of each sample's rays that was blocked):
@@ -725,14 +748,14 @@ export function visibilityFromRays(g: Geometry, s: FaceSamples, blocked: ArrayLi
 
 /**
  * How much of the sky each face sees, per prim: rays from points spread over the face (faceSamples: by area, at least
- * `perFace`) over its hemisphere against `scene` (the geometry and its surroundings, as one RayScene), unlimited; the
- * fraction that escapes, taken as 1 from OPEN_SHARE (a half-space) up, averaged over the face. 1 = open, 0 = enclosed or
- * against something, between for a face part of which is covered. Prims that are not polygons, have no area or are
- * outside `faces` read 1.
+ * `perFace`) over its hemisphere against the geometry `own` (a RayScene of `g`) and `outside` (the surroundings, or
+ * null), unlimited; the fraction that escapes, taken as 1 from OPEN_SHARE up, averaged over the face. 1 = open, 0 =
+ * enclosed or against something, between for a face part of which is covered. Prims that are not polygons, have no area
+ * or are outside `faces` read 1.
  */
-export function faceVisibility(g: Geometry, scene: RayScene, perFace = 4, faces?: ArrayLike<number> | null, rays = 32): Float64Array {
+export function faceVisibility(g: Geometry, own: RayScene, outside: RayScene | null, perFace = VISIBILITY_POINTS, faces?: ArrayLike<number> | null, rays = VISIBILITY_RAYS): Float64Array {
   const s = faceSamples(g, perFace, faces);
-  return visibilityFromRays(g, s, rayMeasure(s.P, s.N, scene, visibilityRays(g, rays)));
+  return visibilityFromRays(g, s, rayMeasure(s.P, s.N, own, visibilityRays(g, rays), null, undefined, 0, undefined, outside));
 }
 
 // ---------------------------------------------------------------- closest points

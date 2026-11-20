@@ -11,7 +11,7 @@ import {
 } from '../core/uv.ts';
 import type { Island, Sides } from '../core/uv.ts';
 import { packCharts } from '../core/uvpack.ts';
-import { cutLongCharts, islandWeights, packsDenser, visibilityScale, worldAngles } from '../core/uvislands.ts';
+import { MIN_VISIBLE_SHARE, cutLongCharts, islandWeights, packsDenser, visibilityScale, worldAngles } from '../core/uvislands.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import { primWhere } from '../core/report.ts';
 import { loadXatlas, runXatlas } from '../core/xatlas.ts';
@@ -188,16 +188,32 @@ function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandO
 
 // ---------------------------------------------------------------- visibility weight
 
-/** the faces of the visibility measure: points per polygon at least, rays per point (core faceVisibility) */
-const VISIBILITY_POINTS = 4;
-const VISIBILITY_RAYS = 32;
-
 const VISIBILITY_WEIGHT: ParamDef = {
   type: 'float', default: 0, min: 0, max: 1,
-  desc: 'texel density by visibility, 0..1: texels per metre of each polygon times lerp(1, max(0.05, visible), weight), where visible is the share of its hemisphere that is not blocked by the geometry or the surroundings input (rays from points spread over the polygon by area, unlimited): faces against a wall or inside a closed part get a twentieth of the density, open faces keep it, and the rest of the atlas grows; 0 = off (the layout is as without it). Writes prim visibility',
+  desc: 'texel density by visibility, 0..1: texels per metre of each polygon times lerp(1, max(0.05, open), weight), where open is how much of its hemisphere is not blocked by the geometry or the surroundings input (rays from points spread over the polygon by area, unlimited; a quarter of the hemisphere counts as fully open): faces against a wall (also one flush with them) or inside a closed part get a twentieth of the density, open faces keep it, and the rest of the atlas grows. It is openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called visibility is replaced when the weight is above 0. 0 = off (the layout is as without it). Writes prim visibility; stats count the faces and the share of the area at the minimum, and a warning says so when a quarter of the area reads hidden with no surroundings connected (normals facing inwards)',
 };
 
 const visibilityWeightOf = (x: unknown) => Math.max(0, Math.min(1, Number(x) || 0));
+
+/**
+ * Said after a visibility measure: how many faces, and how much of the area, read as hidden (the minimum texel density);
+ * and a warning when that is a quarter of the area or more with no surroundings connected: a hidden face with nothing around
+ * it means its normal points into the part, and it would be starved without a word.
+ */
+function reportVisibility(g: Geometry, vis: ArrayLike<number>, faces: ArrayLike<number> | null, surroundings: boolean, node: string, warn: (m: string) => void, stat: (k: string, v: number) => void): void {
+  let n = 0, hidden = 0, area = 0, hiddenArea = 0;
+  for (let p = 0; p < g.numPrims; p++) {
+    if (!g.primClosed[p] || g.primSize(p) < 3 || (faces && !faces[p])) continue;
+    const a = primArea(g, p);
+    n++; area += a;
+    if (vis[p] <= MIN_VISIBLE_SHARE) { hidden++; hiddenArea += a; }
+  }
+  stat('faces at the minimum texel density', hidden);
+  stat('area at the minimum texel density, %', area > 0 ? Math.round((hiddenArea / area) * 1000) / 10 : 0);
+  if (!surroundings && area > 0 && hiddenArea >= 0.25 * area) {
+    warn(`${node}: ${hidden} of ${n} faces (${Math.round((hiddenArea / area) * 100)}% of the area) read fully hidden and no surroundings are connected, so they see nothing of themselves: their normals probably face inwards (a reversed or flipped mesh) and they get the minimum texel density. Fix the normals (reverse, normal) or set visibility_weight 0`);
+  }
+}
 
 /** whether `name` is a numeric prim attribute (a texel weight that islandWeights can read) */
 function numericPrimAttrib(g: Geometry, name: string): boolean {
@@ -226,7 +242,9 @@ defineNode({
     'charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are ' +
     'cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of ' +
     '`resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute (and, with visibility_weight, times how ' +
-    'open each polygon is: against the geometry and the optional surroundings input, so hidden faces get a twentieth of the texels), never overlapping, into the 0..1 tile ' +
+    'open each polygon is: against the geometry and the optional surroundings input, so hidden faces get a twentieth of the texels; it is ' +
+    'openness, so a face deep inside a recess gets less; a chart that mixes hidden and visible faces is weighted by its mean; an existing prim ' +
+    'attribute called `visibility` is replaced when the weight is above 0), never overlapping, into the 0..1 tile ' +
     '(fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big ' +
     'smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger ' +
     'charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the ' +
@@ -280,7 +298,12 @@ defineNode({
     const X = await loadXatlas();
     // visibility_weight: measured on the real shape (before chart_smoothing), written as prim visibility; the unwrap scales each chart's texel density by it
     const weight = visibilityWeightOf(p.visibility_weight);
-    if (weight > 0) (g.prims.add('visibility', 'float', 1).data as Float64Array).set(await faceVisibilityRun(ctx, src, hasInput(1) ? input(1) : null, null, VISIBILITY_POINTS, VISIBILITY_RAYS));
+    if (weight > 0) {
+      const around = hasInput(1) && input(1).numPrims > 0;
+      const vis = await faceVisibilityRun(ctx, src, around ? input(1) : null, null);
+      (g.prims.add('visibility', 'float', 1).data as Float64Array).set(vis);
+      reportVisibility(src, vis, null, around, 'uv_unwrap', warn, stat);
+    }
     const nv = g.numVertices;
     // chart_smoothing: cut and flatten the charts on a smoothed copy (g, from here to unwrapMesh), the uv kept on the real shape (realP)
     const smoothing = Math.max(0, Math.floor(p.chart_smoothing) || 0);
@@ -440,8 +463,11 @@ defineNode({
     'row; an island goes to the first tile it fits), up to udims. cut_long cuts islands longer than the tile, and rings and arcs, into parts ' +
     'when the parts pack denser (each cut is a seam). visibility_weight gives the faces that show more texels: the density of each polygon is ' +
     'scaled by how much of its hemisphere is open (rays from points spread over it, against the geometry and the optional surroundings ' +
-    'input), so the back of a wall-mounted part or the inside of a closed one shrinks to a twentieth and the rest of the atlas grows ' +
-    '(the density of an island is the mean of its polygons; prim visibility is written). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps ' +
+    'input; a quarter of the hemisphere counts as fully open, a wall flush with a face blocks it), so the back of a wall-mounted part or the inside of a ' +
+    'closed one shrinks to a twentieth and the rest of the atlas grows. It measures openness, so a face deep inside a recess gets less. ' +
+    'A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called `visibility` is replaced when the weight ' +
+    'is above 0. Prim visibility is written; the stats count the faces at the minimum, and a warning says so when a quarter of the area is hidden with ' +
+    'no surroundings connected (normals facing inwards). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps ' +
     'inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the part they are in; islands ' +
     'that do not fit at any scale leave the uv unchanged, with a warning.',
   aliases: ['uvlayout', 'uvpack', 'uv_pack', 'pack_uv'],
@@ -503,8 +529,10 @@ defineNode({
     const weight = visibilityWeightOf(p.visibility_weight);
     if (!(weight > 0)) return run(null);
     // visibility_weight: the share of sky each polygon sees (against the geometry and the surroundings) scales its texel density
-    return andThen(faceVisibilityRun(ctx, g, hasInput(1) ? input(1) : null, gm, VISIBILITY_POINTS, VISIBILITY_RAYS), (vis) => {
+    const around = hasInput(1) && input(1).numPrims > 0;
+    return andThen(faceVisibilityRun(ctx, g, around ? input(1) : null, gm), (vis) => {
       (g.prims.add('visibility', 'float', 1).data as Float64Array).set(vis);
+      reportVisibility(g, vis, gm, around, 'uv_layout', warn, stat);
       return run(visibilityScale(vis, weight));
     });
   },

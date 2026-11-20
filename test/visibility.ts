@@ -5,11 +5,12 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
-import { RayScene, faceSamples, faceVisibility } from '../src/core/analysis.ts';
-import { triangulate } from '../src/core/topology.ts';
+import { RayScene, faceSamples, faceVisibility, visibilityBias } from '../src/core/analysis.ts';
+import { primNormals, triangulate } from '../src/core/topology.ts';
 import { readUV } from '../src/core/uv.ts';
 import { uvReport } from '../src/core/uvreport.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
+import { addFixture } from './fixtures.ts';
 
 let fail = 0;
 const check = (ok: boolean, msg: string) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`); if (!ok) fail++; };
@@ -22,7 +23,7 @@ await pooled.init();
 const cook = async (nodes: GraphSpec['nodes'], output = 'out', engine = serial) => {
   const r = await engine.cook({ nodes, output });
   if (!r.ok || !r.geo) throw new Error(`cook failed: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
-  return { geo: r.geo, warnings: r.warnings.map((w) => w.message) };
+  return { geo: r.geo, warnings: r.warnings.map((w) => w.message), stats: (r.results.get(output)?.stats ?? {}) as Record<string, number> };
 };
 
 const RES = 1024;
@@ -43,9 +44,9 @@ const vis = (g: Geometry) => g.prims.get('visibility')!.data as Float64Array;
 const sameArray = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a as ArrayLike<number>).every((x, i) => Object.is(x, b[i]));
 
 // ---- a box against a wall (surroundings)
-// box x -0.5..0.5, y 0..1, z 0..1 (prims: 0 front -z? found below by normal); the wall plane a millimetre behind it (z = -0.001)
+// a 1 x 1 x 0.25 m box (x -0.5..0.5, y 0..1, z 0..0.25: faces of different sizes), the wall plane a millimetre behind it (z = -0.001)
 const wallBox: GraphSpec['nodes'] = {
-  box: { type: 'box', params: { size: [1, 1, 1], center: [0, 0.5, 0.5] } },
+  box: { type: 'box', params: { size: [1, 1, 0.25], center: [0, 0.5, 0.125] } },
   wall: { type: 'grid', params: { size: [8, 8], divisions: [1, 1], plane: 'xy', center: [0, 0.5, -0.001] } },
 };
 const layout = (w: number, extra: Record<string, unknown> = {}, wired = true): GraphSpec['nodes'] => ({
@@ -62,7 +63,9 @@ const layout = (w: number, extra: Record<string, unknown> = {}, wired = true): G
   check(others.every((p) => v[p] > 0.95), `box on a wall: the other faces read open, ${others.map((p) => v[p].toFixed(2)).join(', ')} (the wall covers half the hemisphere of the sides, which makes them no less visible)`);
   const rel = d.tpm[back] / d.tpm[others.find((p) => v[p] > 0.95)!];
   check(Math.abs(rel - 0.05) < 0.003, `box on a wall: the face against the wall gets the minimum weight, ${rel.toFixed(4)} of the density of the open front`);
-  check(others.every((p) => d.tpm[p] >= d0.tpm[p] * 0.999), `box on a wall: the other faces keep their texel density or gain (${others.map((p) => (d.tpm[p] / d0.tpm[p]).toFixed(2)).join(', ')} times; six equal squares or five fill the tile alike)`);
+  const front = others.find((p) => v[p] > 0.95 && d.area[p] > 0.9)!;
+  check(others.every((p) => d.tpm[p] > d0.tpm[p] * 1.01) && d.tpm[front] > d0.tpm[front] * 1.3,
+    `box on a wall: every other face gains texel density (${others.map((p) => (d.tpm[p] / d0.tpm[p]).toFixed(2)).join(', ')} times; the large front ${(d.tpm[front] / d0.tpm[front]).toFixed(2)})`);
   const rep = uvReport(g, { resolution: RES });
   check(rep.overlap.pairs === 0 && !on.warnings.length, `box on a wall: no uv overlaps after re-packing (${rep.overlap.pairs}), warnings: ${on.warnings.join('; ') || 'none'}`);
   check(!off.geo.prims.has('visibility'), 'visibility_weight 0 writes no visibility attribute');
@@ -72,22 +75,93 @@ const layout = (w: number, extra: Record<string, unknown> = {}, wired = true): G
   check(Math.abs(relH - 0.525) < 0.01, `weight 0.5: the face against the wall gets lerp(1, 0.05, 0.5) = 0.525 of the open density (${relH.toFixed(4)})`);
 }
 
-// ---- a slab on the wall (half its area is its hidden back): the faces that show gain
+// ---- a slab on the wall (its back, and a closed core inside it, are hidden): the faces that show gain
 {
   const slab: GraphSpec['nodes'] = {
     ...wallBox,
     box: { type: 'box', params: { size: [1, 1, 0.05], center: [0, 0.5, 0.025] } },
     top: { type: 'box', params: { size: [0.3, 0.3, 0.2], center: [0.2, 0.65, 0.15] } },
-    both: { type: 'merge', in: ['box', 'top'] },
+    core: { type: 'box', params: { size: [0.8, 0.8, 0.02], center: [-0.05, 0.5, 0.025] } }, // closed and inside the slab: nothing sees it
+    both: { type: 'merge', in: ['box', 'top', 'core'] },
   };
   const on = (await cook({ ...slab, out: { type: 'uv_layout', in: ['both', 'wall'], params: { resolution: RES, visibility_weight: 1 } } })).geo;
   const off = (await cook({ ...slab, out: { type: 'uv_layout', in: ['both', 'wall'], params: { resolution: RES } } })).geo;
   const v = vis(on), d = density(on), d0 = density(off);
   const open = Array.from({ length: on.numPrims }, (_, p) => p).filter((p) => v[p] > 0.9), shut = Array.from({ length: on.numPrims }, (_, p) => p).filter((p) => v[p] < 0.02);
   const mean = (g: { tpm: Float64Array; area: Float64Array }, ps: number[]) => ps.reduce((s, p) => s + g.tpm[p] * g.area[p], 0) / ps.reduce((s, p) => s + g.area[p], 0);
-  check(shut.length >= 1 && open.length >= 8, `slab on a wall: ${shut.length} hidden face(s), ${open.length} open`);
+  check(shut.length >= 7 && open.length >= 8, `slab on a wall: ${shut.length} hidden face(s), ${open.length} open`);
   const gain = mean(d, open) / mean(d0, open);
-  check(gain > 1.3, `slab on a wall: the faces that show gain texel density ${gain.toFixed(2)} times (${mean(d0, open).toFixed(0)} → ${mean(d, open).toFixed(0)} per metre), the hidden back ${(mean(d, shut) / mean(d, open)).toFixed(3)} of that`);
+  check(gain >= 1.5, `slab on a wall: the faces that show gain texel density ${gain.toFixed(2)} times (${mean(d0, open).toFixed(0)} → ${mean(d, open).toFixed(0)} per metre), the hidden back ${(mean(d, shut) / mean(d, open)).toFixed(3)} of that`);
+}
+
+// ---- a wall flush with the face (in its plane), a thick flush wall, one a hair off: all hide it; the part never hides itself
+{
+  const walls: Record<string, GraphSpec['nodes']> = {
+    'a plane exactly at the back of the box (z = 0)': { wall: { type: 'grid', params: { size: [8, 8], divisions: [1, 1], plane: 'xy', center: [0, 0.5, 0] } } },
+    'a thick wall whose front is flush with the back (z -1 .. 0)': { wall: { type: 'box', params: { size: [8, 8, 1], center: [0, 0.5, -0.5] } } },
+    'a plane 5 mm behind': { wall: { type: 'grid', params: { size: [8, 8], divisions: [1, 1], plane: 'xy', center: [0, 0.5, -0.005] } } },
+    'a plane 0.05 mm behind (inside the offset)': { wall: { type: 'grid', params: { size: [8, 8], divisions: [1, 1], plane: 'xy', center: [0, 0.5, -0.00005] } } },
+  };
+  for (const [name, w] of Object.entries(walls)) {
+    const g = (await cook({ ...wallBox, ...w, out: { type: 'uv_layout', in: ['box', 'wall'], params: { resolution: RES, visibility_weight: 1 } } })).geo, v = vis(g);
+    const back = Array.from({ length: g.numPrims }, (_, p) => p).filter((p) => v[p] < 0.01);
+    check(back.length === 1 && Array.from(v).filter((x) => x > 0.95).length === 5, `${name}: the face against it reads ${Math.min(...v).toFixed(3)}, ${Array.from(v).filter((x) => x > 0.95).length} of the other 5 faces open`);
+  }
+  const lone = (await cook({ ...wallBox, out: { type: 'uv_layout', in: ['box'], params: { resolution: RES, visibility_weight: 1 } } })).geo;
+  check(Array.from(vis(lone)).every((x) => x === 1), 'a lone box with no surroundings reads open on every face: a face never blocks itself');
+  const big = (await cook({ b: { type: 'box', params: { size: [2000, 2000, 2000] } }, out: { type: 'null', in: ['b'] } })).geo;
+  check(visibilityBias(big) === 1e-3 && visibilityBias(new Geometry({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], prims: [[0, 1, 2]] })) < 1e-3, 'the ray offset is 1e-4 of the diagonal, at most 1 mm');
+}
+
+// ---- a cabinet standing in a room corner (floor and wall, both flush): the sides still show
+{
+  const corner: GraphSpec['nodes'] = {
+    box: { type: 'box', params: { size: [0.6, 1, 0.4], center: [0, 0.5, 0.2] } },
+    w1: { type: 'grid', params: { size: [8, 8], divisions: [1, 1], plane: 'xy', center: [0, 0.5, 0] } },
+    w2: { type: 'grid', params: { size: [8, 8], divisions: [1, 1], plane: 'xz', center: [0, 0, 0] } },
+    room: { type: 'merge', in: ['w1', 'w2'] },
+  };
+  const g = (await cook({ ...corner, out: { type: 'uv_layout', in: ['box', 'room'], params: { resolution: RES, visibility_weight: 1 } } })).geo, v = vis(g);
+  const N = primNormals(g), by = (x: number, y: number, z: number) => Array.from({ length: g.numPrims }, (_, p) => p).find((p) => N[p * 3] * x + N[p * 3 + 1] * y + N[p * 3 + 2] * z > 0.9)!;
+  const sides = [by(-1, 0, 0), by(1, 0, 0)], front = by(0, 0, 1), top = by(0, 1, 0), back = by(0, 0, -1), bottom = by(0, -1, 0);
+  check(v[back] < 0.01 && v[bottom] < 0.01 && v[front] > 0.99 && v[top] > 0.99, `corner: back ${v[back].toFixed(2)} and bottom ${v[bottom].toFixed(2)} hidden, front ${v[front].toFixed(2)} and top ${v[top].toFixed(2)} open`);
+  check(sides.every((p) => v[p] > 0.95), `corner: the sides, which see half the room, read ${sides.map((p) => v[p].toFixed(3)).join(' and ')} (open)`);
+  check(Math.abs(v[sides[0]] - v[sides[1]]) <= 0.02, `corner: the two mirror faces read the same within 0.02 (${v[sides[0]].toFixed(3)}, ${v[sides[1]].toFixed(3)})`);
+}
+
+// ---- an open-front recess 0.4 m deep: the back of it sees less, and is read as less open; mirror faces read alike
+{
+  const T = 0.05, D = 0.4, Wd = 1;
+  const recess: GraphSpec['nodes'] = {
+    back: { type: 'box', params: { size: [Wd + 2 * T, Wd + 2 * T, T], center: [0, Wd / 2, -T / 2] } },
+    left: { type: 'box', params: { size: [T, Wd + 2 * T, D], center: [-(Wd + T) / 2, Wd / 2, D / 2] } },
+    right: { type: 'box', params: { size: [T, Wd + 2 * T, D], center: [(Wd + T) / 2, Wd / 2, D / 2] } },
+    floor: { type: 'box', params: { size: [Wd, T, D], center: [0, -T / 2, D / 2] } },
+    ceil: { type: 'box', params: { size: [Wd, T, D], center: [0, Wd + T / 2, D / 2] } },
+    part: { type: 'merge', in: ['back', 'left', 'right', 'floor', 'ceil'] },
+  };
+  const g = (await cook({ ...recess, out: { type: 'uv_layout', in: ['part'], params: { resolution: RES, visibility_weight: 1 } } })).geo, v = vis(g);
+  const P = g.P, vp = g.vertexPoint, N = primNormals(g), all = Array.from({ length: g.numPrims }, (_, p) => p);
+  const inBack = all.find((p) => N[p * 3 + 2] > 0.9 && Math.abs(P[vp[g.primStart[p]] * 3 + 2]) < 1e-9)!; // the back panel's front face, z = 0
+  const inLeft = all.find((p) => N[p * 3] > 0.9 && P[vp[g.primStart[p]] * 3] < 0)!, inRight = all.find((p) => N[p * 3] < -0.9 && P[vp[g.primStart[p]] * 3] > 0)!;
+  check(v[inBack] > 0.6 && v[inBack] < 0.95, `recess 0.4 m deep, 1 m wide: its back reads ${v[inBack].toFixed(3)} open (a face deep inside a recess counts as less open)`);
+  check(Math.abs(v[inLeft] - v[inRight]) <= 0.02, `recess: its two side walls, mirror faces, read ${v[inLeft].toFixed(3)} and ${v[inRight].toFixed(3)}, within 0.02`);
+}
+
+// ---- normals facing inwards: nothing sees them, and the node says so
+{
+  const rev: GraphSpec['nodes'] = { ...wallBox, flip: { type: 'reverse', in: ['box'] } };
+  const a = await cook({ ...rev, out: { type: 'uv_layout', in: ['flip'], params: { resolution: RES, visibility_weight: 1 } } });
+  check(Array.from(vis(a.geo)).every((x) => x === 0) && a.warnings.some((w) => /normals probably face inwards/.test(w) && /6 of 6 faces/.test(w) && /visibility_weight 0/.test(w)),
+    `a reversed box with no surroundings: every face reads 0 and the warning names the normals (${a.warnings.find((w) => /inwards/.test(w))?.slice(0, 200)}...)`);
+  check(a.stats['faces at the minimum texel density'] === 6 && a.stats['area at the minimum texel density, %'] === 100, `the stats count the faces and the area at the minimum: ${JSON.stringify(a.stats)}`);
+  const withWall = await cook({ ...rev, out: { type: 'uv_layout', in: ['flip', 'wall'], params: { resolution: RES, visibility_weight: 1 } } });
+  check(!withWall.warnings.some((w) => /inwards/.test(w)), 'with surroundings connected a hidden face is no sign of reversed normals: no warning');
+  const one = await cook({ ...wallBox, flip: { type: 'reverse', in: ['box'], params: { group: '0' } }, out: { type: 'uv_layout', in: ['flip'], params: { resolution: RES, visibility_weight: 1 } } });
+  check(one.stats['faces at the minimum texel density'] === 1 && Array.from(vis(one.geo)).filter((x) => x === 0).length === 1 && !one.warnings.some((w) => /inwards/.test(w)),
+    `one flipped face: it alone reads 0 and the stats say 1 face at the minimum (${one.stats['area at the minimum texel density, %']}% of the area); under a quarter of the area, no warning`);
+  const unwrapped = await cook({ ...rev, out: { type: 'uv_unwrap', in: ['flip'], params: { resolution: RES, visibility_weight: 1 } } });
+  check(unwrapped.warnings.some((w) => /uv_unwrap: 6 of 6 faces.*inwards/.test(w)) && unwrapped.stats['faces at the minimum texel density'] === 6, 'uv_unwrap: the same warning and stats for a reversed box')
 }
 
 // ---- weight 0 is today's layout, bit for bit, wired or not, set or left alone
@@ -179,6 +253,29 @@ const covered: GraphSpec['nodes'] = {
   check(sameArray(readUV(a)!, readUV(b)!), 'uv_unwrap with visibility_weight: identical bits with and without worker threads');
 }
 
+// ---- uv_unwrap on a mesh whose polygons xatlas cuts into triangles (the straddling split): prim visibility follows each polygon
+{
+  const nodes: GraphSpec['nodes'] = {};
+  addFixture(nodes, 'NOISY_QUAD_ROCK');
+  const rock = (await cook({ ...nodes, out: { type: 'wrangle', in: ['NOISY_QUAD_ROCK'], params: { run_over: 'prims', code: 'i@src = @primnum;' } } })).geo;
+  let minY = Infinity;
+  for (let i = 0; i < rock.numPoints; i++) minY = Math.min(minY, rock.P[i * 3 + 1]);
+  const floor: GraphSpec['nodes'] = { ...nodes, tag: { type: 'wrangle', in: ['NOISY_QUAD_ROCK'], params: { run_over: 'prims', code: 'i@src = @primnum;' } }, floor: { type: 'grid', params: { size: [10, 10], divisions: [1, 1], center: [0, minY, 0] } } };
+  const u = (await cook({ ...floor, out: { type: 'uv_unwrap', in: ['tag', 'floor'], params: { resolution: RES, chart_smoothing: 60, visibility_weight: 1 } } }));
+  const g = u.geo, src = g.prims.get('src')!.data as Int32Array, v = vis(g);
+  const floorGeo = (await cook({ ...floor, out: { type: 'null', in: ['floor'] } })).geo;
+  const ref = faceVisibility(rock, RayScene.of(rock), RayScene.of(floorGeo));
+  let worst = 0, copies = new Int32Array(rock.numPrims);
+  for (let q = 0; q < g.numPrims; q++) { worst = Math.max(worst, Math.abs(v[q] - ref[src[q]])); copies[src[q]]++; }
+  const split = Array.from(copies).filter((c) => c > 1).length;
+  check(g.numPrims > rock.numPrims && split > 0 && worst < 1e-12, `uv_unwrap on a rock whose polygons split: ${rock.numPrims} polygons became ${g.numPrims} prims (${split} polygons cut into triangles), every piece carries its polygon's visibility (largest difference ${worst.toExponential(1)})`);
+  const hidden = Array.from(v).filter((x) => x < 0.02).length, open = Array.from(v).filter((x) => x > 0.95).length;
+  const d = density(g), mean = (f: (q: number) => boolean) => { let s = 0, a = 0; for (let q = 0; q < g.numPrims; q++) if (f(q)) { s += d.tpm[q] * d.area[q]; a += d.area[q]; } return s / a; };
+  const ratio = mean((q) => v[q] < 0.02) / mean((q) => v[q] > 0.95);
+  check(hidden > 0 && open > 0 && ratio > 0.04 && ratio < 0.6, `rock on a flush floor: ${hidden} hidden and ${open} open prims, the hidden ones get ${ratio.toFixed(3)} of the density of the open ones (a chart that mixes both is weighted by its mean)`);
+  check(uvReport(g, { resolution: RES }).overlap.pairs === 0, 'uv_unwrap on the split rock with visibility_weight: no overlaps');
+}
+
 // ---- the measure itself: faceSamples and faceVisibility
 {
   const mesh = (await cook({ ...covered, out: { type: 'null', in: ['both'] } })).geo;
@@ -186,7 +283,7 @@ const covered: GraphSpec['nodes'] = {
   const count = new Int32Array(mesh.numPrims);
   for (const f of s.face) count[f]++;
   const quad = Array.from({ length: mesh.numPrims }, (_, p) => p).find((p) => mesh.primSize(p) === 4 && mesh.P[mesh.vertexPoint[mesh.primStart[p]] * 3 + 1] === 0)!;
-  check(Array.from(count).every((c) => c >= 4) && count[quad] > 8 && sameArray(s.P, again.P), `faceSamples: at least 4 points per face, ${count[quad]} on the large quad (the faces of the plate: ${Math.min(...Array.from(count).filter((_, p) => p !== quad))}), the same on every call`);
+  check(Array.from(count).every((c) => c >= 4) && count[quad] > 100 && sameArray(s.P, again.P), `faceSamples: at least 4 points per face, ${count[quad]} on the large quad (the faces of the plate: ${Math.min(...Array.from(count).filter((_, p) => p !== quad))}), the same on every call`);
   // every sample lies on its face's plane
   let off = 0;
   for (let i = 0; i < s.face.length; i++) {
@@ -194,10 +291,10 @@ const covered: GraphSpec['nodes'] = {
     off = Math.max(off, Math.abs((s.P[i * 3] - mesh.P[c]) * s.N[i * 3] + (s.P[i * 3 + 1] - mesh.P[c + 1]) * s.N[i * 3 + 1] + (s.P[i * 3 + 2] - mesh.P[c + 2]) * s.N[i * 3 + 2]));
   }
   check(off < 1e-9, `faceSamples: every point lies on its face (largest distance from the plane ${off.toExponential(1)})`);
-  const v = faceVisibility(mesh, RayScene.of(mesh));
+  const v = faceVisibility(mesh, RayScene.of(mesh), null);
   check(v.length === mesh.numPrims && v[quad] > 0.3 && v[quad] < 0.85, `faceVisibility: ${v[quad].toFixed(3)} for the half covered quad`);
   const lines = new Geometry({ positions: [0, 0, 0, 1, 0, 0], prims: [[0, 1]], closed: false });
-  check(faceVisibility(lines, RayScene.of(lines))[0] === 1, 'faceVisibility: a polyline reads 1');
+  check(faceVisibility(lines, RayScene.of(lines), null)[0] === 1, 'faceVisibility: a polyline reads 1');
 }
 
 // ---- occlusion class prim: group, invert, other modes
