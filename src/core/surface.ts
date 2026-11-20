@@ -1285,6 +1285,146 @@ export function runInterp(run: RunKernel, s: { n: number; tri: Int32Array; b1: F
   return afterRun(run('surface_interp', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared }) as any, () => V);
 }
 
+// ---------------------------------------------------------------- edge wear (bake_edge_wear)
+
+/**
+ * Edge proximity per cloud point (kernel surface_spread), at two reaches: V[2i] the largest E[q] × (1 − d / width),
+ * V[2i + 1] the largest E[q] × (1 − d / far), over the points q of the same part within reach that are not buried and
+ * do not face away (normals more than 120° apart: the far side of a thin plate), the point itself included (far ≥
+ * width). E is the edge field (0..1); buried points read 0. Shared: the cloud's A.CP, A.CN, A.CPiece, A.CB, its grid
+ * A.GH, A.GS, A.GI, A.GP, and A.E; A.V out (2 per point).
+ */
+export function surfaceSpreadRange(a: { width: number; far: number; deadline?: number }, A: Record<string, any>, start: number, end: number): void {
+  const CP: Float64Array = A.CP, CN: Float64Array = A.CN, CPiece: Int32Array = A.CPiece, CB: Uint8Array | undefined = A.CB, E: Float32Array = A.E, V: Float32Array = A.V;
+  const GH: Float64Array = A.GH, GS: Int32Array = A.GS, GI: Int32Array = A.GI, GP: Float64Array = A.GP;
+  const ox = GH[0], oy = GH[1], oz = GH[2], h = GH[3], gx = GH[4], gy = GH[5], gz = GH[6];
+  const w = a.width, f = Math.max(a.width, a.far), f2 = f * f;
+  for (let i = start; i < end; i++) {
+    if (late(a.deadline, i - start)) throw new Error(PAST_DEADLINE);
+    if (CB && CB[i]) { V[i * 2] = 0; V[i * 2 + 1] = 0; continue; }
+    let best = E[i], bestF = E[i];
+    if (bestF < 1 && f > 0) {
+      const px = CP[i * 3], py = CP[i * 3 + 1], pz = CP[i * 3 + 2], nx = CN[i * 3], ny = CN[i * 3 + 1], nz = CN[i * 3 + 2], pc = CPiece[i];
+      const x0 = Math.max(0, Math.floor((px - f - ox) / h)), x1 = Math.min(gx - 1, Math.floor((px + f - ox) / h));
+      const y0 = Math.max(0, Math.floor((py - f - oy) / h)), y1 = Math.min(gy - 1, Math.floor((py + f - oy) / h));
+      const z0 = Math.max(0, Math.floor((pz - f - oz) / h)), z1 = Math.min(gz - 1, Math.floor((pz + f - oz) / h));
+      for (let cz = z0; cz <= z1; cz++) for (let cy = y0; cy <= y1; cy++) {
+        const row = (cz * gy + cy) * gx;
+        for (let k = GS[row + x0], ke = GS[row + x1 + 1]; k < ke; k++) {
+          const dx = GP[k * 3] - px, dy = GP[k * 3 + 1] - py, dz = GP[k * 3 + 2] - pz, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= f2) continue;
+          const q = GI[k], e = E[q];
+          if (e <= bestF || CPiece[q] !== pc || (CB && CB[q])) continue;
+          if (nx * CN[q * 3] + ny * CN[q * 3 + 1] + nz * CN[q * 3 + 2] < -0.5) continue;
+          const d = Math.sqrt(d2), vf = e * (1 - d / f);
+          if (vf > bestF) bestF = vf;
+          if (d < w) { const v = e * (1 - d / w); if (v > best) best = v; }
+        }
+      }
+    }
+    V[i * 2] = best;
+    V[i * 2 + 1] = bestF;
+  }
+}
+
+/** Edge proximity per cloud point at width and far (2 per point; see surfaceSpreadRange) from the edge field E per point. */
+export function runSpread(run: RunKernel, sc: SurfaceCloud, E: Float32Array, width: number, far: number, CB: Uint8Array | null = null, deadline = 0): Float32Array | Promise<Float32Array> {
+  const c = sc.cloud, V = new Float32Array(c.n * 2);
+  const shared: Record<string, any> = { ...sc.grid, CP: c.P, CN: c.N, CPiece: c.piece, E };
+  if (CB) shared.CB = CB;
+  return afterRun(run('surface_spread', { count: c.n, args: { width, far, deadline }, results: { V }, shared }, { minElements: 8192 }) as any, () => V);
+}
+
+export interface EdgeWearArgs {
+  seed: number;
+  /** breakup feature size and patch size (metres) */
+  chipSize: number;
+  patchSize: number;
+  raggedness: number;
+  patchiness: number;
+  focusAmount: number;
+  deadline?: number;
+}
+
+/** Seeds of the edge-wear noises (chips, warp, patches) from the node's seed. */
+const wearSeeds = (seed: number) => [hash32(seed ^ 0x6368), hash32(seed ^ 0x7761), hash32(seed ^ 0x7061)];
+
+/**
+ * The continuous wear field at texel samples [start, end) into A.V (kernel edge_wear): with handled h (A.HD, optional),
+ * edge proximity e blended from the near to the far reach by h (A.PX, 2 per sample), focus f = focusAmount × h, a patch
+ * factor p (large 3D patches, 1 ± patchiness) and a chip factor c (3D noise at chipSize, its domain warped by raggedness
+ * × 1.5 × chipSize, 0.35..1.65), W = 0.8 e (1 + f) p c + 0.12 f, clamped to 0..1. Where e is 0 the noise is not
+ * evaluated (W = 0.12 f): flats only rub, never chip. Positions from the samples' triangles and barycentrics (A.tri,
+ * A.b1, A.b2; shared A.tris, A.VP).
+ */
+export function edgeWearRange(a: EdgeWearArgs, A: Record<string, any>, start: number, end: number): void {
+  const PX: Float32Array = A.PX, HD: Float32Array | undefined = A.HD, V: Float32Array = A.V;
+  const [sc, sw, sp] = wearSeeds(a.seed);
+  const chip = fractal(makeNoise('perlin', sc), { octaves: 5, roughness: 0.55 });
+  const wx = fractal(makeNoise('perlin', sw), { octaves: 3, roughness: 0.5 }), wy = fractal(makeNoise('perlin', sw + 1), { octaves: 3, roughness: 0.5 }), wz = fractal(makeNoise('perlin', sw + 2), { octaves: 3, roughness: 0.5 });
+  const patch = fractal(makeNoise('perlin', sp), { octaves: 3, roughness: 0.5 });
+  const ic = 1 / a.chipSize, iw = 0.5 / a.chipSize, ip = 1 / a.patchSize, warp = 1.5 * a.raggedness * a.chipSize, pz = a.patchiness;
+  const p = new Float64Array(3);
+  for (let i = start; i < end; i++) {
+    if (late(a.deadline, i - start)) throw new Error(PAST_DEADLINE);
+    const hd = HD ? HD[i] : 0, e = PX[i * 2] + (PX[i * 2 + 1] - PX[i * 2]) * hd, f = a.focusAmount * hd;
+    if (!(e > 0)) { V[i] = 0.12 * f; continue; }
+    samplePos(A, i, p);
+    const x = p[0], y = p[1], z = p[2];
+    let pv = (0.5 + 0.5 * patch(x * ip, y * ip, z * ip) - 0.3) / 0.4;
+    pv = pv <= 0 ? 0 : pv >= 1 ? 1 : pv * pv * (3 - 2 * pv);
+    const pf = 1 - pz + 2 * pz * pv;
+    const ux = x + warp * wx(x * iw, y * iw, z * iw), uy = y + warp * wy(x * iw, y * iw, z * iw), uz = z + warp * wz(x * iw, y * iw, z * iw);
+    const c = 0.35 + 1.3 * (0.5 + 0.5 * chip(ux * ic, uy * ic, uz * ic));
+    const v = 0.8 * e * (1 + f) * pf * c + 0.12 * f;
+    V[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+  }
+}
+
+/** The continuous wear field at every texel sample (see edgeWearRange). */
+export function runEdgeWear(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, VP: Float64Array, PX: Float32Array, HD: Float32Array | null, args: EdgeWearArgs): Float32Array | Promise<Float32Array> {
+  const V = new Float32Array(s.n);
+  const shared: Record<string, any> = { tris, VP, PX };
+  if (HD) shared.HD = HD;
+  return afterRun(run('edge_wear', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared }) as any, () => V);
+}
+
+/**
+ * Facets of curved surfaces per piece: for every edge shared by two triangles that bend between 0.5° and 30° (a
+ * faceted round: not a flat, not a designed edge), the height of the smaller triangle across it. Returns per piece the
+ * median of those (0 when fewer than 16 such edges), for the warning that facets would read as edges.
+ */
+export function facetSizes(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, piece: Int32Array, pieces: number): Float64Array {
+  const VP = vertexPositions(g), vp = g.vertexPoint, nt = triPrim.length;
+  const FN = new Float64Array(nt * 3), area2 = new Float64Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const a = tris[t * 3] * 3, b = tris[t * 3 + 1] * 3, c = tris[t * 3 + 2] * 3;
+    const ux = VP[b] - VP[a], uy = VP[b + 1] - VP[a + 1], uz = VP[b + 2] - VP[a + 2], wx = VP[c] - VP[a], wy = VP[c + 1] - VP[a + 1], wz = VP[c + 2] - VP[a + 2];
+    const x = uy * wz - uz * wy, y = uz * wx - ux * wz, z = ux * wy - uy * wx, l = Math.hypot(x, y, z);
+    area2[t] = l;
+    if (l > 0) { FN[t * 3] = x / l; FN[t * 3 + 1] = y / l; FN[t * 3 + 2] = z / l; }
+  }
+  const first = new Map<number, number>(), sizes: number[][] = Array.from({ length: pieces }, () => []);
+  const cosLo = Math.cos((30 * Math.PI) / 180), cosHi = Math.cos((0.5 * Math.PI) / 180);
+  for (let t = 0; t < nt; t++) for (let e = 0; e < 3; e++) {
+    const va = tris[t * 3 + e], vb = tris[t * 3 + ((e + 1) % 3)], pa = vp[va], pb = vp[vb];
+    if (pa === pb) continue;
+    const key = pa < pb ? pa * 4294967296 + pb : pb * 4294967296 + pa;
+    const o = first.get(key);
+    if (o === undefined) { first.set(key, t); continue; }
+    const pc = piece[triPrim[t]];
+    if (pc < 0 || piece[triPrim[o]] !== pc) continue;
+    const d = FN[t * 3] * FN[o * 3] + FN[t * 3 + 1] * FN[o * 3 + 1] + FN[t * 3 + 2] * FN[o * 3 + 2];
+    if (!(d < cosHi && d > cosLo)) continue;
+    const len = Math.hypot(VP[va * 3] - VP[vb * 3], VP[va * 3 + 1] - VP[vb * 3 + 1], VP[va * 3 + 2] - VP[vb * 3 + 2]);
+    if (!(len > 0)) continue;
+    sizes[pc].push(Math.min(area2[t], area2[o]) / len);
+  }
+  const out = new Float64Array(pieces);
+  sizes.forEach((v, c) => { if (v.length >= 16) { v.sort((x, y) => x - y); out[c] = v[v.length >> 1]; } });
+  return out;
+}
+
 /** 3D noise 0..1 at every texel sample. */
 export function runNoise(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, VP: Float64Array, args: NoiseArgs): Float32Array | Promise<Float32Array> {
   const V = new Float32Array(s.n);
