@@ -331,7 +331,7 @@ defineNode({
     const prefix = outName(ctx);
     const make = (suffix: string, data: Float32Array) => {
       const img = new Image(w, h, `${prefix}_${suffix}`).set(MAIN_LAYER, data);
-      img.size = base.img.size;
+      img.takeSize(base.img);
       if (coverage) img.set('mask', coverage);
       // the maps keep the texel size and the islands of the base, so a filter after this node stays on one island
       for (const l of ['texel', 'island']) { const a = base.img.layer(l); if (a) img.set(l, a); }

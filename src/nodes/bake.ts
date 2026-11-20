@@ -151,7 +151,7 @@ export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, backgr
   const { ctx, s } = b, p = ctx.p;
   const { data, coverage } = resolve(s, vals, ch);
   const img = new Image(s.W, s.H, outName(ctx));
-  img.size = bakeSize(b);
+  img.setSize(bakeSize(b));
   const pad = Math.max(0, Math.round(p.padding));
   const map = paddingMap(coverage, s.W, s.H, pad);
   applyPadding(data, ch, map, background);

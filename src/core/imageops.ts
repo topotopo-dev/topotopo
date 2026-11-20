@@ -9,7 +9,7 @@ import { distanceTransform } from './heightfield.ts';
  */
 export function cropImage(img: Image, x: number, y: number, w: number, h: number, ow: number, oh: number, nearest: boolean, name: string): Image {
   const out = new Image(ow, oh, name);
-  out.size = img.size * (w / img.width);
+  out.takeSize(img, w / img.width);
   for (const [layer, data] of img.layers) {
     const ch = img.channels(layer), crop = new Float32Array(w * h * ch);
     // what lies beyond the source belongs to no island

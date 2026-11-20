@@ -64,8 +64,9 @@ const tileParam = (desc = 'the image tiles: filters read across the opposite bor
  */
 const textureSizeParam = (): ParamDef => ({
   type: 'float', default: 1, min: 1e-6,
-  desc: 'metres the image\'s width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it',
+  desc: 'metres the image\'s width covers on the model (one texel is texture_size / width metres): the image carries it, and every filter after this node reads its lengths in metres against it. Leave it out and the image has the size 1 m but states none: tex_to_heightfield and trace_image then need an extent',
   aliases: ['world_size', 'tile_size', 'image_width'],
+  readsGiven: true,
 });
 /** renamed hint for the generators' old per-node `size`: the image's own size now lives on the generator. */
 const SIZE_NOW = 'the metres the image width covers are texture_size on the node that makes the image (a filter reads them from its image)';
@@ -85,8 +86,8 @@ function cellsAcross(ctx: CookContext, what: string, size: number, feature: numb
 /** A new image named after the node, covering the node's texture_size. */
 function newImage(ctx: CookContext, w: number, h: number): Image {
   const img = new Image(w, h, outName(ctx));
-  img.size = ctx.p.texture_size ?? 1;
-  return img;
+  // stated when the graph set texture_size (1 included); a generator left at its default says nothing about its metres
+  return img.setSize(ctx.p.texture_size ?? 1, ctx.given('texture_size'));
 }
 const NORMAL_MAPS = 'normal maps are RGBA images (tex_normal_from_height, bake_normal, image_file of a normal map)';
 /** A normal-map source: RGBA, or an error that says how to make one. */
@@ -376,14 +377,14 @@ defineNode({
   },
   cook: (ctx) => {
     const { p, type } = ctx;
-    let w: number, h: number, metres = p.texture_size;
-    if (ctx.hasInput(0)) { const s = source(ctx, 0, p.image); w = s.img.width; h = s.img.height; metres = s.img.size; } else [w, h] = size2(p, type);
+    let w: number, h: number, from: Image | null = null;
+    if (ctx.hasInput(0)) { const s = source(ctx, 0, p.image); w = s.img.width; h = s.img.height; from = s.img; } else [w, h] = size2(p, type);
     const rgba = p.channels === 'rgba';
     const C = new Float32Array(w * h * (rgba ? 4 : 1));
     if (!rgba) C.fill(p.value);
     else for (let i = 0; i < C.length; i += 4) { C[i] = p.color[0]; C[i + 1] = p.color[1]; C[i + 2] = p.color[2]; C[i + 3] = p.alpha; }
     const img = new Image(w, h, outName(ctx)).set(MAIN_LAYER, C);
-    img.size = metres;
+    if (from) img.takeSize(from); else img.setSize(p.texture_size, ctx.given('texture_size'));
     return imageGeo(img);
   },
 });
@@ -763,7 +764,7 @@ defineNode({
     try {
       img = await readImageFile((f) => scope.files.readFile(f), p.path, { name: outName(ctx), layers: p.layers, srgb: !!p.srgb });
     } catch (e: any) { throw new NodeError(`${type}: ${e?.message ?? e}`); }
-    img.size = p.texture_size;
+    img.setSize(p.texture_size, ctx.given('texture_size'));
     const g = ctx.hasInput(0) ? ctx.input(0).clone() : new Geometry();
     const before = g.volumes.length;
     g.volumes = g.volumes.filter((v) => !(isImage(v) && v.name === img.name));
@@ -1770,7 +1771,7 @@ defineNode({
     }
     const img = new Image(w, h, outName(ctx)).set(MAIN_LAYER, out);
     // the packed map covers what its largest input covers, and keeps that input's texel size and islands
-    img.size = ref.size;
+    img.takeSize(ref);
     for (const l of ['texel', 'island']) { const a = ref.layer(l); if (a) img.set(l, a); }
     return imageGeo(img);
   },
@@ -2265,7 +2266,7 @@ defineNode({
     const g = s.g.clone();
     if (p.layer) {
       img = new Image(s.img.width, s.img.height, name).set(MAIN_LAYER, s.data);
-      img.size = s.img.size;
+      img.takeSize(s.img);
       for (const l of ['texel', 'island']) { const a = s.img.layer(l); if (a) img.set(l, a); }
       g.volumes.push(img);
     } else {
@@ -2378,7 +2379,7 @@ defineNode({
       const out = new Float32Array(n * 4);
       for (let i = 0; i < n; i++) { out[i * 4] = O ? O[i] : 1; out[i * 4 + 1] = R ? R[i] : rv ?? entry.roughness; out[i * 4 + 2] = M ? M[i] : mv ?? entry.metallic; out[i * 4 + 3] = 1; }
       const orm = new Image(w, h, `${mat}_orm`).set(MAIN_LAYER, out);
-      orm.size = ref.size;
+      orm.takeSize(ref);
       for (const l of ['texel', 'island']) { const a = ref.layer(l); if (a && ref.width === w && ref.height === h) orm.set(l, a); }
       used.push(orm);
       tex.orm = `image:${orm.name}`;
@@ -2416,12 +2417,12 @@ defineNode({
   type: 'tex_to_heightfield',
   category: 'texture',
   summary: 'Bridge: an image (grey or luminance) becomes a heightfield of the same sample count (u → +X, v → −Z).',
-  description: 'Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. size sets the extent in metres along X (Z follows the image aspect). Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.',
+  description: 'Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. extent is the extent in metres along X (Z follows the image aspect): give it, or the image must state how many metres it covers (a bake writes it, a generator states it when its texture_size is set, 1 included; a generator left at the default states nothing), else the node refuses, as there is no default size. The samples sit on the grid nodes, so a heightfield of extent E and an image of w pixels have a cell of E / (w - 1), and heightfield_to_tex writes an image covering the extent: the round trip keeps it exactly. Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.',
   aliases: ['image_to_heightfield', 'texture_to_heightfield', 'tex2hf'],
   renamed: { size: 'it is now extent, in metres (0, the default, = the metres the image covers; it was 20 when not given)' },
   inputs: FILTER_INPUT,
   params: {
-    extent: { type: 'float', default: 0, min: 0, desc: 'extent along X in metres (0 = the metres the image covers: its size)' },
+    extent: { type: 'float', default: 0, min: 0, desc: 'extent along X in metres; 0 = the metres the image covers (its size, when the image states one: a texture_size set on its generator, 1 included, or a bake), and a refusal when it states none' },
     height_scale: { type: 'float', default: 1, desc: 'metres per unit of image value', aliases: ['amplitude'] },
     height_offset: { type: 'float', default: 0, desc: 'added height (metres)' },
     center: P.center(),
@@ -2441,6 +2442,7 @@ defineNode({
     const s = source(ctx, 0, p.image, p.layer);
     const w = s.img.width, h = s.img.height;
     if (w < 2 || h < 2) throw new NodeError(`${type}: a heightfield needs at least 2 × 2 samples (image is ${w} × ${h})`);
+    if (!(p.extent > 0) && !s.img.sizeStated) throw new NodeError(`${type}: extent is not set and image "${s.img.name}" does not say how many metres it covers (nothing set its texture_size)`, 'set extent (metres along X), or set texture_size on the generator that made the image (a bake writes its own)');
     const cell = (p.extent > 0 ? p.extent : s.img.size) / (w - 1);
     const hf = new Heightfield(w, h, cell, [p.center[0] - ((w - 1) * cell) / 2, p.center[2] - ((h - 1) * cell) / 2], undefined, s.img.name);
     const gr = toGrey(s.data, s.ch);
@@ -2498,7 +2500,7 @@ defineNode({
     const span = hi - lo;
     for (let k = 0; k < a.length; k++) out[k] = p.normalize ? (span !== 0 ? (a[k] - lo) / span : 0) : a[k];
     const img = new Image(hf.width, hf.height, outName(ctx)).set(MAIN_LAYER, out);
-    img.size = hf.width * hf.cellSize; // a sample is a texel: the image covers what the heightfield spans along X
+    img.setSize((hf.width - 1) * hf.cellSize); // the extent along X, which tex_to_heightfield reads back (cell = extent / (w - 1))
     if (p.normalize) { ctx.stat('range_min', lo); ctx.stat('range_max', hi); }
     if (!p.keep) return imageGeo(img);
     const g = ctx.input(0).clone();

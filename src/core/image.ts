@@ -44,6 +44,12 @@ export class Image implements ImageVolume {
   layers: Map<string, Float32Array>;
   /** metres the width covers (see the header); 1 unless a generator, a file or a bake says otherwise */
   size = 1;
+  /**
+   * Whether `size` was stated: a generator was given texture_size (any value, 1 included), or the image comes from a bake, a
+   * heightfield, a pack or a file with texture_size. Only the default 1 m is not stated: a node that turns pixels into metres
+   * (tex_to_heightfield, trace_image) refuses it. Every image made from another takes it with `takeSize`.
+   */
+  sizeStated = false;
 
   constructor(width: number, height: number, name = 'image', layers?: Map<string, Float32Array>) {
     if (!(Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1)) throw new Error(`image needs at least 1 × 1 pixels (got ${width} × ${height})`);
@@ -79,10 +85,16 @@ export class Image implements ImageVolume {
     return this;
   }
 
-  clone(): Image { const c = new Image(this.width, this.height, this.name, new Map(this.layers)); c.size = this.size; return c; }
+  clone(): Image { const c = new Image(this.width, this.height, this.name, new Map(this.layers)); return c.takeSize(this); }
 
   /** The same size and name without layers. */
-  emptyLike(name = this.name): Image { const c = new Image(this.width, this.height, name); c.size = this.size; return c; }
+  emptyLike(name = this.name): Image { return new Image(this.width, this.height, name).takeSize(this); }
+
+  /** Say how many metres the width covers (stated, unless `stated` is false: the default of a generator nobody set). */
+  setSize(metres: number, stated = true): this { this.size = metres; this.sizeStated = stated; return this; }
+
+  /** The metres another image covers, scaled by `by` (a crop covers part of them), and whether they were stated. */
+  takeSize(from: { size: number; sizeStated?: boolean }, by = 1): this { this.size = from.size * by; this.sizeStated = !!from.sizeStated; return this; }
 
   /** Metres one texel covers where nothing says otherwise: size / width (texels are square). */
   get texel(): number { return this.size / this.width; }
@@ -96,7 +108,7 @@ export function isImage(v: Volume): v is ImageVolume {
 export function asImage(v: ImageVolume): Image {
   if (v instanceof Image) return v;
   const img = new Image(v.width, v.height, v.name, new Map(v.layers));
-  if (v.size > 0) img.size = v.size;
+  if (v.size > 0) { img.size = v.size; img.sizeStated = v.sizeStated ?? v.size !== 1; }
   return img;
 }
 
@@ -264,7 +276,7 @@ export function imageSummary(g: Geometry): string[] {
   for (const img of imgs.slice(0, max)) {
     const ls = [...img.layers.keys()].map((k) => layerDescription(img, k));
     // the metres the width covers, when it is not the default 1: what every length node after it works against
-    const covers = img.size !== 1 ? ` covering ${fmt(img.size)} m (${fmt((img.size / img.width) * 1000)} mm a texel)` : '';
+    const covers = img.size !== 1 || img.sizeStated ? ` covering ${fmt(img.size)} m (${fmt((img.size / img.width) * 1000)} mm a texel)` : '';
     out.push(`image "${img.name}": ${img.width}×${img.height}${covers}, layers: ${ls.length ? ls.join(', ') : '(none)'}`);
   }
   if (imgs.length > max) out.push(`… ${imgs.length - max} more image(s)`);
@@ -308,13 +320,13 @@ export function opaque(a: Float32Array, ch: number): boolean {
 export function imageToJSON(img: Image): Record<string, any> {
   const layers: Record<string, string> = {};
   for (const [k, a] of img.layers) layers[k] = f32ToBase64(a);
-  return { name: img.name, width: img.width, height: img.height, ...(img.size !== 1 ? { size: img.size } : {}), layers };
+  return { name: img.name, width: img.width, height: img.height, ...(img.size !== 1 || img.sizeStated ? { size: img.size } : {}), layers };
 }
 
 /** An image from imageToJSON output (layers as base64 float32, or plain number arrays). */
 export function imageFromJSON(j: any): Image {
   const img = new Image(Number(j?.width), Number(j?.height), String(j?.name ?? 'image'));
-  if (Number(j?.size) > 0) img.size = Number(j.size);
+  if (Number(j?.size) > 0) img.setSize(Number(j.size)); // a written size was stated
   for (const [k, v] of Object.entries(j?.layers ?? {})) {
     const a = typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);
     if (!channelsOf(a, img.count)) throw new Error(`image "${img.name}" layer "${k}": ${a.length} values for ${img.width} × ${img.height} pixels`);

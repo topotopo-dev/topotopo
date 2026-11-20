@@ -1146,7 +1146,7 @@ export class Engine {
       return { rp, refSig: '', usesTime: rp.usesTime, depsTimeDependent: false };
     }
     const fail = (error: string, upstream = false): NodeParams => ({
-      rp: { values: {}, errors: [], notes: [], warnings: [], outOfRange: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
+      rp: { values: {}, errors: [], notes: [], warnings: [], outOfRange: [], usesTime: false, deferred: [], given: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
     });
     const geo = new Map<string, Geometry>();
     const parts: string[] = [];
@@ -1303,7 +1303,8 @@ export class Engine {
     const varsSig = def.usesVars === true ? stableStringify(vars)
       : typeof def.usesVars === 'function' ? stableStringify(pickVars(vars, codeVarNames(def.usesVars(rp.values), vars))) : '';
     // a result named after its node (an image's default name) is not shared with an identical node of another name
-    const nameSig = def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '';
+    const givenSig = Object.entries(def.params).filter(([k, d]) => d.readsGiven && rp.given.includes(k)).map(([k]) => '|G:' + k).join('');
+    const nameSig = givenSig + (def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '');
     const materialWith = (ex: string) => def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + ex + (np.refSig ? '|R:' + np.refSig : '') + nameSig;
     const material = materialWith(extra);
     const plainSig = String(hashString(material));
@@ -1423,6 +1424,7 @@ export class Engine {
       node: name,
       type: def.type,
       p: rp.values,
+      given: (param) => rp.given.includes(param),
       inputs,
       input: (i) => inputs[i] ?? new Geometry(),
       hasInput: (i) => !!inputs[i],

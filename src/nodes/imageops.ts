@@ -91,14 +91,15 @@ defineNode({
     threshold: { type: 'float', default: 0.5, desc: 'values at least this threshold are foreground' },
     tolerance: { type: 'float', default: 0.5, min: 0, max: 8192, desc: 'maximum contour simplification error in source pixels; 0 only removes collinear points' },
     min_area: { type: 'float', default: 0, min: 0, max: MAX_PIXELS, desc: 'minimum connected foreground component area in pixels; 0 retains all components' },
-    extent: { type: 'float', default: 0, min: 0, desc: 'full image canvas width in metres; height follows image aspect (0 = the metres the image covers: its size)' },
+    extent: { type: 'float', default: 0, min: 0, desc: 'full image canvas width in metres; height follows image aspect (0 = the metres the image states it covers: texture_size set on its generator, or a bake; refused when it states none)' },
   },
-  renamed: { width: 'it is now extent, in metres (0, the default, = the metres the image covers; a width of 1 is an extent of 1)' },
+  renamed: { width: 'it is now extent, in metres (0, the default, = the metres the image states it covers; a width of 1 is an extent of 1)' },
   outputs: 'closed curves; point uv; prim class (component ID), contour_id and hole (0/1); detail image_size and image_width',
-  example: { nodes: { img: { type: 'tex_shape', params: { resolution: [64, 32], shape: 'disc', falloff: 0 } }, out: { type: 'trace_image', in: ['img'], params: { channel: 'luminance' } } }, output: 'out' },
+  example: { nodes: { img: { type: 'tex_shape', params: { resolution: [64, 32], texture_size: 1, shape: 'disc', falloff: 0 } }, out: { type: 'trace_image', in: ['img'], params: { channel: 'luminance' } } }, output: 'out' },
   cook: (ctx) => {
     const { p } = ctx, s = source(ctx, 0, p.image, p.layer);
     const loops = traceMask(channel(s.data, s.ch, p.channel), s.img.width, s.img.height, p.threshold, p.min_area, p.tolerance);
+    if (!(p.extent > 0) && !s.img.sizeStated) throw new NodeError(`trace_image: extent is not set and image "${s.img.name}" does not say how many metres it covers (nothing set its texture_size)`, 'set extent (metres along the image width), or set texture_size on the generator that made the image (a bake writes its own)');
     const extent = p.extent > 0 ? p.extent : s.img.size, b = new GeoBuilder(), scale = extent / s.img.width;
     for (const loop of loops) {
       // Pixel-space winding is reversed by Y-up, so reverse the sequence as well.

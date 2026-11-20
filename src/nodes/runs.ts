@@ -147,7 +147,7 @@ function cook(ctx: CookContext): Geometry {
     if (k >= 0 && C[k] > 0) { data[t * NL + 1] = along[k]; data[t * NL + 2] = strength[k]; data[t * NL + 4] = id[k]; }
   }
   const img = new Image(W, H, outName(ctx));
-  img.size = bakedImageSize(pos, uv, tris, W, H, skip); // as every bake
+  img.setSize(bakedImageSize(pos, uv, tris, W, H, skip)); // as every bake
   const pad = Math.max(0, Math.round(p.padding));
   dilate(data, NL, W, H, first.coverage, pad, [0, 0, 0, 0, 0]);
   // channel order in `data`: C, along, strength, head, id

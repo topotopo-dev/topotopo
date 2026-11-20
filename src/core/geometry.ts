@@ -469,6 +469,8 @@ export interface ImageVolume {
   layers: Map<string, Float32Array>;
   /** metres the width covers (one texel is size / width along u and v); 1 unless said otherwise */
   size: number;
+  /** whether `size` was stated rather than the default (see Image.sizeStated); absent: stated when it is not 1 */
+  sizeStated?: boolean;
   /** always an empty box (min +Infinity, max -Infinity): an image is not placed in space */
   readonly bounds: { min: Vec3; max: Vec3 };
   /** a copy with its own layer map that shares the layer arrays */
@@ -490,7 +492,7 @@ export function sameImage(a: ImageVolume, b: ImageVolume): boolean {
 /** Two images of the same size and layers, every layer equal value for value, whatever their names. */
 export function samePixels(a: ImageVolume, b: ImageVolume): boolean {
   if (a === b) return true;
-  if (a.width !== b.width || a.height !== b.height || a.size !== b.size || a.layers.size !== b.layers.size) return false;
+  if (a.width !== b.width || a.height !== b.height || a.size !== b.size || !!a.sizeStated !== !!b.sizeStated || a.layers.size !== b.layers.size) return false;
   for (const [k, x] of a.layers) {
     const y = b.layers.get(k);
     if (!y || y.length !== x.length) return false;

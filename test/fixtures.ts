@@ -301,7 +301,7 @@ export const PARAMS: Record<string, any> = {
   tex_tile_sampler: { resolution: 64, count: [4, 4], scale: [0.5, 1] },
   tex_output: { name: 'bricks_id', layer: 'id' },
   tex_crop: { origin: [-2, 4], size: [40, 20], resolution: [20, 10] },
-  trace_image: { channel: 'luminance', tolerance: 1 },
+  trace_image: { channel: 'luminance', tolerance: 1, extent: 1 },
   tex_dilate: { distance: 3 / 32, mask_threshold: 0.5 },
   tex_pack: { resolution: 128, padding: 4 },
   texture_to_material: { material: 'noisy', base_color: 'TEX', roughness: 'TEX' },
