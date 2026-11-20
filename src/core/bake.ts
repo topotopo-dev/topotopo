@@ -38,9 +38,11 @@ export interface TexelMap {
 /**
  * Rasterise triangles (vertex index triples into `uv`, 2 floats per vertex) into a w × h texel grid. Centre-inside
  * texels first; then, with conservative, texels within half a texel diagonal of a triangle that no triangle covers
- * take the closest point on the nearest one. `skip` leaves triangles out (masked prims).
+ * take the closest point on the nearest one. `skip` leaves triangles out (masked prims). `key` (per triangle) settles a
+ * texel two triangles claim equally (a centre on their shared edge, or as near both) by the smaller key instead of by
+ * triangle order: a key from where the triangle is makes the result independent of prim order.
  */
-export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, conservative = true, skip?: Uint8Array | null): TexelMap {
+export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, conservative = true, skip?: Uint8Array | null, key?: ArrayLike<number>): TexelMap {
   const n = w * h, nt = Math.floor(tris.length / 3);
   const tri = new Int32Array(n).fill(-1), b1 = new Float32Array(n), b2 = new Float32Array(n);
   let degenerate = 0, outside = 0;
@@ -65,6 +67,7 @@ export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: n
         const w2 = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * inv; // weight of c
         if (w1 < -1e-9 || w2 < -1e-9 || w1 + w2 > 1 + 1e-9) continue;
         const k = j * w + i;
+        if (key && tri[k] >= 0 && key[tri[k]] <= key[t]) continue;
         tri[k] = t; b1[k] = w1; b2[k] = w2;
       }
     }
@@ -83,7 +86,7 @@ export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: n
           const k = j * w + i;
           if (tri[k] >= 0 && best[k] === Infinity) continue; // covered by a centre test
           const q = closestOnTri(i + 0.5, j + 0.5, ax, ay, bx, by, cx, cy);
-          if (q.d2 > R2 || q.d2 >= best[k]) continue;
+          if (q.d2 > R2 || q.d2 > best[k] || (q.d2 === best[k] && (!key || key[tri[k]] <= key[t]))) continue;
           best[k] = q.d2; tri[k] = t; b1[k] = q.w1; b2[k] = q.w2;
         }
     }

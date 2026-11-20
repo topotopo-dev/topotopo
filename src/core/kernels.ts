@@ -24,7 +24,7 @@ import { particlesRange } from './particles.ts';
 import type { StepArgs } from './particles.ts';
 import { getLoadedKernels } from '../wasm/kernels.ts';
 import { TriBVH } from './spatial.ts';
-import { bakeDistanceRange, bakeNoiseRange, surfaceCurvatureRange, surfaceInterpRange, surfaceRaysRange } from './surface.ts';
+import { bakeDistanceRange, bakeNoiseRange, surfaceBuriedRange, surfaceCurvatureRange, surfaceInterpRange, surfaceRaysRange } from './surface.ts';
 import type { CurvatureCloudArgs, InterpArgs, NoiseArgs, SurfaceRayArgs } from './surface.ts';
 
 export type TypedArray =
@@ -156,6 +156,16 @@ const surfaceRays: Kernel = {
   },
 };
 
+/** bake_measure / bake_curvature method surface: which cloud points lie inside another part (scene and its parts shared). */
+const surfaceBuried: Kernel = {
+  minElements: 4096,
+  chunksPerWorker: 4,
+  run(a: { bias: number; deadline?: number }, A, start, end, ctx) {
+    const scene = ctx.memo('buryscene:' + ctx.sharedKey, () => RayScene.fromArrays(A as any));
+    surfaceBuriedRange(a, A, scene, start, end);
+  },
+};
+
 /** bake_measure / bake_curvature method surface: curvature per cloud point (cloud and its grid shared). */
 const surfaceCurvature: Kernel = {
   minElements: 8192,
@@ -180,7 +190,7 @@ const bakeNoiseK: Kernel = {
 const bakeDistanceK: Kernel = {
   minElements: 16384,
   chunksPerWorker: 2,
-  run(a: { maxD: number }, A, start, end, ctx) {
+  run(a: { maxD: number; deadline?: number }, A, start, end, ctx) {
     const bvh = ctx.memo('bvh:' + ctx.sharedKey, () => TriBVH.fromArrays(A as any));
     bakeDistanceRange(a, A, bvh, start, end);
   },
@@ -331,6 +341,7 @@ export const KERNELS: Record<string, Kernel> = {
   bake_project: bakeProject,
   bake_curvature: bakeCurvature,
   surface_rays: surfaceRays,
+  surface_buried: surfaceBuried,
   surface_curvature: surfaceCurvature,
   surface_interp: surfaceInterp,
   bake_noise: bakeNoiseK,
