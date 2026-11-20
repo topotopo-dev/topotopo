@@ -846,7 +846,7 @@ section('the bake memo keeps at most its limits and releases the oldest values')
   check(loose.real > 64 * 2 ** 20 && Math.abs(loose.counted - loose.real) < 0.15 * loose.real, `twelve versions, no limit: ${MB(loose.real)} MB really held, ${MB(loose.counted)} MB counted (within 15 %)`);
   check(tight.real <= 32 * 2 ** 20 * 1.15 && tight.counted <= 32 * 2 ** 20, `limit 32 MB: ${MB(tight.real)} MB really held after twelve versions (≤ 32 MB + 15 %), ${MB(tight.counted)} MB counted`);
   Object.assign(bakeMemoLimits, saved);
-  check(saved.bytes === 512 * 2 ** 20 && saved.entries === 8, 'the limits: 512 MB and 8 values (about two versions of a mesh)');
+  check(saved.bytes === 512 * 2 ** 20 && saved.entries === 64, 'the limits: 512 MB and 64 values (the bytes bind first: a version of a mesh keeps a few rasters and the per-cloud values of the surface bakes)');
 }
 
 section('a time bound: every measure on a mid-size model, rays per cloud point');
