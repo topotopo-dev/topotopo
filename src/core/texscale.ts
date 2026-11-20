@@ -1,7 +1,9 @@
 // Texture nodes work in metres. The scale an image has comes from two places:
 //   - an image with a layer "island" (the uv island of every texel) and, usually, "texel" (metres per texel along u in
 //     R and along v in G, as the bakes write them) is an atlas: every island is a surface of its own with its own texel
-//     size, so a filter runs once per island, with that island's texel, and never reads across an island border;
+//     size, so a filter runs once per island, with that island's texel, and never reads across an island border. A texel
+//     that belongs to the surface of an island holds its whole-number id; the gutter around it (padding, not surface) holds
+//     the id plus a half, and a texel of no island holds -1 (see markGutter);
 //   - any other image (a generator's, a file's) covers `size` metres across and size × height / width down: one texel
 //     is size / width along both axes.
 // The filters themselves (core/texture.ts, core/texsdf.ts) take texel sizes in metres and know nothing of islands;
@@ -46,9 +48,8 @@ function medianOf(vals: number[]): number {
 export function imageTexels(img: Image): { tu: number; tv: number } {
   const t = img.layer('texel');
   if (t && img.channels('texel') === 4 && !img.layer('island')) {
-    const cov = img.layer('mask'), n = img.count, stride = Math.max(1, Math.floor(n / (SAMPLES * 4))), us: number[] = [], vs: number[] = [];
+    const n = img.count, stride = Math.max(1, Math.floor(n / (SAMPLES * 4))), us: number[] = [], vs: number[] = [];
     for (let i = 0; i < n; i += stride) {
-      if (cov && !(cov[i] > 0)) continue;
       if (t[i * 4] > 0 && t[i * 4 + 1] > 0) { us.push(t[i * 4]); vs.push(t[i * 4 + 1]); }
     }
     const tu = medianOf(us), tv = medianOf(vs);
@@ -75,19 +76,18 @@ export function islandsOf(img: Image): Atlas | null {
   if (hit && hit.texel === tex) return hit.value;
   const w = img.width, h = img.height, n = w * h;
   let maxId = -1;
-  for (let k = 0; k < n; k++) if (ids[k] > maxId) maxId = ids[k];
+  for (let k = 0; k < n; k++) if (ids[k] > maxId) maxId = Math.floor(ids[k]);
   if (maxId > 1 << 24) return null;
   // slot of every id: islands in ascending order of id
   const slot = new Int32Array(maxId + 1).fill(-1);
-  for (let k = 0; k < n; k++) { const id = ids[k]; if (id >= 0 && slot[id] < 0) slot[id] = 0; }
+  for (let k = 0; k < n; k++) { const id = Math.floor(ids[k]); if (id >= 0 && slot[id] < 0) slot[id] = 0; }
   const islands: Island[] = [];
   for (let id = 0; id <= maxId; id++) if (slot[id] === 0) { slot[id] = islands.length; islands.push({ id, x0: w, y0: h, x1: -1, y1: -1, count: 0, tu: 0, tv: 0 }); }
   let background = 0;
   for (let j = 0, k = 0; j < h; j++)
     for (let i = 0; i < w; i++, k++) {
-      const id = ids[k];
-      if (!(id >= 0)) { background++; continue; }
-      const s = islands[slot[id]];
+      if (!(ids[k] >= 0)) { background++; continue; }
+      const s = islands[slot[Math.floor(ids[k])]];
       if (i < s.x0) s.x0 = i;
       if (i > s.x1) s.x1 = i;
       if (j < s.y0) s.y0 = j;
@@ -101,9 +101,8 @@ export function islandsOf(img: Image): Atlas | null {
     const us = islands.map(() => [] as number[]), vs = islands.map(() => [] as number[]), seen = new Int32Array(islands.length);
     const stride = islands.map((s) => Math.max(1, Math.floor(s.count / SAMPLES)));
     for (let k = 0; k < n; k++) {
-      const id = ids[k];
-      if (!(id >= 0)) continue;
-      const q = slot[id];
+      if (!(ids[k] >= 0)) continue;
+      const q = slot[Math.floor(ids[k])];
       if (seen[q]++ % stride[q]) continue;
       const u = tex[k * 4], v = tex[k * 4 + 1];
       if (u > 0 && v > 0) { us[q].push(u); vs[q].push(v); }
@@ -113,6 +112,16 @@ export function islandsOf(img: Image): Atlas | null {
   const value = { islands, ids, background, index: slot };
   atlasCache.set(ids, { texel: tex, value });
   return value;
+}
+
+/**
+ * Mark the gutter of an island layer: a texel that holds an island but is not covered (a bake's padding) takes the id plus a
+ * half, so the surface of an island (a whole number) and its padding are told apart without another layer. Texels of no
+ * island (-1) stay. `coverage` is the bake's coverage (a texel above 0 is surface). Changes `ids` in place.
+ */
+export function markGutter(ids: Float32Array, coverage: ArrayLike<number>): Float32Array {
+  for (let k = 0; k < ids.length; k++) if (ids[k] >= 0 && !(coverage[k] > 0)) ids[k] += 0.5;
+  return ids;
 }
 
 /**
@@ -148,8 +157,8 @@ function nearestOwn(own: Uint8Array, w: number, h: number): Int32Array {
  * `outCh` (channels each).
  *   without islands   fn runs once on the whole image
  *   with islands      fn runs on each island's box (its own texels, no wrap) and its result is kept on the island's own pixels.
- *                     An island's own pixels are those of its id that its coverage ("mask" layer, when there is one) covers:
- *                     its gutter is padding, not surface. Every other pixel of the box (another island, the background, the
+ *                     An island's own pixels are those of its whole-number id:
+ *                     its gutter (the id plus a half) is padding, not surface. Every other pixel of the box (another island, the background, the
  *                     gutter) is replaced by the nearest own pixel for the filter to read (`fill: false` leaves it 0: the filter
  *                     then weighs by region.own, as a blur does to stay mean-preserving), and a filter that costs per pixel
  *                     skips the pixels region.own does not set. The island's gutter then takes the result of its nearest own
@@ -169,7 +178,7 @@ export function runScaled(img: Image, inputs: Plane[], outCh: number[], wrap: bo
   }
   const { islands, ids } = found;
   const fill = opts.fill !== false, repad = opts.repad !== false;
-  const cl = opts.coverage === false ? undefined : img.layer('mask'), cov = cl && img.channels('mask') === 1 ? cl : null;
+  const gutterOwn = opts.coverage === false;
   const outs = outCh.map((c, o) => {
     const arr = new Float32Array(w * h * c), bg = opts.bg?.[o];
     if (bg) { for (let k = 0; k < w * h; k++) for (let q = 0; q < c; q++) arr[k * c + q] = bg[q % bg.length]; }
@@ -183,7 +192,7 @@ export function runScaled(img: Image, inputs: Plane[], outCh: number[], wrap: bo
     let foreign = 0, owned = 0;
     for (let j = 0; j < chh; j++) {
       const row = (y0 + j) * w + x0;
-      for (let i = 0; i < cw; i++) if (ids[row + i] === s.id && (!cov || cov[row + i] > 0)) { own[j * cw + i] = 1; owned++; } else foreign++;
+      for (let i = 0; i < cw; i++) { const v = ids[row + i]; if (v === s.id || (gutterOwn && Math.floor(v) === s.id)) { own[j * cw + i] = 1; owned++; } else foreign++; }
     }
     if (!owned) continue;
     // the nearest own pixel of every pixel of the box (an index of the box), for reading and for the gutter
@@ -208,7 +217,7 @@ export function runScaled(img: Image, inputs: Plane[], outCh: number[], wrap: bo
         for (let i = 0; i < cw; i++) {
           const k = rk + i;
           // an own pixel takes its result; the island's gutter (its id, not covered) that of the nearest own pixel
-          const from = own[k] ? k : repad && ids[row + i] === s.id ? near![k] : -1;
+          const from = own[k] ? k : repad && Math.floor(ids[row + i]) === s.id ? near![k] : -1;
           if (from < 0) continue;
           const to = (row + i) * c, rf = from * c;
           for (let q = 0; q < c; q++) out[to + q] = r[rf + q];
@@ -233,11 +242,11 @@ export function slopeFacts(img: Image, grey: Float32Array, wrap: boolean): { max
     for (let i = 0; i < w; i++, k++) {
       let t = base;
       if (found) {
-        const id = found.ids[k];
-        if (!(id >= 0)) continue;
+        if (!(found.ids[k] >= 0)) continue;
+        const id = Math.floor(found.ids[k]);
         // the step from one island to the next is no slope of either
         let edge = false;
-        for (let dj = -1; dj <= 1 && !edge; dj++) for (let di = -1; di <= 1; di++) { const x = i + di, y = j + dj; if (x >= 0 && y >= 0 && x < w && y < h && found.ids[y * w + x] !== id) { edge = true; break; } }
+        for (let dj = -1; dj <= 1 && !edge; dj++) for (let di = -1; di <= 1; di++) { const x = i + di, y = j + dj; if (x >= 0 && y >= 0 && x < w && y < h && Math.floor(found.ids[y * w + x]) !== id) { edge = true; break; } }
         if (edge) continue;
         const s = found.islands[found.index[id]];
         t = Math.sqrt(s.tu * s.tv);

@@ -5,6 +5,7 @@ import { Image, MAIN_LAYER } from '../core/image.ts';
 import { bakeSamples, dilate, interpolate, normalize3, resolve, vertexPositions } from '../core/bake.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { partsOf } from '../core/report.ts';
+import { markGutter } from '../core/texscale.ts';
 import { CREASE, FlowLimit, limits, MAX_RUNS, REF_WIDTH, TOUCH, rasterRuns, sampleSources, scales, traceRuns, triTexelSizes } from '../core/runs.ts';
 import type { FlowParams } from '../core/runs.ts';
 import { triangulate, vertexNormals } from '../core/topology.ts';
@@ -161,6 +162,7 @@ function cook(ctx: CookContext): Geometry {
   const T = resolve(s, tl.texel.vals, 4).data, I = resolve(s, tl.island.vals, 1).data;
   dilate(T, 4, W, H, first.coverage, pad, tl.texel.background);
   dilate(I, 1, W, H, first.coverage, pad, tl.island.background);
+  markGutter(I, first.coverage);
   img.set('texel', T).set('island', I);
   img.set('mask', first.coverage);
   let covered = 0;

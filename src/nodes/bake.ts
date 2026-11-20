@@ -10,6 +10,7 @@ import { Image, MAIN_LAYER, imageRef, referenceableImages, sampleUV } from '../c
 import { MATERIAL_KINDS, primMaterials, readMaterials, resolveKind } from '../core/materials.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import { bakedImageSize, triangleTexelSizes } from '../core/texelsize.ts';
+import { markGutter } from '../core/texscale.ts';
 import {
   applyPadding, averagedVertexNormals, bakeMemoGrew, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
@@ -161,6 +162,7 @@ export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, backgr
   for (const [k, e] of Object.entries(layers)) {
     const r = resolve(s, e.vals, e.ch);
     applyPadding(r.data, e.ch, map, e.background);
+    if (k === 'island') markGutter(r.data, coverage);
     img.set(k, r.data);
   }
   // every bake tells later nodes the texel size of each texel and its uv island (the nodes that make them themselves pass
@@ -172,6 +174,7 @@ export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, backgr
       const T = resolve(s, t.texel.vals, 4), I = resolve(s, t.island.vals, 1);
       applyPadding(T.data, 4, map, t.texel.background);
       applyPadding(I.data, 1, map, t.island.background);
+      markGutter(I.data, coverage);
       return { texel: T.data, island: I.data };
     });
     img.set('texel', shared.texel).set('island', shared.island);

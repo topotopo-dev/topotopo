@@ -25,7 +25,7 @@ export function imagePNG(img: Image, layer = '', deflate?: (d: Uint8Array) => Ui
   const ids = (layer || img.mainLayer) === 'island' && a && channelsOf(a, img.count) === 1;
   if (ids) {
     const v = new Uint16Array(img.count);
-    for (let i = 0; i < v.length; i++) v[i] = Math.max(0, Math.min(65535, Math.round(a![i] + 1)));
+    for (let i = 0; i < v.length; i++) v[i] = Math.max(0, Math.min(65535, Math.floor(a![i]) + 1));
     const png = encodeGreyPNG(v, img.width, img.height, 16, deflate);
     let list = encoded.get(a!); if (!list) encoded.set(a!, list = []); list.push({ key, deflate, bytes: png });
     return png;
