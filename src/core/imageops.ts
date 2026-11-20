@@ -12,6 +12,8 @@ export function cropImage(img: Image, x: number, y: number, w: number, h: number
   out.size = img.size * (w / img.width);
   for (const [layer, data] of img.layers) {
     const ch = img.channels(layer), crop = new Float32Array(w * h * ch);
+    // what lies beyond the source belongs to no island
+    if (layer === 'island') crop.fill(-1);
     for (let j = 0; j < h; j++) {
       const sy = y + j;
       if (sy < 0 || sy >= img.height) continue;
@@ -41,12 +43,12 @@ export function cropImage(img: Image, x: number, y: number, w: number, h: number
 /** Exact nearest-site padding, sharing the distance transform used by wide bake padding.
  * Ties are deterministic (topmost site, then leftmost). Unreached and valid values are untouched.
  */
-export function dilateImage(data: Float32Array, ch: number, w: number, h: number, mask: Float32Array, threshold: number, radius: number, preserveAlpha: boolean): Float32Array {
+export function dilateImage(data: Float32Array, ch: number, w: number, h: number, mask: Float32Array, threshold: number, radius: number, preserveAlpha: boolean, aspect = 1): Float32Array {
   const out = data.slice();
   if (!radius) return out;
   const valid = Uint8Array.from(mask, (v) => v > threshold ? 1 : 0);
   if (!valid.some(Boolean) || valid.every(Boolean)) return out;
-  const { d2, nearest } = distanceTransform(valid, w, h);
+  const { d2, nearest } = distanceTransform(valid, w, h, aspect);
   for (let i = 0; i < valid.length; i++) {
     if (valid[i] || nearest[i] < 0 || d2[i] > radius * radius) continue;
     for (let c = 0; c < ch; c++) if (!(ch === 4 && c === 3 && preserveAlpha)) out[i * ch + c] = data[nearest[i] * ch + c];

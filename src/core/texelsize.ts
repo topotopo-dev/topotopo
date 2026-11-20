@@ -25,6 +25,16 @@ export function triangleTexelSizes(positions: ArrayLike<number>, uv: ArrayLike<n
 }
 
 /**
+ * Metres the width of a baked image covers: the median texel size over the image's texels (weighted by texels, so a model
+ * with big hidden faces on coarse texels does not set the size of the pixels that show) times the width; 1 when no
+ * triangle has both an area and a uv area.
+ */
+export function bakedImageSize(positions: ArrayLike<number>, uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, skip?: Uint8Array | null): number {
+  const t = medianTexelSize(positions, uv, tris, w, h, skip, 'texels');
+  return t > 0 ? t * w : 1;
+}
+
+/**
  * The median over the triangles of sqrt(3D area / uv area in texels): the texel size along the surface in metres for an
  * image of w × h texels, weighted by 3D area (the default: a typical piece of the model) or by texels (`by: 'texels'`:
  * a typical texel of the image, which a model with a few big hidden faces on coarse texels does not skew).
