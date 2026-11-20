@@ -12,6 +12,7 @@
 import { Geometry } from './geometry.ts';
 import { RayScene } from './analysis.ts';
 import type { GraphSpec, NodeSpec } from '../graph/types.ts';
+import { usesName } from './pixelexpr.ts';
 
 // ---------------------------------------------------------------- kinds
 
@@ -499,6 +500,29 @@ export interface GraphOptions {
 export const INPUT_INDEX = { mesh: 0, env: 1, leaks: 2, images: 3, joints: 4 } as const;
 
 /**
+ * The mask bakes keep only the layers the stack's expressions name (image m, layer occ is the variable m_occ; layer C,
+ * kept always as the main layer, the image's own name), stored as 16-bit floats (tex_compact) except the part ids, which stay exact; a bake nothing
+ * reads leaves the merge. The material bake writes no mat_* masks when nothing reads them. In place on nodes and masks.
+ */
+function compactBakes(nodes: Record<string, NodeSpec>, masks: string[], texts: string[]): void {
+  const reads = (v: string) => texts.some((t) => usesName(t, v));
+  if (!texts.some((t) => /(^|[^\w$.])base_mat_/.test(t))) nodes.base.params = { ...nodes.base.params, masks: 'kinds' };
+  for (let k = masks.length - 1; k >= 0; k--) {
+    const id = masks[k], spec = nodes[id];
+    const layerNames = spec?.type === 'bake_measure' ? ['C', ...((spec.params?.measures ?? []) as { name: string }[]).map((m) => m.name)]
+      : spec?.type === 'bake_flow' ? ['C', 'along', 'strength', 'head', 'id'] : spec?.type === 'bake_mask' ? ['C'] : null;
+    if (!layerNames) continue;
+    const img = String(spec.params?.name ?? id);
+    const used = layerNames.filter((l) => reads(l === 'C' ? img : `${img}_${l}`));
+    if (!used.length) { masks.splice(k, 1); continue; }
+    // C stays: it is the image's main layer, so the other layers keep their variable names (m_occ, not m)
+    if (!used.includes('C')) used.unshift('C');
+    nodes[`${id}_kept`] = { type: 'tex_compact', in: [id], params: { keep: used.join(' '), half: spec.type === 'bake_mask' ? '' : '*' } };
+    masks[k] = `${id}_kept`;
+  }
+}
+
+/**
  * The nested graph: (re-packed) atlas, material bake, one measure bake (rays, curvature, facing, height: independent
  * of the seed), one noise bake (seeded), the part hash, runs, joints and photos, then the layer stack; in maps mode
  * texture_to_material puts the maps on the mesh. Sliders reach only the stack (graph vars), so moving one re-cooks
@@ -561,7 +585,6 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
     masks.push(id);
   }
   if (o.images) masks.push('images');
-  nodes.mask_images = { type: 'merge', in: masks };
   const named = namedMasks({ handled: !!o.handled, rustRuns: o.rustSources, dirtRuns: o.leaks, joints: o.joints, kinds: o.kindsPresent, replaced: o.replaced, wallNear }, o.mode === 'masks');
   let layers: LayerJSON[] = [];
   if (o.mode === 'maps') {
@@ -579,6 +602,8 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
   // only the masks people read are written (the steps between them stay in memory): an image layer each is a lot at 4K
   const keep: readonly string[] = o.mode === 'masks' ? PACKABLE : WEATHER_MASKS;
   const written = named.map((m) => (keep.includes(m.name) ? m : { ...m, write: false }));
+  compactBakes(nodes, masks, [...written.map((m) => m.mask), ...layers.flatMap((L) => [L.mask, typeof L.color_by === 'string' ? L.color_by : ''])]);
+  nodes.mask_images = { type: 'merge', in: masks };
   nodes.stack = { type: 'tex_layers', in: ['base', 'mask_images'], params: { masks: written, layers, outputs: o.mode === 'masks' ? 'masks' : 'both', padding: pad, name: o.material } };
   if (o.mode === 'masks') return { nodes, output: 'stack' };
   const m = o.material;
