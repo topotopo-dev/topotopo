@@ -322,7 +322,7 @@ function prepareWrangle(geo: Geometry, opts: WrangleOptions): WrangleRun {
     else if (b.kind === 'group') src.push(`__d${i}[${ix}]=${b.local}?1:0;`);
     else if (b.kind === 'new') src.push(`__d${i}[${ix}]=${b.local};`);
     else if (b.type === 'string') src.push(`__d${i}[${ix}]=String(${b.local});`);
-    else if (b.size === 1) src.push(`__d${i}[${ix}]=(typeof ${b.local}==='number'?${b.local}:+(${b.local}?.[0]??${b.local}));`);
+    else if (b.size === 1) src.push(`__d${i}[${ix}]=__n1(${b.local});`);
     else src.push(`__wf(__d${i},${ix},${b.size},${b.local});`);
   });
   src.push('}', '})();', '})');
