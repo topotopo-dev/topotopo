@@ -340,26 +340,31 @@ section('node: a broad stain around the runs');
   const im = findImage((await cookOn(engines.pool, flow('uncut', { ...P, stain: 3 }), 'f')).geo!, 'f')!;
   const c0 = plain.layer('C')!, c = im.layer('C')!, st = im.layer('stain'), m = im.layer('mask')!;
   check(!plain.layer('stain') && !!st && c.every((v, i) => v === c0[i]), 'stain adds its layer and leaves the runs as they were');
-  let wide = 0, core = 0, outside = 0, top = 0, nTop = 0, low = 0, nLow = 0;
+  let outside = 0;
   for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
     const k = j * R + i;
     if (m[k] < 1) continue;
     const x = ((i + 0.5) / R) / SPAN * SIDE, y = ((R - j - 0.5) / R) / SPAN * SIDE, v = st![k];
-    if (c[k] > 0.05) core++;
-    if (v > 0.05) wide++;
-    // half width 3 × the head (3 mm, swelling to 3.9 mm), 1.5 × that at the tail: 17.6 mm around runs from x 0.28 to 0.32
-    if (v > 0 && (x < 0.28 - 0.0196 || x > 0.32 + 0.0196 || y > 0.45 + 0.002)) outside++;
+    // half width 3 × the head (3 mm, swelling to 3.9 mm) at most, narrower down the run: 11.7 mm around runs from x 0.28
+    // to 0.32
+    if (v > 0 && (x < 0.28 - 0.0137 || x > 0.32 + 0.0137 || y > 0.45 + 0.002)) outside++;
   }
-  check(wide > 1.5 * core && outside === 0, `the stain is wider than the runs (${wide} texels against ${core}) and stays within its reach (${outside} beyond)`);
-  // the fade of one run (few runs: where many meet, their stains add up to a wash)
-  const few = findImage((await cookOn(engines.pool, flow('uncut', { ...P, density: 15, stain: 3 }), 'f')).geo!, 'f')!.layer('stain')!;
-  top = nTop = low = nLow = 0;
+  check(outside === 0, `the stain stays within its reach (${outside} texels beyond)`);
+  // a few runs, apart: each stain is wider than its run near the head and fades toward the tail (where many meet, their
+  // stains add up to a wash)
+  const fewIm = findImage((await cookOn(engines.pool, flow('uncut', { ...P, density: 15, stain: 3 }), 'f')).geo!, 'f')!;
+  const few = fewIm.layer('stain')!, fc = fewIm.layer('C')!;
+  let wide = 0, core = 0, top = 0, nTop = 0, low = 0, nLow = 0;
   for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
     const k = j * R + i, x = ((i + 0.5) / R) / SPAN * SIDE, y = ((R - j - 0.5) / R) / SPAN * SIDE;
-    if (m[k] < 1 || Math.abs(x - 0.3) >= 0.02) continue;
+    if (m[k] < 1) continue;
+    if (y > 0.42 && fc[k] > 0.05) core++;
+    if (y > 0.42 && few[k] > 0.01) wide++;
+    if (Math.abs(x - 0.3) >= 0.02) continue;
     if (y < 0.45 && y > 0.43) { top += few[k]; nTop++; }
     if (y < 0.37 && y > 0.35) { low += few[k]; nLow++; }
   }
+  check(core > 0 && wide > 1.5 * core, `the stain is wider than the runs near their heads (${wide} texels against ${core})`);
   check(nTop > 0 && nLow > 0 && top / nTop > 2 * (low / nLow), `and fades toward the tail (${(top / nTop).toFixed(3)} near the source, ${(low / nLow).toFixed(3)} near the tail)`);
 }
 
@@ -461,15 +466,16 @@ section('stain: adds up, skew, lattice');
   rasterRuns(dense, inp, 0, 3, s2, { stain: 4, stainSkew: 2 });
   let lower = true; for (let k = 0; k < n; k++) if (s2.stain[k] > b.stain[k] + 1e-6) lower = false;
   check(lower && mean(s2.stain) < 0.8 * mean(b.stain), `skew 2 makes the stain fainter, never stronger (mean ${mean(s2.stain).toFixed(3)} against ${mean(b.stain).toFixed(3)})`);
-  // the lattice: drawn exactly every 4th sample, between them interpolated; close to drawing every sample
+  // the lattice: drawn exactly every 2nd sample (a third of the narrowest stain's half width, as bake_flow picks it),
+  // between them interpolated; close to drawing every sample
   const l = out();
-  rasterRuns(dense, inp, 0, 3, l, { stain: 4, stainSkew: 2, stainLattice: { pix, gw: xs, gh: ys, step: 4, island: new Float32Array(n) } });
-  // (the line where the runs begin is a step in the exact stain: the lattice softens it over four samples)
+  rasterRuns(dense, inp, 0, 3, l, { stain: 4, stainSkew: 2, stainLattice: { pix, gw: xs, gh: ys, step: 2, island: new Float32Array(n) } });
+  // (the line where the runs begin is a step in the exact stain: the lattice softens it over two samples)
   let same = true, sum = 0; const d: number[] = [];
   for (let k = 0; k < n; k++) { const x = Math.abs(l.stain[k] - s2.stain[k]); d.push(x); sum += x; if (l.C[k] !== s2.C[k]) same = false; }
   d.sort((p, q) => p - q);
   const p99 = d[Math.floor(n * 0.99)], avg = sum / n;
-  check(same && p99 < 0.1 && avg < 0.01, `a lattice of every 4th sample gives nearly the same stain (99 % of samples within ${p99.toFixed(3)}, mean difference ${avg.toFixed(4)}) and the same runs`);
+  check(same && p99 < 0.1 && avg < 0.01, `a lattice of every 2nd sample gives nearly the same stain (99 % of samples within ${p99.toFixed(3)}, mean difference ${avg.toFixed(4)}) and the same runs`);
   // a sample whose lattice corners lie on another island is drawn exactly
   const isl = new Float32Array(n); for (let k = 0; k < n; k++) isl[k] = k % xs < 50 ? 0 : 1;
   const li = out();

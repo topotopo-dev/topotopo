@@ -676,8 +676,8 @@ export interface RasterOpts {
   brute?: boolean;
   /**
    * The half width of a broad, faint stain around each run as a multiple of the run's head width (0 = none; out.stain):
-   * it keeps that width down the run and widens by half toward the tail instead of tapering, has no gaps, fades
-   * sideways ((1 − d²/w²)²) and along the run to almost nothing at the tail; where stains of runs meet they add up
+   * it narrows to 45 % of that down the run, has no gaps, fades sideways ((1 − d²/w²)²) and along the run
+   * ((1 − along)²) to nothing at the tail; where stains of runs meet they add up
    * (1 − Π(1 − v), one term per run), so many faint runs under an edge merge into a wash.
    */
   stain?: number;
@@ -838,7 +838,7 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
  */
 function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain: Float32Array, opts: RasterOpts): void {
   const n = inp.P.length / 3, A = rs.A, ns = rs.segs, check = opts.check, P = inp.P, N = inp.N;
-  // the head half width of each run (its widest segment end): the stain keeps it instead of tapering
+  // the head half width of each run (its widest segment end): the stain's width at the head
   const headHW = new Float32Array(rs.runLen.length);
   // and where it is first drawn (out from under its source): the stain begins there, with no round cap above it
   const startS = new Float32Array(rs.runLen.length).fill(Infinity);
@@ -848,8 +848,8 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
   if (!segs.length) return;
   const skew = Math.max(0, opts.stainSkew ?? 0), runW = new Float32Array(rs.runLen.length);
   for (let r = 0; r < runW.length; r++) runW[r] = skew > 0 ? Math.max(0, Math.min(1, rs.strength[r])) ** skew : 1;
-  /** the farthest the stain reaches from segment k (widest at the tail: 1.5 × its width), plus half a sample */
-  const reach = (k: number) => 1.5 * K * headHW[rs.ID[k]] + 0.5 * tauCap;
+  /** the farthest the stain reaches from segment k (widest at the head), plus half a sample */
+  const reach = (k: number) => K * headHW[rs.ID[k]] + 0.5 * tauCap;
   let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity, rMax = 0;
   for (const k of segs) {
     const r = reach(k);
@@ -864,7 +864,16 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
   let cs = Math.max(rMax / 6, 1e-4);
   const dimsFor = (c: number) => [Math.max(1, Math.ceil((mxx - mnx) / c)), Math.max(1, Math.ceil((mxy - mny) / c)), Math.max(1, Math.ceil((mxz - mnz) / c))];
   let dims = dimsFor(cs);
-  while (dims[0] * dims[1] * dims[2] > 4_000_000) { cs *= 1.4; dims = dimsFor(cs); }
+  // coarser cells when the segments would register in too many (many runs, broad stains)
+  const registrations = (c: number) => {
+    let t = 0;
+    for (const k of segs) {
+      const r = reach(k), o = k * 6;
+      t += (Math.floor((Math.abs(A[o + 3] - A[o]) + 2 * r) / c) + 2) * (Math.floor((Math.abs(A[o + 4] - A[o + 1]) + 2 * r) / c) + 2) * (Math.floor((Math.abs(A[o + 5] - A[o + 2]) + 2 * r) / c) + 2);
+    }
+    return t;
+  };
+  while (dims[0] * dims[1] * dims[2] > 4_000_000 || registrations(cs) > limits.maxItems / 2) { cs *= 1.4; dims = dimsFor(cs); }
   const [dx, dy, dz] = dims, cells = dx * dy * dz;
   const count = new Int32Array(cells + 1);
   let total = 0;
@@ -909,12 +918,14 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
       const d2 = cx * cx + cy * cy + cz * cz;
       const sAbs = rs.SS[k * 2] + (rs.SS[k * 2 + 1] - rs.SS[k * 2]) * t;
       const along = Math.min(1, sAbs / rs.runLen[id]);
-      const sw = K * headHW[id] * (1 + 0.5 * along);
+      // widest at the head, narrowing to under half down the run: many runs under an edge merge into a wash there and
+      // part into streaks lower down
+      const sw = K * headHW[id] * (1 - 0.55 * along);
       if (d2 >= sw * sw) continue;
       // the sample lies on the same surface: its normal agrees with the run's there
       const mx = rs.NRM[o] + (rs.NRM[o + 3] - rs.NRM[o]) * t, my = rs.NRM[o + 1] + (rs.NRM[o + 4] - rs.NRM[o + 1]) * t, mz = rs.NRM[o + 2] + (rs.NRM[o + 5] - rs.NRM[o + 2]) * t;
       if (nx * mx + ny * my + nz * mz < 0.5 * Math.sqrt(mx * mx + my * my + mz * mz)) continue;
-      const q = 1 - d2 / (sw * sw), v = q * q * (1 - 0.95 * smoothstep(0.1, 1, along)) * rs.AMP[k] * runW[id];
+      const q = 1 - d2 / (sw * sw), fade = 1 - along, v = q * q * fade * fade * rs.AMP[k] * runW[id];
       if (v > best) best = v;
     }
     rest *= 1 - Math.min(1, best);
