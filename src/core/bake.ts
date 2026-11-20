@@ -38,9 +38,11 @@ export interface TexelMap {
 /**
  * Rasterise triangles (vertex index triples into `uv`, 2 floats per vertex) into a w × h texel grid. Centre-inside
  * texels first; then, with conservative, texels within half a texel diagonal of a triangle that no triangle covers
- * take the closest point on the nearest one. `skip` leaves triangles out (masked prims).
+ * take the closest point on the nearest one. `skip` leaves triangles out (masked prims). `key` (per triangle) settles a
+ * texel two triangles claim equally (a centre on their shared edge, or as near both) by the smaller key instead of by
+ * triangle order: a key from where the triangle is makes the result independent of prim order.
  */
-export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, conservative = true, skip?: Uint8Array | null): TexelMap {
+export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, conservative = true, skip?: Uint8Array | null, key?: ArrayLike<number>): TexelMap {
   const n = w * h, nt = Math.floor(tris.length / 3);
   const tri = new Int32Array(n).fill(-1), b1 = new Float32Array(n), b2 = new Float32Array(n);
   let degenerate = 0, outside = 0;
@@ -65,6 +67,7 @@ export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: n
         const w2 = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * inv; // weight of c
         if (w1 < -1e-9 || w2 < -1e-9 || w1 + w2 > 1 + 1e-9) continue;
         const k = j * w + i;
+        if (key && tri[k] >= 0 && key[tri[k]] <= key[t]) continue;
         tri[k] = t; b1[k] = w1; b2[k] = w2;
       }
     }
@@ -83,7 +86,7 @@ export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: n
           const k = j * w + i;
           if (tri[k] >= 0 && best[k] === Infinity) continue; // covered by a centre test
           const q = closestOnTri(i + 0.5, j + 0.5, ax, ay, bx, by, cx, cy);
-          if (q.d2 > R2 || q.d2 >= best[k]) continue;
+          if (q.d2 > R2 || q.d2 > best[k] || (q.d2 === best[k] && (!key || key[tri[k]] <= key[t]))) continue;
           best[k] = q.d2; tri[k] = t; b1[k] = q.w1; b2[k] = q.w2;
         }
     }
@@ -115,6 +118,119 @@ function closestOnTri(px: number, py: number, ax: number, ay: number, bx: number
   if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const t = (d4 - d3) / (d4 - d3 + (d5 - d6)); return set(1 - t, t); }
   const den = 1 / (va + vb + vc);
   return set(vb * den, vc * den);
+}
+
+// ---------------------------------------------------------------- one rasterisation per mesh
+
+const bakeMemo = new WeakMap<object, Map<string, unknown>>();
+
+/** How often memoBake made a value and how often it reused one (tests read it). */
+export const bakeMemoStats = { made: 0, reused: 0 };
+
+/** The memo's limits: total bytes of the values it keeps and how many values (the oldest used are released first). */
+export const bakeMemoLimits = { bytes: 512 * 1024 * 1024, entries: 8 };
+
+interface MemoEntry { g: WeakRef<object>; key: string; bytes: number }
+/** Every kept value, least recently used first (a Map keeps insertion order). */
+const memoOrder = new Map<number, MemoEntry>();
+const memoIds = new WeakMap<object, Map<string, number>>();
+let memoBytes = 0, memoNext = 0;
+// a mesh that is collected takes its values with it: drop their entries from the count
+const memoGone = new FinalizationRegistry<number[]>((ids) => {
+  for (const id of ids) {
+    const e = memoOrder.get(id);
+    if (e) { memoBytes -= e.bytes; memoOrder.delete(id); }
+  }
+});
+const memoGoneIds = new WeakMap<object, number[]>();
+
+/** What the memo keeps now: the values and their bytes (typed arrays counted by their buffers). */
+export function bakeMemoUsage(): { entries: number; bytes: number } {
+  return { entries: memoOrder.size, bytes: memoBytes };
+}
+
+/** The bytes a memo value holds: its typed arrays, found through plain objects, arrays and class fields. */
+function bytesOf(v: unknown, seen = new Set<object>(), depth = 0): number {
+  if (!v || typeof v !== 'object' || seen.has(v) || depth > 6) return 0;
+  seen.add(v);
+  if (ArrayBuffer.isView(v)) return v.byteLength;
+  if (v instanceof ArrayBuffer) return v.byteLength;
+  let n = 0;
+  if (Array.isArray(v)) { for (const x of v) n += bytesOf(x, seen, depth + 1); return n; }
+  if (v instanceof Map) { for (const x of v.values()) n += bytesOf(x, seen, depth + 1); return n; }
+  for (const k of Object.keys(v)) n += bytesOf((v as any)[k], seen, depth + 1);
+  return n;
+}
+
+function memoForget(id: number): void {
+  const e = memoOrder.get(id);
+  if (!e) return;
+  memoOrder.delete(id);
+  memoBytes -= e.bytes;
+  const g = e.g.deref();
+  if (g) { bakeMemo.get(g)?.delete(e.key); memoIds.get(g)?.delete(e.key); }
+}
+
+/** Release the oldest values until the memo is within its limits; the newest value always stays. */
+function memoTrim(): void {
+  for (const id of memoOrder.keys()) {
+    if (memoOrder.size <= 1 || (memoBytes <= bakeMemoLimits.bytes && memoOrder.size <= bakeMemoLimits.entries)) break;
+    memoForget(id);
+  }
+}
+
+/**
+ * A memo value that grew after it was stored (a lazily filled field): count its bytes again and keep the memo within
+ * its limits. It becomes the most recently used.
+ */
+export function bakeMemoGrew(g: object, key: string): void {
+  const id = memoIds.get(g)?.get(key), e = id === undefined ? undefined : memoOrder.get(id);
+  const v = bakeMemo.get(g)?.get(key);
+  if (!e || v === undefined) return;
+  const bytes = bytesOf(v);
+  memoBytes += bytes - e.bytes;
+  e.bytes = bytes;
+  memoOrder.delete(id!);
+  memoOrder.set(id!, e);
+  memoTrim();
+}
+
+/**
+ * A value derived from a mesh, made once per (mesh object, key) and shared by every bake that asks for it: the covered
+ * samples of a uv raster, the per-sample positions and normals, the surface cloud, the ray scene. Cooked geometry is
+ * immutable, so the object itself is a safe key. A value lives no longer than its mesh, and the memo keeps at most
+ * `bakeMemoLimits` (bytes and values): the least recently used values are released first. Callers must not write into
+ * what it returns. A `make` that throws stores nothing.
+ */
+export function memoBake<T>(g: object, key: string, make: () => T): T {
+  let m = bakeMemo.get(g);
+  if (!m) { m = new Map(); bakeMemo.set(g, m); }
+  let ids = memoIds.get(g);
+  if (!ids) {
+    ids = new Map();
+    memoIds.set(g, ids);
+    const gone: number[] = [];
+    memoGoneIds.set(g, gone);
+    memoGone.register(g, gone);
+  }
+  if (m.has(key)) {
+    bakeMemoStats.reused++;
+    // most recently used: to the back of the line
+    const id = ids.get(key);
+    const e = id === undefined ? undefined : memoOrder.get(id);
+    if (e) { memoOrder.delete(id!); memoOrder.set(id!, e); }
+    return m.get(key) as T;
+  }
+  const v = make();
+  m.set(key, v);
+  bakeMemoStats.made++;
+  const id = memoNext++, bytes = bytesOf(v);
+  memoOrder.set(id, { g: new WeakRef(g), key, bytes });
+  ids.set(key, id);
+  memoGoneIds.get(g)!.push(id);
+  memoBytes += bytes;
+  memoTrim();
+  return v;
 }
 
 // ---------------------------------------------------------------- covered samples

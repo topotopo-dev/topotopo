@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-265 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+266 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -12551,7 +12551,7 @@ category: `texture` · aliases: `curvature_bake`, `bake_edges`, `edge_wear_bake`
 
 Bake edge curvature into uv space: 0.5 flat, brighter on convex edges and bevels, darker in concave creases (edge wear and dirt masks).
 
-Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask.
+Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. Measured from the mesh's dihedral angles in 3D (uv seams do not show): every edge carries its signed bend (angle / 90°, + convex), and a texel sums the bends of the edge length within `radius`, weighted (1 - d²/r²)² and normalised so a 90° edge through the texel reads 1. C = 0.5 + 0.5 × strength × value; layers "convex" and "concave" hold the two sides 0..1. Edges whose faces both turn away from a texel (the far side of a thin plank) are ignored; points are matched by position, so unwelded boxes work. intersections (on by default) also finds the creases where separate parts cut into each other, as kitbashed meshes have them (a rivet or boss merged onto a plate, a box sunk into another): concave by the angle between the two faces, so dirt gathers there too (stat crossing_edges). tex_histogram_scan or tex_levels on "convex" make an edge-wear mask, on "concave" a dirt or cavity mask. method surface measures how the shading normals turn within radius instead, on a cloud of surface points interpolated in 3D (as bake_measure curvature): the facets of decimated and isosurface meshes do not read as edges, hard edges (split normals) still do, and each connected part is measured on its own (where parts intersect, cavity shows the seam); min_angle and intersections are for method dihedral, and it does not read a high-res input.
 
 **Inputs**
 
@@ -12573,8 +12573,9 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `radius` | float | `0` | 0.. |  | `width`, `edge_width`, `distance` | how far an edge reaches across the surface (metres; 0 = auto: 1% of the bbox diagonal) |
 | `strength` | float | `1` | 0.. |  | `intensity`, `contrast` | contrast multiplier |
-| `min_angle` | float | `0.5` | 0..179 |  |  | edges bending less than this (degrees) are ignored |
-| `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | also find the concave creases where separate parts cut into each other (kitbashed meshes) |
+| `method` | enum | `"dihedral"` |  | `dihedral`, `surface` | `mode`, `curvature_method` | dihedral: the angles of the mesh edges near the texel; surface: how the shading normals turn within radius (facets smaller than radius do not show: decimated and isosurface meshes; other parts count where they are not buried, so junctions read concave; radius at most half the size of the model) |
+| `min_angle` | float | `0.5` | 0..179 |  |  | dihedral: edges bending less than this (degrees) are ignored |
+| `intersections` | bool | `true` |  |  | `crossings`, `intersection_creases` | dihedral: also find the concave creases where separate parts cut into each other (kitbashed meshes) |
 | `tile` | bool | `true` |  |  |  | trim sheets: a band that tiles is copied one period past each open end, so curvature does not fade there (no effect without trim bands). Help topic trim_sheets. |
 | `cage` | float | `0` | 0.. |  | `cage_distance`, `max_frontal_distance`, `ray_distance` | high-res input: search distance along the cage normals on each side (metres; 0 = auto: 2% of the bbox diagonal) |
 | `cage_normals` | enum | `"averaged"` |  | `averaged`, `mesh` | `ray_normals`, `average_normals` | high-res input: ray directions: averaged normals over every face at a position (no gaps at hard edges) or the mesh's own normals |
@@ -12917,10 +12918,10 @@ Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv 
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
 | `mask_group` | group (prim) | `""` |  |  | `from_group`, `mask_prims` | prims that read 1 (e.g. "planks", "@P.y>0.5") |
-| `attrib` | string | `""` |  |  | `attribute`, `from_attrib` | numeric attribute to bake when mask_group is empty |
+| `attrib` | string | `""` |  |  | `attribute`, `from_attrib` | numeric attribute to bake when mask_group is empty; a comma list ("wear, dirt") bakes one layer per attribute, named after it, C = the first |
 | `component` | int | `0` | -1..15 |  |  | vector component of attrib (-1 = luminance of the first three) |
 
-**Writes:** image <name> (default: the node name): C grey, mask
+**Writes:** image <name> (default: the node name): C grey, mask; with an attrib list also one layer per attribute
 
 **Example**
 
@@ -13034,6 +13035,105 @@ Reads the prim attribute "material" and the detail table "materials" (the materi
     }
   },
   "output": "base"
+}
+```
+
+### bake_measure
+
+category: `texture` · aliases: `bake_measures`, `bake_noise`, `bake_distance`, `bake_cavity`, `bake_shelter`, `bake_visibility`
+
+Measure the model in 3D at every texel into named layers: facing, height, distance to parts, 3D noise, occlusion, cavity, shelter, visibility, curvature at a radius, group. Ray measures share one set of rays; uv seams never show.
+
+Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. measures is a list of objects, each {"by": kind, "name": layer, …}; the image gets one layer per measure (C = the first), then "texel" (metres per texel along u and v), "island" (uv island) and "mask". Kinds and their own 0..1: facing (1 toward direction, 0 away; band units: degrees between the normal and direction), height (0 at input 0's lowest point, 1 at its highest along up; metres), distance (1 at the target, 0 at range; metres), noise (3D, 0..1, continuous across seams and triangles), occlusion (1 = open, as bake_ao), cavity (1 = in a crevice), shelter (1 = covered from direction within cone; the part of the cone behind the surface counts as covered), visibility (1 = seen from outside: a quarter of the hemisphere escaping the model and input 1 counts as fully seen), curvature (as bake_curvature method surface; band units: the signed value, 1 = a 90° convex edge; radius at most half the model's size), group (1 on pattern). Each value is shaped like the point mask node: min/max/falloff make a band in the measure's units (unset = its own 0..1), then ramp, then invert, then where (0 outside). Facing, height, distance, noise and group are evaluated per texel; occlusion, cavity, shelter, visibility and curvature on a cloud of surface points every `spacing` metres (default 4 texels at this resolution, at least 0.5 mm; denser where the atlas gives more texels, never sparser than spacing where it gives fewer) and taken to each texel from the cloud points of its own part within 2 × spacing that face its way, so values do not bleed around edges or onto the far side of a plate. A point inside another part (a post sunk into a plate) is buried: it reads covered and no texel that is seen takes its value; curvature counts the points of every part that are not buried, so a junction between parts reads concave. Every ray measure counts over one set of `samples` cosine-weighted rays per cloud point; shelter casts its own cone. Input 1 (surroundings: a wall, the ground) blocks rays, and a face lying flat against it and facing it counts as covered. Results do not depend on prim order. Faces wound against their neighbours are measured turned and reported; a closed part that faces inward is reported, not turned. Stops at the time limit of long-running nodes. Fields: name (layer name (default: the by value)); min (band in the measure's units: 1 inside [min, max]); max (band in the measure's units: 1 inside [min, max]); falloff (linear fade to 0 outside the band, in the measure's units); ramp (reshape the 0..1 value); invert (write 1 − value); where (prims where the measure applies; 0 elsewhere); direction (facing, shelter: the direction measured against); cone (shelter: half-angle of the cone around direction (degrees)); up (height: the axis); target (distance: prims of input 0 ("@name=bolt*") or "input1"); range (distance: metres at which the unbanded value reaches 0); max_distance (ray measures: hits farther than this do not count (metres; 0 = occlusion 0.25, cavity 0.02, shelter and visibility unlimited)); noise (noise: the basis); fractal (noise: how octaves combine); size (noise: feature size in metres per axis ([0.005, 0.15, 0.005] = vertical streaks)); octaves (noise: octaves); roughness (noise: amplitude kept per octave); radius (curvature: the scale the shape is measured at (metres)); side (curvature: both (0.5 = flat), convex or concave (0..1)); pattern (group: prims that read 1).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
+| 1 | `surroundings` | yes | no | optional: geometry that blocks rays (a wall, the ground, neighbours) and can be a distance target ("input1") |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `measures` | json | `[{"by":"occlusion"}]` |  |  | `measure`, `masks`, `layers` | the measures: [{"by": "occlusion"}, {"by": "facing", "name": "top", "min": 0, "max": 30, "falloff": 15}, {"by": "noise", "name": "grain", "size": [0.005, 0.15, 0.005]}] |
+| `samples` | int | `32` | 4..256 |  | `rays` | rays per cloud point, shared by every ray measure (each texel averages several cloud points) |
+| `spacing` | float | `0` | 0.. |  | `cloud_spacing` | distance between cloud points for ray and curvature measures (metres; 0 = 4 texels at this resolution, at least 0.5 mm) |
+| `seed` | float | `0` |  |  |  | ray and noise seed |
+
+**Writes:** image <name> (default: the node name): C = the first measure, one layer per measure, texel, island, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "pocket": {
+      "type": "poly_extrude",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "group": "@P.y>0.4",
+        "distance": -0.2,
+        "inset": 0.15
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "pocket"
+      ]
+    },
+    "measure": {
+      "type": "bake_measure",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256,
+        "samples": 16,
+        "measures": [
+          {
+            "by": "occlusion"
+          },
+          {
+            "by": "facing",
+            "name": "top",
+            "min": 0,
+            "max": 30,
+            "falloff": 20
+          },
+          {
+            "by": "noise",
+            "name": "grain",
+            "size": [
+              0.1,
+              0.1,
+              0.1
+            ]
+          },
+          {
+            "by": "curvature",
+            "name": "edges",
+            "radius": 0.05
+          }
+        ]
+      }
+    }
+  },
+  "output": "measure"
 }
 ```
 
