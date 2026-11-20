@@ -41,7 +41,9 @@
           "C": "08ec682f4dd3883d",
           "concave": "9005a1b59538744f",
           "convex": "071b4ab2dd5fc004",
-          "mask": "5963c5b542beec4f"
+          "island": "0968c228a28f1b56",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
         },
         "name": "target"
       }

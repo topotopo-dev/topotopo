@@ -39,7 +39,9 @@
         "kind": "image",
         "layers": {
           "C": "6f3576cf7fe0a261",
-          "mask": "5963c5b542beec4f"
+          "island": "908d8e2c131dcf0a",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
         },
         "name": "target"
       }
