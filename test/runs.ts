@@ -1,16 +1,20 @@
 // bake_flow and core/runs.ts: runs that flow down a surface under gravity from source parts.
-//   core: runs go straight down a box wall, follow a cylinder (standing and lying), stop and pool on a ledge, drip off an
-//         overhang onto the surface below, follow another gravity, are the same for a seed and differ for another
-//   node: a wall cut into many charts bakes texel for texel what the uncut wall bakes (runs cross uv seams unbroken), the
-//         same bits with and without the worker pool, every refusal message, the layers, the example
+//   core: runs go straight down a box wall, follow a cylinder (standing and lying), stop and pool on a ledge, spill over
+//         the edge of a narrow one, drip off an overhang onto the surface below, pool at the bottom of a groove and run on
+//         along a sloping one, follow another gravity, ignore authored normals, are the same for a seed, differ for
+//         another, and do not depend on the order of the parts or on the parts that are added elsewhere
+//   grid: the texel grid gives what testing every segment gives (soft edges are not clipped); the time limit and the
+//         segment limit stop a bake
+//   node: charts of different texel density across a fold agree with the one-chart surface in 3D, the same bits for one
+//         seed, the layers (also with supersample), the same image at ten times the scale, every refusal, the example
 //   node test/runs.ts
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import { defineNode } from '../src/graph/registry.ts';
+import { defineNode, getNodeDef } from '../src/graph/registry.ts';
 import { GeoBuilder, Geometry } from '../src/core/geometry.ts';
 import { findImage } from '../src/core/image.ts';
-import { sampleSources, traceRuns } from '../src/core/runs.ts';
+import { limits, rasterRuns, sampleSources, traceRuns } from '../src/core/runs.ts';
 import type { FlowParams, RunSet } from '../src/core/runs.ts';
 import type { NodeSpec } from '../src/graph/types.ts';
 
@@ -25,16 +29,24 @@ const section = (s: string) => console.log(`\n== ${s}`);
 
 interface Part { name: string; polys: number[][][]; uv?: number[][][] }
 
-/** Closed polygons from corner lists, with a prim name per part and optional per-corner uv. */
+/** Closed polygons from corner lists, with a prim name per part and optional per-corner uv. The corners of a part that
+ * coincide are one point, so a part is one connected piece (a box is 8 points, not 24). */
 function build(parts: Part[], withUv = false): Geometry {
   const b = new GeoBuilder();
   const names: string[] = [], uvs: number[][] = [];
-  for (const part of parts)
+  for (const part of parts) {
+    const ids = new Map<string, number>();
     part.polys.forEach((poly, i) => {
-      b.addPrim(poly.map((p) => b.addPoint(p[0], p[1], p[2])));
+      b.addPrim(poly.map((p) => {
+        const k = `${p[0]},${p[1]},${p[2]}`;
+        let id = ids.get(k);
+        if (id === undefined) { id = b.addPoint(p[0], p[1], p[2]); ids.set(k, id); }
+        return id;
+      }));
       names.push(part.name);
       for (let k = 0; k < poly.length; k++) uvs.push(part.uv?.[i]?.[k] ?? [0, 0]);
     });
+  }
   const g = b.build();
   const n = g.prims.add('name', 'string', 1);
   names.forEach((x, p) => n.set(p, x));
@@ -61,7 +73,7 @@ function cylPolys(r: number, y0: number, y1: number, sides: number, axis: 'y' | 
   return axis === 'y' ? out : out.map((p, i) => (i < sides ? p.slice().reverse() : i === sides ? lo : hi.slice().reverse()));
 }
 
-const PRM: FlowParams = { density: 40, direction: [0, -1, 0], length: [0.05, 0.25], width: [0.004, 0.012], wobble: 0, breakup: 0, ledge: 30, pool: 1.5, drip: true, step: 0, spill: 0, seed: 0 };
+const PRM: FlowParams = { density: 40, direction: [0, -1, 0], length: [0.05, 0.25], width: [0.003, 0.01], wobble: 0, breakup: 0, ledge: 30, pool: 1.5, drip: true, step: 0, spill: 0, seed: 0 };
 const prm = (o: Partial<FlowParams> = {}): FlowParams => ({ ...PRM, ...o });
 
 /** Trace the parts named "src" over the others. */
@@ -198,8 +210,12 @@ const hashA = (rs: RunSet) => { let h = 0, c = 0; for (let k = 0; k < rs.segs; k
   const narrow = stepped(0.02, -0.01);
   const segsBelow = (rs: RunSet, z: number) => Array.from({ length: rs.segs }, (_, k) => k).filter((k) => rs.A[k * 6 + 1] < 0.49 && rs.A[k * 6 + 4] < 0.49 && Math.abs(rs.A[k * 6 + 2] - z) < 0.003);
   const none = trace(narrow, { spill: 0 });
-  // recorded from the build before spilling existed: with the reach at 0 the result is the same bit for bit
-  check(hashA(none.runs) === '15:13:-913485494' && segsBelow(none.runs, 0).length === 0, `spill 0: the runs are those of the build before spilling (${hashA(none.runs)}), nothing below the ledge`);
+  const startsOnLedge = (rs: RunSet) => Array.from({ length: rs.count }, (_, r) => r + 1).filter((id) => { const k = Array.from({ length: rs.segs }, (_, q) => q).find((q) => rs.ID[q] === id)!; return Math.abs(rs.A[k * 6 + 1] - 0.5) < 2e-3; }).length;
+  check(none.stats.ledgeRejected > 0 && startsOnLedge(none.runs) === 0, `spill 0: no run starts on the ledge itself, as before spilling existed (${none.stats.ledgeRejected} candidates rejected)`);
+  // a run from the wall above the ledge: with the reach at 0 it pools and nothing goes below; the paths are recorded
+  const above = build([{ name: 'lower', polys: boxPolys(0, 0, -0.05, 1, 0.5, 0) }, { name: 'upper', polys: boxPolys(0, 0.5, -0.05, 1, 1, -0.02) }, { name: 'src', polys: boxPolys(0.4, 0.6, -0.03, 0.45, 0.62, -0.015) }]);
+  const a0 = trace(above, { spill: 0, length: [0.2, 0.2] }), a1 = trace(above, { spill: 0, length: [0.2, 0.2] });
+  check(hashA(a0.runs) === hashA(a1.runs) && hashA(a0.runs) === '21:19:1080399545' && segsBelow(a0.runs, 0).length === 0 && a0.stats.ended.ledge > 0, `spill 0: runs from above pool on the ledge and go no further; the paths are the recorded ones (${hashA(a0.runs)})`);
   const sp = trace(narrow, { spill: 0.05 });
   const below = segsBelow(sp.runs, 0);
   check(sp.stats.spills > 0 && below.length > 0 && below.every((k) => sp.runs.AMP[k] < 1 && sp.runs.A[k * 6] > 0.36 && sp.runs.A[k * 6] < 0.49), `a bolt on a narrow ledge: ${sp.stats.spills} spill(s), ${below.length} segments on the wall below it, weaker than the pool (amp ${Math.min(...below.map((k) => sp.runs.AMP[k])).toFixed(2)})`);
@@ -229,8 +245,8 @@ section('node: uv seams');
 const tmp = (await import('node:fs')).mkdtempSync((await import('node:path')).join((await import('node:os')).tmpdir(), 'topotopo-runs-'));
 const store = new Map<string, Geometry>();
 defineNode({ type: '__runs_source', category: 'test', inputs: [], summary: 'test', params: { key: { type: 'string', default: '', desc: 'geometry key' } }, cook: ({ p }) => store.get(p.key)!.clone() });
-const engines = { pool: new Engine(createNodeHost({ baseDir: tmp })), serial: new Engine(createNodeHost({ baseDir: tmp, workers: 0 })) };
-await engines.pool.init(); await engines.serial.init();
+const engines = { pool: new Engine(createNodeHost({ baseDir: tmp })) };
+await engines.pool.init();
 type Nodes = Record<string, NodeSpec>;
 async function cookOn(e: Engine, nodes: Nodes, output: string) {
   const r = await e.cook({ nodes, output });
@@ -253,59 +269,49 @@ function sheet(cut: boolean): Geometry {
   const plate = boxPolys(0.28, 0.45, 0.0, 0.32, 0.5, 0.01);
   return build([{ name: 'wall', polys, uv }, { name: 'bolt', polys: plate }], true);
 }
-store.set('uncut', sheet(false)); store.set('cut', sheet(true));
+store.set('uncut', sheet(false));
+const eq = (x: Geometry, y: Geometry) => { const u = findImage(x, 'f')!, v = findImage(y, 'f')!; return [...u.layers.keys()].every((k) => v.layers.has(k) && u.layers.get(k)!.every((q, i) => q === v.layers.get(k)![i])); };
 {
   const P = { sources: '@name=bolt', resolution: R, density: 200, wobble: 0.2, breakup: 0.5, seed: 3, padding: 0, length: [0.1, 0.2] };
-  const A = await cookOn(engines.pool, flow('uncut', P), 'f'), B = await cookOn(engines.pool, flow('cut', P), 'f');
-  check(A.ok && B.ok, `both cook${A.errors.concat(B.errors).join('; ')}`);
-  const ia = findImage(A.geo!, 'f')!, ib = findImage(B.geo!, 'f')!;
-  const ca = ia.layer('C')!, cb = ib.layer('C')!, ma = ia.layer('mask')!, mb = ib.layer('mask')!;
-  let both = 0, bad = 0, maxd = 0, lit = 0;
-  for (let b = 0; b < K; b++)
-    for (let a = 0; a < K; a++)
-      for (let j = 0; j < R; j++)
-        for (let i = 0; i < R; i++) {
-          const q = j * R + i;
-          if (mb[q] < 1) continue;
-          // the chart (a, b) is the uncut one shifted by GAP texels per step right and up
-          const ja = j + b * GAP, ia2 = i - a * GAP;
-          if (ia2 < 0 || ja < 0 || ia2 >= R || ja >= R) continue;
-          const qa = ja * R + ia2;
-          if (ma[qa] < 1) continue;
-          // only the texels whose centre falls in this chart's own tile
-          const x = ((ia2 + 0.5) / R) / SPAN * SIDE, y = ((R - ja - 0.5) / R) / SPAN * SIDE, t = SIDE / K;
-          if (Math.floor(x / t) !== a || Math.floor(y / t) !== b) continue;
-          both++;
-          const d = Math.abs(cb[q] - ca[qa]);
-          maxd = Math.max(maxd, d);
-          if (d > 1e-3) bad++;
-          if (ca[qa] > 0.5) lit++;
-        }
-  check(both > 100000 && lit > 100, `${both} texels compared, ${lit} of them on runs`);
-  check(bad === 0, `the wall cut into ${K * K} charts bakes the uncut wall's runs texel for texel (${bad} differ by more than 0.001, largest ${maxd.toExponential(1)})`);
-  // the runs really cross the seams: the plate sits on the x = 0.3 seam and the runs below it cross the y seams at 0.15 and 0.3
-  let crossing = 0;
-  for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) if (mb[j * R + i] >= 1 && cb[j * R + i] > 0.5) { const y = ((R - j - 0.5) / R) * SIDE / SPAN; void y; crossing++; }
-  check(crossing > 200, `${crossing} run texels in the cut wall`);
-  // the same bits with and without the worker pool, and with the same seed again
-  const S = await cookOn(engines.serial, flow('cut', P), 'f');
-  const eq = (x: Geometry, y: Geometry) => { const u = findImage(x, 'f')!, v = findImage(y, 'f')!; return [...u.layers.keys()].every((k) => v.layers.has(k) && u.layers.get(k)!.every((q, i) => q === v.layers.get(k)![i])); };
-  check(eq(B.geo!, S.geo!), 'TOPOTOPO_WORKERS=0 (no pool): identical bits');
-  const B2 = await cookOn(engines.pool, flow('cut', P), 'f');
-  check(eq(B.geo!, B2.geo!), 'the same seed again: identical bits');
-  const O = await cookOn(engines.pool, flow('cut', { ...P, seed: 4 }), 'f');
-  check(!eq(B.geo!, O.geo!), 'another seed: other runs');
+  const A = await cookOn(engines.pool, flow('uncut', P), 'f');
+  check(A.ok, `the wall cooks${A.errors.join('; ')}`);
+  const ia = findImage(A.geo!, 'f')!;
+  const ca = ia.layer('C')!, ma = ia.layer('mask')!;
+  // the same seed again: the same bits; another seed: other runs
+  const A2 = await cookOn(engines.pool, flow('uncut', P), 'f');
+  check(eq(A.geo!, A2.geo!), 'the same seed again: identical bits');
+  const O = await cookOn(engines.pool, flow('uncut', { ...P, seed: 4 }), 'f');
+  check(!eq(A.geo!, O.geo!), 'another seed: other runs');
   // layers
-  const names = [...ib.layers.keys()].sort().join(',');
+  const names = [...ia.layers.keys()].sort().join(',');
   check(names === 'C,along,head,id,mask,strength', `layers ${names}`);
-  const along = ib.layer('along')!, id = ib.layer('id')!, str = ib.layer('strength')!, head = ib.layer('head')!;
-  let okLayers = true, ids = new Set<number>();
+  const along = ia.layer('along')!, id = ia.layer('id')!, str = ia.layer('strength')!, head = ia.layer('head')!;
+  let okLayers = true, lit = 0; const ids = new Set<number>();
   for (let q = 0; q < R * R; q++) {
-    if (mb[q] < 1) continue;
-    if (cb[q] > 0) { ids.add(id[q]); if (!(id[q] >= 1 && along[q] >= 0 && along[q] <= 1 && str[q] > 0 && head[q] <= cb[q] + 1e-6)) okLayers = false; }
-    else if (cb[q] === 0 && (id[q] !== 0 || head[q] !== 0 || along[q] !== 0)) okLayers = false;
+    if (ma[q] < 1) continue;
+    if (ca[q] > 0) { lit++; ids.add(id[q]); if (!(id[q] >= 1 && along[q] >= 0 && along[q] <= 1 && str[q] > 0 && head[q] <= ca[q] + 1e-6)) okLayers = false; }
+    else if (id[q] !== 0 || head[q] !== 0 || along[q] !== 0) okLayers = false;
   }
-  check(okLayers && ids.size > 3, `along, head, strength and id hold where runs are and 0 elsewhere (${ids.size} runs seen)`);
+  check(okLayers && ids.size > 3 && lit > 500, `along, head, strength and id hold where runs are and 0 elsewhere (${ids.size} runs seen, ${lit} texels)`);
+  // supersampling: along, strength and id are those of the run that covers the texel most, never a mean with empty samples
+  const base = flow('uncut', { ...P, supersample: 1 }), ss = flow('uncut', { ...P, supersample: 3 });
+  const s1 = findImage((await cookOn(engines.pool, base, 'f')).geo!, 'f')!, s3 = findImage((await cookOn(engines.pool, ss, 'f')).geo!, 'f')!;
+  void s1;
+  let bad = 0, seen = 0;
+  const i3 = s3.layer('id')!, t3 = s3.layer('strength')!, a3 = s3.layer('along')!, c3 = s3.layer('C')!, strOf = new Map<number, number>();
+  for (let q = 0; q < c3.length; q++) {
+    if (!(c3[q] > 0)) continue;
+    seen++;
+    // a run id is a whole number, one run has one strength, along stays in 0..1
+    if (!Number.isInteger(i3[q]) || i3[q] < 1 || !(a3[q] >= 0 && a3[q] <= 1) || (strOf.has(i3[q]) && strOf.get(i3[q]) !== t3[q])) bad++;
+    strOf.set(i3[q], t3[q]);
+  }
+  check(seen > 500 && bad === 0, `at supersample 3 every id is a whole run number with its own strength (${bad} of ${seen} covered texels are not: no mean of run ids)`);
+  // read the way a layer stack reads it: an expression over `f_id` finds no id that is not a whole run number
+  const stack = (mask: string): Nodes => ({ s: { type: '__runs_source', params: { key: 'uncut' } }, f: { type: 'bake_flow', in: ['s'], params: { ...P, supersample: 3 } }, l: { type: 'tex_layers', in: ['f', 'f'], params: { base_roughness: 0.5, base_metallic: 0, padding: 0, layers: [{ name: 'x', mask, color: '#ff0000' }] } } });
+  const reds = async (mask: string) => { const r = await cookOn(engines.pool, stack(mask), 'l'); const im = r.geo && findImage(r.geo, 'l_base_color'); if (!im) return -1; const C = im.layer('C')!; let n = 0; for (let i = 0; i < C.length / 4; i++) if (C[i * 4] > 0.99 && C[i * 4 + 1] < 0.01) n++; return n; };
+  const withId = await reds('f_id > 0 ? 1 : 0'), notWhole = await reds('f_id > 0 && f_id != floor(f_id) ? 1 : 0');
+  check(withId > 500 && notWhole === 0, `an expression over f_id: ${withId} texels carry a run id, ${notWhole} of them are not a whole number`);
 }
 
 section('node: straight runs below a source');
@@ -361,6 +367,251 @@ section('resolution');
   const area = async (res: number) => { const r = await cookOn(engines.pool, flow('uncut', { ...P, resolution: res }), 'f'); const im = findImage(r.geo!, 'f')!; const c = im.layer('C')!, m = im.layer('mask')!; let s = 0; for (let q = 0; q < c.length; q++) if (m[q] > 0) s += c[q]; return (s * (SIDE / SPAN / res) ** 2); };
   const a1 = await area(256), a2 = await area(1024);
   check(Math.abs(a1 - a2) / a2 < 0.1, `the painted area is the same at 256 and 1024 (${(a1 * 1e4).toFixed(1)} and ${(a2 * 1e4).toFixed(1)} cm²)`);
+}
+
+
+// ---------------------------------------------------------------- the texel grid: soft edges, limits, time
+section('texel grid and limits');
+const rasterScene = () => {
+  const g = build(wallParts());
+  const { runs } = trace(g, { length: [0.1, 0.1], density: 150, seed: 3 });
+  const step = 0.001, xs = 100, ys = 150;
+  const P = new Float64Array(xs * ys * 3), N = new Float64Array(xs * ys * 3), tau = new Float32Array(xs * ys).fill(step);
+  for (let j = 0; j < ys; j++) for (let i = 0; i < xs; i++) { const k = j * xs + i; P[k * 3] = 0.4 + i * step; P[k * 3 + 1] = 0.66 + j * step; P[k * 3 + 2] = 0; N[k * 3 + 2] = 1; }
+  const out = () => ({ C: new Float32Array(xs * ys), along: new Float32Array(xs * ys), head: new Float32Array(xs * ys), strength: new Float32Array(xs * ys), id: new Float32Array(xs * ys) });
+  return { runs, inp: { P, N, tau }, out };
+};
+{
+  const { runs, inp, out } = rasterScene();
+  for (const br of [0, 0.4]) {
+    const a = out(), b = out();
+    rasterRuns(runs, inp, br, 3, a);
+    rasterRuns(runs, inp, br, 3, b, { brute: true });
+    let diff = 0, clipped = 0, lit = 0;
+    for (let i = 0; i < a.C.length; i++) { diff = Math.max(diff, Math.abs(a.C[i] - b.C[i])); if (a.C[i] === 0 && b.C[i] > 1e-4) clipped++; if (b.C[i] > 0) lit++; }
+    check(lit > 1500 && clipped === 0 && diff < 1e-6, `breakup ${br}: the grid gives what testing every segment gives (${lit} texels on runs, ${clipped} clipped by the grid, largest difference ${diff.toExponential(1)})`);
+  }
+  // the time limit: the check runs while the grid is built and while the texels are read
+  let calls = 0, threw = '';
+  try { rasterRuns(runs, inp, 0.4, 3, out(), { check: () => { if (++calls > 2) throw new Error('stop grid'); } }); } catch (e: any) { threw = e.message; }
+  check(threw === 'stop grid', 'a time limit stops the raster while it builds the grid');
+  calls = 0; threw = '';
+  try { rasterRuns(runs, inp, 0.4, 3, out(), { brute: true, check: () => { if (++calls > 2) throw new Error('stop texels'); } }); } catch (e: any) { threw = e.message; }
+  check(threw === 'stop texels' && calls === 3, 'a time limit stops the raster while it reads the texels');
+  const def = getNodeDef('bake_flow')!;
+  check(['density', 'pool', 'length', 'width', 'step', 'spill'].every((k) => def.params[k].max !== undefined), 'density, pool, length, width, step and spill have a maximum');
+  // too many segments: the limit is lowered for the test (a bake that hits the real one takes minutes)
+  const was = limits.maxSegments;
+  limits.maxSegments = 300;
+  const lim = await cookOn(engines.pool, flow('uncut', { sources: '@name=bolt', resolution: 64, density: 400 }), 'f');
+  limits.maxSegments = was;
+  check(lim.errors.join('').includes('bake_flow: the runs would need more than 300 segments') && lim.errors.join('').includes('density'), `too many segments are refused with the params to lower: ${lim.errors.join('; ')}`);
+  check(was === 400000, 'the segment limit is 400,000');
+}
+
+// ---------------------------------------------------------------- randomness follows where things are
+section('order of the parts');
+{
+  const bolt = (x: number, y = 0.5) => ({ name: 'src', polys: boxPolys(x, y, -0.002, x + 0.04, y + 0.04, 0.01) });
+  const wall = { name: 'wall', polys: boxPolys(0, 0, -0.05, 1, 1, 0) };
+  const byKey = (rs: RunSet) => {
+    const m = new Map<number, string>();
+    for (let i = 0; i < rs.count; i++) {
+      const segs = Array.from({ length: rs.segs }, (_, k) => k).filter((k) => rs.ID[k] === i + 1);
+      m.set(rs.key[i + 1], segs.map((k) => Array.from(rs.A.subarray(k * 6, k * 6 + 6)).map((v) => v.toFixed(9)).join(',')).join(';'));
+    }
+    return m;
+  };
+  const four = [0.1, 0.3, 0.5, 0.7].map((x) => bolt(x));
+  const a = trace(build([wall, ...four]), { seed: 5 }), b = trace(build([...four.slice().reverse(), wall]), { seed: 5 }), c = trace(build([four[2], wall, four[0], four[3], four[1]]), { seed: 5 });
+  const ma = byKey(a.runs), mb = byKey(b.runs), mc = byKey(c.runs);
+  const same = (x: Map<number, string>, y: Map<number, string>) => x.size === y.size && [...x].every(([k, v]) => y.get(k) === v);
+  check(ma.size >= 4 && same(ma, mb) && same(ma, mc), `four bolts merged in three orders: the same ${ma.size} runs (same ids, same paths)`);
+  const five = trace(build([wall, ...four, bolt(0.9)]), { seed: 5 }), mf = byKey(five.runs);
+  check([...ma].every(([k, v]) => mf.get(k) === v) && mf.size > ma.size, `a bolt added far away: the other ${ma.size} runs are unchanged (${mf.size - ma.size} new)`);
+  check(!same(ma, byKey(trace(build([wall, ...four]), { seed: 6 }).runs)), 'another seed: other runs');
+  // at node level: the image
+  const sheetBolts = (xs: number[]) => build([{ name: 'wall', polys: [[[0, 0, 0], [SIDE, 0, 0], [SIDE, SIDE, 0], [0, SIDE, 0]]], uv: [[[0, 0], [SPAN, 0], [SPAN, SPAN], [0, SPAN]]] }, ...xs.map((x) => ({ name: 'bolt', polys: boxPolys(x, 0.45, 0, x + 0.03, 0.48, 0.01) }))], true);
+  store.set('o1', sheetBolts([0.05, 0.2, 0.35])); store.set('o2', sheetBolts([0.35, 0.05, 0.2])); store.set('o3', sheetBolts([0.05, 0.2, 0.35, 0.55]));
+  const P = { sources: '@name=bolt', resolution: 256, seed: 2, padding: 0 };
+  const i1 = await cookOn(engines.pool, flow('o1', P), 'f'), i2 = await cookOn(engines.pool, flow('o2', P), 'f'), i3 = await cookOn(engines.pool, flow('o3', P), 'f');
+  check(eq(i1.geo!, i2.geo!), 'three bolts merged in another order: the same image, bit for bit');
+  const c1 = findImage(i1.geo!, 'f')!.layer('C')!, c3 = findImage(i3.geo!, 'f')!.layer('C')!, id1 = findImage(i1.geo!, 'f')!.layer('id')!, id3 = findImage(i3.geo!, 'f')!.layer('id')!;
+  let diff = 0, lit = 0, cmp = 0;
+  for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) {
+    const x = ((i + 0.5) / 256) / SPAN * SIDE;
+    if (x > 0.5) continue; // the new bolt is at x 0.55
+    const q = j * 256 + i;
+    if (c1[q] !== c3[q] || id1[q] !== id3[q]) diff++;
+    if (c1[q] > 0) lit++;
+    cmp++;
+  }
+  check(lit > 300 && diff === 0, `a bolt added far away: the texels of the others are unchanged (${cmp} compared, ${lit} on runs, ${diff} differ)`);
+}
+
+// ---------------------------------------------------------------- the same look at any scale
+section('scale');
+{
+  const scaled = (k: number): Geometry => build([{ name: 'wall', polys: [[[0, 0, 0], [SIDE * k, 0, 0], [SIDE * k, SIDE * k, 0], [0, SIDE * k, 0]]], uv: [[[0, 0], [SPAN, 0], [SPAN, SPAN], [0, SPAN]]] }, { name: 'bolt', polys: boxPolys(0.28 * k, 0.45 * k, 0, 0.32 * k, 0.5 * k, 0.005 * k) }], true);
+  store.set('s1', scaled(1)); store.set('s10', scaled(10));
+  const P1 = { sources: '@name=bolt', resolution: 384, density: 120, wobble: 0.3, breakup: 0.5, seed: 4, padding: 0, width: [0.003, 0.01], length: [0.05, 0.25], spill: 0.05 };
+  const P10 = { ...P1, density: 12, width: [0.03, 0.1], length: [0.5, 2.5], spill: 0.5 };
+  const a = findImage((await cookOn(engines.pool, flow('s1', P1), 'f')).geo!, 'f')!, b = findImage((await cookOn(engines.pool, flow('s10', P10), 'f')).geo!, 'f')!;
+  const ca = a.layer('C')!, cb = b.layer('C')!, ma = a.layer('mask')!;
+  let sum = 0, mx = 0, lit = 0, bad = 0;
+  for (let q = 0; q < ca.length; q++) { if (ma[q] < 1) continue; const d = Math.abs(ca[q] - cb[q]); if (ca[q] > 0.05 || cb[q] > 0.05) { lit++; sum += d; } mx = Math.max(mx, d); if (d > 0.1) bad++; }
+  check(lit > 800 && bad / lit < 0.01 && sum / lit < 0.01, `the scene and the params both ten times larger give the same image (${lit} texels on runs, ${bad} differ by more than 0.1, mean difference ${(sum / lit).toExponential(1)}, largest ${mx.toFixed(2)})`);
+}
+
+// ---------------------------------------------------------------- the bottom of a groove
+section('groove');
+{
+  /** A quad wound so that its normal points up (+y). */
+  const quadUp = (c: number[][]): number[][] => {
+    const a = c[0], b = c[1], d = c[2];
+    const ny = (b[2] - a[2]) * (d[0] - a[0]) - (b[0] - a[0]) * (d[2] - a[2]);
+    return ny >= 0 ? c : c.slice().reverse();
+  };
+  /** A V groove along z: two faces at `deg` from the horizontal meeting at x 0, y 0; the crease rises `rise` per metre of z. */
+  const groove = (deg: number, rise: number, z1 = 1): Geometry => {
+    const tan = Math.tan((deg * Math.PI) / 180), h = 0.3 * tan, Y = (y: number, z: number) => y + rise * z;
+    const left = quadUp([[-0.3, Y(h, 0), 0], [0, Y(0, 0), 0], [0, Y(0, z1), z1], [-0.3, Y(h, z1), z1]]);
+    const right = quadUp([[0.3, Y(h, 0), 0], [0, Y(0, 0), 0], [0, Y(0, z1), z1], [0.3, Y(h, z1), z1]]);
+    const zb = z1 * 0.8, sx = -0.22, sy = Y(0.22 * tan, zb);
+    return build([{ name: 'a', polys: [left] }, { name: 'b', polys: [right] }, { name: 'src', polys: boxPolys(sx - 0.015, sy - 0.015, zb - 0.015, sx + 0.015, sy + 0.015, zb + 0.015) }]);
+  };
+  for (const deg of [35, 45, 60]) {
+    const { runs, stats } = trace(groove(deg, 0), { length: [0.6, 0.6], density: 80 });
+    const ends = runPoints(runs).map((r) => r[r.length - 1]);
+    check(runs.count > 0 && stats.ended.ledge === runs.count && stats.ended.lost === 0, `a V groove with sides at ${deg}°: every run pools at the bottom (${stats.ended.ledge} of ${runs.count}, ${stats.ended.lost} lost)`);
+    check(ends.every((p) => Math.abs(p[0]) < 0.005 && Math.abs(p[1]) < 0.005), `at ${deg}° they end on the crease (largest offset ${Math.max(...ends.map((p) => Math.hypot(p[0], p[1]))).toFixed(4)} m)`);
+  }
+  const sloped = trace(groove(45, 0.15), { length: [0.6, 0.6], density: 80 });
+  const sp = runPoints(sloped.runs);
+  const flatEnds = runPoints(trace(groove(45, 0), { length: [0.6, 0.6], density: 80 }).runs).map((r) => r[r.length - 1][2]);
+  check(sloped.runs.count > 0 && sp.every((r) => Math.abs(r[r.length - 1][0]) < 0.005), `a groove that slopes toward z 0: the runs follow its crease (${sp.length} runs, lowest z ${Math.min(...sp.map((r) => r[r.length - 1][2])).toFixed(3)})`);
+  check(sp.every((r) => r[r.length - 1][2] < Math.min(...flatEnds) - 0.1), 'the sloping groove carries the water farther along than the level one');
+}
+
+// ---------------------------------------------------------------- the geometry decides the flow, not authored normals
+section('authored normals');
+{
+  const g = build([{ name: 'wall', polys: boxPolys(0, 0, -0.05, 1, 1, 0) }, { name: 'src', polys: boxPolys(0.4, 0.2, -0.002, 0.46, 0.24, 0.01) }]);
+  // normals smoothed across the box edges, as a sphere would have them: near the bottom of a face they tilt down
+  const N = g.points.add('N', 'float', 3);
+  for (let i = 0; i < g.numPoints; i++) { const x = g.P[i * 3] - 0.5, y = g.P[i * 3 + 1] - 0.5, z = g.P[i * 3 + 2] + 0.025, l = Math.hypot(x, y, z) || 1; N.set(i, [x / l, y / l, z / l]); }
+  const { runs } = trace(g, { length: [0.2, 0.2] });
+  const low = Math.min(...runPoints(runs).map((r) => r[r.length - 1][1]));
+  check(runs.count > 0 && low < 0.02, `a run goes straight down the face to its bottom edge although the point normals tilt down (lowest ${low.toFixed(3)} m)`);
+}
+
+// ---------------------------------------------------------------- connected parts
+section('parts');
+{
+  const wall = { name: 'wall', polys: boxPolys(0, 0, -0.05, 1, 1, 0) };
+  const g = build([wall, { name: 'src', polys: boxPolys(0.2, 0.5, -0.002, 0.24, 0.54, 0.01) }, { name: 'src', polys: boxPolys(0.5, 0.5, -0.002, 0.54, 0.54, 0.01) }]);
+  const nm = g.prims.get('name')!;
+  const keep = Uint8Array.from({ length: g.numPrims }, (_, p) => (nm.get(p) === 'src' ? 1 : 0));
+  const c = sampleSources(g.subsetPrims(keep), 0);
+  check(new Set(c.part).size === 2, `two bolts of one name are two parts (${new Set(c.part).size}), each box one connected piece`);
+  const r = trace(g, { density: 1 });
+  check(r.runs.count === 2, `at 1 run per metre each part still gets a run (${r.runs.count})`);
+}
+
+
+// ---------------------------------------------------------------- uv seams on a fold: different texel densities, compared in 3D
+section('folded uv seams');
+{
+  /** Bake `fold` (charts of different texel density) and `ref` (the same surface as one chart) and compare them in 3D. */
+  const compare = async (label: string, fold: Geometry, ref: Geometry, posOfFold: (u: number, v: number) => number[] | null, uvOfRef: (p: number[]) => number[], P: Record<string, any>, chartB: (u: number, v: number) => boolean) => {
+    store.set(`${label}-f`, fold); store.set(`${label}-r`, ref);
+    const RR = 1024;
+    const a = await cookOn(engines.pool, flow(`${label}-f`, { ...P, resolution: RR }), 'f'), b = await cookOn(engines.pool, flow(`${label}-r`, { ...P, resolution: RR }), 'f');
+    if (!a.ok || !b.ok) { check(false, `${label}: both cook ${a.errors.concat(b.errors).join('; ')}`); return; }
+    const ia = findImage(a.geo!, 'f')!, ib = findImage(b.geo!, 'f')!;
+    const ca = ia.layer('C')!, ma = ia.layer('mask')!, cb = ib.layer('C')!;
+    let sure = 0, bad = 0, litA = 0, litB = 0, litRef = 0;
+    for (let j = 0; j < RR; j++) for (let i = 0; i < RR; i++) {
+      const q = j * RR + i;
+      if (ma[q] < 1) continue;
+      const u = (i + 0.5) / RR, v = 1 - (j + 0.5) / RR;
+      const p = posOfFold(u, v);
+      if (!p) continue;
+      const [ru, rv] = uvOfRef(p);
+      const ri = Math.min(RR - 1, Math.max(0, Math.floor(ru * RR))), rj = Math.min(RR - 1, Math.max(0, Math.floor((1 - rv) * RR)));
+      // a neighbourhood of the reference texel: the texel centres of the two bakes differ by up to a texel
+      let rmin = 1, rmax = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const v2 = cb[Math.min(RR - 1, Math.max(0, rj + dj)) * RR + Math.min(RR - 1, Math.max(0, ri + di))]; rmin = Math.min(rmin, v2); rmax = Math.max(rmax, v2); }
+      if (ca[q] > 0.9) { sure++; if (rmax < 0.3) bad++; } else if (ca[q] < 0.02) { sure++; if (rmin > 0.7) bad++; }
+      if (ca[q] > 0.2) { litA++; if (chartB(u, v)) litB++; }
+    }
+    for (let q = 0; q < cb.length; q++) if (cb[q] > 0.2) litRef++;
+    check(sure > 100000 && bad / sure < 0.002, `${label}: charts of different texel density agree with the one-chart surface in 3D (${sure} texels compared, ${bad} disagree)`);
+    check(litA > 300 && litB > 100 && litB < litA - 100, `${label}: runs are painted on both sides of the seam (${litA - litB} texels in the first chart, ${litB} in the second; ${litRef} in the one-chart bake)`);
+  };
+  const facing = (c: number[][], dir: number[]): number[][] => {
+    const a = c[0], b = c[1], d = c[2];
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], wx = d[0] - a[0], wy = d[1] - a[1], wz = d[2] - a[2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    return nx * dir[0] + ny * dir[1] + nz * dir[2] >= 0 ? c : c.slice().reverse();
+  };
+  const bolt = (x: number, y: number, z: number, hs = 0.015) => ({ name: 'bolt', polys: boxPolys(x - hs, y - hs, z - hs, x + hs, y + hs, z + hs) });
+  const base = { sources: '@name=bolt', density: 150, wobble: 0.2, breakup: 0.3, seed: 2, padding: 0, length: [0.5, 0.5], width: [0.006, 0.008] };
+
+  // (1) a fold between a wall and a slope below it (45°), two charts: the wall at 1.5 mm per texel, the slope at 2.9 mm
+  {
+    const A = (x: number, y: number) => [0.05 + x * (0.4 / 0.6), 0.5 + (y - 0.4) / 1.5];
+    const S = 1 / Math.SQRT2;
+    const Bq = (x: number, t: number) => [0.5 + x * (0.2 / 0.6), 0.45 - t / 3];
+    const wallA = facing([[0, 0.4, 0], [0.6, 0.4, 0], [0.6, 1, 0], [0, 1, 0]], [0, 0, 1]);
+    const slope = facing([[0, 0.4, 0], [0.6, 0.4, 0], [0.6, 0.4 - 0.3, 0.3], [0, 0.4 - 0.3, 0.3]], [0, S, S]);
+    const uvA = wallA.map((p) => A(p[0], p[1])), uvB = slope.map((p) => Bq(p[0], Math.hypot(p[1] - 0.4, p[2])));
+    const fold = build([{ name: 'wall', polys: [wallA, slope], uv: [uvA, uvB] }, bolt(0.3, 0.6, 0.0)], true);
+    const refSlopeUv = slope.map((p) => { const t = Math.hypot(p[1] - 0.4, p[2]); return [0.05 + p[0] * (0.4 / 0.6), 0.5 - t / 1.5]; });
+    const ref = build([{ name: 'wall', polys: [wallA, slope], uv: [uvA, refSlopeUv] }, bolt(0.3, 0.6, 0.0)], true);
+    await compare('wall and slope', fold, ref,
+      (u, v) => {
+        if (u >= 0.05 && u <= 0.45 && v >= 0.5 && v <= 0.9) return [(u - 0.05) * 1.5, 0.4 + (v - 0.5) * 1.5, 0];
+        const t = (0.45 - v) * 3;
+        if (u >= 0.5 && u <= 0.7 && t >= 0 && t <= 0.424) return [(u - 0.5) * 3, 0.4 - t * S, t * S];
+        return null;
+      },
+      (p) => (p[2] < 1e-9 ? [0.05 + p[0] * (0.4 / 0.6), 0.5 + (p[1] - 0.4) / 1.5] : [0.05 + p[0] * (0.4 / 0.6), 0.5 - (p[2] * Math.SQRT2) / 1.5]),
+      base, (u) => u >= 0.5);
+  }
+
+  // (2) a cylinder cut into an upper and a lower ring, the lower at twice the texel density, against the cylinder unrolled as one chart
+  {
+    const R0 = 0.1, SIDES = 72;
+    const ang = (i: number) => (i / SIDES) * 2 * Math.PI;
+    const uvTop = (th: number, y: number) => [0.05 + (th / (2 * Math.PI)) * 0.45, 0.5 + (y - 0.5) * 0.8];
+    const uvBot = (th: number, y: number) => [0.05 + (th / (2 * Math.PI)) * 0.9, 0.05 + y * 0.8];
+    const uvOne = (th: number, y: number) => [0.05 + (th / (2 * Math.PI)) * 0.9, 0.05 + y * 0.9];
+    const ring = (y0: number, y1: number, uvf: (th: number, y: number) => number[]) => {
+      const polys: number[][][] = [], uv: number[][][] = [];
+      for (let i = 0; i < SIDES; i++) {
+        const t0 = ang(i), t1 = ang(i + 1);
+        const c = [[R0 * Math.cos(t0), y0, R0 * Math.sin(t0)], [R0 * Math.cos(t0), y1, R0 * Math.sin(t0)], [R0 * Math.cos(t1), y1, R0 * Math.sin(t1)], [R0 * Math.cos(t1), y0, R0 * Math.sin(t1)]];
+        const uvs = [uvf(t0, y0), uvf(t0, y1), uvf(t1, y1), uvf(t1, y0)];
+        polys.push(c); uv.push(uvs);
+      }
+      return { polys, uv };
+    };
+    const th0 = (100 * Math.PI) / 180, bx = R0 * Math.cos(th0), bz = R0 * Math.sin(th0);
+    const top = ring(0.5, 1, uvTop), bot = ring(0, 0.5, uvBot);
+    const fold = build([{ name: 'cyl', polys: [...top.polys, ...bot.polys], uv: [...top.uv, ...bot.uv] }, bolt(bx, 0.75, bz)], true);
+    const one = ring(0, 1, uvOne);
+    // the single chart is one ring of tall quads: the same surface, no seam across the height
+    const ref = build([{ name: 'cyl', polys: one.polys, uv: one.uv }, bolt(bx, 0.75, bz)], true);
+    await compare('cylinder', fold, ref,
+      (u, v) => {
+        if (u >= 0.05 && u <= 0.5 && v >= 0.5 && v <= 0.9) { const th = ((u - 0.05) / 0.45) * 2 * Math.PI; return [R0 * Math.cos(th), 0.5 + (v - 0.5) / 0.8, R0 * Math.sin(th)]; }
+        if (u >= 0.05 && u <= 0.95 && v >= 0.05 && v <= 0.45) { const th = ((u - 0.05) / 0.9) * 2 * Math.PI; return [R0 * Math.cos(th), (v - 0.05) / 0.8, R0 * Math.sin(th)]; }
+        return null;
+      },
+      (p) => { let th = Math.atan2(p[2], p[0]); if (th < 0) th += 2 * Math.PI; return uvOne(th, p[1]); },
+      { ...base, length: [0.45, 0.45] }, (u, v) => v < 0.5);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

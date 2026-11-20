@@ -5,9 +5,9 @@ import { Image, MAIN_LAYER } from '../core/image.ts';
 import { bakeSamples, dilate, interpolate, normalize3, resolve, vertexPositions } from '../core/bake.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { partsOf } from '../core/report.ts';
-import { MAX_RUNS, rasterRuns, sampleSources, traceRuns, triTexelSizes } from '../core/runs.ts';
+import { CREASE, FlowLimit, limits, MAX_RUNS, REF_WIDTH, TOUCH, rasterRuns, sampleSources, scales, traceRuns, triTexelSizes } from '../core/runs.ts';
 import type { FlowParams } from '../core/runs.ts';
-import { resolveVertexNormals, triangulate } from '../core/topology.ts';
+import { triangulate, vertexNormals } from '../core/topology.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
@@ -73,11 +73,19 @@ function cook(ctx: CookContext): Geometry {
     wobble: Number(p.wobble), breakup: Number(p.breakup), ledge: Number(p.ledge), pool: Number(p.pool), drip: !!p.drip, step: Number(p.step), spill: Number(p.spill), seed: Number(p.seed),
   };
   const budget = simBudget(ctx, 'fewer runs (a lower density), shorter lengths or a larger step; or raise the limit');
-  const cands = sampleSources(srcGeo, prm.seed);
+  const { kw } = scales(prm);
+  const cands = sampleSources(srcGeo, prm.seed, REF_WIDTH * 1e-3 * kw, kw);
   if (!cands.part.length) throw new NodeError(`${type}: the sources have no polygons or points`, pattern ? 'sources select prims that are polygons' : 'connect points or a polygon mesh to input 1');
-  const { runs, stats } = traceRuns(recv, srcGeo, cands, prm, () => budget.check());
+  let traced;
+  const tTrace = performance.now();
+  try { traced = traceRuns(recv, srcGeo, cands, prm, () => budget.check()); } catch (e) {
+    if (e instanceof FlowLimit) throw new NodeError(`${type}: the runs would need more than ${limits.maxSegments.toLocaleString('en-US')} segments`, 'lower density or length, or raise step (a run has about length / step segments)');
+    throw e;
+  }
+  const { runs, stats } = traced;
+  ctx.stat('trace_ms', Math.round(performance.now() - tTrace));
   const srcNames = pattern ? [...new Set(cands.names)] : ['input 1'];
-  if (!stats.touching) ctx.warn(`${type}: no source part touches another surface within 1 cm (sources: ${listNames(srcNames)}); no runs`);
+  if (!stats.touching) ctx.warn(`${type}: no source part touches another surface within ${+(TOUCH * kw * 100).toPrecision(2)} cm (sources: ${listNames(srcNames)}); no runs`);
   else if (stats.touching === stats.ledgeRejected) ctx.warn(`${type}: every source part that touches a surface sits on a ledge (within ${p.ledge}° of flat) or under an overhang, where no run starts (sources: ${listNames(stats.touchingParts)}); no runs`);
   if (stats.capped) ctx.warn(`${type}: density ${p.density} would start more than ${MAX_RUNS.toLocaleString('en-US')} runs; the first ${MAX_RUNS.toLocaleString('en-US')} (in random order) are traced`);
   ctx.stat('runs', runs.count);
@@ -102,7 +110,7 @@ function cook(ctx: CookContext): Geometry {
   if (!s.n) ctx.warn(`${type}: no texel is covered (uv collapsed or outside 0..1)`);
   const pos = vertexPositions(g);
   const SP = interpolate(s, tris, pos, 3);
-  const SN = interpolate(s, tris, resolveVertexNormals(g, 60), 3);
+  const SN = interpolate(s, tris, vertexNormals(g, CREASE), 3);
   normalize3(SN);
   const triTau = triTexelSizes(pos, uv, tris, W, H);
   const fin: number[] = [];
@@ -114,19 +122,34 @@ function cook(ctx: CookContext): Geometry {
   let skipSamples: Uint8Array | null = null;
   if (srcMask) { skipSamples = new Uint8Array(s.n); for (let k = 0; k < s.n; k++) skipSamples[k] = srcMask[triPrim[s.tri[k]]]; }
   const C = new Float32Array(s.n), along = new Float32Array(s.n), head = new Float32Array(s.n), strength = new Float32Array(s.n), id = new Float32Array(s.n);
-  rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id });
+  const tRaster = performance.now();
+  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id }, { check: () => budget.check() }); } catch (e) {
+    if (e instanceof FlowLimit) throw new NodeError(`${type}: the runs cover too many texel cells (${e.count.toLocaleString('en-US')} registrations)`, 'lower pool or width, or density');
+    throw e;
+  }
 
-  // layers: C, along, head, strength, id, mask; resolved and padded together as one 5-channel map
-  const LAYERS = ['C', 'along', 'head', 'strength', 'id'] as const, NL = LAYERS.length;
-  const packed = new Float32Array(s.n * NL);
-  for (let k = 0; k < s.n; k++) { packed[k * NL] = C[k]; packed[k * NL + 1] = along[k]; packed[k * NL + 2] = head[k]; packed[k * NL + 3] = strength[k]; packed[k * NL + 4] = id[k]; }
-  const first = resolve(s, packed, NL);
+  ctx.stat('raster_ms', Math.round(performance.now() - tRaster));
+  // layers: C, along, head, strength, id, mask. C and head are means over the texel's samples (an empty sample counts 0);
+  // along, strength and id are those of the run that covers the texel most: never a mean with empty samples or other runs
+  const NL = 5;
+  const CH = new Float32Array(s.n * 2);
+  for (let k = 0; k < s.n; k++) { CH[k * 2] = C[k]; CH[k * 2 + 1] = head[k]; }
+  const first = resolve(s, CH, 2);
+  const bestK = new Int32Array(W * H).fill(-1), bestC = new Float32Array(W * H).fill(-1);
+  for (let k = 0; k < s.n; k++) { const t = s.texel[k]; if (C[k] > bestC[t]) { bestC[t] = C[k]; bestK[t] = k; } }
+  const data = new Float32Array(W * H * NL);
+  for (let t = 0; t < W * H; t++) {
+    data[t * NL] = first.data[t * 2]; data[t * NL + 3] = first.data[t * 2 + 1];
+    const k = bestK[t];
+    if (k >= 0 && C[k] > 0) { data[t * NL + 1] = along[k]; data[t * NL + 2] = strength[k]; data[t * NL + 4] = id[k]; }
+  }
   const img = new Image(W, H, outName(ctx));
   const pad = Math.max(0, Math.round(p.padding));
-  dilate(first.data, NL, W, H, first.coverage, pad, [0, 0, 0, 0, 0]);
-  LAYERS.forEach((name, c) => {
+  dilate(data, NL, W, H, first.coverage, pad, [0, 0, 0, 0, 0]);
+  // channel order in `data`: C, along, strength, head, id
+  ['C', 'along', 'strength', 'head', 'id'].forEach((name, c) => {
     const out = new Float32Array(W * H);
-    for (let i = 0; i < out.length; i++) out[i] = first.data[i * NL + c];
+    for (let i = 0; i < out.length; i++) out[i] = data[i * NL + c];
     img.set(name === 'C' ? MAIN_LAYER : name, out);
   });
   img.set('mask', first.coverage);
@@ -152,7 +175,9 @@ defineNode({
     'at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. ' +
     'Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. ' +
     'Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); ' +
-    'strength = the run\'s random 0..1 (a threshold picks how many runs show, without tracing again); id = run number (0 = none); mask = coverage. The source parts themselves bake 0. ' +
+    'strength = the run\'s random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. ' +
+    'Water goes down the geometry, not down authored normals: the flow direction comes from face normals, smoothed only between faces that meet within 40°, so a face wound the wrong way reads as turned down and lets water through. The bottom of a groove whose sides are steeper than ledge pools, and runs on along it when it slopes. ' +
+    'The metre constants of a run (gaps, wander, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. ' +
     'Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).',
   aliases: ['flow_bake', 'bake_runs', 'bake_drips', 'bake_streaks', 'bake_rust_runs'],
   inputs: [
@@ -168,17 +193,17 @@ defineNode({
     keep_mesh: { type: 'bool', default: false, desc: 'output the input mesh with the image added (off: only the image)', aliases: ['keep_input', 'keep'] },
     name: nameParam(),
     sources: P.group('prim', 'prims of input 0 the runs start from, e.g. "@name=bolt* @name=hinge*" ("" = input 1); they bake 0 and the runs flow on every other prim'),
-    density: { type: 'float', default: 40, min: 0, desc: 'runs per metre of source part where it meets the surface (40 = one every 2.5 cm: a bolt gets one or two, a hinge four or five)', aliases: ['count', 'runs_per_metre', 'frequency'] },
+    density: { type: 'float', default: 40, min: 0, max: 2000, desc: 'runs per metre of source part where it meets the surface (40 = one every 2.5 cm: a bolt gets one or two, a hinge four or five)', aliases: ['count', 'runs_per_metre', 'frequency'] },
     direction: { type: 'vec3', default: [0, -1, 0], desc: 'gravity: the way the runs flow', aliases: ['gravity', 'dir'] },
-    length: { type: 'vec2', default: [0.05, 0.25], min: 0, desc: 'range of the drawn length per run in metres, from where it comes out from under its source (the longer runs are the stronger)', aliases: ['run_length', 'length_range'] },
-    width: { type: 'vec2', default: [0.003, 0.01], min: 0, desc: 'range of the run width at the head in metres; runs taper to 30 % at the tail', aliases: ['run_width', 'width_range'] },
+    length: { type: 'vec2', default: [0.05, 0.25], min: 0, max: 100, desc: 'range of the drawn length per run in metres, from where it comes out from under its source (the longer runs are the stronger)', aliases: ['run_length', 'length_range'] },
+    width: { type: 'vec2', default: [0.003, 0.01], min: 0, max: 5, desc: 'range of the run width at the head in metres; runs taper to 30 % at the tail', aliases: ['run_width', 'width_range'] },
     wobble: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'sideways wander of a run (3D noise on its walking direction); 0 = ruler-straight', aliases: ['meander', 'wander', 'spread'] },
     breakup: { type: 'float', default: 0.4, min: 0, max: 1, desc: 'gaps along a run and a wandering width (3D noise); the gaps grow toward the tail; 0 = unbroken', aliases: ['break_up', 'gaps', 'raggedness'] },
     ledge: { type: 'float', default: 30, min: 0, max: 90, desc: 'a surface whose normal is within this many degrees of up stops the run, which pools there (a 30° slope still sheds water)', aliases: ['ledge_angle', 'stop_angle'] },
-    pool: { type: 'float', default: 1.5, min: 1, desc: 'width multiplier of the pool where a run stops on a ledge', aliases: ['pool_width', 'puddle'] },
+    pool: { type: 'float', default: 1.5, min: 1, max: 10, desc: 'width multiplier of the pool where a run stops on a ledge', aliases: ['pool_width', 'puddle'] },
     drip: { type: 'bool', default: true, desc: 'a run reaching an overhang (a face turned down) falls along the direction to the next surface below and goes on; off: it ends there', aliases: ['drips'] },
-    step: { type: 'float', default: 0, min: 0, desc: 'walking step in metres (0 = half the smallest width)', aliases: ['step_size'] },
-    spill: { type: 'float', default: 0.05, min: 0, desc: 'a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are', aliases: ['spill_reach', 'overflow'] },
+    step: { type: 'float', default: 0, min: 0, max: 5, desc: 'walking step in metres (0 = half the smallest width)', aliases: ['step_size'] },
+    spill: { type: 'float', default: 0.05, min: 0, max: 50, desc: 'a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are', aliases: ['spill_reach', 'overflow'] },
     seed: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'seed of the run starts, lengths, widths, wander and gaps' },
   },
   outputs: 'image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask',
