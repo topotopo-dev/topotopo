@@ -6,7 +6,9 @@
 // writes layer C (the map) and layer "mask" (the texel coverage 0..1, before padding). Rays and curvature run in chunks
 // on the worker pool (kernels "occlusion", "bake_project", "bake_curvature"). Algorithms: core/bake.ts.
 import type { Geometry } from '../core/geometry.ts';
-import { Image, MAIN_LAYER } from '../core/image.ts';
+import { Image, MAIN_LAYER, imageRef, referenceableImages, sampleUV } from '../core/image.ts';
+import { MATERIAL_KINDS, primMaterials, readMaterials } from '../core/materials.ts';
+import { medianTexelSize } from '../core/texelsize.ts';
 import {
   averagedVertexNormals, bakeSamples, curvatureEdges, dilate, edgeGrid, idColor, interpolate, interpolateCorners, normalize3, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
@@ -19,6 +21,7 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { andThen } from '../graph/parallel.ts';
+import { didYouMean } from '../graph/params.ts';
 import { partsOf, primWhere } from '../core/report.ts';
 import { tiledScene } from '../core/trimtile.ts';
 import { P, mask } from './util.ts';
@@ -725,5 +728,164 @@ defineBake({
     const n = b.s.n, out = new Float32Array(n * 4);
     for (let i = 0; i < n; i++) { out[i * 4] = C3[i * 3]; out[i * 4 + 1] = C3[i * 3 + 1]; out[i * 4 + 2] = C3[i * 3 + 2]; out[i * 4 + 3] = A ? A[i] : 1; }
     return finish(b, out, 4, [0, 0, 0, 1]);
+  },
+});
+
+// ---------------------------------------------------------------- materials
+
+const KIND_LIST = MATERIAL_KINDS.join(', ');
+
+/** The names in quotes, at most `max` of them. */
+const quoted = (names: string[], max = 6) => names.slice(0, max).map((n) => `"${n}"`).join(', ') + (names.length > max ? `, … ${names.length - max} more` : '');
+
+defineBake({
+  type: 'bake_material',
+  summary: 'Bake the material table into uv space: base colour, roughness and metallic from each prim\'s material, with a 0/1 mask per material and per kind.',
+  description:
+    'Reads the prim attribute "material" and the detail table "materials" (the material node) and writes, in the uv space of the mesh: C = ' +
+    'the base colour (RGBA; the colour a material\'s base colour map shows where the map is an "image:<name>" the geometry carries, ' +
+    'sampled at the texel\'s own uv), layer "roughness" and layer "metallic" (the material\'s values, or its roughness map\'s green ' +
+    'channel), a 0/1 layer "mat_<material>" per material the baked prims use and a 0/1 layer "kind_<kind>" per kind present ' +
+    '(masks: all, materials, kinds or none). A texel that two materials share takes the first sample\'s material for the labels ' +
+    '(as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is the `kinds` entry for ' +
+    'its name, else its own `kind` field (the material node\'s kind param); a material without one has no kind layer. ' +
+    BAKE_DOC + 'This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values and ' +
+    'mask as coverage, and the masks mat_* and kind_* in its expressions. Stats: size (metres the image width covers, the median ' +
+    'texel size times the width: the size param of tex_layers and tex_normal_from_height) and texel_mm.',
+  aliases: ['material_bake', 'bake_materials', 'bake_material_table'],
+  inputs: [INPUTS[0]],
+  params: {
+    ...BAKE_PARAMS(),
+    kinds: { type: 'json', default: {}, desc: 'kind per material name, e.g. {"zinc_steel": "galvanised"}; wins over the material\'s own kind (kinds: ' + KIND_LIST + ')', aliases: ['material_kinds'] },
+    masks: { type: 'enum', options: ['all', 'materials', 'kinds', 'none'], default: 'all', desc: 'which 0/1 mask layers to write: mat_<material>, kind_<kind>, both or neither', aliases: ['mask_layers', 'labels'] },
+  },
+  outputs: 'image <name> (default: the node name): C base colour RGBA, roughness, metallic, mat_<material> (0/1 per material), kind_<kind> (0/1 per kind present), mask; stats size, texel_mm, texels, coverage',
+  example: {
+    nodes: {
+      box: { type: 'box' },
+      paint: { type: 'material', in: ['box'], params: { name: 'paint', base_color: '#6f8fae', roughness: 0.55, kind: 'painted_metal', group: '@P.y>0.4' } },
+      steel: { type: 'material', in: ['paint'], params: { name: 'steel', base_color: '#9a9a96', roughness: 0.35, metallic: 1, kind: 'bare_steel', group: '@P.y<0.4' } },
+      uv: { type: 'uv_unwrap', in: ['steel'] },
+      base: { type: 'bake_material', in: ['uv'], params: { resolution: 256 } },
+    },
+    output: 'base',
+  },
+  cook: (ctx) => {
+    const { p, type } = ctx;
+    const g = ctx.input(0);
+    const per = primMaterials(g);
+    if (!per) throw new NodeError(`${type}: input 0 has no prim attribute "material"`, 'assign materials first (material node); colours carried as Cd bake with bake_vertex_color');
+    const b = setup(ctx);
+    const table = readMaterials(g);
+    // the prims this bake covers: those with a triangle that is not left out by the group
+    const sel = mask(g, 'prim', p.group);
+    const skip = sel ? Uint8Array.from(b.triPrim, (pr) => (sel[pr] ? 0 : 1)) : null;
+    const primUsed = new Uint8Array(g.numPrims);
+    for (let t = 0; t < b.triPrim.length; t++) if (!skip || !skip[t]) primUsed[b.triPrim[t]] = 1;
+    const order: string[] = [], index = new Map<string, number>();
+    const undefinedNames = new Set<string>();
+    let unassigned = 0;
+    for (let i = 0; i < g.numPrims; i++) {
+      if (!primUsed[i]) continue;
+      const name = per[i] ?? '';
+      if (!name) { unassigned++; continue; }
+      if (!table[name]) { undefinedNames.add(name); continue; }
+      if (!index.has(name)) { index.set(name, order.length); order.push(name); }
+    }
+    const tableNames = Object.keys(table);
+    if (undefinedNames.size) {
+      const names = [...undefinedNames];
+      throw new NodeError(`${type}: prims use material${names.length > 1 ? 's' : ''} ${quoted(names)}, which the material table does not define`, `materials: ${tableNames.join(', ') || '(none)'}`);
+    }
+    if (unassigned) throw new NodeError(`${type}: ${unassigned} prim${unassigned > 1 ? 's have' : ' has'} no material`, 'give every baked prim one (material node; an empty group assigns all prims), or bake a group');
+    // maps: only images the geometry carries can be read here
+    const pool = referenceableImages(g);
+    const maps = new Map<string, { color?: Image; rough?: Image }>();
+    for (const name of order) {
+      const tx = table[name].textures ?? {};
+      const found: { color?: Image; rough?: Image } = {};
+      for (const [slot, label] of [['baseColor', 'base colour'], ['roughness', 'roughness']] as const) {
+        const path = tx[slot];
+        if (!path) continue;
+        const ref = imageRef(path);
+        if (ref === null) throw new NodeError(`${type}: material "${name}" has its ${label} map in a file ("${path}"); bakes read only images the geometry carries`, 'load it with image_file and set the map to "image:<name>"');
+        const im = pool.get(ref);
+        if (!im) throw new NodeError(`${type}: material "${name}" uses image "${ref}" for its ${label}, which input 0 does not carry`, `images: ${[...pool.keys()].join(', ') || '(none)'}; load it with image_file and set the map to "image:<name>"`);
+        if (slot === 'baseColor') found.color = im; else found.rough = im;
+      }
+      if (found.color || found.rough) maps.set(name, found);
+    }
+    // kinds: the kinds param, else the material's own
+    const asked = p.kinds && typeof p.kinds === 'object' && !Array.isArray(p.kinds) ? (p.kinds as Record<string, unknown>) : null;
+    if (p.kinds && !asked) throw new NodeError(`${type}: kinds must be an object of material name → kind`, `e.g. {"zinc_steel": "galvanised"}; kinds: ${KIND_LIST}`);
+    for (const k of Object.keys(asked ?? {})) {
+      if (!table[k]) throw new NodeError(`${type}: kinds names material "${k}", which the material table does not define`, `materials: ${tableNames.join(', ') || '(none)'}`);
+    }
+    const kindOf = (name: string): string => {
+      const k = asked && Object.hasOwn(asked, name) ? asked[name] : table[name].kind;
+      if (k === undefined || k === null || k === '') return '';
+      const s = String(k);
+      if (!(MATERIAL_KINDS as readonly string[]).includes(s)) {
+        const near = didYouMean(s, [...MATERIAL_KINDS], 1);
+        throw new NodeError(`${type}: unknown kind "${s}" for material "${name}"`, `kinds: ${KIND_LIST}${near.length ? `; did you mean "${near[0]}"?` : ''}`);
+      }
+      return s;
+    };
+    const kinds = order.map(kindOf);
+    const kindsPresent = [...new Set(kinds.filter(Boolean))];
+    // per-sample values
+    const n = b.s.n, S = b.s.S;
+    const C = new Float32Array(n * 4), R = new Float32Array(n), M = new Float32Array(n);
+    const matOf = new Int32Array(n);
+    const UV = maps.size ? interpolate(b.s, b.tris, b.uv, 2) : null;
+    const tmp = new Float32Array(4);
+    for (let i = 0; i < n; i++) {
+      const mi = index.get(per[b.triPrim[b.s.tri[i]]])!;
+      matOf[i] = mi;
+      const name = order[mi], m = table[name], mp = maps.get(name);
+      let r = m.baseColor[0], gr = m.baseColor[1], bl = m.baseColor[2], al = m.alpha, rough = m.roughness;
+      if (mp?.color) {
+        const im = mp.color, a = im.layer(im.mainLayer)!, ch = im.channels(im.mainLayer);
+        sampleUV(a, ch, im.width, im.height, UV![i * 2], UV![i * 2 + 1], tmp, true);
+        if (ch === 4) { r = tmp[0]; gr = tmp[1]; bl = tmp[2]; al = m.alpha * tmp[3]; } else { r = gr = bl = tmp[0]; }
+      }
+      if (mp?.rough) {
+        const im = mp.rough, a = im.layer(im.mainLayer)!, ch = im.channels(im.mainLayer);
+        sampleUV(a, ch, im.width, im.height, UV![i * 2], UV![i * 2 + 1], tmp, true);
+        rough = ch === 4 ? tmp[1] : tmp[0];
+      }
+      C[i * 4] = r; C[i * 4 + 1] = gr; C[i * 4 + 2] = bl; C[i * 4 + 3] = al;
+      R[i] = rough; M[i] = m.metallic;
+    }
+    // labels are not averaged: a texel that several materials share takes its first sample's material
+    if (S > 1) {
+      const first = new Int32Array(b.s.W * b.s.H).fill(-1);
+      for (let i = 0; i < n; i++) if (first[b.s.texel[i]] < 0) first[b.s.texel[i]] = i;
+      const lab = matOf.slice();
+      for (let i = 0; i < n; i++) matOf[i] = lab[first[b.s.texel[i]]];
+    }
+    const extra: Record<string, { vals: ArrayLike<number>; ch: number; background: number[] }> = {
+      roughness: { vals: R, ch: 1, background: [0.5] },
+      metallic: { vals: M, ch: 1, background: [0] },
+    };
+    if (p.masks === 'all' || p.masks === 'materials') {
+      order.forEach((name, mi) => {
+        const v = new Uint8Array(n);
+        for (let i = 0; i < n; i++) if (matOf[i] === mi) v[i] = 1;
+        extra[`mat_${name}`] = { vals: v, ch: 1, background: [0] };
+      });
+    }
+    if (p.masks === 'all' || p.masks === 'kinds') {
+      for (const k of kindsPresent) {
+        const v = new Uint8Array(n);
+        for (let i = 0; i < n; i++) if (kinds[matOf[i]] === k) v[i] = 1;
+        extra[`kind_${k}`] = { vals: v, ch: 1, background: [0] };
+      }
+    }
+    const texel = medianTexelSize(vertexPositions(g), b.uv, b.tris, b.s.W, b.s.H, skip);
+    ctx.stat('materials', order.length);
+    ctx.stat('size', texel * b.s.W);
+    ctx.stat('texel_mm', texel * 1000);
+    return finish(b, C, 4, [0, 0, 0, 1], extra);
   },
 });
