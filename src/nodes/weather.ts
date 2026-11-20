@@ -217,22 +217,25 @@ const sigOf = (ctx: CookContext, what: string, extra: unknown) => `${what}:${has
  * before, so what the bakes keep per geometry (the edge wear's buried points and wear field per surroundings) is found
  * again when only a slider moved.
  */
-const lastInputs = new Map<string, Geometry>();
+const lastInputs = new WeakMap<object, Map<string, Geometry>>();
 const LAST_INPUTS = 32;
-function sameInputs(inputs: SubInput[]): SubInput[] {
+function sameInputs(engine: object, inputs: SubInput[]): SubInput[] {
+  // per engine, as its caches are: a fresh engine makes every input anew
+  let held = lastInputs.get(engine);
+  if (!held) lastInputs.set(engine, (held = new Map()));
   return inputs.map((x) => {
     // images (photos, overrides, the preview's masks) are not held: only the prepared meshes, planes and points
     if (x.geo.volumes.length) return x;
-    const had = lastInputs.get(x.sig);
-    if (had) { lastInputs.delete(x.sig); lastInputs.set(x.sig, had); return { ...x, geo: had }; }
-    lastInputs.set(x.sig, x.geo);
-    if (lastInputs.size > LAST_INPUTS) lastInputs.delete(lastInputs.keys().next().value!);
+    const had = held.get(x.sig);
+    if (had) { held.delete(x.sig); held.set(x.sig, had); return { ...x, geo: had }; }
+    held.set(x.sig, x.geo);
+    if (held.size > LAST_INPUTS) held.delete(held.keys().next().value!);
     return x;
   });
 }
 
 async function cookNested(ctx: CookContext, T: string, graph: GraphSpec, inputs: SubInput[], vars: Record<string, number>, target?: string): Promise<CookReport> {
-  const r = await ctx.subcook(graph, { inputs: sameInputs(inputs), vars, ...(target ? { target } : {}) });
+  const r = await ctx.subcook(graph, { inputs: sameInputs(ctx.engine, inputs), vars, ...(target ? { target } : {}) });
   for (const w of r.warnings) ctx.warn(`[${w.node}] ${w.message}`);
   if (!r.ok || !r.geo) {
     const e = r.errors[0];
@@ -283,7 +286,7 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
   const prepKey = [p.kinds, p.handled, layout, p.rust > 0.6];
   const inputs: SubInput[] = [
     { geo: prep.mesh, sig: sig('mesh', prepKey) },
-    { geo: env ?? new Geometry(), sig: sig('env', [p.mount, p.wall_side]) },
+    { geo: env ?? new Geometry(), sig: sig('env', [prepKey, p.mount, p.wall_side]) },
     { geo: leaks?.points ?? new Geometry(), sig: sig('leaks', [prepKey, p.leak_density, p.seed, p.exposure, p.mount, p.wall_side]) },
     { geo: new Geometry(), sig: 'none' },
   ];
@@ -295,13 +298,14 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     photos, overrides: ov, match: null, material,
   };
   const vars = weatherVars({ wear: p.wear, dirt: p.dirt, rust: p.rust, age: p.age, seed: Number(p.seed) || 0, exposure: p.exposure, mount: p.mount });
-  const withImages = (extra: Image[]) => {
+  // the images of inputs 2 and 3 are signed by the signatures of those inputs (in sig); one made here by what it is made from
+  const withImages = (extra: Image[], made: unknown = null) => {
     const all = [...imgs, ...extra];
     if (!all.length) return;
     const g = new Geometry();
     g.volumes.push(...all);
     opts.images = true;
-    inputs[3] = { geo: g, sig: sig('images', all.map((i) => `${i.name}:${i.width}x${i.height}:${hashString(Array.from(i.layer(i.mainLayer)!.subarray(0, 4096)).join(','))}`)) };
+    inputs[3] = { geo: g, sig: sig('images', [all.map((i) => i.name), made]) };
   };
   if (Object.keys(ref).length && amount > 0) {
     // stage 1: the base alone (cached for the full cook), its mean colour and roughness on the covered texels
@@ -311,7 +315,8 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     const base = findImage(r1.geo!, 'base')!;
     budget.check();
     ctx.stat('match', amount);
-    withImages([matchImage(ctx, base, ref, photosIn)]);
+    // the match image is made from the base (signed by the nested cook), the reference and input 3
+    withImages([matchImage(ctx, base, ref, photosIn)], ['match', r1.results.get(r1.target)!.sig, ref]);
     opts.match = { image: 'match', amount };
   } else withImages([]);
   const graph = weatherGraph(opts);
@@ -489,6 +494,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   const variants = Math.max(1, Math.min(8, Math.round(Number(p.variants) || 1)));
   const out = ctx.input(0).clone();
   const packedImgs: Image[] = [];
+  let masksSig = '';
   for (let v = 0; v < variants; v++) {
     const seed = (Number(p.seed) || 0) + v * 1013;
     // the leak points move with the seed: thinned and jittered again
@@ -498,8 +504,8 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
         for (let i = 0; i < mesh.numPrims; i++) sel[i] = pieceOf[i] === pieces[k] ? 1 : 0;
         return leakSources(mesh, { density: Number(p.leak_density), seed: seed + k * 7919, rain: p.exposure !== 'indoor', blockers: envGeo, prims: sel, topEdge: p.above === 'source' ? b : null, max: 2000 }).points;
       });
-      inputs[2] = { geo: Geometry.merge(lp), sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.above]) };
-    } else if (leakGeo) inputs[2] = { geo: leakGeo, sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.above]) };
+      inputs[2] = { geo: Geometry.merge(lp), sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.wall_side, p.above]) };
+    } else if (leakGeo) inputs[2] = { geo: leakGeo, sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.wall_side, p.above]) };
     const opts: GraphOptions = {
       mode: 'masks', resolution: Number(p.resolution), padding: Number(p.padding), layout: 'keep', uv, mapUV: 'uv',
       kinds: prep.kinds, kindsPresent: prep.present, exposure: p.exposure as Exposure, handled: String(p.handled ?? '').trim(),
@@ -522,6 +528,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     for (const l of ['texel', 'island', 'mask']) { const a = mi.layer(l); if (a) im.set(l, a); }
     packedImgs.push(im);
     if (v === 0) {
+      masksSig = r.results.get(r.target)!.sig;
       ctx.stat('leak_sources', inputs[2].geo.numPoints);
       if (r.results) ctx.stat('texels_per_metre', texelsPerMetre(mi));
     }
@@ -535,10 +542,10 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     const pv = previewGraph(name, uv, Number(p.resolution), channels, p.under);
     const g = new Geometry();
     g.volumes.push(packedImgs[0]);
-    // the mesh with its own materials (prims with none take kind's)
+    // the mesh with its own materials (prims with none take kind's); the first variant signed by the cook that made it
     let pmesh = ctx.input(0);
     if (fallback && bareOf(pmesh).length) { pmesh = pmesh.clone(); fallbackMaterial(pmesh, fallback); }
-    const r = await cookNested(ctx, T_M, pv, [{ geo: pmesh, sig: sig('preview_mesh', [uv, fallback]) }, { geo: g, sig: sig('preview_masks', [p.seed, p.wear, p.dirt, p.rust, p.age, p.exposure, p.mount, p.above, joints, jw, p.channels, p.kinds, p.kind, p.leak_density]) }], {});
+    const r = await cookNested(ctx, T_M, pv, [{ geo: pmesh, sig: sig('preview_mesh', [uv, fallback]) }, { geo: g, sig: sig('preview_masks', [masksSig, channels, name]) }], {});
     const pm = r.geo!;
     const pimgs = pm.volumes.filter((v) => v.name.startsWith(`${name}_preview`));
     out.volumes.push(...pimgs);
