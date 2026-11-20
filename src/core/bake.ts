@@ -129,7 +129,7 @@ const bakeMemo = new WeakMap<object, Map<string, unknown>>();
 export const bakeMemoStats = { made: 0, reused: 0 };
 
 /** The memo's limits: total bytes of the values it keeps and how many values (the oldest used are released first). */
-export const bakeMemoLimits = { bytes: 512 * 1024 * 1024, entries: 8 };
+export const bakeMemoLimits = { bytes: 512 * 1024 * 1024, entries: 64 };
 
 interface MemoEntry { g: WeakRef<object>; key: string; bytes: number }
 /** Every kept value, least recently used first (a Map keeps insertion order). */
@@ -196,12 +196,20 @@ export function bakeMemoGrew(g: object, key: string): void {
   memoTrim();
 }
 
+/** Release one value now (nothing when it is not kept). */
+export function bakeMemoDrop(g: object, key: string): void {
+  const id = memoIds.get(g)?.get(key);
+  if (id !== undefined) memoForget(id);
+  else bakeMemo.get(g)?.delete(key);
+}
+
 /**
  * A value derived from a mesh, made once per (mesh object, key) and shared by every bake that asks for it: the covered
  * samples of a uv raster, the per-sample positions and normals, the surface cloud, the ray scene. Cooked geometry is
  * immutable, so the object itself is a safe key. A value lives no longer than its mesh, and the memo keeps at most
  * `bakeMemoLimits` (bytes and values): the least recently used values are released first. Callers must not write into
- * what it returns. A `make` that throws stores nothing.
+ * what it returns. A `make` that throws stores nothing; one that returns a promise keeps its result, or nothing if it
+ * fails.
  */
 export function memoBake<T>(g: object, key: string, make: () => T): T {
   let m = bakeMemo.get(g);
@@ -231,6 +239,12 @@ export function memoBake<T>(g: object, key: string, make: () => T): T {
   memoGoneIds.get(g)!.push(id);
   memoBytes += bytes;
   memoTrim();
+  // a value still being made: kept as its result once it comes (its bytes counted then), dropped if it fails (a cook
+  // stopped by its time limit leaves nothing behind)
+  if (v instanceof Promise) {
+    const own = () => memoIds.get(g)?.get(key) === id;
+    v.then((x) => { if (own()) { m!.set(key, x); bakeMemoGrew(g, key); } }, () => { if (own()) memoForget(id); });
+  }
   return v;
 }
 
