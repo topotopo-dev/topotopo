@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-262 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+264 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -3731,6 +3731,7 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `alpha_cutoff` | float | `0.5` | 0..1 |  |  | mask: discard where material alpha × texture alpha × vertex Alpha is below this value |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
+| `kind` | enum | `""` |  | ``, `painted_metal`, `cast_metal`, `galvanised`, `bare_steel`, `stainless`, `plastic`, `rubber`, `concrete`, `painted_wood`, `decal`, `keep` | `material_kind` | what the material is made of and how it ages ("" = not said): painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, or keep (leave the part as it is); stored in the table, ignored by exporters, read by bake_material (a kind written here also applies to a material copied from input 1) |
 | `base_color_map` | path | `""` |  |  | `basecolor_map`, `albedo_map`, `diffuse_map`, `color_map`, `basecolor_texture`, `base_color_texture` | base colour texture (sRGB PNG/JPEG path, or "image:<name>" for an image the geometry carries; "" = none); uses the uv attribute |
 | `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none) |
 | `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel |
@@ -12782,6 +12783,91 @@ Substance Painter "ID" (by group / attribute). Input 0 needs non-overlapping uv 
 }
 ```
 
+### bake_material
+
+category: `texture` · aliases: `material_bake`, `bake_materials`, `bake_material_table`
+
+Bake the material table into uv space: base colour, roughness and metallic from each prim's material, a 0/1 mask per material and per kind, and the texel size and uv island of every texel.
+
+Reads the prim attribute "material" and the detail table "materials" (the material node) and writes, in the uv space of the mesh (uv_attrib): C = the base colour (RGBA; where a material's base colour map is an "image:<name>" the geometry carries, the colour it shows), layer "roughness" and layer "metallic" (the material's values; a packed orm map gives roughness from its green and metallic from its blue channel times the factors, a roughness map its green channel), a 0/1 layer "mat_<material>" per material the baked prims use and a 0/1 layer "kind_<kind>" per kind present (masks: all, materials, kinds or none), layer "texel" (R = metres one texel covers along u, G along v, at that texel: tex_layers builds its normal map from it, so a step has the same slope at any resolution and on any shape of image) and layer "island" (the uv island, so a filter can stay on one). Maps are read with the mesh's "uv" attribute (the uv a material's maps use), whatever uv_attrib the bake is laid out with. A material's normal map is not carried (its detail is not in the stack yet: a warning names the material), nor is the occlusion of an orm map: give tex_layers an occlusion expression. Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning lists the renames and two materials never share a name). A texel that two materials share takes the first sample's material for the labels (as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is, in this order, the `kinds` entry for its name, its own `kind` field (the material node's kind param), its whole name when that is a kind or one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about (a texel they share holds the last one's values). Stats: size (metres the image width covers, the median texel size times the width) and texel_mm.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh to bake (needs uv without overlaps: uv_unwrap or uv_layout) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `kinds` | json | `{}` |  |  | `material_kinds` | kind per material name, e.g. {"zinc_steel": "galvanised"}; wins over the material's own kind (kinds: painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, keep) |
+| `masks` | enum | `"all"` |  | `all`, `materials`, `kinds`, `none` | `mask_layers`, `labels` | which 0/1 mask layers to write: mat_<material>, kind_<kind>, both or neither |
+
+**Writes:** image <name> (default: the node name): C base colour RGBA, roughness, metallic, mat_<material> (0/1 per material), kind_<kind> (0/1 per kind present), texel (RGBA: R metres per texel along u, G along v), island, mask; stats size, texel_mm, texels, coverage
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "paint": {
+      "type": "material",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "paint",
+        "base_color": "#6f8fae",
+        "roughness": 0.55,
+        "kind": "painted_metal",
+        "group": "@P.y>0.4"
+      }
+    },
+    "steel": {
+      "type": "material",
+      "in": [
+        "paint"
+      ],
+      "params": {
+        "name": "steel",
+        "base_color": "#9a9a96",
+        "roughness": 0.35,
+        "metallic": 1,
+        "kind": "bare_steel",
+        "group": "@P.y<0.4"
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "steel"
+      ]
+    },
+    "base": {
+      "type": "bake_material",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    }
+  },
+  "output": "base"
+}
+```
+
 ### bake_normal
 
 category: `texture` · aliases: `normal_bake`, `bake_tangent_normal`, `bake_normal_map`
@@ -14747,6 +14833,114 @@ Invert: 1 - value (grey or RGB; alpha untouched).
     }
   },
   "output": "out"
+}
+```
+
+### tex_layers
+
+category: `texture` · aliases: `layers`, `material_layers`, `texture_layers`, `layer_stack`
+
+A layer stack over a base: each layer is a mask expression with a colour or ramp, roughness, metallic and height; writes base colour, normal, ORM and height together on the covered texels, then pads.
+
+Input 0 is the base: an image whose C is the base colour and whose layers "roughness" and "metallic" hold the base values (bake_material gives exactly this), or any colour image with base_roughness / base_metallic set; its layer "mask" is the coverage (coverage param), its layers "texel" (metres per texel along u and v) and "island" give the normal map its slopes and keep it on one island. Input 1 holds the mask images (merge the bakes). A layer's mask is an expression over the layers of the images in both inputs: an image's main layer is a variable named like the image, each other layer <image>_<layer> (an image "edges" with layers convex and concave gives edges, edges_convex, edges_concave; the base image's own layers too: base_kind_painted_metal); a grey layer is its value, a colour layer its luminance and its channels <name>_r, <name>_g, <name>_b, <name>_a; the wrangle helpers (smoothstep, fit, clamp, min, max, pow …) and the graph vars are there, and a bare layer name is an expression too. Layer names that are no identifier cannot be read: a warning lists them. A name two layers share is an error only where an expression uses it, as is an image called like a helper function (noise, fit …). Layers run bottom to top; a = clamp(mask, 0, 1) × opacity. color is "#rrggbb", a name, [r, g, b] or a ramp [[t, colour], …] read at the expression color_by (0..1; a noise image for varied rust); color_mode normal replaces, multiply darkens by the colour, overlay overlays it, lighten keeps the lighter of the two (a fade toward a pale colour). roughness and metallic replace the values below where the mask is, roughness_offset adds to roughness (clamped to 0..1 after every layer); height is metres added where the mask is (negative = a step down: chips). A layer with signed true reads its mask as -1..1 for roughness_offset and height alone (one mask makes both bumps and dents, rougher and smoother). The normal map is made from the summed height at the texel size of every texel (the base's "texel" layer; without one size, the metres the image width covers, and a layer with a height refuses until one is given), so a 0.15 mm step has the same slope at 1024 and 2048 and on a non-square image, and a texel only reads neighbours of its own island, so a chip never leaves a ridge on the island next to it. Only covered texels are composed and expressions run on them only, so nothing a mask holds outside the islands reaches the maps; at the end every map is padded from the covered texels by padding texels (a neutral value beyond). Mask images of another size than the base are resized, with a warning. Expressions are compiled once per distinct text and run in chunks on the worker pool for large images (code that reads globalThis, this or geometry functions runs in one piece), with identical results without it. Outputs: images <name>_base_color, <name>_normal, <name>_orm (R occlusion, G roughness, B metallic) and <name>_height (metres), each keeping the coverage as layer "mask"; texture_to_material makes a material of the first three.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `base` | no | no | the base: colour in C, layers roughness, metallic, texel, island and mask (bake_material) |
+| 1 | `masks` | yes | no | geometry holding the images the mask expressions name (merge the bake outputs) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `layers` | json | `[]` |  |  | `stack` | the layers, bottom to top: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top)", "opacity": 1, "color": "#a69d8b" \| [r, g, b] \| [[0, "#5c2a14"], [1, "#9a4a20"]], "color_by": "0", "color_mode": "normal" \| "multiply" \| "overlay" \| "lighten", "roughness": 0.95, "roughness_offset": 0, "metallic": 0, "height": 0.0003, "signed": false}]; name and mask are required, the rest optional (a field left out leaves that channel alone) |
+| `occlusion` | code | `""` |  |  | `ao`, `occlusion_expression` | expression for ORM red (occlusion 0..1) over the same variables ("" = 1) |
+| `base_roughness` | float | `-1` | -1..1 |  | `roughness` | roughness of the whole base, 0..1 (-1 = read the base's layer "roughness"; an error when it has none) |
+| `base_metallic` | float | `-1` | -1..1 |  | `metallic` | metallic of the whole base, 0..1 (-1 = read the base's layer "metallic"; an error when it has none) |
+| `coverage` | string | `"mask"` |  |  | `coverage_layer` | the base layer that holds the coverage (texels above 0 are composed and padded from; "" = every texel counts) |
+| `padding` | int | `8` | 0..256 |  | `dilation`, `margin` | texels to pad from the coverage at the end (the nearest covered texel; a neutral value beyond) |
+| `size` | float | `0` | 0.. |  | `texture_size`, `world_size` | only read when the base has no "texel" layer: the metres the image width covers (one texel is size / width along both axes), for the slope of the normal map; 0 = none, and a layer with a height then refuses |
+| `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` | `format`, `convention` | green channel convention of the normal map (glTF and Blender read OpenGL, Unreal DirectX) |
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of input 0 (the base) to use ("" = its only image; needed when it holds several) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | prefix of the output images ("" = this node's name): <name>_base_color, <name>_normal, <name>_orm, <name>_height |
+
+**Writes:** images <name>_base_color (RGBA), <name>_normal (RGBA, tangent space), <name>_orm (R occlusion, G roughness, B metallic) and <name>_height (grey, metres), each with layer mask (the coverage)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "paint": {
+      "type": "material",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "name": "paint",
+        "base_color": "#6f8fae",
+        "roughness": 0.55,
+        "kind": "painted_metal"
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "paint"
+      ]
+    },
+    "base": {
+      "type": "bake_material",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    },
+    "curv": {
+      "type": "bake_curvature",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    },
+    "stack": {
+      "type": "tex_layers",
+      "in": [
+        "base",
+        "curv"
+      ],
+      "params": {
+        "layers": [
+          {
+            "name": "chips",
+            "mask": "smoothstep(0.15, 0.4, curv_convex)",
+            "color": "#9a9a96",
+            "roughness": 0.4,
+            "metallic": 1,
+            "height": -0.0005
+          },
+          {
+            "name": "grime",
+            "mask": "smoothstep(0.1, 0.5, curv_concave)",
+            "color": "#3d3529",
+            "color_mode": "multiply",
+            "roughness": 0.9,
+            "opacity": 0.8
+          }
+        ]
+      }
+    }
+  },
+  "output": "stack"
 }
 ```
 

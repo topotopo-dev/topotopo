@@ -791,7 +791,9 @@ BAKES (input 0 = mesh with non-overlapping uv in 0..1: uv_unwrap; input 1 = opti
   bake_thickness, bake_position (bbox/uniform/world), bake_world_normal,
   bake_normal (tangent space from the high mesh along averaged-normal cage rays; cage distance), bake_height (high above
   low; layer distance in metres), bake_island_id (colour per uv island, layer id, stat islands), bake_mask
-  (mask_group or a numeric attribute), bake_vertex_color (Cd + Alpha). Shared: resolution (default 1024), supersample
+  (mask_group or a numeric attribute), bake_vertex_color (Cd + Alpha), bake_material (the material table: C = base colour,
+  layers roughness and metallic, a 0/1 layer mat_<material> per material and kind_<kind> per kind; stat size = metres
+  the image width covers). Shared: resolution (default 1024), supersample
   (1..4), padding (texels of edge dilation, default 4), group (prims to bake), keep_mesh (output the mesh too).
   With a high-res mesh: cage (search distance), cage_attrib (default "cage": a float prim/point attribute of the mesh
   that sets the cage per part, e.g. attrib_create {name:"cage", class:"prim", group:"@name=grip", value:0.03}),
@@ -802,6 +804,22 @@ MATERIALS: texture_to_material {material, base_color, normal, roughness, metalli
   with uv) + input 1 (merged images): writes "image:<name>" slots into the material table, assigns the material (all
   prims when new, else group) and carries the images. occlusion/metallic images are packed into "<material>_orm".
   The material node's *_map paths accept "image:<name>" as well.
+LAYERS: tex_layers puts a layer stack on a bake_material base (input 0; mask images merged into input 1): layers: [{name,
+  mask: "smoothstep(0.2, 0.5, edges_convex)", color: "#9a9a96" | [[0,"#5c2a14"],[1,"#9a4a20"]] with color_by: "grain" (a
+  noise image), color_mode, opacity, roughness, roughness_offset, metallic, height (metres), signed}]. A mask is an expression
+  over the layers of the images in both inputs: an image's main layer is a variable named like the image, the others
+  <image>_<layer> (base_kind_painted_metal, edges_concave), a colour layer also <name>_r _g _b _a; the wrangle helpers and
+  graph vars are there. An image must not be called like a helper (noise, fit …). signed: true reads the mask as -1..1 for
+  roughness_offset and height (bumps and dents, rougher and smoother, from one mask). It writes <name>_base_color,
+  <name>_normal, <name>_orm and <name>_height on the covered texels only and pads them last; the normal reads the base's
+  texel layer (bake_material writes it: metres per texel along u and v) and stays on one uv island; without that layer give
+  size = metres the image width covers (bake_material's stat size), and a layer with a height refuses until one is given.
+  texture_to_material {base_color:"<name>_base_color", normal:"<name>_normal", orm:"<name>_orm"} makes the material. The
+  material node's kind param (painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete,
+  painted_wood, decal, keep) is stored in the table; bake_material resolves a kind from its kinds param, then the material's
+  kind, then the material's whole name (painted_steel, rubber, label …) and writes kind_<kind> layers. bake_material reads
+  base colour, roughness and packed orm maps (image: references the geometry carries) but not a normal map or the occlusion
+  of an orm map (a warning names them; give tex_layers an occlusion expression). tex_channel packs to the largest input (warns).
 CUTOUTS: tex_crop extracts a top-left pixel rectangle (all layers), optionally resizes. trace_image reads alpha
   or a selected channel into closed XY curves, including holes; fill builds faces. Restore UVs after fill using
   uv_project {method:"planar",axis:"z",scale:[width,width*imageHeight/imageWidth]} BEFORE deforming.
