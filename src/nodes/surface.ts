@@ -535,7 +535,9 @@ function cookEdgeWear(ctx: CookContext) {
         const c = sc.cloud, E = new Float32Array(c.n);
         for (let i = 0; i < c.n; i++) E[i] = edgeField(CV[i]);
         t0 = performance.now();
-        return seq(runSpread(run, sc, E, p.width, far, CB, deadline), (PXc: Float32Array) => {
+        // the proximity does not depend on amount, seed or the noise: shared per cloud, radius, reach and surroundings
+        const spread = perCloudMemo(sc, `spread|${r}|${p.width}|${far}|${surId(surG)}`, () => runSpread(run, sc, E, p.width, far, CB, deadline));
+        return seq(spread, (PXc: Float32Array) => {
           ctx.stage('spread', performance.now() - t0);
           const M = new Float32Array(c.n * 4);
           for (let i = 0; i < c.n; i++) { const v = CV[i]; M[i * 4] = PXc[i * 2]; M[i * 4 + 1] = PXc[i * 2 + 1]; M[i * 4 + 2] = v > 0 ? Math.min(1, v) : 0; M[i * 4 + 3] = v < 0 ? Math.min(1, -v) : 0; }
