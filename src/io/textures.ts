@@ -21,6 +21,15 @@ export function imagePNG(img: Image, layer = '', deflate?: (d: Uint8Array) => Ui
   const a = img.layer(layer || img.mainLayer), key = `${img.width}x${img.height}`;
   const known = a && encoded.get(a)?.find((e) => e.key === key && e.deflate === deflate);
   if (known) return known.bytes;
+  // island numbers are not 0..1 values: a 16-bit grey, the island number + 1 (0 = no island), so none above 255 clips
+  const ids = (layer || img.mainLayer) === 'island' && a && channelsOf(a, img.count) === 1;
+  if (ids) {
+    const v = new Uint16Array(img.count);
+    for (let i = 0; i < v.length; i++) v[i] = Math.max(0, Math.min(65535, Math.floor(a![i]) + 1));
+    const png = encodeGreyPNG(v, img.width, img.height, 16, deflate);
+    let list = encoded.get(a!); if (!list) encoded.set(a!, list = []); list.push({ key, deflate, bytes: png });
+    return png;
+  }
   const { bytes, channels } = imageToBytes(img, layer, true);
   const png = channels === 1 ? encodeGreyPNG(bytes, img.width, img.height, 8, deflate) : encodePNG(bytes, img.width, img.height, deflate ?? zlibStored);
   if (a) { let list = encoded.get(a); if (!list) encoded.set(a, list = []); list.push({ key, deflate, bytes: png }); }
@@ -207,6 +216,8 @@ export function texturesExport(g: Geometry, dir: string, o: TexturesExportOption
     lines.push(`${name} ${img.width}×${img.height} ${ch === 4 ? (opaque(a!, 4) ? 'rgb' : 'rgba') : 'grey'}`);
     for (const l of img.layers.keys()) {
       if (l === main || !(all || o.layers?.includes(l))) continue;
+      // metres per texel are no 8-bit map: "*" leaves the texel layer out (name it to write it)
+      if (l === 'texel' && !o.layers?.includes(l)) continue;
       add(`${name}_${l}`, imagePNG(img, l, o.deflate));
     }
   }

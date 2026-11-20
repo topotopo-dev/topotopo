@@ -23,6 +23,8 @@ export interface ParamDef {
   groupClass?: 'point' | 'prim' | 'vertex' | 'edge';
   /** GUI hint: hide behind an "advanced" fold */
   advanced?: boolean;
+  /** the node reads whether the graph set this param, even to its default (CookContext.given): it is part of the cook signature */
+  readsGiven?: boolean;
 }
 
 export interface InputDef {
@@ -189,6 +191,8 @@ export interface CookContext {
   node: string;
   type: string;
   p: Record<string, any>;
+  /** whether the graph set param `name` (any value, the default's included), as against it taking its default */
+  given(name: string): boolean;
   inputs: (Geometry | null)[];
   /** input i, or an empty geometry if unconnected */
   input(i: number): Geometry;

@@ -33,12 +33,15 @@
         },
         "image": {
           "height": 64,
+          "size": 3.026408,
           "width": 64
         },
         "kind": "image",
         "layers": {
           "C": "cc1c47bd4d09cdb7",
-          "mask": "5963c5b542beec4f"
+          "island": "19727268b1d09f96",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
         },
         "name": "target_base_color"
       },
@@ -49,12 +52,15 @@
         },
         "image": {
           "height": 64,
+          "size": 3.026408,
           "width": 64
         },
         "kind": "image",
         "layers": {
           "C": "c3c53fe902cbf53b",
-          "mask": "5963c5b542beec4f"
+          "island": "19727268b1d09f96",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
         },
         "name": "target_normal"
       },
@@ -65,12 +71,15 @@
         },
         "image": {
           "height": 64,
+          "size": 3.026408,
           "width": 64
         },
         "kind": "image",
         "layers": {
           "C": "8edc34b0065345ae",
-          "mask": "5963c5b542beec4f"
+          "island": "19727268b1d09f96",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
         },
         "name": "target_orm"
       },
@@ -81,12 +90,15 @@
         },
         "image": {
           "height": 64,
+          "size": 3.026408,
           "width": 64
         },
         "kind": "image",
         "layers": {
           "C": "ff9a69c43c799f7e",
-          "mask": "5963c5b542beec4f"
+          "island": "19727268b1d09f96",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
         },
         "name": "target_height"
       }

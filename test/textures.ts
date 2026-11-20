@@ -166,11 +166,11 @@ section('generators: deterministic, seeded, tileable');
       }
       check(d < 1e-6 && dn > 1e-3, `${noise} ${fractal}: tileable repeats at u+1 and v+1 (max diff ${d.toExponential(1)}), not tileable does not (${f3(dn)})`);
     }
-  const tile = await image({ n: { type: 'tex_noise', params: { resolution: [96, 48], scale: 5 } } });
-  const free = await image({ n: { type: 'tex_noise', params: { resolution: [96, 48], scale: 5, tileable: false } } });
+  const tile = await image({ n: { type: 'tex_noise', params: { resolution: [96, 48], feature: 0.2 } } });
+  const free = await image({ n: { type: 'tex_noise', params: { resolution: [96, 48], feature: 0.2, tileable: false } } });
   const rT = seamRatio(tile.layer('C')!, 96, 48), rF = seamRatio(free.layer('C')!, 96, 48);
   check(rT < 2 && rF > 3 * rT, `tex_noise image: seam jump / neighbour jump ${f3(rT)} tileable vs ${f3(rF)} not`);
-  const cells = await image({ n: { type: 'tex_cells', params: { resolution: 96, scale: 6, output: 'distance' } } });
+  const cells = await image({ n: { type: 'tex_cells', params: { resolution: 96, cell: 1 / 6, output: 'distance' } } });
   check(seamRatio(cells.layer('C')!, 96, 96) < 2, `tex_cells tileable (seam ratio ${f3(seamRatio(cells.layer('C')!, 96, 96))}); id layer per cell`);
   const pat = genPattern({ pattern: 'bricks', count: [4, 8], offset: 0.5, gap: 0.08, bevel: 0.1, variation: 0, seed: 0 }, 128, 128);
   check(seamRatio(pat.C, 128, 128) < 2, `tex_pattern bricks (even rows) tile across the border (seam ratio ${f3(seamRatio(pat.C, 128, 128))})`);
@@ -180,11 +180,11 @@ section('generators: deterministic, seeded, tileable');
   const C = bricks.layer('C')!, id = bricks.layer('id')!;
   check(C[0] < 0.01 && C[(8 + 0) * 128 + 16] > 0.99, 'bricks: 0 in the mortar, 1 on a brick');
   check(new Set(Array.from(id, (x) => x.toFixed(6))).size >= 20, 'bricks: id layer has a value per brick');
-  const shp = await image({ n: { type: 'tex_shape', params: { resolution: 64, shape: 'disc', size: 0.5 } } });
+  const shp = await image({ n: { type: 'tex_shape', params: { resolution: 64, shape: 'disc', fill: 0.5 } } });
   check(shp.layer('C')![32 * 64 + 32] === 1 && shp.layer('C')![0] === 0, 'tex_shape: 1 inside the disc, 0 in the corner');
   const sp1 = await image({ n: { type: 'tex_splatter', params: { resolution: 64, seed: 2 } } }), sp2 = await image({ n: { type: 'tex_splatter', params: { resolution: 64, seed: 2 } } });
   check(maxDiff(sp1.layer('C')!, sp2.layer('C')!) === 0 && mean(sp1.layer('C')!) > 0.01, 'tex_splatter deterministic and non-empty');
-  const txt = await image({ n: { type: 'tex_text', params: { resolution: [128, 32], text: 'AB', size: 0.8 } } });
+  const txt = await image({ n: { type: 'tex_text', params: { resolution: [128, 32], text: 'AB', text_height: 0.2 } } });
   check(mean(txt.layer('C')!) > 0.03 && mean(txt.layer('C')!) < 0.6, `tex_text fills glyphs (coverage ${f3(mean(txt.layer('C')!))})`);
 
   // weight: the wght axis of a variable font (a generated test font whose bar is 20, 100 and 300 units wide at 100,
@@ -226,7 +226,7 @@ section('generators: deterministic, seeded, tileable');
   const found = ['sign', 'lettering', 'label', 'font', 'engrave'].filter((w) => / {2}text\b/.test(catalogText(allNodeDefs(), { search: w })));
   check(found.length === 5, `the catalog finds text by sign, lettering, label, font and engrave (${found.join(', ')})`);
   const cover = async (weight: number) => {
-    const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, size: 0.8 } } });
+    const r = await cookOn(engine, { n: { type: 'tex_text', params: { resolution: [64, 64], text: 'I', font: vf, weight, text_height: 0.8 } } });
     return { c: mean(findImage(r.geo, '')!.layer('C')!), warnings: r.warnings };
   };
   const thin = await cover(100), heavy = await cover(900), clampedTex = await cover(950);
@@ -272,7 +272,7 @@ section('filters: blend modes, levels, blur, normals');
   const hs = await image({ ...noise, h: { type: 'tex_histogram_scan', in: ['n'], params: { position: 0.5, contrast: 0 } } }, 'h');
   check(maxDiff(hs.layer('C')!, src) < 1e-6, 'tex_histogram_scan at position 0.5, contrast 0 is the identity');
   for (const mode of ['gaussian', 'box']) {
-    const b = await image({ ...noise, b: { type: 'tex_blur', in: ['n'], params: { radius: 9, mode } } }, 'b');
+    const b = await image({ ...noise, b: { type: 'tex_blur', in: ['n'], params: { blur: 9 / 128, mode } } }, 'b');
     const m0 = mean(src), m1 = mean(b.layer('C')!);
     let v0 = 0, v1 = 0;
     for (let i = 0; i < src.length; i++) { v0 += (src[i] - m0) ** 2; v1 += (b.layer('C')![i] - m1) ** 2; }
@@ -293,15 +293,15 @@ section('filters: blend modes, levels, blur, normals');
   // physical units: a ramp of 0..1 across an image 0.1 m wide, at depth 0.1 m, rises 0.1 m over 0.1 m: 45° at any
   // resolution; depth 0.05 m gives atan(0.5)
   for (const res of [64, 256]) {
-    const nm = (depth: number) => image({ g: { type: 'tex_gradient', params: { resolution: res } }, nm: { type: 'tex_normal_from_height', in: ['g'], params: { tileable: false, depth, size: 0.1 } } }, 'nm');
+    const nm = (depth: number) => image({ g: { type: 'tex_gradient', params: { resolution: res, texture_size: 0.1 } }, nm: { type: 'tex_normal_from_height', in: ['g'], params: { tileable: false, depth } } }, 'nm');
     const r = (await nm(0.1)).layer('C')![((res / 2) * res + res / 2) * 4], h = (await nm(0.05)).layer('C')![((res / 2) * res + res / 2) * 4];
     const tilt = (x: number) => 0.5 - 0.5 * Math.sin(Math.atan(x));
     check(Math.abs(r - tilt(1)) < 0.01 && Math.abs(h - tilt(0.5)) < 0.01, `depth / texel size: 0.1 m over 0.1 m → 45°, 0.05 m → 26.6° at ${res}² (red ${f3(r)}, ${f3(h)})`);
   }
   // tex_normal_blend: rnm keeps both reliefs; a flat detail (or strength 0, or a black mask) returns the base
   {
-    const base = { g: { type: 'tex_gradient', params: { resolution: 32 } }, bn: { type: 'tex_normal_from_height', in: ['g'], params: { tileable: false, depth: 0.5, size: 1 } } };
-    const detailV = { d: { type: 'tex_gradient', params: { resolution: 32, angle: 90 } }, dn: { type: 'tex_normal_from_height', in: ['d'], params: { tileable: false, depth: 0.5, size: 1 } } };
+    const base = { g: { type: 'tex_gradient', params: { resolution: 32 } }, bn: { type: 'tex_normal_from_height', in: ['g'], params: { tileable: false, depth: 0.5 } } };
+    const detailV = { d: { type: 'tex_gradient', params: { resolution: 32, angle: 90 } }, dn: { type: 'tex_normal_from_height', in: ['d'], params: { tileable: false, depth: 0.5 } } };
     const flatD = { f: { type: 'tex_levels', in: ['d'], params: { out_low: 0.5, out_high: 0.5 } }, fn: { type: 'tex_normal_from_height', in: ['f'] } };
     const B = (await image({ ...base }, 'bn')).layer('C')!;
     const blend = async (params: Record<string, any>, detail = 'dn', extra: Record<string, NodeSpec> = {}) => (await image({ ...base, ...detailV, ...flatD, ...extra, out: { type: 'tex_normal_blend', in: ['bn', detail, ...(extra.m ? ['m'] : [])], params } }, 'out'));
@@ -317,7 +317,7 @@ section('filters: blend modes, levels, blur, normals');
   }
   const ed = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, e: { type: 'tex_edge_detect', in: ['p'] } }, 'e');
   check(Math.abs(ed.layer('C')![10 * 64 + 31] - 1) < 0.05 && ed.layer('C')![10 * 64 + 10] === 0, 'tex_edge_detect: about 1 on a 0 → 1 step, 0 on flat areas');
-  const ao = await image({ p: { type: 'tex_pattern', params: { resolution: 128, gap: 0.15, bevel: 0 } }, a: { type: 'tex_height_to_ao', in: ['p'], params: { radius: 0.05, depth: 0.05 } } }, 'a');
+  const ao = await image({ p: { type: 'tex_pattern', params: { resolution: 128, gap: 0.15, bevel: 0 } }, a: { type: 'tex_height_to_ao', in: ['p'], params: { reach: 0.05, relief_depth: 0.05 } } }, 'a');
   check(ao.layer('C')![0] < 0.8 && ao.layer('C')![(8 + 0) * 128 + 16] > 0.95, 'tex_height_to_ao: mortar dark, brick tops open');
   const col = await image({ g: { type: 'tex_gradient', params: { resolution: 16 } }, c: { type: 'tex_colorize', in: ['g'], params: { ramp: [[0, '#ff0000'], [1, '#0000ff']] } } }, 'c');
   check(col.layer('C')!.length === 16 * 16 * 4 && col.layer('C')![0] > 0.9 && col.layer('C')![15 * 4 + 2] > 0.9, 'tex_colorize: ramp colours as they are (#ff0000 → red 1)');
@@ -325,7 +325,7 @@ section('filters: blend modes, levels, blur, normals');
   check(orm.name === 'orm' && orm.width === 16 && orm.layer('C')![2] === 0 && orm.layer('C')![3] === 1, 'tex_channel pack: R, G from inputs (resized to the largest), B and A from fill');
   const ex = await image({ a: { type: 'tex_colorize', in: ['g'], params: { ramp: [[0, '#336699'], [1, '#336699']] } }, g: { type: 'tex_gradient', params: { resolution: 4 } }, x: { type: 'tex_channel', in: ['a'], params: { mode: 'extract', channel: 'b' } } }, 'x');
   check(Math.abs(ex.layer('C')![0] - 0x99 / 255) < 1e-6 && ex.layer('C')!.length === 16, 'tex_channel extract: one channel as grey');
-  const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { offset: [0.5, 0] } } }, 't');
+  const tr = await image({ p: { type: 'tex_pattern', params: { resolution: 64, pattern: 'checker', count: [2, 2] } }, t: { type: 'tex_transform', in: ['p'], params: { shift: [0.5, 0] } } }, 't');
   const p0 = genPattern({ pattern: 'checker', count: [2, 2], offset: 0.5, gap: 0, bevel: 0, variation: 0, seed: 0 }, 64, 64).C;
   check(maxDiff(tr.layer('C')!, p0.map((x) => 1 - x)) < 1e-6, 'tex_transform: half an image offset of a 2 × 2 checker inverts it');
   const grad = { g: { type: 'tex_gradient', params: { resolution: 32 } } };
@@ -345,7 +345,7 @@ section('filters: blend modes, levels, blur, normals');
   const out = await geo({ p: { type: 'tex_pattern', params: { resolution: 16 } }, o: { type: 'tex_output', in: ['p'], params: { name: 'brick_ids', layer: 'id' } } }, 'o');
   check(imagesOf(out).map((i) => i.name).join(',') === 'p,brick_ids', 'tex_output with a layer adds it as a new image');
   check((await cookErr({ b: { type: 'box' }, l: { type: 'tex_levels', in: ['b'] } }, 'l')).includes('has no image'), 'a filter on a mesh fails with a hint');
-  const hf = await geo({ n: { type: 'tex_noise', params: { resolution: 33 } }, h: { type: 'tex_to_heightfield', in: ['n'], params: { size: 4, height_scale: 2 } }, t: { type: 'heightfield_to_tex', in: ['h'], params: { normalize: false } } }, 't');
+  const hf = await geo({ n: { type: 'tex_noise', params: { resolution: 33 } }, h: { type: 'tex_to_heightfield', in: ['n'], params: { extent: 4, height_scale: 2 } }, t: { type: 'heightfield_to_tex', in: ['h'], params: { normalize: false } } }, 't');
   const back = findImage(hf)!, srcN = (await image({ n: { type: 'tex_noise', params: { resolution: 33 } } })).layer('C')!;
   check(back.width === 33 && maxDiff(back.layer('C')!, srcN.map((x) => x * 2)) < 1e-5, 'tex_to_heightfield → heightfield_to_tex round trip (height = value × scale)');
 }

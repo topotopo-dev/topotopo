@@ -182,8 +182,12 @@ export function genPattern(o: PatternOptions, w: number, h: number): { C: Float3
 
 export const GRADIENTS = ['linear', 'mirror', 'radial', 'angular', 'diamond'];
 
-/** A grey gradient 0..1: linear / mirror along `angle` (0 = left → right, 90 = bottom → top), radial / diamond from `center` over `radius`, angular around `center`. */
+/**
+ * A grey gradient 0..1: linear / mirror along `angle` (0 = left → right, 90 = bottom → top), radial / diamond from `center`
+ * over `radius` (in image widths: a circle on a non-square image too, v is scaled by its aspect h / w), angular around `center`.
+ */
 export function genGradient(mode: string, angle: number, center: [number, number], radius: number, w: number, h: number): Float32Array {
+  const asp = h / w;
   const out = new Float32Array(w * h);
   const a = (angle * Math.PI) / 180, dx = Math.cos(a), dy = Math.sin(a);
   const ext = 0.5 * (Math.abs(dx) + Math.abs(dy)) || 1;
@@ -193,8 +197,8 @@ export function genGradient(mode: string, angle: number, center: [number, number
       const u = (i + 0.5) / w, v = 1 - (j + 0.5) / h;
       let t: number;
       switch (mode) {
-        case 'radial': t = Math.sqrt((u - center[0]) ** 2 + (v - center[1]) ** 2) / r; break;
-        case 'diamond': t = (Math.abs(u - center[0]) + Math.abs(v - center[1])) / r; break;
+        case 'radial': t = Math.sqrt((u - center[0]) ** 2 + ((v - center[1]) * asp) ** 2) / r; break;
+        case 'diamond': t = (Math.abs(u - center[0]) + Math.abs(v - center[1]) * asp) / r; break;
         case 'angular': t = (((Math.atan2(v - center[1], u - center[0]) - a) / (2 * Math.PI)) % 1 + 1) % 1; break;
         case 'mirror': { const l = ((u - 0.5) * dx + (v - 0.5) * dy) / ext * 0.5 + 0.5; t = 1 - Math.abs(2 * l - 1); break; }
         default: t = ((u - 0.5) * dx + (v - 0.5) * dy) / ext * 0.5 + 0.5;
@@ -518,18 +522,23 @@ function gaussBoxes(sigma: number): number[] {
   return Array.from({ length: n }, (_, i) => Math.max(0, ((i < m ? wl : wu) - 1) / 2));
 }
 
+/** The half-widths of the box passes a blur of `r` pixels makes (a box blur is one pass of at least 1); a pass under 1 changes nothing. */
+export function blurBoxes(r: number, mode: string): number[] {
+  return mode === 'box' ? [Math.max(1, Math.round(r))] : gaussBoxes(r / 2).map(Math.round);
+}
+
 /**
  * Blur every channel: 'gaussian' (radius = 2 sigma, three box passes) or 'box' (half-width = radius), separable
- * running sums. With wrap the image is treated as periodic, so the mean of every channel is preserved exactly.
+ * running sums, `radius` pixels along u and `radiusY` along v (texels that are not square). With wrap the image is
+ * treated as periodic, so the mean of every channel is preserved exactly.
  */
-export function blurLayer(a: Float32Array, ch: number, w: number, h: number, radius: number, mode: string, wrap: boolean): Float32Array {
-  if (!(radius > 0)) return a.slice();
-  const rs = mode === 'box' ? [Math.max(1, Math.round(radius))] : gaussBoxes(radius / 2).map(Math.round);
+export function blurLayer(a: Float32Array, ch: number, w: number, h: number, radius: number, mode: string, wrap: boolean, radiusY = radius): Float32Array {
+  if (!(radius > 0) && !(radiusY > 0)) return a.slice();
+  const rx = radius > 0 ? blurBoxes(radius, mode) : [], ry = radiusY > 0 ? blurBoxes(radiusY, mode) : [];
   let x = a;
-  for (const r of rs) {
-    if (r < 1) continue;
-    x = boxPass(x, w, h, ch, r, true, wrap);
-    x = boxPass(x, w, h, ch, r, false, wrap);
+  for (let i = 0; i < Math.max(rx.length, ry.length); i++) {
+    if ((rx[i] ?? 0) >= 1) x = boxPass(x, w, h, ch, rx[i], true, wrap);
+    if ((ry[i] ?? 0) >= 1) x = boxPass(x, w, h, ch, ry[i], false, wrap);
   }
   return x === a ? a.slice() : x;
 }
@@ -551,14 +560,17 @@ function sobel(g: Float32Array, w: number, h: number, i: number, j: number, wrap
  * metres high and the image width spans `size` metres, so the slope is the Sobel height step per texel × depth /
  * (size / w), the same at any resolution for the same relief. OpenGL convention (+Y up = +v) unless directx.
  */
-export function normalFromHeight(g: Float32Array, w: number, h: number, depth: number, size: number, directx: boolean, wrap: boolean): Float32Array {
+export function normalFromHeight(g: Float32Array, w: number, h: number, depth: number, size: number, directx: boolean, wrap: boolean, texelV?: number, act?: Uint8Array | null): Float32Array {
   const out = new Float32Array(w * h * 4);
   const k = (depth * w) / Math.max(1e-12, size); // Sobel / 8 is the value step per texel; × depth / texel size = metres per metre
+  // texels that are not square: the step along v is over texelV metres (the same arithmetic as along u when they are square)
+  const kv = texelV && Math.abs((texelV * w) / size - 1) > 1e-9 ? depth / texelV : k;
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
+      if (act && !act[j * w + i]) continue;
       sobel(g, w, h, i, j, wrap); const gx = SB[0], gy = SB[1];
       // dh/du = gx per pixel; dh/dv = -gy (rows go down)
-      let nx = -gx * k, ny = gy * k;
+      let nx = -gx * k, ny = gy * kv;
       if (directx) ny = -ny;
       const l = Math.sqrt(nx * nx + ny * ny + 1);
       const o = (j * w + i) * 4;
@@ -612,10 +624,11 @@ export function blendNormals(A: Float32Array, B: Float32Array, M: Float32Array |
 }
 
 /** Edge detection: Sobel gradient magnitude of a grey layer × strength, clamped, grown by `width` pixels (max filter). */
-export function edgeDetect(g: Float32Array, w: number, h: number, strength: number, width: number, wrap: boolean): Float32Array {
+export function edgeDetect(g: Float32Array, w: number, h: number, strength: number, width: number, wrap: boolean, act?: Uint8Array | null): Float32Array {
   let out: Float32Array = new Float32Array(w * h);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
+      if (act && !act[j * w + i]) continue;
       sobel(g, w, h, i, j, wrap); const gx = SB[0], gy = SB[1];
       out[j * w + i] = clamp01(Math.sqrt(gx * gx + gy * gy) * 2 * strength);
     }
@@ -640,7 +653,7 @@ export function maxFilter(a: Float32Array, w: number, h: number, r: number, wrap
  * (fraction of the image width) and take the highest elevation angle above the pixel; height is scaled by `depth`
  * (height 1 = depth image widths). Returns 1 = open, darker in pits and crevices.
  */
-export function heightToAO(g: Float32Array, w: number, h: number, radius: number, depth: number, dirs: number, steps: number, wrap: boolean): Float32Array {
+export function heightToAO(g: Float32Array, w: number, h: number, radius: number, depth: number, dirs: number, steps: number, wrap: boolean, act?: Uint8Array | null): Float32Array {
   const out = new Float32Array(w * h);
   const D = Math.max(1, Math.round(dirs)), S = Math.max(1, Math.round(steps));
   const rpx = Math.max(1, radius * w), zs = depth * w; // heights in pixel units
@@ -648,6 +661,7 @@ export function heightToAO(g: Float32Array, w: number, h: number, radius: number
   const cs = Array.from({ length: D }, (_, d) => [Math.cos((d * 2 * Math.PI) / D + 0.37), Math.sin((d * 2 * Math.PI) / D + 0.37)]);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
+      if (act && !act[j * w + i]) continue;
       const h0 = g[j * w + i] * zs;
       let occ = 0;
       for (const [dx, dy] of cs) {
@@ -674,7 +688,7 @@ export const WARP_MODES = ['directional', 'slope', 'vector', 'nonuniform', 'mult
  * angleMap × 360° per pixel (a grey map the same size); multi = the mean of `directions` directional warps whose
  * angles split the circle evenly from `angle` (a smeared, direction-free warp).
  */
-export function warpLayer(a: Float32Array, ch: number, w: number, h: number, W: Float32Array, chW: number, mode: string, intensity: number, angle: number, wrap: boolean, angleMap: Float32Array | null = null, directions = 4): Float32Array {
+export function warpLayer(a: Float32Array, ch: number, w: number, h: number, W: Float32Array, chW: number, mode: string, intensity: number, angle: number, wrap: boolean, angleMap: Float32Array | null = null, directions = 4, steepest = 0, act: Uint8Array | null = null): Float32Array {
   const out = new Float32Array(a.length);
   const n = w * h, gW = toGrey(W, chW);
   const tmp = new Float32Array(ch);
@@ -684,6 +698,7 @@ export function warpLayer(a: Float32Array, ch: number, w: number, h: number, W: 
     for (let j = 0; j < h; j++)
       for (let i = 0; i < w; i++) {
         const k = j * w + i, len = gW[k] * intensity * w;
+        if (act && !act[k]) continue;
         acc.fill(0);
         for (let d = 0; d < D; d++) {
           const t = ((angle + (d * 360) / D) * Math.PI) / 180;
@@ -697,7 +712,9 @@ export function warpLayer(a: Float32Array, ch: number, w: number, h: number, W: 
   const ox = new Float32Array(n), oy = new Float32Array(n);
   if (mode === 'slope') {
     let mx = 0;
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { sobel(gW, w, h, i, j, wrap); const gx = SB[0], gy = SB[1]; ox[j * w + i] = gx; oy[j * w + i] = gy; mx = Math.max(mx, Math.hypot(gx, gy)); }
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { if (act && !act[j * w + i]) continue; sobel(gW, w, h, i, j, wrap); const gx = SB[0], gy = SB[1]; ox[j * w + i] = gx; oy[j * w + i] = gy; mx = Math.max(mx, Math.hypot(gx, gy)); }
+    // the steepest slope of the whole image, in this region's texels (given), else the region's own
+    if (steepest > 0) mx = steepest;
     const k = mx > 0 ? (intensity * w) / mx : 0;
     for (let i = 0; i < n; i++) { ox[i] *= k; oy[i] *= k; }
   } else if (mode === 'vector') {
@@ -717,6 +734,7 @@ export function warpLayer(a: Float32Array, ch: number, w: number, h: number, W: 
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       const k = j * w + i;
+      if (act && !act[k]) continue;
       sampleBilinear(a, ch, w, h, i + 0.5 - ox[k], j + 0.5 - oy[k], tmp, wrap);
       out.set(tmp, k * ch);
     }
@@ -963,16 +981,18 @@ export function quantizeFn(levels: number, mode: string): (x: number) => number 
  * centred on the pixel when symmetric, else behind it (so a bright dot trails along the angle). One sample per pixel
  * of length (at most 1024), bilinear.
  */
-export function directionalBlur(a: Float32Array, ch: number, w: number, h: number, lengthPx: number, angle: number, symmetric: boolean, wrap: boolean): Float32Array {
+export function directionalBlur(a: Float32Array, ch: number, w: number, h: number, lengthPx: number, angle: number, symmetric: boolean, wrap: boolean, yScale = 1, act: Uint8Array | null = null): Float32Array {
   if (!(lengthPx > 0)) return a.slice();
   const N = Math.min(1024, Math.max(2, Math.ceil(lengthPx) + 1));
   const t = (angle * Math.PI) / 180, dx = Math.cos(t), dy = -Math.sin(t);
   const offs = new Float64Array(N);
   for (let s = 0; s < N; s++) offs[s] = symmetric ? (s / (N - 1) - 0.5) * lengthPx : -(s / (N - 1)) * lengthPx;
   const out = new Float32Array(a.length), tmp = new Float32Array(ch), acc = new Float64Array(ch);
-  const ox = offs.map((t) => dx * t), oy = offs.map((t) => dy * t);
+  // yScale = texel u / texel v: a step of 1 metre is that many rows per column
+  const ox = offs.map((t) => dx * t), oy = offs.map((t) => dy * t * yScale);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
+      if (act && !act[j * w + i]) continue;
       if (ch === 1) {
         let sum = 0;
         for (let s = 0; s < N; s++) sum += bilinear1(a, w, h, i + 0.5 + ox[s], j + 0.5 + oy[s], wrap);
@@ -998,16 +1018,18 @@ export const SLOPE_BLUR_MODES = ['blur', 'min', 'max'];
  * walk is in image space and the average slope is the map's own, so the result is the same in metres at any
  * resolution.
  */
-export function slopeBlur(a: Float32Array, ch: number, w: number, h: number, slope: Float32Array, distancePx: number, samples: number, mode: string, uphill: boolean, wrap: boolean): Float32Array {
+export function slopeBlur(a: Float32Array, ch: number, w: number, h: number, slope: Float32Array, distancePx: number, samples: number, mode: string, uphill: boolean, wrap: boolean, meanSlope = 0, act: Uint8Array | null = null): Float32Array {
   const n = w * h, S = Math.max(1, Math.round(samples));
   const G = new Float32Array(n * 2);
-  let sum = 0;
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { sobel(slope, w, h, i, j, wrap); G[(j * w + i) * 2] = SB[0]; G[(j * w + i) * 2 + 1] = SB[1]; sum += Math.hypot(SB[0], SB[1]); }
+  let sum = 0, counted = 0;
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { if (act && !act[j * w + i]) continue; sobel(slope, w, h, i, j, wrap); G[(j * w + i) * 2] = SB[0]; G[(j * w + i) * 2 + 1] = SB[1]; sum += Math.hypot(SB[0], SB[1]); counted++; }
   const out = new Float32Array(a.length), tmp = new Float32Array(ch), g = new Float32Array(2), acc = new Float64Array(ch);
-  const sgn = uphill ? 1 : -1, stepMax = distancePx / S, full = (0.5 * sum) / n; // slopes from half the mean take full steps
+  // slopes from half the mean take full steps: the mean of the whole image (in this region's texels) when given
+  const sgn = uphill ? 1 : -1, stepMax = distancePx / S, full = meanSlope > 0 ? 0.5 * meanSlope : (0.5 * sum) / Math.max(1, counted);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       const k = j * w + i;
+      if (act && !act[k]) continue;
       for (let c = 0; c < ch; c++) acc[c] = a[k * ch + c];
       let x = i + 0.5, y = j + 0.5, m = 1;
       for (let s = 0; s < S && stepMax > 0; s++) {
@@ -1034,7 +1056,7 @@ export function slopeBlur(a: Float32Array, ch: number, w: number, h: number, slo
  * clamped: bends of radius `radius` metres or tighter read full white (convex) or black (concave); convex and concave
  * hold the two sides 0..1 (as bake_curvature's layers).
  */
-export function curvatureFromNormal(N: Float32Array, w: number, h: number, texel: number, radius: number, directx: boolean, wrap: boolean): { C: Float32Array; convex: Float32Array; concave: Float32Array } {
+export function curvatureFromNormal(N: Float32Array, w: number, h: number, texel: number, radius: number, directx: boolean, wrap: boolean, act: Uint8Array | null = null): { C: Float32Array; convex: Float32Array; concave: Float32Array } {
   const n = w * h, nx = new Float32Array(n), ny = new Float32Array(n);
   for (let k = 0; k < n; k++) {
     const x = N[k * 4] * 2 - 1, y = (N[k * 4 + 1] * 2 - 1) * (directx ? -1 : 1), z = N[k * 4 + 2] * 2 - 1;
@@ -1045,6 +1067,7 @@ export function curvatureFromNormal(N: Float32Array, w: number, h: number, texel
   const fix = wrap ? wrapI : clampI;
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
+      if (act && !act[j * w + i]) continue;
       const il = wrap ? i - 1 : Math.max(0, i - 1), ir = wrap ? i + 1 : Math.min(w - 1, i + 1);
       const ju = wrap ? j - 1 : Math.max(0, j - 1), jd = wrap ? j + 1 : Math.min(h - 1, j + 1);
       // x grows with i, y (up) grows against j
@@ -1070,6 +1093,8 @@ export interface AOOptions {
   /** 0 = no occlusion, 1 = as measured, 2 = twice as dark */
   strength: number;
   wrap: boolean;
+  /** only the pixels where this is set are computed (the others stay 0) */
+  act?: Uint8Array | null;
 }
 
 /**
@@ -1097,6 +1122,7 @@ export function heightAO(g: Float32Array, w: number, h: number, o: AOOptions): F
   const HALF = Math.PI / 2;
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
+      if (o.act && !o.act[j * w + i]) continue;
       const h0 = g[j * w + i] * z;
       sobel(g, w, h, i, j, o.wrap);
       const sx = (SB[0] * z) / o.texel, sy = (-SB[1] * z) / o.texel; // dh/dx, dh/dy (y up), metres per metre
@@ -1442,4 +1468,11 @@ export function genGrunge(o: GrungeOptions, w: number, h: number): Float32Array 
   const scan = histogramScanFn(1 - coverageCut(val, o.coverage, o.contrast), o.contrast);
   for (let i = 0; i < val.length; i++) val[i] = scan(val[i]);
   return val;
+}
+
+/** The Sobel gradient magnitude (value step per pixel) of every pixel of a grey layer. */
+export function gradientMagnitudes(g: Float32Array, w: number, h: number, wrap: boolean): Float64Array {
+  const out = new Float64Array(w * h);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { sobel(g, w, h, i, j, wrap); out[j * w + i] = Math.hypot(SB[0], SB[1]); }
+  return out;
 }

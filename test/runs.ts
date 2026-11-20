@@ -284,7 +284,7 @@ const eq = (x: Geometry, y: Geometry) => { const u = findImage(x, 'f')!, v = fin
   check(!eq(A.geo!, O.geo!), 'another seed: other runs');
   // layers
   const names = [...ia.layers.keys()].sort().join(',');
-  check(names === 'C,along,head,id,mask,strength', `layers ${names}`);
+  check(names === 'C,along,head,id,island,mask,strength,texel', `layers ${names}`);
   const along = ia.layer('along')!, id = ia.layer('id')!, str = ia.layer('strength')!, head = ia.layer('head')!;
   let okLayers = true, lit = 0; const ids = new Set<number>();
   for (let q = 0; q < R * R; q++) {

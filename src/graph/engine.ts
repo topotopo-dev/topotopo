@@ -560,7 +560,7 @@ function refFunctions(geo: Map<string, Geometry>, chp: ChParams): Record<string,
       const e = typeof node === 'string' ? chp.get(node) : undefined;
       if (!e) throw new Error(`ch(${JSON.stringify(a)}${b === undefined ? '' : ', ' + JSON.stringify(b)}): node and param must be string literals (dynamic names are not supported)`);
       const pn = resolveParamName(e.def, String(param));
-      if (!pn) throw new Error(`ch("${node}/${param}"): "${e.def.type}" has no param "${param}"`);
+      if (!pn) throw new Error(`ch("${node}/${param}"): "${e.def.type}" has no param "${param}"${e.def.renamed?.[String(param)] ? `: ${e.def.renamed[String(param)]}` : ''}`);
       const v = e.values[pn];
       if (v === null || typeof v !== 'object') return v;
       return Array.isArray(v) ? vecOut(structuredClone(v)) : structuredClone(v);
@@ -943,10 +943,10 @@ export class Engine {
         }
         const tdef = typeof target === 'object' && target ? this.resolveDef(target.type, scope) : undefined;
         if (tdef && !resolveParamName(tdef, c.param)) {
-          const s = didYouMean(c.param, Object.keys(tdef.params));
+          const now = tdef.renamed?.[c.param], s = now ? [] : didYouMean(c.param, Object.keys(tdef.params));
           errors.push({
             node: nm,
-            message: `ch("${c.node}/${c.param}"): ${tdef.type} has no param "${c.param}"${s.length ? ` — did you mean ${s.map((x) => `"${x}"`).join(' or ')}?` : ''}`,
+            message: `ch("${c.node}/${c.param}"): ${tdef.type} has no param "${c.param}"${now ? `: ${now}` : s.length ? ` — did you mean ${s.map((x) => `"${x}"`).join(' or ')}?` : ''}`,
             hint: `valid params: ${Object.keys(tdef.params).join(', ') || '(none)'}`,
           });
         }
@@ -1146,7 +1146,7 @@ export class Engine {
       return { rp, refSig: '', usesTime: rp.usesTime, depsTimeDependent: false };
     }
     const fail = (error: string, upstream = false): NodeParams => ({
-      rp: { values: {}, errors: [], notes: [], warnings: [], outOfRange: [], usesTime: false, deferred: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
+      rp: { values: {}, errors: [], notes: [], warnings: [], outOfRange: [], usesTime: false, deferred: [], given: [] }, refSig: '', usesTime: false, depsTimeDependent: false, error, upstream,
     });
     const geo = new Map<string, Geometry>();
     const parts: string[] = [];
@@ -1303,7 +1303,8 @@ export class Engine {
     const varsSig = def.usesVars === true ? stableStringify(vars)
       : typeof def.usesVars === 'function' ? stableStringify(pickVars(vars, codeVarNames(def.usesVars(rp.values), vars))) : '';
     // a result named after its node (an image's default name) is not shared with an identical node of another name
-    const nameSig = def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '';
+    const givenSig = Object.entries(def.params).filter(([k, d]) => d.readsGiven && rp.given.includes(k)).map(([k]) => '|G:' + k).join('');
+    const nameSig = givenSig + (def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '');
     const materialWith = (ex: string) => def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + ex + (np.refSig ? '|R:' + np.refSig : '') + nameSig;
     const material = materialWith(extra);
     const plainSig = String(hashString(material));
@@ -1423,6 +1424,7 @@ export class Engine {
       node: name,
       type: def.type,
       p: rp.values,
+      given: (param) => rp.given.includes(param),
       inputs,
       input: (i) => inputs[i] ?? new Geometry(),
       hasInput: (i) => !!inputs[i],

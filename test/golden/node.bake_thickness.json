@@ -33,12 +33,15 @@
         },
         "image": {
           "height": 64,
+          "size": 3.026408,
           "width": 64
         },
         "kind": "image",
         "layers": {
           "C": "b7f03f2a35b8051c",
-          "mask": "5963c5b542beec4f"
+          "island": "19727268b1d09f96",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
         },
         "name": "target"
       }

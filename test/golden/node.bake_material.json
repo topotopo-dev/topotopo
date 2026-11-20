@@ -33,12 +33,13 @@
         },
         "image": {
           "height": 64,
+          "size": 3.026408,
           "width": 64
         },
         "kind": "image",
         "layers": {
           "C": "b9084c1567ba113f",
-          "island": "0968c228a28f1b56",
+          "island": "19727268b1d09f96",
           "kind_bare_steel": "29a43ef50b48b5cf",
           "kind_painted_metal": "45ac3ef568b8b5cf",
           "mask": "5963c5b542beec4f",

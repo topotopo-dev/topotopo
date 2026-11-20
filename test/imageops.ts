@@ -85,7 +85,7 @@ await rejects('tex_crop', [sourceGeo], { image: 'source', size: [8192, 8192] }, 
 
 // Dilation: exact nearest sites including deterministic ties, no alpha loss.
 const rgba = img(7, 5, 'rgba', 4, (i, c) => c === 3 ? (i === 8 || i === 26 ? 1 : 0) : i + c / 4);
-const padded = await cook('tex_dilate', [geo(rgba)], { radius: 3 });
+const padded = await cook('tex_dilate', [geo(rgba)], { distance: 3 / rgba.width });
 test('dilate: exact nearest source, deterministic ties, unchanged alpha and unreached pixels', () => {
   const a = rgba.layer('C')!, b = findImage(padded)!.layer('C')!;
   for (let i = 0; i < 35; i++) {
@@ -100,11 +100,11 @@ test('dilate: empty/full masks and radius zero do nothing', () => {
   for (const [m, r] of [[new Float32Array(4), 8], [new Float32Array(4).fill(1), 8], [Float32Array.from([1, 0, 0, 0]), 0]] as const) eq(dilateImage(a, 1, 2, 2, m, 0, r, true), a);
 });
 const grey = img(3, 1, 'data', 1, (i) => [3, 7, 9][i]), validity = img(3, 1, 'mask', 1, (i) => i === 0 ? 1 : 0);
-const gd = await cook('tex_dilate', [geo(grey), geo(validity)], { radius: 1 });
+const gd = await cook('tex_dilate', [geo(grey), geo(validity)], { distance: 1 / grey.width });
 test('dilate: explicit grayscale mask, radius and original source preserved', () => {
   eq(findImage(gd)!.layer('C')!, [3, 3, 9]); eq(grey.layer('C')!, [3, 7, 9]);
 });
-const noPreserve = await cook('tex_dilate', [geo(rgba)], { radius: 1, preserve_alpha: false });
+const noPreserve = await cook('tex_dilate', [geo(rgba)], { distance: 1 / rgba.width, preserve_alpha: false });
 test('dilate: preserve_alpha false extends alpha too', () => assert.equal(findImage(noPreserve)!.layer('C')![9 * 4 + 3], 1));
 await rejects('tex_dilate', [geo(grey)], {}, /explicit mask/);
 await rejects('tex_dilate', [geo(grey), geo(img(2, 2, 'bad'))], {}, /dimensions must match/);
@@ -119,7 +119,7 @@ function signedArea(g: Geometry): number {
   return sum / 2;
 }
 const rows = ['.........', '.#####.#.', '.#...#.#.', '.#...#.#.', '.#####.#.', '.........'];
-const im = new Image(9, 6, 'shapes').set('C', mask(rows));
+const im = new Image(9, 6, 'shapes').set('C', mask(rows)).setSize(1);
 const traced = await cook('trace_image', [geo(im)], { channel: 'luminance', tolerance: 0 });
 const filled = await cook('fill', [traced], { plane: 'xy' });
 test('trace: ring, hole and one-pixel strip survive fill with exact area', () => {
@@ -128,15 +128,15 @@ test('trace: ring, hole and one-pixel strip survive fill with exact area', () =>
   assert.equal(new Set(traced.prims.get('class')!.data as Int32Array).size, 2);
   near(signedArea(filled), rows.join('').split('#').length / 81 - 1 / 81);
 });
-const full = await cook('trace_image', [geo(img(4, 2, 'full', 1, () => 1))], { channel: 'r' });
+const full = await cook('trace_image', [geo(img(4, 2, 'full', 1, () => 1).setSize(1))], { channel: 'r' });
 test('trace: full mask covers the full canvas, aspect and UVs retained', () => {
   assert.equal(full.numPoints, 4); near(signedArea(full), 0.5);
   assert.deepEqual(full.bbox().min, [0, 0, 0]); assert.deepEqual(full.bbox().max, [1, 0.5, 0]);
   eq(full.detail.get('image_size')!.get(0) as number[], [4, 2]);
 });
-const empty = await cook('trace_image', [geo(img(4, 2, 'empty', 1, () => 0))], { channel: 'luminance' });
+const empty = await cook('trace_image', [geo(img(4, 2, 'empty', 1, () => 0).setSize(1))], { channel: 'luminance' });
 test('trace: empty mask returns empty geometry', () => assert.equal(empty.numPrims, 0));
-const diagonal = await cook('trace_image', [geo(new Image(2, 2, 'diagonal').set('C', mask(['#.', '.#'])))], { channel: 'r', tolerance: 8 });
+const diagonal = await cook('trace_image', [geo(new Image(2, 2, 'diagonal').set('C', mask(['#.', '.#'])).setSize(1))], { channel: 'r', tolerance: 8 });
 test('trace: diagonal contacts remain two components even at high tolerance', () => {
   assert.equal(diagonal.numPrims, 2); assert.equal(new Set(diagonal.prims.get('class')!.data as Int32Array).size, 2);
 });

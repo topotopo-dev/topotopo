@@ -43,12 +43,15 @@
         },
         "image": {
           "height": 1024,
+          "size": 100.190116,
           "width": 1024
         },
         "kind": "image",
         "layers": {
-          "C": "4df06bd60dda4d0c",
-          "mask": "7640f0f52de3d70f"
+          "C": "201cfa5aa32a67cc",
+          "island": "5b40f0f553e3d70f",
+          "mask": "7640f0f52de3d70f",
+          "texel": "5bdb3cb18a02c147"
         },
         "name": "ocean_color"
       },
@@ -59,6 +62,7 @@
         },
         "image": {
           "height": 1024,
+          "size": 100,
           "width": 1024
         },
         "kind": "image",
@@ -74,12 +78,15 @@
         },
         "image": {
           "height": 1024,
+          "size": 100.190116,
           "width": 1024
         },
         "kind": "image",
         "layers": {
           "C": "0986a45c243e1b4a",
-          "mask": "7640f0f52de3d70f"
+          "island": "5b40f0f553e3d70f",
+          "mask": "7640f0f52de3d70f",
+          "texel": "5bdb3cb18a02c147"
         },
         "name": "ocean_rough"
       }

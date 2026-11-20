@@ -43,11 +43,14 @@
         },
         "image": {
           "height": 256,
+          "size": 2.782609,
           "width": 512
         },
         "kind": "image",
         "layers": {
-          "C": "fbf7e970bfa3a0d6"
+          "C": "fbf7e970bfa3a0d6",
+          "island": "d4466197846be4fd",
+          "texel": "ded0699d25e83f97"
         },
         "name": "cutouts_color"
       },
@@ -58,11 +61,14 @@
         },
         "image": {
           "height": 256,
+          "size": 2.782609,
           "width": 512
         },
         "kind": "image",
         "layers": {
-          "C": "0ca9bc7a65c4b664"
+          "C": "0ca9bc7a65c4b664",
+          "island": "d4466197846be4fd",
+          "texel": "ded0699d25e83f97"
         },
         "name": "cutouts_normal"
       },
@@ -73,11 +79,14 @@
         },
         "image": {
           "height": 256,
+          "size": 2.782609,
           "width": 512
         },
         "kind": "image",
         "layers": {
-          "C": "6a4b4d4b0a37465d"
+          "C": "6a4b4d4b0a37465d",
+          "island": "d4466197846be4fd",
+          "texel": "ded0699d25e83f97"
         },
         "name": "cutouts_roughness"
       }
