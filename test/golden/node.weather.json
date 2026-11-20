@@ -49,7 +49,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "97ce0336efff8790",
+          "C": "ce00e7a72c43d86d",
           "island": "8d885882adc1eca8",
           "mask": "43d311b52f14544f",
           "texel": "3d3c4cc1a0d758fb"
@@ -68,7 +68,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "52cb7dc05ad35a6a",
+          "C": "7ca502b657c7af74",
           "island": "8d885882adc1eca8",
           "mask": "43d311b52f14544f",
           "texel": "3d3c4cc1a0d758fb"
@@ -87,7 +87,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "7ff7ff70c0c4138e",
+          "C": "3688746da8754b17",
           "island": "8d885882adc1eca8",
           "mask": "43d311b52f14544f",
           "texel": "3d3c4cc1a0d758fb"
@@ -106,16 +106,16 @@
         },
         "kind": "image",
         "layers": {
-          "bare": "fdf3d1c64f7a0e98",
-          "blotch": "155f656e627710f4",
+          "bare": "aea765b04cb37ef6",
+          "blotch": "d50b1a3cbb6fc2aa",
           "cavity": "9005a1b59538744f",
-          "chip": "a2e600503a7c360a",
-          "core": "c7a12435f528d1cf",
-          "damp": "b7d75b0b218c233d",
-          "dust": "0d9e54b36fc7c3bd",
-          "edge_wear": "3afe9325cce94c2b",
-          "fade": "d1466ec383a69895",
-          "grain": "a926646b8a2afbb1",
+          "chip": "e82c86c4fe2a9f52",
+          "core": "ff677b8b7f06bc55",
+          "damp": "5851ea6fea4b1b3d",
+          "dust": "e826a99b4b24df7d",
+          "edge_wear": "b4eeffcc33cdaaf6",
+          "fade": "c1fef6c9df38db07",
+          "grain": "ce53618276248274",
           "grime": "9005a1b59538744f",
           "growth": "9005a1b59538744f",
           "handled": "9005a1b59538744f",
@@ -123,11 +123,11 @@
           "joints": "9005a1b59538744f",
           "mask": "43d311b52f14544f",
           "occlusion": "4e4b8528dbd71836",
-          "runs_dirt": "6e2953f9314438eb",
+          "runs_dirt": "1f6cf8bb3c396661",
           "runs_rust": "9005a1b59538744f",
-          "rust": "e99538ef6dce6ec1",
+          "rust": "e3a14c4630438258",
           "splash": "9005a1b59538744f",
-          "streaks": "9ade7a4753465c99",
+          "streaks": "668e25fb9f795d85",
           "texel": "3d3c4cc1a0d758fb"
         },
         "name": "weathered_masks"
