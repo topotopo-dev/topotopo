@@ -731,8 +731,8 @@ GENERATORS (no input, resolution [w, h], texture_size, name): tex_noise (feature
   RGBA colour with channels:"rgba"; input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star,
   ring; fill = radius as a fraction of half a tile; falloff; tile) · tex_sdf_shape (the signed distance in metres to a
   disc, box, polygon, star, capsule or cross; corner rounding; tile; see SHAPES below) · tex_grunge (dirt / leaks /
-  spots with a coverage fraction and edge contrast; feature in metres) · tex_splatter (blobs; radius in metres) ·
-  tex_scratches (strokes; length and width in metres) · tex_text (height in metres; font, weight: 100 thin … 400 regular … 900
+  spots with a coverage fraction and edge contrast; feature in metres) · tex_splatter (blobs; blob_radius in metres) ·
+  tex_scratches (strokes; stroke_length and stroke_width in metres) · tex_text (text_height in metres; font, weight: 100 thin … 400 regular … 900
   black on the wght axis of a variable font, e.g. a Noto Sans TC variable file; a static font keeps its own weight).
 FILES: image_file {path:"inputs/brick.png", texture_size: 2} loads a PNG (8/16-bit, grey or colour) as an image named after the node
   (name sets another; the file node reads .png the same way, named after the file); texture_size = the metres its width covers; layers auto/grey/rgba; srgb
@@ -743,8 +743,8 @@ FILTERS (input 0 = an image; image/layer pick what to process, the result replac
   max, difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (blur = radius in metres;
   gaussian/box, tileable keeps the mean) · tex_directional_blur (motion blur, length in metres: brushed metal from noise; symmetric off = a
   trail) · tex_slope_blur (smear input 0 along the slopes of input 1 for distance metres: blur, min = eroded ragged
-  edges, max = grown) · tex_warp (directional/slope/vector by input 1, intensity in metres; nonuniform adds an angle map on
-  input 2; multi averages several directions) · tex_transform (offset in metres, rotate, scale, tile) · tex_make_tile (blend with
+  edges, max = grown) · tex_warp (directional/slope/vector by input 1, distance in metres; nonuniform adds an angle map on
+  input 2; multi averages several directions) · tex_transform (shift in metres, rotate, scale, tile) · tex_make_tile (blend with
   half-shifted copies so a photo or non-tileable noise tiles; noise = a wandering patch edge) · tex_edge_detect
   (sobel, or outline / inner / outer: a line line_width metres wide along a mask's outline, roundness 1 = a ridge) ·
   tex_invert · tex_threshold · tex_clamp · tex_quantize (levels; round or floor = posterize) · tex_auto_levels (own
@@ -774,7 +774,10 @@ UNITS: every length in the texture nodes is in metres: a generator says how many
   bake writes its own) and a filter reads that from the image it works on, so one graph gives the same maps at 512 and 4096. On an atlas a bake
   wrote (layers texel and island) a filter converts per texel and stays inside each island, so a blur of 2 mm is 2 mm on every island whatever
   its density. Give every generator of one material the same texture_size (the uv tile's span on the model); filters with tileable (default on)
-  read across the borders exactly like anywhere else.
+  read across the borders exactly like anywhere else. Counts (strokes, blobs, pattern cells, tile-sampler instances) are per image: a larger
+  texture_size makes them larger, not more of them. Filters that still use the mean texel on an atlas whose texels are not square: warp,
+  slope blur, sobel edges, curvature, ao, sdf_op, sdf_to_mask and flood fill; blur, dilate, distance, sdf, bevel, outlines, directional
+  blur and normal from height give a circle in metres.
 SHAPES AND REGIONS (metres): an SDF image holds the signed distance in metres in C (negative inside). tex_sdf_shape
   makes one; tex_sdf_from_mask measures one from any mask (threshold; sub-pixel accurate) · tex_sdf_op (offset grows,
   round / fillet round convex / concave corners, stroke = a band on the outline, invert, redistance) ·

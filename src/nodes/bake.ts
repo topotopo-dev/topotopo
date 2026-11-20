@@ -9,7 +9,7 @@ import type { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER, imageRef, referenceableImages, sampleUV } from '../core/image.ts';
 import { MATERIAL_KINDS, primMaterials, readMaterials, resolveKind } from '../core/materials.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
-import { medianTexelSize, triangleTexelSizes } from '../core/texelsize.ts';
+import { bakedImageSize, triangleTexelSizes } from '../core/texelsize.ts';
 import {
   applyPadding, averagedVertexNormals, bakeMemoGrew, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
@@ -76,6 +76,8 @@ export interface Bake {
   diag: number;
   /** per sample, 1 where the projection onto the high-res mesh found nothing (the "missed" layer) */
   missed?: Float32Array;
+  /** the memo key of this rasterisation (mesh, uv, size, supersampling and group) */
+  key: string;
 }
 
 function readUVNamed(g: Geometry, name: string): Float64Array | null {
@@ -117,7 +119,7 @@ export function setup(ctx: CookContext): Bake {
   if (s.outside) ctx.warn(`${type}: ${s.outside} triangle(s) reach outside the 0..1 uv square (clipped; UDIM tiles are not baked)`);
   if (!s.n) ctx.warn(`${type}: no texel is covered (uv collapsed or outside 0..1)`);
   return {
-    ctx, g, tris, triPrim, uv, skip: r.skip, s, diag: bboxDiagonal(g) || 1,
+    ctx, g, tris, triPrim, uv, skip: r.skip, s, key, diag: bboxDiagonal(g) || 1,
     // filled on first use: the memo counts them then
     get P() {
       if (!r.P) { r.P = interpolate(s, tris, vertexPositions(g), 3); bakeMemoGrew(g, key); }
@@ -138,8 +140,7 @@ function bakeSize(b: Bake): number {
   const sel = mask(b.g, 'prim', b.ctx.p.group);
   let skip: Uint8Array | null = null;
   if (sel) { skip = new Uint8Array(b.triPrim.length); for (let t = 0; t < skip.length; t++) skip[t] = sel[b.triPrim[t]] ? 0 : 1; }
-  const t = medianTexelSize(vertexPositions(b.g), b.uv, b.tris, b.s.W, b.s.H, skip, 'texels');
-  return t > 0 ? t * b.s.W : 1;
+  return bakedImageSize(vertexPositions(b.g), b.uv, b.tris, b.s.W, b.s.H, skip);
 }
 
 /**
@@ -161,6 +162,20 @@ export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, backgr
     const r = resolve(s, e.vals, e.ch);
     applyPadding(r.data, e.ch, map, e.background);
     img.set(k, r.data);
+  }
+  // every bake tells later nodes the texel size of each texel and its uv island (the nodes that make them themselves pass
+  // them in extra): one copy per mesh, uv, size and padding, shared by every bake of this cook, so it costs no more memory
+  if (!('texel' in layers)) {
+    const t0 = performance.now(), made = bakeMemoStats.made;
+    const shared = memoBake(b.g, `texel|${b.key}|${pad}`, () => {
+      const t = texelLayers(b, vertexPositions(b.g));
+      const T = resolve(s, t.texel.vals, 4), I = resolve(s, t.island.vals, 1);
+      applyPadding(T.data, 4, map, t.texel.background);
+      applyPadding(I.data, 1, map, t.island.background);
+      return { texel: T.data, island: I.data };
+    });
+    img.set('texel', shared.texel).set('island', shared.island);
+    if (bakeMemoStats.made !== made) ctx.stage('texel and island', performance.now() - t0);
   }
   img.set('mask', coverage);
   let covered = 0;

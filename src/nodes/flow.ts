@@ -433,6 +433,7 @@ defineNode({
   inputs: [],
   params: {
     path: { type: 'path', default: '', desc: 'file or folder path or file URL; a relative path reads from the package folder (the nearest folder with a .topo file at or above the graph), else from the graph\'s folder (MCP: the package); folder mode needs directory support in the host', aliases: ['file', 'filename'] },
+    texture_size: { type: 'float', default: 1, min: 1e-6, desc: 'png: the metres the picture\'s width covers on the model (a file knows no size; the texture nodes after it work in metres against it)', aliases: ['world_size'] },
     format: { type: 'enum', options: ['auto', ...IMPORT_FORMATS], default: 'auto', desc: 'file format (auto = by extension; folders always use each file’s extension; ".points.json" = pointsjson; json also reads points streams, point rows ([{"P": [x, y, z], "yaw": 30, "name": "crate"}, …], each key an attribute as a CSV column) and Houdini .geo; bgeo = uncompressed binary Houdini geometry, not .bgeo.sc; png = an image volume)' },
     up_axis: { type: 'enum', options: ['y', 'z'], default: 'y', desc: 'source up axis; z converts Z-up files (Blender/Unreal exports) to Y-up' },
     scale: { type: 'float', default: 1, desc: 'uniform scale (e.g. 0.01 for centimetres → metres)' },
@@ -453,7 +454,7 @@ defineNode({
       if (format === 'png') {
         // an image, not a mesh: the image_file loader (its defaults), and no axis, scale or weld
         const g = new Geometry();
-        try { g.volumes = [await readImageFile((f) => host.readFile(f), file)]; } catch (e: any) { throw new NodeError(String(e?.message ?? e)); }
+        try { const im = await readImageFile((f) => host.readFile(f), file); im.size = p.texture_size; g.volumes = [im]; } catch (e: any) { throw new NodeError(String(e?.message ?? e)); }
         return g;
       }
       let fmt = format;

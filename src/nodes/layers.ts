@@ -106,6 +106,7 @@ defineNode({
   type: 'tex_layers',
   category: 'texture',
   usesNodeName: NAMED_BY_NODE,
+  renamed: Object.fromEntries(['size', 'texture_size', 'world_size'].map((k) => [k, 'the base image carries its size now: a bake writes it, a generator sets it with texture_size, and without a texel layer this node reads it from the base (inspect shows it)'])),
   summary: 'A layer stack over a base: each layer is a mask expression with a colour or ramp, roughness, metallic and height; writes base colour, normal, ORM and height together on the covered texels, then pads.',
   description:
     'Input 0 is the base: an image whose C is the base colour and whose layers "roughness" and "metallic" hold the base values ' +
@@ -124,8 +125,8 @@ defineNode({
     'roughness and metallic replace the values below where the mask is, roughness_offset adds to roughness (clamped to 0..1 after ' +
     'every layer); height is metres added where the mask is (negative = a step down: chips). A layer with signed true reads its ' +
     'mask as -1..1 for roughness_offset and height alone (one mask makes both bumps and dents, rougher and smoother). The normal ' +
-    'map is made from the summed height at the texel size of every texel (the base\'s "texel" layer; without one size, the metres ' +
-    'the image width covers, and a layer with a height refuses until one is given), so a 0.15 mm step has the same slope at 1024 and ' +
+    'map is made from the summed height at the texel size of every texel (the base\'s "texel" layer; without one, the metres ' +
+    'the base image covers: its size, which a bake writes and a generator sets with texture_size), so a 0.15 mm step has the same slope at 1024 and ' +
     '2048 and on a non-square image, and a texel only reads neighbours of its own island, so a chip never leaves a ridge on the island ' +
     'next to it. Only covered texels are composed and expressions run on them only, so nothing a mask holds outside the islands ' +
     'reaches the maps; at the end every map is padded from the covered texels by padding texels (a neutral value beyond). Mask images of ' +
@@ -145,7 +146,6 @@ defineNode({
     base_metallic: { type: 'float', default: -1, min: -1, max: 1, desc: 'metallic of the whole base, 0..1 (-1 = read the base\'s layer "metallic"; an error when it has none)', aliases: ['metallic'] },
     coverage: { type: 'string', default: 'mask', desc: 'the base layer that holds the coverage (texels above 0 are composed and padded from; "" = every texel counts)', aliases: ['coverage_layer'] },
     padding: { type: 'int', default: 8, min: 0, max: 256, desc: 'texels to pad from the coverage at the end (the nearest covered texel; a neutral value beyond)', aliases: ['dilation', 'margin'] },
-    size: { type: 'float', default: 0, min: 0, desc: 'only read when the base has no "texel" layer: the metres the image width covers (one texel is size / width along both axes), for the slope of the normal map; 0 = none, and a layer with a height then refuses', aliases: ['texture_size', 'world_size'] },
     normal_format: { type: 'enum', options: ['opengl', 'directx'], default: 'opengl', desc: 'green channel convention of the normal map (glTF and Blender read OpenGL, Unreal DirectX)', aliases: ['format', 'convention'] },
     image: imageParam('input 0 (the base)'),
     name: nameParam('prefix of the output images ("" = this node\'s name): <name>_base_color, <name>_normal, <name>_orm, <name>_height'),
@@ -201,9 +201,6 @@ defineNode({
     const il = base.img.layer('island');
     const island = il && base.img.channels('island') === 1 ? il : null;
     const heightLayer = layers.find((l) => l.height !== 0);
-    if (heightLayer && !texel && !(p.size > 0)) {
-      throw new NodeError(`${type}: layer "${heightLayer.name}" has a height, which needs the metres one texel covers, and the base has no "texel" layer`, 'bake the base with bake_material (it writes a "texel" layer), or set size to the metres the image width covers');
-    }
     // the variables the expressions read: every layer of every image of both inputs, and the channels of colour layers
     const entries = new Map<string, Entry[]>();
     const unnamed = new Set<string>();
@@ -330,12 +327,14 @@ defineNode({
       for (const v of [...arrays.keys()]) if (lastUse(v) < end) arrays.delete(v);
       li = end;
     }
-    const maps = finishStack(stack, { occlusion: occ, coverage, padding: p.padding, texel, size: p.size, island, directx: p.normal_format === 'directx' });
+    const maps = finishStack(stack, { occlusion: occ, coverage, padding: p.padding, texel, size: base.img.size, island, directx: p.normal_format === 'directx' });
     const prefix = outName(ctx);
     const make = (suffix: string, data: Float32Array) => {
       const img = new Image(w, h, `${prefix}_${suffix}`).set(MAIN_LAYER, data);
       img.size = base.img.size;
       if (coverage) img.set('mask', coverage);
+      // the maps keep the texel size and the islands of the base, so a filter after this node stays on one island
+      for (const l of ['texel', 'island']) { const a = base.img.layer(l); if (a) img.set(l, a); }
       return img;
     };
     const out = new Geometry();

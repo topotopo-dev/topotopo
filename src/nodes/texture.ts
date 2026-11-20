@@ -22,8 +22,8 @@ import {
   sdfBoolean, sdfOp, sdfShape, sdfToMask, shapeReach, signedDistance,
 } from '../core/texsdf.ts';
 import { texNoise } from '../core/texnoise.ts';
-import { imageTexel, runScaled } from '../core/texscale.ts';
-import type { Plane } from '../core/texscale.ts';
+import { imageTexel, runScaled, slopeFacts } from '../core/texscale.ts';
+import type { Plane, Region } from '../core/texscale.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
 import { MATERIAL_ATTRIB, normalizeMaterial, readMaterials, writeMaterials } from '../core/materials.ts';
 import { readUV } from '../core/uv.ts';
@@ -68,6 +68,19 @@ const textureSizeParam = (): ParamDef => ({
 });
 /** renamed hint for the generators' old per-node `size`: the image's own size now lives on the generator. */
 const SIZE_NOW = 'the metres the image width covers are texture_size on the node that makes the image (a filter reads them from its image)';
+/** the old per-node size, under every name it had: a filter has none now, a generator calls it texture_size */
+const SIZE_KEYS: Record<string, string> = { size: SIZE_NOW, texture_size: SIZE_NOW, world_size: SIZE_NOW, tile_size: SIZE_NOW, image_width: SIZE_NOW };
+/**
+ * Cells across a tile of `size` metres for a feature of `feature` metres: the count asked for, which a tileable image rounds to
+ * whole cells (at least one). Says so when the feature that fits is more than 10 % off the one asked for.
+ */
+function cellsAcross(ctx: CookContext, what: string, size: number, feature: number, tileable: boolean, max = Infinity): number {
+  const asked = size / feature;
+  if (!tileable) return asked;
+  const n = Math.min(max, Math.max(1, Math.round(asked))), fits = size / n;
+  if (Math.abs(fits / feature - 1) > 0.1) ctx.warn(`${ctx.type}: a ${what} of ${+feature.toPrecision(3)} m does not fit a tile of ${+size.toPrecision(3)} m a whole number of times: a tileable image has ${n} across, so it is ${+fits.toPrecision(3)} m (${+(size / Math.max(1, Math.floor(asked))).toPrecision(3)} or ${+(size / Math.ceil(asked)).toPrecision(3)} fit exactly; tileable false keeps it)`);
+  return n;
+}
 /** A new image named after the node, covering the node's texture_size. */
 function newImage(ctx: CookContext, w: number, h: number): Image {
   const img = new Image(w, h, outName(ctx));
@@ -81,14 +94,33 @@ function normalSource(ctx: CookContext, s: Source, what = 'input 0'): Source {
   return s;
 }
 /** Signed distance in metres (negative inside) of a grey mask at threshold, for texels of `texel` metres. */
-function maskSDF(grey: Float32Array, w: number, h: number, threshold: number, texel: number, wrap: boolean): Float32Array {
-  const d = signedDistance(grey, w, h, threshold, wrap);
+function maskSDF(grey: Float32Array, w: number, h: number, threshold: number, texel: number, wrap: boolean, aspect = 1): Float32Array {
+  const d = signedDistance(grey, w, h, threshold, wrap, aspect);
   for (let k = 0; k < d.length; k++) d[k] *= texel;
   return d;
 }
 /** The plane of a source, for runScaled. */
 const planeOf = (s: { data: Float32Array; ch: number }): Plane => ({ data: s.data, ch: s.ch });
 const greyPlane = (s: { data: Float32Array; ch: number }): Plane => ({ data: toGrey(s.data, s.ch), ch: 1 });
+/**
+ * Blur a region by `rx` texels along u and `ry` along v. On an island the weights are the island's own pixels, so the
+ * result is normalised by the island's coverage: the mean is kept up to the border, whatever lies beyond it.
+ */
+function blurRegion(a: Float32Array, ch: number, r: Region, rx: number, ry: number, mode: string): Float32Array {
+  if (!r.own) return blurLayer(a, ch, r.w, r.h, rx, mode, r.wrap, ry);
+  const n = r.w * r.h, c1 = ch + 1, buf = new Float32Array(n * c1);
+  for (let k = 0; k < n; k++) {
+    if (!r.own[k]) continue;
+    for (let c = 0; c < ch; c++) buf[k * c1 + c] = a[k * ch + c];
+    buf[k * c1 + ch] = 1;
+  }
+  const b = blurLayer(buf, c1, r.w, r.h, rx, mode, false, ry), out = new Float32Array(n * ch);
+  for (let k = 0; k < n; k++) {
+    const wt = b[k * c1 + ch];
+    for (let c = 0; c < ch; c++) out[k * ch + c] = wt > 1e-6 ? b[k * c1 + c] / wt : a[k * ch + c];
+  }
+  return out;
+}
 /** A length in metres as texels of `texel` metres, at most as many as the region is wide twice over (a wider reach changes nothing more). */
 const texels = (m: number, texel: number, w: number, h: number) => Math.min(m / texel, 2 * Math.max(w, h));
 const SDF_INPUT = [{ name: 'sdf', desc: 'geometry holding an SDF image (signed distance in metres: tex_sdf_shape, tex_sdf_from_mask); everything else passes through' }];
@@ -142,6 +174,7 @@ export function source(ctx: CookContext, i: number, imageName = '', layerName = 
     );
   } else index = found[0];
   const img = asImage(g.volumes[index] as Image);
+  if (i === 0) firstImage.set(ctx, img);
   const layer = layerName || img.mainLayer;
   const data = img.layer(layer);
   if (!data) throw new NodeError(`${ctx.type}: image "${img.name}" has no layer "${layer}"`, `layers: ${[...img.layers.keys()].join(', ') || 'none'}`);
@@ -150,10 +183,16 @@ export function source(ctx: CookContext, i: number, imageName = '', layerName = 
   return { g, img, index, layer, data, ch };
 }
 
+/** The image input 0 of a cook read: the one whose size (in metres) a later input is compared with. */
+const firstImage = new WeakMap<CookContext, Image>();
+
 /** Input i's image layer resized to w × h (or null when the input is not connected); `param` as in source(). */
 function sourceAt(ctx: CookContext, i: number, w: number, h: number, imageName = '', layerName = '', wrap = true, param = ''): { data: Float32Array; ch: 1 | 4 } | null {
   if (!ctx.hasInput(i)) return null;
   const s = source(ctx, i, imageName, layerName, param);
+  // two images that cover different metres: the second is resized to the first's pixels, and says nothing of it
+  const a = firstImage.get(ctx);
+  if (a && i > 0 && Math.abs(s.img.size / a.size - 1) > 0.01) ctx.warn(`${ctx.type}: input ${i} "${s.img.name}" covers ${+s.img.size.toPrecision(4)} m but input 0 "${a.name}" covers ${+a.size.toPrecision(4)} m; the result keeps input 0's size and input ${i} is resized to its pixels, so its features change size in metres`);
   return { data: resizeLayer(s.data, s.ch, s.img.width, s.img.height, w, h, wrap), ch: s.ch };
 }
 
@@ -198,14 +237,15 @@ defineNode({
     frequency: 'it is now feature, the size of one cell in metres (the inverse of a count: frequency 4 on a 1 m image is feature 0.25)',
     freq: 'it is now feature, the size of one cell in metres (freq 4 on a 1 m image is feature 0.25)',
     offset: 'it is now shift, in metres (a shift of 1 cell is feature metres)',
-    size: SIZE_NOW,
+    element_size: 'it is now feature, the size of one cell in metres (element_size was a count of cells across: 6 on a 1 m image is feature 0.1667)',
+    ...SIZE_KEYS,
   },
   inputs: [],
   params: {
     resolution: resolutionParam(),
     noise: { type: 'enum', options: ['perlin', 'simplex', 'value', 'worley'], default: 'perlin', desc: 'base noise', aliases: ['type', 'basis', 'noise_type'] },
     fractal: { type: 'enum', options: ['none', 'fbm', 'ridged', 'turbulence'], default: 'fbm', desc: 'octave layering (ridged = sharp crests, turbulence = billows)' },
-    feature: { type: 'float', default: 0.25, min: 1e-6, desc: 'size of one cell at the first octave, in metres (the image has texture_size / feature of them across; whole numbers when tileable)', aliases: ['cell_size', 'element_size', 'wavelength'] },
+    feature: { type: 'float', default: 0.25, min: 1e-6, desc: 'size of one cell at the first octave, in metres (the image has texture_size / feature of them across; whole numbers when tileable)', aliases: ['cell_size', 'wavelength'] },
     octaves: { type: 'int', default: 5, min: 1, max: 12, desc: 'number of octaves' },
     roughness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'amplitude gain per octave (persistence)', aliases: ['persistence', 'gain'] },
     lacunarity: { type: 'float', default: 2, min: 1, max: 4, desc: 'frequency gain per octave' },
@@ -223,7 +263,7 @@ defineNode({
     const { p, type, parallelMap } = ctx;
     const [w, h] = size2(p, type);
     const job: NoiseJob = {
-      noise: p.noise, fractal: p.fractal, scale: p.tileable ? Math.max(1, Math.round(p.texture_size / p.feature)) : p.texture_size / p.feature, octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity,
+      noise: p.noise, fractal: p.fractal, scale: cellsAcross(ctx, 'feature', p.texture_size, p.feature, !!p.tileable), octaves: p.octaves, roughness: p.roughness, lacunarity: p.lacunarity,
       seed: p.seed, tileable: !!p.tileable, offset: [p.shift[0] / p.feature, p.shift[1] / p.feature], aspect: h / w, jitter: p.jitter, width: w, height: h,
     };
     const C = new Float32Array(w * h);
@@ -246,12 +286,12 @@ defineNode({
     'fractions of the smaller cell side; variation darkens cells randomly. A cell is texture_size / count metres: for ' +
     'bricks of a given size in metres, count = texture_size / brick size.',
   aliases: ['tile_generator', 'bricks', 'brick', 'checker', 'tiles_pattern', 'cop_pattern'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: [],
   params: {
     resolution: resolutionParam(),
     pattern: { type: 'enum', options: PATTERNS, default: 'bricks', desc: 'pattern', aliases: ['type', 'mode'] },
-    count: { type: 'ivec2', default: [4, 8], min: 1, max: 4096, desc: 'cells along u (columns) and v (rows)', aliases: ['tiles', 'repeat', 'cells'] },
+    count: { type: 'ivec2', default: [4, 8], min: 1, max: 4096, desc: 'cells along u (columns) and v (rows) across the whole image: a count per image, so a larger texture_size makes bigger cells, not more of them', aliases: ['tiles', 'repeat', 'cells'] },
     offset: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'bricks / hex / dots: shift of every other row (fraction of a cell)', aliases: ['row_offset', 'stagger'] },
     gap: { type: 'float', default: 0.06, min: 0, max: 1, desc: 'mortar / gap width as a fraction of the smaller cell side (dots: 1 - diameter)', aliases: ['mortar', 'spacing'] },
     bevel: { type: 'float', default: 0.08, min: 0, max: 1, desc: 'bevel width as a fraction of the smaller cell side (0 = hard antialiased edge)', aliases: ['smooth', 'roundness'] },
@@ -277,24 +317,24 @@ defineNode({
   summary: 'Gradient image: linear, mirror, radial, angular or diamond, 0..1.',
   description: 'Substance: Gradient Linear / Radial / Axial; Houdini COP: Ramp. linear runs along angle (0 = left → right, 90 = bottom → top) and spans the image corner to corner; mirror rises to 1 in the middle; radial and diamond grow from center (a position in uv) over radius metres; angular sweeps once around center.',
   aliases: ['gradient', 'ramp_texture', 'gradient_linear', 'gradient_radial', 'cop_ramp'],
-  renamed: { size: SIZE_NOW },
+  renamed: { ...SIZE_KEYS, radius: 'it is now reach, in metres: radius × texture_size (a radius of 0.5 on a 1 m image is 0.5; it was a distance in image widths)' },
   inputs: [],
   params: {
     resolution: resolutionParam(),
     mode: { type: 'enum', options: GRADIENTS, default: 'linear', desc: 'gradient shape', aliases: ['type'] },
     angle: { type: 'float', default: 0, desc: 'direction in degrees (linear, mirror) or start angle (angular)', aliases: ['rotation', 'direction'] },
     center: { type: 'vec2', default: [0.5, 0.5], desc: 'centre in uv (radial, diamond, angular)' },
-    radius: { type: 'float', default: 0.5, min: 0.001, desc: 'radial / diamond: distance in metres from the centre where the gradient reaches 1' },
+    reach: { type: 'float', default: 0.5, min: 0.001, desc: 'radial / diamond: distance in metres from the centre where the gradient reaches 1 (a circle in metres whatever the image\'s shape)' },
     texture_size: textureSizeParam(),
     name: nameParam(),
   },
   usesNodeName: NAMED_BY_NODE,
   outputs: 'image <name> (default: the node name): C grey 0..1',
-  example: { type: 'tex_gradient', params: { resolution: 256, mode: 'radial', radius: 0.5 } },
+  example: { type: 'tex_gradient', params: { resolution: 256, mode: 'radial', reach: 0.5 } },
   cook: (ctx) => {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
-    return imageGeo(newImage(ctx, w, h).set(MAIN_LAYER, genGradient(p.mode, p.angle, [p.center[0], p.center[1]], p.radius / p.texture_size, w, h)));
+    return imageGeo(newImage(ctx, w, h).set(MAIN_LAYER, genGradient(p.mode, p.angle, [p.center[0], p.center[1]], p.reach / p.texture_size, w, h)));
   },
 });
 
@@ -310,7 +350,7 @@ defineNode({
     '(texture_size is ignored too); the output holds only the new image either way. Blend over it, pack it into an ORM ' +
     'channel, or give a material a flat map.',
   aliases: ['constant_texture', 'uniform_color', 'solid_color', 'flat_color', 'fill_image', 'cop_constant'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: [{ name: 'size_from', desc: 'optional: an image whose size the constant takes', optional: true }],
   params: {
     resolution: resolutionParam(),
@@ -353,7 +393,11 @@ defineNode({
   summary: 'Shape image: disc, square, polygon, star or ring with a soft falloff, optionally repeated in a grid.',
   description: 'Substance: Shape; Houdini COP: Shape. 1 inside, 0 outside; falloff (fraction of the radius) ramps the edge inward, so falloff 1 gives a cone or pyramid usable as a height stamp. fill is the radius relative to half a tile, so a tile of texture_size / tile metres holds a shape of fill × half of that. tile repeats the shape (a tileable stud or rivet grid). Use as a mask, a stamp for tex_tile_sampler, or a bump through tex_normal_from_height; for a shape of a size in metres use tex_sdf_shape.',
   aliases: ['shape_texture', 'cop_shape', 'polygon_shape', 'disc_texture'],
-  renamed: { size: 'the radius is now fill (a fraction of half a tile), and the metres the image width covers are texture_size' },
+  renamed: {
+    size: 'it is now fill (a fraction of half a tile); the metres the image width covers are texture_size',
+    radius: 'it is now fill (a fraction of half a tile: radius was an alias of size); for a radius in metres use tex_sdf_shape',
+    world_size: SIZE_NOW, tile_size: SIZE_NOW, image_width: SIZE_NOW,
+  },
   inputs: [],
   params: {
     resolution: resolutionParam(),
@@ -389,7 +433,7 @@ defineNode({
     frequency: 'it is now cell, the size of one cell in metres (the inverse of a count: 8 on a 1 m image is cell 0.125)',
     freq: 'it is now cell, the size of one cell in metres (8 on a 1 m image is cell 0.125)',
     count: 'it is now cell, the size of one cell in metres (cells across = texture_size / cell: 8 on a 1 m image is cell 0.125)',
-    size: SIZE_NOW,
+    ...SIZE_KEYS,
   },
   inputs: [],
   params: {
@@ -411,7 +455,7 @@ defineNode({
     const { p, type, parallelMap } = ctx;
     const [w, h] = size2(p, type);
     const job: CellsJob = {
-      width: w, height: h, scale: p.texture_size / p.cell, jitter: p.jitter, seed: p.seed, tileable: !!p.tileable, output: p.output, edgeWidth: p.edge_width,
+      width: w, height: h, scale: cellsAcross(ctx, 'cell', p.texture_size, p.cell, !!p.tileable), jitter: p.jitter, seed: p.seed, tileable: !!p.tileable, output: p.output, edgeWidth: p.edge_width,
       metric: ['euclidean', 'manhattan', 'chebyshev'].indexOf(p.metric),
     };
     const C = new Float32Array(w * h), id = new Float32Array(w * h);
@@ -425,13 +469,17 @@ defineNode({
   summary: 'Seeded scratches: thin tapered strokes along a direction with random spread, length and intensity.',
   description: 'Substance: Scratches Generator / Directional Scratches. Strokes are slightly bent, thin at both ends, combined with max; they wrap at the borders (tileable). length and width are in metres on an image texture_size metres wide (a stroke is never thinner than about one texel, so a hairline is a one-texel line at any resolution). count is the number of strokes in the whole image. Blend over a roughness or base colour map with tex_blend.',
   aliases: ['scratches', 'scratch_generator', 'directional_scratches', 'strokes', 'cracks'],
-  renamed: { size: SIZE_NOW },
+  renamed: {
+    ...SIZE_KEYS,
+    length: 'it is now stroke_length, in metres: the old fractions of the image width × texture_size (0.05 .. 0.25 on a 1 m image is the same numbers)',
+    width: 'it is now stroke_width, in metres: the old fraction of the image width × texture_size (0.003 on a 1 m image is the same number)',
+  },
   inputs: [],
   params: {
     resolution: resolutionParam(),
-    count: { type: 'int', default: 200, min: 0, max: 100000, desc: 'number of strokes', aliases: ['number', 'amount'] },
-    length: { type: 'vec2', default: [0.05, 0.25], min: 0, desc: 'stroke length range in metres' },
-    width: { type: 'float', default: 0.003, min: 0, desc: 'stroke width in metres (at least about one texel)' },
+    count: { type: 'int', default: 200, min: 0, max: 100000, desc: 'number of strokes in the whole image (a count per image: a larger texture_size makes the same strokes longer, not more of them)', aliases: ['number', 'amount'] },
+    stroke_length: { type: 'vec2', default: [0.05, 0.25], min: 0, desc: 'stroke length range in metres' },
+    stroke_width: { type: 'float', default: 0.003, min: 0, desc: 'stroke width in metres (at least about one texel)' },
     angle: { type: 'float', default: 20, desc: 'mean direction in degrees (0 = along u)' },
     spread: { type: 'float', default: 30, min: 0, max: 180, desc: 'random deviation from angle in degrees' },
     curvature: { type: 'float', default: 0.1, min: 0, max: 1, desc: 'sideways bend as a fraction of the length' },
@@ -448,7 +496,7 @@ defineNode({
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
     const k = 1 / p.texture_size;
-    const C = genScratches({ count: p.count, length: [p.length[0] * k, p.length[1] * k], width: p.width * k, angle: p.angle, spread: p.spread, curvature: p.curvature, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable }, w, h);
+    const C = genScratches({ count: p.count, length: [p.stroke_length[0] * k, p.stroke_length[1] * k], width: p.stroke_width * k, angle: p.angle, spread: p.spread, curvature: p.curvature, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable }, w, h);
     return imageGeo(newImage(ctx, w, h).set(MAIN_LAYER, C));
   },
 });
@@ -459,12 +507,16 @@ defineNode({
   summary: 'Seeded splatter: ragged soft blobs (stains, dirt, paint drops) scattered over the image.',
   description: 'Substance: Splatter / Dirt / Grunge Map. radius is the blob radius range in metres on an image texture_size metres wide; irregularity makes the outlines ragged (0 = discs); softness is the edge blur as a fraction of the radius; blobs wrap at the borders (tileable) and combine with max, or add (clamped to 1). count is the number of blobs in the whole image. For strokes use tex_scratches.',
   aliases: ['splatter', 'blobs', 'stains', 'dirt_map', 'grunge'],
-  renamed: { size: 'the blob radius is now radius (a range in metres), and the metres the image width covers are texture_size' },
+  renamed: {
+    size: 'it is now blob_radius, in metres: the old fractions of the image width × texture_size; the metres the image width covers are texture_size',
+    radius: 'it is now blob_radius, in metres: the old fractions of the image width × texture_size (0.02 .. 0.08 on a 1 m image is the same numbers)',
+    world_size: SIZE_NOW, tile_size: SIZE_NOW, image_width: SIZE_NOW,
+  },
   inputs: [],
   params: {
     resolution: resolutionParam(),
-    count: { type: 'int', default: 60, min: 0, max: 100000, desc: 'number of blobs', aliases: ['number', 'amount'] },
-    radius: { type: 'vec2', default: [0.02, 0.08], min: 0, desc: 'blob radius range in metres' },
+    count: { type: 'int', default: 60, min: 0, max: 100000, desc: 'number of blobs in the whole image (a count per image: a larger texture_size makes the same blobs bigger, not more of them)', aliases: ['number', 'amount'] },
+    blob_radius: { type: 'vec2', default: [0.02, 0.08], min: 0, desc: 'blob radius range in metres' },
     irregularity: { type: 'float', default: 0.6, min: 0, max: 1, desc: 'ragged outline (0 = discs)', aliases: ['roughness', 'disorder'] },
     softness: { type: 'float', default: 0.4, min: 0, max: 1, desc: 'edge blur as a fraction of the radius', aliases: ['falloff', 'blur'] },
     intensity: { type: 'vec2', default: [0.5, 1], min: 0, desc: 'intensity range of a blob' },
@@ -476,11 +528,11 @@ defineNode({
   },
   usesNodeName: NAMED_BY_NODE,
   outputs: 'image <name> (default: the node name): C grey 0..1',
-  example: { type: 'tex_splatter', params: { resolution: 512, count: 40, radius: [0.03, 0.1], seed: 2 } },
+  example: { type: 'tex_splatter', params: { resolution: 512, count: 40, blob_radius: [0.03, 0.1], seed: 2 } },
   cook: (ctx) => {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
-    const C = genSplatter({ count: p.count, size: [p.radius[0] / p.texture_size, p.radius[1] / p.texture_size], irregularity: p.irregularity, softness: p.softness, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable, add: p.combine === 'add' }, w, h);
+    const C = genSplatter({ count: p.count, size: [p.blob_radius[0] / p.texture_size, p.blob_radius[1] / p.texture_size], irregularity: p.irregularity, softness: p.softness, intensity: [p.intensity[0], p.intensity[1]], seed: p.seed, wrap: !!p.tileable, add: p.combine === 'add' }, w, h);
     return imageGeo(newImage(ctx, w, h).set(MAIN_LAYER, C));
   },
 });
@@ -522,14 +574,19 @@ defineNode({
   summary: 'Text image: a line (or lines) of text from the bundled font (or a named one), filled and antialiased.',
   description: 'Substance: Text. Uses the text node\'s glyph outlines (bundled DejaVu Sans by default, identical on every machine), fits the text block\'s height to `height` metres (shrunk to fit the width of an image texture_size metres wide) and places its centre at `position` (uv). Labels, stencils, decals, serial numbers.',
   aliases: ['text_texture', 'label_texture', 'stencil'],
-  renamed: { size: 'the text height is now height, in metres (a size of 0.2 on a square image is a height of 0.2 times texture_size), and the metres the image width covers are texture_size' },
+  renamed: {
+    size: 'it is now text_height, in metres: size × texture_size × image height / image width (a size of 0.2 on a 512 × 128 image of 1 m is 0.05)',
+    height: 'it is now text_height, in metres: size × texture_size × image height / image width (a size of 0.2 on a 512 × 128 image of 1 m is 0.05)',
+    font_size: 'it is now text_height, in metres: size × texture_size × image height / image width (a size of 0.2 on a 512 × 128 image of 1 m is 0.05)',
+    world_size: SIZE_NOW, tile_size: SIZE_NOW, image_width: SIZE_NOW,
+  },
   inputs: [],
   params: {
     resolution: resolutionParam(),
     text: { type: 'string', default: 'TOPOTOPO', desc: 'text (use \\n for new lines)' },
     font: { type: 'string', default: '', desc: 'font file or family ("" = the bundled DejaVu Sans)' },
     weight: { type: 'float', default: 400, min: 1, max: 1000, desc: 'font weight on the wght axis of a variable font: 100 thin, 400 regular, 700 bold (see the text node; a font without a wght axis is drawn at its own weight)', aliases: ['wght', 'font_weight'] },
-    height: { type: 'float', default: 0.2, min: 1e-5, desc: 'height of the text block in metres (shrunk to fit the width)', aliases: ['font_size'] },
+    text_height: { type: 'float', default: 0.2, min: 1e-5, desc: 'height of the text block in metres (shrunk to fit the width)' },
     position: { type: 'vec2', default: [0.5, 0.5], desc: 'centre of the text in uv', aliases: ['center'] },
     align: { type: 'enum', options: ['left', 'center', 'right'], default: 'center', desc: 'horizontal alignment of lines' },
     texture_size: textureSizeParam(),
@@ -538,7 +595,7 @@ defineNode({
   outputs: 'image <name> (default: the node name): C grey 0..1',
   // it cooks a text node, which reads its font through the scope
   usesNodeName: NAMED_BY_NODE,
-  example: { type: 'tex_text', params: { resolution: [512, 128], text: 'EXIT', height: 0.175 } },
+  example: { type: 'tex_text', params: { resolution: [512, 128], text: 'EXIT', text_height: 0.175 } },
   async cook(ctx) {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
@@ -551,7 +608,7 @@ defineNode({
     const b = g.bbox();
     const tw = b.max[0] - b.min[0], th = b.max[1] - b.min[1];
     // pixels per text unit: the block is `height` metres tall, shrunk to fit 98% of the width
-    const k = Math.min(p.height / img.texel / Math.max(th, 1e-9), (0.98 * w) / Math.max(tw, 1e-9));
+    const k = Math.min(p.text_height / img.texel / Math.max(th, 1e-9), (0.98 * w) / Math.max(tw, 1e-9));
     const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2;
     const ox = p.position[0] * w, oy = (1 - p.position[1]) * h;
     const contours: number[][] = [];
@@ -577,7 +634,7 @@ defineNode({
     'in the tile\'s uv); with tileable the grid continues past the borders, so the field tiles and shapes cut by a ' +
     'border continue on the other side. Panels, plates, rivets, slots, vents, decals. See it with tex_sdf_to_mask.',
   aliases: ['sdf_shape_texture', 'cop_sdfshape', 'shape_sdf', 'distance_shape'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: [],
   params: {
     resolution: resolutionParam(),
@@ -627,7 +684,7 @@ defineNode({
   renamed: {
     scale: 'it is now feature, the size of a feature in metres (features across = texture_size / feature: scale 4 on a 1 m image is feature 0.25)',
     frequency: 'it is now feature, the size of a feature in metres (frequency 4 on a 1 m image is feature 0.25)',
-    size: SIZE_NOW,
+    ...SIZE_KEYS,
   },
   inputs: [],
   params: {
@@ -648,7 +705,9 @@ defineNode({
   cook: (ctx) => {
     const { p, type } = ctx;
     const [w, h] = size2(p, type);
-    const across = p.tileable ? Math.min(256, Math.max(1, Math.round(p.texture_size / p.feature))) : Math.min(256, Math.max(0.1, p.texture_size / p.feature));
+    // at most 256 features across: a smaller feature is clamped, and the result says so
+    if (p.texture_size / p.feature > 256) ctx.warn(`${type}: a feature of ${+p.feature.toPrecision(3)} m on ${+p.texture_size.toPrecision(3)} m is ${Math.round(p.texture_size / p.feature)} across, more than the 256 this node makes: the feature is ${+(p.texture_size / 256).toPrecision(3)} m`);
+    const across = Math.max(0.1, cellsAcross(ctx, 'feature', Math.min(p.texture_size, 256 * p.feature), p.feature, !!p.tileable, 256));
     const C = genGrunge({ style: p.style, scale: across, coverage: p.coverage, contrast: p.contrast, detail: p.detail, seed: p.seed, tileable: !!p.tileable }, w, h);
     return imageGeo(newImage(ctx, w, h).set(MAIN_LAYER, C));
   },
@@ -681,7 +740,7 @@ defineNode({
     srgb: { type: 'bool', default: true, desc: 'the file holds display (sRGB) values: kept as stored, like every colour in the engine (masks and data maps load unchanged too); off = it holds linear-light colour, encoded to display values on load (alpha never)' },
     texture_size: textureSizeParam(),
   },
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   // relative paths read the scope's folder
   usesNodeName: NAMED_BY_NODE,
   signatureExtra: (p, scope) => scope.files.fileStamp(p.path),
@@ -842,14 +901,14 @@ defineNode({
   example: {
     nodes: {
       bricks: { type: 'tex_pattern', params: { resolution: 256 } },
-      out: { type: 'tex_blur', in: ['bricks'], params: { blur: 0.004 } },
+      out: { type: 'tex_blur', in: ['bricks'], params: { blur: 0.0078 } },
     },
     output: 'out',
   },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, w, h, texel, wrap) => [blurLayer(pl[0].data, pl[0].ch, w, h, texels(p.blur, texel, w, h), p.mode, wrap)]);
+    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, r) => [blurRegion(pl[0].data, pl[0].ch, r, texels(p.blur, r.tu, r.w, r.h), texels(p.blur, r.tv, r.w, r.h), p.mode)], { fill: false, skip: (tu, tv) => p.blur / tu < 0.5 && p.blur / tv < 0.5 });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -866,7 +925,7 @@ defineNode({
     'every island of an atlas). Brushed metal: tex_noise {feature: 0.0167} → tex_directional_blur {length: 0.2} → ' +
     'tex_levels. Grey or RGBA (alpha blurs too).',
   aliases: ['directional_blur', 'motion_blur', 'blur_directional', 'anisotropic_blur', 'streak_blur'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: FILTER_INPUT,
   params: {
     length: { type: 'float', default: 0.05, min: 0, desc: 'blur length in metres', aliases: ['distance', 'intensity'] },
@@ -885,7 +944,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, w, h, texel, wrap) => [directionalBlur(pl[0].data, pl[0].ch, w, h, p.length / texel, p.angle, !!p.symmetric, wrap)]);
+    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, r) => [directionalBlur(pl[0].data, pl[0].ch, r.w, r.h, p.length / r.tu, p.angle, !!p.symmetric, r.wrap, r.tu / r.tv, r.own)], { skip: (tu) => p.length / tu < 0.5 });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -903,7 +962,7 @@ defineNode({
     'in metres, so the same at any resolution. Typical: ' +
     'a histogram_scan wear mask slope-blurred by tex_noise for ragged paint edges. Grey or RGBA (alpha is kept).',
   aliases: ['slope_blur', 'slopeblur', 'slope_blur_grayscale', 'flow_blur'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: [
     { name: 'image', desc: 'image to blur (its geometry passes through)' },
     { name: 'slope', desc: 'grey map whose slopes the blur follows (noise, a height)' },
@@ -934,7 +993,9 @@ defineNode({
     const w = s.img.width, h = s.img.height, wrap = !!p.tileable;
     const S = sourceAt(ctx, 1, w, h, p.slope_image, p.slope_layer, wrap, 'slope_image');
     if (!S) throw new NodeError(`${type}: connect a slope map to input 1`, 'a grey image whose slopes the blur follows: tex_noise, tex_grunge, a height');
-    const [out] = runScaled(s.img, [planeOf(s), greyPlane(S)], [s.ch], wrap, (pl, cw, ch, texel, wr) => [slopeBlur(pl[0].data, pl[0].ch, cw, ch, pl[1].data, p.distance / texel, p.samples, p.mode, p.direction === 'uphill', wr)]);
+    // the mean slope of the whole image in value per metre: every island is judged against the same one
+    const facts = slopeFacts(s.img, toGrey(S.data, S.ch), wrap);
+    const [out] = runScaled(s.img, [planeOf(s), greyPlane(S)], [s.ch], wrap, (pl, r) => [slopeBlur(pl[0].data, pl[0].ch, r.w, r.h, pl[1].data, p.distance / r.texel, p.samples, p.mode, p.direction === 'uphill', r.wrap, facts.px ? facts.px.mean : facts.mean * r.texel, r.own)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -947,13 +1008,18 @@ defineNode({
   description:
     'Substance: Warp / Directional Warp / Vector Warp / Non-Uniform Directional Warp / Multi-Directional Warp; Houdini ' +
     'COP: Displace. intensity is the largest offset in metres, so a warp looks the same at any resolution (and on every ' +
-    'island of an atlas). directional moves each pixel by intensity × warp value along ' +
+    'island of an atlas). directional moves each pixel by distance × warp value along ' +
     'angle; slope along the warp image\'s gradient (normalised so the steepest slope moves intensity); vector by ' +
     '(R, G) × 2 − 1 of an RGBA warp image; nonuniform like directional, with the angle map on input 2 (grey 0..1 = ' +
     '0..360°) added to angle per pixel (flow along a pattern: wood grain around knots, fibres, brushed swirls); multi ' +
     'averages `directions` directional warps whose angles split the circle evenly from angle (a soft, direction-free ' +
     'smear: melted edges, worn paint borders).',
   aliases: ['warp', 'directional_warp', 'vector_warp', 'cop_displace', 'distort', 'non_uniform_directional_warp', 'multi_directional_warp'],
+  renamed: {
+    intensity: 'it is now distance, in metres: intensity × texture_size (the old fraction of the image width; 0.02 on a 1 m image is 0.02)',
+    amount: 'it is now distance, in metres: intensity × texture_size (amount was an alias of intensity)',
+    strength: 'it is now distance, in metres: intensity × texture_size (strength was an alias of intensity)',
+  },
   inputs: [
     { name: 'image', desc: 'image to warp (its geometry passes through)' },
     { name: 'warp', desc: 'grey (directional, slope, nonuniform, multi) or RGBA (vector) warp image' },
@@ -961,7 +1027,7 @@ defineNode({
   ],
   params: {
     mode: { type: 'enum', options: WARP_MODES, default: 'slope', desc: 'how the warp image moves pixels', aliases: ['type'] },
-    intensity: { type: 'float', default: 0.02, desc: 'largest offset in metres', aliases: ['amount', 'strength'] },
+    distance: { type: 'float', default: 0.02, desc: 'largest offset in metres' },
     angle: { type: 'float', default: 0, desc: 'directional, nonuniform, multi: direction in degrees (0 = +u)' },
     directions: { type: 'int', default: 4, min: 1, max: 32, desc: 'multi: number of directions averaged' },
     tileable: tileParam(),
@@ -976,7 +1042,7 @@ defineNode({
     nodes: {
       bricks: { type: 'tex_pattern', params: { resolution: 256 } },
       n: { type: 'tex_noise', params: { resolution: 256, feature: 0.25 } },
-      out: { type: 'tex_warp', in: ['bricks', 'n'], params: { mode: 'slope', intensity: 0.03 } },
+      out: { type: 'tex_warp', in: ['bricks', 'n'], params: { mode: 'slope', distance: 0.03 } },
     },
     output: 'out',
   },
@@ -990,7 +1056,9 @@ defineNode({
     if (p.mode === 'nonuniform' && !A) throw new NodeError(`${ctx.type}: mode nonuniform needs an angle map on input 2`, 'a grey image: 0..1 turns the direction by 0..360° (tex_noise for swirls, tex_gradient angular for a vortex); for one direction use mode directional');
     const planes: Plane[] = [planeOf(s), { data: W.data, ch: W.ch }];
     if (A) planes.push({ data: toGrey(A.data, A.ch), ch: 1 });
-    const [out] = runScaled(s.img, planes, [s.ch], !!p.tileable, (pl, cw, ch, texel, wr) => [warpLayer(pl[0].data, pl[0].ch, cw, ch, pl[1].data, pl[1].ch, p.mode, p.intensity / (texel * cw), p.angle, wr, pl[2] ? pl[2].data : null, p.directions)]);
+    // the steepest slope of the whole image in value per metre: the strongest slope moves `distance` on every island
+    const facts = p.mode === 'slope' ? slopeFacts(s.img, toGrey(W.data, W.ch), !!p.tileable) : null;
+    const [out] = runScaled(s.img, planes, [s.ch], !!p.tileable, (pl, r) => [warpLayer(pl[0].data, pl[0].ch, r.w, r.h, pl[1].data, pl[1].ch, p.mode, p.distance / (r.texel * r.w), p.angle, r.wrap, pl[2] ? pl[2].data : null, p.directions, facts ? (facts.px ? facts.px.max : facts.max * r.texel) : 0, r.own)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1000,11 +1068,16 @@ defineNode({
   usesNodeName: NAMED_BY_NODE,
   category: 'texture',
   summary: 'Offset, rotate, scale and tile an image (2D transform with wrap).',
-  description: 'Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by offset (metres of the image: half of its texture_size is half the image); tiling is about the lower-left corner, so cell 0 starts at uv (0, 0) and offset 0 keeps the cells aligned with the image edges. With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.',
+  description: 'Substance: Transformation 2D; Houdini COP: Transform. The content is repeated `tile` times, scaled by `scale` (> 1 enlarges), rotated about the centre and shifted by shift (metres: half of the width of the image in metres is half the image, and along v half of its height in metres); tiling is about the lower-left corner, so cell 0 starts at uv (0, 0) and offset 0 keeps the cells aligned with the image edges. With tileable the source repeats, else the outside is 0. Whole-number tiling and offsets keep a tileable image tileable; other rotations generally do not.',
   aliases: ['transform_texture', 'transformation_2d', 'offset_texture', 'tile_texture', 'cop_transform'],
+  renamed: {
+    offset: 'it is now shift, in metres: offset × texture_size along u and offset × texture_size × height / width along v (the old offset was a fraction of the image)',
+    translate: 'it is now shift, in metres (translate was an alias of offset, a fraction of the image)',
+    t: 'it is now shift, in metres (t was an alias of offset, a fraction of the image)',
+  },
   inputs: FILTER_INPUT,
   params: {
-    offset: { type: 'vec2', default: [0, 0], desc: 'shift in metres (half the image\'s texture_size is half the image)', aliases: ['translate', 't'] },
+    shift: { type: 'vec2', default: [0, 0], desc: 'shift in metres along u and v (half the image\'s width in metres is half the image; v is measured in metres too, so a non-square image is shorter than it is wide)' },
     rotate: { type: 'float', default: 0, desc: 'rotation in degrees (counter-clockwise)', aliases: ['rotation', 'r', 'angle'] },
     scale: { type: 'vec2', default: [1, 1], desc: 'zoom (> 1 enlarges the content)', aliases: ['s', 'zoom'] },
     tile: { type: 'vec2', default: [1, 1], min: 0.001, desc: 'repeats of the content along u and v; cells start at the lower-left corner (uv 0, 0), so [1, 2] gives two stacked cells, each the whole image', aliases: ['tiling', 'repeat'] },
@@ -1021,7 +1094,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    return withLayer(s, transformLayer(s.data, s.ch, s.img.width, s.img.height, [p.offset[0] / s.img.size, p.offset[1] / s.img.size], p.rotate, [p.scale[0], p.scale[1]], [p.tile[0], p.tile[1]], !!p.tileable), outName(ctx));
+    return withLayer(s, transformLayer(s.data, s.ch, s.img.width, s.img.height, [p.shift[0] / s.img.size, p.shift[1] / ((s.img.size * s.img.height) / s.img.width)], p.rotate, [p.scale[0], p.scale[1]], [p.tile[0], p.tile[1]], !!p.tileable), outName(ctx));
   },
 });
 
@@ -1040,7 +1113,7 @@ defineNode({
   aliases: ['edge_detect', 'edges_texture', 'sobel', 'cop_edge'],
   renamed: {
     width: 'it is now grow, the thickening of sobel edges in metres (a width of 1 pixel is texture_size / width); line_width is the width of outline, inner and outer',
-    size: SIZE_NOW,
+    ...SIZE_KEYS,
   },
   inputs: FILTER_INPUT,
   params: {
@@ -1056,17 +1129,17 @@ defineNode({
   example: {
     nodes: {
       bricks: { type: 'tex_pattern', params: { resolution: 256 } },
-      out: { type: 'tex_edge_detect', in: ['bricks'], params: { grow: 0.002 } },
+      out: { type: 'tex_edge_detect', in: ['bricks'], params: { grow: 0.0039 } },
     },
     output: 'out',
   },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, w, h, texel, wrap) => [
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [
       p.mode !== 'sobel'
-        ? edgeBand(maskSDF(pl[0].data, w, h, p.threshold, texel, wrap), p.mode, p.line_width, p.roundness, texel)
-        : edgeDetect(pl[0].data, w, h, p.strength, p.grow / texel, wrap),
+        ? edgeBand(maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect), p.mode, p.line_width, p.roundness, r.tu)
+        : edgeDetect(pl[0].data, r.w, r.h, p.strength, p.grow / r.texel, r.wrap, r.own),
     ]);
     return withLayer(s, out, outName(ctx));
   },
@@ -1330,7 +1403,7 @@ defineNode({
   category: 'texture',
   renamed: {
     strength: 'it is now depth, the relief in metres for a height of 1 (strength k matches depth k/64 on a 1 m image)',
-    size: SIZE_NOW,
+    ...SIZE_KEYS,
   },
   summary: 'Normal map from a height image (Sobel) in physical units (relief depth in metres, texel size from the image): tangent-space RGBA, OpenGL (+Y up) or DirectX (Y down).',
   description:
@@ -1360,7 +1433,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [4], !!p.tileable, (pl, w, h, texel, wrap) => [normalFromHeight(pl[0].data, w, h, p.depth, texel * w, p.format === 'directx', wrap)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [4], !!p.tileable, (pl, r) => [normalFromHeight(pl[0].data, r.w, r.h, p.depth, r.tu * r.w, p.format === 'directx', r.wrap, r.tv, r.own)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1487,7 +1560,7 @@ defineNode({
     '0..1. The stat relief is the height range in metres. Use it for AO and curvature from a baked or downloaded normal ' +
     'map, or to blend normals as heights.',
   aliases: ['height_from_normal', 'normal_to_height', 'normal_integrate', 'cop_normaltoheight'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: FILTER_INPUT,
   params: {
     depth: { type: 'float', default: 0.01, min: 1e-9, desc: 'metres a height value of 1 stands for', aliases: ['height', 'height_scale', 'relief'] },
@@ -1532,7 +1605,7 @@ defineNode({
     'sides 0..1, like bake_curvature: tex_output {layer: "convex"} → tex_histogram_scan gives edge wear, concave gives ' +
     'dirt. Needs a normal map (tex_normal_from_height of a height, bake_normal).',
   aliases: ['curvature_texture', 'curvature_from_normal', 'normal_to_curvature', 'curvature_smooth', 'cop_curvature'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: [{ name: 'normal', desc: 'geometry holding a tangent-space normal map (RGBA); everything else passes through' }],
   params: {
     radius: { type: 'float', default: 0.02, min: 1e-6, desc: 'bend radius in metres that reads full white / black (larger = more contrast)', aliases: ['range', 'intensity'] },
@@ -1553,10 +1626,10 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = normalSource(ctx, source(ctx, 0, p.image, p.layer));
-    const [C, convex, concave] = runScaled(s.img, [planeOf(s)], [1, 1, 1], !!p.tileable, (pl, w, h, texel, wrap) => {
+    const [C, convex, concave] = runScaled(s.img, [planeOf(s)], [1, 1, 1], !!p.tileable, (pl, rg) => {
       // a blur wider than the image changes nothing more (and the box passes' tables grow with the radius)
-      const N = p.blur > 0 ? blurLayer(pl[0].data, 4, w, h, texels(p.blur, texel, w, h), 'gaussian', wrap) : pl[0].data;
-      const r = curvatureFromNormal(N, w, h, texel, p.radius, p.format === 'directx', wrap);
+      const N = p.blur > 0 ? blurLayer(pl[0].data, 4, rg.w, rg.h, texels(p.blur, rg.texel, rg.w, rg.h), 'gaussian', rg.wrap) : pl[0].data;
+      const r = curvatureFromNormal(N, rg.w, rg.h, rg.texel, p.radius, p.format === 'directx', rg.wrap, rg.own);
       return [r.C, r.convex, r.concave];
     });
     return withLayer(s, C, outName(ctx), { convex, concave });
@@ -1570,11 +1643,16 @@ defineNode({
   summary: 'Ambient occlusion of a height image (horizon based): white = open, dark in pits, gaps and mortar.',
   description: 'Substance: Ambient Occlusion (HBAO). For each pixel, `directions` rays march `steps` samples up to radius metres and keep the highest horizon; depth sets how tall a height of 1 is, in metres. For the physical version (a tilted plane stays white) use tex_ao.',
   aliases: ['height_to_ao', 'hbao', 'ao_from_height', 'texture_ao'],
-  renamed: { size: SIZE_NOW },
+  renamed: {
+    ...SIZE_KEYS,
+    radius: 'it is now reach, in metres: radius × texture_size (the old fraction of the image width; 0.05 on a 1 m image is 0.05)',
+    depth: 'it is now relief_depth, in metres: depth × texture_size (the old height in image widths; 0.05 on a 1 m image is 0.05)',
+    height_depth: 'it is now relief_depth, in metres: depth × texture_size (height_depth was an alias of depth, in image widths)',
+  },
   inputs: FILTER_INPUT,
   params: {
-    radius: { type: 'float', default: 0.05, min: 1e-6, desc: 'search radius in metres' },
-    depth: { type: 'float', default: 0.05, min: 0, desc: 'height of a value of 1 in metres (larger = deeper shadows)', aliases: ['height_depth'] },
+    reach: { type: 'float', default: 0.05, min: 1e-6, desc: 'search radius in metres' },
+    relief_depth: { type: 'float', default: 0.05, min: 0, desc: 'height of a value of 1 in metres (larger = deeper shadows)' },
     directions: { type: 'int', default: 8, min: 1, max: 32, desc: 'directions per pixel', aliases: ['dirs'] },
     steps: { type: 'int', default: 6, min: 1, max: 64, desc: 'samples along each direction' },
     tileable: tileParam(),
@@ -1583,14 +1661,14 @@ defineNode({
   example: {
     nodes: {
       bricks: { type: 'tex_pattern', params: { resolution: 256 } },
-      out: { type: 'tex_height_to_ao', in: ['bricks'], params: { radius: 0.03, name: 'brick_ao' } },
+      out: { type: 'tex_height_to_ao', in: ['bricks'], params: { reach: 0.03, name: 'brick_ao' } },
     },
     output: 'out',
   },
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, w, h, texel, wrap) => [heightToAO(pl[0].data, w, h, p.radius / (texel * w), p.depth / (texel * w), p.directions, p.steps, wrap)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [heightToAO(pl[0].data, r.w, r.h, p.reach / (r.texel * r.w), p.relief_depth / (r.texel * r.w), p.directions, p.steps, r.wrap, r.own)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1609,7 +1687,7 @@ defineNode({
     'shadow) a tilted plane stays white and the result does not change with the resolution. strength scales the ' +
     'darkening (1 = as measured). More directions and steps = smoother, slower.',
   aliases: ['ao_texture', 'gtao', 'height_ao', 'ambient_occlusion_texture', 'cop_ambientocclusion'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: FILTER_INPUT,
   params: {
     radius: { type: 'float', default: 0.05, min: 1e-6, desc: 'how far occluders count, in metres', aliases: ['distance', 'search_radius'] },
@@ -1630,7 +1708,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [ao] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, w, h, texel, wrap) => [heightAO(pl[0].data, w, h, { texel, depth: p.depth, radius: p.radius, directions: p.directions, steps: p.steps, strength: p.strength, wrap })]);
+    const [ao] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [heightAO(pl[0].data, r.w, r.h, { texel: r.texel, depth: p.depth, radius: p.radius, directions: p.directions, steps: p.steps, strength: p.strength, wrap: r.wrap, act: r.own })]);
     return withLayer(s, ao, outName(ctx));
   },
 });
@@ -1681,6 +1759,7 @@ defineNode({
     const found = [0, 1, 2, 3].filter((i) => ctx.hasInput(i)).map((i) => ({ i, img: source(ctx, i, '', '', '').img }));
     const ref = found.reduce((a, b) => (b.img.width * b.img.height > a.img.width * a.img.height ? b : a)).img;
     const w = ref.width, h = ref.height, n = w * h;
+    for (const f of found) if (Math.abs(f.img.size / ref.size - 1) > 0.01) ctx.warn(`${type}: input ${f.i} "${f.img.name}" covers ${+f.img.size.toPrecision(4)} m, the largest input "${ref.name}" ${+ref.size.toPrecision(4)} m; the packed map takes the largest input's size`);
     for (const f of found) if (f.img.width !== w || f.img.height !== h) ctx.warn(`${type}: input ${f.i} "${f.img.name}" is ${f.img.width} × ${f.img.height}, the largest is ${w} × ${h}; it is resized`);
     const out = new Float32Array(n * 4);
     for (let c = 0; c < 4; c++) {
@@ -1733,7 +1812,7 @@ defineNode({
     'the stamps), both taken from the strongest instance at a pixel, with the grey stamps in layer "mask" (tex_colorize ' +
     'an id for a palette, or tex_blend a colour over a base: its alpha masks it).',
   aliases: ['tile_sampler', 'tilesampler', 'scatter_texture', 'stamp_scatter'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: [
     { name: 'pattern', desc: 'image to scatter (e.g. tex_shape); with stamps random, every image here' },
     { name: 'mask', desc: 'grey mask: probability of a cell keeping its instance', optional: true },
@@ -1743,7 +1822,7 @@ defineNode({
   ],
   params: {
     resolution: resolutionParam(),
-    count: { type: 'ivec2', default: [8, 8], min: 1, max: 1024, desc: 'grid cells along u and v (one instance each)', aliases: ['tiles', 'x_y_amount'] },
+    count: { type: 'ivec2', default: [8, 8], min: 1, max: 1024, desc: 'grid cells along u and v of the whole image (one instance each): a count per image, so a larger texture_size makes the instances bigger, not more', aliases: ['tiles', 'x_y_amount'] },
     scale: { type: 'vec2', default: [0.8, 1], min: 0, desc: 'instance size range relative to a cell', aliases: ['instance_size'] },
     rotation: { type: 'float', default: 180, min: 0, max: 180, desc: 'random rotation ± degrees', aliases: ['rotation_random'] },
     jitter: { type: 'float', default: 0.5, min: 0, max: 2, desc: 'random position offset (fraction of a cell)', aliases: ['position_random'] },
@@ -1819,7 +1898,7 @@ defineNode({
     'distances are measured across the borders. A mask without any outline (all inside or all outside) gives ± the ' +
     'image\'s width + height in texels. Feed tex_sdf_op, tex_sdf_boolean and tex_sdf_to_mask.',
   aliases: ['sdf_from_mask', 'mask_to_sdf', 'sdf_from_mono', 'cop_sdffrommono', 'distance_field'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: FILTER_INPUT,
   params: {
     threshold: thresholdParam(),
@@ -1829,7 +1908,7 @@ defineNode({
   outputs: 'the SDF (grey, metres, negative inside) named <name> (default: the node name)',
   example: {
     nodes: {
-      word: { type: 'tex_text', params: { resolution: [256, 128], text: 'SDF', height: 0.15 } },
+      word: { type: 'tex_text', params: { resolution: [256, 128], text: 'SDF', text_height: 0.3 } },
       sdf: { type: 'tex_sdf_from_mask', in: ['word'], params: { tileable: false } },
     },
     output: 'sdf',
@@ -1837,7 +1916,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, w, h, texel, wrap) => [maskSDF(pl[0].data, w, h, p.threshold, texel, wrap)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1854,7 +1933,7 @@ defineNode({
     'frames from boxes, then tex_sdf_to_mask); invert swaps inside and outside; redistance measures the distance ' +
     'to the outline again after smooth booleans or a morph. Distances are in metres.',
   aliases: ['sdf_op', 'sdf_operation', 'sdf_texture_offset', 'cop_sdfoffset', 'sdf_round'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: SDF_INPUT,
   params: {
     mode: { type: 'enum', options: SDF_OPS, default: 'offset', desc: 'operation', aliases: ['operation', 'type'] },
@@ -1874,7 +1953,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, w, h, texel, wrap) => [sdfOp(pl[0].data, w, h, p.mode, p.amount, texel, wrap)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [sdfOp(pl[0].data, r.w, r.h, p.mode, p.amount, r.texel, r.wrap)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1936,7 +2015,7 @@ defineNode({
     'metres inside: a height for tex_normal_from_height. distance: 0.5 on the outline, 1 at width metres inside, 0 at ' +
     'width outside (the usual encoding of distance-field textures for decals and text in shaders).',
   aliases: ['sdf_to_mask', 'sdf_to_mono', 'sdf_render', 'cop_sdftomono', 'sdf_fill'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: SDF_INPUT,
   params: {
     mode: { type: 'enum', options: SDF_RENDER, default: 'fill', desc: 'what to draw', aliases: ['type', 'output'] },
@@ -1958,7 +2037,7 @@ defineNode({
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
     const prof = profileFn(p.profile, (t) => Number(evalRamp(p.ramp, t)));
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], false, (pl, w, h, texel) => [sdfToMask(pl[0].data, p.mode, p.width, p.softness, texel, prof)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], false, (pl, r) => [sdfToMask(pl[0].data, p.mode, p.width, p.softness, r.texel, prof)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1976,7 +2055,7 @@ defineNode({
     'sharp, outer corners of an outward bevel round off. Feed tex_normal_from_height and ' +
     'tex_curvature or tex_ao.',
   aliases: ['bevel_texture', 'texture_bevel', 'cop_bevel', 'mask_bevel', 'chamfer_texture'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: FILTER_INPUT,
   params: {
     distance: { type: 'float', default: 0.02, desc: 'bevel width in metres (> 0 inward, < 0 outward)', aliases: ['width', 'bevel_width'] },
@@ -1998,7 +2077,7 @@ defineNode({
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
     const prof = profileFn(p.profile, (t) => Number(evalRamp(p.ramp, t)));
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, w, h, texel, wrap) => [bevelHeight(maskSDF(pl[0].data, w, h, p.threshold, texel, wrap), p.distance, prof, texel)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [bevelHeight(maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect), p.distance, prof, r.tu)]);
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -2016,7 +2095,7 @@ defineNode({
     'padding in metres; layer "mask" holds the gradient or grown mask. Distances in metres, so the same at any ' +
     'resolution (and on every island of an atlas, never across its border); with tileable they cross the borders.',
   aliases: ['distance_texture', 'grow_mask', 'mask_distance', 'mask_grow', 'expand_mask'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: [
     { name: 'mask', desc: 'grey mask to grow (its geometry passes through)' },
     { name: 'source', desc: 'optional: an image whose values are carried out from the mask', optional: true },
@@ -2047,8 +2126,9 @@ defineNode({
     const src = sourceAt(ctx, 1, w0, h0, p.source_image, p.source_layer, wrap0, 'source_image');
     const planes: Plane[] = [greyPlane(s)];
     if (src) planes.push({ data: src.data, ch: src.ch });
-    const [C, mask] = runScaled(s.img, planes, [src ? src.ch : 1, 1], wrap0, (pl, w, h, texel, wrap) => {
-      const d = maskSDF(pl[0].data, w, h, p.threshold, texel, wrap);
+    const [C, mask] = runScaled(s.img, planes, [src ? src.ch : 1, 1], wrap0, (pl, r) => {
+      const { w, h, tu: texel, wrap } = r;
+      const d = maskSDF(pl[0].data, w, h, p.threshold, texel, wrap, r.aspect);
       const m = new Float32Array(w * h);
       for (let k = 0; k < m.length; k++) {
         const x = d[k];
@@ -2056,7 +2136,7 @@ defineNode({
       }
       if (!pl[1]) return [m, m];
       const inside = Uint8Array.from(d, (x) => (x <= 0 ? 1 : 0));
-      return [propagate(pl[1].data, pl[1].ch, inside, w, h, D / texel, wrap), m];
+      return [propagate(pl[1].data, pl[1].ch, inside, w, h, D / texel, wrap, r.aspect), m];
     });
     if (!src) return withLayer(s, mask, outName(ctx));
     return withLayer(s, C, outName(ctx), { mask });
@@ -2078,7 +2158,7 @@ defineNode({
     'from each tile\'s centre (area-weighted with its antialiased edge), so they stay with the tile whatever the ' +
     'resolution or the order tiles are found in. The gaps are 0. Stat tiles = the number of tiles.',
   aliases: ['flood_fill', 'floodfill', 'flood_fill_to_random', 'flood_fill_to_color', 'flood_fill_to_gradient', 'tile_id', 'connected_components'],
-  renamed: { size: SIZE_NOW },
+  renamed: SIZE_KEYS,
   inputs: FILTER_INPUT,
   params: {
     output: { type: 'enum', options: FLOOD_OUTPUTS, default: 'random', desc: 'what each tile gets in C', aliases: ['mode', 'type'] },
@@ -2102,14 +2182,14 @@ defineNode({
     const { p, type } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
     let tiles = 0;
-    const [C, id] = runScaled(s.img, [greyPlane(s)], [p.output === 'color' || p.output === 'position' ? 4 : 1, 1], !!p.tileable, (pl, w, h, texel, wrap) => {
-      const r = floodFill(pl[0].data, w, h, {
+    const [C, id] = runScaled(s.img, [greyPlane(s)], [p.output === 'color' || p.output === 'position' ? 4 : 1, 1], !!p.tileable, (pl, rg) => {
+      const r = floodFill(pl[0].data, rg.w, rg.h, {
         threshold: p.threshold, connectivity: Number(p.connectivity), output: p.output, angle: p.angle, angleRandom: p.angle_random,
-        seed: p.seed, wrap, texel,
+        seed: p.seed, wrap: rg.wrap, texel: rg.texel, frame: { x0: rg.x0, y0: rg.y0, width: rg.fullW, height: rg.fullH }, act: rg.own,
       });
       tiles += r.tiles;
       return [r.C, r.id];
-    });
+    }, { fill: false });
     ctx.stat('tiles', tiles);
     if (!tiles) ctx.warn(`${type}: no pixel of "${s.img.name}" reaches threshold ${p.threshold}: no tiles`);
     return withLayer(s, C, outName(ctx), { id });
@@ -2297,6 +2377,8 @@ defineNode({
       const out = new Float32Array(n * 4);
       for (let i = 0; i < n; i++) { out[i * 4] = O ? O[i] : 1; out[i * 4 + 1] = R ? R[i] : rv ?? entry.roughness; out[i * 4 + 2] = M ? M[i] : mv ?? entry.metallic; out[i * 4 + 3] = 1; }
       const orm = new Image(w, h, `${mat}_orm`).set(MAIN_LAYER, out);
+      orm.size = ref.size;
+      for (const l of ['texel', 'island']) { const a = ref.layer(l); if (a && ref.width === w && ref.height === h) orm.set(l, a); }
       used.push(orm);
       tex.orm = `image:${orm.name}`;
       delete tex.roughness;
@@ -2335,9 +2417,10 @@ defineNode({
   summary: 'Bridge: an image (grey or luminance) becomes a heightfield of the same sample count (u → +X, v → −Z).',
   description: 'Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. size sets the extent in metres along X (Z follows the image aspect). Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.',
   aliases: ['image_to_heightfield', 'texture_to_heightfield', 'tex2hf'],
+  renamed: { size: 'it is now extent, in metres (0, the default, = the metres the image covers; it was 20 when not given)' },
   inputs: FILTER_INPUT,
   params: {
-    size: { type: 'float', default: 20, min: 0.001, desc: 'extent along X in metres' },
+    extent: { type: 'float', default: 0, min: 0, desc: 'extent along X in metres (0 = the metres the image covers: its size)' },
     height_scale: { type: 'float', default: 1, desc: 'metres per unit of image value', aliases: ['amplitude'] },
     height_offset: { type: 'float', default: 0, desc: 'added height (metres)' },
     center: P.center(),
@@ -2348,7 +2431,7 @@ defineNode({
   example: {
     nodes: {
       n: { type: 'tex_noise', params: { resolution: 129, fractal: 'ridged', feature: 0.33 } },
-      hf: { type: 'tex_to_heightfield', in: ['n'], params: { size: 40, height_scale: 6 } },
+      hf: { type: 'tex_to_heightfield', in: ['n'], params: { extent: 40, height_scale: 6 } },
     },
     output: 'hf',
   },
@@ -2357,7 +2440,7 @@ defineNode({
     const s = source(ctx, 0, p.image, p.layer);
     const w = s.img.width, h = s.img.height;
     if (w < 2 || h < 2) throw new NodeError(`${type}: a heightfield needs at least 2 × 2 samples (image is ${w} × ${h})`);
-    const cell = p.size / (w - 1);
+    const cell = (p.extent > 0 ? p.extent : s.img.size) / (w - 1);
     const hf = new Heightfield(w, h, cell, [p.center[0] - ((w - 1) * cell) / 2, p.center[2] - ((h - 1) * cell) / 2], undefined, s.img.name);
     const gr = toGrey(s.data, s.ch);
     const ln = String(p.layer_name || 'height');

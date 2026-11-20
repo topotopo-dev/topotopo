@@ -12,6 +12,9 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
 import { P, mask, simBudget } from './util.ts';
+import { bakedImageSize } from '../core/texelsize.ts';
+import { texelLayers } from './bake.ts';
+import type { Bake } from './bake.ts';
 import { NAMED_BY_NODE, imageGeo, nameParam, outName, resolutionParam, size2 } from './texture.ts';
 
 /** Most samples a bake may rasterise (output texels × supersample²), as in the other bakes. */
@@ -144,7 +147,7 @@ function cook(ctx: CookContext): Geometry {
     if (k >= 0 && C[k] > 0) { data[t * NL + 1] = along[k]; data[t * NL + 2] = strength[k]; data[t * NL + 4] = id[k]; }
   }
   const img = new Image(W, H, outName(ctx));
-  img.size = fallback * W; // the median texel size of the baked triangles, as the other bakes write it
+  img.size = bakedImageSize(pos, uv, tris, W, H, skip); // as every bake
   const pad = Math.max(0, Math.round(p.padding));
   dilate(data, NL, W, H, first.coverage, pad, [0, 0, 0, 0, 0]);
   // channel order in `data`: C, along, strength, head, id
@@ -153,6 +156,12 @@ function cook(ctx: CookContext): Geometry {
     for (let i = 0; i < out.length; i++) out[i] = data[i * NL + c];
     img.set(name === 'C' ? MAIN_LAYER : name, out);
   });
+  // texel sizes and islands, as every bake writes them
+  const tl = texelLayers({ s, uv, tris, g } as unknown as Bake, pos);
+  const T = resolve(s, tl.texel.vals, 4).data, I = resolve(s, tl.island.vals, 1).data;
+  dilate(T, 4, W, H, first.coverage, pad, tl.texel.background);
+  dilate(I, 1, W, H, first.coverage, pad, tl.island.background);
+  img.set('texel', T).set('island', I);
   img.set('mask', first.coverage);
   let covered = 0;
   for (let i = 0; i < first.coverage.length; i++) if (first.coverage[i] > 0) covered++;
