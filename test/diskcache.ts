@@ -155,7 +155,7 @@ try {
     g.vertexGroups.set('v', Uint8Array.from({ length: g.numVertices }, (_, i) => i % 2));
     g.edgeGroups.set('e', new EdgeSet([[3, 0], [2, 1], [4, 1]]));
     const covered = new Image(2, 2, 'img', new Map([['C', Float32Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])], ['mask', Float32Array.from([0, 1, 0, NaN])]]));
-    covered.size = 0.37; // the metres its width covers: kept bit for bit like a layer
+    covered.setSize(0.37); // the metres its width covers, and that they were stated: kept bit for bit like a layer
     g.volumes.push(covered);
     g.volumes.push(new Heightfield(3, 2, 0.5, [-0, 1.5], new Map([['height', Float32Array.from([0, 1, 2, 3, 4, 5])]]), 'terrain'));
     g.volumes.push(new SdfGrid([2, 2, 2], [-0, 0, 1], 0.25, Float32Array.from([-Infinity, -0, 0.5, Infinity, 1, 2, 3, 4]), 'sdf'));

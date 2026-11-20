@@ -147,6 +147,32 @@ section('islands of different texel sizes: a length in metres is the same on eac
   check(Math.abs(red(CX[0]) - red(CX[1])) < 1e-4 && red(CX[0]) < 0.5, `height to normal: the same tilt on both islands (red ${red(CX[0]).toFixed(5)} and ${red(CX[1]).toFixed(5)})`);
 }
 
+section('an island is skipped only when the filter would return it unchanged');
+{
+  // content with structure on every island, so any filter that does something shows
+  const wavy = (i: number, j: number, isl: number) => 0.5 + 0.4 * Math.sin(i * 0.9 + isl) * Math.cos(j * 0.7);
+  sources.set('wavy', atlas(wavy));
+  const changed = (a: Float32Array, b: Float32Array, isl: number) => { let m = 0; for (let j = 0; j < AH; j++) for (let i = isl * 128; i < isl * 128 + 128; i++) m = Math.max(m, Math.abs(a[j * AW + i] - b[j * AW + i])); return m; };
+  const base = sources.get('wavy')!.layer('C')!;
+  // a directional blur of 0.4 texel still takes two samples and changes the values, on an atlas as without one
+  const db = await image({ ...src('wavy'), f: { type: 'tex_directional_blur', in: ['s'], params: { length: 0.0008, angle: 0, tileable: false } } }, 'f');
+  const plain = new Image(AW, AH, 'p'); plain.set('C', base.slice()); plain.size = T0 * AW; sources.set('plain', plain);
+  const dbp = await image({ ...src('plain'), f: { type: 'tex_directional_blur', in: ['s'], params: { length: 0.0008, angle: 0, tileable: false } } }, 'f');
+  check(changed(db.layer('C')!, base, 0) > 0.01 && changed(dbp.layer('C')!, base, 0) > 0.01, `a directional blur of 0.4 texel changes the fine island (${f3(changed(db.layer('C')!, base, 0))}), as it does without islands (${f3(changed(dbp.layer('C')!, base, 0))})`);
+  // a box blur is one pass of at least a texel
+  const bb = await image({ ...src('wavy'), f: { type: 'tex_blur', in: ['s'], params: { blur: 0.0004, mode: 'box', tileable: false } } }, 'f');
+  check(changed(bb.layer('C')!, base, 0) > 0.05, `a box blur of 0.2 texel is still one pass of a texel (changes the fine island by ${f3(changed(bb.layer('C')!, base, 0))})`);
+  // a gaussian blur below half a texel does change nothing, and an island is passed over
+  const gb = await image({ ...src('wavy'), f: { type: 'tex_blur', in: ['s'], params: { blur: 0.0004, tileable: false } } }, 'f');
+  check(changed(gb.layer('C')!, base, 0) === 0, 'a gaussian blur of 0.2 texel changes nothing (the box passes round to 0)');
+  // a dilate reaching 3 rows but under a column: texels of 2 mm by 0.5 mm
+  sources.set('valid-thin', atlas(impulse, true, 0.0005, 0.0005));
+  const dl = await image({ ...src('valid-thin'), f: { type: 'tex_dilate', in: ['s'], params: { distance: 0.0015 } } }, 'f');
+  let rows = 0;
+  for (let j = 0; j < AH; j++) if (dl.layer('C')![(j * AW + CX[0]) * 4] > 0) rows++;
+  check(rows >= 5, `a dilate of 1.5 mm on texels 2 mm wide and 0.5 mm tall reaches along v (${rows} rows), though it is under a column`);
+}
+
 section('texels that are not square: a circle in metres');
 {
   // 2 mm along u and 1 mm along v on the left island, 8 and 2 mm on the right
@@ -253,6 +279,76 @@ const SCENE = (r: number): Nodes => ({
   await gen('grunge, feature 0.4 m on 3.2 m', (r) => ({ type: 'tex_grunge', params: { resolution: r, feature: 0.4, texture_size: 3.2 } }), 0.03);
 }
 
+// ---------------------------------------------------------------- background and gutter
+
+section('the background takes the neutral value of the filter and a gutter holds the own edge values of its island');
+{
+  const r = 256, pad = 4;
+  const nodes = SCENE(r);
+  const check1 = async (label: string, extra: Nodes, node: NodeSpec, neutral: number[]) => {
+    const out = await image({ ...nodes, ...extra, f: node }, 'f');
+    const ch = out.channels('C'), a = out.layer('C')!, isl = out.layer('island')!, cov = out.layer('mask')!;
+    let bgN = 0, bgBad = 0, gutN = 0, gutBad = 0;
+    for (let j = 0; j < r; j++)
+      for (let i = 0; i < r; i++) {
+        const k = j * r + i;
+        if (isl[k] < 0) { bgN++; for (let c = 0; c < ch; c++) if (Math.abs(a[k * ch + c] - neutral[c % neutral.length]) > 1e-6) { bgBad++; break; } continue; }
+        if (cov[k] > 0 || gutN > 600) continue;
+        // a gutter texel equals a covered texel of its island within the padding
+        gutN++;
+        let found = false;
+        for (let dj = -pad - 1; dj <= pad + 1 && !found; dj++) for (let di = -pad - 1; di <= pad + 1 && !found; di++) {
+          const x = i + di, y = j + dj;
+          if (x < 0 || y < 0 || x >= r || y >= r) continue;
+          const q = y * r + x;
+          if (isl[q] !== isl[k] || !(cov[q] > 0)) continue;
+          let same2 = true;
+          for (let c = 0; c < ch; c++) if (Math.abs(a[q * ch + c] - a[k * ch + c]) > 1e-6) same2 = false;
+          if (same2) found = true;
+        }
+        if (!found) gutBad++;
+      }
+    check(bgN > 100 && gutN > 100 && !bgBad && !gutBad, `${label}: ${bgN} background texels all ${neutral.join(', ')}; ${gutN} gutter texels each hold a covered texel of their island (${bgBad} and ${gutBad} wrong)`);
+  };
+  await check1('height to normal', { bl: { type: 'tex_blur', in: ['smooth'], params: { blur: 0.03 } } }, { type: 'tex_normal_from_height', in: ['bl'], params: { depth: 0.02 } }, [0.5, 0.5, 1, 1]);
+  await check1('curvature', { bl: { type: 'tex_blur', in: ['smooth'], params: { blur: 0.04 } }, nm: { type: 'tex_normal_from_height', in: ['bl'], params: { depth: 0.02 } } }, { type: 'tex_curvature', in: ['nm'], params: { radius: 0.05 } }, [0.5]);
+  await check1('ao', { bl: { type: 'tex_blur', in: ['smooth'], params: { blur: 0.02 } } }, { type: 'tex_ao', in: ['bl'], params: { radius: 0.05, depth: 0.02, directions: 4, steps: 4 } }, [1]);
+  await check1('height to ao', { bl: { type: 'tex_blur', in: ['smooth'], params: { blur: 0.02 } } }, { type: 'tex_height_to_ao', in: ['bl'], params: { reach: 0.05, relief_depth: 0.02, directions: 4, steps: 4 } }, [1]);
+  await check1('edge detect (sobel)', {}, { type: 'tex_edge_detect', in: ['smooth'], params: { mode: 'sobel' } }, [0]);
+  await check1('bevel', {}, { type: 'tex_bevel', in: ['hard'], params: { distance: 0.03 } }, [0]);
+}
+
+section('a gutter is padding: it is not surface to a blur or a distance, and a concave island has no outline in its notch');
+{
+  // two items in an atlas with a black gutter: a blur must not pull the gutter's black into the item's edge
+  const pk = await cook({
+    a: { type: 'tex_constant', params: { resolution: 24, value: 0.8, name: 'a' } },
+    m: { type: 'merge', in: ['a'] },
+    p: { type: 'tex_pack', in: ['m'], params: { resolution: 64, padding: 8, name: 'atl' } },
+    f: { type: 'tex_blur', in: ['p'], params: { blur: 0.2, tileable: false } },
+  }, 'f');
+  const b = findImage(pk, 'f')!, v = b.layer('C')!;
+  let min = 1, max = 0;
+  for (let k = 0; k < 64 * 64; k++) if (b.layer('mask')![k] > 0) { min = Math.min(min, v[k]); max = Math.max(max, v[k]); }
+  check(min > 0.799 && max < 0.801, `a blur of a packed item stays 0.8 up to its edge (${min.toFixed(4)} .. ${max.toFixed(4)}), the gutter's black is not pulled in`);
+  // an L-shaped island: a plane has the same slope everywhere, with no spike where the notch is
+  const W = 64, H = 64, img = new Image(W, H, 'L');
+  const C = new Float32Array(W * H), texel = new Float32Array(W * H * 4), island = new Float32Array(W * H).fill(-1), mask = new Float32Array(W * H);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const k = j * W + i, inL = (i < 40 && j < 56 && !(i >= 16 && j < 28 && i < 40 && j >= 8)) || false;
+    if (i < 40 && j < 56) { island[k] = 0; mask[k] = !(i >= 16 && j >= 8 && j < 28) ? 1 : 0; }
+    C[k] = 0.3 + 0.01 * i + 0.004 * j; texel[k * 4] = texel[k * 4 + 1] = 0.01; texel[k * 4 + 3] = 1;
+    void inL;
+  }
+  img.set('C', C).set('texel', texel).set('island', island).set('mask', mask); img.size = 0.64;
+  sources.set('L', img);
+  const sb = await image({ ...src('L'), f: { type: 'tex_edge_detect', in: ['s'], params: { mode: 'sobel', tileable: false } } }, 'f');
+  let top = 0, interior = 0;
+  for (let k = 0; k < W * H; k++) if (mask[k] > 0) { top = Math.max(top, sb.layer('C')![k]); }
+  interior = sb.layer('C')![30 * W + 4];
+  check(top < interior * 1.2 + 1e-4, `sobel on an L-shaped island: the steepest texel is ${top.toFixed(4)}, the plane's own is ${interior.toFixed(4)}: no outline in the notch`);
+}
+
 // ---------------------------------------------------------------- flood fill on an atlas
 
 section('flood fill on an atlas: positions and values in the whole image, tiles counted once');
@@ -261,19 +357,19 @@ section('flood fill on an atlas: positions and values in the whole image, tiles 
   const g = await cookAll({ ...SCENE(r), f: { type: 'tex_flood_fill', in: ['hard'], params: { output: 'position' } } }, 'f');
   const randomGeo = await cook({ ...SCENE(r), v: { type: 'tex_flood_fill', in: ['hard'], params: { output: 'random' } } }, 'v');
   const fill = findImage(g.geo, 'f')!, hard = await image(SCENE(r), 'hard');
-  const isl = hard.layer('island')!, m = hard.layer('C')!, P = fill.layer('C')!;
+  const isl = hard.layer('island')!, m = hard.layer('C')!, P = fill.layer('C')!, cov = hard.layer('mask')!;
   // components of the mask inside each island, labelled by hand
   const label = new Int32Array(r * r).fill(-1);
   let tiles = 0;
   const stats: { sx: number; sy: number; n: number; isl: number }[] = [];
   for (let s = 0; s < r * r; s++) {
-    if (label[s] >= 0 || !(m[s] >= 0.5) || isl[s] < 0) continue;
+    if (label[s] >= 0 || !(m[s] >= 0.5) || isl[s] < 0 || !(cov[s] > 0)) continue;
     const q = [s]; label[s] = tiles;
     const T = { sx: 0, sy: 0, n: 0, isl: isl[s] };
     while (q.length) {
       const k = q.pop()!, x = k % r, y = (k - x) / r;
       T.sx += x + 0.5; T.sy += y + 0.5; T.n++;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= r || ny >= r) continue; const o = ny * r + nx; if (label[o] < 0 && m[o] >= 0.5 && isl[o] === T.isl) { label[o] = tiles; q.push(o); } }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= r || ny >= r) continue; const o = ny * r + nx; if (label[o] < 0 && m[o] >= 0.5 && isl[o] === T.isl && cov[o] > 0) { label[o] = tiles; q.push(o); } }
     }
     stats.push(T); tiles++;
   }
@@ -480,12 +576,35 @@ section('the size and the layers follow the image');
   // a heightfield made into an image covers its extent
   const hfNodes: Nodes = { hf: { type: 'heightfield', params: { size: [10, 10], resolution: 0.5 } }, t: { type: 'heightfield_to_tex', in: ['hf'] } };
   const field = heightfieldsOf(await cook(hfNodes, 'hf'))[0], hfImage = await image(hfNodes, 't');
-  check(Math.abs(hfImage.size - field.width * field.cellSize) < 1e-9 && hfImage.size > 5, `a heightfield image covers the heightfield's width (${hfImage.size} m for ${field.width} samples of ${field.cellSize} m)`);
+  check(Math.abs(hfImage.size - (field.width - 1) * field.cellSize) < 1e-9 && hfImage.size > 5, `a heightfield image covers the heightfield's extent (${hfImage.size} m for ${field.width} samples of ${field.cellSize} m)`);
+  const trip = heightfieldsOf(await cook({ ...hfNodes, back: { type: 'tex_to_heightfield', in: ['t'] }, again: { type: 'heightfield_to_tex', in: ['back'], params: { name: 'again' } }, back2: { type: 'tex_to_heightfield', in: ['again'] } }, 'back2'))[0];
+  check(trip.width === field.width && trip.cellSize === field.cellSize, `a round trip heightfield, image, heightfield, image, heightfield keeps the cell exactly (${field.cellSize} m, then ${trip.cellSize} m)`);
+  const refuse = await err({ n: { type: 'tex_noise', params: { resolution: 33 } }, h: { type: 'tex_to_heightfield', in: ['n'] } }, 'h');
+  check(/extent/.test(refuse) && /does not say/.test(refuse) && /texture_size/.test(refuse), 'tex_to_heightfield refuses an image of no stated size and says what to set: ' + refuse.slice(0, 120));
   const th = heightfieldsOf(await cook({ n: { type: 'tex_noise', params: { resolution: 33, texture_size: 3 } }, h: { type: 'tex_to_heightfield', in: ['n'] } }, 'h'))[0];
   check(Math.abs((th.width - 1) * th.cellSize - 3) < 1e-9, `tex_to_heightfield reads the image's size (${(th.width - 1) * th.cellSize} m)`);
   const tr = await cook({ s: { type: 'tex_shape', params: { resolution: [64, 32], shape: 'disc', falloff: 0, texture_size: 3 } }, t: { type: 'trace_image', in: ['s'], params: { channel: 'luminance' } } }, 't');
   const bb = tr.bbox();
   check(bb.max[0] - bb.min[0] > 1.5 && bb.max[0] - bb.min[0] <= 3, `trace_image reads the image's size (a disc ${f3(bb.max[0] - bb.min[0])} m wide on a 3 m image)`);
+  // a size is stated when the graph set texture_size (1 included) or a bake, a heightfield, a pack or a file says it; the default says nothing
+  const hfOf = async (params: Record<string, any>) => heightfieldsOf(await cook({ n: { type: 'tex_noise', params: { resolution: 33, ...params } }, h: { type: 'tex_to_heightfield', in: ['n'] } }, 'h'))[0];
+  const one = await hfOf({ texture_size: 1 }), twenty = await hfOf({ texture_size: 20 });
+  check(Math.abs((one.width - 1) * one.cellSize - 1) < 1e-9, `texture_size 1 set on the generator is stated: tex_to_heightfield gives ${(one.width - 1) * one.cellSize} m, not a refusal`);
+  check(Math.abs((twenty.width - 1) * twenty.cellSize - 20) < 1e-9, `texture_size 20 gives ${(twenty.width - 1) * twenty.cellSize} m`);
+  const blurred = heightfieldsOf(await cook({ n: { type: 'tex_noise', params: { resolution: 33, texture_size: 1 } }, b: { type: 'tex_blur', in: ['n'] }, c: { type: 'tex_crop', in: ['b'], params: { origin: [0, 0], size: [17, 17] } }, m: { type: 'tex_blend', in: ['c', 'c'] }, h: { type: 'tex_to_heightfield', in: ['m'] } }, 'h'))[0];
+  check(Math.abs((blurred.width - 1) * blurred.cellSize - 17 / 33) < 1e-9, `the stated size survives a blur, a crop and a blend (${(blurred.width - 1) * blurred.cellSize} m for 17 of 33 pixels of 1 m)`);
+  const unstated = await err({ n: { type: 'tex_noise', params: { resolution: 33 } }, b: { type: 'tex_blur', in: ['n'] }, h: { type: 'tex_to_heightfield', in: ['b'] } }, 'h');
+  check(/does not say/.test(unstated), 'an image that only has the default size is still refused after a blur');
+  const bakeSized = heightfieldsOf(await cook({ ...SCENE(64), p: { type: 'bake_position', in: ['all'], params: { resolution: 64 } }, h: { type: 'tex_to_heightfield', in: ['p'] } }, 'h'))[0];
+  check(bakeSized.width === 64 && (bakeSized.width - 1) * bakeSized.cellSize > 0, `an image a bake wrote is stated: tex_to_heightfield gives ${(bakeSized.width - 1) * bakeSized.cellSize} m`);
+  const traceRefuse = await err({ s: { type: 'tex_shape', params: { resolution: [64, 32], shape: 'disc', falloff: 0 } }, t: { type: 'trace_image', in: ['s'], params: { channel: 'luminance' } } }, 't');
+  check(/extent/.test(traceRefuse) && /does not say/.test(traceRefuse), 'trace_image refuses an image of no stated size and says what to set');
+  const traceOne = await cook({ s: { type: 'tex_shape', params: { resolution: [64, 32], shape: 'disc', falloff: 0, texture_size: 1 } }, t: { type: 'trace_image', in: ['s'], params: { channel: 'luminance' } } }, 't');
+  check(traceOne.bbox().max[0] - traceOne.bbox().min[0] > 0.5 && traceOne.bbox().max[0] - traceOne.bbox().min[0] <= 1, 'trace_image takes a stated size of 1 m');
+  const statedJ = geoFromJSON(JSON.parse(JSON.stringify(geoToJSON(await cook({ n: { type: 'tex_noise', params: { resolution: 8, texture_size: 1 } } }, 'n')))));
+  const defaultJ = geoFromJSON(JSON.parse(JSON.stringify(geoToJSON(await cook({ n: { type: 'tex_noise', params: { resolution: 8 } } }, 'n')))));
+  check(findImage(statedJ, 'n')!.sizeStated && !findImage(defaultJ, 'n')!.sizeStated, 'the stated fact survives the json format: a stated 1 m stays stated, the default stays unstated');
+  check(!new Image(4, 4).takeSize({ size: 1 }).sizeStated && new Image(4, 4).takeSize({ size: 1, sizeStated: true }).sizeStated, 'takeSize carries the fact it is given');
   // tex_pack: one island per item with its gutter, each item's texel size per texel
   const pkd = await cook({
     a: { type: 'tex_noise', params: { resolution: 32, texture_size: 0.5, name: 'a' } },
@@ -522,6 +641,31 @@ section('the size and the layers follow the image');
   let calls = 0, seen = 0, seenV = 0;
   runScaled(flat, [{ data: new Float32Array(64 * 32), ch: 1 }], [1], true, (_p, r) => { calls++; seen = r.tu; seenV = r.tv; return [new Float32Array(r.w * r.h)]; });
   check(calls === 1 && Math.abs(seen - 2 / 64) < 1e-12 && seenV === seen, `an image without islands runs once at size / width (${seen} m, square texels)`);
+}
+
+// ---------------------------------------------------------------- what is stored
+
+section('texel and island are stored once where images of one geometry share them; island numbers survive a texture export');
+{
+  const { geoToJSON, geoFromJSON } = await import('../src/io/json.ts');
+  const { imagePNG } = await import('../src/io/textures.ts');
+  const { decodePNG } = await import('../src/io/png-decode.ts');
+  const { deflateSync } = await import('node:zlib');
+  const two = await cook({ ...SCENE(128), a: { type: 'bake_ao', in: ['all'], params: { resolution: 128, padding: 2 } }, b: { type: 'bake_thickness', in: ['all'], params: { resolution: 128, padding: 2 } }, m: { type: 'merge', in: ['a', 'b'] } }, 'm');
+  const one = await cook({ ...SCENE(128), a: { type: 'bake_ao', in: ['all'], params: { resolution: 128, padding: 2 } } }, 'a');
+  const jTwo = JSON.stringify(geoToJSON(two)), jOne = JSON.stringify(geoToJSON(one));
+  const back = geoFromJSON(JSON.parse(jTwo));
+  const a2 = findImage(back, 'a')!, b2 = findImage(back, 'b')!;
+  check(jTwo.includes('"same"') && jTwo.length < jOne.length * 2 * 0.8 && same(a2.layer('texel')!, findImage(two, 'a')!.layer('texel')!) && b2.layer('island') !== undefined && same(b2.layer('island')!, findImage(two, 'b')!.layer('island')!),
+    `two bakes of one mesh write texel and island once in json (${(jTwo.length / 1024).toFixed(0)} KB, one bake alone ${(jOne.length / 1024).toFixed(0)} KB) and read back bit for bit`);
+  // more than 255 islands: a 16-bit grey, the island number + 1
+  const many = new Image(300, 4, 'many');
+  const ids = new Float32Array(300 * 4);
+  for (let j = 0; j < 4; j++) for (let i = 0; i < 300; i++) ids[j * 300 + i] = i === 0 ? -1 : i;
+  many.set('C', new Float32Array(300 * 4)).set('island', ids);
+  const png = decodePNG(imagePNG(many, 'island', (d: Uint8Array) => deflateSync(d)));
+  const at = (i: number) => png.data[i];
+  check(png.maxValue === 65535 && at(0) === 0 && at(299) === 300 && at(257) === 258 && at(256) === 257, `island ids above 255 do not clip in a texture export (${at(256)}, ${at(257)}, ${at(299)} for islands 256, 257, 299)`);
 }
 
 // ---------------------------------------------------------------- tex_layers keeps the scale
