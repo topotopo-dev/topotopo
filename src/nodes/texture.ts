@@ -23,6 +23,7 @@ import {
 } from '../core/texsdf.ts';
 import { texNoise } from '../core/texnoise.ts';
 import { imageTexel, runScaled, slopeFacts } from '../core/texscale.ts';
+import { blurBoxes } from '../core/texture.ts';
 import type { Plane, Region } from '../core/texscale.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
 import { MATERIAL_ATTRIB, normalizeMaterial, readMaterials, writeMaterials } from '../core/materials.ts';
@@ -893,7 +894,7 @@ defineNode({
   },
   inputs: FILTER_INPUT,
   params: {
-    blur: { type: 'float', default: 0.008, min: 0, desc: 'blur radius in metres (on an atlas: on every island, whatever its texel density)', aliases: ['blur_radius'] },
+    blur: { type: 'float', default: 0.008, min: 0, desc: 'blur radius in metres (on an atlas: on every island, whatever its texel density). The default, 8 mm, is 4 pixels only on 512 pixels over 1 m: on another resolution or size it is another number of pixels', aliases: ['blur_radius'] },
     mode: { type: 'enum', options: ['gaussian', 'box'], default: 'gaussian', desc: 'filter shape', aliases: ['type', 'filter'] },
     tileable: tileParam(),
     image: imageParam(), layer: layerParam(), name: renameParam(),
@@ -908,7 +909,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, r) => [blurRegion(pl[0].data, pl[0].ch, r, texels(p.blur, r.tu, r.w, r.h), texels(p.blur, r.tv, r.w, r.h), p.mode)], { fill: false, skip: (tu, tv) => p.blur / tu < 0.5 && p.blur / tv < 0.5 });
+    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, r) => [blurRegion(pl[0].data, pl[0].ch, r, texels(p.blur, r.tu, r.w, r.h), texels(p.blur, r.tv, r.w, r.h), p.mode)], { fill: false, skip: (tu, tv) => !(p.blur > 0) || (!blurBoxes(p.blur / tu, p.mode).some((b) => b >= 1) && !blurBoxes(p.blur / tv, p.mode).some((b) => b >= 1)) });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -944,7 +945,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, r) => [directionalBlur(pl[0].data, pl[0].ch, r.w, r.h, p.length / r.tu, p.angle, !!p.symmetric, r.wrap, r.tu / r.tv, r.own)], { skip: (tu) => p.length / tu < 0.5 });
+    const [out] = runScaled(s.img, [planeOf(s)], [s.ch], !!p.tileable, (pl, r) => [directionalBlur(pl[0].data, pl[0].ch, r.w, r.h, p.length / r.tu, p.angle, !!p.symmetric, r.wrap, r.tu / r.tv, r.own)], { skip: () => !(p.length > 0) });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1140,7 +1141,7 @@ defineNode({
       p.mode !== 'sobel'
         ? edgeBand(maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect), p.mode, p.line_width, p.roundness, r.tu)
         : edgeDetect(pl[0].data, r.w, r.h, p.strength, p.grow / r.texel, r.wrap, r.own),
-    ]);
+    ], { bg: [[0]] });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1433,7 +1434,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [4], !!p.tileable, (pl, r) => [normalFromHeight(pl[0].data, r.w, r.h, p.depth, r.tu * r.w, p.format === 'directx', r.wrap, r.tv, r.own)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [4], !!p.tileable, (pl, r) => [normalFromHeight(pl[0].data, r.w, r.h, p.depth, r.tu * r.w, p.format === 'directx', r.wrap, r.tv, r.own)], { bg: [[0.5, 0.5, 1, 1]] });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1631,7 +1632,7 @@ defineNode({
       const N = p.blur > 0 ? blurLayer(pl[0].data, 4, rg.w, rg.h, texels(p.blur, rg.texel, rg.w, rg.h), 'gaussian', rg.wrap) : pl[0].data;
       const r = curvatureFromNormal(N, rg.w, rg.h, rg.texel, p.radius, p.format === 'directx', rg.wrap, rg.own);
       return [r.C, r.convex, r.concave];
-    });
+    }, { bg: [[0.5], [0], [0]] });
     return withLayer(s, C, outName(ctx), { convex, concave });
   },
 });
@@ -1668,7 +1669,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [heightToAO(pl[0].data, r.w, r.h, p.reach / (r.texel * r.w), p.relief_depth / (r.texel * r.w), p.directions, p.steps, r.wrap, r.own)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [heightToAO(pl[0].data, r.w, r.h, p.reach / (r.texel * r.w), p.relief_depth / (r.texel * r.w), p.directions, p.steps, r.wrap, r.own)], { bg: [[1]] });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -1708,7 +1709,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [ao] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [heightAO(pl[0].data, r.w, r.h, { texel: r.texel, depth: p.depth, radius: p.radius, directions: p.directions, steps: p.steps, strength: p.strength, wrap: r.wrap, act: r.own })]);
+    const [ao] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [heightAO(pl[0].data, r.w, r.h, { texel: r.texel, depth: p.depth, radius: p.radius, directions: p.directions, steps: p.steps, strength: p.strength, wrap: r.wrap, act: r.own })], { bg: [[1]] });
     return withLayer(s, ao, outName(ctx));
   },
 });
@@ -1916,7 +1917,7 @@ defineNode({
   cook: (ctx) => {
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect)], { bg: [[s.img.size]] });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -2037,7 +2038,7 @@ defineNode({
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
     const prof = profileFn(p.profile, (t) => Number(evalRamp(p.ramp, t)));
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], false, (pl, r) => [sdfToMask(pl[0].data, p.mode, p.width, p.softness, r.texel, prof)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], false, (pl, r) => [sdfToMask(pl[0].data, p.mode, p.width, p.softness, r.texel, prof)], { bg: [[0]] });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -2077,7 +2078,7 @@ defineNode({
     const { p } = ctx;
     const s = source(ctx, 0, p.image, p.layer);
     const prof = profileFn(p.profile, (t) => Number(evalRamp(p.ramp, t)));
-    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [bevelHeight(maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect), p.distance, prof, r.tu)]);
+    const [out] = runScaled(s.img, [greyPlane(s)], [1], !!p.tileable, (pl, r) => [bevelHeight(maskSDF(pl[0].data, r.w, r.h, p.threshold, r.tu, r.wrap, r.aspect), p.distance, prof, r.tu)], { bg: [[0]] });
     return withLayer(s, out, outName(ctx));
   },
 });
@@ -2137,7 +2138,7 @@ defineNode({
       if (!pl[1]) return [m, m];
       const inside = Uint8Array.from(d, (x) => (x <= 0 ? 1 : 0));
       return [propagate(pl[1].data, pl[1].ch, inside, w, h, D / texel, wrap, r.aspect), m];
-    });
+    }, { bg: [undefined, [0]] });
     if (!src) return withLayer(s, mask, outName(ctx));
     return withLayer(s, C, outName(ctx), { mask });
   },
@@ -2189,7 +2190,7 @@ defineNode({
       });
       tiles += r.tiles;
       return [r.C, r.id];
-    }, { fill: false });
+    }, { fill: false, bg: [[0], [0]] });
     ctx.stat('tiles', tiles);
     if (!tiles) ctx.warn(`${type}: no pixel of "${s.img.name}" reaches threshold ${p.threshold}: no tiles`);
     return withLayer(s, C, outName(ctx), { id });

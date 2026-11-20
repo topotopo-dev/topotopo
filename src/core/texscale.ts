@@ -116,32 +116,30 @@ export function islandsOf(img: Image): Atlas | null {
 }
 
 /**
- * For each pixel of an island's box, the index in the whole image (width `full`) of the pixel to read: itself for the
- * island's own, else the nearest of its own along its row, else along the nearest row that has any (-1 when it has none).
+ * The nearest own pixel (an index of the box) of every pixel of an island's box, by a breadth-first fill outward from the own
+ * pixels through the others: a pixel in a notch reads the island's own edge there, not a pixel across the notch. Only the
+ * pixels that are not own are visited, so it costs by the others (4-neighbour distance; -1 where the fill does not reach).
  */
-function sweepSource(own: Uint8Array, w: number, h: number, x0: number, y0: number, full: number): Int32Array {
-  const src = new Int32Array(w * h).fill(-1), rowHas = new Uint8Array(h);
-  for (let j = 0; j < h; j++) {
-    const row = j * w, abs = (y0 + j) * full + x0;
-    let last = -1;
-    for (let i = 0; i < w; i++) { if (own[row + i]) { last = i; rowHas[j] = 1; } src[row + i] = last < 0 ? -1 : abs + last; }
-    let next = -1;
-    for (let i = w - 1; i >= 0; i--) {
-      if (own[row + i]) next = i;
-      else if (next >= 0 && (src[row + i] < 0 || next - i < i - (src[row + i] - abs))) src[row + i] = abs + next;
+function nearestOwn(own: Uint8Array, w: number, h: number): Int32Array {
+  const n = w * h, near = new Int32Array(n).fill(-1), queue = new Int32Array(n);
+  let head = 0, tail = 0;
+  for (let k = 0; k < n; k++) if (own[k]) near[k] = k;
+  // seeds: the others next to an own pixel
+  for (let j = 0; j < h; j++)
+    for (let i = 0; i < w; i++) {
+      const k = j * w + i;
+      if (own[k]) continue;
+      const q = i > 0 && own[k - 1] ? k - 1 : i < w - 1 && own[k + 1] ? k + 1 : j > 0 && own[k - w] ? k - w : j < h - 1 && own[k + w] ? k + w : -1;
+      if (q >= 0) { near[k] = q; queue[tail++] = k; }
     }
+  while (head < tail) {
+    const k = queue[head++], i = k % w, src = near[k];
+    if (i > 0 && near[k - 1] < 0) { near[k - 1] = src; queue[tail++] = k - 1; }
+    if (i < w - 1 && near[k + 1] < 0) { near[k + 1] = src; queue[tail++] = k + 1; }
+    if (k >= w && near[k - w] < 0) { near[k - w] = src; queue[tail++] = k - w; }
+    if (k + w < n && near[k + w] < 0) { near[k + w] = src; queue[tail++] = k + w; }
   }
-  // rows with no pixel of the island take the nearest row that has some
-  let up = -1;
-  const from = new Int32Array(h).fill(-1);
-  for (let j = 0; j < h; j++) { if (rowHas[j]) up = j; from[j] = up; }
-  let down = -1;
-  for (let j = h - 1; j >= 0; j--) {
-    if (rowHas[j]) down = j;
-    else if (down >= 0 && (from[j] < 0 || down - j < j - from[j])) from[j] = down;
-  }
-  for (let j = 0; j < h; j++) if (!rowHas[j] && from[j] >= 0) for (let i = 0; i < w; i++) src[j * w + i] = src[from[j] * w + i];
-  return src;
+  return near;
 }
 
 /**
@@ -149,41 +147,55 @@ function sweepSource(own: Uint8Array, w: number, h: number, x0: number, y0: numb
  * (its size, texel sizes along u and v, whether it wraps, which pixels are its own) and returns one array per entry of
  * `outCh` (channels each).
  *   without islands   fn runs once on the whole image
- *   with islands      fn runs on each island's box (its own texels, no wrap); its result is kept on the island's pixels,
- *                     so nothing is read across a border. The pixels of other islands and of the background in the box
- *                     are copies of the nearest pixel of the island (fill; `fill: false` leaves them 0: the filter then
- *                     weighs by region.own, as a blur does to stay mean-preserving), and a filter that costs per pixel
- *                     skips the ones region.own does not set. Pixels of no island keep the first input's values (when
- *                     the outputs have its channels) or are 0: nothing reads them. `skip` says an island of those texel
- *                     sizes is passed over (the filter would change nothing there): it keeps the first input's values.
+ *   with islands      fn runs on each island's box (its own texels, no wrap) and its result is kept on the island's own pixels.
+ *                     An island's own pixels are those of its id that its coverage ("mask" layer, when there is one) covers:
+ *                     its gutter is padding, not surface. Every other pixel of the box (another island, the background, the
+ *                     gutter) is replaced by the nearest own pixel for the filter to read (`fill: false` leaves it 0: the filter
+ *                     then weighs by region.own, as a blur does to stay mean-preserving), and a filter that costs per pixel
+ *                     skips the pixels region.own does not set. The island's gutter then takes the result of its nearest own
+ *                     pixel, as a bake's padding does (`repad: false` leaves it as it was). A pixel no island has takes
+ *                     `bg`, one neutral value per output (a flat normal, mid grey, no occlusion), else the first input's
+ *                     values when the outputs have its channels, else 0. `skip` says an island of those texel sizes is passed
+ *                     over because the filter would return its input unchanged there; it keeps the first input's values.
+ *                     `coverage: false` takes every pixel of the id as the island's own (a dilate fills the gutter).
  */
-export function runScaled(img: Image, inputs: Plane[], outCh: number[], wrap: boolean, fn: (planes: Plane[], r: Region) => Float32Array[], opts: { fill?: boolean; skip?: (tu: number, tv: number) => boolean } = {}): Float32Array[] {
+export function runScaled(img: Image, inputs: Plane[], outCh: number[], wrap: boolean, fn: (planes: Plane[], r: Region) => Float32Array[],
+  opts: { fill?: boolean; skip?: (tu: number, tv: number) => boolean; bg?: (number[] | undefined)[]; repad?: boolean; coverage?: boolean } = {}): Float32Array[] {
   const w = img.width, h = img.height;
   const found = islandsOf(img);
   if (!found || !found.islands.length) {
     const { tu, tv } = imageTexels(img);
     return fn(inputs, { w, h, x0: 0, y0: 0, fullW: w, fullH: h, tu, tv, texel: tu === tv ? tu : Math.sqrt(tu * tv), aspect: tv / tu, wrap, own: null });
   }
-  const { islands, ids, background } = found;
-  const fill = opts.fill !== false;
-  // a pixel no island takes, or an island `skip` passes over, keeps the first input's values when the outputs have its channels
-  const outs = outCh.map((c) => (inputs[0] && inputs[0].ch === c && (background || opts.skip) ? inputs[0].data.slice() : new Float32Array(w * h * c)));
+  const { islands, ids } = found;
+  const fill = opts.fill !== false, repad = opts.repad !== false;
+  const cl = opts.coverage === false ? undefined : img.layer('mask'), cov = cl && img.channels('mask') === 1 ? cl : null;
+  const outs = outCh.map((c, o) => {
+    const arr = new Float32Array(w * h * c), bg = opts.bg?.[o];
+    if (bg) { for (let k = 0; k < w * h; k++) for (let q = 0; q < c; q++) arr[k * c + q] = bg[q % bg.length]; }
+    else if (inputs[0] && inputs[0].ch === c) arr.set(inputs[0].data);
+    return arr;
+  });
   for (const s of islands) {
     if (opts.skip && opts.skip(s.tu, s.tv)) continue;
     const x0 = s.x0, y0 = s.y0, cw = s.x1 - s.x0 + 1, chh = s.y1 - s.y0 + 1;
     const own = new Uint8Array(cw * chh);
-    let foreign = 0;
-    for (let j = 0; j < chh; j++) { const row = (y0 + j) * w + x0; for (let i = 0; i < cw; i++) if (ids[row + i] === s.id) own[j * cw + i] = 1; else foreign++; }
-    const src = foreign && fill ? sweepSource(own, cw, chh, x0, y0, w) : null;
+    let foreign = 0, owned = 0;
+    for (let j = 0; j < chh; j++) {
+      const row = (y0 + j) * w + x0;
+      for (let i = 0; i < cw; i++) if (ids[row + i] === s.id && (!cov || cov[row + i] > 0)) { own[j * cw + i] = 1; owned++; } else foreign++;
+    }
+    if (!owned) continue;
+    // the nearest own pixel of every pixel of the box (an index of the box), for reading and for the gutter
+    const near = foreign ? nearestOwn(own, cw, chh) : null;
     const crops: Plane[] = inputs.map((p) => {
       const out = new Float32Array(cw * chh * p.ch), ch = p.ch, d = p.data;
       if (!foreign) { for (let j = 0; j < chh; j++) out.set(d.subarray(((y0 + j) * w + x0) * ch, ((y0 + j) * w + x0 + cw) * ch), j * cw * ch); return { data: out, ch }; }
-      if (src) {
-        if (ch === 1) for (let k = 0; k < cw * chh; k++) { const q = src[k]; if (q >= 0) out[k] = d[q]; }
-        else for (let k = 0; k < cw * chh; k++) { const q = src[k]; if (q >= 0) for (let c = 0; c < ch; c++) out[k * ch + c] = d[q * ch + c]; }
-      } else {
-        // foreign pixels stay 0: the island's own are copied
-        for (let j = 0; j < chh; j++) for (let i = 0; i < cw; i++) { const k = j * cw + i; if (own[k]) { const q = (y0 + j) * w + x0 + i; for (let c = 0; c < ch; c++) out[k * ch + c] = d[q * ch + c]; } }
+      for (let k = 0; k < cw * chh; k++) {
+        const q = own[k] ? k : fill ? near![k] : -1;
+        if (q < 0) continue;
+        const qj = (q / cw) | 0, from = ((y0 + qj) * w + x0 + (q - qj * cw)) * ch;
+        for (let c = 0; c < ch; c++) out[k * ch + c] = d[from + c];
       }
       return { data: out, ch };
     });
@@ -191,11 +203,16 @@ export function runScaled(img: Image, inputs: Plane[], outCh: number[], wrap: bo
     for (let o = 0; o < outs.length; o++) {
       const c = outCh[o], r = res[o], out = outs[o];
       for (let j = 0; j < chh; j++) {
-        const row = (y0 + j) * w + x0;
-        if (!foreign) { out.set(r.subarray(j * cw * c, (j + 1) * cw * c), row * c); continue; }
-        const rk = j * cw;
-        if (c === 1) { for (let i = 0; i < cw; i++) if (own[rk + i]) out[row + i] = r[rk + i]; }
-        else for (let i = 0; i < cw; i++) if (own[rk + i]) { const to = (row + i) * c, k = (rk + i) * c; for (let q = 0; q < c; q++) out[to + q] = r[k + q]; }
+        const row = (y0 + j) * w + x0, rk = j * cw;
+        if (!foreign) { out.set(r.subarray(rk * c, (rk + cw) * c), row * c); continue; }
+        for (let i = 0; i < cw; i++) {
+          const k = rk + i;
+          // an own pixel takes its result; the island's gutter (its id, not covered) that of the nearest own pixel
+          const from = own[k] ? k : repad && ids[row + i] === s.id ? near![k] : -1;
+          if (from < 0) continue;
+          const to = (row + i) * c, rf = from * c;
+          for (let q = 0; q < c; q++) out[to + q] = r[rf + q];
+        }
       }
     }
   }

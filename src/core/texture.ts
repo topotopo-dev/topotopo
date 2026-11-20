@@ -522,6 +522,11 @@ function gaussBoxes(sigma: number): number[] {
   return Array.from({ length: n }, (_, i) => Math.max(0, ((i < m ? wl : wu) - 1) / 2));
 }
 
+/** The half-widths of the box passes a blur of `r` pixels makes (a box blur is one pass of at least 1); a pass under 1 changes nothing. */
+export function blurBoxes(r: number, mode: string): number[] {
+  return mode === 'box' ? [Math.max(1, Math.round(r))] : gaussBoxes(r / 2).map(Math.round);
+}
+
 /**
  * Blur every channel: 'gaussian' (radius = 2 sigma, three box passes) or 'box' (half-width = radius), separable
  * running sums, `radius` pixels along u and `radiusY` along v (texels that are not square). With wrap the image is
@@ -529,8 +534,7 @@ function gaussBoxes(sigma: number): number[] {
  */
 export function blurLayer(a: Float32Array, ch: number, w: number, h: number, radius: number, mode: string, wrap: boolean, radiusY = radius): Float32Array {
   if (!(radius > 0) && !(radiusY > 0)) return a.slice();
-  const boxes = (r: number) => (mode === 'box' ? [Math.max(1, Math.round(r))] : gaussBoxes(r / 2).map(Math.round));
-  const rx = radius > 0 ? boxes(radius) : [], ry = radiusY > 0 ? boxes(radiusY) : [];
+  const rx = radius > 0 ? blurBoxes(radius, mode) : [], ry = radiusY > 0 ? blurBoxes(radiusY, mode) : [];
   let x = a;
   for (let i = 0; i < Math.max(rx.length, ry.length); i++) {
     if ((rx[i] ?? 0) >= 1) x = boxPass(x, w, h, ch, rx[i], true, wrap);

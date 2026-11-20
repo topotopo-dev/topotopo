@@ -58,7 +58,7 @@ defineNode({
   inputs: [{ name: 'image', desc: 'image to pad' }, { name: 'mask', desc: 'optional explicit validity mask (same dimensions)', optional: true }],
   params: {
     image: imageParam(), layer: layerParam(), name: renameParam(),
-    distance: { type: 'float', default: 0.016, min: 0, desc: 'maximum Euclidean distance in metres from a valid source (on an atlas: on every island, whatever its texel density)', aliases: ['padding'] },
+    distance: { type: 'float', default: 0.016, min: 0, desc: 'maximum Euclidean distance in metres from a valid source (on an atlas: on every island, whatever its texel density). The default, 16 mm, is 8 pixels only on 512 pixels over 1 m: on another resolution or size it is another number of pixels' },
     mask_image: imageParam('input 1 (the mask)', []), mask_layer: layerParam(), mask_channel: channelParam('luminance'),
     mask_threshold: { type: 'float', default: 0, desc: 'mask values strictly greater than this are valid' },
     preserve_alpha: { type: 'bool', default: true, desc: 'keep original alpha at every RGBA pixel while padding RGB' },
@@ -76,7 +76,7 @@ defineNode({
       if (s.ch !== 4) throw new NodeError('tex_dilate: a grey image requires an explicit mask input');
       mask = channel(s.data, s.ch, 'alpha');
     }
-    const [out] = runScaled(s.img, [{ data: s.data, ch: s.ch }, { data: mask, ch: 1 }], [s.ch], false, (pl, r) => [dilateImage(pl[0].data, pl[0].ch, r.w, r.h, pl[1].data, p.mask_threshold, Math.min((p.distance / r.tu) * (1 + 1e-6), 8192), p.preserve_alpha, r.aspect)], { skip: (tu) => p.distance / tu < 0.5 });
+    const [out] = runScaled(s.img, [{ data: s.data, ch: s.ch }, { data: mask, ch: 1 }], [s.ch], false, (pl, r) => [dilateImage(pl[0].data, pl[0].ch, r.w, r.h, pl[1].data, p.mask_threshold, Math.min((p.distance / r.tu) * (1 + 1e-6), 8192), p.preserve_alpha, r.aspect)], { coverage: false, skip: (tu, tv) => { const px = (p.distance / tu) * (1 + 1e-6); return !(p.distance > 0) || (px < 1 && px < tv / tu); } });
     return withLayer(s, out, outName(ctx));
   },
 });
