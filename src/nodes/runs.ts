@@ -133,7 +133,8 @@ function cook(ctx: CookContext): Geometry {
   // interpolated
   const medTau = (() => { const t: number[] = []; for (let k = 0; k < s.n; k += Math.max(1, Math.floor(s.n / 4096))) t.push(tau[k]); t.sort((a, b) => a - b); return t[t.length >> 1] || 1; })();
   const latStep = Math.max(1, Math.min(8, Math.floor((stainK * 0.5 * Math.min(prm.width[0], prm.width[1])) / (3 * medTau))));
-  const stainLattice = stain && latStep > 1 ? { pix: s.pix, gw: W * S, gh: H * S, step: latStep, island: tl.island.vals } : undefined;
+  // the narrowest stain sets the finest lattice; wider ones are drawn on coarser lattices (core/runs.ts rasterStain)
+  const stainLattice = stain ? { pix: s.pix, gw: W * S, gh: H * S, step: latStep, island: tl.island.vals, tau: medTau } : undefined;
   const tRaster = performance.now();
   try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, { check: () => budget.check(), stain: stainK, stainSkew: Math.max(0, Number(p.stain_skew) || 0), stainLattice }); } catch (e) {
     if (e instanceof FlowLimit) throw new NodeError(`${type}: the runs cover too many texel cells (${e.count.toLocaleString('en-US')} registrations)`, 'lower pool or width, or density');

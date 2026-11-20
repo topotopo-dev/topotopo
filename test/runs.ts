@@ -476,6 +476,25 @@ section('stain: adds up, skew, lattice');
   d.sort((p, q) => p - q);
   const p99 = d[Math.floor(n * 0.99)], avg = sum / n;
   check(same && p99 < 0.1 && avg < 0.01, `a lattice of every 2nd sample gives nearly the same stain (99 % of samples within ${p99.toFixed(3)}, mean difference ${avg.toFixed(4)}) and the same runs`);
+  // each run on a lattice as coarse as a third of its own head half width (the runs here are 1 to 4 mm wide: steps of
+  // 1, 2 and 4 samples), the lattices added up: close to drawing every sample
+  const lv = out();
+  rasterRuns(dense, inp, 0, 3, lv, { stain: 4, stainSkew: 2, stainLattice: { pix, gw: xs, gh: ys, step: 1, island: new Float32Array(n), tau: step } });
+  // the line where the runs begin is a step in the exact stain (the row where its mean jumps most): coarser lattices
+  // soften it over up to 4 samples; elsewhere the stain is close to the exact one
+  const rowMean = (a: Float32Array, j: number) => { let t = 0; for (let i = 0; i < xs; i++) t += a[j * xs + i]; return t / xs; };
+  let line = 0, jump = 0;
+  for (let j = 1; j < ys; j++) { const dj = Math.abs(rowMean(s2.stain, j) - rowMean(s2.stain, j - 1)); if (dj > jump) { jump = dj; line = j; } }
+  const dl: number[] = []; let suml = 0, sameL = true;
+  for (let k = 0; k < n; k++) {
+    if (lv.C[k] !== s2.C[k]) sameL = false;
+    const x = Math.abs(lv.stain[k] - s2.stain[k]); suml += x;
+    if (Math.abs(Math.floor(k / xs) - line) > 4) dl.push(x);
+  }
+  dl.sort((p, q) => p - q);
+  const p99l = dl[Math.floor(dl.length * 0.99)], avgl = suml / n;
+  const lineHeld = Math.abs(rowMean(lv.stain, line + 4) - rowMean(s2.stain, line + 4)) < 0.05 && Math.abs(rowMean(lv.stain, line - 5) - rowMean(s2.stain, line - 5)) < 0.05;
+  check(sameL && p99l < 0.05 && avgl < 0.01 && lineHeld && Math.abs(mean(lv.stain) - mean(s2.stain)) < 0.01, `each run on a lattice as coarse as its width allows (steps 1 to 4 here) gives nearly the same stain: away from the line where the runs begin 99 % of samples within ${p99l.toFixed(3)}, the line softened but in place, mean difference ${avgl.toFixed(4)}, means ${mean(lv.stain).toFixed(3)} and ${mean(s2.stain).toFixed(3)}`);
   // a sample whose lattice corners lie on another island is drawn exactly
   const isl = new Float32Array(n); for (let k = 0; k < n; k++) isl[k] = k % xs < 50 ? 0 : 1;
   const li = out();
