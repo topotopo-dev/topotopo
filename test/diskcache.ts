@@ -842,13 +842,14 @@ process.exit(0);
   // ------------------------------------------------------------ no test writes to the real cache folder
   {
     const covered = (src: string) => /cache-guard\.ts|fixtures\.ts/.test(src);
-    const starts = (src: string) => /(spawn|spawnSync|execFile|execFileSync|StdioClientTransport|fork)\b/.test(src) && /(['"\/\\]cli\.ts|mcp[\/'", ]+server\.ts|'src', 'cli\.ts'|diskcache-cli|diskcache-mcp)/.test(src);
+    // any process a test starts may cook: the web app bakes packages through the CLI, a launcher runs it, and so on
+    const starts = (src: string) => /(spawn|spawnSync|execFile|execFileSync|StdioClientTransport|fork)\b/.test(src);
     const bad: string[] = [];
     for (const f of fs.readdirSync(path.join(ROOT, 'test')).filter((x) => x.endsWith('.ts'))) {
       const src = fs.readFileSync(path.join(ROOT, 'test', f), 'utf8');
       if (starts(src) && !covered(src) && !['diskcache.ts'].includes(f)) bad.push(f);
     }
-    check(bad.length === 0, `every test that runs the CLI or the MCP server imports the cache guard${bad.length ? ` (not: ${bad.join(', ')})` : ''}`);
+    check(bad.length === 0, `every test that starts a process imports the cache guard${bad.length ? ` (not: ${bad.join(', ')})` : ''}`);
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
