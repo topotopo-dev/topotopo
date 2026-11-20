@@ -337,6 +337,14 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     out.volumes.push(im);
     entry.textures = { ...(entry.textures ?? {}), orm: `image:${im.name}` };
     entry.packing = packing.join('');
+    // what the layout does not hold is the material's own value (exporters read a missing channel as the factor alone):
+    // the mean over the covered texels, said when the parts differ
+    for (const [has, field, c, what] of [[packing.includes('m'), 'metallic', 2, 'metallic'], [packing.includes('r') || packing.includes('s'), 'roughness', 1, 'roughness']] as const) {
+      if (has) continue;
+      const s = coveredStats(orm, c);
+      entry[field] = Math.round(s.mean * 1000) / 1000;
+      if (s.max - s.min > 0.05) ctx.warn(`${T_W}: packing "${String(p.packing)}" holds no ${what}: the material's ${what} is ${entry[field]} (the mean; the parts range ${s.min.toFixed(2)} to ${s.max.toFixed(2)}); a layout with ${field === 'metallic' ? 'm' : 'r or s'} keeps them apart`);
+    }
   }
   if (p.normal_format === 'directx') {
     const i = out.volumes.findIndex((v) => v.name === `${material}_normal`);
@@ -372,6 +380,14 @@ function texelsPerMetre(im: Image): number {
   for (let i = 0; i < im.width * im.height; i += 7) if ((!m || m[i] > 0.5) && t[i * ch] > 0) v.push(1 / t[i * ch]);
   v.sort((a, b) => a - b);
   return v.length ? Math.round(v[v.length >> 1]) : 0;
+}
+
+/** Mean, least and most of channel c of an RGBA image over its covered texels (layer mask). */
+function coveredStats(im: Image, c: number): { mean: number; min: number; max: number } {
+  const a = im.layer('C')!, m = im.layer('mask');
+  let s = 0, k = 0, min = Infinity, max = -Infinity;
+  for (let i = 0; i < im.width * im.height; i++) if (!m || m[i] > 0.5) { const v = a[i * 4 + c]; s += v; k++; if (v < min) min = v; if (v > max) max = v; }
+  return k ? { mean: s / k, min, max } : { mean: 0, min: 0, max: 0 };
 }
 
 /** The ORM and height of the stack in another channel layout (o r m h s x). */

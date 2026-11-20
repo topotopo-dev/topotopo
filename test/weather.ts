@@ -404,6 +404,31 @@ section('packing and the normal convention');
   const [a, b] = [await shot(mrao.geo), await shot(cab.geo)];
   check(a.every((v, i) => Math.abs(v - b[i]) <= 1), 'the preview of the mrao + directx maps is the preview of the default layout');
 
+  // rma (roughness, metallic, ambient occlusion) is a named layout: packed, then rewritten for glTF as the default
+  const rma = await cook({ ...CAB, w: W({ ...CAB_W, packing: 'rma' }) }, 'w');
+  const R = findImage(rma.geo, 'weathered_rmo'), Oc = img(cab, 'weathered_orm').layer('C')!;
+  check(!!R && R.layer('C')!.every((v, i) => (i % 4 === 3 ? v === 1 : v === Oc[i - (i % 4) + [1, 2, 0][i % 4]])) && readMaterials(rma.geo).weathered.packing === 'rmo', `packing rma: R roughness, G metallic, B occlusion (${R ? R.name : 'no weathered_rmo'})`);
+  check(same(findImage(await glb(rma.geo), 'weathered_rmo_gltf'), findImage(ref, 'weathered_orm')), 'glb: the rma map is written as the orm of glTF');
+
+  // a layout without a channel: the material's own value stands in for it (exporters read the factor alone), occlusion
+  // missing is none; the means over the covered texels are those of the default layout
+  const covered = img(cab, 'weathered_orm').layer('mask')!;
+  const meanOf = (a: Float32Array, c: number) => { let s = 0, k = 0; for (let i = 0; i < covered.length; i++) if (covered[i] > 0.5) { s += a[i * 4 + c]; k++; } return s / k; };
+  const want = [0, 1, 2].map((c) => meanOf(Oc, c));
+  for (const [packing, lacks] of [['hro', 'm'], ['rmh', 'o'], ['omh', 'r'], ['moxs', '']] as const) {
+    const c = packing === 'hro' ? hro : await cook({ ...CAB, w: W({ ...CAB_W, packing }) }, 'w');
+    const back2 = await glb(c.geo), t2 = readMaterials(back2).weathered, im = findImage(back2, t2.textures!.orm!.slice(6))!.layer('C')!;
+    const got = [meanOf(im, 0), t2.roughness * meanOf(im, 1), t2.metallic * meanOf(im, 2)];
+    const u = new TextDecoder().decode(exportGeometry(c.geo, 'usda'));
+    const usdOk = lacks === '' ? /smoothness_map/.test(u) : lacks === 'o' ? !/inputs:occlusion\.connect/.test(u) : lacks === 'm' ? !/inputs:metallic\.connect/.test(u) && Math.abs(Number(/float inputs:metallic = ([\d.]+)/.exec(u)?.[1]) - want[2]) < 0.002 : !/inputs:roughness\.connect/.test(u) && Math.abs(Number(/float inputs:roughness = ([\d.]+)/.exec(u)?.[1]) - want[1]) < 0.002;
+    const glOk = got.every((v, k) => Math.abs(v - (k === 0 && lacks === 'o' ? 1 : want[k])) < 0.01);
+    check(glOk && usdOk, `packing ${packing} (${lacks ? `no ${lacks}` : 'smoothness'}): glb occlusion, roughness, metallic ${got.map(f3).join(', ')} for ${want.map((v, k) => f3(k === 0 && lacks === 'o' ? 1 : v)).join(', ')}; usda ${usdOk ? 'reads the material\'s value' : 'wrong'}`);
+  }
+  check(hro.warnings.some((x) => x.includes('holds no metallic') && x.includes('a layout with m')), 'parts of different metallic in a layout without m: said, with the way out');
+  // the preview: a slab of one kind (metallic 0 throughout) looks the same in hro as in orm
+  const slabOf = (packing: string): Nodes => ({ s: { type: 'box', params: { size: [1, 1.2, 0.15], center: [0, 0.6, 0] } }, m: { type: 'material', in: ['s'], params: { name: 'c', base_color: '#9c978c', kind: 'concrete' } }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 128, padding: 2 } }, w: W({ mount: 'ground', packing }) });
+  const [sh, so] = [await shot((await cook(slabOf('hro'), 'w')).geo), await shot((await cook(slabOf('orm'), 'w')).geo)];
+  check(sh.every((v, i) => Math.abs(v - so[i]) <= 1), 'the preview of a non-metal in hro is its preview in orm (not fully metallic)');
 }
 
 section('route B: unique maps pulled toward a stated reference');
