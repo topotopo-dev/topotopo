@@ -26,6 +26,7 @@ import type { Volume } from '../src/core/geometry.ts';
 import { EdgeSet } from '../src/core/edges.ts';
 import { Heightfield } from '../src/core/heightfield.ts';
 import { Image } from '../src/core/image.ts';
+import { toHalf } from '../src/core/half.ts';
 import { SdfGrid } from '../src/core/sdfgrid.ts';
 import { openPackages } from '../src/packages/registry.ts';
 import { ROOT, SKIP, createFixtureEngine, fixtureGraphFor } from './fixtures.ts';
@@ -176,10 +177,18 @@ try {
       check(back && d === null, `${name}: the result loaded is the result saved, bit for bit${d ? ` (${d})` : ''}`);
       check(back?.warnings.join('|') === 'w1|w "2"' && back?.stats?.n === 3 && back?.cookMs === 1234.5 && JSON.stringify(back?.deps) === JSON.stringify([{ p: '/a/b.png', k: 'f', s: '1:2' }, { p: '/a', k: 'd', s: '["x"]' }]), `${name}: its warnings, stats, files and cook time come back`);
     }
+    // a 16-bit layer (tex_compact) comes back as the same values, in 16 bits where the runtime has them
+    const halfGeo = new Geometry();
+    const hl = toHalf(Float32Array.from([0, 0.1, 0.5, 1, 0.3333, 2047, -0.25, 1e-5]));
+    halfGeo.volumes.push(new Image(4, 2, 'h').set('C', hl));
+    await store.save('half', { geo: halfGeo, deps: [], warnings: [], cookMs: 1 });
+    const hb = (await store.load('half'))?.geo.volumes[0] as Image | undefined;
+    const hbl = hb?.layer('C');
+    check(!!hbl && hbl.constructor === hl.constructor && Array.from(hbl).every((v, i) => Object.is(v, hl[i])), `a 16-bit layer comes back value for value, as a ${hl.constructor.name}`);
     const sdf = new Geometry();
     sdf.volumes.push({ kind: 'sdf', name: 's', bounds: { min: [0, 0, 0], max: [1, 1, 1] }, sample: () => 0 });
     await store.save('sdf', { geo: sdf, deps: [], warnings: [], cookMs: 1 });
-    check((await store.load('sdf')) === null && entries(store.dir).length === 2, 'a result with an SDF volume (a function) is not kept');
+    check((await store.load('sdf')) === null && entries(store.dir).length === 3, 'a result with an SDF volume (a function) is not kept');
     check((await store.load('nothing')) === null, 'an identity never saved is a miss');
   }
 

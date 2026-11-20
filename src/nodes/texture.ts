@@ -178,8 +178,10 @@ export function source(ctx: CookContext, i: number, imageName = '', layerName = 
   const img = asImage(g.volumes[index] as Image);
   if (i === 0) firstImage.set(ctx, img);
   const layer = layerName || img.mainLayer;
-  const data = img.layer(layer);
-  if (!data) throw new NodeError(`${ctx.type}: image "${img.name}" has no layer "${layer}"`, `layers: ${[...img.layers.keys()].join(', ') || 'none'}`);
+  const stored = img.layer(layer);
+  if (!stored) throw new NodeError(`${ctx.type}: image "${img.name}" has no layer "${layer}"`, `layers: ${[...img.layers.keys()].join(', ') || 'none'}`);
+  // a 16-bit layer (tex_compact) is read as a 32-bit copy, so a filter's result keeps full precision
+  const data = stored instanceof Float32Array ? stored : Float32Array.from(stored);
   const ch = channelsOf(data, img.count);
   if (!ch) throw new NodeError(`${ctx.type}: image "${img.name}" layer "${layer}" has ${data.length} values for ${img.width} × ${img.height} pixels`);
   return { g, img, index, layer, data, ch };

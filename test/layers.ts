@@ -12,6 +12,7 @@ import type { Geometry } from '../src/core/geometry.ts';
 import { Image, findImage, resizeLayer } from '../src/core/image.ts';
 import { MATERIAL_KINDS, normalizeMaterial, readMaterials } from '../src/core/materials.ts';
 import { medianTexelSize } from '../src/core/texelsize.ts';
+import { HALF_STORED, f16round, toHalf } from '../src/core/half.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 
 let fail = 0, pass = 0;
@@ -715,6 +716,44 @@ section('tex_layers: named masks, the masks image, image layers, the base normal
   check(near(sn[0], enc(0.6), 0.01) && near(sn[2], enc(0.8), 0.01), `the base normal comes through the stack (${sn.slice(0, 3).map((v) => v.toFixed(3)).join(', ')})`);
   const flatBase = px(img(await cook({ ...base, stack: { type: 'tex_layers', in: ['base'], params: { layers: [] } } }, 'stack'), 'stack_normal'), 'C', 32, 32);
   check(near(flatBase[0], 0.5, 1e-4) && near(flatBase[1], 0.5, 1e-4), 'without a base normal the normal stays flat');
+}
+
+section('tex_compact: the layers something reads, 0..1 ones in 16 bits');
+{
+  // the rounding is the runtime's own where it has one, and the same numbers where it does not
+  const edge = [0, -0, 1, 0.1, 1 / 3, 2047, 2049, 65504, 65519, 65520, -65520, 6.1e-5, 5.96e-8, 2.98e-8, 2.99e-8, 1e-9, 0.99951171875, 1.00048828125, NaN, Infinity];
+  const rnd = Array.from({ length: 20000 }, (_, i) => (Math.sin(i * 12.9898) * 43758.5453 % 1) * 10 ** ((i % 13) - 8));
+  const f16 = (Math as any).f16round as ((x: number) => number) | undefined;
+  if (f16) check([...edge, ...rnd].every((x) => Object.is(f16round(x), f16(x))), 'f16round is Math.f16round on every edge case and 20000 values');
+  else console.log('SKIP f16round against Math.f16round: this runtime has none');
+  const src = Float32Array.from([...edge, ...rnd]), h = toHalf(src);
+  check(Array.from(h).every((v, i) => Object.is(v, f16round(src[i]))) && (HALF_STORED ? h.BYTES_PER_ELEMENT === 2 : h instanceof Float32Array), `toHalf holds the rounded values${HALF_STORED ? ', in 16 bits' : ' (in 32 bits: this runtime has no Float16Array)'}`);
+
+  const nodes: Nodes = {
+    box: { type: 'box', params: { size: [1, 1, 1] } },
+    uv: { type: 'uv_unwrap', in: ['box'], params: { resolution: 64 } },
+    a: { type: 'bake_measure', in: ['uv'], params: { resolution: 64, name: 'a', measures: [{ by: 'facing', name: 'top' }, { by: 'height', name: 'ht' }] } },
+    b: { type: 'bake_measure', in: ['uv'], params: { resolution: 64, name: 'b', measures: [{ by: 'noise', name: 'grain', size: [0.2, 0.2, 0.2] }] } },
+    ab: { type: 'merge', in: ['a', 'b'] },
+    k: { type: 'tex_compact', in: ['ab'], params: { keep: 'C top grain texel island' } },
+  };
+  const before = await cook(nodes, 'ab'), after = await cook(nodes, 'k');
+  const A0 = img(before, 'a'), A = img(after, 'a'), B = img(after, 'b');
+  check([...A.layers.keys()].join(' ') === 'C top texel island' && !A.layer('ht') && !A.layer('mask'), `only the kept layers stay (${[...A.layers.keys()].join(' ')})`);
+  const top = A.layer('top')!, top0 = A0.layer('top')!;
+  check(top.every((v, i) => Math.abs(v - top0[i]) <= 3e-4 && Object.is(v, f16round(top0[i]))), 'a 0..1 layer comes back within 0.0003, rounded to 16 bits');
+  const twice = await cook({ ...nodes, k2: { type: 'tex_compact', in: ['ab'], params: { keep: 'C ht texel' } } }, 'k2');
+  check(A.layer('island') === A0.layer('island') && img(twice, 'a').layer('texel') === A.layer('texel'), 'island stays as it was (ids above 2048 are not exact in 16 bits), and one array made 16-bit twice is one array');
+  check(after.stats.layers === 8 && after.stats.dropped === 3 && after.stats.half === 6, `stats: kept ${after.stats.layers}, dropped ${after.stats.dropped}, half ${after.stats.half}`);
+  const typo = await cook({ ...nodes, k: { type: 'tex_compact', in: ['ab'], params: { keep: 'C tpo' } } }, 'k');
+  check(typo.warnings.some((w) => w.includes('"tpo"')), 'a keep name no image holds is reported');
+  // a filter after it works in 32 bits
+  const blur = await cook({ ...nodes, k: { ...nodes.k, params: { keep: 'C top', image: 'a' } }, bl: { type: 'tex_blur', in: ['k'], params: { image: 'a', layer: 'top', blur: 0.02 } } }, 'bl');
+  check(findImage(blur.geo, 'bl')?.layer('top') instanceof Float32Array, 'a filter reading a 16-bit layer writes a 32-bit one');
+  // tex_layers reads compacted masks as it reads the originals, within the 16-bit rounding
+  const stack = (from: string): Nodes => ({ ...nodes, mat: { type: 'material', in: ['uv'], params: { name: 'grey', base_color: '#808080' } }, base: { type: 'bake_material', in: ['mat'], params: { resolution: 64 } }, st: { type: 'tex_layers', in: ['base', from], params: { layers: [{ name: 'dust', mask: 'smoothstep(0.2, 0.8, a_top) * b_grain', color: '#a69d8b' }] } } });
+  const s0 = img(await cook(stack('ab'), 'st'), 'st_base_color').layer('C')!, s1 = img(await cook(stack('k'), 'st'), 'st_base_color').layer('C')!;
+  check(s0.every((v, i) => Math.abs(v - s1[i]) < 2e-3), 'a stack reading the compacted bakes makes the same maps within 0.002');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
