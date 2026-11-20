@@ -30,6 +30,7 @@ import './texture.ts';
 import './imageops.ts';
 import './bake.ts';
 import './layers.ts';
+import './surface.ts';
 import './particles.ts';
 import './rbd.ts';
 import './cloth.ts';
