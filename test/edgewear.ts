@@ -1,7 +1,8 @@
 // bake_edge_wear. Checks what it promises: on a decimated sphere with a rim, no chips on the facets at a radius of twice
 // their edges and chips on the rim; the facet warning only where facets chip, once per bake; a box chips on its edges
 // only, its flats read 0; small parts under full focus chip on less than a third of their area and keep paint on their
-// faces; a larger amount only adds wear; core inside bare inside chip, texel for texel; the focus raises
+// faces; amount 0 wears nothing and a larger amount only adds wear, texel for texel, on a box, a model of several parts
+// and a thin sheet, with and without focus; core inside bare inside chip, texel for texel; the focus raises
 // wear on the edges near a handle more than on the flat beside it, which never chips; the same wear on both sides of a uv
 // seam and at two texel densities across an edge; a part keeps its chips when another part is added or the prims are
 // reordered; seeds differ; the same bits with and without the worker pool; a bolt standing on a plate makes the plate
@@ -611,6 +612,41 @@ section('the time limit of long-running nodes stops it, on this thread and on th
       const msg = r.errors.map((e) => e.message).join('; ');
       check(!r.ok && msg.includes('bake_edge_wear: stopped after 40 ms, the time limit of long-running nodes'), `method ${method} ${label}: stopped (${msg || 'cooked'}; ${ms.toFixed(0)} ms)`);
     }
+  }
+}
+
+section('amount 0 wears nothing; chip, bare and core never fall as amount rises, texel for texel');
+{
+  // a bevelled box; a body with a welded boss, a bolt, a nut and a latch (small features the cap holds); a thin sheet
+  const kit: Nodes = {
+    ...named('body', 'k0', { type: 'box', params: { size: [0.3, 0.4, 0.2], center: [0, 0.2, 0] } }),
+    k1: { type: 'poly_extrude', in: ['body'], params: { group: '@P.y>0.39', distance: 0, inset: 0.12 } },
+    k2: { type: 'poly_extrude', in: ['k1'], params: { group: 'front', distance: 0.02 } },
+    ...named('bolt', 'k3', { type: 'box', params: { size: [0.02, 0.02, 0.02], center: [-0.1, 0.3, 0.11] } }),
+    ...named('nut', 'k4', { type: 'tube', params: { radius: 0.012, height: 0.01, cols: 6, center: [0.1, 0.405, 0.05] } }),
+    k5: { type: 'normal', in: ['nut'], params: { cusp_angle: 30 } },
+    ...named('latch', 'k6', { type: 'box', params: { size: [0.03, 0.08, 0.03], center: [0.12, 0.25, 0.115] } }),
+    km: { type: 'merge', in: ['k2', 'bolt', 'k5', 'latch'] }, ku: { type: 'uv_unwrap', in: ['km'] },
+  };
+  const sheet: Nodes = { h0: { type: 'box', params: { size: [0.4, 0.0008, 0.3], center: [0, 0.0004, 0] } }, hu: { type: 'uv_unwrap', in: ['h0'] } };
+  const shapes: [string, Nodes, string, string][] = [['box', BOX, 'bx', '@P.x>0.1'], ['parts', kit, 'ku', '@name=latch'], ['sheet', sheet, 'hu', '@P.x>0.1']];
+  const A = [0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.8, 0.9, 1];
+  for (const [label, nodes, mesh, focus] of shapes) for (const f of ['', focus]) {
+    const ims: Image[] = [];
+    for (const amount of A) { const im = img(await cook({ ...nodes, m: { type: 'bake_edge_wear', in: [mesh], params: { resolution: 512, amount, focus: f } } }, 'm'), 'm'); nest(im); ims.push(im); }
+    const mk = ims[0].layer('mask')!;
+    let covered = 0, worn0 = 0, Cmax = 0;
+    for (let k = 0; k < mk.length; k++) if (mk[k] > 0) { covered++; Cmax = Math.max(Cmax, ims[0].layer('C')![k]); if (ims[0].layer('chip')![k] || ims[0].layer('bare')![k] || ims[0].layer('core')![k]) worn0++; }
+    const fell: Record<string, number> = { chip: 0, bare: 0, core: 0 };
+    for (const l of Object.keys(fell)) for (let s = 1; s < A.length; s++) {
+      const a = ims[s - 1].layer(l)!, b = ims[s].layer(l)!;
+      for (let k = 0; k < mk.length; k++) if (mk[k] > 0 && b[k] < a[k]) fell[l]++;
+    }
+    const Csame = ims.every((im) => same(im.layer('C')!, ims[0].layer('C')!));
+    const grew = ims[A.length - 1].layer('chip')!.some((v) => v > 0);
+    const what = `${label}${f ? `, focus ${f}` : ''}`;
+    check(covered > 1000 && worn0 === 0 && Cmax > 0.5 && Csame, `${what}, amount 0: chip, bare and core 0 on all ${covered} covered texels (${worn0} worn); C the raw field at every amount (max ${f3(Cmax)})`);
+    check(grew && fell.chip + fell.bare + fell.core === 0, `${what}, amounts ${A.join(' / ')}: texels where a layer falls from one amount to the next: chip ${fell.chip}, bare ${fell.bare}, core ${fell.core}`);
   }
 }
 
