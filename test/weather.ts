@@ -338,6 +338,17 @@ section('the material\'s maps survive zero weathering; its normal map is carried
       dr = Math.max(dr, Math.abs(O[i * oc + 1] - R[i])); dm = Math.max(dm, Math.abs(O[i * oc + 2] - M[i]));
     }
     check(n > 1000 && dc < 0.01 && dr < 0.01 && dm < 0.01, `at zero weathering every texel keeps the material: largest difference base colour ${f3(dc)}, roughness ${f3(dr)}, metallic ${f3(dm)} over ${n} texels (cabinet, three parts)`);
+    // more wear never takes wear away: chip, bare and core never fall on any texel from wear 0 to 1
+    const steps = [0, 0.25, 0.5, 0.75, 1], layers = ['chip', 'bare', 'core'];
+    const at: Image[] = [];
+    for (const wear of steps) at.push(img(await cook({ ...CAB, w: W({ ...CAB_W, ...ZERO, wear }) }, 'w'), 'weathered_masks'));
+    const falls = layers.map((l) => {
+      let k = 0;
+      for (let s = 1; s < steps.length; s++) { const a = at[s - 1].layer(l)!, b = at[s].layer(l)!; for (let i = 0; i < a.length; i++) if (b[i] < a[i] - 1e-6) k++; }
+      return k;
+    });
+    const top = layers.map((l) => mean(at[steps.length - 1], l));
+    check(falls.every((k) => k === 0) && top[0] > 0, `wear never falls on any texel from 0 to 1 in steps of 0.25 (texels that fall: ${layers.map((l, i) => `${l} ${falls[i]}`).join(', ')}; chip mean at 1 ${f3(top[0])})`);
   }
   const wz = await cook({ ...tiled, w: W(ZERO) }, 'w');
   const base = img(await cook(tiled, 'base'), 'base');
