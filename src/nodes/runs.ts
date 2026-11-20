@@ -136,7 +136,7 @@ function cook(ctx: CookContext): Geometry {
   // the narrowest stain sets the finest lattice; wider ones are drawn on coarser lattices (core/runs.ts rasterStain)
   const stainLattice = stain ? { pix: s.pix, gw: W * S, gh: H * S, step: latStep, island: tl.island.vals, tau: medTau } : undefined;
   const tRaster = performance.now();
-  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, { check: () => budget.check(), stain: stainK, stainSkew: Math.max(0, Number(p.stain_skew) || 0), stainLattice }); } catch (e) {
+  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, { check: () => budget.check(), stain: stainK, stainSkew: Math.max(0, Number(p.stain_skew) || 0), stainMaxHW: 0.75 * Math.max(prm.width[0], prm.width[1]), stainLattice }); } catch (e) {
     if (e instanceof FlowLimit) throw new NodeError(`${type}: the runs cover too many texel cells (${e.count.toLocaleString('en-US')} registrations)`, 'lower pool or width, or density');
     throw e;
   }
@@ -226,7 +226,7 @@ defineNode({
     step: { type: 'float', default: 0, min: 0, max: 5, desc: 'walking step in metres (0 = half the smallest width)', aliases: ['step_size'] },
     spill: { type: 'float', default: 0.05, min: 0, max: 50, desc: 'a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are', aliases: ['spill_reach', 'overflow'] },
     seed: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'seed of the run starts, lengths, widths, wander and gaps' },
-    stain: { type: 'float', default: 0, min: 0, max: 20, desc: 'a broad faint stain around each run, its half width this many times the run\'s head width (0 = none): layer stain, widest at the head and narrowing to under half down the run, no gaps, fading sideways and to nothing at the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash', aliases: ['stain_width', 'halo'] },
+    stain: { type: 'float', default: 0, min: 0, max: 20, desc: 'a broad faint stain around each run, its half width this many times the run\'s head width (0 = none; a spill wider than 1.5 times the widest width counts as that): layer stain, widest at the head and narrowing to under half down the run, no gaps, fading sideways and to nothing at the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash', aliases: ['stain_width', 'halo'] },
     stain_skew: { type: 'float', default: 0, min: 0, max: 8, desc: 'each run\'s stain times its strength (0..1; the longer runs are the stronger) to this power: 0 = every stain alike, 2 = most faint and a few strong', aliases: ['stain_contrast'] },
   },
   outputs: 'image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask (and stain when asked for)',
