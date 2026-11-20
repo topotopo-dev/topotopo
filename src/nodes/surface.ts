@@ -483,7 +483,7 @@ export const wearThreshold = (amount: number) => 1 - 0.85 * Math.max(0, Math.min
 
 function cookEdgeWear(ctx: CookContext) {
   const p = ctx.p;
-  for (const [k, h] of [['radius', 'radius: 0.004 measures edges at 4 mm'], ['width', 'width: 0.008 lets wear reach 8 mm in from an edge'], ['chip_size', 'chip_size: 0.003 breaks the outline up at 3 mm'], ['patch_size', 'patch_size: 0.15 decides which stretches of edge wear at 15 cm']] as const)
+  for (const [k, h] of [['radius', 'radius: 0.004 measures edges at 4 mm'], ['width', 'width: 0.008 lets wear reach 8 mm in from an edge'], ['chip_size', 'chip_size: 0.006 breaks the outline up at 6 mm'], ['patch_size', 'patch_size: 0.15 decides which stretches of edge wear at 15 cm']] as const)
     if (!(p[k] > 0)) throw failW(`${k} must be above 0`, h);
   const b = setup(ctx), g = b.g, s = b.s, n = s.n;
   const sur = ctx.hasInput(1) ? ctx.input(1) : null;
@@ -648,7 +648,7 @@ defineNode({
     radius: { type: 'float', default: 0.004, min: 0, desc: 'the scale edges are measured at (metres): 4 mm catches 1 to 3 mm bevels on sheet metal; cast parts want 6 to 8 mm; facets smaller than it do not count', aliases: ['edge_radius'] },
     method: { type: 'enum', options: ['surface', 'dihedral'], default: 'surface', desc: 'surface: from the shading normals over radius (ignores facets; decimated, isosurface and clean meshes); dihedral: the mesh\'s edge angles, as bake_curvature', aliases: ['mode', 'curvature_method'] },
     width: { type: 'float', default: 0.008, min: 0, desc: 'how far wear reaches in from an edge at amount 1 (metres)', aliases: ['reach', 'edge_width'] },
-    chip_size: { type: 'float', default: 0.003, min: 0, desc: 'size of the chips that break the wear up (metres)', aliases: ['chip_scale', 'breakup_size'] },
+    chip_size: { type: 'float', default: 0.006, min: 0, desc: 'size of the chips that break the wear up (metres)', aliases: ['chip_scale', 'breakup_size'] },
     raggedness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how ragged the chip outlines are (domain warp)', aliases: ['ragged', 'warp'] },
     patchiness: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'how strongly large patches decide which stretches of edge wear (0: every edge alike)', aliases: ['patches'] },
     patch_size: { type: 'float', default: 0.15, min: 0, desc: 'size of those patches (metres)', aliases: ['patch_scale'] },

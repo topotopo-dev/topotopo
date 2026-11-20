@@ -12653,7 +12653,7 @@ Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the cov
 | `radius` | float | `0.004` | 0.. |  | `edge_radius` | the scale edges are measured at (metres): 4 mm catches 1 to 3 mm bevels on sheet metal; cast parts want 6 to 8 mm; facets smaller than it do not count |
 | `method` | enum | `"surface"` |  | `surface`, `dihedral` | `mode`, `curvature_method` | surface: from the shading normals over radius (ignores facets; decimated, isosurface and clean meshes); dihedral: the mesh's edge angles, as bake_curvature |
 | `width` | float | `0.008` | 0.. |  | `reach`, `edge_width` | how far wear reaches in from an edge at amount 1 (metres) |
-| `chip_size` | float | `0.003` | 0.. |  | `chip_scale`, `breakup_size` | size of the chips that break the wear up (metres) |
+| `chip_size` | float | `0.006` | 0.. |  | `chip_scale`, `breakup_size` | size of the chips that break the wear up (metres) |
 | `raggedness` | float | `0.5` | 0..1 |  | `ragged`, `warp` | how ragged the chip outlines are (domain warp) |
 | `patchiness` | float | `0.5` | 0..1 |  | `patches` | how strongly large patches decide which stretches of edge wear (0: every edge alike) |
 | `patch_size` | float | `0.15` | 0.. |  | `patch_scale` | size of those patches (metres) |
