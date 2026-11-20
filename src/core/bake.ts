@@ -117,6 +117,29 @@ function closestOnTri(px: number, py: number, ax: number, ay: number, bx: number
   return set(vb * den, vc * den);
 }
 
+// ---------------------------------------------------------------- one rasterisation per mesh
+
+const bakeMemo = new WeakMap<object, Map<string, unknown>>();
+
+/** How often memoBake made a value and how often it reused one (tests read it). */
+export const bakeMemoStats = { made: 0, reused: 0 };
+
+/**
+ * A value derived from a mesh, made once per (mesh object, key) and shared by every bake that asks for it: the covered
+ * samples of a uv raster and the per-sample positions and normals. Cooked geometry is immutable, so the object itself
+ * is a safe key; the value lives as long as the mesh does. Callers must not write into what it returns. A `make` that
+ * throws stores nothing.
+ */
+export function memoBake<T>(g: object, key: string, make: () => T): T {
+  let m = bakeMemo.get(g);
+  if (!m) { m = new Map(); bakeMemo.set(g, m); }
+  if (m.has(key)) { bakeMemoStats.reused++; return m.get(key) as T; }
+  const v = make();
+  m.set(key, v);
+  bakeMemoStats.made++;
+  return v;
+}
+
 // ---------------------------------------------------------------- covered samples
 
 /** The covered samples of a (supersampled) texel map: what the bakes evaluate. */
