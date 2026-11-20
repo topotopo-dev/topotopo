@@ -241,6 +241,16 @@ section('the same wear across uv seams and at two texel densities across an edge
     return { C: mean(top.map((k) => s.at('C', k))), chip: share(top.map((k) => s.at('chip', k))) };
   };
   const d = [await strip(1), await strip(0.5), await strip(0.25)];
+  // the defaults (4 mm radius) on the example's bevelled box, its +x side at 1 and 0.25 of the texel density
+  const small = async (w: number) => {
+    const nodes: Nodes = { ...BOX, bw: { type: 'wrangle', in: ['b1'], params: { run_over: 'prims', code: `f@texel_weight = @P.x > 0.19 ? ${w} : 1;` } }, bwx: { type: 'uv_unwrap', in: ['bw'] } };
+    const s = await texels(nodes, 'bwx', { resolution: 1024, amount: 0.6 });
+    nest(s.im);
+    const top = s.idx.filter((k) => { const p = s.p(k); return p[1] > 0.1499 && p[0] > 0.19 && Math.abs(p[2]) < 0.12; });
+    return { C: mean(top.map((k) => s.at('C', k))), n: top.length };
+  };
+  const sm = [await small(1), await small(0.25)];
+  check(sm[1].n > 1000 && Math.abs(sm[0].C - sm[1].C) < 0.03, `the defaults on a 4 mm bevel: the top within 1 cm of the edge reads C ${f3(sm[0].C)} / ${f3(sm[1].C)} at side densities 1 / 0.25 (within 0.03)`);
   check(d.every((x) => Math.abs(x.C - d[0].C) < 0.03 && Math.abs(x.chip - d[0].chip) < 0.05), `the top within 3 cm of the edge: C ${d.map((x) => f3(x.C)).join(' / ')}, chipped ${d.map((x) => f3(x.chip)).join(' / ')} at side densities 1 / 0.5 / 0.25 (within 0.03 and 0.05)`);
 }
 
