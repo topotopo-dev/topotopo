@@ -1375,7 +1375,9 @@ Two nodes, one way of measuring. Each part ages by its material's kind (the mate
 {"material": "kind"} on the node; never guessed from names; "keep" leaves a part as it is). What the object stands on
 is stated with mount (ground, wall, free), the parts hands touch with handled (a group). Dirt runs start where the
 shape sheds water (tops meeting steep faces at a convex edge: sills, copings, ledges), rust runs below bare steel.
-Sliders wear, dirt, rust, age and the seed; exposure outdoor, sheltered or indoor.
+Sliders wear, dirt, rust, age and the seed; exposure outdoor, sheltered or indoor. Worn edges come from
+bake_edge_wear (chip, bare and core, capped per face); in weather_masks, edges is its chip layer and coating its
+bare layer.
 
 MAPS (weather): unique maps for one prop. The material's own maps are read in metres (its tile) on the uv it comes
 with, and kept: at zero weathering the maps are the material's. Out: material "weathered" with base colour, normal
@@ -1405,7 +1407,8 @@ a prim attribute: each piece of a kit is weathered as if alone. preview adds a b
    "output": "masks"}
 
 TAKING A STEP OVER: both nodes cook a nested graph (bakes, then one tex_layers stack); their help shows it for the
-defaults. A slider re-cooks only the stack, the seed also the noise and the runs. Input 2 replaces masks by name (an
+defaults. A slider re-cooks only the stack (wear also the edge wear threshold), the seed also the noise, the edge
+wear and the runs. Input 2 replaces masks by name (an
 image named "dust", or a layer "dust"). Check with --inspect, render with --shading pbr --textures.`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:

@@ -35,7 +35,7 @@ const KIND_LAYERS: Record<string, (k: string) => LayerJSON[]> = {
     { name: 'fade', mask: `${k} * fade`, color: '#d6d2c8', opacity: 0.55, roughness_offset: 0.25 },
     { name: 'primer', mask: `${k} * chip`, color: '#8e8b84', roughness: 0.75, metallic: 0, height: -0.00004 },
     { name: 'bare', mask: `${k} * bare`, color: '#9a9a96', roughness: 0.4, metallic: 1, height: -0.00008 },
-    { name: 'rust', mask: `${k} * core * clamp(0.2 + rust * 1.1, 0, 1)`, color: [[0, '#4a2210'], [1, '#8a4020']], color_by: 'blotch', roughness: 0.9, metallic: 0, height: 0.0001 },
+    { name: 'rust', mask: `${k} * clamp(core * 1.1 + bare * 0.45, 0, 1) * clamp(0.2 + rust * 1.1, 0, 1)`, color: [[0, '#3e1c0e'], [0.5, '#64301a'], [1, '#8a4420']], color_by: 'grain', roughness: 0.9, metallic: 0, height: 0.0001 },
   ],
   cast_metal: (k) => [
     { name: 'pitting', mask: `${k} * smoothstep(0.58, 0.8, n_pits) * clamp(k_age * 2, 0, 1)`, roughness_offset: 0.12, height: -0.0003 },
@@ -51,8 +51,10 @@ const KIND_LAYERS: Record<string, (k: string) => LayerJSON[]> = {
   ],
   bare_steel: (k) => [
     { name: 'mill_scale', mask: `${k} * smoothstep(0.48, 0.62, n_patch) * clamp(k_age * 2, 0, 1)`, color: '#45423e', roughness: 0.65, metallic: 0.7 },
-    { name: 'flash_rust', mask: `${k} * clamp(rust * 1.3, 0, 1)`, color: '#8a4a22', roughness: 0.85, metallic: 0 },
-    { name: 'heavy_rust', mask: `${k} * smoothstep(0.45, 0.85, rust * (0.6 + cavity + m_low * 0.5))`, color: '#4e2412', roughness: 0.95, metallic: 0, height: 0.0002 },
+    // rust in patches, opaque where it holds (a thin orange glaze over grey steel reads tan): orange-brown to dark
+    // red-brown with the grain, darker in the cavities, low down and in the cores of the patches
+    { name: 'flash_rust', mask: `${k} * smoothstep(0.16, 0.36, rust * (0.55 + 0.9 * grain))`, color: [[0, '#5e2a14'], [0.55, '#7c3a1a'], [1, '#9c5222']], color_by: 'grain', roughness: 0.85, metallic: 0 },
+    { name: 'heavy_rust', mask: `${k} * smoothstep(0.45, 0.8, rust * (0.6 + cavity + m_low * 0.5) * (0.7 + 0.6 * blotch))`, color: [[0, '#2a1209'], [1, '#4c2210']], color_by: 'grain', roughness: 0.95, metallic: 0, height: 0.0002 },
   ],
   stainless: (k) => [
     { name: 'smudge', mask: `${k} * handled * n_patch * clamp(k_wear * 2, 0, 1)`, roughness_offset: 0.15 },
@@ -136,7 +138,7 @@ export function weatherVars(o: { wear: number; dirt: number; rust: number; age: 
   return {
     k_wear: wear, k_dirt: o.dirt * A, k_rust: o.rust * A, k_age: Math.min(1, o.age * 1.25), k_fade: o.age * x.fade,
     // a chip shows where the wear field times its noise passes the cut: more wear, a lower cut
-    k_cut: wear > 0 ? 1.55 - 0.9 * Math.min(1.3, wear) : 99, k_seed: o.seed, k_redrust: Math.max(0, o.rust * A - 0.6) * 2.5,
+    k_cut: wear > 0 ? 1.55 - 0.9 * Math.min(1.3, wear) : 99, k_amount: Math.min(1, wear), k_focus: Math.min(1, 0.5 * x.handled), k_seed: o.seed, k_redrust: Math.max(0, o.rust * A - 0.6) * 2.5,
     k_ground: o.mount === 'ground' ? 1 : 0, k_wall: o.mount === 'wall' ? 1 : 0,
     x_runs_dirt: x.runs_dirt, x_runs_rust: x.runs_rust, x_dust: x.dust, x_wash: x.wash, x_splash: x.splash, x_rust: x.rust,
     x_growth: x.growth, x_handled: x.handled, x_damp: x.damp, x_bloom: x.bloom,
@@ -177,27 +179,34 @@ export function namedMasks(o: MaskInputs, packed = false): { name: string; mask:
   const grows = o.kinds.filter((k) => (GROWING_KINDS as readonly string[]).includes(k)).map((k) => `base_kind_${k}`);
   const out: { name: string; mask: string }[] = [
     { name: 'pv', mask: '0.8 + 0.4 * frac(part * 13.37 + k_seed * 0.618)' },
-    // curvature can miss a few texels (NaN): they read as flat
-    { name: 'convex', mask: 'm_cvx || 0' },
+    // edges, chips and the handled field come from the edge wear bake (ew): its amount follows the wear slider, and
+    // chip, bare and core carry its per-face cap; its C, the raw wear field, is never capped, so no mask cuts it
+    { name: 'convex', mask: 'ew_convex' },
     { name: 'occlusion', mask: 'm_occ' },
-    { name: 'cavity', mask: 'clamp(m_cav * 1.4 + (m_ccv || 0) * 0.6, 0, 1)' },
-    { name: 'handled', mask: o.handled ? 'm_hand' : '0' },
-    // the raw wear field: edges at the radius, more where hands go, broken into stretches by the patch noise (seeded)
-    { name: 'edge_wear', mask: `clamp(smoothstep(0.2, 0.65, convex) * (0.1 + 1.3 * smoothstep(0.32, 0.68, n_patch))${o.handled ? ' + handled * x_handled * (0.7 + 1.1 * n_patch)' : ''}, 0, 2)` },
-    { name: 'wearf', mask: 'edge_wear * (0.45 + 1.1 * n_chip) * pv' },
-    { name: 'chip', mask: 'smoothstep(k_cut, k_cut + 0.05, wearf)' },
-    { name: 'bare', mask: 'smoothstep(k_cut + 0.12, k_cut + 0.17, wearf)' },
-    { name: 'core', mask: 'smoothstep(k_cut + 0.45, k_cut + 0.52, wearf)' },
+    { name: 'cavity', mask: 'clamp(m_cav * 1.4 + ew_concave * 0.6, 0, 1)' },
+    { name: 'handled', mask: o.handled ? 'ew_handled' : '0' },
+    { name: 'edge_wear', mask: 'ew' },
+    { name: 'chip', mask: 'ew_chip' },
+    { name: 'bare', mask: 'ew_bare' },
+    { name: 'core', mask: 'ew_core' },
     { name: 'edges_soft', mask: 'clamp(smoothstep(0.1, 0.6, convex) * (0.3 + 0.8 * n_patch) * k_wear, 0, 1)' },
-    { name: 'peel', mask: 'smoothstep(k_cut - 0.1, k_cut - 0.04, (edge_wear * 0.5 + n_patch * 0.8 + m_low * k_ground * 0.4) * pv)' },
+    { name: 'peel', mask: 'smoothstep(k_cut - 0.1, k_cut - 0.04, (chip * 0.5 + n_patch * 0.8 + m_low * k_ground * 0.4) * pv)' },
     { name: 'blotch', mask: 'n_blotch' }, { name: 'grain', mask: 'n_grain' },
     { name: 'grime', mask: 'clamp(k_dirt * (cavity * 1.1 + (1 - m_occ) * 0.9) * (0.4 + 0.9 * n_blotch) * (0.7 + 0.6 * (1 - m_ht)) * pv + handled * k_dirt * 0.35 * n_patch, 0, 1)' },
     { name: 'dust', mask: `clamp(k_dirt * x_dust * smoothstep(0.15, 0.8, m_top) * (1 - x_wash + x_wash * m_shel) * (0.35 + 0.9 * n_grain) ${o.wallNear ? '+ k_wall * m_wallnear * m_top * k_dirt * 0.5' : ''}, 0, 1)` },
-    { name: 'splash', mask: 'k_ground * clamp(x_splash * k_dirt * 1.2, 0, 1) * smoothstep(0.45, 0.62, m_low * (0.35 + 1.3 * n_ragged)) * (0.55 + 0.6 * n_blotch)' },
+    // splash: densest at the ground, thinning upward into spatter (the grain noise cut lower the nearer the ground) with a
+    // ragged top; lighter where something overhangs (rain falls less there)
+    { name: 'splashd', mask: 'm_low * (0.55 + 0.9 * n_ragged)' },
+    { name: 'splash', mask: 'k_ground * clamp(x_splash * k_dirt * 1.3, 0, 1) * clamp(max(smoothstep(0.45, 0.85, splashd), smoothstep(1 - 0.55 * splashd, 1.06 - 0.55 * splashd, n_grain) * smoothstep(0.08, 0.3, splashd)), 0, 1) * (0.6 + 0.5 * n_blotch) * (1 - 0.6 * m_shel)' },
     { name: 'fade', mask: 'clamp(k_fade * m_sun * m_vis * (0.7 + 0.6 * n_blotch), 0, 1)' },
     { name: 'rust', mask: 'clamp(k_rust * x_rust * (0.45 + 0.8 * n_blotch) * (0.7 + 0.5 * cavity + 0.3 * m_top + 0.3 * m_low), 0, 1)' },
-    { name: 'runs_rust', mask: o.rustRuns ? 'rr * clamp(k_rust * x_runs_rust * 1.4, 0, 1)' : '0' },
-    { name: 'runs_dirt', mask: o.dirtRuns ? 'rd * clamp(k_dirt * x_runs_dirt * 1.5, 0, 1)' : '0' },
+    // runs: the core (C) and its broad stain, as separate masks for the layers and together (the stain fainter) as the run
+    { name: 'rust_core', mask: o.rustRuns ? 'rr * clamp(k_rust * x_runs_rust * 1.4, 0, 1)' : '0' },
+    { name: 'rust_stain', mask: o.rustRuns ? 'rr_stain * clamp(k_rust * x_runs_rust * 1.2, 0, 1)' : '0' },
+    { name: 'runs_rust', mask: 'clamp(rust_core + rust_stain * 0.5, 0, 1)' },
+    { name: 'dirt_core', mask: o.dirtRuns ? 'rd * clamp(k_dirt * x_runs_dirt * 1.5, 0, 1)' : '0' },
+    { name: 'dirt_stain', mask: o.dirtRuns ? 'rd_stain * clamp(k_dirt * x_runs_dirt * 1.3, 0, 1)' : '0' },
+    { name: 'runs_dirt', mask: 'clamp(dirt_core + dirt_stain * 0.45, 0, 1)' },
     // fine rain streaks down steep faces, stronger high up where the water starts
     { name: 'streaks', mask: 'clamp(k_dirt * x_runs_dirt * (1 - m_top) * smoothstep(0.62, 0.8, n_streak) * smoothstep(0.35, 0.65, n_blotch) * m_ht * m_ht * 1.4, 0, 1)' },
     { name: 'damp', mask: 'clamp(x_damp * clamp(k_dirt * 2, 0, 1) * (k_ground * m_low * 0.8 + cavity * 0.4 + runs_dirt * 0.5) * (0.45 + n_patch), 0, 1)' },
@@ -212,6 +221,11 @@ export function namedMasks(o: MaskInputs, packed = false): { name: string; mask:
     { name: 'zero', mask: '0' }, { name: 'one', mask: '1' },
   );
   for (const m of out) if (o.replaced.includes(m.name)) m.mask = `ov_${m.name}`;
+  // a replaced run is drawn as the core, with no stain of its own
+  for (const [run, core, stain] of [['runs_dirt', 'dirt_core', 'dirt_stain'], ['runs_rust', 'rust_core', 'rust_stain']]) {
+    if (!o.replaced.includes(run)) continue;
+    for (const m of out) if (m.name === core) m.mask = `ov_${run}`; else if (m.name === stain) m.mask = '0';
+  }
   return out;
 }
 
@@ -221,13 +235,15 @@ export function sharedLayers(o: { exposure: Exposure; kinds: string[]; joints: b
   const out: LayerJSON[] = [
     { name: 'film', mask: '(1 - occlusion) * clamp(k_dirt, 0, 1)', color: [0.86, 0.86, 0.86], color_mode: 'multiply', roughness_offset: 0.1 },
     // a light soil over everything, heavier low down and in blotches: nothing stays factory clean
-    { name: 'soil', mask: 'clamp(k_dirt * (0.35 + 0.6 * blotch) * (0.6 + 0.7 * (1 - m_ht)), 0, 1)', color: [0.82, 0.78, 0.7], color_mode: 'multiply', roughness_offset: 0.05 },
+    { name: 'soil', mask: 'clamp(k_dirt * (0.35 + 0.6 * blotch) * (0.6 + 0.7 * (1 - m_ht)), 0, 1)', color: [0.84, 0.82, 0.78], color_mode: 'multiply', roughness_offset: 0.05 },
     { name: 'grime', mask: 'grime', color: grimeC, roughness: grimeR, metallic: 0 },
     { name: 'dust', mask: 'dust', color: '#a69d8b', roughness: 0.95, metallic: 0 },
-    { name: 'splash', mask: 'splash', color: '#4a4034', opacity: 0.85, roughness: 0.9, metallic: 0 },
+    { name: 'splash', mask: 'splash', color: [[0, '#3a3128'], [0.5, '#54473a'], [1, '#6e604d']], color_by: 'blotch', opacity: 0.85, roughness: 0.9, metallic: 0 },
     { name: 'streaks', mask: 'streaks', color: '#5f574b', opacity: 0.4, roughness_offset: 0.05 },
-    { name: 'runs_dirt', mask: 'runs_dirt', color: '#5a5146', opacity: 0.45, roughness_offset: 0.1 },
-    { name: 'runs_rust', mask: 'runs_rust', color: '#8a4520', opacity: 0.85, roughness: 0.85, metallic: 0 },
+    { name: 'dirt_stain', mask: 'dirt_stain', color: '#62584a', opacity: 0.4, roughness_offset: 0.06 },
+    { name: 'runs_dirt', mask: 'dirt_core', color: '#4a4236', opacity: 0.45, roughness_offset: 0.1 },
+    { name: 'rust_stain', mask: 'rust_stain', color: '#8a4a26', opacity: 0.35, roughness_offset: 0.08 },
+    { name: 'runs_rust', mask: 'rust_core', color: [[0, '#5a2a14'], [1, '#86421e']], color_by: 'grain', opacity: 0.85, roughness: 0.85, metallic: 0 },
   ];
   if (o.kinds.some((k) => (GROWING_KINDS as readonly string[]).includes(k)) && o.exposure !== 'indoor') out.push({ name: 'growth', mask: 'growth', color: [[0, '#2f3a1f'], [1, '#5a6230']], color_by: 'grain', roughness: 0.95, metallic: 0, height: 0.0002 });
   if (o.joints) out.push({ name: 'joints', mask: 'joints', color: [0.55, 0.55, 0.55], color_mode: 'multiply', roughness_offset: 0.1 });
@@ -384,13 +400,30 @@ export function leakSources(g: Geometry, o: LeakOptions): LeakSources {
   let h = (o.seed * 2654435761) >>> 0;
   const rnd = () => { h = (h + 0x6d2b79f5) >>> 0; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const step = 1 / Math.max(1e-6, o.density);
-  /** points along a-b, set off by `off` (a unit vector times metres) from the edge */
+  /**
+   * Points along a-b, set off by `off` (a unit vector times metres) from the edge. Water gathers before it drips: a
+   * few points sit at each end of the edge (the ends of a ledge, the joints between its pieces; on a sloping edge the
+   * lower end takes them), most of the rest around a few drip spots along it, the remainder anywhere.
+   */
   const along = (a: number[], b: number[], off: number[], weight: (x: number, y: number, z: number) => number, kind: keyof typeof count) => {
     const L = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
     if (!(L > 1e-6)) return;
     const n = Math.max(1, Math.floor(L / step + rnd()));
+    const near = Math.min(0.5, 0.03 / L), slope = (b[1] - a[1]) / L;
+    const spots = Array.from({ length: Math.max(1, Math.round(L * 2.5 * (0.6 + 0.8 * rnd()))) }, () => near + (1 - 2 * near) * rnd());
+    const spread = Math.min(0.25, 0.015 / L);
     for (let i = 0; i < n; i++) {
-      const t = (i + 0.2 + 0.6 * rnd()) / n;
+      const r = rnd();
+      let t: number;
+      if (r < 0.3) {
+        // an end: the lower one of a sloping edge, either of a level one
+        const lowB = slope < -0.05 ? 0.85 : slope > 0.05 ? 0.15 : 0.5;
+        const nearB = rnd() < lowB;
+        t = (nearB ? 1 - rnd() * near : rnd() * near);
+      } else if (r < 0.8) {
+        const c = spots[Math.floor(rnd() * spots.length)];
+        t = Math.min(1 - 1e-3, Math.max(1e-3, c + (rnd() + rnd() + rnd() - 1.5) * spread));
+      } else t = rnd();
       const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t, z = a[2] + (b[2] - a[2]) * t;
       // a ledge the rain reaches less keeps fewer of its points
       const w = weight(x, y, z);
@@ -510,7 +543,8 @@ function compactBakes(nodes: Record<string, NodeSpec>, masks: string[], texts: s
   for (let k = masks.length - 1; k >= 0; k--) {
     const id = masks[k], spec = nodes[id];
     const layerNames = spec?.type === 'bake_measure' ? ['C', ...((spec.params?.measures ?? []) as { name: string }[]).map((m) => m.name)]
-      : spec?.type === 'bake_flow' ? ['C', 'along', 'strength', 'head', 'id'] : spec?.type === 'bake_mask' ? ['C'] : null;
+      : spec?.type === 'bake_flow' ? ['C', 'along', 'strength', 'head', 'id', 'stain']
+      : spec?.type === 'bake_edge_wear' ? ['C', 'chip', 'bare', 'core', 'convex', 'concave', 'handled'] : spec?.type === 'bake_mask' ? ['C'] : null;
     if (!layerNames) continue;
     const img = String(spec.params?.name ?? id);
     const used = layerNames.filter((l) => reads(l === 'C' ? img : `${img}_${l}`));
@@ -548,14 +582,12 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
     { by: 'cavity', name: 'cav', max_distance: f(o.scale.cavity) },
     { by: 'shelter', name: 'shel', direction: [0, 1, 0], cone: 35 },
     { by: 'visibility', name: 'vis' },
-    { by: 'curvature', name: 'cvx', radius: f(o.scale.edge), side: 'convex' },
-    { by: 'curvature', name: 'ccv', radius: f(o.scale.edge * 2), side: 'concave' },
     { by: 'facing', name: 'top', min: 0, max: 20, falloff: 25 },
     { by: 'facing', name: 'sun', direction: o.sun, min: 0, max: 45, falloff: 90 },
     { by: 'height', name: 'ht' },
-    { by: 'height', name: 'low', min: 0, max: f(o.scale.splash * 0.6), falloff: f(o.scale.splash * 0.6) },
+    // 1 at the lowest point, fading to 0 at the splash height: splash and damp thin out upward, no band with a top
+    { by: 'height', name: 'low', min: 0, max: 0, falloff: f(o.scale.splash) },
   ];
-  if (o.handled) measures.push({ by: 'distance', name: 'hand', target: o.handled, range: f(0.06 * s) });
   const wallNear = o.mountWall && o.env;
   if (wallNear) measures.push({ by: 'distance', name: 'wallnear', target: 'input1', range: f(0.15 * s) });
   nodes.measure = { type: 'bake_measure', in: [atlas, ...env], params: { ...bake, measures, samples: o.samples, name: 'm' } };
@@ -563,21 +595,30 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
     type: 'bake_measure', in: [atlas], params: {
       ...bake, seed: o.seed, name: 'n', measures: [
         { by: 'noise', name: 'patch', size: [f(0.15 * s), f(0.15 * s), f(0.15 * s)] },
-        { by: 'noise', name: 'chip', noise: 'worley', size: [f(0.012 * s), f(0.012 * s), f(0.012 * s)], octaves: 2 },
         { by: 'noise', name: 'grain', size: [f(0.004 * s), f(0.004 * s), f(0.004 * s)], octaves: 3 },
         { by: 'noise', name: 'blotch', size: [f(0.4 * s), f(0.4 * s), f(0.4 * s)] },
         { by: 'noise', name: 'ragged', size: [f(0.03 * s), f(0.03 * s), f(0.03 * s)] },
-        { by: 'noise', name: 'streak', size: [f(0.01 * s), f(0.25 * s), f(0.01 * s)] },
+        { by: 'noise', name: 'streak', size: [f(0.03 * s), f(0.35 * s), f(0.03 * s)] },
         { by: 'noise', name: 'pits', noise: 'worley', size: [0.004, 0.004, 0.004], octaves: 1 },
         { by: 'noise', name: 'moss', size: [f(0.06 * s), f(0.06 * s), f(0.06 * s)], fractal: 'turbulence' },
       ],
     },
   };
+  // the worn edges: the wear slider sets the amount (a slider change re-cooks only its threshold and per-face cap, the
+  // wear field is kept), the handled parts are its focus
+  nodes.wear = {
+    type: 'bake_edge_wear', in: [atlas, ...env], params: {
+      ...bake, name: 'ew', amount: '=k_amount', radius: f(o.scale.edge), reach: f(o.scale.edge * 2), chip_size: f(0.006 * s),
+      patch_size: f(0.15 * s), seed: o.seed, ...(o.handled ? { focus: o.handled, focus_radius: f(0.06 * s), focus_amount: '=k_focus' } : {}),
+    },
+  };
   nodes.parts = { type: 'bake_mask', in: [atlas], params: { ...bake, attrib: 'wpart', name: 'part' } };
-  const masks = ['measure', 'noise', 'parts'];
-  const run = { resolution: res, padding: pad, uv_attrib: o.uv, seed: o.seed, length: [f(0.08 * s), f(0.45 * s)], width: [f(0.003 * s), f(0.012 * s)], wobble: 0.25, breakup: 0.45 };
+  const masks = ['measure', 'noise', 'wear', 'parts'];
+  // water on a flat face goes straight down (it wanders only where the shape turns it): little wobble, lengths that vary a
+  // lot (most short, a few long), a narrow core in a broad faint stain
+  const run = { resolution: res, padding: pad, uv_attrib: o.uv, seed: o.seed, length: [f(0.06 * s), f(0.45 * s)], width: [f(0.003 * s), f(0.01 * s)], wobble: 0.05, breakup: 0.3, stain: 3 };
   if (o.rustSources) { nodes.rust_runs = { type: 'bake_flow', in: [atlas], params: { ...run, sources: '@wrust=1', density: 30, name: 'rr' } }; masks.push('rust_runs'); }
-  if (o.leaks) { nodes.dirt_runs = { type: 'bake_flow', in: [atlas, 'leak_sources'], params: { ...run, length: [f(0.12 * s), f(0.7 * s)], width: [f(0.002 * s), f(0.007 * s)], name: 'rd' } }; masks.push('dirt_runs'); }
+  if (o.leaks) { nodes.dirt_runs = { type: 'bake_flow', in: [atlas, 'leak_sources'], params: { ...run, length: [f(0.05 * s), f(0.9 * s)], width: [f(0.0015 * s), f(0.005 * s)], wobble: 0.04, stain: 4, name: 'rd' } }; masks.push('dirt_runs'); }
   if (o.joints) { nodes.joints = { type: 'bake_measure', in: [atlas, 'joint_planes'], params: { ...bake, name: 'jn', measures: [{ by: 'distance', name: 'joint', target: 'input1', range: 1 }] } }; masks.push('joints'); }
   for (const ph of o.photos) {
     const id = `photo_${ph.layer}`;

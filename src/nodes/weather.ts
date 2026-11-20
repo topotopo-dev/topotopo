@@ -1,7 +1,8 @@
 // weather and weather_masks: one node each for weathering a model, built from the bakes and the layer stack. Both
 // prepare the mesh here (kinds, parts, the planes a stated mount or border adds, where water leaks from) and cook the
 // graph src/core/weather.ts builds with ctx.subcook, so every inner node is cached by its own signature: a slider
-// (wear, dirt, rust, age) reaches only tex_layers and re-cooks only it; seed also re-cooks the noise bake and the runs.
+// (dirt, rust, age) reaches only tex_layers and re-cooks only it; wear also re-cooks the chip threshold of the edge wear
+// bake (its wear field is kept); seed also re-cooks the noise bake, the edge wear and the runs.
 //
 //   weather         the maps: base colour, normal and a packed map on one material over every weathered part, the
 //                   masks image beside them; parts of kind keep keep their own material
@@ -42,7 +43,7 @@ const SHARED = (): Record<string, ParamDef> => ({
   sun: { type: 'vec3', default: [0, 1, 0], desc: 'where the sun comes from (fade, chalk, greying): straight up by default, a model does not know where south is' },
   padding: { type: 'int', default: 4, min: 0, max: 64, desc: 'texels the islands are padded by', aliases: ['dilation'] },
   samples: { type: 'int', default: 32, min: 4, max: 256, desc: 'rays per cloud point of the occlusion, cavity, shelter and visibility bake' },
-  leak_density: { type: 'float', default: 40, min: 0, max: 500, desc: 'leak sources per metre of ledge, sill, coping or overhang edge (0 = no dirt runs)', aliases: ['runs_per_metre'] },
+  leak_density: { type: 'float', default: 20, min: 0, max: 500, desc: 'leak sources per metre of ledge, sill, coping or overhang edge (0 = no dirt runs)', aliases: ['runs_per_metre'] },
 });
 
 // ---------------------------------------------------------------- preparation
@@ -196,8 +197,27 @@ function overridesOf(ctx: CookContext, T: string, index: number, masks: readonly
 /** The signature of a prepared input: what it was made from and how. */
 const sigOf = (ctx: CookContext, what: string, extra: unknown) => `${what}:${hashString(JSON.stringify([ctx.inputSigs, extra]))}`;
 
+/**
+ * The inputs of the last nested cooks by signature: an input made again the same way is handed over as the object it was
+ * before, so what the bakes keep per geometry (the edge wear's buried points and wear field per surroundings) is found
+ * again when only a slider moved.
+ */
+const lastInputs = new Map<string, Geometry>();
+const LAST_INPUTS = 32;
+function sameInputs(inputs: SubInput[]): SubInput[] {
+  return inputs.map((x) => {
+    // images (photos, overrides, the preview's masks) are not held: only the prepared meshes, planes and points
+    if (x.geo.volumes.length) return x;
+    const had = lastInputs.get(x.sig);
+    if (had) { lastInputs.delete(x.sig); lastInputs.set(x.sig, had); return { ...x, geo: had }; }
+    lastInputs.set(x.sig, x.geo);
+    if (lastInputs.size > LAST_INPUTS) lastInputs.delete(lastInputs.keys().next().value!);
+    return x;
+  });
+}
+
 async function cookNested(ctx: CookContext, T: string, graph: GraphSpec, inputs: SubInput[], vars: Record<string, number>, target?: string): Promise<CookReport> {
-  const r = await ctx.subcook(graph, { inputs, vars, ...(target ? { target } : {}) });
+  const r = await ctx.subcook(graph, { inputs: sameInputs(inputs), vars, ...(target ? { target } : {}) });
   for (const w of r.warnings) ctx.warn(`[${w.node}] ${w.message}`);
   if (!r.ok || !r.geo) {
     const e = r.errors[0];
@@ -579,10 +599,15 @@ defineNode({
     'with material `material` on every weathered prim (parts of kind keep keep theirs), images <material>_base_color, _normal (in ' +
     'normal_format), the packed map (_orm, or _<packing> in the stated layout, h = height around 0.5 at 5 mm per unit) and ' +
     '_masks holding every mask as a layer: ' + WEATHER_MASKS.join(', ') + ' (and the steps between them). Built from bakes ' +
-    '(uv_layout, bake_material, bake_measure twice: rays and shape, then seeded noise; bake_mask, bake_flow for rust and dirt ' +
-    'runs, bake_triplanar per photo) and one tex_layers stack, cooked as a nested graph: each step is cached by its own ' +
-    'signature, so wear, dirt, rust and age re-cook only the stack, and seed also the noise and the runs. Edge wear is ' +
-    'measured as curvature at a radius (convex) broken by patch and chip noise. The graph for the defaults, to copy and take ' +
+    '(uv_layout, bake_material, bake_measure twice: rays and shape, then seeded noise; bake_edge_wear, bake_mask, bake_flow ' +
+    'for rust and dirt runs, bake_triplanar per photo) and one tex_layers stack, cooked as a nested graph: each step is cached ' +
+    'by its own signature, so dirt, rust and age re-cook only the stack, wear also the chip threshold of the edge wear (its ' +
+    'wear field is kept), and seed also the noise, the edge wear and the runs. Worn edges are bake_edge_wear: its amount is ' +
+    'the wear slider after age and exposure, its focus the handled parts, and chip, bare and core (nested, capped per face: at ' +
+    'most about a third of any face chips) are the masks of the same names; edge_wear is its raw wear field. Runs are a dark ' +
+    'narrow core in a broad faint stain (bake_flow stain), nearly straight on flat faces; their drip points gather at the ends ' +
+    'of a ledge, at its joints and low end and around a few spots along it. Splash is densest at the ground and thins upward ' +
+    'into spatter with a ragged top, lighter under an overhang. The graph for the defaults, to copy and take ' +
     'over any step (vars k_* are the sliders after age and exposure, x_* the exposure weights): ' + defaultGraph('maps'),
   aliases: ['weathering', 'age_material', 'wear_and_tear', 'grunge_material', 'smart_material'],
   inputs: [
@@ -631,7 +656,9 @@ defineNode({
     'mount and borders apply per piece. Borders, as stated: above open (rain on its own tops, as measured), covered (something ' +
     'sits on it: no rain or sky from above), source (water arrives along its top edge: runs from the whole top); joints ' +
     '"sides bottom top" darken a band joint_width wide along those borders of each piece (the joint lines of precast panels); ' +
-    'mount ground adds the splash band and moss at the bottom. ' + KIND_DOC + ' Coating lost is 0 on bare kinds. kind gives ' +
+    'mount ground adds splash and moss at the bottom. Worn edges (edges) is the chip layer of bake_edge_wear (everywhere the ' +
+    'top coat is gone, the primer ring included) with a faint rub along the edges; coating lost (coating) is its bare layer ' +
+    '(down to the substrate) on painted kinds, with the larger peeling of age. ' + KIND_DOC + ' Coating lost is 0 on bare kinds. kind gives ' +
     'the kind of prims whose material says none (or of a mesh with no materials). ' + LEAK_DOC + ' preview bakes the ' +
     'material of the mesh on the mask uv and blends the first variant over it like a simple engine material (dirt darkens ' +
     'and roughens, leaks tint, worn edges lighten, coating lost shows under): material <name>_preview, for looking only. ' +

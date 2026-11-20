@@ -348,6 +348,14 @@ section('leak sources: a wall with a sill and a coping');
   const underCoping = ys.filter((y) => y > 2.78 && y < 2.8).length, underSill = ys.filter((y) => y > 0.96 && y < 0.975).length;
   check(l.count.under > 0 && underCoping > 0 && underSill > 0, `the wall under the coping and under the sill (separate pieces) is a source: ${underCoping}, ${underSill}`);
   check(!ys.some((y) => y < 0.9), 'nothing on the plain wall below the sill');
+  // drip points gather: at the ends of the coping's front edge and around a few spots along it, not evenly spaced
+  const xs: number[] = [];
+  for (let i = 0; i < l.points.numPoints; i++) if (Math.abs(P[i * 3 + 1] - 2.856) < 0.005 && Math.abs(P[i * 3 + 2] - 0.2) < 0.005) xs.push(P[i * 3]);
+  const bins = new Array(31).fill(0);
+  for (const x of xs) bins[Math.min(30, Math.max(0, Math.floor((x + 1.55) / 0.1)))]++;
+  const meanBin = xs.length / 31, ends = bins[0] + bins[30];
+  const empty = bins.filter((b) => b === 0).length, top = Math.max(...bins);
+  check(xs.length > 20 && ends > 4 * meanBin && top > 3 * meanBin && empty > 5, `the coping's drips cluster: ${xs.length} along its front edge, ${ends} in the 10 cm at its two ends (${(2 * meanBin).toFixed(1)} if even), the fullest 10 cm holds ${top}, ${empty} of 31 hold none`);
   const w = l.points.points.get('w');
   check(!!w && [...Array(l.points.numPoints).keys()].every((i) => (w.get(i) as number) > 0 && (w.get(i) as number) <= 1), 'each source carries its rain weight w');
 }
@@ -425,7 +433,7 @@ section('a slider re-cooks only the stack');
   const first = await ran({});
   check(first.includes('measure') && first.includes('atlas') && first.includes('stack'), `the first cook runs every step (${first.join(', ')})`);
   const wear = await ran({ wear: 0.9 });
-  check(wear.length > 0 && wear.every((n) => ['stack', 'out'].includes(n)), `wear re-cooks the stack and the material only (${wear.join(', ')})`);
+  check(wear.length > 0 && wear.every((n) => ['stack', 'out', 'mask_images', 'wear', 'wear_kept'].includes(n)), `wear re-cooks the edge wear threshold, the stack and the material only (${wear.join(', ')})`);
   const seed = await ran({ wear: 0.9, seed: 3 });
   check(seed.includes('noise') && !seed.includes('measure') && !seed.includes('atlas') && !seed.includes('base'), `seed re-cooks the noise and the runs, not the measures or the atlas (${seed.join(', ')})`);
 }
