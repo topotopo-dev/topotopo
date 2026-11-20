@@ -331,6 +331,29 @@ section('node: straight runs below a source');
   check(bolt.ok && !!bolt.geo && bolt.geo.numPrims > 0, 'keep_mesh keeps the mesh');
 }
 
+section('node: a broad stain around the runs');
+{
+  const P = { sources: '@name=bolt', resolution: R, density: 100, wobble: 0, breakup: 0, padding: 0, length: [0.1, 0.1], width: [0.006, 0.006] };
+  const plain = findImage((await cookOn(engines.pool, flow('uncut', P), 'f')).geo!, 'f')!;
+  const im = findImage((await cookOn(engines.pool, flow('uncut', { ...P, stain: 3 }), 'f')).geo!, 'f')!;
+  const c0 = plain.layer('C')!, c = im.layer('C')!, st = im.layer('stain'), m = im.layer('mask')!;
+  check(!plain.layer('stain') && !!st && c.every((v, i) => v === c0[i]), 'stain adds its layer and leaves the runs as they were');
+  let wide = 0, core = 0, outside = 0, top = 0, nTop = 0, low = 0, nLow = 0;
+  for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
+    const k = j * R + i;
+    if (m[k] < 1) continue;
+    const x = ((i + 0.5) / R) / SPAN * SIDE, y = ((R - j - 0.5) / R) / SPAN * SIDE, v = st![k];
+    if (c[k] > 0.05) core++;
+    if (v > 0.05) wide++;
+    // half width 3 × the head (3 mm, swelling to 3.9 mm), 1.5 × that at the tail: 17.6 mm around runs from x 0.28 to 0.32
+    if (v > 0 && (x < 0.28 - 0.0196 || x > 0.32 + 0.0196 || y > 0.45 + 0.002)) outside++;
+    if (Math.abs(x - 0.3) < 0.02 && y < 0.45 && y > 0.43) { top += v; nTop++; }
+    if (Math.abs(x - 0.3) < 0.02 && y < 0.37 && y > 0.35) { low += v; nLow++; }
+  }
+  check(wide > 1.5 * core && outside === 0, `the stain is wider than the runs (${wide} texels against ${core}) and stays within its reach (${outside} beyond)`);
+  check(nTop > 0 && nLow > 0 && top / nTop > 2 * (low / nLow), `and fades toward the tail (${(top / nTop).toFixed(3)} near the source, ${(low / nLow).toFixed(3)} near the tail)`);
+}
+
 // ---------------------------------------------------------------- refusals
 section('refusals');
 {
