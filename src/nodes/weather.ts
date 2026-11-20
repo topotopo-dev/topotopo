@@ -43,7 +43,7 @@ const SHARED = (): Record<string, ParamDef> => ({
   sun: { type: 'vec3', default: [0, 1, 0], desc: 'where the sun comes from (fade, chalk, greying): straight up by default, a model does not know where south is' },
   padding: { type: 'int', default: 4, min: 0, max: 64, desc: 'texels the islands are padded by', aliases: ['dilation'] },
   samples: { type: 'int', default: 32, min: 4, max: 256, desc: 'rays per cloud point of the occlusion, cavity, shelter and visibility bake' },
-  leak_density: { type: 'float', default: 20, min: 0, max: 500, desc: 'leak sources per metre of ledge, sill, coping or overhang edge (0 = no dirt runs)', aliases: ['runs_per_metre'] },
+  leak_density: { type: 'float', default: 120, min: 0, max: 500, desc: 'run starts per metre of ledge, sill, coping or overhang edge, and per metre where a rusting part meets the surface (0 = no runs): most runs are faint, a few strong, and under a long edge they merge into a wash', aliases: ['runs_per_metre'] },
 });
 
 // ---------------------------------------------------------------- preparation
@@ -261,7 +261,7 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
   const ref = p.reference && typeof p.reference === 'object' && !Array.isArray(p.reference) ? (p.reference as Record<string, unknown>) : {};
   const amount = Math.max(0, Math.min(1, Number(p.match) || 0));
   const env = ctx.hasInput(1) && ctx.input(1).numPrims ? ctx.input(1) : mountPlane(prep.bbox, p.mount, p.wall_side);
-  const leaks = Number(p.leak_density) > 0 ? leakSources(prep.mesh, { density: Number(p.leak_density), seed: Number(p.seed) || 0, rain: p.exposure !== 'indoor', blockers: env, max: 4000 }) : null;
+  const leaks = Number(p.leak_density) > 0 ? leakSources(prep.mesh, { density: Number(p.leak_density), seed: Number(p.seed) || 0, rain: p.exposure !== 'indoor', blockers: env, max: 20000 }) : null;
   const nLeaks = leaks?.points.numPoints ?? 0;
   const imgs: Image[] = [...(over.image ? [over.image] : []), ...(photosIn ? imagesOf(photosIn) : [])];
   const sig = (what: string, extra: unknown) => sigOf(ctx, what, extra);
@@ -276,7 +276,7 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     mode: 'maps', resolution: Number(p.resolution), padding: Number(p.padding), layout, uv: 'uv', mapUV: 'uv_maps',
     kinds: prep.kinds, kindsPresent: prep.present, exposure: p.exposure as Exposure, handled: String(p.handled ?? '').trim(),
     sun: p.sun, seed: Number(p.seed) || 0, scale: prep.scale, samples: Number(p.samples), env: !!env, leaks: nLeaks > 0,
-    images: false, joints: false, rustSources: prep.rustSources, mountWall: p.mount === 'wall', replaced: over.names,
+    images: false, joints: false, rustSources: prep.rustSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
     photos, overrides: ov, match: null, material,
   };
   const vars = weatherVars({ wear: p.wear, dirt: p.dirt, rust: p.rust, age: p.age, seed: Number(p.seed) || 0, exposure: p.exposure, mount: p.mount });
@@ -456,7 +456,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   const leakParts = Number(p.leak_density) > 0 ? moved.map((b, k) => {
     const sel = new Uint8Array(mesh.numPrims);
     for (let i = 0; i < mesh.numPrims; i++) sel[i] = pieceOf[i] === pieces[k] ? 1 : 0;
-    return leakSources(mesh, { density: Number(p.leak_density), seed: (Number(p.seed) || 0) + k * 7919, rain: p.exposure !== 'indoor', blockers: envGeo, prims: sel, topEdge: p.above === 'source' ? b : null, max: 2000 });
+    return leakSources(mesh, { density: Number(p.leak_density), seed: (Number(p.seed) || 0) + k * 7919, rain: p.exposure !== 'indoor', blockers: envGeo, prims: sel, topEdge: p.above === 'source' ? b : null, max: 8000 });
   }) : [];
   const leakGeo = leakParts.length ? Geometry.merge(leakParts.map((l) => l.points)) : null;
   const over = overridesOf(ctx, T_M, 2, [...WEATHER_MASKS, ...PACKED_MASKS]);
@@ -481,7 +481,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
       const lp = moved.map((b, k) => {
         const sel = new Uint8Array(mesh.numPrims);
         for (let i = 0; i < mesh.numPrims; i++) sel[i] = pieceOf[i] === pieces[k] ? 1 : 0;
-        return leakSources(mesh, { density: Number(p.leak_density), seed: seed + k * 7919, rain: p.exposure !== 'indoor', blockers: envGeo, prims: sel, topEdge: p.above === 'source' ? b : null, max: 2000 }).points;
+        return leakSources(mesh, { density: Number(p.leak_density), seed: seed + k * 7919, rain: p.exposure !== 'indoor', blockers: envGeo, prims: sel, topEdge: p.above === 'source' ? b : null, max: 8000 }).points;
       });
       inputs[2] = { geo: Geometry.merge(lp), sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.above]) };
     } else if (leakGeo) inputs[2] = { geo: leakGeo, sig: sig('leaks', [prepKey, p.leak_density, seed, p.exposure, p.mount, p.above]) };
@@ -489,7 +489,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
       mode: 'masks', resolution: Number(p.resolution), padding: Number(p.padding), layout: 'keep', uv, mapUV: 'uv',
       kinds: prep.kinds, kindsPresent: prep.present, exposure: p.exposure as Exposure, handled: String(p.handled ?? '').trim(),
       sun: p.sun, seed, scale: prep.scale, samples: Number(p.samples), env: !!envGeo, leaks: !!leakGeo && leakGeo.numPoints > 0,
-      images: !!over.image, joints: !!jointGeo, rustSources: prep.rustSources, mountWall: p.mount === 'wall', replaced: over.names,
+      images: !!over.image, joints: !!jointGeo, rustSources: prep.rustSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
       photos: [], overrides: {}, match: null, material: name,
     };
     const graph = weatherGraph(opts);
@@ -571,7 +571,7 @@ function defaultGraph(mode: 'maps' | 'masks'): string {
   const g = weatherGraph({
     mode, resolution: mode === 'maps' ? 1024 : 2048, padding: 4, layout: mode === 'maps' ? 'visible' : 'keep', uv: mode === 'maps' ? 'uv' : 'uv2', mapUV: mode === 'maps' ? 'uv_maps' : 'uv',
     kinds: { paint: 'painted_metal' }, kindsPresent: ['painted_metal'], exposure: 'outdoor', handled: '', sun: [0, 1, 0], seed: 0,
-    scale: weatherScale(1.2, 1, 0.001), samples: 32, env: true, leaks: true, images: false, joints: false, rustSources: false,
+    scale: weatherScale(1.2, 1, 0.001), samples: 32, env: true, leaks: true, images: false, joints: false, rustSources: false, runDensity: 120,
     mountWall: false, replaced: [], photos: [], overrides: {}, match: null, material: mode === 'maps' ? 'weathered' : 'weather',
   });
   return JSON.stringify(g);

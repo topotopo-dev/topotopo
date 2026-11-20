@@ -192,6 +192,7 @@ export function namedMasks(o: MaskInputs, packed = false): { name: string; mask:
     { name: 'edges_soft', mask: 'clamp(smoothstep(0.1, 0.6, convex) * (0.3 + 0.8 * n_patch) * k_wear, 0, 1)' },
     { name: 'peel', mask: 'smoothstep(k_cut - 0.1, k_cut - 0.04, (chip * 0.5 + n_patch * 0.8 + m_low * k_ground * 0.4) * pv)' },
     { name: 'blotch', mask: 'n_blotch' }, { name: 'grain', mask: 'n_grain' },
+    { name: 'patch_mix', mask: 'n_patch * 0.6 + n_blotch * 0.4' },
     { name: 'grime', mask: 'clamp(k_dirt * (cavity * 1.1 + (1 - m_occ) * 0.9) * (0.4 + 0.9 * n_blotch) * (0.7 + 0.6 * (1 - m_ht)) * pv + handled * k_dirt * 0.35 * n_patch, 0, 1)' },
     { name: 'dust', mask: `clamp(k_dirt * x_dust * smoothstep(0.15, 0.8, m_top) * (1 - x_wash + x_wash * m_shel) * (0.35 + 0.9 * n_grain) ${o.wallNear ? '+ k_wall * m_wallnear * m_top * k_dirt * 0.5' : ''}, 0, 1)` },
     // splash: densest at the ground, thinning upward into spatter (the grain noise cut lower the nearer the ground) with a
@@ -201,12 +202,13 @@ export function namedMasks(o: MaskInputs, packed = false): { name: string; mask:
     { name: 'fade', mask: 'clamp(k_fade * m_sun * m_vis * (0.7 + 0.6 * n_blotch), 0, 1)' },
     { name: 'rust', mask: 'clamp(k_rust * x_rust * (0.45 + 0.8 * n_blotch) * (0.7 + 0.5 * cavity + 0.3 * m_top + 0.3 * m_low), 0, 1)' },
     // runs: the core (C) and its broad stain, as separate masks for the layers and together (the stain fainter) as the run
-    { name: 'rust_core', mask: o.rustRuns ? 'rr * clamp(k_rust * x_runs_rust * 1.4, 0, 1)' : '0' },
-    { name: 'rust_stain', mask: o.rustRuns ? 'rr_stain * clamp(k_rust * x_runs_rust * 1.2, 0, 1)' : '0' },
-    { name: 'runs_rust', mask: 'clamp(rust_core + rust_stain * 0.5, 0, 1)' },
-    { name: 'dirt_core', mask: o.dirtRuns ? 'rd * clamp(k_dirt * x_runs_dirt * 1.5, 0, 1)' : '0' },
-    { name: 'dirt_stain', mask: o.dirtRuns ? 'rd_stain * clamp(k_dirt * x_runs_dirt * 1.3, 0, 1)' : '0' },
-    { name: 'runs_dirt', mask: 'clamp(dirt_core + dirt_stain * 0.45, 0, 1)' },
+    // (most runs are only their stain, faint; the stronger ones keep a core)
+    { name: 'rust_core', mask: o.rustRuns ? 'rr * smoothstep(0.25, 0.75, rr_strength) * clamp(k_rust * x_runs_rust * 1.6, 0, 1)' : '0' },
+    { name: 'rust_stain', mask: o.rustRuns ? 'rr_stain * clamp(k_rust * x_runs_rust * 1.5, 0, 1)' : '0' },
+    { name: 'runs_rust', mask: 'clamp(rust_core + rust_stain * 0.6, 0, 1)' },
+    { name: 'dirt_core', mask: o.dirtRuns ? 'rd * smoothstep(0.7, 1, rd_strength) * clamp(k_dirt * x_runs_dirt * 1.5, 0, 1)' : '0' },
+    { name: 'dirt_stain', mask: o.dirtRuns ? 'smoothstep(0.12, 0.85, rd_stain) * clamp(k_dirt * x_runs_dirt * 1.8, 0, 1)' : '0' },
+    { name: 'runs_dirt', mask: 'clamp(dirt_core + dirt_stain * 0.6, 0, 1)' },
     // fine rain streaks down steep faces, stronger high up where the water starts
     { name: 'streaks', mask: 'clamp(k_dirt * x_runs_dirt * (1 - m_top) * smoothstep(0.62, 0.8, n_streak) * smoothstep(0.35, 0.65, n_blotch) * m_ht * m_ht * 1.4, 0, 1)' },
     { name: 'damp', mask: 'clamp(x_damp * clamp(k_dirt * 2, 0, 1) * (k_ground * m_low * 0.8 + cavity * 0.4 + runs_dirt * 0.5) * (0.45 + n_patch), 0, 1)' },
@@ -234,16 +236,20 @@ export function sharedLayers(o: { exposure: Exposure; kinds: string[]; joints: b
   const [grimeC, grimeR] = GRIME[o.exposure];
   const out: LayerJSON[] = [
     { name: 'film', mask: '(1 - occlusion) * clamp(k_dirt, 0, 1)', color: [0.86, 0.86, 0.86], color_mode: 'multiply', roughness_offset: 0.1 },
+    // a faint grime film over everything, mottled (nothing between the chips stays clean paint), and a soft darkening
+    // toward the bottom of the object with a ragged top (never a band)
+    { name: 'grime_film', mask: 'clamp(k_dirt * 1.3, 0, 1) * (0.3 + 0.7 * smoothstep(0.2, 0.8, patch_mix))', color: [0.86, 0.84, 0.81], color_mode: 'multiply', roughness_offset: 0.06 },
+    { name: 'bottom', mask: 'clamp(k_dirt * 1.4, 0, 1) * (1 - smoothstep(0.0, 0.1 + 0.08 * n_ragged + 0.05 * n_patch, m_ht)) * (0.7 + 0.3 * n_blotch)', color: [0.8, 0.77, 0.73], color_mode: 'multiply', roughness_offset: 0.05 },
     // a light soil over everything, heavier low down and in blotches: nothing stays factory clean
     { name: 'soil', mask: 'clamp(k_dirt * (0.35 + 0.6 * blotch) * (0.6 + 0.7 * (1 - m_ht)), 0, 1)', color: [0.84, 0.82, 0.78], color_mode: 'multiply', roughness_offset: 0.05 },
     { name: 'grime', mask: 'grime', color: grimeC, roughness: grimeR, metallic: 0 },
     { name: 'dust', mask: 'dust', color: '#a69d8b', roughness: 0.95, metallic: 0 },
     { name: 'splash', mask: 'splash', color: [[0, '#3a3128'], [0.5, '#54473a'], [1, '#6e604d']], color_by: 'blotch', opacity: 0.85, roughness: 0.9, metallic: 0 },
     { name: 'streaks', mask: 'streaks', color: '#5f574b', opacity: 0.4, roughness_offset: 0.05 },
-    { name: 'dirt_stain', mask: 'dirt_stain', color: '#62584a', opacity: 0.4, roughness_offset: 0.06 },
-    { name: 'runs_dirt', mask: 'dirt_core', color: '#4a4236', opacity: 0.45, roughness_offset: 0.1 },
-    { name: 'rust_stain', mask: 'rust_stain', color: '#8a4a26', opacity: 0.35, roughness_offset: 0.08 },
-    { name: 'runs_rust', mask: 'rust_core', color: [[0, '#5a2a14'], [1, '#86421e']], color_by: 'grain', opacity: 0.85, roughness: 0.85, metallic: 0 },
+    { name: 'dirt_stain', mask: 'dirt_stain', color: '#4c4338', opacity: 0.55, roughness_offset: 0.06 },
+    { name: 'runs_dirt', mask: 'dirt_core', color: '#3e372d', opacity: 0.25, roughness_offset: 0.1 },
+    { name: 'rust_stain', mask: 'rust_stain', color: '#9a5a2c', opacity: 0.5, roughness_offset: 0.08 },
+    { name: 'runs_rust', mask: 'rust_core', color: [[0, '#6a3418'], [1, '#a45a26']], color_by: 'grain', opacity: 0.9, roughness: 0.85, metallic: 0 },
   ];
   if (o.kinds.some((k) => (GROWING_KINDS as readonly string[]).includes(k)) && o.exposure !== 'indoor') out.push({ name: 'growth', mask: 'growth', color: [[0, '#2f3a1f'], [1, '#5a6230']], color_by: 'grain', roughness: 0.95, metallic: 0, height: 0.0002 });
   if (o.joints) out.push({ name: 'joints', mask: 'joints', color: [0.55, 0.55, 0.55], color_mode: 'multiply', roughness_offset: 0.1 });
@@ -515,6 +521,8 @@ export interface GraphOptions {
   seed: number;
   scale: { s: number; splash: number; edge: number; cavity: number };
   samples: number;
+  /** run starts per metre of a rusting part's contact (rust runs) */
+  runDensity: number;
   /** inputs of the nested graph present: 1 surroundings, 2 leak points, 3 images (overrides, photos, match), 4 joint planes */
   env: boolean;
   leaks: boolean;
@@ -614,11 +622,12 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
   };
   nodes.parts = { type: 'bake_mask', in: [atlas], params: { ...bake, attrib: 'wpart', name: 'part' } };
   const masks = ['measure', 'noise', 'wear', 'parts'];
-  // water on a flat face goes straight down (it wanders only where the shape turns it): little wobble, lengths that vary a
-  // lot (most short, a few long), a narrow core in a broad faint stain
-  const run = { resolution: res, padding: pad, uv_attrib: o.uv, seed: o.seed, length: [f(0.06 * s), f(0.45 * s)], width: [f(0.003 * s), f(0.01 * s)], wobble: 0.05, breakup: 0.3, stain: 3 };
-  if (o.rustSources) { nodes.rust_runs = { type: 'bake_flow', in: [atlas], params: { ...run, sources: '@wrust=1', density: 30, name: 'rr' } }; masks.push('rust_runs'); }
-  if (o.leaks) { nodes.dirt_runs = { type: 'bake_flow', in: [atlas, 'leak_sources'], params: { ...run, length: [f(0.05 * s), f(0.9 * s)], width: [f(0.0015 * s), f(0.005 * s)], wobble: 0.04, stain: 4, name: 'rd' } }; masks.push('dirt_runs'); }
+  // water on a flat face goes straight down (it wanders only where the shape turns it): little wobble, many runs whose
+  // lengths vary a lot (most short, a few long), each a narrow core in a broad soft stain; the stains add up, so under a
+  // long edge they merge into a wash that breaks into streaks lower down, and most are faint (stain_skew), a few strong
+  const run = { resolution: res, padding: pad, uv_attrib: o.uv, seed: o.seed, length: [f(0.03 * s), f(0.4 * s)], width: [f(0.002 * s), f(0.008 * s)], wobble: 0.05, breakup: 0.3, stain: 5, stain_skew: 1.5 };
+  if (o.rustSources && o.runDensity > 0) { nodes.rust_runs = { type: 'bake_flow', in: [atlas], params: { ...run, sources: '@wrust=1', density: f(o.runDensity), name: 'rr' } }; masks.push('rust_runs'); }
+  if (o.leaks) { nodes.dirt_runs = { type: 'bake_flow', in: [atlas, 'leak_sources'], params: { ...run, length: [f(0.03 * s), f(1.0 * s)], width: [f(0.0015 * s), f(0.005 * s)], wobble: 0.04, stain: 6, stain_skew: 2, name: 'rd' } }; masks.push('dirt_runs'); }
   if (o.joints) { nodes.joints = { type: 'bake_measure', in: [atlas, 'joint_planes'], params: { ...bake, name: 'jn', measures: [{ by: 'distance', name: 'joint', target: 'input1', range: 1 }] } }; masks.push('joints'); }
   for (const ph of o.photos) {
     const id = `photo_${ph.layer}`;
