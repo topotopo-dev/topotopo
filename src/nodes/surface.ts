@@ -17,7 +17,7 @@ import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { coerce, didYouMean, evalRamp } from '../graph/params.ts';
 import { BAKE_DOC, BAKE_PARAMS, cloudOf, finishImage, setup, surfaceOf, surfaceWarnings, texelLayers, wrapImage } from './bake.ts';
 import type { Bake } from './bake.ts';
-import { mask } from './util.ts';
+import { P, mask } from './util.ts';
 import { NAMED_BY_NODE } from './texture.ts';
 
 const KINDS = ['facing', 'height', 'distance', 'noise', 'occlusion', 'cavity', 'shelter', 'visibility', 'curvature', 'group'] as const;
@@ -398,7 +398,7 @@ defineNode({
     measures: { type: 'json', default: [{ by: 'occlusion' }], desc: 'the measures: [{"by": "occlusion"}, {"by": "facing", "name": "top", "min": 0, "max": 30, "falloff": 15}, {"by": "noise", "name": "grain", "size": [0.005, 0.15, 0.005]}]', aliases: ['measure', 'masks', 'layers'] },
     samples: { type: 'int', default: 32, min: 4, max: 256, desc: 'rays per cloud point, shared by every ray measure (each texel averages several cloud points)', aliases: ['rays'] },
     spacing: { type: 'float', default: 0, min: 0, desc: 'distance between cloud points for ray and curvature measures (metres; 0 = 4 texels at this resolution, at least 0.5 mm)', aliases: ['cloud_spacing'] },
-    seed: { type: 'int', default: 0, desc: 'ray and noise seed' },
+    seed: { ...P.seed(), desc: 'ray and noise seed' },
   },
   outputs: 'image <name> (default: the node name): C = the first measure, one layer per measure, texel, island, mask',
   example: {

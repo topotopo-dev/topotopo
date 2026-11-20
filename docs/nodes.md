@@ -12898,7 +12898,7 @@ Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the cov
 | `measures` | json | `[{"by":"occlusion"}]` |  |  | `measure`, `masks`, `layers` | the measures: [{"by": "occlusion"}, {"by": "facing", "name": "top", "min": 0, "max": 30, "falloff": 15}, {"by": "noise", "name": "grain", "size": [0.005, 0.15, 0.005]}] |
 | `samples` | int | `32` | 4..256 |  | `rays` | rays per cloud point, shared by every ray measure (each texel averages several cloud points) |
 | `spacing` | float | `0` | 0.. |  | `cloud_spacing` | distance between cloud points for ray and curvature measures (metres; 0 = 4 texels at this resolution, at least 0.5 mm) |
-| `seed` | int | `0` |  |  |  | ray and noise seed |
+| `seed` | float | `0` |  |  |  | ray and noise seed |
 
 **Writes:** image <name> (default: the node name): C = the first measure, one layer per measure, texel, island, mask
 
