@@ -1,0 +1,146 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["chart:int:1", "island:int:1", "material:string:1", "visibility:float:1"],
+      "vertex": ["uv:float:3", "uv_maps:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 4
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "5e7fa92eda54cd74",
+      "attributes": {
+        "detail.materials": "df64decbe422fccd",
+        "prim.chart": "9349e10509ff00df",
+        "prim.island": "9349e10509ff00df",
+        "prim.material": "a33088452e41e67f",
+        "prim.visibility": "12b61d455a16081f",
+        "vertex.uv": "21bf187571331d17",
+        "vertex.uv_maps": "940dfe35c4622fbf"
+      },
+      "topology": "211195f53fcdbf2f"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "size": 4.830294,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "804fb78f69adf645",
+          "island": "8d885882adc1eca8",
+          "mask": "43d311b52f14544f",
+          "texel": "3d3c4cc1a0d758fb"
+        },
+        "name": "weathered_base_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "size": 4.830294,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "3180b2c11a395a53",
+          "island": "8d885882adc1eca8",
+          "mask": "43d311b52f14544f",
+          "texel": "3d3c4cc1a0d758fb"
+        },
+        "name": "weathered_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "size": 4.830294,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "d9ffbc715651753f",
+          "island": "8d885882adc1eca8",
+          "mask": "43d311b52f14544f",
+          "texel": "3d3c4cc1a0d758fb"
+        },
+        "name": "weathered_orm"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "size": 4.830294,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "bare": "19c441f515da01d7",
+          "blotch": "155f656e627710f4",
+          "cavity": "9005a1b59538744f",
+          "chip": "c7adeb11e513d85f",
+          "convex": "a7d257dc6f7123f6",
+          "core": "c7a12435f528d1cf",
+          "damp": "b7d75b0b218c233d",
+          "dust": "0d9e54b36fc7c3bd",
+          "edge_wear": "c64495a45934573a",
+          "edges_soft": "90579bec4ac4dd6e",
+          "fade": "d1466ec383a69895",
+          "grain": "a926646b8a2afbb1",
+          "grime": "9005a1b59538744f",
+          "growth": "9005a1b59538744f",
+          "handled": "9005a1b59538744f",
+          "island": "8d885882adc1eca8",
+          "joints": "9005a1b59538744f",
+          "mask": "43d311b52f14544f",
+          "occlusion": "4e4b8528dbd71836",
+          "peel": "aaabbcaeb8b08660",
+          "pv": "b8e642fe006a5478",
+          "runs_dirt": "6e2953f9314438eb",
+          "runs_rust": "9005a1b59538744f",
+          "rust": "e99538ef6dce6ec1",
+          "splash": "9005a1b59538744f",
+          "streaks": "9ade7a4753465c99",
+          "texel": "3d3c4cc1a0d758fb",
+          "wearf": "668437d3490c6eb1"
+        },
+        "name": "weathered_masks"
+      }
+    ]
+  },
+  "name": "node.weather",
+  "ok": true,
+  "source": "fixture for node type \"weather\" (test/fixtures.ts)",
+  "warnings": []
+}

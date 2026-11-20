@@ -1,0 +1,66 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["chart:int:1", "material:string:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.5, 0.5, 0.5],
+      "min": [-0.5, -0.5, -0.5]
+    },
+    "counts": {
+      "points": 26,
+      "prims": 24,
+      "vertices": 96,
+      "volumes": 1
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "5e7fa92eda54cd74",
+      "attributes": {
+        "detail.materials": "f4ac5579955cff6f",
+        "prim.chart": "9349e10509ff00df",
+        "prim.material": "37614eed6fe4d737",
+        "vertex.uv": "940dfe35c4622fbf"
+      },
+      "topology": "211195f53fcdbf2f"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 64,
+          "size": 3.026408,
+          "width": 64
+        },
+        "kind": "image",
+        "layers": {
+          "C": "ec82f73b40b474e5",
+          "coating": "782e78daf69d4020",
+          "dirt": "c23e041951f69d4f",
+          "edges": "07cb15dbb5119a3d",
+          "island": "19727268b1d09f96",
+          "leaks": "94f83296edc5ea70",
+          "mask": "5963c5b542beec4f",
+          "texel": "cca48525b745925f"
+        },
+        "name": "weather"
+      }
+    ]
+  },
+  "name": "node.weather_masks",
+  "ok": true,
+  "source": "fixture for node type \"weather_masks\" (test/fixtures.ts)",
+  "warnings": []
+}

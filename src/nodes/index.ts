@@ -33,6 +33,7 @@ import './runs.ts';
 import './layers.ts';
 import './surface.ts';
 import './triplanar.ts';
+import './weather.ts';
 import './particles.ts';
 import './rbd.ts';
 import './cloth.ts';
