@@ -33,14 +33,14 @@ import { Image } from '../core/image.ts';
 import { SdfGrid } from '../core/sdfgrid.ts';
 import type { GridDims } from '../core/sdfgrid.ts';
 import { ENGINE_ROOT, engineSha256, engineStamp } from './engine-code.ts';
-import type { NodeStore, StoredNode } from './types.ts';
+import type { FileDep, NodeStore, StoredNode } from './types.ts';
 
 /** Results of nodes that cooked at least this long (ms) are kept. */
 export const NODE_CACHE_MIN_MS = 500;
 /** The cache's size cap. */
 export const NODE_CACHE_MAX_BYTES = 4 * 2 ** 30;
 /** Bump when the file layout changes: older files then miss. */
-const FORMAT = 1;
+const FORMAT = 2;
 const MAGIC = 'TTNODE1\0';
 const EXT = '.ttnode';
 const TMP = '.tmp';
@@ -86,23 +86,33 @@ function dependencyVersions(): string {
   }).join(',');
 }
 
-let engineMemo: string | undefined;
+/** The identity of the engine this process runs (stamp: the state of its files then), or 'off': it cannot be vouched for. */
+let engineMemo: { id: string; stamp: string } | 'off' | undefined;
 
 /**
  * What a result depends on besides its identity: the engine's code hash (engine-code.ts), the Node version and platform
  * (a math function may differ in the last bit between them) and the libraries' versions. The hash reads every file of
  * the engine, which takes most of a second, so it is kept in the cache folder under the files' sizes and modification
  * times (engineStamp): a process that finds the same stamp there does not read them again.
+ *
+ * The identity must describe the code this process loaded, which is the code on disk when the process started. It is
+ * taken the first time the store is used, so: when any engine file is newer than the process (a long-running server
+ * whose sources were changed or merged since it started), the files are not the code it runs and the store is off for
+ * the rest of the process; so it is when the files change while the hash is taken, and before every write (engineHolds).
+ * A process never writes a result under an identity it cannot vouch for.
  */
-function engineIdentity(dir: string): string {
-  if (engineMemo) return engineMemo;
-  const stamp = engineStamp();
+function engineIdentity(dir: string): string | null {
+  if (engineMemo === 'off') return null;
+  if (engineMemo) return engineMemo.id;
+  const { stamp, newest } = engineStamp();
+  if (newest > performance.timeOrigin) { engineMemo = 'off'; return null; }
   const memoFile = path.join(dir, 'engine.json');
   let known: Record<string, string> = {};
   try { known = JSON.parse(fs.readFileSync(memoFile, 'utf8')) ?? {}; } catch { /* none yet */ }
   let code = typeof known[stamp] === 'string' && /^[0-9a-f]{64}$/.test(known[stamp]) ? known[stamp] : '';
   if (!code) {
     code = engineSha256();
+    if (engineStamp().stamp !== stamp) { engineMemo = 'off'; return null; }
     const keep = Object.entries(known).slice(-7);
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -111,7 +121,18 @@ function engineIdentity(dir: string): string {
       fs.renameSync(tmp, memoFile);
     } catch { /* the hash is just taken again next time */ }
   }
-  return (engineMemo = sha256([code, process.version, process.platform, process.arch, dependencyVersions()].join('|')));
+  const id = sha256([code, process.version, process.platform, process.arch, dependencyVersions()].join('|'));
+  engineMemo = { id, stamp };
+  return id;
+}
+
+/** Are the engine's files still as they were when the identity was taken? When not, the store is off for good. */
+function engineHolds(): boolean {
+  if (engineMemo === 'off') return false;
+  if (!engineMemo) return true;
+  if (engineStamp().stamp === engineMemo.stamp) return true;
+  engineMemo = 'off';
+  return false;
 }
 
 // ---------------------------------------------------------------- geometry <-> header + arrays
@@ -188,45 +209,101 @@ function packGeometry(g: Geometry, A: Arrays): any {
   return out;
 }
 
-function unpackTable(j: any, arrays: Typed[]): AttribTable {
+/** An entry whose arrays do not fit its own counts: it is read as damaged, never as a geometry. */
+class Inconsistent extends Error {}
+const must = (ok: unknown, what: string): void => { if (!ok) throw new Inconsistent(what); };
+
+/** The array a header names, which must be of the kind and length the geometry needs. */
+function arrayOf<T extends Typed>(arrays: Typed[], i: unknown, C: { new (...a: any[]): T }, length: number | null, what: string): T {
+  must(Number.isInteger(i) && (i as number) >= 0 && (i as number) < arrays.length, `${what}: no such array`);
+  const a = arrays[i as number];
+  must(a instanceof C, `${what}: array of another kind`);
+  must(length === null || a.length === length, `${what}: ${a.length} values for ${length}`);
+  return a as T;
+}
+
+const SCALARS: Record<string, any> = { float: Float64Array, int: Int32Array };
+
+function unpackTable(j: any, arrays: Typed[], what: string): AttribTable {
+  must(Number.isInteger(j?.count) && j.count >= 0 && Array.isArray(j.attribs), `${what}: count`);
   const t = new AttribTable(j.count);
   for (const a of j.attribs) {
     const type = a.t as AttribType;
-    const data = typeof a.v === 'number' ? arrays[a.v] : a.v;
+    const at = `${what}.${a.n}`;
+    const array = type.endsWith('[]');
+    const base = array ? type.slice(0, -2) : type;
+    must(base === 'float' || base === 'int' || base === 'string', `${at}: type ${type}`);
+    must(Number.isInteger(a.s) && a.s >= 1 && (!array || a.s === 1), `${at}: size`);
+    let data: any, offsets: Int32Array | undefined;
+    if (array) {
+      offsets = arrayOf(arrays, a.o, Int32Array, j.count + 1, `${at} offsets`);
+      let last = 0;
+      for (const o of offsets) { must(o >= last, `${at}: offsets go back`); last = o; }
+      must(offsets[0] === 0, `${at}: offsets do not start at 0`);
+      data = base === 'string' ? a.v : arrayOf(arrays, a.v, SCALARS[base], offsets[j.count], `${at} entries`);
+      if (base === 'string') must(Array.isArray(data) && data.length === offsets[j.count] && data.every((x: unknown) => typeof x === 'string'), `${at}: strings`);
+    } else if (base === 'string') {
+      data = a.v;
+      must(Array.isArray(data) && data.length === j.count && data.every((x: unknown) => typeof x === 'string'), `${at}: strings`);
+    } else data = arrayOf(arrays, a.v, SCALARS[base], j.count * a.s, at);
     const def = typeof a.d === 'string' ? a.d : decAll(a.d);
-    t.map.set(a.n, new Attribute(type, a.s, data, def, a.o === undefined ? undefined : (arrays[a.o] as Int32Array)));
+    t.map.set(a.n, new Attribute(type, a.s, data, def, offsets));
   }
   return t;
 }
 
-const unpackMasks = (list: [string, number][], arrays: Typed[]) => new Map(list.map(([k, i]) => [k, arrays[i] as Uint8Array]));
+const unpackMasks = (list: [string, number][], arrays: Typed[], length: number, what: string) =>
+  new Map(list.map(([k, i]) => [k, arrayOf(arrays, i, Uint8Array, length, `${what} group ${k}`)]));
 
 function unpackGeometry(j: any, arrays: Typed[]): Geometry {
+  must(j && typeof j === 'object', 'geometry');
   const g = new Geometry();
-  g.points = unpackTable(j.points, arrays);
-  g.vertices = unpackTable(j.vertices, arrays);
-  g.prims = unpackTable(j.prims, arrays);
-  g.detail = unpackTable(j.detail, arrays);
-  g.primStart = arrays[j.primStart] as Int32Array;
-  g.vertexPoint = arrays[j.vertexPoint] as Int32Array;
-  g.primClosed = arrays[j.primClosed] as Uint8Array;
-  g.pointGroups = unpackMasks(j.pointGroups, arrays);
-  g.primGroups = unpackMasks(j.primGroups, arrays);
-  if (j.vertexGroups.length) g.vertexGroups = unpackMasks(j.vertexGroups, arrays);
+  g.points = unpackTable(j.points, arrays, 'points');
+  g.vertices = unpackTable(j.vertices, arrays, 'vertices');
+  g.prims = unpackTable(j.prims, arrays, 'prims');
+  g.detail = unpackTable(j.detail, arrays, 'detail');
+  const np = g.points.count, nv = g.vertices.count, nprims = g.prims.count;
+  must(g.detail.count === 1, 'detail count');
+  const P = g.points.get('P');
+  must(P && P.type === 'float' && P.size === 3, 'no point positions');
+  g.vertexPoint = arrayOf(arrays, j.vertexPoint, Int32Array, nv, 'vertex points');
+  g.primStart = arrayOf(arrays, j.primStart, Int32Array, nprims + 1, 'prim starts');
+  g.primClosed = arrayOf(arrays, j.primClosed, Uint8Array, nprims, 'prim closed');
+  for (const p of g.vertexPoint) must(p >= 0 && p < np, 'a vertex names a point that is not there');
+  must(g.primStart[0] === 0 && g.primStart[nprims] === nv, 'prim starts do not span the vertices');
+  for (let i = 0; i < nprims; i++) must(g.primStart[i + 1] >= g.primStart[i], 'prim starts go back');
+  g.pointGroups = unpackMasks(j.pointGroups, arrays, np, 'point');
+  g.primGroups = unpackMasks(j.primGroups, arrays, nprims, 'prim');
+  if (j.vertexGroups.length) g.vertexGroups = unpackMasks(j.vertexGroups, arrays, nv, 'vertex');
   if (j.edgeGroups.length) g.edgeGroups = new Map(j.edgeGroups.map(([k, i]: [string, number]) => {
-    const pairs = arrays[i] as Int32Array, set = new EdgeSet();
-    for (let p = 0; p < pairs.length; p += 2) set.add(pairs[p], pairs[p + 1]);
+    const pairs = arrayOf(arrays, i, Int32Array, null, `edge group ${k}`), set = new EdgeSet();
+    must(pairs.length % 2 === 0, `edge group ${k}: odd`);
+    for (let p = 0; p < pairs.length; p += 2) { must(pairs[p] >= 0 && pairs[p] < np && pairs[p + 1] >= 0 && pairs[p + 1] < np, `edge group ${k}: a point that is not there`); set.add(pairs[p], pairs[p + 1]); }
     return [k, set];
   }));
   if (j.primKind !== undefined) {
-    g.primKind = arrays[j.primKind] as Uint8Array;
-    g.packedSource = arrays[j.packedSource] as Int32Array;
-    g.packedXform = arrays[j.packedXform] as Float64Array;
+    g.primKind = arrayOf(arrays, j.primKind, Uint8Array, nprims, 'prim kinds');
+    g.packedSource = arrayOf(arrays, j.packedSource, Int32Array, nprims, 'packed sources');
+    g.packedXform = arrayOf(arrays, j.packedXform, Float64Array, nprims * 9, 'packed transforms');
   }
-  if (j.packedSources) g.packedSources = j.packedSources.map((s: any) => unpackGeometry(s, arrays));
+  if (j.packedSources) {
+    must(Array.isArray(j.packedSources), 'packed sources');
+    g.packedSources = j.packedSources.map((s: any) => unpackGeometry(s, arrays));
+  }
+  if (g.packedSource) for (const x of g.packedSource) must(x >= -1 && x < g.packedSources.length, 'a packed prim names a source that is not there');
+  must(Array.isArray(j.volumes), 'volumes');
   g.volumes = j.volumes.map((v: any): Volume => {
-    if (v.k === 'grid') return new SdfGrid(v.dims as GridDims, decAll(v.origin) as [number, number, number], dec(v.voxel), arrays[v.values] as Float32Array, v.name);
-    const layers = new Map<string, Float32Array>(v.layers.map(([k, i]: [string, number]) => [k, arrays[i] as Float32Array]));
+    if (v.k === 'grid') {
+      must(Array.isArray(v.dims) && v.dims.length === 3 && v.dims.every((n: unknown) => Number.isInteger(n) && (n as number) >= 2), 'grid size');
+      return new SdfGrid(v.dims as GridDims, decAll(v.origin) as [number, number, number], dec(v.voxel), arrayOf(arrays, v.values, Float32Array, v.dims[0] * v.dims[1] * v.dims[2], 'grid values'), v.name);
+    }
+    must(Number.isInteger(v.width) && Number.isInteger(v.height) && v.width >= 1 && v.height >= 1 && v.width * v.height <= 2 ** 31, 'volume size');
+    const count = v.width * v.height;
+    const layers = new Map<string, Float32Array>(v.layers.map(([k, i]: [string, number]) => {
+      const a = arrayOf(arrays, i, Float32Array, null, `layer ${k}`);
+      must(a.length === count || (v.k === 'image' && a.length === count * 4), `layer ${k}: ${a.length} values for ${v.width} × ${v.height}`);
+      return [k, a];
+    }));
     if (v.k === 'image') return new Image(v.width, v.height, v.name, layers);
     return new Heightfield(v.width, v.height, dec(v.cellSize), decAll(v.origin) as [number, number], layers, v.name);
   });
@@ -278,7 +355,7 @@ class DiskNodeStore implements NodeStore {
   readonly minMs: number;
   readonly dir: string;
   readonly maxBytes: number;
-  private engine: string | undefined;
+  private engine: string | null | undefined;
   private fixedEngine: string | undefined;
   private written = 0;
   private pruned = false;
@@ -291,18 +368,25 @@ class DiskNodeStore implements NodeStore {
     this.fixedEngine = o.engine;
   }
 
-  private engineId(): string { return this.fixedEngine ?? (this.engine ??= engineIdentity(this.dir)); }
+  /** The engine's identity, null when this process cannot vouch for it (then nothing is read or written). */
+  private engineId(): string | null {
+    if (this.fixedEngine !== undefined) return this.fixedEngine;
+    if (this.engine === undefined || this.engine === null) this.engine = engineIdentity(this.dir);
+    return this.engine;
+  }
   private fileOf(id: string) { return path.join(this.dir, sha256(JSON.stringify([FORMAT, id])) + EXT); }
 
-  async load(identity: string): Promise<StoredNode | null> {
+  async load(identity: string, accept?: (deps: FileDep[]) => boolean): Promise<StoredNode | null> {
     const file = this.fileOf(identity);
     let fh: fsp.FileHandle;
     try { fh = await fsp.open(file, 'r'); } catch { return null; }
+    // (the engine's identity is taken once there is something that might be it)
+    if (this.engineId() === null) { await fh.close().catch(() => {}); return null; }
     let got: StoredNode | null | 'other' = null;
     let before: fs.Stats | null = null;
     try {
       before = await fh.stat();
-      got = await this.read(fh, identity);
+      got = await this.read(fh, identity, accept);
     } catch { /* unreadable: as corrupt */ } finally {
       await fh.close().catch(() => {});
     }
@@ -320,7 +404,7 @@ class DiskNodeStore implements NodeStore {
   }
 
   /** The result a file holds; null when the file is broken; 'other' when it is whole but is another engine's. */
-  private async read(fh: fsp.FileHandle, identity: string): Promise<StoredNode | null | 'other'> {
+  private async read(fh: fsp.FileHandle, identity: string, accept?: (deps: FileDep[]) => boolean): Promise<StoredNode | null | 'other'> {
     const size = (await fh.stat()).size;
     const head = Buffer.alloc(HEAD);
     if (size < HEAD + 4 || !(await readInto(fh, head, 0)) || head.toString('latin1', 0, 8) !== MAGIC) return null;
@@ -339,6 +423,10 @@ class DiskNodeStore implements NodeStore {
     if (total !== size) return null;
     // another engine's result is whole, not broken: left for its engine, and written over when this one cooks the node
     if (h.engine !== this.engineId()) return 'other';
+    // the files it was made from must be as they were: if not, it is out of date, not broken
+    const deps: FileDep[] = Array.isArray(h.deps) ? h.deps : [];
+    if (!deps.every((d) => d && typeof d.p === 'string' && (d.k === 'f' || d.k === 'd') && typeof d.s === 'string')) return null;
+    if (accept && !accept(deps)) return 'other';
     let crc = zlib.crc32(head, 0);
     crc = zlib.crc32(hbuf, crc);
     const arrays: Typed[] = [];
@@ -353,17 +441,20 @@ class DiskNodeStore implements NodeStore {
     }
     const tail = Buffer.alloc(4);
     if (!(await readInto(fh, tail, pos)) || tail.readUInt32LE(0) !== crc >>> 0) return null;
-    return { geo: unpackGeometry(h.geo, arrays), warnings: h.warnings ?? [], ...(h.stats ? { stats: h.stats } : {}), cookMs: Number(h.cookMs) || 0 };
+    return { geo: unpackGeometry(h.geo, arrays), deps, warnings: h.warnings ?? [], ...(h.stats ? { stats: h.stats } : {}), cookMs: Number(h.cookMs) || 0 };
   }
 
   async save(identity: string, node: StoredNode): Promise<void> {
+    // never under an identity this process cannot vouch for (see engineIdentity)
+    const engine = this.engineId();
+    if (engine === null || (this.fixedEngine === undefined && !engineHolds())) return;
     const A = new Arrays();
     let geo: any;
     try { geo = packGeometry(node.geo, A); } catch (e) { if (e instanceof Unstorable) return; throw e; }
     // one result may not take more than half of the cache
     if (A.bytes > this.maxBytes / 2) return;
     const header = Buffer.from(JSON.stringify({
-      v: FORMAT, id: sha256(identity), engine: this.engineId(), cookMs: node.cookMs, warnings: node.warnings,
+      v: FORMAT, id: sha256(identity), engine, deps: node.deps, cookMs: node.cookMs, warnings: node.warnings,
       ...(node.stats ? { stats: node.stats } : {}), arrays: A.kinds, geo,
     }), 'utf8');
     const file = this.fileOf(identity);

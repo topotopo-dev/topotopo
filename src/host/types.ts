@@ -157,9 +157,18 @@ export interface Host {
   persist?: NodeStore;
 }
 
+/**
+ * A file, or the listing of a folder, that a result was made from, as it was when it was read: `p` its absolute path,
+ * `k` 'f' for a file or 'd' for a folder listing, `s` its stamp (HostFiles.fileStamp: modification time and size; for a
+ * folder the JSON list of its file names). A stored result is only good while every one of them is as it was.
+ */
+export interface FileDep { p: string; k: 'f' | 'd'; s: string }
+
 /** A node result as a NodeStore keeps it. */
 export interface StoredNode {
   geo: Geometry;
+  /** the files the result depended on, its inputs' and its own (the engine checks them when it loads the result) */
+  deps: FileDep[];
   /** the warnings the node's own cook raised (those of its params and of being deprecated are raised again every cook) */
   warnings: string[];
   /** the numbers the node recorded while cooking (CookContext.stat) */
@@ -177,7 +186,11 @@ export interface StoredNode {
 export interface NodeStore {
   /** results of nodes that cooked at least this many milliseconds are offered to save() */
   readonly minMs: number;
-  load(identity: string): Promise<StoredNode | null>;
+  /**
+   * The result kept under an identity, or null. `accept` is asked about the result's files before its arrays are read;
+   * a result it refuses is a miss.
+   */
+  load(identity: string, accept?: (deps: FileDep[]) => boolean): Promise<StoredNode | null>;
   /** Keep a result; one that cannot be stored (volumes that are functions, too large, no space) is dropped. */
   save(identity: string, node: StoredNode): Promise<void>;
 }

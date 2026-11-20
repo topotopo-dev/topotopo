@@ -57,17 +57,20 @@ export function engineCodeHash(root: string, code: string): string {
 }
 
 /**
- * A quick stand-in for telling whether the running engine's code changed since a hash was taken: SHA-256 over the path,
- * size and modification time of the files engineCodeHash covers (a few milliseconds, where reading them takes most of a
- * second). Computed again on every call.
+ * A quick stand-in for telling whether the running engine's code changed since a hash was taken: `stamp` is the SHA-256
+ * over the path, size and modification time of the files engineCodeHash covers (tens of milliseconds, where reading them
+ * takes most of a second), `newest` the latest modification time among them (ms since the epoch). Computed again on every
+ * call.
  */
-export function engineStamp(): string {
+export function engineStamp(): { stamp: string; newest: number } {
   const h = createHash('sha256');
+  let newest = 0;
   for (const f of engineFiles(ROOT, CODE)) {
     const st = fs.statSync(f[1], { throwIfNoEntry: false });
     h.update(`${f[0]}\0${st?.size ?? -1}\0${st?.mtimeMs ?? -1}\0`);
+    if (st && st.mtimeMs > newest) newest = st.mtimeMs;
   }
-  return h.digest('hex');
+  return { stamp: h.digest('hex'), newest };
 }
 
 /** The package root engineSha256 and engineStamp cover (where its node_modules begin). */

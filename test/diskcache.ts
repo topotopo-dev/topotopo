@@ -12,12 +12,13 @@ import zlib from 'node:zlib';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import './diskcache-nodes.ts';
-import { SLOW_NODE } from './diskcache-nodes.ts';
+import { SLOW_NODE, SLOW_PASS } from './diskcache-nodes.ts';
+import { variableTestFont } from './varfont.ts';
 import { Engine } from '../src/graph/engine.ts';
-import { allNodeDefs } from '../src/graph/registry.ts';
+import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
-import type { NodeStore, StoredNode } from '../src/host/types.ts';
+import type { FileDep, NodeStore, StoredNode } from '../src/host/types.ts';
 import { NODE_CACHE_MAX_BYTES, NODE_CACHE_MIN_MS, nodeCacheFolder, nodeCacheOff, openNodeCache } from '../src/host/diskcache.ts';
 import { Attribute, Geometry } from '../src/core/geometry.ts';
 import type { Volume } from '../src/core/geometry.ts';
@@ -151,15 +152,15 @@ try {
     const packed = (await e.cook({ nodes: { b: { type: 'box' }, p: { type: 'point_grid', params: { counts: [2, 1, 2] } }, c: { type: 'copy_to_points', in: ['b', 'p'], params: { pack: true } }, n: { type: 'nurbs' }, m: { type: 'merge', in: ['c', 'n'] } }, output: 'm' })).geo!;
     check(packed.hasPacked() && packed.hasSplines(), 'the test geometry has packed instances and a spline prim');
     for (const [name, geo] of [['rich', g], ['packed', packed]] as const) {
-      await store.save(name, { geo, warnings: ['w1', 'w "2"'], stats: { n: 3 }, cookMs: 1234.5 });
+      await store.save(name, { geo, deps: [{ p: '/a/b.png', k: 'f', s: '1:2' }, { p: '/a', k: 'd', s: '["x"]' }], warnings: ['w1', 'w "2"'], stats: { n: 3 }, cookMs: 1234.5 });
       const back = await store.load(name);
       const d = back ? diffGeo(geo, back.geo) : 'not loaded';
       check(back && d === null, `${name}: the result loaded is the result saved, bit for bit${d ? ` (${d})` : ''}`);
-      check(back?.warnings.join('|') === 'w1|w "2"' && back?.stats?.n === 3 && back?.cookMs === 1234.5, `${name}: its warnings, stats and cook time come back`);
+      check(back?.warnings.join('|') === 'w1|w "2"' && back?.stats?.n === 3 && back?.cookMs === 1234.5 && JSON.stringify(back?.deps) === JSON.stringify([{ p: '/a/b.png', k: 'f', s: '1:2' }, { p: '/a', k: 'd', s: '["x"]' }]), `${name}: its warnings, stats, files and cook time come back`);
     }
     const sdf = new Geometry();
     sdf.volumes.push({ kind: 'sdf', name: 's', bounds: { min: [0, 0, 0], max: [1, 1, 1] }, sample: () => 0 });
-    await store.save('sdf', { geo: sdf, warnings: [], cookMs: 1 });
+    await store.save('sdf', { geo: sdf, deps: [], warnings: [], cookMs: 1 });
     check((await store.load('sdf')) === null && entries(store.dir).length === 2, 'a result with an SDF volume (a function) is not kept');
     check((await store.load('nothing')) === null, 'an identity never saved is a miss');
   }
@@ -171,7 +172,7 @@ try {
     saved = new Map<string, StoredNode>();
     asked: string[] = [];
     constructor(minMs = 0) { this.minMs = minMs; }
-    async load(id: string) { this.asked.push(id); return this.saved.get(id) ?? null; }
+    async load(id: string, accept?: (deps: FileDep[]) => boolean) { this.asked.push(id); const n = this.saved.get(id); return n && (!accept || accept(n.deps)) ? n : null; }
     async save(id: string, n: StoredNode) { this.saved.set(id, n); }
   }
   const engineWith = async (store: NodeStore | undefined, baseDir = tmp) => {
@@ -186,28 +187,33 @@ try {
     return r;
   };
   {
-    // which nodes are offered: a plain one is, a nested one (foreach), a script that runs nodes, the file node and a node with a URL are not
+    // which results are offered: a plain node and what is made from the file node or from a graph cooked inside a node
+    // are; a node that cooked a graph inside itself is not (its nodes are, on their own); what a script that runs nodes
+    // or a URL fed is not, nor what is made from it
     const obj = path.join(tmp, 'cube.obj');
     fs.writeFileSync(obj, 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
-    const graph: GraphSpec = {
-      nodes: {
-        plain: { type: 'box' },
-        each: { type: 'foreach', in: ['plain'], params: { mode: 'count', count: 2, body: { nodes: { i: { type: 'input', params: { index: 0 } }, o: { type: 'transform', in: ['i'], params: { translate: [1, 0, 0] } } }, output: 'o' } } },
-        scr: { type: 'script', params: { code: "return await lib.run('sphere', { radius: 2 });" } },
-        file: { type: 'file', params: { path: obj } },
-        url: { type: 'attrib_create', in: ['plain'], params: { name: 'src', type: 'string', value: 'https://example.com/a.png' } },
-        all: { type: 'merge', in: ['each', 'scr', 'file', 'url'] },
-      },
-      output: 'all',
+    const nodes: GraphSpec['nodes'] = {
+      plain: { type: 'box' },
+      each: { type: 'foreach', in: ['plain'], params: { mode: 'count', count: 2, body: { nodes: { i: { type: 'input', params: { index: 0 } }, o: { type: 'transform', in: ['i'], params: { translate: [1, 0, 0] } } }, output: 'o' } } },
+      scr: { type: 'script', params: { code: "return await lib.run('sphere', { radius: 2 });" } },
+      file: { type: 'file', params: { path: obj } },
+      url: { type: 'attrib_create', in: ['plain'], params: { name: 'src', type: 'string', value: 'https://example.com/a.png' } },
+      safe: { type: 'merge', in: ['plain', 'each', 'file'] },
+      fromScript: { type: 'merge', in: ['scr', 'plain'] },
+      fromUrl: { type: 'null', in: ['url'] },
     };
-    const spy = new Spy();
-    const r = await cookOk(await engineWith(spy), graph);
-    void r;
-    const offered = (type: string) => [...spy.saved.keys()].some((k) => k.startsWith(`${type}|`));
-    check(offered('box') && offered('merge'), 'a plain node and a merge are offered to the store');
-    check(!offered('foreach') && !offered('script') && !offered('file') && !offered('attrib_create'), 'a node that cooked a graph inside itself (foreach), a script, the file node and a node with a URL in a param are not');
-    // the inner nodes of the foreach are offered on their own
-    check([...spy.saved.keys()].some((k) => k.startsWith('transform|')), 'the nodes inside a nested graph are offered on their own');
+    const types = async (out: string) => {
+      const spy = new Spy();
+      await cookOk(await engineWith(spy), { nodes, output: out });
+      return (t: string) => [...spy.saved.keys()].some((k) => k.startsWith(`${t}|`));
+    };
+    const ofSafe = await types('safe');
+    check(ofSafe('box') && ofSafe('file') && ofSafe('merge'), 'a plain node, the file node and a merge of them are offered to the store');
+    check(!ofSafe('foreach') && ofSafe('transform'), 'a node that cooked a graph inside itself (foreach) is not, the nodes inside it are');
+    const ofScript = await types('fromScript');
+    check(!ofScript('script') && !ofScript('merge') && ofScript('box'), 'a script that runs nodes, and what is made from it, is not offered');
+    const ofUrl = await types('fromUrl');
+    check(!ofUrl('attrib_create') && !ofUrl('null') && ofUrl('box'), 'a node with a URL in a param, and what is made from it, is not offered');
   }
   {
     // an engine without a store, and nodes under the store's minimum, offer nothing
@@ -312,7 +318,7 @@ try {
     // size cap: the entries used longest ago go first; a load counts as a use
     const dir = folder();
     // a result of about 100 kB: an image of 100 × 250 pixels with every value v
-    const big = (v: number): StoredNode => { const g = new Geometry(); g.volumes.push(new Image(100, 250, 'i', new Map([['C', new Float32Array(25000).fill(v)]]))); return { geo: g, warnings: [], cookMs: 1 }; };
+    const big = (v: number): StoredNode => { const g = new Geometry(); g.volumes.push(new Image(100, 250, 'i', new Map([['C', new Float32Array(25000).fill(v)]]))); return { geo: g, deps: [], warnings: [], cookMs: 1 }; };
     const store = openNodeCache({ dir, minMs: 0, maxBytes: 250_000, engine: 'e' })!;
     await store.save('A', big(1)); await store.save('B', big(2));
     const files = () => entries(dir).map((f) => path.join(dir, f));
@@ -345,13 +351,222 @@ try {
     const dir = folder();
     const stores = Array.from({ length: 6 }, () => openNodeCache({ dir, minMs: 0, engine: 'e' })!);
     const geo = rich();
-    const node = { geo, warnings: [], cookMs: 5 };
+    const node = { geo, deps: [], warnings: [], cookMs: 5 };
     const loads: Promise<unknown>[] = [];
     await Promise.all(stores.flatMap((s, i) => [s.save('same', node), s.save(`own${i}`, node), (async () => { await sleep(i); loads.push(s.load('same')); })()]));
     const got = await Promise.all(loads);
     check(got.every((x) => x === null || diffGeo(geo, (x as StoredNode).geo) === null), 'a read during writes is a whole result or a miss');
     const last = await stores[0].load('same');
     check(last !== null && diffGeo(geo, last.geo) === null && leftovers(dir).length === 0 && entries(dir).length === 7, 'six writers of one result leave one whole file and no leftovers');
+  }
+
+  // ------------------------------------------------------------ what a result was made from: files, graphs inside nodes, URLs
+  {
+    // A slow node below one that reads a file is kept with the files it was made from: the same files, it loads; any of them
+    // changed, the next cook is fresh and says so. The file node is read by name (cube.obj), its side file (its .mtl) apart
+    // from what the signature holds, a foreach, graph_ref and an asset whose graph reads it, a solver (never kept)
+    const W = path.join(tmp, 'work');
+    fs.mkdirSync(W);
+    const objFile = path.join(W, 'm.obj'), mtlFile = path.join(W, 'm.mtl');
+    let stampN = 0;
+    /** A new modification time, whatever the size */
+    const bump = (f: string) => { const t = new Date(Date.UTC(2021, 0, 1) + ++stampN * 10_000); fs.utimesSync(f, t, t); };
+    const writeObj = (x: number) => { fs.writeFileSync(objFile, `mtllib m.mtl\nusemtl paint\nv 0 0 0\nv ${x} 0 0\nv 0 1 0\nf 1 2 3\n`); bump(objFile); };
+    const writeMtl = (r: number) => { fs.writeFileSync(mtlFile, `newmtl paint\nKd ${r} 0.2 0.3\n`); bump(mtlFile); };
+    const body: GraphSpec = { nodes: { f: { type: 'file', params: { path: objFile } } }, output: 'f' };
+    const withSlow = (nodes: GraphSpec['nodes'], from: string): GraphSpec => ({ nodes: { ...nodes, slow: { type: SLOW_PASS, in: [from], params: { ms: 150 } } }, output: 'slow' });
+    const dirs = new Set<string>();
+    const cookSlow = async (dir: string, g: GraphSpec, setup?: (e: Engine) => void) => {
+      const e = await engineWith(openNodeCache({ dir, minMs: 100, engine: 'files' })!, W);
+      setup?.(e);
+      const r = await cookOk(e, g);
+      return { slow: r.results.get('slow')!, x: r.geo!.bbox(true).max[0], fp: sortedJSON(fingerprint(r.geo!)) };
+    };
+    /** cook, cook again (loads when it may), change a file, cook again: fresh, never the old result */
+    const scenario = async (name: string, g: GraphSpec, mutate: () => void, o: { setup?: (e: Engine) => void; loads?: boolean } = {}) => {
+      writeObj(1); writeMtl(0.1);
+      const dir = folder();
+      dirs.add(dir);
+      const a = await cookSlow(dir, g, o.setup), b = await cookSlow(dir, g, o.setup);
+      mutate();
+      const c = await cookSlow(dir, g, o.setup);
+      const loads = o.loads ?? true;
+      check(!a.slow.disk && !!b.slow.disk === loads && b.fp === a.fp, `${name}: ${loads ? 'the second cook loads it' : 'it is never kept'}, the same result`);
+      check(!c.slow.disk && c.fp !== a.fp, `${name}: after the file changed the next cook is fresh (x ${a.x} → ${c.x}), not the stored one`);
+    };
+    const newObj = () => writeObj(5), newMtl = () => writeMtl(0.9);
+    await scenario('below the file node (its file)', withSlow(body.nodes, 'f'), newObj);
+    await scenario('below the file node (its .mtl, which the signature does not hold)', withSlow(body.nodes, 'f'), newMtl);
+    const each: GraphSpec['nodes'] = { each: { type: 'foreach', params: { mode: 'count', count: 1, body } } };
+    await scenario('below a foreach whose body reads the file', withSlow(each, 'each'), newObj);
+    await scenario('below a foreach whose body reads the .mtl', withSlow(each, 'each'), newMtl);
+    const ref: GraphSpec['nodes'] = { ref: { type: 'graph_ref', params: { graph: 'g' } } };
+    const useGraph = (e: Engine) => { e.root.graphs = (n: string) => (n === 'g' ? structuredClone(body) : undefined); };
+    await scenario('below graph_ref whose graph reads the file', withSlow(ref, 'ref'), newObj, { setup: useGraph });
+    await scenario('below graph_ref whose graph reads the .mtl', withSlow(ref, 'ref'), newMtl, { setup: useGraph });
+    const asset: GraphSpec['nodes'] = { a: { type: 'readm' } };
+    const useAsset = (e: Engine) => { e.registerAsset('readm', structuredClone(body)); };
+    await scenario('below an asset whose graph reads the file', withSlow(asset, 'a'), newObj, { setup: useAsset });
+    await scenario('below an asset whose graph reads the .mtl', withSlow(asset, 'a'), newMtl, { setup: useAsset });
+    const solver: GraphSpec['nodes'] = {
+      seed: { type: 'box' },
+      sol: { type: 'solver', in: ['seed'], params: { body: { nodes: { prev: { type: 'input', params: { index: 0 } }, f: { type: 'file', params: { path: objFile } }, m: { type: 'merge', in: ['prev', 'f'] } }, output: 'm' } } },
+    };
+    await scenario('below a solver whose body reads the file', withSlow(solver, 'sol'), newObj, { loads: false });
+    // the asset used inside another graph: its definition is not in that graph's signature, so nothing below it is kept
+    {
+      const g = withSlow({ each: { type: 'foreach', params: { mode: 'count', count: 1, body: { nodes: { a: { type: 'readm' } }, output: 'a' } } } }, 'each');
+      writeObj(1);
+      const dir = folder();
+      const a = await cookSlow(dir, g, useAsset), b = await cookSlow(dir, g, useAsset);
+      check(!a.slow.disk && !b.slow.disk && entries(dir).length === 0, 'what is made from an asset used inside another graph is not kept (the graph does not hold its definition)');
+    }
+    // a URL: never kept, nor anything below it
+    {
+      const g = withSlow({ f: { type: 'file', params: { path: 'http://127.0.0.1:9/m.obj' } }, u: { type: 'null', in: ['f'] } }, 'u');
+      const dir = folder();
+      const r = await (await engineWith(openNodeCache({ dir, minMs: 100, engine: 'files' })!, W)).cook(g);
+      check(!r.ok && entries(dir).length === 0, 'below a URL nothing is kept (the cook fails here: nothing answers)');
+      const g2 = withSlow({ b: { type: 'box' }, u: { type: 'attrib_create', in: ['b'], params: { name: 'src', type: 'string', value: 'https://example.com/a.png' } } }, 'u');
+      const a = await cookSlow(dir, g2), b = await cookSlow(dir, g2);
+      check(!a.slow.disk && !b.slow.disk && entries(dir).length === 0, 'below a node with a URL in a param nothing is kept, and nothing is loaded');
+    }
+    // a file that holds its stamp: a result loaded from disk makes what is below it keep the files too
+    {
+      writeObj(1); writeMtl(0.1);
+      const dir = folder();
+      const g: GraphSpec = { nodes: { ...body.nodes, slow: { type: SLOW_PASS, in: ['f'], params: { ms: 150 } }, after: { type: SLOW_PASS, in: ['slow'], params: { ms: 150 } } }, output: 'after' };
+      const run = async () => { const r = await cookOk(await engineWith(openNodeCache({ dir, minMs: 100, engine: 'files' })!, W), g); return { slow: r.results.get('slow')!, after: r.results.get('after')! }; };
+      await run();
+      const b = await run();
+      check(b.slow.disk && b.after.disk, 'two slow nodes in a row both load');
+      newMtl();
+      const c = await run();
+      check(!c.slow.disk && !c.after.disk, 'a changed side file makes both of them cook again');
+    }
+  }
+  {
+    // the part of the signature that depends on state the node reads when its cook starts (the kernels loaded): the result
+    // is kept under the one the cook used, even when the state changed while the store was asked
+    const backend = { v: 'js' };
+    defineNode({
+      type: 'backend_probe', category: 'test', summary: 'Test node: its signature names a backend, which its cook reads at its start.', inputs: [], params: {},
+      example: { type: 'backend_probe' },
+      signatureExtra: () => backend.v,
+      async cook() {
+        const used = backend.v;
+        await sleep(5);
+        const g = new Geometry({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], prims: [[0, 1, 2]] });
+        g.detail.add('backend', 'string').set(0, used);
+        return g;
+      },
+    });
+    const spy = new Spy();
+    const load = spy.load.bind(spy);
+    spy.load = async (id, accept) => { backend.v = 'kernel'; return load(id, accept); };
+    const r = await cookOk(await engineWith(spy), { nodes: { p: { type: 'backend_probe' } }, output: 'p' });
+    const made = String(r.geo!.detail.get('backend')!.get(0));
+    const keys = [...spy.saved.keys()];
+    check(made === 'kernel' && keys.length === 1 && /\|\|kernel/.test(keys[0]) && !/\|\|js/.test(keys[0]), `a result is kept under the backend that made it (${made}), not the one the signature named (${/\|\|(\w+)/.exec(spy.asked[0])?.[1]} when asked)`);
+  }
+  {
+    // an entry whose arrays do not fit its own counts is a miss, not a geometry
+    const dir = folder();
+    const store = openNodeCache({ dir, minMs: 0, engine: 'x' })!;
+    const pass = (g: Geometry) => ({ geo: g, deps: [], warnings: [], cookMs: 1 });
+    const file = () => path.join(dir, entries(dir)[0]);
+    /** Rewrite the header of the entry, with a checksum that is right: a file that is whole, and wrong */
+    const tamper = (mutate: (h: any) => void) => {
+      const b = fs.readFileSync(file());
+      const hlen = b.readUInt32LE(8);
+      const h = JSON.parse(b.subarray(16, 16 + hlen).toString('utf8'));
+      mutate(h);
+      const hb = Buffer.from(JSON.stringify(h), 'utf8');
+      const head = Buffer.from(b.subarray(0, 16));
+      head.writeUInt32LE(hb.length, 8);
+      const arrays = b.subarray(16 + hlen, b.length - 4);
+      const tail = Buffer.alloc(4);
+      tail.writeUInt32LE(zlib.crc32(arrays, zlib.crc32(hb, zlib.crc32(head))) >>> 0, 0);
+      fs.writeFileSync(file(), Buffer.concat([head, hb, arrays, tail]));
+    };
+    const cases: [string, (h: any) => void][] = [
+      ['more points than the arrays hold', (h) => { h.geo.points.count++; }],
+      ['fewer prims than the arrays hold', (h) => { h.geo.prims.count--; }],
+      ['a vertex array of the wrong kind', (h) => { h.geo.vertexPoint = h.geo.points.attribs[0].v; }],
+      ['a group array of the wrong length', (h) => { h.geo.pointGroups[0][1] = h.geo.primClosed; }],
+      ['a heightfield layer of the wrong length', (h) => { h.geo.volumes[1].width += 1; }],
+      ['an array that is not there', (h) => { h.geo.primStart = 9999; }],
+    ];
+    for (const [what, mutate] of cases) {
+      const g = rich();
+      await store.save('t', pass(g));
+      const good = await store.load('t');
+      tamper(mutate);
+      let got: StoredNode | null | 'threw' = 'threw';
+      try { got = await store.load('t'); } catch { /* stays 'threw' */ }
+      check(good !== null && got === null, `an entry with ${what} is a miss`);
+      for (const f of entries(dir)) fs.rmSync(path.join(dir, f));
+    }
+  }
+  {
+    // the engine's identity is the code the process loaded: a process whose sources changed after it started keeps nothing
+    const app = path.join(tmp, 'app');
+    const stage = (dest: string) => {
+      fs.mkdirSync(dest, { recursive: true });
+      for (const d of ['src', 'kernels/pkg', 'kernels/pkg-simd', 'assets/fonts']) fs.cpSync(path.join(ROOT, d), path.join(dest, d), { recursive: true });
+      fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dest, 'package.json'));
+      fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dest, 'node_modules'), 'junction');
+    };
+    const lateSource = `
+import fs from 'node:fs';
+import './src/nodes/index.ts';
+import { Engine } from './src/graph/engine.ts';
+import { defineNode } from './src/graph/registry.ts';
+import { Geometry } from './src/core/geometry.ts';
+import { createNodeHost } from './src/host/node.ts';
+const [, , cacheDir, dir] = process.argv;
+defineNode({ type: 'slow_wait', category: 'test', summary: 'x', inputs: [], params: { ms: { type: 'int', default: 150, desc: 'ms' }, value: { type: 'float', default: 1, desc: 'v' } }, example: { type: 'slow_wait' },
+  async cook({ p }) { await new Promise((r) => setTimeout(r, p.ms)); return new Geometry({ positions: [0, 0, 0, p.value, 0, 0, 0, p.value, 0], prims: [[0, 1, 2]] }); } });
+const e = new Engine(createNodeHost({ baseDir: dir, nodeCache: { dir: cacheDir, minMs: 100 } }));
+await e.init();
+fs.writeFileSync(dir + '/ready', '1');
+for (const [go, value] of [['go1', 1], ['go2', 2]] as const) {
+  while (!fs.existsSync(dir + '/' + go)) await new Promise((r) => setTimeout(r, 30));
+  const r = await e.cook({ nodes: { s: { type: 'slow_wait', params: { value } } }, output: 's' });
+  console.log(JSON.stringify({ go, ok: r.ok }));
+  fs.writeFileSync(dir + '/' + go + '.done', '1');
+}
+await e.host.pool?.close();
+process.exit(0);
+`;
+    /** A child on a copy of the engine's sources; edit says when its sources change: before its first use of the store, between its two cooks, never. */
+    const child = async (edit: 'before' | 'between' | 'never') => {
+      const dest = path.join(app, edit), cache = path.join(dest, 'cache');
+      stage(dest);
+      fs.writeFileSync(path.join(dest, 'late.ts'), lateSource);
+      await sleep(150);
+      const p = spawn(process.execPath, [path.join(dest, 'late.ts'), cache, dest], { cwd: dest, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      p.stdout.on('data', (d) => { out += d; });
+      p.stderr.on('data', (d) => { out += d; });
+      const exited = new Promise<void>((r) => p.on('close', () => r()));
+      const until = async (f: string) => { for (let i = 0; i < 600 && !fs.existsSync(path.join(dest, f)); i++) await sleep(50); };
+      const touch = (f: string) => fs.writeFileSync(path.join(dest, f), '1');
+      const change = () => fs.appendFileSync(path.join(dest, 'src', 'core', 'random.ts'), '\n// changed after the process started\n');
+      await until('ready');
+      if (edit === 'before') { await sleep(60); change(); }
+      touch('go1'); await until('go1.done');
+      if (edit === 'between') { await sleep(60); change(); }
+      touch('go2'); await until('go2.done');
+      await exited;
+      // the sources' libraries are the repository's own: only the link goes
+      try { fs.rmdirSync(path.join(dest, 'node_modules')); } catch { fs.unlinkSync(path.join(dest, 'node_modules')); }
+      return { out, files: entries(cache).length, memo: fs.existsSync(path.join(cache, 'engine.json')) };
+    };
+    const [before, between, never] = await Promise.all([child('before'), child('between'), child('never')]);
+    check(never.files === 2 && never.memo, `a process whose sources did not change keeps both results (${never.files})`);
+    check(before.files === 0 && !before.memo && /"ok":true/.test(before.out), `sources changed after the process started, before its first use of the store: nothing kept, the cooks are fine (${before.files} files)`);
+    check(between.files === 1 && /"ok":true/.test(between.out), `sources changed between two cooks: the first is kept, the second is not (${between.files} file)`);
   }
 
   // ------------------------------------------------------------ the CLI and the MCP server, in processes of their own
@@ -452,6 +667,43 @@ try {
     return results;
   })());
 
+  scenarios.push((async () => {
+    // the case a slow node below a foreach whose body reads a file, in processes of their own: the file changes, the next run is fresh
+    const results: [unknown, string][] = [];
+    const check = (ok: unknown, msg: string) => { results.push([ok, msg]); };
+    const dir = folder(), ws = fs.mkdtempSync(path.join(tmp, 'rep-'));
+    const env = { TOPOTOPO_NODE_CACHE_DIR: dir };
+    const obj = (x: number) => fs.writeFileSync(path.join(ws, 'm.obj'), `v 0 0 0\nv ${x} 0 0\nv 0 1 0\nf 1 2 3\n`);
+    obj(1);
+    const g = path.join(ws, 'g.json');
+    fs.writeFileSync(g, JSON.stringify({ nodes: { each: { type: 'foreach', params: { mode: 'count', count: 1, body: { nodes: { f: { type: 'file', params: { path: 'm.obj' } } }, output: 'f' } } }, slow: { type: 'slow_pass', in: ['each'], params: { ms: 700 } } }, output: 'slow' }));
+    const a = await run([g], env), b = await run([g], env);
+    check(a.code === 0 && !loaded(a.out) && loaded(b.out) && summary(a.out) === summary(b.out) && /max \(1\.000/.test(a.out), 'CLI, slow node below a foreach whose body reads m.obj: the second run loads it');
+    obj(5);
+    fs.utimesSync(path.join(ws, 'm.obj'), new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+    const c = await run([g], env), plain = await run([g, '--no-cache'], env);
+    check(c.code === 0 && !loaded(c.out) && /max \(5\.000/.test(c.out) && summary(c.out) === summary(plain.out), 'CLI: after m.obj changed the next run is fresh (the new bbox, the one --no-cache gives), and does not say it loaded anything');
+    return results;
+  })());
+  scenarios.push((async () => {
+    // a font replaced at the same path
+    const results: [unknown, string][] = [];
+    const check = (ok: unknown, msg: string) => { results.push([ok, msg]); };
+    const dir = folder(), ws = fs.mkdtempSync(path.join(tmp, 'font-'));
+    const env = { TOPOTOPO_NODE_CACHE_DIR: dir };
+    const font = path.join(ws, 'f.ttf');
+    fs.writeFileSync(font, variableTestFont());
+    const g = path.join(ws, 'g.json');
+    fs.writeFileSync(g, JSON.stringify({ nodes: { t: { type: 'text', params: { text: 'I', font: 'f.ttf', size: 1 } }, slow: { type: 'slow_pass', in: ['t'], params: { ms: 700 } } }, output: 'slow' }));
+    const a = await run([g], env), b = await run([g], env);
+    check(a.code === 0 && summary(a.out) !== '' && loaded(b.out) && summary(a.out) === summary(b.out), 'CLI, slow node below a text node: the second run loads it');
+    fs.copyFileSync(path.join(ROOT, 'assets', 'fonts', 'DejaVuSans.ttf'), font);
+    fs.utimesSync(font, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+    const c = await run([g], env), plain = await run([g, '--no-cache'], env);
+    check(c.code === 0 && !loaded(c.out) && summary(c.out) === summary(plain.out) && summary(c.out) !== summary(a.out), 'CLI: with the font replaced at the same path the next run is fresh, not the stored result');
+    return results;
+  })());
+
   // ------------------------------------------------------------ the sweep: every node of the catalogue
   {
     const { engine: off, tmp: ft } = await createFixtureEngine();
@@ -463,7 +715,7 @@ try {
     // the golden fingerprints (test/golden/node.<type>.json, made without any cache) are the oracle for the cold and warm cooks
     let cases = 0, loadedNodes = 0, offeredNodes = 0, firstBad = '';
     for (const def of allNodeDefs()) {
-      if (SKIP.has(def.type) || def.type === SLOW_NODE) continue;
+      if (SKIP.has(def.type) || !fs.existsSync(path.join(ROOT, 'test', 'golden', `node.${def.type}.json`))) continue;
       const g = fixtureGraphFor(def.type);
       const gold = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'golden', `node.${def.type}.json`), 'utf8'));
       const b = await cold.cook(g), c = await warm.cook(g);

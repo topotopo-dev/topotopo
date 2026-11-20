@@ -30,10 +30,12 @@
 // Disk cache: a host with a node store (Host.persist, src/host/diskcache.ts) keeps the results of slow nodes between
 // runs. On a miss in memory the engine asks the store before it cooks; after a cook of Host.persist.minMs or more it
 // offers the result. The store is keyed by an identity the engine builds from what the result is a function of (the
-// signature material, the folder a file-reading node reads from, the frame of a time-dependent node), so everything
-// that is in the signature is in the key. What the signature does not hold is kept out (persistable below): a node that
-// cooked a nested graph (its result also depends on the nodes inside, and on the files they read), one that read its
-// scope while cooking without saying so in its signature, and the node types in NOT_PERSISTED.
+// signature material, the folder a file-reading node reads from, the frame of a time-dependent node). What a signature
+// does not hold, the result carries with it (Meta): the files it was made from, as they were when read (the node's own
+// reads through its scope's files, those of the nodes it was made from and of the graphs it cooked inside itself), which
+// the engine checks when it loads a stored result. A result that was made from something no key and no file stamp
+// covers (a URL, a Blender conversion, a node type the scope defines used inside another graph, a scope read the
+// signature does not name) is unsafe, and so is everything made from it: none of it is stored or loaded.
 //
 // Concurrency: when the host has a worker pool (Engine.concurrent), the inputs of a node (and the nodes its
 // expressions reference) are pulled at once, so independent branches overlap wherever a cook awaits (a chunked
@@ -46,7 +48,7 @@ import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { primIntrinsic } from '../core/intrinsics.ts';
 import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
-import type { Host, StopSignal, StoredNode } from '../host/types.ts';
+import type { FileDep, Host, HostFiles, StopSignal, StoredNode } from '../host/types.ts';
 import { targetError, targetWarning } from '../io/targets.ts';
 import { allAliases, getNodeDef } from './registry.ts';
 import {
@@ -132,7 +134,13 @@ export interface NodeProgress {
 
 export type { StopSignal };
 
-export interface SubInput { geo: Geometry; sig: string }
+export interface SubInput {
+  geo: Geometry;
+  sig: string;
+  /** the files the input was made from, and whether something it was made from cannot be checked (the engine fills them in for a node's nested cooks) */
+  deps?: FileDep[];
+  unsafe?: boolean;
+}
 
 export interface CookOptions {
   target?: string;
@@ -288,13 +296,100 @@ const timeKey = (t: TimeState) => `T:${t.frame}:${t.time}:${t.fps}:${t.timeInc}`
  * signatureExtra and as CookContext.scope: Engine.scopeDeps). Its id alone does not count: a node that reads it keys
  * its result by it itself.
  */
-const watchScope = (s: Scope, read: () => void): Scope => ({
-  get id() { return s.id; },
-  get assets() { read(); return s.assets; },
-  get graphs() { read(); return s.graphs; },
-  get files() { read(); return s.files; },
-  get packages() { read(); return s.packages; },
-});
+const watchScope = (s: Scope, read: () => void, o: { hidden?: () => void; rec?: Recorder } = {}): Scope => {
+  let wrapped: HostFiles | undefined;
+  return {
+    get id() { return s.id; },
+    get assets() { read(); o.hidden?.(); return s.assets; },
+    get graphs() { read(); o.hidden?.(); return s.graphs; },
+    get files() { read(); return o.rec ? (wrapped ??= recordingFiles(s.files, o.rec)) : s.files; },
+    get packages() { read(); o.hidden?.(); return s.packages; },
+  };
+};
+
+// ---------------------------------------------------------------- what a result was made from
+
+/**
+ * What a result was made from that no signature holds: the files (and folder listings) it read, as they were when read,
+ * and whether it was made from something that cannot be checked at all. Both pass on to everything made from the result.
+ */
+interface Meta { deps: FileDep[]; unsafe: boolean }
+const NO_META: Meta = { deps: [], unsafe: false };
+const UNSAFE: Meta = { deps: [], unsafe: true };
+/** The Meta of each result of a cook. */
+const metas = new WeakMap<NodeResult, Meta>();
+
+/** The files one node's cook reads, through the files of the scope it is given (recordingFiles). */
+class Recorder {
+  deps = new Map<string, FileDep>();
+  unsafe = false;
+  add(d: FileDep) {
+    const k = d.k + d.p, had = this.deps.get(k);
+    if (!had) this.deps.set(k, d);
+    else if (had.s !== d.s) this.unsafe = true; // the file changed while the node read it
+  }
+}
+
+/** Meta from parts (a missing part is unknown, so unsafe), what a node read itself and whether it is unsafe on its own. */
+function mergeMeta(parts: (Meta | undefined)[], rec?: Recorder, unsafe = false): Meta {
+  let bad = unsafe || !!rec?.unsafe;
+  const real: Meta[] = [];
+  for (const m of parts) {
+    if (!m) bad = true;
+    else if (m.unsafe) bad = true;
+    else if (m.deps.length) real.push(m);
+  }
+  if (!real.length && !rec?.deps.size) return bad ? UNSAFE : NO_META;
+  if (real.length === 1 && !rec?.deps.size) return bad ? { deps: real[0].deps, unsafe: true } : real[0];
+  const deps = new Map<string, FileDep>();
+  const add = (d: FileDep) => {
+    const k = d.k + d.p, had = deps.get(k);
+    if (!had) deps.set(k, d);
+    else if (had.s !== d.s) bad = true;
+  };
+  for (const m of real) for (const d of m.deps) add(d);
+  if (rec) for (const d of rec.deps.values()) add(d);
+  return { deps: [...deps.values()], unsafe: bad };
+}
+
+/** The stamp of a folder listing, as a dependency holds it. */
+const listing = (files: HostFiles, p: string): string => JSON.stringify(files.listDir!(p));
+
+/**
+ * The files of a scope as one node's cook sees them, noting what it reads: every file it reads or stamps (the stamp taken
+ * before the file is read, so a change during the read is a change), every folder it lists, the fonts it asks for. A URL
+ * and a Blender conversion cannot be checked: they make the result unsafe.
+ */
+function recordingFiles(files: HostFiles, rec: Recorder): HostFiles {
+  const isUrl = (p: string) => /^https?:\/\//i.test(p);
+  const file = (p: string) => {
+    const abs = files.resolvePath(p);
+    if (isUrl(abs)) { rec.unsafe = true; return abs; }
+    rec.add({ p: abs, k: 'f', s: files.fileStamp(abs) });
+    return abs;
+  };
+  const out: HostFiles = {
+    resolvePath: (p) => files.resolvePath(p),
+    fileStamp: (p) => { const stamp = files.fileStamp(p); const abs = files.resolvePath(p); if (isUrl(abs)) rec.unsafe = true; else rec.add({ p: abs, k: 'f', s: stamp }); return stamp; },
+    readFile: (p) => { file(p); return files.readFile(p); },
+    findFont: (name) => { const f = files.findFont(name); if (f) file(f); return f; },
+  };
+  if (files.isDirectory) out.isDirectory = (p) => files.isDirectory!(p);
+  if (files.listDir) out.listDir = (p) => { const names = files.listDir!(p); rec.add({ p: files.resolvePath(p), k: 'd', s: JSON.stringify(names) }); return names; };
+  if (files.convertFile) out.convertFile = (p, t) => { rec.unsafe = true; return files.convertFile!(p, t); };
+  if (files.fontCandidates) out.fontCandidates = (name) => { const c = files.fontCandidates!(name); for (const f of c) file(f); return c; };
+  return out;
+}
+
+/** Is every file a stored result was made from as it was? */
+function depsHold(files: HostFiles, deps: FileDep[]): boolean {
+  try {
+    for (const d of deps) {
+      if (d.k === 'f' ? files.fileStamp(d.p) !== d.s : !files.listDir || listing(files, d.p) !== d.s) return false;
+    }
+    return true;
+  } catch { return false; }
+}
 
 /** Normalise `in` wiring into an ordered list of node names (null = unconnected). */
 export function wiringOf(spec: NodeSpec, def: NodeDef): { list: (string | null)[]; errors: string[] } {
@@ -471,6 +566,8 @@ interface NodeParams {
   usesTime: boolean;
   /** referenced geometry or params change with time */
   depsTimeDependent: boolean;
+  /** what the referenced nodes were made from */
+  meta?: Meta;
   error?: string;
   upstream?: boolean;
 }
@@ -501,18 +598,18 @@ interface CookSession {
 
 /** What an in-flight cook hands to the cooks that wait for it. */
 interface Flight {
-  done: Promise<{ geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean }>;
+  done: Promise<{ geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean; meta: Meta }>;
   result: NodeResult;
 }
 
 const PSUF = '\u0000params';
 
 /**
- * Node types whose results the disk cache does not keep: their signature does not cover everything their result is read
- * from. The file node reads files its path does not name (the buffers and textures a glTF or OBJ points to), a URL, and the
- * output of Blender for a .blend.
+ * Node types whose result is made from earlier cooks kept in memory, not only from the cook at hand: a solver resumes from
+ * the state of the latest frame it has, so the graphs its earlier frames cooked (and the files they read) are not in
+ * this cook. Nothing made from one is kept on disk.
  */
-const NOT_PERSISTED = new Set(['file']);
+const RESUMES = new Set(['solver']);
 
 // ---------------------------------------------------------------- engine
 
@@ -543,6 +640,8 @@ export class Engine {
   concurrent: boolean;
   /** CookContext.parallelMap usage: jobs run on the pool / on the cooking thread, chunks dispatched */
   poolStats: PoolStats = { parallel: 0, serial: 0, chunks: 0 };
+  /** what each result in memory was made from, by signature (a result without an entry is unknown, so unsafe) */
+  private metaBySig = new Map<string, Meta>();
   /** cooks in progress by signature: a second cook of the same signature waits for the first */
   private inflight = new Map<string, Flight>();
 
@@ -1040,11 +1139,13 @@ export class Engine {
     });
     const geo = new Map<string, Geometry>();
     const parts: string[] = [];
+    const made: (Meta | undefined)[] = [];
     let usesTime = false, depTime = false;
     for (const g of refs.geo) {
       const r = await s.pull(g);
       if (r.error || !r.geo) return fail(`expression reference "${g}" failed`, true);
       geo.set(g, r.geo);
+      made.push(metas.get(r));
       parts.push(`${g}=${r.sig}`);
       depTime ||= r.timeDependent;
     }
@@ -1057,13 +1158,14 @@ export class Engine {
         chp.set(c.node, { def: this.resolveDef(s.graph.nodes[c.node].type, s.scope)!, values: np.rp.values });
         usesTime ||= np.usesTime;
         depTime ||= np.depsTimeDependent;
+        if (np.meta) made.push(np.meta);
       }
       const e = chp.get(c.node)!;
       const pn = resolveParamName(e.def, c.param);
       parts.push(`${c.node}.${c.param}=${pn ? stableStringify(e.values[pn]) : 'u'}`);
     }
     const rp = resolveParams(def, spec.params, s.vars, { time: s.time, fns: refFunctions(geo, chp), host: this.host, timeoutMs: this.scriptTimeoutMs });
-    return { rp, refSig: parts.join(','), usesTime: usesTime || rp.usesTime, depsTimeDependent: depTime };
+    return { rp, refSig: parts.join(','), usesTime: usesTime || rp.usesTime, depsTimeDependent: depTime, meta: mergeMeta(made) };
   }
 
   /** The inputs of a merge (NodeDef.passesMaterials) this cook leaves out: src/graph/demand.ts. */
@@ -1096,6 +1198,8 @@ export class Engine {
     const inputSigs: string[] = [];
     const inputRes: (NodeResult | null)[] = [];
     let depTime = false;
+    /** the result's Meta, once it has one: every result that is returned with geometry gets it */
+    const made = (m: Meta | undefined) => { metas.set(result, m ?? UNSAFE); };
     // a node that picks its inputs by param (switch) resolves its params first and cooks only the inputs it reads
     const lazy = !!def.inputsUsed && !spec.bypass && def.type !== 'input';
     let used: boolean[] | null = null;
@@ -1131,6 +1235,7 @@ export class Engine {
       result.geo = si?.geo ?? new Geometry();
       result.sig = 'input:' + (si?.sig ?? 'none');
       result.cached = true;
+      made(!si ? NO_META : si.deps || si.unsafe !== undefined ? { deps: si.deps ?? [], unsafe: !!si.unsafe } : UNSAFE);
       return result;
     }
 
@@ -1158,25 +1263,35 @@ export class Engine {
       result.sig = inputSigs[0] ?? 'bypass';
       result.timeDependent = inputRes[0]?.timeDependent ?? false;
       result.warnings.push('bypassed');
+      made(inputRes[0] ? metas.get(inputRes[0]) : NO_META);
       return result;
     }
 
     // the scope a node reads, through signatureExtra (a file's stamp) or while it cooks (ctx.scope, a nested cook in
     // it), keys its result outside the root scope (scopeSig); found once, remembered for its signature (scopeDeps)
-    let readScope = !!def.usesScope, readScopeCooking = false;
+    let readScope = !!def.usesScope, readScopeCooking = false, hiddenRead = false;
+    // the files this node reads, in its signature and in its cook
+    const own = new Recorder();
+    // (the files are only watched when a store keeps results: otherwise a node is given the scope's own files)
+    const recording = this.host.persist ? own : undefined;
+    const sigScope = watchScope(scope, () => { readScope = true; }, { rec: recording });
     let extra = '';
     try {
-      extra = def.signatureExtra?.(rp.values, watchScope(scope, () => { readScope = true; })) ?? '';
+      extra = def.signatureExtra?.(rp.values, sigScope) ?? '';
     } catch (e: any) {
       result.error = { node: name, message: e.message };
       return result;
     }
+    // the part of the signature a node can change between asking for it and cooking (the kernels a node uses are the ones
+    // loaded by then): the disk cache keys a result by the one in force at that moment
+    const extraNow = (): string => { try { return def.signatureExtra?.(rp.values, sigScope) ?? extra; } catch { return extra; } };
     // vars read by the node's code: all of them (loop bodies, scripts), or those its code names
     const varsSig = def.usesVars === true ? stableStringify(vars)
       : typeof def.usesVars === 'function' ? stableStringify(pickVars(vars, codeVarNames(def.usesVars(rp.values), vars))) : '';
     // a result named after its node (an image's default name) is not shared with an identical node of another name
     const nameSig = def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '';
-    const material = def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : '') + nameSig;
+    const materialWith = (ex: string) => def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + ex + (np.refSig ? '|R:' + np.refSig : '') + nameSig;
+    const material = materialWith(extra);
     const plainSig = String(hashString(material));
     // what the signature itself reads of the scope (a file's stamp), apart from what an earlier cook found
     const signedScope = readScope;
@@ -1192,15 +1307,20 @@ export class Engine {
     if (hit) {
       result.geo = hit;
       result.cached = true;
+      made(this.metaBySig.get(sig));
       return result;
     }
-    // what the disk cache keys this result by (null: it has no store, or keeps no result of this type): the signature's
-    // material and what the signature leaves to the engine, which is the scope (what a node that reads files reads them
-    // from) and the time of a node that depends on it
+    // what this result was made from: its inputs and the nodes its params read, then its own reads (below)
+    const inMeta = mergeMeta([...inputRes.filter((r): r is NodeResult => !!r).map((r) => metas.get(r)), ...(np.meta ? [np.meta] : [])]);
+    // unsafe on its own: a URL in a param (what is behind it is not in the signature), a node type its scope defines used
+    // inside another graph (the graph's signature does not hold that definition)
+    const ownUnsafe = /"https?:\/\//i.test(material) || (!getNodeDef(def.type) && depth > 0) || RESUMES.has(def.type);
+    // what the disk cache keys this result by (null: it has no store, or this result cannot be kept or checked): the
+    // signature's material and what the signature leaves to the engine, which is the scope (what a node that reads files
+    // reads them from) and the time of a node that depends on it
     const store = this.host.persist;
-    // (a URL in a param: what is behind it is not in the signature)
-    const diskKey = store && !NOT_PERSISTED.has(def.type) && !/"https?:\/\//i.test(material)
-      ? (td: boolean) => material + (readScope ? `|S:${scope.id}|F:${scope.files.resolvePath('.')}` : '') + (td ? '|' + timeKey(time) : '')
+    const diskKey = store && !ownUnsafe && !inMeta.unsafe
+      ? (td: boolean, ex: string) => materialWith(ex) + (readScope ? `|S:${scope.id}|F:${scope.files.resolvePath('.')}` : '') + (td ? '|' + timeKey(time) : '')
       : null;
     // about to cook: report it (the host may yield there), and stop here when the cook was asked to stop
     const progress: NodeProgress | null = opts.onNode ? { phase: 'start', node: name, type: def.type, depth, within: opts.within ?? [] } : null;
@@ -1216,8 +1336,8 @@ export class Engine {
     }
     if (progress) {
       // while the host had the thread, another cook may have made this result
-      const made = this.cache.get(sig);
-      if (made) { result.geo = made; result.cached = true; ended(0); return result; }
+      const was = this.cache.get(sig);
+      if (was) { result.geo = was; result.cached = true; made(this.metaBySig.get(sig)); ended(0); return result; }
     }
     // the same signature is cooking elsewhere (another branch, an identical node, another iteration): share that cook
     const key = sig;
@@ -1229,6 +1349,7 @@ export class Engine {
         result.sig = d.sig;
         result.timeDependent = d.timeDep || depTime;
         result.cached = true;
+        made(d.meta);
         s.shared.push({ leader: flight.result, waiter: result });
         ended(0);
         return result;
@@ -1240,13 +1361,14 @@ export class Engine {
         return result;
       }
     }
-    let land!: (v: { geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean }) => void;
+    let land!: (v: { geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean; meta: Meta }) => void;
     const mine: Flight = { done: new Promise((r) => { land = r; }), result };
     this.inflight.set(key, mine);
     if (store && diskKey) {
       const t1 = now();
       let kept: StoredNode | null = null;
-      try { kept = await store.load(diskKey(timeDep)); } catch { /* a miss */ }
+      // a stored result is good while the files it was made from are as they were
+      try { kept = await store.load(diskKey(timeDep, extraNow()), (deps) => depsHold(scope.files, deps)); } catch { /* a miss */ }
       if (kept && isGeometry(kept.geo)) {
         result.geo = kept.geo;
         result.cached = true;
@@ -1255,9 +1377,12 @@ export class Engine {
         result.warnings.push(...kept.warnings);
         if (kept.stats) result.stats = kept.stats;
         this.cache.set(sig, kept.geo);
+        const meta = mergeMeta([inMeta, { deps: kept.deps, unsafe: false }]);
+        made(meta);
+        this.noteMeta(sig, meta);
         result.ms = now() - t1;
         if (this.inflight.get(key) === mine) this.inflight.delete(key);
-        land({ geo: result.geo, sig: result.sig, timeDep, failed: false });
+        land({ geo: result.geo, sig: result.sig, timeDep, failed: false, meta });
         ended(result.ms);
         return result;
       }
@@ -1269,8 +1394,12 @@ export class Engine {
     const warnFrom = result.warnings.length;
     let cookMs = 0;
     let readTime = false;
-    // the node cooked a graph inside its own cook (ctx.subcook, ctx.inputAt at another frame)
+    // the node cooked a graph inside its own cook (ctx.subcook, ctx.inputAt at another frame), and what those cooks were made from
     let nested = false;
+    let nestedMeta: Meta = NO_META;
+    const takeNested = (r: CookReport) => {
+      nestedMeta = mergeMeta([nestedMeta, ...[...r.results.values()].filter((x) => !x.error).map((x) => metas.get(x))]);
+    };
     const mark = () => { readTime = true; };
     const engine = this;
     const ctx: CookContext = {
@@ -1283,7 +1412,7 @@ export class Engine {
       warn: (m) => result.warnings.push(m),
       vars,
       engine: this,
-      scope: watchScope(scope, () => { readScopeCooking = true; }),
+      scope: watchScope(scope, () => { readScopeCooking = true; }, { hidden: () => { hiddenRead = true; }, rec: recording }),
       inputSigs,
       depth,
       get frame() { mark(); return time.frame; },
@@ -1298,10 +1427,14 @@ export class Engine {
         // a nested cook in this cook's scope resolves its node types there
         if (!o.scope) readScopeCooking = true;
         // nested cooks report their nodes (inside this one), stop with this cook and run in its scope unless given one
+        // what the graph's inputs were made from: the node's own inputs, and the graphs it has cooked so far
+        const into = mergeMeta([inMeta, nestedMeta]);
         const r = await engine.cook(g, {
           fps: time.fps, ...inherit, ...o, depth: depth + 1, ancestors: chain(),
           onNode: opts.onNode, signal: opts.signal, within: [...(opts.within ?? []), name], scope: o.scope ?? scope,
+          ...(o.inputs ? { inputs: o.inputs.map((i) => ({ ...i, deps: into.deps, unsafe: into.unsafe })) } : {}),
         });
+        takeNested(r);
         if (r.timeDependent) mark();
         return r;
       },
@@ -1312,6 +1445,7 @@ export class Engine {
         if (!cur.timeDependent || frame === time.frame) return { geo: cur.geo ?? new Geometry(), sig: cur.sig, timeDependent: cur.timeDependent };
         nested = true;
         const r = await engine.cook(graph, { ...opts, target: ref, frame, time: undefined, timeInc: undefined, depth, ancestors: chain() });
+        takeNested(r);
         const rr = r.results.get(ref);
         if (!r.ok || !r.geo || !rr) throw new NodeError(`input ${i} ("${ref}") failed at frame ${frame}: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
         return { geo: r.geo, sig: rr.sig, timeDependent: true };
@@ -1327,6 +1461,8 @@ export class Engine {
     };
     try {
       this.unpackInputs(def, rp.values, inputs, inputSigs, name, result);
+      // the part of the signature in force when the cook starts (it reads it in this same turn)
+      const extraAtCook = store && diskKey ? extraNow() : extra;
       const out = await def.cook(ctx);
       if (!isGeometry(out)) throw new Error(`node returned ${out === null ? 'null' : typeof out} instead of geometry`);
       checkFinite(out, result);
@@ -1350,10 +1486,15 @@ export class Engine {
       result.geo = out;
       this.cache.set(sig, out);
       cookMs = now() - t0;
-      // a slow result is kept for the next run, unless the signature does not hold what it was made from
-      if (store && diskKey && cookMs >= store.minMs && !nested && !(readScopeCooking && !signedScope)) {
+      // what the result was made from; unsafe when no key and no file stamp covers all of it: a node that read its scope
+      // without its signature saying so is unsafe, and so is what a URL or a Blender conversion fed
+      const meta = mergeMeta([inMeta, nestedMeta], own, ownUnsafe || (hiddenRead && !signedScope));
+      made(meta);
+      this.noteMeta(sig, meta);
+      // a slow result is kept for the next run (a graph cooked inside the node is kept in its own nodes)
+      if (store && diskKey && cookMs >= store.minMs && !nested && !meta.unsafe) {
         try {
-          await store.save(diskKey(timeDep), { geo: out, warnings: result.warnings.slice(warnFrom), ...(result.stats ? { stats: { ...result.stats } } : {}), cookMs });
+          await store.save(diskKey(timeDep, extraAtCook), { geo: out, deps: meta.deps, warnings: result.warnings.slice(warnFrom), ...(result.stats ? { stats: { ...result.stats } } : {}), cookMs });
         } catch { /* the cache is not the cook */ }
       }
     } catch (e: any) {
@@ -1364,9 +1505,15 @@ export class Engine {
     }
     result.ms = cookMs || now() - t0;
     if (this.inflight.get(key) === mine) this.inflight.delete(key);
-    land({ geo: result.geo, sig: result.sig, timeDep, failed: !!result.error });
+    land({ geo: result.geo, sig: result.sig, timeDep, failed: !!result.error, meta: metas.get(result) ?? UNSAFE });
     ended(result.ms, result.error?.message);
     return result;
+  }
+
+  /** Remember what a result in memory was made from. */
+  private noteMeta(sig: string, meta: Meta) {
+    if (this.metaBySig.size > 100000) this.metaBySig.clear();
+    this.metaBySig.set(sig, meta);
   }
 
   /**
