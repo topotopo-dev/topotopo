@@ -318,7 +318,7 @@ defineNode({
   summary: 'Gradient image: linear, mirror, radial, angular or diamond, 0..1.',
   description: 'Substance: Gradient Linear / Radial / Axial; Houdini COP: Ramp. linear runs along angle (0 = left → right, 90 = bottom → top) and spans the image corner to corner; mirror rises to 1 in the middle; radial and diamond grow from center (a position in uv) over radius metres; angular sweeps once around center.',
   aliases: ['gradient', 'ramp_texture', 'gradient_linear', 'gradient_radial', 'cop_ramp'],
-  renamed: { ...SIZE_KEYS, radius: 'it is now reach, in metres: radius × texture_size (a radius of 0.5 on a 1 m image is 0.5; it was a distance in image widths)' },
+  renamed: { ...SIZE_KEYS, radius: 'it is now reach, in metres, a circle: reach = radius × texture_size (0.5 on a 1 m image is 0.5). The old radius was a distance in image widths across and in image heights down, so on an image that was not square it was an ellipse; now it is the same metres both ways' },
   inputs: [],
   params: {
     resolution: resolutionParam(),
