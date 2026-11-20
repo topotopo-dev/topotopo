@@ -353,9 +353,17 @@ defineNode({
         throw e;
       }
     };
-    // the named masks first, in order: each becomes a variable for what follows
+    // the named masks first, in order: each becomes a variable for what follows. Masks in a row that read none of each
+    // other are evaluated in one call
     const t0 = performance.now();
-    for (let j = 0; j < named.length; j++) namedArrays.set(named[j].name, (await evaluate([maskCodes[j]]))[0]);
+    for (let j = 0; j < named.length;) {
+      const group = new Set([named[j].name]);
+      let end = j + 1;
+      while (end < named.length && !codes[maskCodes[end]].vars.some((v) => group.has(v))) group.add(named[end++].name);
+      const vals = await evaluate(maskCodes.slice(j, end));
+      for (let k = j; k < end; k++) namedArrays.set(named[k].name, vals[k - j]);
+      j = end;
+    }
     if (named.length) ctx.stage('masks', performance.now() - t0);
     const prefix = outName(ctx);
     const make = (suffix: string, data: Float32Array) => {
