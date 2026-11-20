@@ -57,7 +57,7 @@ const same = (a: Float32Array, b: Float32Array) => a.length === b.length && a.ev
 const SCENE: Nodes = {
   quad: { type: 'grid', params: { size: [2, 2], divisions: [2, 2] } },
   m1: { type: 'material', in: ['quad'], params: { name: 'paint', base_color: '#ff0000', roughness: 0.7, kind: 'painted_metal', group: '@P.x<0' } },
-  m2: { type: 'material', in: ['m1'], params: { name: 'steel', base_color: '#00ff00', metallic: 1, roughness: 0.3, group: '@P.x>0' } },
+  m2: { type: 'material', in: ['m1'], params: { name: 'brushed', base_color: '#00ff00', metallic: 1, roughness: 0.3, group: '@P.x>0' } },
   uv: { type: 'uv_project', in: ['m2'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } },
 };
 const RES = 64;
@@ -71,7 +71,7 @@ section('material kind');
   check(MATERIAL_KINDS.length === 11 && MATERIAL_KINDS.includes('keep'), 'eleven kinds, keep among them');
   const g = (await cook(SCENE, 'uv')).geo;
   const t = readMaterials(g);
-  check(t.paint.kind === 'painted_metal' && !('kind' in t.steel), 'the material node writes its kind param into the table, and nothing when it is empty');
+  check(t.paint.kind === 'painted_metal' && !('kind' in t.brushed), 'the material node writes its kind param into the table, and nothing when it is empty');
   const copy = await cook({ ...SCENE, tab: { type: 'material', in: ['quad', 'm1'], params: { from: 'paint', name: 'copy' } } }, 'tab');
   check(readMaterials(copy.geo).copy.kind === 'painted_metal', 'a material copied from input 1 keeps its kind');
   const over = await cook({ ...SCENE, tab: { type: 'material', in: ['quad', 'm1'], params: { from: 'paint', name: 'copy', kind: 'rubber' } } }, 'tab');
@@ -83,16 +83,16 @@ section('bake_material');
 {
   const c = await cook(bakeNodes(), 'base');
   const b = img(c, 'base');
-  check(eq(Array.from(b.layers.keys()), ['C', 'roughness', 'metallic', 'mat_paint', 'mat_steel', 'kind_painted_metal', 'mask']), `layers C, roughness, metallic, mat_paint, mat_steel, kind_painted_metal, mask (${[...b.layers.keys()].join(', ')})`);
+  check(eq(Array.from(b.layers.keys()), ['C', 'roughness', 'metallic', 'texel', 'island', 'mat_paint', 'mat_brushed', 'kind_painted_metal', 'mask']), `layers C, roughness, metallic, texel, island, mat_paint, mat_brushed, kind_painted_metal, mask (${[...b.layers.keys()].join(', ')})`);
   // the grid covers x, z in [-1, 1]; uv = position / 4 + 0.5, so texels 16..47 are covered; x < 0 is the left half
   const left = px(b, 'C', 20, 32), right = px(b, 'C', 43, 32);
   check(near(left[0], 1) && near(left[1], 0) && near(left[3], 1), 'the paint half bakes its base colour');
-  check(near(right[0], 0) && near(right[1], 1), 'the steel half bakes its base colour');
+  check(near(right[0], 0) && near(right[1], 1), 'the brushed half bakes its base colour');
   check(near(px(b, 'roughness', 20, 32)[0], 0.7) && near(px(b, 'roughness', 43, 32)[0], 0.3), 'roughness bakes per material');
   check(near(px(b, 'metallic', 20, 32)[0], 0) && near(px(b, 'metallic', 43, 32)[0], 1), 'metallic bakes per material');
-  check(px(b, 'mat_paint', 20, 32)[0] === 1 && px(b, 'mat_paint', 43, 32)[0] === 0 && px(b, 'mat_steel', 43, 32)[0] === 1, 'a 0/1 mask per material');
+  check(px(b, 'mat_paint', 20, 32)[0] === 1 && px(b, 'mat_paint', 43, 32)[0] === 0 && px(b, 'mat_brushed', 43, 32)[0] === 1, 'a 0/1 mask per material');
   check(px(b, 'kind_painted_metal', 20, 32)[0] === 1 && px(b, 'kind_painted_metal', 43, 32)[0] === 0, 'a 0/1 mask per kind present; a material without a kind has none');
-  const cov = b.layer('mask')!, mp = b.layer('mat_paint')!, ms = b.layer('mat_steel')!;
+  const cov = b.layer('mask')!, mp = b.layer('mat_paint')!, ms = b.layer('mat_brushed')!;
   let ok = true, covered = 0;
   for (let i = 0; i < cov.length; i++) if (cov[i] > 0) { covered++; if (mp[i] + ms[i] !== 1) ok = false; }
   check(ok && covered === 34 * 34, `every covered texel belongs to exactly one material (${covered} covered)`);
@@ -100,10 +100,10 @@ section('bake_material');
   const hi = await cook(bakeNodes({ resolution: 128 }), 'base');
   check(near(hi.stats.size, c.stats.size), 'the size stat is the same at twice the resolution');
 
-  const kinds = await cook(bakeNodes({ kinds: { steel: 'bare_steel', paint: 'cast_metal' } }), 'base');
+  const kinds = await cook(bakeNodes({ kinds: { brushed: 'bare_steel', paint: 'cast_metal' } }), 'base');
   const kl = [...img(kinds, 'base').layers.keys()].filter((k) => k.startsWith('kind_'));
   check(eq(kl.sort(), ['kind_bare_steel', 'kind_cast_metal']), `the kinds param wins over the material's own kind (${kl.join(', ')})`);
-  for (const [masks, want] of [['materials', ['mat_paint', 'mat_steel']], ['kinds', ['kind_painted_metal']], ['none', []]] as const) {
+  for (const [masks, want] of [['materials', ['mat_paint', 'mat_brushed']], ['kinds', ['kind_painted_metal']], ['none', []]] as const) {
     const r = await cook(bakeNodes({ masks }), 'base');
     const ls = [...img(r, 'base').layers.keys()].filter((k) => k.startsWith('mat_') || k.startsWith('kind_'));
     check(eq(ls, want), `masks ${masks}: ${ls.join(', ') || 'no mask layers'}`);
@@ -136,12 +136,12 @@ section('bake_material refusals');
   check(e.includes('bake_material: input 0 has no prim attribute "material"') && e.includes('assign materials first (material node); colours carried as Cd bake with bake_vertex_color'), 'no material attribute: ' + e);
   const ghost: Nodes = { ...SCENE, bad: { type: 'attrib_create', in: ['uv'], params: { name: 'material', class: 'prim', type: 'string', value: 'ghost', group: '@P.x<0' } }, base: { type: 'bake_material', in: ['bad'], params: { resolution: 32 } } };
   e = await err(ghost, 'base');
-  check(e.includes('bake_material: prims use material "ghost", which the material table does not define') && e.includes('materials: paint, steel'), 'a material the table does not define: ' + e);
+  check(e.includes('bake_material: prims use material "ghost", which the material table does not define') && e.includes('materials: brushed, paint'), 'a material the table does not define: ' + e);
   const file: Nodes = { quad: SCENE.quad, mat: { type: 'material', in: ['quad'], params: { name: 'brick', base_color_map: 'tex/brick.png' } }, uv: { type: 'uv_project', in: ['mat'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } }, base: { type: 'bake_material', in: ['uv'], params: { resolution: 32 } } };
   e = await err(file, 'base');
   check(e.includes('bake_material: material "brick" has its base colour map in a file ("tex/brick.png"); bakes read only images the geometry carries') && e.includes('load it with image_file and set the map to "image:<name>"'), 'a base colour map in a file: ' + e);
-  e = await err(bakeNodes({ kinds: { steel: 'galvanized' } }), 'base');
-  check(e.includes('bake_material: unknown kind "galvanized" for material "steel"') && e.includes('kinds: painted_metal, cast_metal') && e.includes('did you mean "galvanised"?'), 'an unknown kind, with the near one: ' + e);
+  e = await err(bakeNodes({ kinds: { brushed: 'galvanized' } }), 'base');
+  check(e.includes('bake_material: unknown kind "galvanized" for material "brushed"') && e.includes('kinds: painted_metal, cast_metal') && e.includes('did you mean "galvanised"?'), 'an unknown kind, with the near one: ' + e);
   e = await err(bakeNodes({ kinds: { ghost: 'rubber' } }), 'base');
   check(e.includes('bake_material: kinds names material "ghost", which the material table does not define'), 'kinds naming a material the table lacks: ' + e);
   const half: Nodes = { ...SCENE, base: { type: 'bake_material', in: ['uv'], params: { resolution: 32 } } };
@@ -161,7 +161,7 @@ const flat = (color = '#808080', res = 32): Nodes => ({
   grad: { type: 'tex_gradient', params: { resolution: res } },
   masks: { type: 'merge', in: ['ones', 'grad'] },
 });
-const stackOf = (nodes: Nodes, params: Record<string, any>): Nodes => ({ ...nodes, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { base_roughness: 0.5, base_metallic: 0, coverage: '', ...params } } });
+const stackOf = (nodes: Nodes, params: Record<string, any>): Nodes => ({ ...nodes, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { size: 1, base_roughness: 0.5, base_metallic: 0, coverage: '', ...params } } });
 
 section('tex_layers: colour modes');
 {
@@ -384,6 +384,257 @@ section('texel size');
   const t = medianTexelSize(pos, uv, [0, 1, 2, 0, 2, 3], 100, 100);
   check(near(t, 0.01, 1e-9), `a 1 m square over 100 texels is 1 cm per texel (${t})`);
   check(medianTexelSize(pos, uv, [0, 1, 2, 0, 2, 3], 100, 100, Uint8Array.of(1, 1)) === 0, 'no triangle left: 0');
+}
+
+// ---------------------------------------------------------------- second review: packed maps, uv, texel size, names, signed, pool
+
+/** A 2 m square grid, uv over the middle quarter, one material: a carrier for a few of the tests below. */
+const plane = (size: [number, number] = [2, 2], res: number | [number, number] = RES, scale: [number, number] = [4, 4], extra: Record<string, any> = {}): Nodes => ({
+  quad: { type: 'grid', params: { size, divisions: [2, 2] } },
+  mat: { type: 'material', in: ['quad'], params: { name: 'plain', base_color: '#808080', roughness: 0.5 } },
+  uv: { type: 'uv_project', in: ['mat'], params: { method: 'planar', axis: 'y', scale, offset: [0.5, 0.5] } },
+  base: { type: 'bake_material', in: ['uv'], params: { resolution: res, padding: 2, ...extra } },
+});
+
+section('bake_material: packed maps, uv, names');
+{
+  // texture_to_material packs roughness and metallic into <material>_orm and sets both factors to 1
+  const packed: Nodes = {
+    quad: SCENE.quad,
+    occ: { type: 'tex_constant', params: { resolution: 8, value: 1 } },
+    rgh: { type: 'tex_constant', params: { resolution: 8, value: 0.2 } },
+    met: { type: 'tex_constant', params: { resolution: 8, value: 0 } },
+    imgs: { type: 'merge', in: ['occ', 'rgh', 'met'] },
+    pk: { type: 'texture_to_material', in: ['quad', 'imgs'], params: { material: 'pk', occlusion: 'occ', roughness: 'rgh', metallic: 'met' } },
+    uv: { type: 'uv_project', in: ['pk'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } },
+    base: { type: 'bake_material', in: ['uv'], params: { resolution: RES, padding: 2 } },
+  };
+  const pb = img(await cook(packed, 'base'), 'base');
+  check(near(px(pb, 'roughness', 30, 30)[0], 0.2, 1e-5) && near(px(pb, 'metallic', 30, 30)[0], 0, 1e-5), `a packed orm map gives its roughness and metallic, not the factors (${px(pb, 'roughness', 30, 30)[0].toFixed(3)}, ${px(pb, 'metallic', 30, 30)[0].toFixed(3)})`);
+  const only: Nodes = { ...packed, pk: { type: 'texture_to_material', in: ['quad', 'imgs'], params: { material: 'pk', roughness: 'rgh' } } };
+  const ob = img(await cook(only, 'base'), 'base');
+  check(near(px(ob, 'roughness', 30, 30)[0], 0.2, 1e-5), 'a roughness map alone gives its value');
+  // a normal map is named in a warning
+  const withNormal: Nodes = { ...packed, pk: { type: 'texture_to_material', in: ['quad', 'imgs'], params: { material: 'bumpy', normal: 'rgh', roughness: 'rgh' } } };
+  const wn = await cook(withNormal, 'base');
+  check(wn.warnings.some((m) => m.includes('bake_material: material "bumpy" has a normal map; its detail is not carried')), 'a normal map is named in a warning: ' + wn.warnings.join('; '));
+
+  // maps on "uv", a bake laid out on "uv2"
+  const two: Nodes = {
+    ramp: { type: 'tex_gradient', params: { resolution: 64 } },
+    quad: SCENE.quad,
+    withmap: { type: 'merge', in: ['quad', 'ramp'] },
+    mat: { type: 'material', in: ['withmap'], params: { name: 'tile', roughness_map: 'image:ramp' } },
+    uv: { type: 'uv_project', in: ['mat'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } },
+    uv2: { type: 'wrangle', in: ['uv'], params: { run_over: 'points', code: 'v@uv2 = set(@P.x / 2 + 0.5, @P.z / 2 + 0.5, 0);' } },
+    base: { type: 'bake_material', in: ['uv2'], params: { resolution: RES, padding: 2, uv_attrib: 'uv2' } },
+  };
+  const tb = img(await cook(two, 'base'), 'base');
+  // the texel at u2 reads the map where the mesh's uv puts it: u = x / 4 + 0.5 with x = 2 (u2 - 0.5)
+  const probe = (i: number) => { const u2 = (i + 0.5) / RES; return (u2 - 0.5) / 2 + 0.5; };
+  const g = img(await cook({ ramp: two.ramp }, 'ramp'), 'ramp');
+  const r16 = px(tb, 'roughness', 16, 32)[0], r48 = px(tb, 'roughness', 48, 32)[0];
+  const expect = (i: number) => px(g, 'C', Math.min(g.width - 1, Math.floor(probe(i) * g.width)), 32)[0];
+  check(Math.abs(r16 - expect(16)) < 0.03 && Math.abs(r48 - expect(48)) < 0.03 && r48 - r16 > 0.2, `maps on uv are read with uv when the bake lies on uv2 (${r16.toFixed(2)}, ${r48.toFixed(2)} for ${expect(16).toFixed(2)}, ${expect(48).toFixed(2)})`);
+
+  // names an expression can read
+  const odd: Nodes = {
+    quad: SCENE.quad,
+    m1: { type: 'material', in: ['quad'], params: { name: 'Paint.001', base_color: '#ff0000', group: '@P.x<0' } },
+    m2: { type: 'material', in: ['m1'], params: { name: 'label-print', base_color: '#00ff00', group: '@P.x>0' } },
+    uv: SCENE.uv && { type: 'uv_project', in: ['m2'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } },
+    base: { type: 'bake_material', in: ['uv'], params: { resolution: RES, padding: 2 } },
+  };
+  const oc = await cook(odd, 'base'), ob2 = img(oc, 'base');
+  check(ob2.layers.has('mat_Paint_001') && ob2.layers.has('mat_label_print') && ob2.layers.has('kind_decal') === false, `material names become identifiers (${[...ob2.layers.keys()].filter((k) => k.startsWith('mat_')).join(', ')})`);
+  check(oc.warnings.some((m) => m.includes('material "Paint.001" is mat_Paint_001') && m.includes('material "label-print" is mat_label_print')), 'the renames are reported: ' + oc.warnings.join('; '));
+  const clash: Nodes = { ...odd, m1: { ...odd.m1, params: { ...odd.m1.params, name: 'a.b' } }, m2: { ...odd.m2, params: { ...odd.m2.params, name: 'a_b' } } };
+  const cl = img(await cook(clash, 'base'), 'base');
+  check(cl.layers.has('mat_a_b') && cl.layers.has('mat_a_b_2'), `two materials that would collide get distinct names (${[...cl.layers.keys()].filter((k) => k.startsWith('mat_')).join(', ')})`);
+  const reach: Nodes = { ...odd, ones: { type: 'tex_constant', params: { resolution: RES, value: 1 } }, masks: { type: 'merge', in: ['ones'] }, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { layers: [{ name: 'p', mask: 'base_mat_Paint_001', color: '#0000ff' }, { name: 'l', mask: 'base_mat_label_print', color: '#ffffff' }] } } };
+  const rc = img(await cook(reach, 'stack'), 'stack_base_color');
+  const lp = px(rc, 'C', 20, 32), rp = px(rc, 'C', 43, 32);
+  check(near(lp[2], 1) && near(lp[0], 0) && near(rp[0], 1) && near(rp[1], 1), 'a material called Paint.001 or label-print is reachable from an expression');
+  // kind from a whole name
+  const named: Nodes = { ...plane(), mat: { type: 'material', in: ['quad'], params: { name: 'Rubber', base_color: '#202020' } } };
+  const nk = img(await cook(named, 'base'), 'base');
+  check(nk.layers.has('kind_rubber'), 'a material called Rubber is rubber by its whole name');
+  // overlapping uv: warned once
+  const over: Nodes = { ...plane(), copy: { type: 'merge', in: ['mat', 'mat'] }, uv: { type: 'uv_project', in: ['copy'], params: { method: 'planar', axis: 'y', scale: 4, offset: [0.5, 0.5] } } };
+  const ow = await cook(over, 'base');
+  check(ow.warnings.filter((m) => m.includes('triangles overlap')).length === 1, 'overlapping uv are warned about once: ' + ow.warnings.filter((m) => m.includes('overlap')).join('; ').slice(0, 160));
+  check((await cook(plane(), 'base')).warnings.length === 0, 'a clean unwrap bakes without a warning');
+}
+
+section('resolveKind');
+{
+  const { resolveKind } = await import('../src/core/materials.ts');
+  const m = (kind?: string) => normalizeMaterial({ kind });
+  check(resolveKind('Paint', m(), null).kind === 'painted_metal' && resolveKind('Paint', m(), null).from === 'name', 'a whole name that is a kind name');
+  check(resolveKind('worn_metal', m(), null).kind === '' && resolveKind('dark_iron', m(), null).from === 'none', 'part of a name tells nothing');
+  check(resolveKind('Paint', m('rubber'), null).kind === 'rubber' && resolveKind('Paint', m('rubber'), null).from === 'material', 'the material\'s own kind wins over its name');
+  check(resolveKind('Paint', m('rubber'), { Paint: 'decal' }).kind === 'decal' && resolveKind('Paint', m('rubber'), { Paint: 'decal' }).from === 'kinds', 'the kinds map wins over both');
+  check(resolveKind('x', m('galvanized'), null).unknown === 'galvanized' && resolveKind('x', m(), { x: 'nope' }).unknown === 'nope', 'a written kind that is none is reported, not guessed');
+  check(resolveKind('GALVANIZED', m(), null).kind === 'galvanised', 'a name spelled the other way still names its kind');
+}
+
+section('tex_layers: texel size, slopes, islands');
+{
+  const rampBase = (size: [number, number], res: [number, number], scale: [number, number], angle: number): Nodes => ({
+    ...plane(size, res, scale),
+    grad: { type: 'tex_gradient', params: { resolution: res, angle } },
+    masks: { type: 'merge', in: ['grad'] },
+    stack: { type: 'tex_layers', in: ['base', 'masks'], params: { padding: 2, layers: [{ name: 'ramp', mask: 'grad', height: 0.1 }] } },
+  });
+  /** the normal's tilt along u and v at the middle, against the slope the height ramp has in metres */
+  async function slopes(size: [number, number], res: [number, number], scale: [number, number], angle: number) {
+    const nodes = rampBase(size, res, scale, angle);
+    const c = await cook(nodes, 'stack'), bk = img(await cook(nodes, 'base'), 'base'), gr = img(await cook(nodes, 'grad'), 'grad');
+    const nm = img(c, 'stack_normal'), [W, H] = res, i = W >> 1, j = H >> 1;
+    const tex = px(bk, 'texel', i, j);
+    const gx = (gr.layer('C')![j * W + i + 1] - gr.layer('C')![j * W + i - 1]) / 2, gy = (gr.layer('C')![(j - 1) * W + i] - gr.layer('C')![(j + 1) * W + i]) / 2; // per texel, +v up
+    const sx = (0.1 * gx) / tex[0], sy = (0.1 * gy) / tex[1];
+    const n = px(nm, 'C', i, j), nx = (n[0] - 0.5) * 2, ny = (n[1] - 0.5) * 2, nz = (n[2] - 0.5) * 2;
+    return { tex, sx, sy, mx: -nx / nz, my: -ny / nz };
+  }
+  for (const [label, size, res, scale, angle] of [['square', [2, 2], [64, 64], [4, 4], 0], ['non-square along u', [2, 1], [128, 64], [4, 2], 0], ['non-square along v', [2, 1], [128, 64], [4, 2], 90]] as const) {
+    const r = await slopes([...size], [...res], [...scale], angle);
+    check(Math.abs(r.mx - r.sx) < 2e-3 && Math.abs(r.my - r.sy) < 2e-3 && (Math.abs(r.sx) > 0.01 || Math.abs(r.sy) > 0.01), `${label}: the normal's slope is the ramp's slope in metres (u ${r.mx.toFixed(4)} for ${r.sx.toFixed(4)}, v ${r.my.toFixed(4)} for ${r.sy.toFixed(4)}; texel ${(r.tex[0] * 1000).toFixed(2)} × ${(r.tex[1] * 1000).toFixed(2)} mm)`);
+  }
+  // the texel layer: a 2 × 1 m grid mapped over the whole uv square at 128 × 64
+  const bk = img(await cook(rampBase([2, 1], [128, 64], [4, 2], 0), 'base'), 'base');
+  const t = px(bk, 'texel', 64, 32);
+  // uv = position / [4, 2]: 4 m per uv unit along u over 128 texels, 2 m along v over 64
+  check(near(t[0], 4 / 128, 1e-6) && near(t[1], 2 / 64, 1e-6), `the texel layer is metres per texel along u and v (${(t[0] * 1000).toFixed(3)} × ${(t[1] * 1000).toFixed(3)} mm)`);
+  check(bk.channels('texel') === 4 && bk.layers.has('island'), 'bake_material writes texel and island');
+
+  // a height without any texel size refuses and names bake_material
+  const noSize: Nodes = { ...flat(), stack: { type: 'tex_layers', in: ['base', 'masks'], params: { base_roughness: 0.5, base_metallic: 0, coverage: '', layers: [{ name: 'step', mask: 'grad', height: 0.01 }] } } };
+  const e = await err(noSize, 'stack');
+  check(e.includes('layer "step" has a height') && e.includes('bake_material') && e.includes('set size'), 'a height without a texel size refuses: ' + e);
+  check(!(await err({ ...noSize, stack: { ...noSize.stack, params: { ...noSize.stack.params, layers: [{ name: 'c', mask: 'grad', color: '#ff0000' }] } } }, 'stack')), 'a stack without heights needs no size');
+
+  // two islands that touch: a ramp on one leaves the other flat
+  const two = (left: number): Nodes => ({
+    ga: { type: 'grid', params: { size: [1, 2], divisions: [1, 1], center: [-0.5, 0, 0] } },
+    gb: { type: 'grid', params: { size: [1, 2], divisions: [1, 1], center: [0.5, 0, 0] } },
+    both: { type: 'merge', in: ['ga', 'gb'] },
+    mat: { type: 'material', in: ['both'], params: { name: 'plain', base_color: '#808080' } },
+    uv: { type: 'uv_project', in: ['mat'], params: { method: 'planar', axis: 'y', scale: [2, 2], offset: [0.5, 0.5] } },
+    base: { type: 'bake_material', in: ['uv'], params: { resolution: 64, padding: 2 } },
+    grad: { type: 'tex_gradient', params: { resolution: 64 } },
+    masks: { type: 'merge', in: ['grad'] },
+    stack: { type: 'tex_layers', in: ['base', 'masks'], params: { padding: 2, layers: [{ name: 'chip', mask: `grad * (Math.abs(base_island - ${left}) < 0.5 ? 1 : 0)`, height: 0.2 }] } },
+  });
+  const probeBase = img(await cook(two(0), 'base'), 'base');
+  const idLeft = px(probeBase, 'island', 10, 32)[0], idRight = px(probeBase, 'island', 54, 32)[0];
+  check(idLeft !== idRight, `two separate quads are two islands (${idLeft}, ${idRight})`);
+  const tc = await cook(two(idLeft), 'stack');
+  const nrm = img(tc, 'stack_normal'), isl = probeBase.layer('island')!, cov = probeBase.layer('mask')!;
+  let rightFlat = true, leftTilt = 0, nRight = 0;
+  for (let j = 0; j < 64; j++) for (let i = 0; i < 64; i++) {
+    const k = j * 64 + i;
+    if (!(cov[k] > 0)) continue;
+    const n = nrm.layer('C')!.subarray(k * 4, k * 4 + 3);
+    if (isl[k] === idRight) { nRight++; if (!(n[0] === 0.5 && n[1] === 0.5 && n[2] === 1)) rightFlat = false; } else leftTilt += Math.abs(n[0] - 0.5);
+  }
+  check(rightFlat && nRight > 100 && leftTilt > 1, `a ramp on one island leaves the island next to it flat (${nRight} texels, left tilt ${leftTilt.toFixed(2)})`);
+}
+
+section('tex_layers: coverage with a mask that differs outside the islands');
+{
+  const nodes: Nodes = {
+    ...bakeNodes(),
+    masks: { type: 'merge', in: ['base'] },
+    // 1 outside the islands, 0 inside: an expression that ran outside would colour and lift the empty texels
+    stack: {
+      type: 'tex_layers', in: ['base', 'masks'],
+      params: { padding: 3, size: 4, layers: [{ name: 'outside', mask: '1 - base_mask', color: '#ffffff', roughness: 0.9, height: 0.2 }] },
+    },
+  };
+  const r = await cook(nodes, 'stack');
+  const col = img(r, 'stack_base_color').layer('C')!, hei = img(r, 'stack_height').layer('C')!, nrm = img(r, 'stack_normal').layer('C')!, orm = img(r, 'stack_orm').layer('C')!;
+  let lit = 0, high = 0, tilt = 0, metal = 0;
+  for (let k = 0; k < RES * RES; k++) {
+    if (Math.min(col[k * 4], col[k * 4 + 1], col[k * 4 + 2]) > 0.01) lit++;
+    if (hei[k] !== 0) high++;
+    if (nrm[k * 4] !== 0.5 || nrm[k * 4 + 1] !== 0.5) tilt++;
+    if (Math.abs(orm[k * 4 + 1] - 0.9) < 0.01) metal++;
+  }
+  check(lit === 0 && high === 0 && tilt === 0 && metal === 0, `a mask that is 1 only outside the islands reaches nothing (white ${lit}, height ${high}, tilted ${tilt}, rough ${metal})`);
+}
+
+section('tex_layers: names, helpers, signed layers, channels, once per text');
+{
+  const base = flat();
+  // a layer that cannot be named is listed, not skipped
+  const oddNames: Nodes = { ...base, odd: { type: 'tex_constant', params: { resolution: 32, value: 1, name: 'odd-name' } }, masks: { type: 'merge', in: ['ones', 'odd'] } };
+  const ow = await cook(stackOf(oddNames, { layers: [{ name: 'a', mask: 'ones' }] }), 'stack');
+  check(ow.warnings.some((m) => m.includes('cannot name') && m.includes('"odd-name"')), 'a mask layer an expression cannot name is warned about: ' + ow.warnings.join('; '));
+  // two layers with one name: only where an expression uses it
+  // image "a" with a layer "id" and an image called "a_id" both make the variable a_id
+  const twin: Nodes = {
+    ...base,
+    a: { type: 'tex_cells', params: { resolution: 32, name: 'a' } },
+    aid: { type: 'tex_constant', params: { resolution: 32, value: 1, name: 'a_id' } },
+    masks: { type: 'merge', in: ['ones', 'a', 'aid'] },
+  };
+  check(!(await err(stackOf(twin, { layers: [{ name: 'x', mask: 'ones' }] }), 'stack')), 'two mask layers of one name are no problem while no expression uses it');
+  let e = await err(stackOf(twin, { layers: [{ name: 'x', mask: 'a_id' }] }), 'stack');
+  check(e.includes('two mask layers are called "a_id"'), 'they are an error where an expression uses it: ' + e);
+  // an image called like a helper
+  const noiseImg: Nodes = { ...base, nz: { type: 'tex_constant', params: { resolution: 32, value: 0.5, name: 'noise' } }, masks: { type: 'merge', in: ['ones', 'nz'] } };
+  e = await err(stackOf(noiseImg, { layers: [{ name: 'a', mask: 'noise * 0.5' }] }), 'stack');
+  check(e.includes('the image "noise" is called like the helper function noise') && e.includes('rename the image'), 'an image called like a helper is refused with a sentence: ' + e);
+  check(!(await err(stackOf(noiseImg, { layers: [{ name: 'a', mask: 'ones * 0.5' }] }), 'stack')), 'an image called like a helper is fine while no expression names it');
+  // a helper name used as a value
+  e = await err(stackOf(base, { layers: [{ name: 'a', mask: '1', color: [[0, '#fff'], [1, '#000']], color_by: 'noise' }] }), 'stack');
+  check(e.includes('layer "a": its color_by names "noise", which is a helper function') && e.includes('variables:'), 'a helper used as a value is a missing-name error: ' + e);
+  // colour channels
+  const rgb: Nodes = { ...flat('#336699'), };
+  const ch = await cook(stackOf(rgb, { layers: [{ name: 'c', mask: 'base_b', color: '#ffffff' }, { name: 'd', mask: 'base_r', color: '#000000', opacity: 0.5 }] }), 'stack');
+  const cc = px(img(ch, 'stack_base_color'), 'C', 3, 3);
+  const b1 = [0.2, 0.4, 0.6].map((x) => x + (1 - x) * 0.6);
+  check(near(cc[0], b1[0] * (1 - 0.1)) && near(cc[1], b1[1] * (1 - 0.1)) , `a colour image's channels are variables (${cc.slice(0, 3).map((x) => x.toFixed(3)).join(', ')})`);
+  // signed
+  const sg = await cook(stackOf(base, { layers: [{ name: 's', mask: 'grad * 2 - 1', roughness_offset: 0.2, height: 0.01, signed: true }] }), 'stack', serial);
+  const g = img(await cook(base, 'grad'), 'grad').layer('C')!, o = img(sg, 'stack_orm').layer('C')!, hh = img(sg, 'stack_height').layer('C')!;
+  let ok = true, lo = Infinity, hi = -Infinity;
+  for (let k = 0; k < g.length; k++) { if (!near(o[k * 4 + 1], 0.5 + 0.2 * (2 * g[k] - 1), 1e-5)) ok = false; lo = Math.min(lo, hh[k]); hi = Math.max(hi, hh[k]); }
+  check(ok && lo < -0.005 && hi > 0.005, `a signed layer makes the roughness offset and the height of either sign (height ${lo.toFixed(4)} .. ${hi.toFixed(4)})`);
+  const un = await cook(stackOf(base, { layers: [{ name: 's', mask: 'grad * 2 - 1', roughness_offset: 0.2, height: 0.01 }] }), 'stack');
+  const uo = img(un, 'stack_orm').layer('C')!, uh = img(un, 'stack_height').layer('C')!;
+  check(Math.min(...Array.from({ length: g.length }, (_, k) => uo[k * 4 + 1])) >= 0.5 - 1e-6 && Math.min(...uh) >= 0, 'an unsigned layer still reads its mask as 0..1');
+  // roughness is clamped per layer
+  const cl = await cook(stackOf(base, { layers: [{ name: 'up', mask: '1', roughness_offset: 0.9 }, { name: 'down', mask: '1', roughness_offset: -0.2 }] }), 'stack');
+  check(near(px(img(cl, 'stack_orm'), 'C', 0, 0)[1], 0.8, 1e-6), 'roughness is clamped after each layer (0.5 + 0.9 clamps to 1, then - 0.2)');
+  // identical texts once per cook, and code that reads globalThis runs in one piece: the same with and without the pool
+  const counter = '(globalThis.__calls = (globalThis.__calls || 0) + 1, (globalThis.__calls % 7) / 7)';
+  const counting = stackOf(base, { layers: [{ name: 'one', mask: counter, color: '#ff0000' }, { name: 'two', mask: counter, color: '#00ff00', opacity: 0.5 }] });
+  const run = async (e: Engine) => { (e.host.compile('globalThis') as any).__calls = 0; const r = await cook(counting, 'stack', e); return { r, calls: (e.host.compile('globalThis') as any).__calls as number }; };
+  const s1 = await run(serial), p1 = await run(pooled);
+  check(s1.calls === 32 * 32 && p1.calls === 32 * 32, `identical mask texts run once (${s1.calls} and ${p1.calls} calls for ${32 * 32} texels)`);
+  check(same(img(s1.r, 'stack_base_color').layer('C')!, img(p1.r, 'stack_base_color').layer('C')!), 'code that reads globalThis gives the same with and without the pool');
+}
+
+section('tex_layers: the pool\'s limits and errors');
+{
+  const limited = new Engine(createNodeHost({ workers: 4, pool: { minElements: 1 } }));
+  await limited.init();
+  limited.scriptTimeoutMs = 400;
+  const run = async (mask: string) => {
+    const r = await limited.cook({ nodes: stackOf(flat(), { layers: [{ name: 'x', mask }] }), output: 'stack' });
+    return r.ok ? '' : r.errors.map((x) => x.message + (x.hint ? ` (${x.hint})` : '')).join('; ');
+  };
+  let e = await run('while (true) {} return 1;');
+  check(/layer "x" mask: expression exceeded 400 ms/.test(e), 'the time limit stops a runaway expression on the pool: ' + e);
+  e = await run("(() => { throw new Error('boom'); })()");
+  check(e.includes('layer "x" mask: boom'), 'an error thrown on the pool names the layer and says what it threw: ' + e);
+  e = await run('no_such_layer');
+  check(e.includes('layer "x": its mask names "no_such_layer"') && e.includes('variables:'), 'a missing name on the pool is the same error with the hint: ' + e);
+  e = await run('1 +* 2');
+  check(e.includes('layer "x" mask: expression syntax error'), 'a syntax error is found before the pool is used');
+  check(limited.poolStats.parallel >= 0, 'pool stats exist');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

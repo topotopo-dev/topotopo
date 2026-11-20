@@ -10,8 +10,9 @@
 // compiles the same source in its own realm; on this thread the same kernel runs in one piece), so a result is the
 // same bits with or without workers.
 import type { Host } from '../host/types.ts';
-import { codeVarDecl, codeVarNames, codeVarValues, deepFreeze, runUserCode, UserCodeError } from './usercode.ts';
+import { JS_GLOBALS, codeVarDecl, codeVarNames, codeVarValues, deepFreeze, runUserCode, UserCodeError } from './usercode.ts';
 import { scriptVarsGuard } from './snippet-lib.ts';
+import { CROSS_ELEMENT } from './wrangle.ts';
 
 const IDENT = /^[A-Za-z_$][\w$]*$/;
 
@@ -75,6 +76,8 @@ export interface PixelExprJob {
   count: number;
   /** pixels to evaluate (1 = yes); the others read 0 in the results. null = all */
   mask: Uint8Array | null;
+  /** the indices of the mask's pixels, ascending (null = all): the only ones scanned for values that are no number */
+  covered?: Uint32Array | null;
   /** the graph vars of the cook (an expression reads the ones it names) */
   vars: Record<string, any>;
   /** the host's script time limit per chunk */
@@ -94,12 +97,15 @@ export interface PixelExprResult {
 export class PixelExprError extends Error {
   index: number;
   missing: string | undefined;
+  /** the expression is the name of a helper function, used as a value */
+  helper: string | undefined;
   timedOut: boolean;
   constructor(index: number, message: string, timedOut = false) {
     super(message);
     this.index = index;
     this.timedOut = timedOut;
     this.missing = /^([A-Za-z_$][\w$]*) is not defined$/.exec(message)?.[1];
+    this.helper = /^([A-Za-z_$][\w$]*) is a function, not a value$/.exec(message)?.[1];
   }
 }
 
@@ -117,7 +123,10 @@ function kernelSource(job: PixelExprJob, names: string[], decls: string[][], var
   src.push('let __cur = 0;');
   src.push('try {');
   src.push('for (let k = __s; k < __e; k++) {', 'if (__mask && !__mask[k]) continue;');
-  for (let i = 0; i < e; i++) src.push(`__cur = ${i}; { const r = __f${i}(k); __o[${i}][k] = typeof r === 'number' ? r : typeof r === 'boolean' ? +r : NaN; }`);
+  for (let i = 0; i < e; i++) {
+    const bare = job.exprs[i].code.trim(), label = IDENT.test(bare) ? bare : 'the expression';
+    src.push(`__cur = ${i}; { const r = __f${i}(k); if (typeof r === 'function') throw new Error(${JSON.stringify(label + ' is a function, not a value')}); __o[${i}][k] = typeof r === 'number' ? r : typeof r === 'boolean' ? +r : NaN; }`);
+  }
   src.push('}');
   src.push(`} catch (__x) { let __m; try { __m = typeof __x === 'object' && __x !== null ? String(__x.message) : String(__x); } catch (__y) { __m = 'an exception that cannot be described'; } throw new Error(${JSON.stringify(MARK)} + __cur + ${JSON.stringify(MARK)} + __m); }`);
   src.push('})');
@@ -155,7 +164,8 @@ export function runPixelExprs(
   const allVars = [...new Set(varNames.flat())].sort();
   const source = kernelSource(job, names, decls, varNames);
   try { host.compile(source); } catch (e: any) { throw new PixelSyntaxError(`expression syntax error: ${e.message}`); }
-  const results = exprs.map(() => new Float32Array(count));
+  // results in shared memory are written in place by the workers: no copy back
+  const results = exprs.map(() => (typeof SharedArrayBuffer !== 'undefined' ? new Float32Array(new SharedArrayBuffer(count * 4)) : new Float32Array(count)));
   const inputs: Record<string, Float32Array | Uint8Array> = {}, B: { data: Float32Array }[] = [];
   names.forEach((n, i) => { inputs['b' + i] = job.inputs[n]; B.push({ data: job.inputs[n] }); });
   if (job.mask) inputs.mask = job.mask;
@@ -179,15 +189,37 @@ export function runPixelExprs(
     try { runUserCode(host, () => kernel(env), job.timeoutMs, true); } catch (e: any) { if (e instanceof UserCodeError && e.timedOut) throw new PixelExprError(-1, `expression exceeded ${job.timeoutMs} ms (infinite loop?)`, true); return fail(e); }
   };
   const finish = (): PixelExprResult => {
+    const cov = job.covered;
     const bad = results.map((r) => {
       let n = 0;
-      for (let k = 0; k < r.length; k++) if (!Number.isFinite(r[k])) { r[k] = 0; n++; }
+      if (cov) { for (let q = 0; q < cov.length; q++) { const k = cov[q]; if (!Number.isFinite(r[k])) { r[k] = 0; n++; } } }
+      else for (let k = 0; k < r.length; k++) if (!Number.isFinite(r[k])) { r[k] = 0; n++; }
       return n;
     });
     return { values: results, bad, hidden: [...hiddenVars].sort() };
   };
+  // code that reads shared state (globalThis, this, eval, geometry functions) runs in one piece here, as a wrangle's does
+  const crossElement = exprs.some((x) => CROSS_ELEMENT.test(expressionBody(x.code)));
   let run: unknown;
-  try { run = par({ count, args, inputs, results: outs }, serial); } catch (e: any) { if (e instanceof PixelExprError) throw e; return fail(e); }
+  try { if (crossElement) serial(); else run = par({ count, args, inputs, results: outs }, serial); } catch (e: any) { if (e instanceof PixelExprError) throw e; return fail(e); }
   if (run instanceof Promise) return run.then(finish, fail);
   return finish();
+}
+
+const helperCache = new WeakMap<object, ReadonlySet<string>>();
+
+/**
+ * The names the script realm of `host` defines as functions (the wrangle helpers: smoothstep, fit, noise …) and the JS
+ * globals: a mask variable of one of these names would hide it from the expressions that use it.
+ */
+export function realmHelperNames(host: Host): ReadonlySet<string> {
+  let s = helperCache.get(host);
+  if (s) return s;
+  const out = new Set<string>(JS_GLOBALS);
+  try {
+    const g: any = host.compile('globalThis');
+    for (const k of Object.getOwnPropertyNames(g)) { try { if (typeof g[k] === 'function') out.add(k); } catch { /* a getter that throws is no helper */ } }
+  } catch { /* a host without a readable global has only the JS globals */ }
+  helperCache.set(host, (s = out));
+  return s;
 }

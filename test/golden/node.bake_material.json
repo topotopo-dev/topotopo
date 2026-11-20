@@ -38,13 +38,15 @@
         "kind": "image",
         "layers": {
           "C": "b9084c1567ba113f",
+          "island": "0968c228a28f1b56",
           "kind_bare_steel": "29a43ef50b48b5cf",
           "kind_painted_metal": "45ac3ef568b8b5cf",
           "mask": "5963c5b542beec4f",
           "mat_paint": "45ac3ef568b8b5cf",
           "mat_steel": "29a43ef50b48b5cf",
           "metallic": "29a43ef50b48b5cf",
-          "roughness": "d28d2a951a4bb82f"
+          "roughness": "d28d2a951a4bb82f",
+          "texel": "cca48525b745925f"
         },
         "name": "target"
       }
