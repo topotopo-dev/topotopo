@@ -326,13 +326,13 @@ export function imageToJSON(img: Image, index = 0, written?: Map<Float32Array, [
     if (had) layers[k] = { same: had };
     else { layers[k] = f32ToBase64(a); written?.set(a, [index, k]); }
   }
-  return { name: img.name, width: img.width, height: img.height, ...(img.size !== 1 || img.sizeStated ? { size: img.size } : {}), layers };
+  return { name: img.name, width: img.width, height: img.height, ...(img.size !== 1 || img.sizeStated ? { size: img.size } : {}), ...(img.sizeStated ? { stated: true } : {}), layers };
 }
 
 /** An image from imageToJSON output (layers as base64 float32, or plain number arrays). */
 export function imageFromJSON(j: any, before: Image[] = []): Image {
   const img = new Image(Number(j?.width), Number(j?.height), String(j?.name ?? 'image'));
-  if (Number(j?.size) > 0) img.setSize(Number(j.size)); // a written size was stated
+  if (Number(j?.size) > 0) img.setSize(Number(j.size), j.stated === true);
   for (const [k, v] of Object.entries(j?.layers ?? {})) {
     const same = (v as any)?.same;
     const a = same ? before[same[0]]?.layer(same[1]) : typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);

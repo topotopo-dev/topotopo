@@ -47,6 +47,13 @@ const edgeGroupsToJSON = (m: Map<string, EdgeSet>) => {
   return o;
 };
 
+/**
+ * The version of the native geometry JSON this code writes and reads. 2: an image layer that several images of the geometry
+ * share (the texel and island layers of the bakes of one mesh) is written once and the others say {same: [image, layer]}, and an
+ * image says "stated" when its size was stated. 1 files (no shared layers, a size is not stated) are read as they are.
+ */
+export const GEO_JSON_VERSION = 2;
+
 export function geoToJSON(g: Geometry) {
   const groups: Record<string, Record<string, number[]>> = { point: groupsToJSON(g.pointGroups), prim: groupsToJSON(g.primGroups) };
   // written only when present, so files without them are unchanged
@@ -54,7 +61,7 @@ export function geoToJSON(g: Geometry) {
   if (g.edgeGroups.size) groups.edge = edgeGroupsToJSON(g.edgeGroups);
   const out: Record<string, any> = {
     format: 'topotopo-geo',
-    version: 1,
+    version: GEO_JSON_VERSION,
     points: { count: g.numPoints, attribs: tableToJSON(g.points) },
     vertices: { count: g.numVertices, points: Array.from(g.vertexPoint), attribs: tableToJSON(g.vertices) },
     prims: { count: g.numPrims, start: Array.from(g.primStart), closed: Array.from(g.primClosed), attribs: tableToJSON(g.prims) },
@@ -93,6 +100,7 @@ export function geoToJSON(g: Geometry) {
 
 export function geoFromJSON(j: any): Geometry {
   if (j?.format !== 'topotopo-geo' && j?.format !== 'polyforge-geo') throw new Error('not a topotopo-geo JSON file');
+  if (Number(j.version) > GEO_JSON_VERSION) throw new Error(`this topotopo-geo JSON file is version ${j.version}, written by a newer TopoTopo than this one, which reads up to version ${GEO_JSON_VERSION}: update TopoTopo to read it`);
   const g = new Geometry();
   g.points = tableFromJSON(j.points.count, j.points.attribs);
   if (!g.points.has('P')) g.points.add('P', 'float', 3);
