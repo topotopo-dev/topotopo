@@ -133,10 +133,11 @@ const NEW = ['tex_sdf_shape', 'tex_grunge', 'tex_directional_blur', 'tex_slope_b
     ['sdf_from_mono', 'tex_sdf_from_mask'], ['histogram_select', 'tex_histogram_select'], ['non_uniform_directional_warp', 'tex_warp']];
   const bad = names.filter(([a, t]) => getNodeDef(a)?.type !== t).map(([a]) => a);
   check(!bad.length, `Substance / COP names resolve to the new nodes${bad.length ? ': ' + bad.join(', ') : ''}`);
-  // every node whose distances are physical says so with the same size param as tex_normal_from_height
-  const sized = allNodeDefs().filter((d) => NEW.includes(d.type) && d.params.size).map((d) => d.type);
-  const off = sized.filter((t) => getNodeDef(t)!.params.size.default !== 1 || getNodeDef(t)!.params.size.type !== 'float');
-  check(sized.length >= 12 && !off.length, `${sized.length} new nodes take size (metres the image width covers, default 1)`);
+  // the image carries the metres its width covers: every generator sets it with texture_size, a filter reads it from the image
+  const GENERATORS = ['tex_noise', 'tex_pattern', 'tex_gradient', 'tex_constant', 'tex_shape', 'tex_cells', 'tex_scratches', 'tex_splatter', 'tex_text', 'tex_sdf_shape', 'tex_grunge', 'tex_tile_sampler', 'image_file'];
+  const offGen = GENERATORS.filter((t) => { const d = getNodeDef(t)!.params.texture_size; return !d || d.default !== 1 || d.type !== 'float'; });
+  const sizedFilters = allNodeDefs().filter((d) => NEW.includes(d.type) && !GENERATORS.includes(d.type) && d.params.size).map((d) => d.type);
+  check(!offGen.length && !sizedFilters.length, `${GENERATORS.length} generators take texture_size (metres the image width covers, default 1); no filter has a size of its own${offGen.length ? ': missing on ' + offGen.join(', ') : ''}${sizedFilters.length ? ': still on ' + sizedFilters.join(', ') : ''}`);
   // filters name their result after the node
   const img = await image({ n: { type: 'tex_noise', params: { resolution: 32 } }, rust_mask: { type: 'tex_histogram_select', in: ['n'] } }, 'rust_mask');
   check(img.name === 'rust_mask', 'a filter\'s result is named after the node');
@@ -178,12 +179,12 @@ section('signed distance');
     check(sum / (W * W) < 0.06 && mx < 0.3, `disc at ${W}²: mean error ${f3(sum / (W * W))} px, max ${f3(mx)} px`);
   }
   // the node: metres, negative inside, tiles across the border
-  const sdf = await image({ m: { type: 'tex_shape', params: { resolution: 128, shape: 'disc', size: 0.5 } }, s: { type: 'tex_sdf_from_mask', in: ['m'], params: { size: 2 } } }, 's');
+  const sdf = await image({ m: { type: 'tex_shape', params: { resolution: 128, shape: 'disc', fill: 0.5, texture_size: 2 } }, s: { type: 'tex_sdf_from_mask', in: ['m'] } }, 's');
   // disc radius 0.25 of the image = 0.5 m at size 2; centre is 0.5 m inside, a corner √2 m − 0.5 m away
   check(Math.abs(at(sdf, 0.5, 0.5) + 0.5) < 0.02 && Math.abs(C(sdf)[0] - (Math.SQRT2 - 0.5)) < 0.02, `tex_sdf_from_mask in metres: centre ${f3(at(sdf, 0.5, 0.5))} (−0.5), corner ${f3(C(sdf)[0])} (${f3(Math.SQRT2 - 0.5)})`);
-  const rd = await resolutionDiff((r) => ({ m: { type: 'tex_shape', params: { resolution: r, shape: 'star', size: 0.7 } }, s: { type: 'tex_sdf_from_mask', in: ['m'] } }), 's');
+  const rd = await resolutionDiff((r) => ({ m: { type: 'tex_shape', params: { resolution: r, shape: 'star', fill: 0.7 } }, s: { type: 'tex_sdf_from_mask', in: ['m'] } }), 's');
   check(rd.meanDiff < 0.002, `tex_sdf_from_mask: 128² vs 256² differ by ${rd.meanDiff.toExponential(2)} m on average`);
-  const sm = await shiftDiff({ m: { type: 'tex_shape', params: { resolution: 128, shape: 'star', size: 0.9, tile: [2, 2] } }, s: { type: 'tex_sdf_from_mask', in: ['m'] }, r: { type: 'tex_sdf_op', in: ['s'], params: { mode: 'round', amount: 0.03 } } }, ['m'], 'r');
+  const sm = await shiftDiff({ m: { type: 'tex_shape', params: { resolution: 128, shape: 'star', fill: 0.9, tile: [2, 2] } }, s: { type: 'tex_sdf_from_mask', in: ['m'] }, r: { type: 'tex_sdf_op', in: ['s'], params: { mode: 'round', amount: 0.03 } } }, ['m'], 'r');
   check(sm < 1e-5, `distances (and a round, which measures again) wrap exactly (${sm.toExponential(1)})`);
 }
 
@@ -191,7 +192,7 @@ section('signed distance');
 
 section('SDF shapes, operations, booleans, rendering');
 {
-  const disc = await image({ s: { type: 'tex_sdf_shape', params: { resolution: 129, shape: 'disc', radius: 0.2, size: 2, tileable: false } } }, 's');
+  const disc = await image({ s: { type: 'tex_sdf_shape', params: { resolution: 129, shape: 'disc', radius: 0.2, texture_size: 2, tileable: false } } }, 's');
   // radius 0.2 m on a 2 m image: the centre pixel −0.2, the corner pixel its distance to the centre − 0.2
   const cornerD = dist(disc, 0, 1) * 2 - 0.2;
   check(Math.abs(at(disc, 0.5, 0.5) + 0.2) < 1e-6 && Math.abs(at(disc, 0, 1) - cornerD) < 1e-5, `disc SDF in metres: centre ${f3(at(disc, 0.5, 0.5))} (−0.2), corner ${f3(at(disc, 0, 1))} (${f3(cornerD)})`);
@@ -347,7 +348,7 @@ section('flood fill');
   const vert = await image(bricks(128, { output: 'gradient', angle: 90 }), 'f');
   check(at(vert, 0.375, 1 - 0.02) > 0.6 && at(vert, 0.375, 1 - 0.105) < 0.4, 'gradient at 90° rises along +v');
   // bbox size in metres: a brick is 0.25 × 0.125 of the image less the mortar (0.15 × 0.125 / 2 a side): 0.4625 m at size 2
-  const bb = await image(bricks(128, { output: 'bbox_size', size: 2 }), 'f');
+  const bb = await image(bricks(128, { output: 'bbox_size' }, { texture_size: 2 }), 'f');
   check(Math.abs(at(bb, 0.125, 1 - 0.0625) - 0.4625) < 0.02, `bbox_size in metres (${f3(at(bb, 0.125, 1 - 0.0625))} for a 0.4625 m brick)`);
   const pos = await image(bricks(128, { output: 'position' }), 'f');
   check(Math.abs(at(pos, 0.1, 1 - 0.0625, 'C', 0) - 0.125) < 0.01 && Math.abs(at(pos, 0.1, 1 - 0.0625, 'C', 1) - (1 - 0.0625)) < 0.01, 'position: the tile\'s centre in uv');
@@ -361,7 +362,7 @@ section('flood fill');
 
 section('directional and slope blur, warps');
 {
-  const noise = (r: number): NodeSpec => ({ type: 'tex_noise', params: { resolution: r, scale: 16, octaves: 3, seed: 2 } });
+  const noise = (r: number): NodeSpec => ({ type: 'tex_noise', params: { resolution: r, feature: 1 / 16, octaves: 3, seed: 2 } });
   const db = (r: number, extra: Record<string, any> = {}): Nodes => ({ n: noise(r), b: { type: 'tex_directional_blur', in: ['n'], params: { length: 0.1, ...extra } } });
   const n = await image({ n: noise(128) }, 'n'), b = await image(db(128), 'b');
   check(Math.abs(mean(C(b)) - mean(C(n))) < 1e-4, 'directional blur keeps the mean (it wraps)');
@@ -383,18 +384,18 @@ section('directional and slope blur, warps');
   let same = true;
   for (let k = 0; k < C(flat).length; k++) if (Math.abs(C(flat)[k] - C(mask)[k]) > 1e-6) same = false;
   check(same, 'a flat slope map leaves the image as it is');
-  const mn = await image(sb(128, { type: 'tex_noise', params: { resolution: 128, scale: 8, seed: 3 } }, { mode: 'min' }), 'b');
-  const mx = await image(sb(128, { type: 'tex_noise', params: { resolution: 128, scale: 8, seed: 3 } }, { mode: 'max' }), 'b');
+  const mn = await image(sb(128, { type: 'tex_noise', params: { resolution: 128, feature: 1 / 8, seed: 3 } }, { mode: 'min' }), 'b');
+  const mx = await image(sb(128, { type: 'tex_noise', params: { resolution: 128, feature: 1 / 8, seed: 3 } }, { mode: 'max' }), 'b');
   const m0 = mean(C(await image(sb(128, { type: 'tex_constant', params: { resolution: 128 } }), 'm')));
   check(mean(C(mn)) < m0 - 0.005 && mean(C(mx)) > m0 + 0.005, `min erodes (${f3(mean(C(mn)))}), max grows (${f3(mean(C(mx)))}) the disc (${f3(m0)})`);
-  const rs = await resolutionDiff((r) => sb(r, { type: 'tex_noise', params: { resolution: r, scale: 6, seed: 3 } }), 'b');
+  const rs = await resolutionDiff((r) => sb(r, { type: 'tex_noise', params: { resolution: r, feature: 1 / 6, seed: 3 } }), 'b');
   check(rs.meanDiff < 0.01, `slope blur in metres: 128² vs 256² differ by ${f3(rs.meanDiff)}`);
-  const ss = await shiftDiff(sb(128, { type: 'tex_noise', params: { resolution: 128, scale: 6, seed: 3 } }), ['d', 's'], 'b');
+  const ss = await shiftDiff(sb(128, { type: 'tex_noise', params: { resolution: 128, feature: 1 / 6, seed: 3 } }), ['d', 's'], 'b');
   check(ss < 1e-5, `slope blur wraps exactly (${ss.toExponential(1)})`);
 
   const warp = (mode: string, extra: Record<string, any> = {}, angleMap?: NodeSpec): Nodes => ({
     c: { type: 'tex_pattern', params: { resolution: 128, pattern: 'checker', count: [8, 8] } },
-    n: { type: 'tex_noise', params: { resolution: 128, scale: 3 } },
+    n: { type: 'tex_noise', params: { resolution: 128, feature: 1 / 3 } },
     ...(angleMap ? { a: angleMap } : {}),
     w: { type: 'tex_warp', in: angleMap ? ['c', 'n', 'a'] : ['c', 'n'], params: { mode, intensity: 0.04, angle: 30, ...extra } },
   });
@@ -402,8 +403,8 @@ section('directional and slope blur, warps');
   let eq = 0;
   for (let k = 0; k < C(dir).length; k++) eq = Math.max(eq, Math.abs(C(dir)[k] - C(nu0)[k]));
   check(eq < 1e-6, 'nonuniform with an angle map of 0 is the directional warp');
-  const nu = await image(warp('nonuniform', {}, { type: 'tex_noise', params: { resolution: 128, scale: 2, seed: 9 } }), 'w');
-  const snu = await shiftDiff(warp('nonuniform', {}, { type: 'tex_noise', params: { resolution: 128, scale: 2, seed: 9 } }), ['c', 'n', 'a'], 'w');
+  const nu = await image(warp('nonuniform', {}, { type: 'tex_noise', params: { resolution: 128, feature: 0.5, seed: 9 } }), 'w');
+  const snu = await shiftDiff(warp('nonuniform', {}, { type: 'tex_noise', params: { resolution: 128, feature: 0.5, seed: 9 } }), ['c', 'n', 'a'], 'w');
   check(snu < 1e-5 && within01(C(nu)), `nonuniform warp wraps exactly (${snu.toExponential(1)})`);
   const multi = await image(warp('multi', { directions: 6 }), 'w');
   const smu = await shiftDiff(warp('multi', { directions: 6 }), ['c', 'n'], 'w');
@@ -439,7 +440,7 @@ section('edge lines, crystal cells, tile sampler');
   const sobel = await image(edge(128, 'sobel'), 'e');
   check(range(C(sobel))[1] > 0.5, 'sobel stays the default mode');
 
-  const cr = await image({ c: { type: 'tex_cells', params: { resolution: 128, output: 'crystal', scale: 6 } } }, 'c');
+  const cr = await image({ c: { type: 'tex_cells', params: { resolution: 128, output: 'crystal', cell: 1 / 6 } } }, 'c');
   check(within01(C(cr)) && seamless(cr) < 2, 'crystal facets: 0..1, tileable');
   // inside a cell the facet is a plane: second differences vanish away from the cell borders
   const id = C(cr, 'id');
@@ -456,8 +457,8 @@ section('edge lines, crystal cells, tile sampler');
   check(planar > n2 * 0.99, `crystal: each cell is one plane (${planar} of ${n2} interior samples)`);
 
   const stamps: Nodes = {
-    a: { type: 'tex_shape', params: { resolution: 32, shape: 'square', size: 0.6, name: 'a' } },
-    b: { type: 'tex_shape', params: { resolution: 32, shape: 'disc', size: 0.6, name: 'b' } },
+    a: { type: 'tex_shape', params: { resolution: 32, shape: 'square', fill: 0.6, name: 'a' } },
+    b: { type: 'tex_shape', params: { resolution: 32, shape: 'disc', fill: 0.6, name: 'b' } },
     ab: { type: 'merge', in: ['a', 'b'] },
   };
   const ts = (extra: Record<string, any>, ins: (string | null)[] = ['a']): Nodes => ({ ...stamps, s: { type: 'tex_tile_sampler', in: ins, params: { resolution: 128, count: [4, 4], rotation: 0, jitter: 0, scale: [1, 1], intensity: [1, 1], ...extra } } });
@@ -594,7 +595,7 @@ section('histogram range and select, auto levels, clamp, quantize');
 section('make it tile');
 {
   const mt = (r: number, extra: Record<string, any> = {}): Nodes => ({
-    n: { type: 'tex_noise', params: { resolution: r, scale: 3.3, tileable: false, seed: 4 } },
+    n: { type: 'tex_noise', params: { resolution: r, feature: 1 / 3.3, tileable: false, seed: 4 } },
     t: { type: 'tex_make_tile', in: ['n'], params: extra },
   });
   const raw = await image(mt(128), 'n'), tiled = await image(mt(128), 't');
@@ -602,7 +603,7 @@ section('make it tile');
   check(Math.abs(at(tiled, 0.5, 0.5) - at(raw, 0.5, 0.5)) < 1e-6 && Math.abs(at(tiled, 0.37, 0.6) - at(raw, 0.37, 0.6)) < 1e-6, 'the middle is untouched');
   const smooth = await image(mt(128, { noise: 0 }), 't');
   check(seamless(smooth) < 1.5, 'a plain cross-fade tiles too');
-  const rgba = await image({ c: { type: 'tex_cells', params: { resolution: 64, scale: 3.5, tileable: false, output: 'distance' } }, k: { type: 'tex_colorize', in: ['c'], params: { ramp: [[0, '#203040'], [1, '#c08040']] } }, t: { type: 'tex_make_tile', in: ['k'] } }, 't');
+  const rgba = await image({ c: { type: 'tex_cells', params: { resolution: 64, cell: 1 / 3.5, tileable: false, output: 'distance' } }, k: { type: 'tex_colorize', in: ['c'], params: { ramp: [[0, '#203040'], [1, '#c08040']] } }, t: { type: 'tex_make_tile', in: ['k'] } }, 't');
   check(rgba.channels('C') === 4 && seamless(rgba) < 1.5, 'RGBA images tile as well');
 }
 
@@ -611,12 +612,12 @@ section('make it tile');
 section('normal maps: normalize, invert, height from normal');
 {
   const nm = (r: number, inv: Record<string, any> = {}, back: Record<string, any> = {}): Nodes => ({
-    h: { type: 'tex_noise', params: { resolution: r, scale: 4, octaves: 3, seed: 6 } },
-    n: { type: 'tex_normal_from_height', in: ['h'], params: { depth: 0.05, size: 1 } },
-    b: { type: 'tex_blur', in: ['n'], params: { radius: 4 } },
+    h: { type: 'tex_noise', params: { resolution: r, feature: 0.25, octaves: 3, seed: 6 } },
+    n: { type: 'tex_normal_from_height', in: ['h'], params: { depth: 0.05 } },
+    b: { type: 'tex_blur', in: ['n'], params: { blur: 4 / r } },
     z: { type: 'tex_normal_normalize', in: ['b'] },
     i: { type: 'tex_normal_invert', in: ['n'], params: inv },
-    k: { type: 'tex_height_from_normal', in: ['n'], params: { depth: 0.05, size: 1, ...back } },
+    k: { type: 'tex_height_from_normal', in: ['n'], params: { depth: 0.05, ...back } },
   });
   const z = await image(nm(64), 'z');
   let worst = 0;
