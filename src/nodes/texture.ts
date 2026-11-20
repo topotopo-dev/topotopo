@@ -886,7 +886,8 @@ defineNode({
     'Substance: Blur HQ; Houdini COP: Blur. blur is the radius in metres (gaussian: radius = 2 sigma, three box passes of ' +
     'running sums, so the cost does not depend on the radius): the same real size at any resolution. On an atlas (the ' +
     '"island" and "texel" layers a bake writes) it is that size on every island whatever its texel density, and nothing ' +
-    'is read across an island border.',
+    'is read across an island border. A texel of an island holds its whole-number id, the gutter around it (padding) the id ' +
+    'plus a half, and a texel of no island -1.',
   aliases: ['blur', 'cop_blur', 'blur_hq', 'gaussian_blur'],
   renamed: {
     radius: 'it is now blur, the radius in metres (a radius of 4 pixels is 4 × texture_size / width: 0.008 on a 512 pixel, 1 m image)',
@@ -2417,12 +2418,12 @@ defineNode({
   type: 'tex_to_heightfield',
   category: 'texture',
   summary: 'Bridge: an image (grey or luminance) becomes a heightfield of the same sample count (u → +X, v → −Z).',
-  description: 'Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. extent is the extent in metres along X (Z follows the image aspect): give it, or the image must state how many metres it covers (a bake writes it, a generator states it when its texture_size is set, 1 included; a generator left at the default states nothing), else the node refuses, as there is no default size. The samples sit on the grid nodes, so a heightfield of extent E and an image of w pixels have a cell of E / (w - 1), and heightfield_to_tex writes an image covering the extent: the round trip keeps it exactly. Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.',
+  description: 'Both are 2D grids: image pixel (i, j) becomes heightfield sample (i, j) (row 0 = the image top = −Z side), height = value × height_scale + height_offset + center.y. extent is the extent in metres along X, first sample to last (Z follows the image aspect), so the cell is extent / (w - 1). Without one a sample is a texel of the image, so the cell is the texel of the image, its size / w: the image must state how many metres it covers (a bake writes it, a generator states it when its texture_size is set, 1 included; a generator left at the default states nothing), else the node refuses, as there is no default size. heightfield_to_tex writes an image of w x cell metres, whose texel is the cell, so a round trip through both keeps the cell exactly. Use texture generators as terrain stamps, or heightfield_to_tex to go back. Writing another layer (layer_name "mask") keeps height at center.y + height_offset.',
   aliases: ['image_to_heightfield', 'texture_to_heightfield', 'tex2hf'],
-  renamed: { size: 'it is now extent, in metres (0, the default, = the metres the image covers; it was 20 when not given)' },
+  renamed: { size: 'it is now extent, in metres along X, the same number (size 40 is extent 40). It was 20 when not given, so a graph that never set size needs extent 20; with no extent the cell is the texel of the image, and the image must state its size' },
   inputs: FILTER_INPUT,
   params: {
-    extent: { type: 'float', default: 0, min: 0, desc: 'extent along X in metres; 0 = the metres the image covers (its size, when the image states one: a texture_size set on its generator, 1 included, or a bake), and a refusal when it states none' },
+    extent: { type: 'float', default: 0, min: 0, desc: 'extent along X in metres, first sample to last; 0 = one sample per texel of the image (cell = its size / width, when the image states a size: a texture_size set on its generator, 1 included, or a bake), and a refusal when it states none' },
     height_scale: { type: 'float', default: 1, desc: 'metres per unit of image value', aliases: ['amplitude'] },
     height_offset: { type: 'float', default: 0, desc: 'added height (metres)' },
     center: P.center(),
@@ -2442,8 +2443,9 @@ defineNode({
     const s = source(ctx, 0, p.image, p.layer);
     const w = s.img.width, h = s.img.height;
     if (w < 2 || h < 2) throw new NodeError(`${type}: a heightfield needs at least 2 × 2 samples (image is ${w} × ${h})`);
-    if (!(p.extent > 0) && !s.img.sizeStated) throw new NodeError(`${type}: extent is not set and image "${s.img.name}" does not say how many metres it covers (nothing set its texture_size)`, 'set extent (metres along X), or set texture_size on the generator that made the image (a bake writes its own)');
-    const cell = (p.extent > 0 ? p.extent : s.img.size) / (w - 1);
+    if (!(p.extent > 0) && !s.img.sizeStated) throw new NodeError(`${type}: extent is not set and image "${s.img.name}" does not say how many metres it covers (nothing set its texture_size)`, 'set extent (metres along X: before extent existed this node made 20 m by default, so extent: 20 keeps an old graph that never set size), or state the size of the image: texture_size on the generator that made it (a bake writes its own)');
+    // an extent spreads the samples over it, first sample to last; without one a sample is a texel of the image (texel = size / width)
+    const cell = p.extent > 0 ? p.extent / (w - 1) : s.img.texel;
     const hf = new Heightfield(w, h, cell, [p.center[0] - ((w - 1) * cell) / 2, p.center[2] - ((h - 1) * cell) / 2], undefined, s.img.name);
     const gr = toGrey(s.data, s.ch);
     const ln = String(p.layer_name || 'height');
@@ -2500,7 +2502,7 @@ defineNode({
     const span = hi - lo;
     for (let k = 0; k < a.length; k++) out[k] = p.normalize ? (span !== 0 ? (a[k] - lo) / span : 0) : a[k];
     const img = new Image(hf.width, hf.height, outName(ctx)).set(MAIN_LAYER, out);
-    img.setSize((hf.width - 1) * hf.cellSize); // the extent along X, which tex_to_heightfield reads back (cell = extent / (w - 1))
+    img.setSize(hf.width * hf.cellSize); // a sample is a texel: the image's texel is the cell, and tex_to_heightfield (no extent) reads the same cell back
     if (p.normalize) { ctx.stat('range_min', lo); ctx.stat('range_max', hi); }
     if (!p.keep) return imageGeo(img);
     const g = ctx.input(0).clone();
