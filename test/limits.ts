@@ -14,6 +14,7 @@
 //     there as on the cooking thread, and a later cook works.
 // Runs in a child process with a hard wall-clock limit, so a limit that does not hold fails the test instead of
 // crashing or hanging it.
+import './cache-guard.ts';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';

@@ -1401,6 +1401,12 @@ Packing (uv_unwrap and uv_layout): islands on the texel grid of resolution, padd
     keep (as it is; no turns). Rotations never mirror.
   texel_weight: a prim float attribute scaling density per island (2 = twice the texels per metre; <= 0 counts as 1):
     attrib_create {name:"texel_weight", class:"prim", value:2, group:"@name=sight"} gives the sight more texels.
+  visibility_weight (0..1; uv_layout and uv_unwrap; optional input 1 = what stands around: a wall, the ground): scales the
+    density of each polygon by how much of its hemisphere is open (rays from points spread over it, against the mesh and
+    input 1; a wall flush with a face blocks it; a quarter of the hemisphere counts as fully open, so it is openness and a face
+    deep in a recess gets less): a face against the wall or inside a closed part gets 0.05, an open one 1, and the rest of the atlas grows
+    (a cabinet on a wall: about 1.5x the texels on the faces that show). Islands average their polygons. Writes prim
+    visibility (occlusion {class:"prim"} measures the same, ao per polygon).
   texels_per_unit (0 = largest that fits) with fit: atlas (default: everything in 0..1, the density lowered if needed,
     with a warning) | udim (keep the density, spill into tiles 1001, 1002 …; uv_layout up to udims) | stack (uv_unwrap:
     more atlases, all in 0..1, prim atlas).

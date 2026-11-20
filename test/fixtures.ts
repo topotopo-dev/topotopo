@@ -1,5 +1,6 @@
 // Shared test fixtures: source geometry, per-node inputs and params, geometry invariants.
 // Every test layer (smoke, golden, property, fuzz, bench) cooks nodes the same way through these.
+import './cache-guard.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -197,7 +198,9 @@ export const INPUTS: Record<string, string[]> = {
   particles: ['PTS_ABOVE', 'BUMPY'],
   bake_ao: ['UVBOX'], bake_thickness: ['UVBOX'], bake_curvature: ['UVBOX'], bake_position: ['UVBOX'], bake_world_normal: ['UVBOX'],
   bake_normal: ['UVBOX', 'HIGHBOX'], bake_height: ['UVBOX', 'HIGHBOX'], bake_island_id: ['UVBOX'], bake_mask: ['UVBOX'],
-  bake_vertex_color: ['UVCOLOR'], bake_material: ['UVMATBOX'], tex_layers: ['MATBASE', 'MATCURV'], bake_measure: ['UVBOX'],
+  bake_vertex_color: ['UVCOLOR'], bake_material: ['UVMATBOX'], tex_layers: ['MATBASE', 'MATCURV'],
+  bake_flow: ['UVBOX'],
+  bake_measure: ['UVBOX'],
   rbd_settle: ['RBD_DROP', 'GRID'], rbd_stack: ['RBD_CRATES'],
   drape: ['CLOTH', 'BOX'],
   trim_map: ['TRIMWALL', 'TRIMSHEET'],
@@ -337,6 +340,7 @@ export const PARAMS: Record<string, any> = {
   bake_material: { resolution: 64 },
   bake_measure: { resolution: 64, samples: 8 },
   tex_layers: { layers: [{ name: 'chips', mask: 'smoothstep(0.15, 0.4, MATCURV_convex)', color: '#9a9a96', roughness: 0.4, metallic: 1, height: -0.0005 }, { name: 'grime', mask: 'MATBASE_kind_painted_metal * smoothstep(0.1, 0.5, MATCURV_concave)', color: '#3d3529', color_mode: 'multiply', opacity: 0.8 }] },
+  bake_flow: { resolution: 64, sources: '@P.y>0.4' },
   particles: { steps: 24, emit_rate: 1, velocity_var: 1, life: 0.8, noise: 1, collide: 'bounce', trails: 4, seed: 1 },
   rbd_settle: { duration: 4 },
   rbd_stack: { interval: 10, duration: 3 },

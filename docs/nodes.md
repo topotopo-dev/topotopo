@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-265 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+266 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
 
 ## generate nodes
 
@@ -4071,7 +4071,7 @@ category: `measure` · aliases: `ambient_occlusion`, `ao`, `thickness`
 
 Ray-cast per-point measures: ambient occlusion (0 open … 1 enclosed), thickness in metres, or cavity (0..1).
 
-Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone around the point normal and tests them against the geometry itself plus the optional occluder input (a triangle BVH). occlusion → "ao": fraction of rays blocked within max_distance. cavity → "cavity": occlusion over a short range where near walls count most (crevices and inner corners light up, flat and convex areas are 0). thickness → "thickness": mean distance to the opposite wall along rays cast inward (against the normal) in metres, so it needs closed or double-walled geometry with outward normals; normalize divides by max_distance. The alias "thickness" still defaults to mode occlusion: set mode. Points outside `group` keep their values.
+Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone around the point normal and tests them against the geometry itself plus the optional occluder input (a triangle BVH). occlusion → "ao": fraction of rays blocked within max_distance. cavity → "cavity": occlusion over a short range where near walls count most (crevices and inner corners light up, flat and convex areas are 0). thickness → "thickness": mean distance to the opposite wall along rays cast inward (against the normal) in metres, so it needs closed or double-walled geometry with outward normals; normalize divides by max_distance. The alias "thickness" still defaults to mode occlusion: set mode. class prim measures each polygon instead of each point: `face_points` points spread over it (more on large faces, by area) cast the rays along the polygon normal, and the mean of them is written as a prim attribute, so a large face that is half covered reads half enclosed where its corner points would read open. Points (or prims) outside `group` keep their values.
 
 **Inputs**
 
@@ -4085,6 +4085,8 @@ Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `mode` | enum | `"occlusion"` |  | `occlusion`, `thickness`, `cavity` |  | what to measure |
+| `class` | enum | `"point"` |  | `point`, `prim` |  | point = one value per point (rays along the point normal); prim = one value per polygon, the mean over `face_points` points spread over it (rays along its normal) |
+| `face_points` | int | `8` | 1..256 |  |  | class prim: points per polygon, at least (large polygons get one per 0.002 m², up to 256) |
 | `samples` | int | `32` | 1..1024 |  | `rays`, `count` | rays per point (stratified; more = smoother) |
 | `max_distance` | float | `0` | 0.. |  | `maxdist`, `distance`, `radius` | hits farther than this are ignored; 0 = auto (occlusion: unlimited, cavity: 5% of the scene diagonal, thickness: the scene diagonal) |
 | `bias` | float | `0` | 0.. |  |  | ray start offset along the normal against self-hits; 0 = auto (1e-4 of the scene diagonal) |
@@ -4092,10 +4094,10 @@ Casts `samples` stratified, seeded, cosine-weighted rays per point inside a cone
 | `seed` | float | `0` |  |  |  | random seed |
 | `invert` | bool | `false` |  |  |  | write 1 - value (thickness: max_distance - value), e.g. exposure instead of occlusion |
 | `normalize` | bool | `false` |  |  |  | thickness: divide by max_distance to get 0..1 (occlusion and cavity are always 0..1) |
-| `group` | group (point) | `""` |  |  |  | points to measure ("" = all); the others keep their values |
-| `name` | string | `""` |  |  | `attrib`, `attribute` | output point attribute ("" = ao, thickness or cavity by mode) |
+| `group` | group (point) | `""` |  |  |  | points (class point) or prims (class prim) to measure ("" = all); the others keep their values |
+| `name` | string | `""` |  |  | `attrib`, `attribute` | output attribute ("" = ao, thickness or cavity by mode) |
 
-**Writes:** point float ao | thickness | cavity (or <name>)
+**Writes:** point float ao | thickness | cavity (or <name>); class prim: the same as a prim attribute
 
 **Example**
 
@@ -9392,13 +9394,14 @@ category: `uv` · aliases: `uvlayout`, `uvpack`, `uv_pack`, `pack_uv`
 
 Pack UV islands into the 0..1 square (or UDIM tiles) without overlaps: rotate to minimal bounds (or keep, or align to the world), equalise texel density, fill every gap.
 
-Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is oriented (orient: its minimum-area bounding rectangle, as it is, or world up to +v), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area, times the texel_weight attribute) and placed on the texel grid of `resolution`: bottom-left, into any gap its shape fits (inside rings, between the arms of other islands), `padding` texels from every other island and half of it from the tile border, so islands never overlap. The scale is the largest at which every island fits (or texels_per_unit); iterations tries other island orders and keeps the densest. fit atlas keeps everything in the 0..1 tile; fit udim fills UDIM tiles 1001, 1002, … (u offset, ten per row; an island goes to the first tile it fits), up to udims. cut_long cuts islands longer than the tile, and rings and arcs, into parts when the parts pack denser (each cut is a seam). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the part they are in; islands that do not fit at any scale leave the uv unchanged, with a warning.
+Islands are polygon regions whose uv is continuous across shared edges, or the values of island_attrib. Each island is oriented (orient: its minimum-area bounding rectangle, as it is, or world up to +v), scaled so texel density is uniform (scale_mode uniform: uv area ∝ 3D area, times the texel_weight attribute) and placed on the texel grid of `resolution`: bottom-left, into any gap its shape fits (inside rings, between the arms of other islands), `padding` texels from every other island and half of it from the tile border, so islands never overlap. The scale is the largest at which every island fits (or texels_per_unit); iterations tries other island orders and keeps the densest. fit atlas keeps everything in the 0..1 tile; fit udim fills UDIM tiles 1001, 1002, … (u offset, ten per row; an island goes to the first tile it fits), up to udims. cut_long cuts islands longer than the tile, and rings and arcs, into parts when the parts pack denser (each cut is a seam). visibility_weight gives the faces that show more texels: the density of each polygon is scaled by how much of its hemisphere is open (rays from points spread over it, against the geometry and the optional surroundings input; a quarter of the hemisphere counts as fully open, a wall flush with a face blocks it), so the back of a wall-mounted part or the inside of a closed one shrinks to a twentieth and the rest of the atlas grows. It measures openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called `visibility` is replaced when the weight is above 0. Prim visibility is written; the stats count the faces at the minimum, and a warning says so when a quarter of the area is hidden with no surroundings connected (normals facing inwards). Prims outside `group` keep their uv and the islands keep clear of them. The result is checked: overlaps inside an island (folds, or pieces joined by island_attrib) come from the input and are reported with the part they are in; islands that do not fit at any scale leave the uv unchanged, with a warning.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | geometry with uv |
+| 1 | `surroundings` | yes | no | what stands around the geometry (a wall, the floor, other parts) and blocks its rays for visibility_weight; not laid out and not changed |
 
 **Parameters**
 
@@ -9409,6 +9412,7 @@ Islands are polygon regions whose uv is continuous across shared edges, or the v
 | `orient` | enum | `"min_rect"` |  | `min_rect`, `keep`, `world` |  | island orientation: min_rect = turned to its minimum bounding rectangle, with 90° turns while packing (densest); keep = as it is, no turns; world = world up (+Y) points to +v (horizontal islands: +X to +u), no turns. Rotations keep the uv winding |
 | `scale_mode` | enum | `"uniform"` |  | `uniform`, `keep` |  | uniform = same texel density on every island (by 3D area); keep = keep the relative uv scale |
 | `texel_weight` | string | `"texel_weight"` |  |  |  | prim attribute scaling the texel density of each island (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1 |
+| `visibility_weight` | float | `0` | 0..1 |  |  | texel density by visibility, 0..1: texels per metre of each polygon times lerp(1, max(0.05, open), weight), where open is how much of its hemisphere is not blocked by the geometry or the surroundings input (rays from points spread over the polygon by area, unlimited; a quarter of the hemisphere counts as fully open): faces against a wall (also one flush with them) or inside a closed part get a twentieth of the density, open faces keep it, and the rest of the atlas grows. It is openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called visibility is replaced when the weight is above 0. 0 = off (the layout is as without it). Writes prim visibility; stats count the faces and the share of the area at the minimum, and a warning says so when a quarter of the area reads hidden with no surroundings connected (normals facing inwards) |
 | `padding` | float | `4` | 0.. |  |  | gap between islands, in texels at `resolution` (or uv units with units:"uv"); half of it, rounded up, to the tile border |
 | `units` | enum | `"texels"` |  | `texels`, `uv` |  | unit of padding |
 | `resolution` | int | `1024` | 16..16384 |  |  | texture size: padding is in its texels, and islands are placed on its texel grid (at most 2048 cells per tile) |
@@ -9426,14 +9430,55 @@ Islands are polygon regions whose uv is continuous across shared edges, or the v
 
 ```json
 {
-  "type": "uv_layout",
-  "in": [
-    "geo"
-  ],
-  "params": {
-    "padding": 8,
-    "resolution": 2048
-  }
+  "nodes": {
+    "cabinet": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.6,
+          1,
+          0.3
+        ],
+        "center": [
+          0,
+          0.5,
+          0.15
+        ]
+      }
+    },
+    "wall": {
+      "type": "grid",
+      "params": {
+        "size": [
+          6,
+          6
+        ],
+        "divisions": [
+          1,
+          1
+        ],
+        "plane": "xy",
+        "center": [
+          0,
+          0.5,
+          -0.001
+        ]
+      }
+    },
+    "out": {
+      "type": "uv_layout",
+      "in": [
+        "cabinet",
+        "wall"
+      ],
+      "params": {
+        "visibility_weight": 1,
+        "padding": 8,
+        "resolution": 2048
+      }
+    }
+  },
+  "output": "out"
 }
 ```
 
@@ -9540,13 +9585,14 @@ category: `uv` · aliases: `uvunwrap`, `autouv`, `xatlas`, `uv_auto`, `unwrap`
 
 Automatic UV unwrap: xatlas cuts and flattens charts per connected piece; they are packed without overlaps into the 0..1 square. Polygons are kept.
 
-Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute, never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the weights: chart_smoothing cuts and flattens the charts on a smoothed copy and keeps the uv on the real shape. Writes prim chart (and atlas with fit stack).
+Charts grow over faces of similar orientation (weights below); each chart is flattened (LSCM, planar or ortho). Every connected piece is charted on its own, so a small part of a merged model unwraps as it would alone. Polygons are triangulated for xatlas; the output keeps the polygons, with per-corner uv (seams split vertices, not points). A polygon xatlas cuts across two charts becomes its triangles (straddling split), so its uv stays exact. Faces with no area are not charted: their uv collapses onto a neighbour's chart. A chart that folds onto itself is charted again (xatlas at a lower cost, then a conformal map) and, if it still folds, cut where it overlaps. Thin charts (bevel strips) join a neighbouring chart where their seam lines up (merge_thin); charts longer than the tile, rings and arcs are cut into parts when that packs denser (cut_long). The charts are packed like uv_layout: oriented (orient), on the texel grid of `resolution`, `padding` texels apart, uniform texel density times the texel_weight attribute (and, with visibility_weight, times how open each polygon is: against the geometry and the optional surroundings input, so hidden faces get a twentieth of the texels; it is openness, so a face deep inside a recess gets less; a chart that mixes hidden and visible faces is weighted by its mean; an existing prim attribute called `visibility` is replaced when the weight is above 0), never overlapping, into the 0..1 tile (fit atlas) or more tiles at a fixed texels_per_unit (fit udim or stack); the result is checked and every warning names the part. Big smooth meshes chart slowly: max_chart_area -1 (auto) limits chart size above ~1000 triangles; a higher max_cost makes fewer, larger charts (less padding). Noisy surfaces (scans, decimated or generated models) shatter into many ragged charts whatever the weights: chart_smoothing cuts and flattens the charts on a smoothed copy and keeps the uv on the real shape. Writes prim chart (and atlas with fit stack).
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `geo` | no | no | polygon geometry (polylines are skipped) |
+| 1 | `surroundings` | yes | no | what stands around the geometry (a wall, the floor, other parts) and blocks its rays for visibility_weight; not unwrapped and not changed |
 
 **Parameters**
 
@@ -9572,9 +9618,10 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 | `merge_thin` | bool | `true` |  |  |  | join thin charts (bevel strips, narrow bands: narrower than three paddings) onto a neighbouring chart where their shared seam lines up and nothing overlaps, so fewer charts lose space to padding (and fewer seams); off = the charts as cut |
 | `cut_long` | bool | `true` |  |  |  | cut charts longer than the tile, and rings and arcs whose hull is mostly empty, across their length into parts, when that packs denser (each cut is a seam); off = charts stay whole |
 | `texel_weight` | string | `"texel_weight"` |  |  |  | prim attribute scaling the texel density of each chart (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1 |
+| `visibility_weight` | float | `0` | 0..1 |  |  | texel density by visibility, 0..1: texels per metre of each polygon times lerp(1, max(0.05, open), weight), where open is how much of its hemisphere is not blocked by the geometry or the surroundings input (rays from points spread over the polygon by area, unlimited; a quarter of the hemisphere counts as fully open): faces against a wall (also one flush with them) or inside a closed part get a twentieth of the density, open faces keep it, and the rest of the atlas grows. It is openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called visibility is replaced when the weight is above 0. 0 = off (the layout is as without it). Writes prim visibility; stats count the faces and the share of the area at the minimum, and a warning says so when a quarter of the area reads hidden with no surroundings connected (normals facing inwards) |
 | `iterations` | int | `4` | 1..64 |  |  | chart orders the packer tries; the densest wins |
 
-**Writes:** vertex uv, prim chart, prim atlas (fit stack with several atlases)
+**Writes:** vertex uv, prim chart, prim atlas (fit stack with several atlases), prim visibility (visibility_weight above 0)
 
 **Example**
 
@@ -12573,6 +12620,128 @@ Substance Painter "Curvature". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
     }
   },
   "output": "curv"
+}
+```
+
+### bake_flow
+
+category: `texture` · aliases: `flow_bake`, `bake_runs`, `bake_drips`, `bake_streaks`, `bake_rust_runs`
+
+Bake runs that flow down the surface under gravity from source parts (rust under bolts, rain streaks under a ledge): traced in 3D across uv seams, varied in length and width, thin, breaking up, pooling on ledges.
+
+Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bolt* @name=hinge*"; or points or a mesh on input 1) where they touch another surface within 1 cm, one every 1 / density metres along each part (at least one per part), and walk down the receiving surface (every prim that is not a source): gravity projected onto the surface, bent sideways by 3D noise (wobble), snapped back onto the mesh, over edges and across uv seams, around bosses and over the underside of a lip. A surface whose normal is within ledge degrees of up stops the run, where it pools; a pool whose ledge has an edge within the spill reach (metres) spills over the edge nearest to it and the run goes on below with less strength; a source standing on a ledge starts a pool and does the same; at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); strength = the run's random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. Water goes down the geometry, not down authored normals: the flow direction comes from face normals, smoothed only between faces that meet within 40°, so a face wound the wrong way reads as turned down and lets water through. The bottom of a groove whose sides are steeper than ledge pools, and runs on along it when it slopes. The metre constants of a run (gaps, wander, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh with uv; its prims that are not sources are the surface the runs flow on |
+| 1 | `sources` | yes | no | where runs start (points or a mesh) when sources is empty |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `sources` | group (prim) | `""` |  |  |  | prims of input 0 the runs start from, e.g. "@name=bolt* @name=hinge*" ("" = input 1); they bake 0 and the runs flow on every other prim |
+| `density` | float | `40` | 0..2000 |  | `count`, `runs_per_metre`, `frequency` | runs per metre of source part where it meets the surface (40 = one every 2.5 cm: a bolt gets one or two, a hinge four or five) |
+| `direction` | vec3 | `[0,-1,0]` |  |  | `gravity`, `dir` | gravity: the way the runs flow |
+| `length` | vec2 | `[0.05,0.25]` | 0..100 |  | `run_length`, `length_range` | range of the drawn length per run in metres, from where it comes out from under its source (the longer runs are the stronger) |
+| `width` | vec2 | `[0.003,0.01]` | 0..5 |  | `run_width`, `width_range` | range of the run width at the head in metres; runs taper to 30 % at the tail |
+| `wobble` | float | `0.3` | 0..1 |  | `meander`, `wander`, `spread` | sideways wander of a run (3D noise on its walking direction); 0 = ruler-straight |
+| `breakup` | float | `0.4` | 0..1 |  | `break_up`, `gaps`, `raggedness` | gaps along a run and a wandering width (3D noise); the gaps grow toward the tail; 0 = unbroken |
+| `ledge` | float | `30` | 0..90 |  | `ledge_angle`, `stop_angle` | a surface whose normal is within this many degrees of up stops the run, which pools there (a 30° slope still sheds water) |
+| `pool` | float | `1.5` | 1..10 |  | `pool_width`, `puddle` | width multiplier of the pool where a run stops on a ledge |
+| `drip` | bool | `true` |  |  | `drips` | a run reaching an overhang (a face turned down) falls along the direction to the next surface below and goes on; off: it ends there |
+| `step` | float | `0` | 0..5 |  | `step_size` | walking step in metres (0 = half the smallest width) |
+| `spill` | float | `0.05` | 0..50 |  | `spill_reach`, `overflow` | a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are |
+| `seed` | int | `0` | 0..2147483647 |  |  | seed of the run starts, lengths, widths, wander and gaps |
+
+**Writes:** image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "wall": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.6,
+          0.6,
+          0.05
+        ]
+      }
+    },
+    "wall_named": {
+      "type": "attrib_create",
+      "in": [
+        "wall"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "wall"
+      }
+    },
+    "bolt": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.03,
+          0.03,
+          0.012
+        ],
+        "center": [
+          0,
+          0.1,
+          0.03
+        ]
+      }
+    },
+    "bolt_named": {
+      "type": "attrib_create",
+      "in": [
+        "bolt"
+      ],
+      "params": {
+        "name": "name",
+        "class": "prim",
+        "value": "bolt"
+      }
+    },
+    "parts": {
+      "type": "merge",
+      "in": [
+        "wall_named",
+        "bolt_named"
+      ]
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "parts"
+      ]
+    },
+    "runs": {
+      "type": "bake_flow",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "sources": "@name=bolt",
+        "resolution": 256
+      }
+    }
+  },
+  "output": "runs"
 }
 ```
 
