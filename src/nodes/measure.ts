@@ -11,11 +11,12 @@ import { pointNormals, primArea } from '../core/topology.ts';
 import { halfEdges } from '../core/halfedge.ts';
 import { edgeWhere, pointWhere, primWhere } from '../core/report.ts';
 import {
-  CURVATURE_TYPES, RayScene, SurfaceQuery, bboxDiagonal, fmt, curvatureOfType, discreteCurvature, duplicatePoints,
+  CURVATURE_TYPES, RayScene, SurfaceQuery, bboxDiagonal, faceMeans, faceSamples, fmt, curvatureOfType, discreteCurvature, duplicatePoints,
   fillFromNearestValid, newNearest, nonManifoldPoints, percentileFit, pieceReport, rayMeasure, selfIntersections,
-  shortEdges, smoothPointValues,
+  shortEdges, smoothPointValues, visibilityFromRays, visibilityRays,
 } from '../core/analysis.ts';
-import type { PieceReport, RayMode } from '../core/analysis.ts';
+import type { FaceSamples, PieceReport, RayMode, RaySampleOptions } from '../core/analysis.ts';
+import type { CookContext } from '../graph/types.ts';
 import { P, getPointNormals, mask } from './util.ts';
 import { andThen } from '../graph/parallel.ts';
 import { namePattern } from './copy.ts';
@@ -81,6 +82,26 @@ defineNode({
 
 // ---------------------------------------------------------------- occlusion / thickness / cavity
 
+/** Ray measure of points `s` (positions and normals) against `scene`: the kernel "occlusion" in chunks on the worker pool (the same bits with or without workers). */
+function castRays(parallelMap: CookContext['parallelMap'], s: { P: Float64Array; N: Float64Array }, scene: RayScene, opts: RaySampleOptions): Float64Array | Promise<Float64Array> {
+  if (scene.empty) return rayMeasure(s.P, s.N, scene, opts);
+  const v = new Float64Array(s.P.length / 3);
+  const run = parallelMap('occlusion', {
+    count: v.length, args: opts, inputs: { P: s.P, N: s.N, sel: null }, results: { out: v }, shared: scene.toArrays(),
+  }, { minElements: Math.ceil(32768 / Math.max(1, opts.samples)) });
+  return andThen(run, () => v);
+}
+
+/**
+ * How much of the sky each polygon of `g` sees (core faceVisibility), the rays against `g` and the optional
+ * `surroundings`, on the worker pool: per prim 0..1, 1 for prims outside `faces`, not polygons or with no area.
+ */
+export function faceVisibilityRun(ctx: CookContext, g: Geometry, surroundings: Geometry | null, faces: ArrayLike<number> | null, perFace = 4, rays = 32): Float64Array | Promise<Float64Array> {
+  const scene = RayScene.of(surroundings && surroundings.numPrims ? Geometry.merge([g, surroundings]) : g);
+  const s = faceSamples(g, perFace, faces);
+  return andThen(castRays(ctx.parallelMap, s, scene, visibilityRays(g, rays)), (blocked) => visibilityFromRays(g, s, blocked));
+}
+
 const RAY_NAMES: Record<RayMode, string> = { occlusion: 'ao', thickness: 'thickness', cavity: 'cavity' };
 
 defineNode({
@@ -94,7 +115,9 @@ defineNode({
     '(crevices and inner corners light up, flat and convex areas are 0). thickness → "thickness": mean distance to the ' +
     'opposite wall along rays cast inward (against the normal) in metres, so it needs closed or double-walled geometry ' +
     'with outward normals; normalize divides by max_distance. The alias "thickness" still defaults to mode occlusion: ' +
-    'set mode. Points outside `group` keep their values.',
+    'set mode. class prim measures each polygon instead of each point: `face_points` points spread over it (more on large faces, by ' +
+    'area) cast the rays along the polygon normal, and the mean of them is written as a prim attribute, so a large face that ' +
+    'is half covered reads half enclosed where its corner points would read open. Points (or prims) outside `group` keep their values.',
   aliases: ['ambient_occlusion', 'ao', 'thickness'],
   inputs: [
     { name: 'geo', desc: 'points to measure (normals from N, else computed from the polygons)' },
@@ -102,6 +125,8 @@ defineNode({
   ],
   params: {
     mode: { type: 'enum', options: ['occlusion', 'thickness', 'cavity'], default: 'occlusion', desc: 'what to measure' },
+    class: { type: 'enum', options: ['point', 'prim'], default: 'point', desc: 'point = one value per point (rays along the point normal); prim = one value per polygon, the mean over `face_points` points spread over it (rays along its normal)' },
+    face_points: { type: 'int', default: 4, min: 1, max: 64, desc: 'class prim: points per polygon, at least (large polygons get more in proportion to their area, up to 64 times this)' },
     samples: { type: 'int', default: 32, min: 1, max: 1024, desc: 'rays per point (stratified; more = smoother)', aliases: ['rays', 'count'] },
     max_distance: { type: 'float', default: 0, min: 0, desc: 'hits farther than this are ignored; 0 = auto (occlusion: unlimited, cavity: 5% of the scene diagonal, thickness: the scene diagonal)', aliases: ['maxdist', 'distance', 'radius'] },
     bias: { type: 'float', default: 0, min: 0, desc: 'ray start offset along the normal against self-hits; 0 = auto (1e-4 of the scene diagonal)' },
@@ -109,10 +134,10 @@ defineNode({
     seed: P.seed(),
     invert: { type: 'bool', default: false, desc: 'write 1 - value (thickness: max_distance - value), e.g. exposure instead of occlusion' },
     normalize: { type: 'bool', default: false, desc: 'thickness: divide by max_distance to get 0..1 (occlusion and cavity are always 0..1)' },
-    group: P.group('point', 'points to measure ("" = all); the others keep their values'),
-    name: { type: 'string', default: '', desc: 'output point attribute ("" = ao, thickness or cavity by mode)', aliases: ['attrib', 'attribute'] },
+    group: P.group('point', 'points (class point) or prims (class prim) to measure ("" = all); the others keep their values'),
+    name: { type: 'string', default: '', desc: 'output attribute ("" = ao, thickness or cavity by mode)', aliases: ['attrib', 'attribute'] },
   },
-  outputs: 'point float ao | thickness | cavity (or <name>)',
+  outputs: 'point float ao | thickness | cavity (or <name>); class prim: the same as a prim attribute',
   example: {
     nodes: {
       rock: { type: 'sphere', params: { type: 'ico', level: 4 } },
@@ -126,36 +151,51 @@ defineNode({
     const src = input(0);
     const g = src.clone();
     const mode = p.mode as RayMode;
+    const prim = p.class === 'prim';
     const occluders = hasInput(1) && input(1).numPrims ? Geometry.merge([src, input(1)]) : src;
     const scene = RayScene.of(occluders);
     const diag = bboxDiagonal(occluders) || bboxDiagonal(g) || 1;
     const maxD = p.max_distance > 0 ? p.max_distance : mode === 'cavity' ? 0.05 * diag : mode === 'thickness' ? diag : 0;
     const bias = p.bias > 0 ? p.bias : 1e-4 * diag;
     const cone = p.cone_angle > 0 ? p.cone_angle : mode === 'thickness' ? 15 : 90;
-    const sel = mask(g, 'point', p.group);
-    const a = g.points.add(p.name || RAY_NAMES[mode], 'float', 1).data as Float64Array;
+    const sel = mask(g, prim ? 'prim' : 'point', p.group);
+    const a = (prim ? g.prims : g.points).add(p.name || RAY_NAMES[mode], 'float', 1).data as Float64Array;
     if (scene.empty) warn(`nothing for the rays to hit: geo has no polygons${hasInput(1) ? ' and neither has the occluder' : ' (connect an occluder as the second input)'}`);
     const opts = { mode, samples: p.samples, maxDistance: maxD, bias, coneAngle: cone, seed: p.seed };
+    const range = mode === 'thickness' ? maxD : 1;
+    const shape = (v: number) => {
+      let x = v;
+      if (mode === 'thickness' && p.normalize) x = Math.min(1, x / maxD);
+      if (p.invert) x = (mode === 'thickness' && !p.normalize ? range : 1) - x;
+      return x;
+    };
     const finish = (v: Float64Array) => {
-      const range = mode === 'thickness' ? maxD : 1;
       let measured = 0;
       for (let i = 0; i < g.numPoints; i++) {
         if (sel && !sel[i]) continue;
         measured++;
-        let x = v[i];
-        if (mode === 'thickness' && p.normalize) x = Math.min(1, x / maxD);
-        if (p.invert) x = (mode === 'thickness' && !p.normalize ? range : 1) - x;
-        a[i] = x;
+        a[i] = shape(v[i]);
       }
       stat('rays', measured * p.samples);
       return g;
     };
+    if (prim) {
+      // class prim: points spread over each polygon (more on large ones), the mean of their rays per polygon
+      const s: FaceSamples = faceSamples(g, p.face_points, sel);
+      const fin = (v: Float64Array) => {
+        const mean = faceMeans(s, v, g.numPrims, 0), seen = new Uint8Array(g.numPrims);
+        for (let i = 0; i < s.face.length; i++) seen[s.face[i]] = 1;
+        for (let q = 0; q < g.numPrims; q++) if (seen[q]) a[q] = shape(mean[q]);
+        stat('rays', s.face.length * p.samples);
+        return g;
+      };
+      return andThen(castRays(parallelMap, s, scene, opts), fin);
+    }
     if (scene.empty) return finish(rayMeasure(g.P, getPointNormals(g), scene, opts, sel));
     // kernel "occlusion": the points in chunks on the worker pool, the BVH shared with the workers as arrays
     const v = new Float64Array(g.numPoints);
     const run = parallelMap('occlusion', {
-      count: g.numPoints, args: opts,
-      inputs: { P: g.P, N: getPointNormals(g), sel }, results: { out: v }, shared: scene.toArrays(),
+      count: g.numPoints, args: opts, inputs: { P: g.P, N: getPointNormals(g), sel }, results: { out: v }, shared: scene.toArrays(),
     }, { minElements: Math.ceil(32768 / Math.max(1, p.samples)) });
     return andThen(run, () => finish(v));
   },

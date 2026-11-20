@@ -10,7 +10,7 @@
 // Host-agnostic: no I/O.
 import { Geometry } from './geometry.ts';
 import type { Vec3 } from './math.ts';
-import { buildEdges, connectivity, pointNeighbors, triangulate } from './topology.ts';
+import { buildEdges, connectivity, pointNeighbors, primNormals, triangulate } from './topology.ts';
 import { halfEdges } from './halfedge.ts';
 import { EDGE_BAND, KDTree, TriBVH, invDir } from './spatial.ts';
 import { trianglesContact } from './tritri.ts';
@@ -630,6 +630,109 @@ export function rayMeasure(
     out[i] = acc / S;
   }
   return out;
+}
+
+// ---------------------------------------------------------------- per face rays
+
+/** Points spread over polygons, each with its polygon's normal: the origins of per-face ray measures. */
+export interface FaceSamples {
+  P: Float64Array;
+  /** the polygon normal (Newell) of the face each point is on */
+  N: Float64Array;
+  /** prim of each point */
+  face: Int32Array;
+}
+
+/**
+ * Points spread over the faces: at least `perFace` on each polygon (area above zero) and more in proportion to its
+ * area on large ones (as many as `perFace` times its area over the mean area, at most 64 times `perFace`), so a large
+ * polygon is sampled all over and not at its corners. The points of a face are placed by a low discrepancy sequence
+ * over its triangles, by area; nothing is random, so the result is the same on every run. `faces` (a prim mask)
+ * limits the polygons.
+ */
+export function faceSamples(g: Geometry, perFace = 4, faces?: ArrayLike<number> | null): FaceSamples {
+  const per = Math.max(1, Math.floor(perFace) || 1);
+  const { tris, triPrim } = triangulate(g, faces);
+  const nt = triPrim.length, P = g.P, vp = g.vertexPoint, FN = primNormals(g);
+  const triA = new Float64Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const a = vp[tris[t * 3]] * 3, b = vp[tris[t * 3 + 1]] * 3, c = vp[tris[t * 3 + 2]] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], wx = P[c] - P[a], wy = P[c + 1] - P[a + 1], wz = P[c + 2] - P[a + 2];
+    triA[t] = Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2;
+  }
+  // triangles of a polygon are consecutive (triangulate walks the prims in order)
+  const runs: number[] = [];
+  let total = 0, faceCount = 0;
+  for (let t0 = 0; t0 < nt;) {
+    let t1 = t0, area = 0;
+    while (t1 < nt && triPrim[t1] === triPrim[t0]) area += triA[t1++];
+    runs.push(t0, t1, area);
+    if (area > 0) { total += area; faceCount++; }
+    t0 = t1;
+  }
+  const mean = faceCount ? total / faceCount : 0;
+  const outP: number[] = [], outN: number[] = [], outF: number[] = [];
+  for (let r = 0; r < runs.length; r += 3) {
+    const t0 = runs[r], t1 = runs[r + 1], area = runs[r + 2];
+    if (!(area > 0)) continue;
+    const prim = triPrim[t0], n = Math.min(per * 64, Math.max(per, Math.ceil((per * area) / mean)));
+    let t = t0, acc = triA[t0];
+    for (let j = 0; j < n; j++) {
+      const x = ((j + 0.5) / n) * area;
+      while (t + 1 < t1 && acc < x) acc += triA[++t];
+      let s1 = (0.5 + (j + 1) * 0.7548776662466927) % 1, s2 = (0.5 + (j + 1) * 0.5698402909980532) % 1;
+      if (s1 + s2 > 1) { s1 = 1 - s1; s2 = 1 - s2; }
+      const a = vp[tris[t * 3]] * 3, b = vp[tris[t * 3 + 1]] * 3, c = vp[tris[t * 3 + 2]] * 3;
+      for (let k = 0; k < 3; k++) outP.push(P[a + k] + (P[b + k] - P[a + k]) * s1 + (P[c + k] - P[a + k]) * s2);
+      outN.push(FN[prim * 3], FN[prim * 3 + 1], FN[prim * 3 + 2]);
+      outF.push(prim);
+    }
+  }
+  return { P: Float64Array.from(outP), N: Float64Array.from(outN), face: Int32Array.from(outF) };
+}
+
+/** The mean of a value per sample over each face's samples; faces with none get `fill`. */
+export function faceMeans(s: FaceSamples, v: ArrayLike<number>, numPrims: number, fill: number): Float64Array {
+  const sum = new Float64Array(numPrims), cnt = new Int32Array(numPrims);
+  for (let i = 0; i < s.face.length; i++) { sum[s.face[i]] += v[i]; cnt[s.face[i]]++; }
+  const out = new Float64Array(numPrims);
+  for (let p = 0; p < numPrims; p++) out[p] = cnt[p] ? sum[p] / cnt[p] : fill;
+  return out;
+}
+
+/** What `faceVisibility` casts: rays over the whole hemisphere, unlimited, from a hair above the face. */
+export function visibilityRays(g: Geometry, rays = 32): RaySampleOptions {
+  return { mode: 'occlusion', samples: rays, maxDistance: 0, bias: 1e-4 * (bboxDiagonal(g) || 1), coneAngle: 90, seed: 0 };
+}
+
+/**
+ * A point that sees this share of its hemisphere (or more) counts as fully open: a face standing on a wall or the floor
+ * sees a half-space at most, and is no less visible for it.
+ */
+export const OPEN_SHARE = 0.5;
+
+/**
+ * Per prim, how open it is from the rays of its samples (`blocked`: the share of each sample's rays that was blocked):
+ * the mean over its samples of min(1, escaped share / OPEN_SHARE); 1 where a prim has no samples.
+ */
+export function visibilityFromRays(g: Geometry, s: FaceSamples, blocked: ArrayLike<number>): Float64Array {
+  const open = new Float64Array(s.face.length), seen = new Uint8Array(g.numPrims);
+  for (let i = 0; i < open.length; i++) { open[i] = Math.min(1, (1 - blocked[i]) / OPEN_SHARE); seen[s.face[i]] = 1; }
+  const vis = faceMeans(s, open, g.numPrims, 1);
+  for (let p = 0; p < g.numPrims; p++) if (!seen[p]) vis[p] = 1;
+  return vis;
+}
+
+/**
+ * How much of the sky each face sees, per prim: rays from points spread over the face (faceSamples: by area, at least
+ * `perFace`) over its hemisphere against `scene` (the geometry and its surroundings, as one RayScene), unlimited; the
+ * fraction that escapes, taken as 1 from OPEN_SHARE (a half-space) up, averaged over the face. 1 = open, 0 = enclosed or
+ * against something, between for a face part of which is covered. Prims that are not polygons, have no area or are
+ * outside `faces` read 1.
+ */
+export function faceVisibility(g: Geometry, scene: RayScene, perFace = 4, faces?: ArrayLike<number> | null, rays = 32): Float64Array {
+  const s = faceSamples(g, perFace, faces);
+  return visibilityFromRays(g, s, rayMeasure(s.P, s.N, scene, visibilityRays(g, rays)));
 }
 
 // ---------------------------------------------------------------- closest points
