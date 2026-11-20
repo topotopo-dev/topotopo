@@ -484,8 +484,11 @@ const FOCUS_REACH = 1.5;
 /** Softness of the chip, bare and core outlines, in units of the wear field. */
 const WEAR_EDGE = 0.03;
 
-/** The chip threshold of the wear field for an amount (0 = nothing wears; larger amounts only add wear). */
-export const wearThreshold = (amount: number) => 1 - 0.85 * Math.max(0, Math.min(1, amount));
+/**
+ * The chip threshold of the wear field for an amount (larger amounts only add wear). At 0 nothing wears: the field
+ * reads above 1 at corners, so the threshold there is out of its reach.
+ */
+export const wearThreshold = (amount: number) => (amount > 0 ? 1 - 0.85 * Math.min(1, amount) : Infinity);
 
 function cookEdgeWear(ctx: CookContext) {
   const p = ctx.p;
@@ -718,9 +721,9 @@ const DEEPEN_FROM = 0.6, DEEPEN_TO = 0.25;
  * Per face (wearRegions) the level its chips start at: the threshold t of the amount, or where the wear field passes t
  * on more than half the cap of the amount (wearCap) of the face's area, the field value above which the area is
  * cappedShare of it, so its most worn texels (the edges, the corners first) chip and its middle keeps paint; a larger
- * amount never raises it. With it, how far the cap binds (0 at half the cap, 1 at the cap), which brings bare and core
- * closer to the chip level as amount rises past DEEPEN_FROM: wear still grows on a face held at its cap. Area per sample
- * from its triangle's texel size.
+ * amount never raises it. With it, how far the full cap (WEAR_CAP) binds (0 at half of it, 1 at it), which brings bare
+ * and core closer to the chip level as amount rises past DEEPEN_FROM: wear still grows on a face held at its cap. Area
+ * per sample from its triangle's texel size.
  */
 function faceLevels(b: Bake, mesh: SurfaceMesh, R: { triRegion: Int32Array; count: number }, Wu: Float32Array, t: number, amount: number, deadline = 0): { level: Float64Array; bind: Float64Array; capped: number } {
   const s = b.s, n = s.n, nr = R.count, tt = mesh.triTexel, reg = R.triRegion;
@@ -734,6 +737,9 @@ function faceLevels(b: Bake, mesh: SurfaceMesh, R: { triRegion: Int32Array; coun
     if (Wu[i] >= t) over[c] += a;
   }
   const level = new Float64Array(nr).fill(t), bind = new Float64Array(nr), cap = wearCap(amount);
+  // measured against the full cap, so it only grows with amount (the share does; the cap of the amount grows faster
+  // below 0.8, and a bind measured against it could fall)
+  for (let c = 0; c < nr; c++) if (area[c] > 0) bind[c] = Math.max(0, Math.min(1, (over[c] / area[c] - WEAR_CAP / 2) / (WEAR_CAP / 2)));
   const lists: number[][] = [];
   let capped = 0;
   if (cap > 0) for (let c = 0; c < nr; c++) if (area[c] > 0 && over[c] > (cap / 2) * area[c]) { lists[c] = []; capped++; }
@@ -743,11 +749,12 @@ function faceLevels(b: Bake, mesh: SurfaceMesh, R: { triRegion: Int32Array; coun
       const L = lists[c];
       if (!L) continue;
       const sh = over[c] / area[c], keep = cappedShare(sh, cap) * area[c];
-      bind[c] = Math.min(1, (sh - cap / 2) / (cap / 2));
       L.sort((x, y) => Wu[y] - Wu[x] || x - y);
-      // the level where the area at or above it reaches the share kept
-      let acc = 0, lv = Wu[L[0]];
-      for (const i of L) { const tr = s.tri[i], a = tt[tr * 2] * tt[tr * 2 + 1]; if (acc + a > keep) break; acc += a; lv = Wu[i]; }
+      // the level is the field of the first texel past the share kept: the texels above it are the share, and a larger
+      // amount (more share kept, the same most worn texels first) only moves it down the same list, never above t of a
+      // smaller amount; none past it: t
+      let acc = 0, lv = t;
+      for (const i of L) { const tr = s.tri[i], a = tt[tr * 2] * tt[tr * 2 + 1]; if (acc + a > keep) { lv = Wu[i]; break; } acc += a; }
       level[c] = Math.max(t, lv);
     }
   }
