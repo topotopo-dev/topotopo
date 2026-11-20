@@ -4,7 +4,8 @@
 // a column, distance to a named part, shelter under a ledge, cavity in a groove, occlusion in a corner, 3D noise that
 // does not change when the mesh is re-triangulated); occlusion up to a concave crease and a contact line against
 // bake_ao; points inside another part (buried) never reaching a texel that is seen; the contact rule one-sided; surface
-// curvature on a decimated sphere with a rim against the dihedral bake, the same at any texel density, concave where
+// curvature on a decimated sphere with a rim against the dihedral bake, the same at any texel density, each radius of a
+// bake with several the same as baked alone, concave where
 // parts meet, thinned within tolerance; islands smaller than a texel, triangles with no uv area and hidden faces;
 // inconsistent windings and normals; every refusal and the time limit; the same bits with and without the worker pool,
 // at two sizes and worker counts, for a seed, from the memo and for two prim orders; one rasterisation shared by the
@@ -423,6 +424,27 @@ section('surface curvature does not depend on texel density');
   check(v.every((x) => Math.abs(x - v[0]) < 0.05) && Math.min(...v) > 0.85, `bake_curvature: the top within 2 mm of the edge reads ${fmt(v)} at side densities 1 / 0.5 / 0.25 (within 0.05, above 0.85)`);
   const m = [await at(1, 'bake_measure'), await at(0.25, 'bake_measure')];
   check(Math.abs(m[0] - m[1]) < 0.05 && Math.min(...m) > 0.85, `bake_measure: ${fmt(m)} at side densities 1 / 0.25`);
+}
+
+section('curvature at several radii in one bake: each radius as it bakes alone');
+{
+  const shapes: [string, Nodes, string, number][] = [
+    ['a 30 cm box', { s0: { type: 'box', params: { size: [0.3, 0.3, 0.3] } }, su: { type: 'uv_unwrap', in: ['s0'], params: { resolution: 128 } } }, 'su', 128],
+    ['a bevelled box', { s0: { type: 'box', params: { size: [0.4, 0.3, 0.3] } }, s1: { type: 'poly_bevel', in: ['s0'], params: { offset: 0.004 } }, su: { type: 'uv_unwrap', in: ['s1'] } }, 'su', 256],
+  ];
+  const r1 = { by: 'curvature', name: 'fine', radius: 0.004 }, r2 = { by: 'curvature', name: 'wide', radius: 0.02, side: 'convex' }, r3 = { by: 'curvature', name: 'wide_in', radius: 0.02, side: 'concave' };
+  const occ = { by: 'occlusion', name: 'occ' };
+  const sets: [string, any[]][] = [['two radii', [r1, r2]], ['two radii, the other order', [r2, r1]], ['an occlusion and two radii, one of them twice', [occ, r2, r1, r3]]];
+  for (const [label, nodes, mesh, res] of shapes) {
+    const bake = async (measures: any[]) => img(await cook({ ...nodes, m: { type: 'bake_measure', in: [mesh], params: { resolution: res, measures } } }, 'm'), 'm');
+    const alone: Record<string, Float32Array> = {};
+    for (const m of [r1, r2, r3, occ]) alone[m.name] = (await bake([m])).layer(m.name)!;
+    for (const [set, ms] of sets) {
+      const im = await bake(ms);
+      const bad = ms.map((m) => { const a = im.layer(m.name)!, b = alone[m.name]; let nan = 0, diff = 0; for (let k = 0; k < a.length; k++) { if (!Number.isFinite(a[k])) nan++; if (!Object.is(a[k], b[k])) diff++; } return { name: m.name, nan, diff }; });
+      check(bad.every((x) => x.nan === 0 && x.diff === 0), `${label} at ${res}, ${set}: ${bad.map((x) => `${x.name} ${x.diff} texels differ from its bake alone, ${x.nan} not finite`).join('; ')}`);
+    }
+  }
 }
 
 section('curvature thinned at a large radius stays within tolerance');

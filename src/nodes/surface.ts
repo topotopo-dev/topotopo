@@ -284,11 +284,13 @@ function cookMeasure(ctx: CookContext) {
     for (const m of cloudMs) if (m.by === 'curvature') cols.set(m, { src: 'curv', col: radii.indexOf(m.f.radius) });
     const nr = hemi.length + cones.length, c = sc.cloud, M = cloudMs.length;
     const CV = new Float32Array(c.n * M);
-    const fill = (src: 'ray' | 'curv', col: number, V: Arr, stride: number) => {
+    // the measures in column col of their source take V[i * stride + at] (rays: every ray column per point; curvature:
+    // one value per point for each radius)
+    const fill = (src: 'ray' | 'curv', col: number, V: Arr, stride: number, at: number) => {
       cloudMs.forEach((m, j) => {
         const e = cols.get(m)!;
         if (e.src !== src || e.col !== col) return;
-        for (let i = 0; i < c.n; i++) CV[i * M + j] = V[i * stride + col];
+        for (let i = 0; i < c.n; i++) CV[i * M + j] = V[i * stride + at];
       });
     };
     const sub: (() => unknown)[] = [];
@@ -304,13 +306,13 @@ function cookMeasure(ctx: CookContext) {
       const args: SurfaceRayArgs = { samples: Math.round(p.samples), bias, seed: Number(p.seed) || 0, hemi, cones, contact: contact ? 2 * bias : 0, deadline };
       ctx.stat('rays', c.n * args.samples * (1 + cones.length));
       return seq(runRays(run, sc, scene(), contact, args, CB), (V: Arr) => {
-        for (let col = 0; col < nr; col++) fill('ray', col, V, nr);
+        for (let col = 0; col < nr; col++) fill('ray', col, V, nr, col);
         ctx.stage('rays', performance.now() - t0);
       });
     });
     radii.forEach((r, ri) => sub.push(() => {
       const t0 = performance.now();
-      return seq(curvatureShared(sc, r, surPolys ? sur : null, CB, run, deadline), (V: Arr) => { fill('curv', ri, V, 1); ctx.stage(`curvature ${mm(r)}`, performance.now() - t0); });
+      return seq(curvatureShared(sc, r, surPolys ? sur : null, CB, run, deadline), (V: Arr) => { fill('curv', ri, V, 1, 0); ctx.stage(`curvature ${mm(r)}`, performance.now() - t0); });
     }));
     sub.push(() => {
       const t0 = performance.now();
