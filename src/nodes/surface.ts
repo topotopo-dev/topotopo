@@ -9,7 +9,7 @@ import { interpolate, memoBake, normalize3 } from '../core/bake.ts';
 import { band } from '../core/pcg.ts';
 import { hashNumber, hashString } from '../core/random.ts';
 import { triangulate } from '../core/topology.ts';
-import { runCurvature, runDistance, runInterp, runNoise, runRays, then } from '../core/surface.ts';
+import { runCurvature, runDistance, runInterp, runNoise, runRays, afterRun } from '../core/surface.ts';
 import type { ConeMeasure, HemiMeasure, SurfaceRayArgs } from '../core/surface.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
@@ -189,7 +189,7 @@ function shaper(m: Measure, extent: number): (raw: number) => number {
 const NEUTRAL: Record<Kind, number> = { facing: 90, height: 0, distance: Infinity, noise: 0.5, occlusion: 1, cavity: 0, shelter: 0, visibility: 1, curvature: 0, group: 0 };
 
 type Arr = Float32Array;
-const seq = <T>(x: T | Promise<T>, f: (v: T) => any) => then(x as any, f as any);
+const seq = <T>(x: T | Promise<T>, f: (v: T) => any) => afterRun(x as any, f as any);
 
 function cookMeasure(ctx: CookContext) {
   const ms = parseMeasures(ctx);

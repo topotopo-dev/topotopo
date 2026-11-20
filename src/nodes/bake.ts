@@ -16,7 +16,7 @@ import {
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
 import { bakeMemoStats } from '../core/bake.ts';
-import { runCurvature, runInterp, surfaceCloud, surfaceMesh, then } from '../core/surface.ts';
+import { runCurvature, runInterp, surfaceCloud, surfaceMesh, afterRun } from '../core/surface.ts';
 import type { SurfaceCloud, SurfaceMesh } from '../core/surface.ts';
 import { RayScene, bboxDiagonal } from '../core/analysis.ts';
 import type { RaySampleOptions } from '../core/analysis.ts';
@@ -511,10 +511,10 @@ defineBake({
       const sc = cloudOf(b, mesh, k);
       const run = (kernel: string, job: any, o?: any) => ctx.parallelMap(kernel, job, o);
       let t0 = performance.now();
-      return then(runCurvature(run, sc, r), (CV) => {
+      return afterRun(runCurvature(run, sc, r), (CV) => {
         ctx.stage('curvature', performance.now() - t0);
         t0 = performance.now();
-        return then(runInterp(run, b.s, b.tris, mesh, sc, CV, 1), (V) => {
+        return afterRun(runInterp(run, b.s, b.tris, mesh, sc, CV, 1), (V) => {
           ctx.stage('interpolation', performance.now() - t0);
           return shape(V);
         });

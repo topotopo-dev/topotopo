@@ -792,7 +792,7 @@ export function bakeDistanceRange(a: { maxD: number }, A: Record<string, any>, b
 export type RunKernel = (kernel: string, job: { count: number; args?: any; inputs?: Record<string, any>; results?: Record<string, any>; shared?: Record<string, any> }, opts?: { minElements?: number }) => unknown;
 
 /** f(x) now when x is a value, after it when x is a promise (keeps cooks on the cooking thread synchronous). */
-export const then = <T, U>(x: T | Promise<T>, f: (v: T) => U | Promise<U>): U | Promise<U> => (x instanceof Promise ? x.then(f) : f(x));
+export const afterRun = <T, U>(x: T | Promise<T>, f: (v: T) => U | Promise<U>): U | Promise<U> => (x instanceof Promise ? x.then(f) : f(x));
 
 /** What every surface measure of one mesh, uv and atlas size shares. */
 export interface SurfaceMesh {
@@ -868,13 +868,13 @@ export function runRays(run: RunKernel, sc: SurfaceCloud, scene: RayScene, conta
   const shared: Record<string, any> = { ...scene.toArrays() };
   if (contact) { const a = contact.arrays(); Object.assign(shared, { cT: a.T, cnodes: a.nodes, cchild: a.child, corder: a.order, ctriPt: a.triPt }); }
   const rays = Math.max(1, args.samples * Math.max(1, m));
-  return then(run('surface_rays', { count: c.n, args, inputs: { P: c.P, N: c.N, FN: sc.FN }, results: { V }, shared }, { minElements: Math.ceil(32768 / rays) }) as any, () => V);
+  return afterRun(run('surface_rays', { count: c.n, args, inputs: { P: c.P, N: c.N, FN: sc.FN }, results: { V }, shared }, { minElements: Math.ceil(32768 / rays) }) as any, () => V);
 }
 
 /** Surface curvature per cloud point at `radius`. */
 export function runCurvature(run: RunKernel, sc: SurfaceCloud, radius: number): Float32Array | Promise<Float32Array> {
   const c = sc.cloud, V = new Float32Array(c.n);
-  return then(run('surface_curvature', { count: c.n, args: { radius }, results: { V }, shared: { ...sc.grid, CP: c.P, CN: c.N, CW: c.wt, CPiece: c.piece } }) as any, () => V);
+  return afterRun(run('surface_curvature', { count: c.n, args: { radius }, results: { V }, shared: { ...sc.grid, CP: c.P, CN: c.N, CW: c.wt, CPiece: c.piece } }) as any, () => V);
 }
 
 /** Cloud values (m per point) at every texel sample: n × m values. */
@@ -882,18 +882,18 @@ export function runInterp(run: RunKernel, s: { n: number; tri: Int32Array; b1: F
   const c = sc.cloud, V = new Float32Array(s.n * m);
   const args: InterpArgs = { m };
   const shared = { ...sc.grid, tris, VP: mesh.VP, VN: mesh.VN, TR: sc.TR, TPiece: mesh.triPiece, CP: c.P, CN: c.N, CW: c.wt, CPiece: c.piece, CV, TS: c.start, TPts: c.pts };
-  return then(run('surface_interp', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared }) as any, () => V);
+  return afterRun(run('surface_interp', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared }) as any, () => V);
 }
 
 /** 3D noise 0..1 at every texel sample. */
 export function runNoise(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, VP: Float64Array, args: NoiseArgs): Float32Array | Promise<Float32Array> {
   const V = new Float32Array(s.n);
-  return then(run('bake_noise', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared: { tris, VP } }) as any, () => V);
+  return afterRun(run('bake_noise', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared: { tris, VP } }) as any, () => V);
 }
 
 /** Distance (metres) from every texel sample to the target's surface; Infinity beyond maxD. */
 export function runDistance(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, VP: Float64Array, target: TriBVH, maxD: number): Float32Array | Promise<Float32Array> {
   const V = new Float32Array(s.n), b = target.arrays();
   const shared = { T: b.T, nodes: b.nodes, child: b.child, order: b.order, triPt: b.triPt, tris, VP };
-  return then(run('bake_distance', { count: s.n, args: { maxD }, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared }) as any, () => V);
+  return afterRun(run('bake_distance', { count: s.n, args: { maxD }, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared }) as any, () => V);
 }
