@@ -5,7 +5,7 @@ import { NodeError } from '../graph/types.ts';
 import { Geometry, sameImage } from '../core/geometry.ts';
 import { referenceableImages } from '../core/image.ts';
 import type { Image } from '../core/image.ts';
-import { MATERIAL_ATTRIB, MATERIAL_KINDS, normalizeMaterial, readMaterials, writeMaterials } from '../core/materials.ts';
+import { MATERIAL_ATTRIB, MATERIAL_KINDS, normalizeMaterial, parsePacking, readMaterials, writeMaterials } from '../core/materials.ts';
 import type { Material } from '../core/materials.ts';
 import { P, mask } from './util.ts';
 
@@ -45,10 +45,14 @@ defineNode({
     alpha_cutoff: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'mask: discard where material alpha × texture alpha × vertex Alpha is below this value' },
     double_sided: { type: 'bool', default: false, desc: 'render both faces', aliases: ['doublesided', 'two_sided'] },
     unlit: { type: 'bool', default: false, desc: 'unlit shading (KHR_materials_unlit)', aliases: ['emissive_only', 'flat'] },
-    kind: { type: 'enum', options: ['', ...MATERIAL_KINDS], default: '', desc: 'what the material is made of and how it ages ("" = not said): painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, or keep (leave the part as it is); stored in the table, ignored by exporters, read by bake_material (a kind written here also applies to a material copied from input 1)', aliases: ['material_kind'] },
+    kind: { type: 'enum', options: ['', ...MATERIAL_KINDS], default: '', desc: 'what the material is made of and how it ages ("" = not said): painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_concrete, painted_plaster, painted_wood, bare_wood, asphalt, ceramic, decal, or keep (leave the part as it is); stored in the table, ignored by exporters, read by bake_material (a kind written here also applies to a material copied from input 1)', aliases: ['material_kind'] },
     base_color_map: { type: 'path', default: '', desc: 'base colour texture (sRGB PNG/JPEG path, or "image:<name>" for an image the geometry carries; "" = none); uses the uv attribute', aliases: ['basecolor_map', 'albedo_map', 'diffuse_map', 'color_map', 'basecolor_texture', 'base_color_texture'] },
     normal_map: { type: 'path', default: '', desc: 'tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none)', aliases: ['normal_texture', 'bump_map'] },
     roughness_map: { type: 'path', default: '', desc: 'roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel', aliases: ['roughness_texture', 'rough_map'] },
+    packed_map: { type: 'path', default: '', desc: 'packed map (PNG/JPEG path or "image:<name>"; "" = none) whose channels packing names; the glTF / Unreal occlusion-roughness-metallic map by default', aliases: ['orm_map', 'mask_map', 'arm_map'] },
+    packing: { type: 'string', default: 'orm', desc: 'channel layout of packed_map, one letter per channel R, G, B (A): o occlusion, r roughness, m metallic, h height, s smoothness, x unused; "orm" (glTF, Unreal), "hro" (R height, G roughness, B occlusion), "rma", "moxs" (a Unity HDRP mask map); exporters write the map as it is, so only "orm" reads right in glTF', aliases: ['packed_layout', 'channel_layout'] },
+    normal_format: { type: 'enum', options: ['opengl', 'directx'], default: 'opengl', desc: 'green-channel convention of normal_map: opengl (+Y up: glTF, Blender) or directx (Unreal); bakes read it, exporters write the map as it is', aliases: ['normal_convention'] },
+    tile: { type: 'float', default: 0, min: 0, desc: 'metres one repeat of the maps covers on a metric uv (1 uv unit = 1 m), e.g. 3 for a concrete map tiling every 3 m; 0 = the maps fill 0..1 of the uv. Bakes read the maps at uv / tile; exporters write uv and maps as they are (the engine material does the tiling)', aliases: ['tile_size', 'tiling_metres', 'texture_size'] },
   },
   example: { type: 'material', params: { name: 'brick', base_color: '#a5462e', roughness: 0.9, group: '@P.y<0.5' } },
   // with "from", input 1 is read for that one material: a merge of material outputs there leaves out the ones after
@@ -85,10 +89,15 @@ defineNode({
         baseColor: p.base_color, metallic: p.metallic, roughness: p.roughness, emissive: p.emissive,
         alpha: p.alpha, doubleSided: !!p.double_sided, unlit: !!p.unlit,
         alphaMode: p.alpha_mode, alphaCutoff: p.alpha_cutoff,
-        textures: { baseColor: p.base_color_map, normal: p.normal_map, roughness: p.roughness_map },
+        textures: { baseColor: p.base_color_map, normal: p.normal_map, roughness: p.roughness_map, orm: p.packed_map },
+        packing: p.packing, normalFormat: p.normal_format, tile: p.tile,
       });
     }
+    const packing = parsePacking(p.packing);
+    if (typeof packing === 'string') throw new NodeError(packing);
     if (p.kind) entry = { ...entry, kind: p.kind };
+    // a stated tile, layout or convention also applies to a material copied from input 1
+    if (hasInput(1)) entry = normalizeMaterial({ ...entry, ...(p.tile > 0 ? { tile: p.tile } : {}), ...(p.packing && p.packing !== 'orm' ? { packing: p.packing } : {}), ...(p.normal_format === 'directx' ? { normalFormat: 'directx' } : {}) });
     // copied maps join the target's images; one that differs from a target image of the same name is renamed
     // "<material>_<map>" (as Geometry.merge does), and the entry follows
     const have = referenceableImages(g);
