@@ -723,27 +723,28 @@ NAMES: every image is named after the node that made or last filtered it ("rust_
   for different images or materials (two package outputs whose maps are all "basecolor"), the later one is renamed
   ("<material>_basecolor", "paint_2") with its material table and prim "material", so each piece keeps its own maps
   in renders, the viewer and every export.
-GENERATORS (no input, resolution [w, h], name): tex_noise (perlin/simplex/value/worley × fbm/ridged/turbulence,
-  tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
+GENERATORS (no input, resolution [w, h], texture_size, name): tex_noise (feature = a cell in metres; perlin/simplex/value/worley
+  × fbm/ridged/turbulence, tileable default: whole cells per octave; simplex tiles on a 4D torus) · tex_pattern (bricks, tiles, checker, stripes,
   hex, dots: 1 on the cells, 0 in the gaps; grid is a line mask, 1 on the lines, 0 in the cells: for grooved cells use
-  tiles; gap = mortar or line width, bevel, variation; layer "id" = random per cell) · tex_cells (Voronoi distance /
-  edges / id / crackle / crystal: a tilted flat facet per cell) · tex_gradient · tex_constant (one grey value, or an
+  tiles; gap = mortar or line width, bevel, variation; layer "id" = random per cell) · tex_cells (cell = a cell in metres; Voronoi
+  distance / edges / id / crackle / crystal: a tilted flat facet per cell) · tex_gradient · tex_constant (one grey value, or an
   RGBA colour with channels:"rgba"; input 0 = an image to take the size from) · tex_shape (disc, square, polygon, star,
-  ring; falloff; tile) · tex_sdf_shape (the signed distance in metres to a disc, box, polygon, star, capsule or cross;
-  corner rounding; tile; see SHAPES below) · tex_grunge (dirt / leaks / spots with a coverage fraction and edge
-  contrast) · tex_splatter (blobs) · tex_scratches (strokes) · tex_text (font, weight: 100 thin … 400 regular … 900
+  ring; fill = radius as a fraction of half a tile; falloff; tile) · tex_sdf_shape (the signed distance in metres to a
+  disc, box, polygon, star, capsule or cross; corner rounding; tile; see SHAPES below) · tex_grunge (dirt / leaks /
+  spots with a coverage fraction and edge contrast; feature in metres) · tex_splatter (blobs; blob_radius in metres) ·
+  tex_scratches (strokes; stroke_length and stroke_width in metres) · tex_text (text_height in metres; font, weight: 100 thin … 400 regular … 900
   black on the wght axis of a variable font, e.g. a Noto Sans TC variable file; a static font keeps its own weight).
-FILES: image_file {path:"inputs/brick.png"} loads a PNG (8/16-bit, grey or colour) as an image named after the node
-  (name sets another; the file node reads .png the same way, named after the file); layers auto/grey/rgba; srgb
+FILES: image_file {path:"inputs/brick.png", texture_size: 2} loads a PNG (8/16-bit, grey or colour) as an image named after the node
+  (name sets another; the file node reads .png the same way, named after the file); texture_size = the metres its width covers; layers auto/grey/rgba; srgb
   (default on) keeps the stored values, which suits colour and data maps alike (off only for linear-light colour).
   Input 0 = a geometry to add it to, so image_file nodes chain. People drop their own textures and masks into inputs/.
 FILTERS (input 0 = an image; image/layer pick what to process, the result replaces that layer and takes the filter's
   name; every other image and the mesh pass through): tex_blend (normal, add, subtract, multiply, screen, overlay, min,
-  max, difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (gaussian/box, tileable
-  keeps the mean) · tex_directional_blur (motion blur, length in metres: brushed metal from noise; symmetric off = a
+  max, difference, divide; opacity; input 2 = mask) · tex_levels · tex_curves (ramp) · tex_blur (blur = radius in metres;
+  gaussian/box, tileable keeps the mean) · tex_directional_blur (motion blur, length in metres: brushed metal from noise; symmetric off = a
   trail) · tex_slope_blur (smear input 0 along the slopes of input 1 for distance metres: blur, min = eroded ragged
-  edges, max = grown) · tex_warp (directional/slope/vector by input 1; nonuniform adds an angle map on input 2;
-  multi averages several directions) · tex_transform (offset, rotate, scale, tile) · tex_make_tile (blend with
+  edges, max = grown) · tex_warp (directional/slope/vector by input 1, distance in metres; nonuniform adds an angle map on
+  input 2; multi averages several directions) · tex_transform (shift in metres, rotate, scale, tile) · tex_make_tile (blend with
   half-shifted copies so a photo or non-tileable noise tiles; noise = a wandering patch edge) · tex_edge_detect
   (sobel, or outline / inner / outer: a line line_width metres wide along a mask's outline, roundness 1 = a ridge) ·
   tex_invert · tex_threshold · tex_clamp · tex_quantize (levels; round or floor = posterize) · tex_auto_levels (own
@@ -751,16 +752,16 @@ FILTERS (input 0 = an image; image/layer pick what to process, the result replac
   tex_histogram_select (a band position ± range/2, contrast = edge hardness) · tex_histogram_scan (THE mask maker:
   coverage 0.3 = the brightest 30 % turn white, whatever the input's range; or position = a value cut; contrast =
   hardness; stat coverage) ·
-  tex_normal_from_height (physical: depth = metres a value of 1 stands, size = metres the image spans, so the slope is
-  real and the same at any resolution; paint grain 0.0003, hammered metal 0.002, bricks 0.015; opengl/directx) ·
+  tex_normal_from_height (physical: depth = metres a value of 1 stands; the texel size comes from the image, so the slope
+  is real and the same at any resolution; paint grain 0.0003, hammered metal 0.002, bricks 0.015; opengl/directx) ·
   tex_normal_blend (detail normal map over a base, e.g. micro grain over a bake: mode rnm (default, reoriented: both
   reliefs keep their depth) | udn | linear; strength scales the detail; input 2 = mask; never tex_blend overlay on
   normals) · tex_normal_normalize (unit vectors again after blur/resize/blend) · tex_normal_invert (green = OpenGL ↔
-  DirectX; red; both) · tex_height_from_normal (integrates a normal map back to a height: same depth and size as
+  DirectX; red; both) · tex_height_from_normal (integrates a normal map back to a height: the same depth as
   tex_normal_from_height round-trips; FFT when tileable; stat relief in metres) · tex_curvature (from a normal map:
   0.5 flat, radius = the bend radius in metres that reads full white/black; blur metres for broader curvature;
-  layers convex/concave, as bake_curvature) · tex_ao (ground-truth AO of a height in metres: depth, size, radius;
-  a plane stays white; same result at any resolution; prefer it to tex_height_to_ao, whose units are image widths)
+  layers convex/concave, as bake_curvature) · tex_ao (ground-truth AO of a height in metres: depth, radius;
+  a plane stays white; same result at any resolution; prefer it to tex_height_to_ao, the older horizon march)
   · tex_colorize (gradient map) · tex_channel (pack inputs 0..3 into RGBA, e.g. ORM; or extract) · tex_tile_sampler
   (stamp input 0 on a grid with jitter/rotation/scale; mask input 1 = keep probability; inputs 2/3/4 = scale,
   rotation (0..1 = 360°) and intensity maps read at each instance; stamps:"random" picks among every image of input
@@ -769,10 +770,14 @@ FILTERS (input 0 = an image; image/layer pick what to process, the result replac
   rest).
   To process a layer as its own image, copy it out first (tex_output layer:"id") and filter that.
   Inputs of different sizes are resized to the first input (bilinear up, area average down).
-UNITS: nodes with a size param measure in metres like tex_normal_from_height: size = metres the image width covers
-  (1 by default, so metres = image widths); their widths, radii and distances are metres, so the same graph gives the
-  same maps at 512 and 4096. Give every node of a material the same size (the uv tile's span on the model). Filters
-  with tileable (default on) read across the borders exactly like anywhere else.
+UNITS: every length in the texture nodes is in metres: a generator says how many metres its image covers (texture_size, 1 by default; a
+  bake writes its own) and a filter reads that from the image it works on, so one graph gives the same maps at 512 and 4096. On an atlas a bake
+  wrote (layers texel and island) a filter converts per texel and stays inside each island, so a blur of 2 mm is 2 mm on every island whatever
+  its density. Give every generator of one material the same texture_size (the uv tile's span on the model); filters with tileable (default on)
+  read across the borders exactly like anywhere else. Counts (strokes, blobs, pattern cells, tile-sampler instances) are per image: a larger
+  texture_size makes them larger, not more of them. Filters that still use the mean texel on an atlas whose texels are not square: warp,
+  slope blur, sobel edges, curvature, ao, sdf_op, sdf_to_mask and flood fill; blur, dilate, distance, sdf, bevel, outlines, directional
+  blur and normal from height give a circle in metres.
 SHAPES AND REGIONS (metres): an SDF image holds the signed distance in metres in C (negative inside). tex_sdf_shape
   makes one; tex_sdf_from_mask measures one from any mask (threshold; sub-pixel accurate) · tex_sdf_op (offset grows,
   round / fillet round convex / concave corners, stroke = a band on the outline, invert, redistance) ·
@@ -836,15 +841,15 @@ SEE IT: render of a geometry holding only images shows the "texture" view; rende
   colour maps on the mesh (texture × Cd, like glTF). inspect lists every image with size and per-layer ranges.
 EXPORT: glb/gltf embed the image textures as PNG (ORM = occlusionTexture + metallicRoughnessTexture); usda writes
   <name>_textures/<image>.png next to the file (ORM through orm_map r/g/b); format "textures" writes every image as
-  <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers); json keeps images losslessly; geo/obj/… skip them.
+  <dir>/<image>.png (layers: ["id"] or ["*"] for extra layers; "*" leaves out the bakes' texel layer, and the island layer is a 16-bit grey, island number + 1); json keeps images losslessly; geo/obj/… skip them.
 RECIPE (brick wall + worn crate; tileable stone, wood and metal from texture nodes: help {examples:["material_set"]}):
-  bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15} · ids = tex_output(bricks) {layer:"id"}
+  bricks = tex_pattern {pattern:"bricks", count:[4, 12], bevel:0.15, texture_size:1.6} · ids = tex_output(bricks) {layer:"id"}
   color = tex_blend(tex_colorize(grain mortar greys), tex_colorize(ids, brick reds), bricks as mask)
-  normal = tex_normal_from_height(bricks) {depth:0.035, size:1.6} · crate: uv_unwrap → bake_ao + bake_curvature →
+  normal = tex_normal_from_height(bricks) {depth:0.035} · crate: uv_unwrap → bake_ao + bake_curvature →
   tex_output layer "convex" → tex_blend subtract noise → tex_histogram_scan {coverage} = edge wear →
   tex_blend(wood, paint, wear) → tex_channel(ao, rough) = ORM → texture_to_material {base_color, orm}.
-  Detail on a bake: grain = tex_noise {scale:60} → grain_n = tex_normal_from_height {depth:0.0003, size:<uv span in m>}
-  → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.
+  Detail on a bake: grain = tex_noise {feature:0.0167, texture_size:<the bake's stat size: the metres its width covers>}
+  → grain_n = tex_normal_from_height {depth:0.0003} → tex_normal_blend(baked_normal, grain_n) {mode:"rnm"}.
 RECIPE (worn painted metal from texture nodes only; the metal of help {examples:["material_set"]}): plates and rivets → height →
   normal, tex_ao · edge wear = tex_curvature(normal) layer convex × tex_grunge chips → tex_slope_blur {mode:"max"}
   (ragged) → tex_histogram_scan {coverage:0.07} · steel = tex_directional_blur(fine noise) under the paint · per-plate

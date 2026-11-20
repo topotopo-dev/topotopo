@@ -9,7 +9,8 @@ import type { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER, imageRef, referenceableImages, sampleUV } from '../core/image.ts';
 import { MATERIAL_KINDS, primMaterials, readMaterials, resolveKind } from '../core/materials.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
-import { medianTexelSize, triangleTexelSizes } from '../core/texelsize.ts';
+import { bakedImageSize, triangleTexelSizes } from '../core/texelsize.ts';
+import { markGutter } from '../core/texscale.ts';
 import {
   applyPadding, averagedVertexNormals, bakeMemoGrew, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
@@ -76,6 +77,8 @@ export interface Bake {
   diag: number;
   /** per sample, 1 where the projection onto the high-res mesh found nothing (the "missed" layer) */
   missed?: Float32Array;
+  /** the memo key of this rasterisation (mesh, uv, size, supersampling and group) */
+  key: string;
 }
 
 function readUVNamed(g: Geometry, name: string): Float64Array | null {
@@ -117,7 +120,7 @@ export function setup(ctx: CookContext): Bake {
   if (s.outside) ctx.warn(`${type}: ${s.outside} triangle(s) reach outside the 0..1 uv square (clipped; UDIM tiles are not baked)`);
   if (!s.n) ctx.warn(`${type}: no texel is covered (uv collapsed or outside 0..1)`);
   return {
-    ctx, g, tris, triPrim, uv, skip: r.skip, s, diag: bboxDiagonal(g) || 1,
+    ctx, g, tris, triPrim, uv, skip: r.skip, s, key, diag: bboxDiagonal(g) || 1,
     // filled on first use: the memo counts them then
     get P() {
       if (!r.P) { r.P = interpolate(s, tris, vertexPositions(g), 3); bakeMemoGrew(g, key); }
@@ -131,6 +134,17 @@ export function setup(ctx: CookContext): Bake {
 }
 
 /**
+ * Metres the baked image's width covers: the median texel size over the image's texels (weighted by texels, so a model with
+ * big hidden faces on coarse texels does not set the size of the pixels that show) times the width; 1 when no triangle has an area.
+ */
+function bakeSize(b: Bake): number {
+  const sel = mask(b.g, 'prim', b.ctx.p.group);
+  let skip: Uint8Array | null = null;
+  if (sel) { skip = new Uint8Array(b.triPrim.length); for (let t = 0; t < skip.length; t++) skip[t] = sel[b.triPrim[t]] ? 0 : 1; }
+  return bakedImageSize(vertexPositions(b.g), b.uv, b.tris, b.s.W, b.s.H, skip);
+}
+
+/**
  * Resolve per-sample values into the output image (C + mask + extra layers) and pad it: one padding map (from the
  * coverage) serves every layer. Returns the image with its coverage and the padding map.
  */
@@ -138,6 +152,7 @@ export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, backgr
   const { ctx, s } = b, p = ctx.p;
   const { data, coverage } = resolve(s, vals, ch);
   const img = new Image(s.W, s.H, outName(ctx));
+  img.setSize(bakeSize(b));
   const pad = Math.max(0, Math.round(p.padding));
   const map = paddingMap(coverage, s.W, s.H, pad);
   applyPadding(data, ch, map, background);
@@ -147,7 +162,23 @@ export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, backgr
   for (const [k, e] of Object.entries(layers)) {
     const r = resolve(s, e.vals, e.ch);
     applyPadding(r.data, e.ch, map, e.background);
+    if (k === 'island') markGutter(r.data, coverage);
     img.set(k, r.data);
+  }
+  // every bake tells later nodes the texel size of each texel and its uv island (the nodes that make them themselves pass
+  // them in extra): one copy per mesh, uv, size and padding, shared by every bake of this cook, so it costs no more memory
+  if (!('texel' in layers)) {
+    const t0 = performance.now(), made = bakeMemoStats.made;
+    const shared = memoBake(b.g, `texel|${b.key}|${pad}`, () => {
+      const t = texelLayers(b, vertexPositions(b.g));
+      const T = resolve(s, t.texel.vals, 4), I = resolve(s, t.island.vals, 1);
+      applyPadding(T.data, 4, map, t.texel.background);
+      applyPadding(I.data, 1, map, t.island.background);
+      markGutter(I.data, coverage);
+      return { texel: T.data, island: I.data };
+    });
+    img.set('texel', shared.texel).set('island', shared.island);
+    if (bakeMemoStats.made !== made) ctx.stage('texel and island', performance.now() - t0);
   }
   img.set('mask', coverage);
   let covered = 0;
@@ -399,7 +430,7 @@ function defineBake(def: Omit<NodeDef, 'category' | 'inputs'> & { inputs?: NodeD
   defineNode({ category: 'texture', inputs: INPUTS, usesNodeName: NAMED_BY_NODE, ...def } as NodeDef);
 }
 
-export const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. ';
+export const BAKE_DOC = 'Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. ';
 
 // ---------------------------------------------------------------- ray bakes
 
@@ -925,7 +956,7 @@ defineBake({
     'one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. ' +
     BAKE_DOC + 'This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and ' +
     'island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about ' +
-    '(a texel they share holds the last one\'s values). Stats: size (metres the image width covers, the median texel size times the width) and texel_mm.',
+    '(a texel they share holds the last one\'s values). Stats: size (the metres the image width covers: the median texel size over the image\'s texels times the width, which the image carries for the filters after it) and texel_mm.',
   aliases: ['material_bake', 'bake_materials', 'bake_material_table'],
   inputs: [INPUTS[0]],
   params: {
@@ -1087,10 +1118,9 @@ defineBake({
     img.layers.delete('mask');
     for (const [k, v] of Object.entries(labels)) img.set(k, v);
     img.set('mask', coverage);
-    const texel = medianTexelSize(P3, b.uv, b.tris, b.s.W, b.s.H, skip);
     ctx.stat('materials', order.length);
-    ctx.stat('size', texel * b.s.W);
-    ctx.stat('texel_mm', texel * 1000);
+    ctx.stat('size', img.size);
+    ctx.stat('texel_mm', (img.size / b.s.W) * 1000);
     return wrapImage(b, img);
   },
 });

@@ -7,6 +7,7 @@ import { skylinePack } from '../core/uv.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { ParamDef } from '../graph/types.ts';
+import { runScaled } from '../core/texscale.ts';
 import { NAMED_BY_NODE, imageParam, outName, renameParam, source, withLayer, checkSize, resolutionParam } from './texture.ts';
 
 const layerParam = (): ParamDef => ({ type: 'string', default: '', desc: 'layer name (empty selects the main layer)' });
@@ -25,7 +26,7 @@ function channel(data: Float32Array, ch: number, which: string): Float32Array {
 defineNode({
   type: 'tex_crop', category: 'texture', packed: 'keep', usesNodeName: NAMED_BY_NODE,
   summary: 'Extract an exact pixel rectangle, optionally resize it; all image layers stay aligned.',
-  description: 'Origin is [x,y] from the top left. Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. The result takes this node\'s name unless name is set; other geometry/images pass through.',
+  description: 'Origin is [x,y] from the top left, in pixels (a crop addresses pixels). Size 0 on an axis means the remaining source extent; resolution 0 keeps the crop size. The result covers the same surface the pixels did: its size in metres is the crop\'s share of the source\'s, and a "texel" layer follows a resize. Outside pixels are zero, never wrapped. Filtered resize uses area averaging down and bilinear up; nearest preserves discrete masks. Values are not colour-converted. The result takes this node\'s name unless name is set; other geometry/images pass through.',
   inputs: [{ name: 'image', desc: 'geometry carrying an image' }],
   params: {
     image: imageParam(), name: renameParam(),
@@ -52,17 +53,18 @@ defineNode({
 defineNode({
   type: 'tex_dilate', category: 'texture', packed: 'keep', usesNodeName: NAMED_BY_NODE,
   summary: 'Extend nearest valid image values into an invalid band, preserving opacity by default.',
-  description: 'Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond radius are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding. The result takes this node\'s name unless name is set.',
+  description: 'Validity comes from RGBA alpha or an explicit, same-sized mask. Grey images need a mask input. Valid pixels and pixels beyond distance (metres) are untouched. Nearest-site ties prefer the topmost, then leftmost source. No wrapping or colour conversion. Other layers pass through; preserve_alpha keeps every original RGBA alpha value. Uses the same exact distance transform as wide bake padding. The distance is the same real size at any resolution; on an atlas (the "island" and "texel" layers a bake writes) it is that size on every island and a texel only takes values from its own island. The result takes this node\'s name unless name is set.',
+  renamed: { radius: 'it is now distance, in metres (a radius of 8 pixels is 8 × texture_size / width: 0.0156 on a 512 pixel, 1 m image)' },
   inputs: [{ name: 'image', desc: 'image to pad' }, { name: 'mask', desc: 'optional explicit validity mask (same dimensions)', optional: true }],
   params: {
     image: imageParam(), layer: layerParam(), name: renameParam(),
-    radius: { type: 'int', default: 8, min: 0, max: 8192, desc: 'maximum Euclidean distance in pixels from a valid source' },
+    distance: { type: 'float', default: 0.016, min: 0, desc: 'maximum Euclidean distance in metres from a valid source (on an atlas: on every island, whatever its texel density). The default, 16 mm, is 8 pixels only on 512 pixels over 1 m: on another resolution or size it is another number of pixels' },
     mask_image: imageParam('input 1 (the mask)', []), mask_layer: layerParam(), mask_channel: channelParam('luminance'),
     mask_threshold: { type: 'float', default: 0, desc: 'mask values strictly greater than this are valid' },
     preserve_alpha: { type: 'bool', default: true, desc: 'keep original alpha at every RGBA pixel while padding RGB' },
   },
   outputs: 'selected image layer padded; original mask/alpha preserved',
-  example: { nodes: { img: { type: 'tex_shape', params: { resolution: 32, falloff: 0 } }, out: { type: 'tex_dilate', in: ['img', 'img'], params: { radius: 3 } } }, output: 'out' },
+  example: { nodes: { img: { type: 'tex_shape', params: { resolution: 32, falloff: 0 } }, out: { type: 'tex_dilate', in: ['img', 'img'], params: { distance: 0.09 } } }, output: 'out' },
   cook: (ctx) => {
     const { p } = ctx, s = source(ctx, 0, p.image, p.layer);
     let mask: Float32Array;
@@ -74,7 +76,8 @@ defineNode({
       if (s.ch !== 4) throw new NodeError('tex_dilate: a grey image requires an explicit mask input');
       mask = channel(s.data, s.ch, 'alpha');
     }
-    return withLayer(s, dilateImage(s.data, s.ch, s.img.width, s.img.height, mask, p.mask_threshold, p.radius, p.preserve_alpha), outName(ctx));
+    const [out] = runScaled(s.img, [{ data: s.data, ch: s.ch }, { data: mask, ch: 1 }], [s.ch], false, (pl, r) => [dilateImage(pl[0].data, pl[0].ch, r.w, r.h, pl[1].data, p.mask_threshold, Math.min((p.distance / r.tu) * (1 + 1e-6), 8192), p.preserve_alpha, r.aspect)], { coverage: false, skip: (tu, tv) => { const px = (p.distance / tu) * (1 + 1e-6); return !(p.distance > 0) || (px < 1 && px < tv / tu); } });
+    return withLayer(s, out, outName(ctx));
   },
 });
 
@@ -88,14 +91,16 @@ defineNode({
     threshold: { type: 'float', default: 0.5, desc: 'values at least this threshold are foreground' },
     tolerance: { type: 'float', default: 0.5, min: 0, max: 8192, desc: 'maximum contour simplification error in source pixels; 0 only removes collinear points' },
     min_area: { type: 'float', default: 0, min: 0, max: MAX_PIXELS, desc: 'minimum connected foreground component area in pixels; 0 retains all components' },
-    width: { type: 'float', default: 1, min: 0.000001, desc: 'full image canvas width in metres; height follows image aspect' },
+    extent: { type: 'float', default: 0, min: 0, desc: 'full image canvas width in metres; height follows image aspect (0 = the metres the image states it covers: texture_size set on its generator, or a bake; refused when it states none)' },
   },
+  renamed: { width: 'it is now extent, in metres (0, the default, = the metres the image states it covers; a width of 1 is an extent of 1)' },
   outputs: 'closed curves; point uv; prim class (component ID), contour_id and hole (0/1); detail image_size and image_width',
-  example: { nodes: { img: { type: 'tex_shape', params: { resolution: [64, 32], shape: 'disc', falloff: 0 } }, out: { type: 'trace_image', in: ['img'], params: { channel: 'luminance' } } }, output: 'out' },
+  example: { nodes: { img: { type: 'tex_shape', params: { resolution: [64, 32], texture_size: 1, shape: 'disc', falloff: 0 } }, out: { type: 'trace_image', in: ['img'], params: { channel: 'luminance' } } }, output: 'out' },
   cook: (ctx) => {
     const { p } = ctx, s = source(ctx, 0, p.image, p.layer);
     const loops = traceMask(channel(s.data, s.ch, p.channel), s.img.width, s.img.height, p.threshold, p.min_area, p.tolerance);
-    const b = new GeoBuilder(), scale = p.width / s.img.width;
+    if (!(p.extent > 0) && !s.img.sizeStated) throw new NodeError(`trace_image: extent is not set and image "${s.img.name}" does not say how many metres it covers (nothing set its texture_size)`, 'set extent (metres along the image width), or set texture_size on the generator that made the image (a bake writes its own)');
+    const extent = p.extent > 0 ? p.extent : s.img.size, b = new GeoBuilder(), scale = extent / s.img.width;
     for (const loop of loops) {
       // Pixel-space winding is reversed by Y-up, so reverse the sequence as well.
       const points = loop.points.slice().reverse().map(([x, y]) => b.addPoint(x * scale, (s.img.height - y) * scale, 0));
@@ -104,9 +109,9 @@ defineNode({
     const g = b.build(), cls = g.prims.add('class', 'int', 1), hole = g.prims.add('hole', 'int', 1), contour = g.prims.add('contour_id', 'int', 1);
     loops.forEach((l, i) => { cls.set(i, l.component); hole.set(i, l.hole ? 1 : 0); contour.set(i, i); });
     const uv = g.points.add('uv', 'float', 3);
-    for (let i = 0; i < g.numPoints; i++) uv.set(i, [g.P[i * 3] / p.width, g.P[i * 3 + 1] / (s.img.height * scale), 0]);
+    for (let i = 0; i < g.numPoints; i++) uv.set(i, [g.P[i * 3] / extent, g.P[i * 3 + 1] / (s.img.height * scale), 0]);
     g.detail.add('image_size', 'int', 2).set(0, [s.img.width, s.img.height]);
-    g.detail.add('image_width', 'float', 1).set(0, p.width);
+    g.detail.add('image_width', 'float', 1).set(0, extent);
     return g;
   },
 });
@@ -116,7 +121,7 @@ interface AtlasItem { name: string; maps: Record<string, string> }
 defineNode({
   type: 'tex_pack', category: 'texture', usesNodeName: NAMED_BY_NODE,
   summary: 'Pack named images into aligned atlases and output per-item UV placement attributes.',
-  description: 'items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.',
+  description: 'items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. The atlas images carry a texel layer (the own texel size of each item) and an island layer (one island per item; its own pixels hold the number of the item and its gutter that number plus a half, so a filter treats the gutter as padding: a blur does not pull the empty gutter into the item and a distance does not take it for surface; background between the items is -1), so the filters after it work in metres on each item and tex_dilate pads inside it. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.',
   inputs: [{ name: 'images', desc: 'geometry carrying named source images (combine with merge)' }],
   params: {
     items: { type: 'json', default: [], desc: 'array of {name, maps:{channel:imageName}}; empty = each image becomes one item in channel C' },
@@ -168,16 +173,44 @@ defineNode({
     const g = new Geometry({ positions: items.flatMap(() => [0, 0, 0]) });
     const name = g.points.add('name', 'string', 1), rect = g.points.add('rect', 'int', 4);
     const offset = g.points.add('uv_offset', 'float', 2), scale = g.points.add('uv_scale', 'float', 2);
+    // items keep their pixels, so each keeps its own texel size: the atlas says so per texel (layer "texel") and gives every
+    // item, with its gutter, an island of its own; its size is that of a typical texel (weighted by pixels)
+    const texelL = new Float32Array(w * h * 4), islandL = new Float32Array(w * h).fill(-1);
+    for (let k = 0; k < w * h; k++) texelL[k * 4 + 3] = 1;
+    const weights: { d: number; w: number }[] = [];
+    let stated = 0;
     const atlases = labels.map((label, i) => new Image(w, h, prefix + '_' + label).set('C', new Float32Array(w * h * channels[i])));
     items.forEach((item, i) => {
       const x = places[i].x + p.padding, y = places[i].y + p.padding, iw = sources[i][0].width, ih = sources[i][0].height;
       name.set(i, item.name); rect.set(i, [x, y, iw, ih]); offset.set(i, [x / w, 1 - (y + ih) / h]); scale.set(i, [iw / w, ih / h]);
       g.P[i * 3] = (x + iw / 2) / w; g.P[i * 3 + 1] = 1 - (y + ih / 2) / h;
+      const first = sources[i][0], tu = first.texel, tv = first.texel;
+      weights.push({ d: first.texel, w: iw * ih });
+      if (first.sizeStated) stated++;
+      for (let row = -p.padding; row < ih + p.padding; row++)
+        for (let col = -p.padding; col < iw + p.padding; col++) {
+          const px = x + col, py = y + row;
+          if (px < 0 || py < 0 || px >= w || py >= h) continue;
+          // an item's own texel layer follows its pixels (the gutter takes the nearest edge pixel's)
+          const k = py * w + px, sx = Math.min(iw - 1, Math.max(0, col)), sy = Math.min(ih - 1, Math.max(0, row)), tl = first.layer('texel');
+          const own = tl && first.channels('texel') === 4 ? tl : null;
+          texelL[k * 4] = own ? own[(sy * iw + sx) * 4] : tu; texelL[k * 4 + 1] = own ? own[(sy * iw + sx) * 4 + 1] : tv;
+          // the item's own pixels hold its number, its gutter the number plus a half (padding, not surface)
+          islandL[k] = row >= 0 && row < ih && col >= 0 && col < iw ? i : i + 0.5;
+        }
       sources[i].forEach((im, c) => {
         const ch = channels[c], data = im.layer(im.mainLayer)!, dest = atlases[c].layer('C')!;
         for (let row = 0; row < ih; row++) dest.set(data.subarray(row * iw * ch, (row + 1) * iw * ch), ((y + row) * w + x) * ch);
       });
     });
+    weights.sort((a, b) => a.d - b.d);
+    let total = 0;
+    for (const q of weights) total += q.w;
+    let run = 0, typical = weights[0].d;
+    for (const q of weights) { run += q.w; if (run >= total / 2) { typical = q.d; break; } }
+    // the atlas states its size only when an item did: packing images that say nothing about their metres says nothing either
+    if (stated && stated < items.length) ctx.warn(`tex_pack: ${stated} of ${items.length} items state how many metres they cover, the others are taken at the default 1 m, so the atlas's typical texel is a guess`);
+    for (const a of atlases) { a.setSize(typical * w, stated > 0); a.set('texel', texelL).set('island', islandL); }
     g.volumes = atlases;
     g.detail.add('atlas_size', 'int', 2).set(0, [w, h]);
     return g;

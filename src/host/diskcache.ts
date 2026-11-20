@@ -166,7 +166,16 @@ class Arrays {
   views: Uint8Array[] = [];
   kinds: [Kind, number][] = [];
   bytes = 0;
+  /** an array that several images share (the texel and island layers of the bakes of one mesh) is stored once */
+  private seen = new Map<ArrayBufferView, number>();
   add(a: ArrayBufferView): number {
+    const had = this.seen.get(a);
+    if (had !== undefined) return had;
+    const index = this.store(a);
+    this.seen.set(a, index);
+    return index;
+  }
+  private store(a: ArrayBufferView): number {
     const kind: Kind | undefined = a instanceof Float64Array ? 'f64' : a instanceof Float32Array ? 'f32' : a instanceof Int32Array ? 'i32' : a instanceof Uint8Array ? 'u8' : undefined;
     if (!kind) throw new Unstorable(`an array of a kind that is not stored (${a.constructor?.name})`);
     this.views.push(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
@@ -203,7 +212,7 @@ function packVolume(v: Volume, A: Arrays) {
   if (v.kind === 'sdf') throw new Unstorable('an SDF volume is a function');
   if (v.kind === 'grid') return { k: 'grid', name: v.name, dims: v.dims, origin: encAll(v.origin), voxel: enc(v.voxel), values: A.add(v.values) };
   const layers = [...v.layers].map(([k, a]) => [k, A.add(a)]);
-  if (v.kind === 'image') return { k: 'image', name: v.name, width: v.width, height: v.height, layers };
+  if (v.kind === 'image') return { k: 'image', name: v.name, width: v.width, height: v.height, size: enc(v.size), ...(v.sizeStated ? { stated: 1 } : {}), layers };
   return { k: 'heightfield', name: v.name, width: v.width, height: v.height, cellSize: enc(v.cellSize), origin: encAll(v.origin), layers };
 }
 
@@ -321,7 +330,7 @@ function unpackGeometry(j: any, arrays: Typed[]): Geometry {
       must(a.length === count || (v.k === 'image' && a.length === count * 4), `layer ${k}: ${a.length} values for ${v.width} × ${v.height}`);
       return [k, a];
     }));
-    if (v.k === 'image') return new Image(v.width, v.height, v.name, layers);
+    if (v.k === 'image') { const img = new Image(v.width, v.height, v.name, layers); if (v.size !== undefined) img.setSize(dec(v.size), v.stated === 1); return img; }
     return new Heightfield(v.width, v.height, dec(v.cellSize), decAll(v.origin) as [number, number], layers, v.name);
   });
   return g;

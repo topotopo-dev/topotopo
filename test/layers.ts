@@ -155,13 +155,13 @@ section('bake_material refusals');
 // ---------------------------------------------------------------- tex_layers
 
 /** A base image of one colour (RGBA) and every texel covered; masks are separate images. */
-const flat = (color = '#808080', res = 32): Nodes => ({
-  base: { type: 'tex_constant', params: { resolution: res, channels: 'rgba', color } },
+const flat = (color = '#808080', res = 32, size = 1): Nodes => ({
+  base: { type: 'tex_constant', params: { resolution: res, channels: 'rgba', color, texture_size: size } },
   ones: { type: 'tex_constant', params: { resolution: res, value: 1 } },
   grad: { type: 'tex_gradient', params: { resolution: res } },
   masks: { type: 'merge', in: ['ones', 'grad'] },
 });
-const stackOf = (nodes: Nodes, params: Record<string, any>): Nodes => ({ ...nodes, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { size: 1, base_roughness: 0.5, base_metallic: 0, coverage: '', ...params } } });
+const stackOf = (nodes: Nodes, params: Record<string, any>): Nodes => ({ ...nodes, stack: { type: 'tex_layers', in: ['base', 'masks'], params: { base_roughness: 0.5, base_metallic: 0, coverage: '', ...params } } });
 
 section('tex_layers: colour modes');
 {
@@ -226,7 +226,7 @@ section('tex_layers: roughness, metallic, occlusion, graph vars');
 
 section('tex_layers: height and normal');
 {
-  const sceneAt = (res: number): Nodes => stackOf(flat('#808080', res), { size: 1, layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] });
+  const sceneAt = (res: number): Nodes => stackOf(flat('#808080', res), { layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] });
   const lo = await cook(sceneAt(128), 'stack'), hi = await cook(sceneAt(256), 'stack');
   const nLo = img(lo, 'stack_normal'), nHi = img(hi, 'stack_normal');
   const down = resizeLayer(nHi.layer('C')!, 4, 256, 256, 128, 128, false);
@@ -234,12 +234,12 @@ section('tex_layers: height and normal');
   for (let i = 0; i < 128 * 128; i++) for (let c = 0; c < 2; c++) { diff += Math.abs(down[i * 4 + c] - nLo.layer('C')![i * 4 + c]); tilt += Math.abs(nLo.layer('C')![i * 4 + c] - 0.5); count++; }
   check(tilt / count > 0.05, `the step tilts the normal (mean tilt ${(tilt / count).toFixed(3)})`);
   check(diff / count < 0.01, `the same step at 128 and 256 gives the same normal after resampling (mean difference ${(diff / count).toFixed(4)})`);
-  const wide = await cook(stackOf(flat('#808080', 128), { size: 2, layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] }), 'stack');
+  const wide = await cook(stackOf(flat('#808080', 128, 2), { layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] }), 'stack');
   const tilt2 = Array.from(img(wide, 'stack_normal').layer('C')!).reduce((s, v, i) => s + (i % 4 < 2 ? Math.abs(v - 0.5) : 0), 0) / count;
   check(tilt2 < (tilt / count) * 0.75, `a larger size (metres per image) gives a gentler slope (${tilt2.toFixed(3)} < ${(tilt / count).toFixed(3)})`);
   const h = img(lo, 'stack_height').layer('C')!;
   check(near(Math.max(...h), 0.3, 1e-4) && near(Math.min(...h), 0, 1e-4), 'the height image holds metres');
-  const dx = await cook(stackOf(flat('#808080', 128), { size: 1, normal_format: 'directx', layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] }), 'stack');
+  const dx = await cook(stackOf(flat('#808080', 128), { normal_format: 'directx', layers: [{ name: 'step', mask: 'smoothstep(0.3, 0.7, grad)', height: 0.3 }] }), 'stack');
   const a = img(lo, 'stack_normal'), b = img(dx, 'stack_normal');
   check(near(a.layer('C')![(64 * 128 + 64) * 4 + 1] + b.layer('C')![(64 * 128 + 64) * 4 + 1], 1, 1e-4), 'directx flips the green channel');
 }
@@ -253,7 +253,7 @@ section('tex_layers: covered texels only, then padding');
     masks: { type: 'merge', in: ['ones'] },
     stack: {
       type: 'tex_layers', in: ['base', 'masks'],
-      params: { padding: 3, size: 4, layers: [{ name: 'all', mask: 'ones', color: '#0000ff', roughness: 0.2, metallic: 1, height: 0.01 }], occlusion: '0.5' },
+      params: { padding: 3, layers: [{ name: 'all', mask: 'ones', color: '#0000ff', roughness: 0.2, metallic: 1, height: 0.01 }], occlusion: '0.5' },
     },
   };
   const r = await cook(nodes, 'stack');
@@ -297,7 +297,7 @@ section('tex_layers: workers');
     { name: 'b', mask: 'ones - grad', color: '#a69d8b', color_mode: 'lighten', opacity: 0.6, roughness_offset: 0.05, height: 0.0005 },
     { name: 'c', mask: 'fit(grad, 0, 1, 0, 1) * 0.5', color: '#222222', color_mode: 'overlay' },
   ];
-  const nodes = stackOf(flat('#6f8fae', 128), { layers, occlusion: 'ones * 0.75 + grad * 0.25', size: 1 });
+  const nodes = stackOf(flat('#6f8fae', 128), { layers, occlusion: 'ones * 0.75 + grad * 0.25' });
   const before = pooled.poolStats.parallel;
   const a = await cook(nodes, 'stack', serial, { amount: 0.8 }), b = await cook(nodes, 'stack', pooled, { amount: 0.8 });
   check(pooled.poolStats.parallel > before, 'the expressions ran on the worker pool');
@@ -508,10 +508,11 @@ section('tex_layers: texel size, slopes, islands');
   check(near(t[0], 4 / 128, 1e-6) && near(t[1], 2 / 64, 1e-6), `the texel layer is metres per texel along u and v (${(t[0] * 1000).toFixed(3)} × ${(t[1] * 1000).toFixed(3)} mm)`);
   check(bk.channels('texel') === 4 && bk.layers.has('island'), 'bake_material writes texel and island');
 
-  // a height without any texel size refuses and names bake_material
-  const noSize: Nodes = { ...flat(), stack: { type: 'tex_layers', in: ['base', 'masks'], params: { base_roughness: 0.5, base_metallic: 0, coverage: '', layers: [{ name: 'step', mask: 'grad', height: 0.01 }] } } };
-  const e = await err(noSize, 'stack');
-  check(e.includes('layer "step" has a height') && e.includes('bake_material') && e.includes('set size'), 'a height without a texel size refuses: ' + e);
+  // a base without a texel layer reads its own size (a generator's texture_size); the old size param says where the size is now
+  const noSize: Nodes = { ...flat('#808080', 32, 2), stack: { type: 'tex_layers', in: ['base', 'masks'], params: { base_roughness: 0.5, base_metallic: 0, coverage: '', layers: [{ name: 'step', mask: 'grad', height: 0.01 }] } } };
+  check(!(await err(noSize, 'stack')), 'a height on a base without texel layer is made against the size of the base image');
+  const e = await err({ ...noSize, stack: { ...noSize.stack, params: { ...noSize.stack.params, size: 2 } } }, 'stack');
+  check(/texture_size/.test(e) && /base image/.test(e), 'the old size param errors and says where the size is now: ' + e.slice(0, 120));
   check(!(await err({ ...noSize, stack: { ...noSize.stack, params: { ...noSize.stack.params, layers: [{ name: 'c', mask: 'grad', color: '#ff0000' }] } } }, 'stack')), 'a stack without heights needs no size');
 
   // two islands that touch: a ramp on one leaves the other flat
@@ -549,7 +550,7 @@ section('tex_layers: coverage with a mask that differs outside the islands');
     // 1 outside the islands, 0 inside: an expression that ran outside would colour and lift the empty texels
     stack: {
       type: 'tex_layers', in: ['base', 'masks'],
-      params: { padding: 3, size: 4, layers: [{ name: 'outside', mask: '1 - base_mask', color: '#ffffff', roughness: 0.9, height: 0.2 }] },
+      params: { padding: 3, layers: [{ name: 'outside', mask: '1 - base_mask', color: '#ffffff', roughness: 0.9, height: 0.2 }] },
     },
   };
   const r = await cook(nodes, 'stack');

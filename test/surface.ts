@@ -788,7 +788,7 @@ section('one rasterisation shared by the bakes of a mesh; bake_mask attribute li
   for (let i = 0; i < msk.length; i++) if (msk[i] >= 1 && (mk.layer('wear')![i] !== 0.25 || mk.layer('dirt')![i] !== 0.75 || mk.layer('C')![i] !== 0.25)) ok = false;
   check(ok, 'bake_mask attrib "wear, dirt": a layer per attribute, C = the first');
   const names = layerNames(one);
-  check(JSON.stringify(names) === JSON.stringify(['C', 'mask']), `one attribute is unchanged: layers ${names.join(', ')}`);
+  check(JSON.stringify(names) === JSON.stringify(['C', 'texel', 'island', 'mask']), `one attribute gives C, and the texel and island layers every bake writes: layers ${names.join(', ')}`);
 }
 
 section('the bake memo keeps at most its limits and releases the oldest values');

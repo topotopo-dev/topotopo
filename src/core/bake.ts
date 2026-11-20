@@ -466,17 +466,27 @@ export function vertexPositions(g: Geometry): Float64Array {
  * Returns the island of each triangle (0..count-1, in order of first appearance).
  */
 export function uvIslands(g: Geometry, uv: ArrayLike<number>, tris: ArrayLike<number>): { triIsland: Int32Array; count: number } {
-  const nt = Math.floor(tris.length / 3);
-  const key = new Map<string, number>();
-  const corner = new Int32Array(nt * 3);
-  for (let i = 0; i < nt * 3; i++) {
-    const v = tris[i];
-    const k = `${g.vertexPoint[v]}:${Math.round(uv[v * 2] * 1e6)}:${Math.round(uv[v * 2 + 1] * 1e6)}`;
-    let id = key.get(k);
-    if (id === undefined) { id = key.size; key.set(k, id); }
-    corner[i] = id;
-  }
-  const parent = new Int32Array(key.size);
+  const nt = Math.floor(tris.length / 3), nc = nt * 3;
+  // corners with the same point and the same uv (to a millionth) are one: bucket them by point, then compare within a bucket
+  let np = 0;
+  for (let i = 0; i < nc; i++) { const p = g.vertexPoint[tris[i]]; if (p >= np) np = p + 1; }
+  const start = new Int32Array(np + 1);
+  for (let i = 0; i < nc; i++) start[g.vertexPoint[tris[i]] + 1]++;
+  for (let p = 0; p < np; p++) start[p + 1] += start[p];
+  const fillAt = start.slice(0, np), order = new Int32Array(nc);
+  for (let i = 0; i < nc; i++) order[fillAt[g.vertexPoint[tris[i]]]++] = i;
+  const corner = new Int32Array(nc).fill(-1), qu = new Float64Array(nc), qv = new Float64Array(nc);
+  for (let i = 0; i < nc; i++) { qu[i] = Math.round(uv[tris[i] * 2] * 1e6); qv[i] = Math.round(uv[tris[i] * 2 + 1] * 1e6); }
+  let ids = 0;
+  for (let p = 0; p < np; p++)
+    for (let a = start[p]; a < start[p + 1]; a++) {
+      const i = order[a];
+      if (corner[i] >= 0) continue;
+      corner[i] = ids;
+      for (let b = a + 1; b < start[p + 1]; b++) { const j = order[b]; if (corner[j] < 0 && qu[j] === qu[i] && qv[j] === qv[i]) corner[j] = ids; }
+      ids++;
+    }
+  const parent = new Int32Array(ids);
   for (let i = 0; i < parent.length; i++) parent[i] = i;
   const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
   const unite = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; };

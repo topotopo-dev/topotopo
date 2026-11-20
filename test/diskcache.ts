@@ -107,6 +107,7 @@ try {
     }
     if ((x.kind === 'image' || x.kind === 'heightfield') && (y.kind === 'image' || y.kind === 'heightfield')) {
       if (x.width !== y.width || x.height !== y.height) return `${x.kind} ${x.name} size`;
+      if (x.kind === 'image' && y.kind === 'image' && x.size !== y.size) return `image ${x.name} covers ${x.size} m, then ${y.size} m`;
       if (x.kind === 'heightfield' && y.kind === 'heightfield' && (num(x.cellSize) !== num(y.cellSize) || x.origin.map(num).join() !== y.origin.map(num).join())) return `heightfield ${x.name} grid`;
       if ([...x.layers.keys()].join('|') !== [...y.layers.keys()].join('|')) return `${x.kind} ${x.name} layer names`;
       for (const [k, v] of x.layers) if (!same(v, y.layers.get(k)!)) return `${x.kind} ${x.name} layer ${k}`;
@@ -153,7 +154,9 @@ try {
     g.primGroups.set('p', Uint8Array.from([0, 1, 0]));
     g.vertexGroups.set('v', Uint8Array.from({ length: g.numVertices }, (_, i) => i % 2));
     g.edgeGroups.set('e', new EdgeSet([[3, 0], [2, 1], [4, 1]]));
-    g.volumes.push(new Image(2, 2, 'img', new Map([['C', Float32Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])], ['mask', Float32Array.from([0, 1, 0, NaN])]])));
+    const covered = new Image(2, 2, 'img', new Map([['C', Float32Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])], ['mask', Float32Array.from([0, 1, 0, NaN])]]));
+    covered.setSize(0.37); // the metres its width covers, and that they were stated: kept bit for bit like a layer
+    g.volumes.push(covered);
     g.volumes.push(new Heightfield(3, 2, 0.5, [-0, 1.5], new Map([['height', Float32Array.from([0, 1, 2, 3, 4, 5])]]), 'terrain'));
     g.volumes.push(new SdfGrid([2, 2, 2], [-0, 0, 1], 0.25, Float32Array.from([-Infinity, -0, 0.5, Infinity, 1, 2, 3, 4]), 'sdf'));
     return g;

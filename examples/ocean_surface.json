@@ -46,7 +46,7 @@
       "in": ["water_color"],
       "note": "smooths the colour's per-triangle steps (about one quad wide) so crests and foam have no saw-tooth edges; tileable, so the map still tiles",
       "params": {
-        "radius": "=1024 / min(400, max(4, round(size / vertex_spacing)))",
+        "blur": "=size / min(400, max(4, round(size / vertex_spacing)))",
         "tileable": true,
         "name": "ocean_color"
       }
@@ -67,10 +67,11 @@
       "note": "a 2 m grain that frays the foam's edges; it stays put while the crests run through it, as foam stays on the water",
       "params": {
         "resolution": 512,
+        "texture_size": "=size",
         "noise": "perlin",
         "fractal": "fbm",
         "octaves": 3,
-        "scale": "=max(1, round(size / 2))",
+        "feature": 2,
         "seed": "=seed",
         "name": "foam_grain"
       }
@@ -105,11 +106,12 @@
       "note": "1.5 m ripples for the normal map: finer than the grid can carry, they break the glint of the light into sparkles; they drift with the wind at about their own speed (one 1.5 m cell a second)",
       "params": {
         "resolution": 1024,
+        "texture_size": "=size",
         "noise": "perlin",
         "fractal": "fbm",
         "octaves": 2,
-        "scale": "=max(1, round(size / 1.5))",
-        "offset": ["=-time * Math.cos(wind_direction * Math.PI / 180)", "=-time * Math.sin(wind_direction * Math.PI / 180)"],
+        "feature": 1.5,
+        "shift": ["=-1.5 * time * Math.cos(wind_direction * Math.PI / 180)", "=-1.5 * time * Math.sin(wind_direction * Math.PI / 180)"],
         "seed": "=seed + 1",
         "name": "ripples"
       }
@@ -120,7 +122,6 @@
       "note": "ripples 25 cm deep, calmer below a 1 m wave_height",
       "params": {
         "depth": "=0.25 * min(1, wave_height)",
-        "size": "=size",
         "name": "ocean_normal"
       }
     },
