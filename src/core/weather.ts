@@ -158,6 +158,8 @@ export interface MaskInputs {
   handled: boolean;
   /** rust runs baked (image rr) */
   rustRuns: boolean;
+  /** rust runs from galvanised parts baked (image rg): they show only when the zinc is gone (k_redrust) */
+  galvRuns?: boolean;
   /** dirt runs baked from leak sources (image rd) */
   dirtRuns: boolean;
   /** joints baked (image jn) */
@@ -203,8 +205,8 @@ export function namedMasks(o: MaskInputs, packed = false): { name: string; mask:
     { name: 'rust', mask: 'clamp(k_rust * x_rust * (0.45 + 0.8 * n_blotch) * (0.7 + 0.5 * cavity + 0.3 * m_top + 0.3 * m_low), 0, 1)' },
     // runs: the core (C) and its broad stain, as separate masks for the layers and together (the stain fainter) as the run
     // (most runs are only their stain, faint; the stronger ones keep a core)
-    { name: 'rust_core', mask: o.rustRuns ? 'rr * smoothstep(0.25, 0.75, rr_strength) * clamp(k_rust * x_runs_rust * 1.6, 0, 1)' : '0' },
-    { name: 'rust_stain', mask: o.rustRuns ? 'rr_stain * clamp(k_rust * x_runs_rust * 1.5, 0, 1)' : '0' },
+    { name: 'rust_core', mask: `clamp(${[o.rustRuns ? 'rr * smoothstep(0.25, 0.75, rr_strength) * clamp(k_rust * x_runs_rust * 1.6, 0, 1)' : '', o.galvRuns ? 'rg * smoothstep(0.25, 0.75, rg_strength) * clamp(k_redrust * x_runs_rust, 0, 1)' : ''].filter(Boolean).join(' + ') || '0'}, 0, 1)` },
+    { name: 'rust_stain', mask: `clamp(${[o.rustRuns ? 'rr_stain * clamp(k_rust * x_runs_rust * 1.5, 0, 1)' : '', o.galvRuns ? 'rg_stain * clamp(k_redrust * x_runs_rust, 0, 1)' : ''].filter(Boolean).join(' + ') || '0'}, 0, 1)` },
     { name: 'runs_rust', mask: 'clamp(rust_core + rust_stain * 0.6, 0, 1)' },
     { name: 'dirt_core', mask: o.dirtRuns ? 'rd * smoothstep(0.7, 1, rd_strength) * clamp(k_dirt * x_runs_dirt * 1.5, 0, 1)' : '0' },
     { name: 'dirt_stain', mask: o.dirtRuns ? 'smoothstep(0.12, 0.85, rd_stain) * clamp(k_dirt * x_runs_dirt * 1.8, 0, 1)' : '0' },
@@ -529,6 +531,8 @@ export interface GraphOptions {
   images: boolean;
   joints: boolean;
   rustSources: boolean;
+  /** galvanised parts beside others (rust runs from them once the zinc is gone) */
+  galvSources?: boolean;
   mountWall: boolean;
   replaced: string[];
   photos: PhotoLayer[];
@@ -627,6 +631,7 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
   // long edge they merge into a wash that breaks into streaks lower down, and most are faint (stain_skew), a few strong
   const run = { resolution: res, padding: pad, uv_attrib: o.uv, seed: o.seed, length: [f(0.03 * s), f(0.4 * s)], width: [f(0.002 * s), f(0.008 * s)], wobble: 0.05, breakup: 0.3, stain: 5, stain_skew: 1.5 };
   if (o.rustSources && o.runDensity > 0) { nodes.rust_runs = { type: 'bake_flow', in: [atlas], params: { ...run, sources: '@wrust=1', density: f(o.runDensity), name: 'rr' } }; masks.push('rust_runs'); }
+  if (o.galvSources && o.runDensity > 0) { nodes.galv_runs = { type: 'bake_flow', in: [atlas], params: { ...run, sources: '@wrust=2', density: f(o.runDensity), name: 'rg' } }; masks.push('galv_runs'); }
   if (o.leaks) { nodes.dirt_runs = { type: 'bake_flow', in: [atlas, 'leak_sources'], params: { ...run, length: [f(0.03 * s), f(1.0 * s)], width: [f(0.0015 * s), f(0.005 * s)], wobble: 0.04, stain: 6, stain_skew: 2, name: 'rd' } }; masks.push('dirt_runs'); }
   if (o.joints) { nodes.joints = { type: 'bake_measure', in: [atlas, 'joint_planes'], params: { ...bake, name: 'jn', measures: [{ by: 'distance', name: 'joint', target: 'input1', range: 1 }] } }; masks.push('joints'); }
   for (const ph of o.photos) {
@@ -635,7 +640,7 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
     masks.push(id);
   }
   if (o.images) masks.push('images');
-  const named = namedMasks({ handled: !!o.handled, rustRuns: o.rustSources, dirtRuns: o.leaks, joints: o.joints, kinds: o.kindsPresent, replaced: o.replaced, wallNear }, o.mode === 'masks');
+  const named = namedMasks({ handled: !!o.handled, rustRuns: o.rustSources && o.runDensity > 0, galvRuns: !!o.galvSources && o.runDensity > 0, dirtRuns: o.leaks, joints: o.joints, kinds: o.kindsPresent, replaced: o.replaced, wallNear }, o.mode === 'masks');
   let layers: LayerJSON[] = [];
   if (o.mode === 'maps') {
     if (o.match) layers.push({ name: 'match', mask: '1', image: o.match.image, opacity: o.match.amount });

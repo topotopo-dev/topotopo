@@ -181,6 +181,10 @@ section('kind: kinds first, then the material; keep leaves a part as it is');
   }
   const t = readMaterials(a.geo);
   check(keptOk && weatheredOk && !!t.glass && !!t.weathered && !t.paint, `a part of kind keep keeps its material, the rest take weathered, unused ones go (${Object.keys(t).join(', ')})`);
+  // the kept glass still stands in front of the frame: it shades it like any surroundings
+  const frameOnly = await cook({ ...two, all: { type: 'merge', in: ['frame'] }, w: W({}) }, 'w');
+  const oa = mean(img(a, 'weathered_masks'), 'occlusion'), of = mean(img(frameOnly, 'weathered_masks'), 'occlusion');
+  check(oa < of - 0.005, `a part of kind keep shades the parts beside it (frame occlusion ${f3(oa)} with the glass kept, ${f3(of)} without it)`);
 }
 
 section('exposure and mount move the masks the measured way');
@@ -284,6 +288,22 @@ section('the material\'s maps survive zero weathering; its normal map is carried
     uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 128, padding: 2 } },
     base: { type: 'bake_material', in: ['uv'], params: { resolution: 128, padding: 2, map_uv: 'uv', name: 'base' } },
   };
+  // per texel on a real multi-part model: base colour, roughness and metallic are the material's own
+  {
+    const cz = await cook({ ...CAB, w: W({ ...CAB_W, ...ZERO }) }, 'w');
+    const cb = img(await cook({ ...CAB, base: { type: 'bake_material', in: ['uv'], params: { resolution: 128, padding: 2, map_uv: 'uv', name: 'base' } } }, 'base'), 'base');
+    const bc = img(cz, 'weathered_base_color'), orm = img(cz, 'weathered_orm');
+    const C = bc.layer('C')!, O = orm.layer('C')!, B = cb.layer('C')!, R = cb.layer('roughness')!, M = cb.layer('metallic')!, m1 = bc.layer('mask')!, m2 = cb.layer('mask')!;
+    const cc = bc.channels('C'), oc = orm.channels('C'), bcc = cb.channels('C');
+    let dc = 0, dr = 0, dm = 0, n = 0;
+    for (let i = 0; i < bc.width * bc.height; i++) {
+      if (!(m1[i] > 0.99 && m2[i] > 0.99)) continue;
+      n++;
+      for (let c = 0; c < 3; c++) dc = Math.max(dc, Math.abs(C[i * cc + c] - B[i * bcc + c]));
+      dr = Math.max(dr, Math.abs(O[i * oc + 1] - R[i])); dm = Math.max(dm, Math.abs(O[i * oc + 2] - M[i]));
+    }
+    check(n > 1000 && dc < 0.01 && dr < 0.01 && dm < 0.01, `at zero weathering every texel keeps the material: largest difference base colour ${f3(dc)}, roughness ${f3(dr)}, metallic ${f3(dm)} over ${n} texels (cabinet, three parts)`);
+  }
   const wz = await cook({ ...tiled, w: W(ZERO) }, 'w');
   const base = img(await cook(tiled, 'base'), 'base');
   const wb = img(wz, 'weathered_base_color');
@@ -436,6 +456,15 @@ section('a slider re-cooks only the stack');
   check(wear.length > 0 && wear.every((n) => ['stack', 'out', 'mask_images', 'wear', 'wear_kept'].includes(n)), `wear re-cooks the edge wear threshold, the stack and the material only (${wear.join(', ')})`);
   const seed = await ran({ wear: 0.9, seed: 3 });
   check(seed.includes('noise') && !seed.includes('measure') && !seed.includes('atlas') && !seed.includes('base'), `seed re-cooks the noise and the runs, not the measures or the atlas (${seed.join(', ')})`);
+  // rust across 0.6 (where galvanised parts start to run rust) on the cabinet with its galvanised cap: the mesh stays
+  const ranCab = async (params: Record<string, unknown>) => {
+    const inner = new Set<string>();
+    await cook({ ...CAB, w: W({ ...CAB_W, ...params }) }, 'w', e, (p) => { if (p.phase === 'end' && p.within[0] === 'w') inner.add(p.node); });
+    return [...inner].sort();
+  };
+  await ranCab({ rust: 0.5 });
+  const rust = await ranCab({ rust: 0.8 });
+  check(rust.length > 0 && rust.every((n) => ['stack', 'out', 'mask_images'].includes(n)), `rust 0.5 → 0.8 re-cooks the stack and the material only, no bake (${rust.join(', ')})`);
 }
 
 section('serial and pooled results are bit-identical');
