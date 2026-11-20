@@ -121,7 +121,7 @@ interface AtlasItem { name: string; maps: Record<string, string> }
 defineNode({
   type: 'tex_pack', category: 'texture', usesNodeName: NAMED_BY_NODE,
   summary: 'Pack named images into aligned atlases and output per-item UV placement attributes.',
-  description: 'items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. The atlas images carry a texel layer (the own texel size of each item) and an island layer (one island per item, its gutter included, background between them), so the filters after it work in metres on each item and tex_dilate pads inside it. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.',
+  description: 'items is [{name:"leaf",maps:{color:"leaf_color",normal:"leaf_normal"}}]. Empty items packs each input image under the channel C. Every item must have the same map labels; images within an item must match dimensions and images within a channel must have matching channel counts. The selected images use their main layer. Native resolution, no rotation/downscaling, zero gutters. Outputs <name>_<channel> images and placement points in item order. rect is [x,y,width,height] in top-left pixels; atlasUV = localUV * uv_scale + uv_offset (V up). Connect the image output to texture_to_material and read placement attributes with a wrangle; do not merge placement points into your mesh. The atlas images carry a texel layer (the own texel size of each item) and an island layer (one island per item, its gutter included, background between them) and a mask layer (the own pixels of the item: its gutter is padding, so a blur does not pull the empty gutter into the item and a distance does not take it for surface), so the filters after it work in metres on each item and tex_dilate pads inside it. Padding is separate: tex_dilate. Limits: 4096 items, normal per-image pixel limit, at most 1 GiB of output image layers.',
   inputs: [{ name: 'images', desc: 'geometry carrying named source images (combine with merge)' }],
   params: {
     items: { type: 'json', default: [], desc: 'array of {name, maps:{channel:imageName}}; empty = each image becomes one item in channel C' },
@@ -175,7 +175,7 @@ defineNode({
     const offset = g.points.add('uv_offset', 'float', 2), scale = g.points.add('uv_scale', 'float', 2);
     // items keep their pixels, so each keeps its own texel size: the atlas says so per texel (layer "texel") and gives every
     // item, with its gutter, an island of its own; its size is that of a typical texel (weighted by pixels)
-    const texelL = new Float32Array(w * h * 4), islandL = new Float32Array(w * h).fill(-1);
+    const texelL = new Float32Array(w * h * 4), islandL = new Float32Array(w * h).fill(-1), coverL = new Float32Array(w * h);
     for (let k = 0; k < w * h; k++) texelL[k * 4 + 3] = 1;
     const weights: { d: number; w: number }[] = [];
     const atlases = labels.map((label, i) => new Image(w, h, prefix + '_' + label).set('C', new Float32Array(w * h * channels[i])));
@@ -194,6 +194,7 @@ defineNode({
           const own = tl && first.channels('texel') === 4 ? tl : null;
           texelL[k * 4] = own ? own[(sy * iw + sx) * 4] : tu; texelL[k * 4 + 1] = own ? own[(sy * iw + sx) * 4 + 1] : tv;
           islandL[k] = i;
+          if (row >= 0 && row < ih && col >= 0 && col < iw) coverL[k] = 1; // the item's own pixels cover; its gutter is padding
         }
       sources[i].forEach((im, c) => {
         const ch = channels[c], data = im.layer(im.mainLayer)!, dest = atlases[c].layer('C')!;
@@ -205,7 +206,7 @@ defineNode({
     for (const q of weights) total += q.w;
     let run = 0, typical = weights[0].d;
     for (const q of weights) { run += q.w; if (run >= total / 2) { typical = q.d; break; } }
-    for (const a of atlases) { a.size = typical * w; a.set('texel', texelL).set('island', islandL); }
+    for (const a of atlases) { a.setSize(typical * w); a.set('texel', texelL).set('island', islandL).set('mask', coverL); }
     g.volumes = atlases;
     g.detail.add('atlas_size', 'int', 2).set(0, [w, h]);
     return g;
