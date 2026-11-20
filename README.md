@@ -223,6 +223,20 @@ From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/t
 Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_PACKAGE`,
 `TOPOTOPO_SCRIPT_TIMEOUT_MS`, `TOPOTOPO_SIM_TIMEOUT_MS` and `TOPOTOPO_WORKERS`. The server exits when the client closes its stdin.
 
+The server and the command line keep the result of every node that took half a second or more to cook in a cache folder
+(`topotopo/nodes` in your OS cache folder: `%LOCALAPPDATA%` on Windows, `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
+`~/.cache` elsewhere; at most 4 GB, least recently used first), and the next run that cooks the same node loads it instead.
+Entries are compressed (zstd). A cook report says which nodes came from it. `TOPOTOPO_NODE_CACHE_DIR` moves the folder, `TOPOTOPO_NODE_CACHE=off` (or
+`--no-cache` on the command line) switches the cache off; deleting the folder clears it.
+
+A stored result is used when the node's type, params, inputs and engine code (and the Node and library versions) are the
+same and every file it was made from is as it was: the files the node and the nodes below it read, side files such as a
+`.mtl` or a glTF buffer and the font of a `text` node included, as their modification time and size, so a tool that
+changes a file and keeps both is not noticed. Not kept: a node that cooks a graph inside itself (`foreach`, `graph_ref`,
+assets, package outputs, `solver`), a result with an SDF volume, and anything made from a URL, a `.blend` converted by
+Blender, a node type a scope defines used inside another graph, a `solver`, or a script that runs nodes with `lib.run`.
+The nodes inside those graphs, and a script that does not call `lib.run`, are kept.
+
 The package folder holds `graphs/` (one JSON file per graph), `assets/` (saved assets), `inputs/` and `exports/`.
 `inputs/` is where you put your own material: meshes, guide curves and points, blockouts and PNG masks from Blender,
 Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` tool lists and describes them, and a

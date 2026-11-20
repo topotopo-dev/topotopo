@@ -1,6 +1,7 @@
 // Engine tests: time and time-dependent caching, the solver node, expression references to other
 // nodes, graph versioning, deprecation, progress reports and stopping a cook, and the CLI frame range.
 //   node test/engine.ts
+import './cache-guard.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

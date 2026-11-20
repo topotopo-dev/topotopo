@@ -1,6 +1,7 @@
 // Published results, persistence, export consistency, image channels and camera navigation contracts; what each
 // output is and the formats that fit it (io/kinds.ts, checked against the exporters), downloads, export sidecars as
 // metadata of their export in the Outputs and Inputs lists (io/sidecars.ts), the heightfield layer drawn in red.
+import './cache-guard.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';

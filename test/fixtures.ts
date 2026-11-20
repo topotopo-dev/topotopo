@@ -1,5 +1,6 @@
 // Shared test fixtures: source geometry, per-node inputs and params, geometry invariants.
 // Every test layer (smoke, golden, property, fuzz, bench) cooks nodes the same way through these.
+import './cache-guard.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
