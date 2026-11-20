@@ -32,6 +32,7 @@ import './bake.ts';
 import './runs.ts';
 import './layers.ts';
 import './surface.ts';
+import './triplanar.ts';
 import './particles.ts';
 import './rbd.ts';
 import './cloth.ts';
