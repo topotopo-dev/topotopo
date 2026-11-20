@@ -73,7 +73,8 @@ export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: n
     }
   }
   if (conservative) {
-    const best = new Float32Array(n).fill(Infinity);
+    // the distances kept exactly, so a near tie is settled by the key and not by which triangle came first
+    const best = new Float64Array(n).fill(Infinity);
     const R = Math.SQRT1_2 + 1e-6, R2 = R * R;
     for (let t = 0; t < nt; t++) {
       if (!(Math.abs(area2[t]) > 1e-12)) continue;

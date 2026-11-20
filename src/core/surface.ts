@@ -375,8 +375,8 @@ export interface CloudInput {
   triPiece: Int32Array;
   /** local cloud spacing per triangle (metres) */
   triL: Float64Array;
-  /** every point stays at least this far (metres) inside its triangle's edges (up to 0.3 of each height) */
-  inset: number;
+  /** every point stays at least this far (metres) inside its triangle's edges (up to 0.3 of each height); per triangle */
+  inset: number | Float64Array;
   /**
    * The cloud's spacing in metres at most (0 = no limit): a triangle with fewer texels than that gets an even lattice
    * instead of its texel grid, so what is measured over a radius does not depend on texel density. The lattice adds
@@ -466,7 +466,8 @@ export function buildCloud(o: CloudInput): Cloud {
     area[t] = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
     // the least barycentric of each corner that keeps a point `inset` from the opposite edge (height h = 2A / edge)
     const e = [Math.hypot(VP[c] - VP[b], VP[c + 1] - VP[b + 1], VP[c + 2] - VP[b + 2]), Math.hypot(vx, vy, vz), Math.hypot(ux, uy, uz)];
-    for (let q = 0; q < 3; q++) mins[t * 3 + q] = area[t] > 0 ? Math.min(0.3, (o.inset * e[q]) / (2 * area[t])) : 0;
+    const ins = typeof o.inset === 'number' ? o.inset : o.inset[t];
+    for (let q = 0; q < 3; q++) mins[t * 3 + q] = area[t] > 0 ? Math.min(0.3, (ins * e[q]) / (2 * area[t])) : 0;
   }
   for (let i = 0; i < n; i++) {
     const t = T[i];
@@ -1118,7 +1119,21 @@ export function surfaceCloud(mesh: SurfaceMesh, tris: Uint32Array, uv: Float64Ar
     TR[t] = 2 * triL[t];
   }
   const spacing = k * mesh.median;
-  const cloud = buildCloud({ uv, tris, skip, W, H, k, VP: mesh.VP, VN: mesh.VN, triPiece: mesh.triPiece, triL, inset: 2 * rayBias(mesh.diag), maxStep: spacing });
+  // the inset from each piece's own size, so a part's points stay put when other parts are added
+  const np = mesh.orient.pieces, box = new Float64Array(np * 6);
+  for (let c = 0; c < np; c++) box.set([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], c * 6);
+  for (let t = 0; t < nt; t++) {
+    const c = mesh.triPiece[t] * 6;
+    for (let q = 0; q < 3; q++) {
+      const v = tris[t * 3 + q] * 3;
+      for (let a = 0; a < 3; a++) { const x = mesh.VP[v + a]; if (x < box[c + a]) box[c + a] = x; if (x > box[c + 3 + a]) box[c + 3 + a] = x; }
+    }
+  }
+  const pieceInset = new Float64Array(np);
+  for (let c = 0; c < np; c++) pieceInset[c] = 2 * rayBias(Math.hypot(box[c * 6 + 3] - box[c * 6], box[c * 6 + 4] - box[c * 6 + 1], box[c * 6 + 5] - box[c * 6 + 2]) || mesh.diag);
+  const inset = new Float64Array(nt);
+  for (let t = 0; t < nt; t++) inset[t] = pieceInset[mesh.triPiece[t]];
+  const cloud = buildCloud({ uv, tris, skip, W, H, k, VP: mesh.VP, VN: mesh.VN, triPiece: mesh.triPiece, triL, inset, maxStep: spacing });
   for (let t = 0; t < nt; t++) {
     const L = cloud.lat[t];
     if (!L) continue;
