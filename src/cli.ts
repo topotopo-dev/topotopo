@@ -11,6 +11,8 @@
 //                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
 //                   (every option of the export tool has a flag; booleans take --name / --no-name)
 //                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--uv-per-piece] [--json]]
+//   Results of nodes that cooked for 0.5 s or more are kept on disk between runs (src/host/diskcache.ts); --no-cache leaves
+//   that alone, TOPOTOPO_NODE_CACHE_DIR moves the folder, TOPOTOPO_NODE_CACHE=off switches it off.
 //   --output picks a named output (the graph's "outputs"); --var overrides a graph var for this run (src/graph/vars.ts).
 //   --export formats: .glb .gltf .obj .usda .ply .stl .json .geo (Houdini) .csv .points.json
 //   Packed instances to .csv/.points.json: one row per instance + <name>.meshes.json + <name>_meshes/<Mesh>.glb.
@@ -64,7 +66,7 @@ import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { KINDS } from './graph/outputs.ts';
 import { createNodeHost, limitsFromEnv } from './host/node.ts';
-import { timingLines } from './graph/timing.ts';
+import { diskCacheLines, timingLines } from './graph/timing.ts';
 import { renderGeometryAsync } from './render/raster.ts';
 import { parseViews } from './render/raster.ts';
 import type { RenderOptions } from './render/raster.ts';
@@ -139,6 +141,9 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           package\'s other graphs, assets/ and inputs/, options and the engine code, all its files in place) is skipped)',
     '         [--force] (--export-all: export every output, the unchanged ones too)',
     '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
+    '         [--no-cache] (leave the disk cache alone: a node that cooked for 0.5 s or more is otherwise stored, up to 4 GB (the least recently used go first), and the next run that cooks it the same loads it; the report says which nodes were loaded.',
+    '           Where: topotopo/nodes in the OS cache folder (Windows %LOCALAPPDATA%, macOS ~/Library/Caches, else $XDG_CACHE_HOME or ~/.cache). Environment, also for the MCP server: TOPOTOPO_NODE_CACHE_DIR=<folder> moves it, TOPOTOPO_NODE_CACHE=off switches the cache off.',
+    '           The key is the node\'s signature (type, params, inputs, file stamps) with the code of the engine, so a change to either cooks again; a node that cooked a graph inside itself (foreach, solver, graph_ref, assets, scripts) and the file node are never stored)',
     '         time limits (environment, milliseconds; also for the MCP server and the viewer): TOPOTOPO_SCRIPT_TIMEOUT_MS (user code: expressions, wrangles, a whole script; default 30000), TOPOTOPO_SIM_TIMEOUT_MS (one cook of a simulation node; default 600000)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
@@ -363,7 +368,7 @@ async function cook() {
     }
     u.outputName = outputName; u.target = target;
   }
-  const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)) }));
+  const engine = new Engine(createNodeHost({ baseDir: path.dirname(path.resolve(file)), nodeCache: !argv.includes('--no-cache') }));
   await engine.init();
   // the packages the file's package uses: one the graph names for the first time is added (said), and
   // --follow uses a package's working folder for this run. A graph that does not validate as a dry run sees it adds
@@ -454,7 +459,7 @@ async function cook() {
   /** Where the cook's time went: with --timing every cooked node, else the slowest when the cook took a second or more. */
   const timingFlag = argv.includes('--timing');
   function timing(r: CookReport) {
-    if (!timingFlag && r.ms < 1000) return;
+    if (!timingFlag && r.ms < 1000) { for (const l of diskCacheLines(r)) console.log(l); return; }
     for (const l of timingLines(r, engine.scriptTimeoutMs, timingFlag ? { minMs: 0, nodes: Infinity } : {})) console.log(l);
   }
 

@@ -223,6 +223,13 @@ From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/t
 Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_PACKAGE`,
 `TOPOTOPO_SCRIPT_TIMEOUT_MS`, `TOPOTOPO_SIM_TIMEOUT_MS` and `TOPOTOPO_WORKERS`. The server exits when the client closes its stdin.
 
+The server and the command line keep the result of every node that took half a second or more to cook in a cache folder
+(`topotopo/nodes` in your OS cache folder: `%LOCALAPPDATA%` on Windows, `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
+`~/.cache` elsewhere; at most 4 GB, least recently used first), so the next run that cooks the same node with the same
+inputs, params and engine code loads it instead. A cook report says which nodes came from it. `TOPOTOPO_NODE_CACHE_DIR`
+moves the folder, `TOPOTOPO_NODE_CACHE=off` (or `--no-cache` on the command line) switches the cache off. Nodes that cook
+a graph inside themselves (`foreach`, `solver`, assets, scripts) and the `file` node are not kept.
+
 The package folder holds `graphs/` (one JSON file per graph), `assets/` (saved assets), `inputs/` and `exports/`.
 `inputs/` is where you put your own material: meshes, guide curves and points, blockouts and PNG masks from Blender,
 Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` tool lists and describes them, and a

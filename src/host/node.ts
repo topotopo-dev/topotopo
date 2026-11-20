@@ -14,6 +14,8 @@ import { REALM_CONTROL, SCRIPT_REALM_SETUP } from '../core/snippet-lib.ts';
 import { makeCurl, makeNoise } from '../core/noise.ts';
 import type { Noise3 } from '../core/noise.ts';
 import { randN } from '../core/random.ts';
+import { openNodeCache } from './diskcache.ts';
+import type { NodeCacheOptions } from './diskcache.ts';
 
 /** Promise.prototype of every script realm (async functions in a realm create promises with it). */
 const realmPromiseProtos = new WeakSet<object>();
@@ -115,6 +117,12 @@ export interface NodeHostOptions {
   workers?: number;
   /** further pool settings for a host with its own pool (idleMs, minElements) */
   pool?: Partial<NodePoolOptions>;
+  /**
+   * Keep the results of slow nodes on disk between runs (Host.persist, src/host/diskcache.ts): true for the default
+   * folder and limits, or the options. Off by default: the CLI and the MCP server turn it on. TOPOTOPO_NODE_CACHE=off
+   * switches it off whatever is asked.
+   */
+  nodeCache?: boolean | NodeCacheOptions;
   /** Optional diagnostics for actual Blender conversions (not version probes or cache hits). */
   onBlenderRun?: (result: { executable: string; durationMs: number; output: string }) => void;
 }
@@ -245,6 +253,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
     name: 'node',
     pool,
     limits: limitsFromEnv(),
+    persist: opts.nodeCache ? openNodeCache(opts.nodeCache === true ? {} : opts.nodeCache) ?? undefined : undefined,
     resolvePath: resolveIn(baseDir),
     async readFile(p) {
       const rp = this.resolvePath(p);

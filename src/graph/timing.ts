@@ -15,11 +15,23 @@ export interface TimingOptions {
   nodes?: number;
 }
 
-/** The timing lines of a cook report ([] when no node cooked for minMs). */
+/**
+ * The nodes the cook loaded from the disk cache (Host.persist), as one line: each with the time loading took and the time
+ * its cook took when it was stored. [] when there were none.
+ */
+export function diskCacheLines(r: CookReport): string[] {
+  const from = [...r.results.values()].filter((x) => x.disk).sort((a, b) => (b.savedMs ?? 0) - (a.savedMs ?? 0));
+  if (!from.length) return [];
+  const saved = from.reduce((t, x) => t + (x.savedMs ?? 0), 0);
+  const list = from.slice(0, 5).map((x) => `${x.node} ${duration(x.ms)} (cooked in ${duration(x.savedMs ?? 0)})`).join(', ');
+  return [`disk cache: ${from.length} node${from.length === 1 ? '' : 's'} loaded instead of cooked, saving about ${duration(Math.max(0, saved - from.reduce((t, x) => t + x.ms, 0)))}: ${list}${from.length > 5 ? `, +${from.length - 5} more` : ''}`];
+}
+
+/** The timing lines of a cook report ([] when no node cooked for minMs and none came from the disk cache). */
 export function timingLines(r: CookReport, scriptLimitMs: number, o: TimingOptions = {}): string[] {
   const min = o.minMs ?? 50, max = o.nodes ?? 5;
   const slow = [...r.results.values()].filter((x) => !x.cached && x.ms >= min).sort((a, b) => b.ms - a.ms);
-  if (!slow.length) return [];
+  if (!slow.length) return diskCacheLines(r);
   const top = slow.slice(0, max);
   const near = top[0].ms >= scriptLimitMs / 2;
   const more = slow.length > top.length ? `, +${slow.length - top.length} more over ${duration(min)}` : '';
@@ -31,5 +43,6 @@ export function timingLines(r: CookReport, scriptLimitMs: number, o: TimingOptio
     const shown = st.slice(0, 6).map(([k, v]) => `${k} ${v.calls > 1 ? `${v.calls}× ` : ''}${duration(v.ms)}`);
     lines.push(`  ${x.node}: ${shown.join(', ')}${st.length > shown.length ? `, +${st.length - shown.length} more` : ''}`);
   }
+  lines.push(...diskCacheLines(r));
   return lines;
 }

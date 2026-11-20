@@ -27,6 +27,14 @@
 // (scopeDeps); NodeDef.usesScope says it up front. A node type with a slash is a package output
 // (src/graph/packages.ts), which only the scope's packages resolve.
 //
+// Disk cache: a host with a node store (Host.persist, src/host/diskcache.ts) keeps the results of slow nodes between
+// runs. On a miss in memory the engine asks the store before it cooks; after a cook of Host.persist.minMs or more it
+// offers the result. The store is keyed by an identity the engine builds from what the result is a function of (the
+// signature material, the folder a file-reading node reads from, the frame of a time-dependent node), so everything
+// that is in the signature is in the key. What the signature does not hold is kept out (persistable below): a node that
+// cooked a nested graph (its result also depends on the nodes inside, and on the files they read), one that read its
+// scope while cooking without saying so in its signature, and the node types in NOT_PERSISTED.
+//
 // Concurrency: when the host has a worker pool (Engine.concurrent), the inputs of a node (and the nodes its
 // expressions reference) are pulled at once, so independent branches overlap wherever a cook awaits (a chunked
 // kernel on the pool, file I/O). Cooks of one signature that are in flight at the same time share one cook
@@ -38,7 +46,7 @@ import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { primIntrinsic } from '../core/intrinsics.ts';
 import { splinesToPolylines } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
-import type { Host, StopSignal } from '../host/types.ts';
+import type { Host, StopSignal, StoredNode } from '../host/types.ts';
 import { targetError, targetWarning } from '../io/targets.ts';
 import { allAliases, getNodeDef } from './registry.ts';
 import {
@@ -73,8 +81,12 @@ export interface NodeResult {
   warnings: string[];
   /** the result changes with the cook time (directly, or through its inputs/references in this graph) */
   timeDependent: boolean;
-  /** numbers recorded by the node while cooking (e.g. solver steps); absent on cache hits */
+  /** numbers recorded by the node while cooking (e.g. solver steps); absent on cache hits (kept with a result from the disk cache) */
   stats?: Record<string, number>;
+  /** the result came from the disk cache (Host.persist) and not from a cook: `ms` is the time loading took, `cached` is true */
+  disk?: boolean;
+  /** a result from the disk cache: how long the node's own cook took when it was stored, in ms */
+  savedMs?: number;
   /** where the node's time went, by named stage (CookContext.stage: a script's lib.run calls by node type); absent on cache hits */
   stages?: Record<string, { ms: number; calls: number }>;
 }
@@ -494,6 +506,13 @@ interface Flight {
 }
 
 const PSUF = '\u0000params';
+
+/**
+ * Node types whose results the disk cache does not keep: their signature does not cover everything their result is read
+ * from. The file node reads files its path does not name (the buffers and textures a glTF or OBJ points to), a URL, and the
+ * output of Blender for a .blend.
+ */
+const NOT_PERSISTED = new Set(['file']);
 
 // ---------------------------------------------------------------- engine
 
@@ -1159,6 +1178,8 @@ export class Engine {
     const nameSig = def.usesNodeName && (def.usesNodeName === true || def.usesNodeName(rp.values)) ? '|N:' + name : '';
     const material = def.type + '|' + stableStringify(rp.values) + '|' + inputSigs.join(',') + '|' + varsSig + '|' + extra + (np.refSig ? '|R:' + np.refSig : '') + nameSig;
     const plainSig = String(hashString(material));
+    // what the signature itself reads of the scope (a file's stamp), apart from what an earlier cook found
+    const signedScope = readScope;
     if (this.scopeDeps.has(plainSig)) readScope = true;
     const scopedSig = () => (scopeSig(scope) ? String(hashString(material + scopeSig(scope))) : plainSig);
     let baseSig = readScope ? scopedSig() : plainSig;
@@ -1173,6 +1194,14 @@ export class Engine {
       result.cached = true;
       return result;
     }
+    // what the disk cache keys this result by (null: it has no store, or keeps no result of this type): the signature's
+    // material and what the signature leaves to the engine, which is the scope (what a node that reads files reads them
+    // from) and the time of a node that depends on it
+    const store = this.host.persist;
+    // (a URL in a param: what is behind it is not in the signature)
+    const diskKey = store && !NOT_PERSISTED.has(def.type) && !/"https?:\/\//i.test(material)
+      ? (td: boolean) => material + (readScope ? `|S:${scope.id}|F:${scope.files.resolvePath('.')}` : '') + (td ? '|' + timeKey(time) : '')
+      : null;
     // about to cook: report it (the host may yield there), and stop here when the cook was asked to stop
     const progress: NodeProgress | null = opts.onNode ? { phase: 'start', node: name, type: def.type, depth, within: opts.within ?? [] } : null;
     // a progress hook that throws must not break the cook
@@ -1214,11 +1243,34 @@ export class Engine {
     let land!: (v: { geo: Geometry | null; sig: string; timeDep: boolean; failed: boolean }) => void;
     const mine: Flight = { done: new Promise((r) => { land = r; }), result };
     this.inflight.set(key, mine);
+    if (store && diskKey) {
+      const t1 = now();
+      let kept: StoredNode | null = null;
+      try { kept = await store.load(diskKey(timeDep)); } catch { /* a miss */ }
+      if (kept && isGeometry(kept.geo)) {
+        result.geo = kept.geo;
+        result.cached = true;
+        result.disk = true;
+        result.savedMs = kept.cookMs;
+        result.warnings.push(...kept.warnings);
+        if (kept.stats) result.stats = kept.stats;
+        this.cache.set(sig, kept.geo);
+        result.ms = now() - t1;
+        if (this.inflight.get(key) === mine) this.inflight.delete(key);
+        land({ geo: result.geo, sig: result.sig, timeDep, failed: false });
+        ended(result.ms);
+        return result;
+      }
+    }
     let chainSet: Set<string> | null = null;
     const chain = () => (chainSet ??= new Set([...(opts.ancestors ?? []), key]));
 
     const t0 = now();
+    const warnFrom = result.warnings.length;
+    let cookMs = 0;
     let readTime = false;
+    // the node cooked a graph inside its own cook (ctx.subcook, ctx.inputAt at another frame)
+    let nested = false;
     const mark = () => { readTime = true; };
     const engine = this;
     const ctx: CookContext = {
@@ -1241,6 +1293,7 @@ export class Engine {
       markTimeDependent: mark,
       signal: opts.signal,
       async subcook(g, o = {}) {
+        nested = true;
         const inherit = o.frame === undefined && o.time === undefined ? { frame: time.frame, time: time.time, timeInc: time.timeInc } : {};
         // a nested cook in this cook's scope resolves its node types there
         if (!o.scope) readScopeCooking = true;
@@ -1257,6 +1310,7 @@ export class Engine {
         const cur = inputRes[i];
         if (!ref || !cur) return { geo: new Geometry(), sig: 'none', timeDependent: false };
         if (!cur.timeDependent || frame === time.frame) return { geo: cur.geo ?? new Geometry(), sig: cur.sig, timeDependent: cur.timeDependent };
+        nested = true;
         const r = await engine.cook(graph, { ...opts, target: ref, frame, time: undefined, timeInc: undefined, depth, ancestors: chain() });
         const rr = r.results.get(ref);
         if (!r.ok || !r.geo || !rr) throw new NodeError(`input ${i} ("${ref}") failed at frame ${frame}: ${r.errors.map((e) => `${e.node}: ${e.message}`).join('; ')}`);
@@ -1295,13 +1349,20 @@ export class Engine {
       }
       result.geo = out;
       this.cache.set(sig, out);
+      cookMs = now() - t0;
+      // a slow result is kept for the next run, unless the signature does not hold what it was made from
+      if (store && diskKey && cookMs >= store.minMs && !nested && !(readScopeCooking && !signedScope)) {
+        try {
+          await store.save(diskKey(timeDep), { geo: out, warnings: result.warnings.slice(warnFrom), ...(result.stats ? { stats: { ...result.stats } } : {}), cookMs });
+        } catch { /* the cache is not the cook */ }
+      }
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       // user code stopped by the script time limit says what the limit is and where it is set
       const hint = e?.hint ?? (/exceeded \d+ ms \(infinite loop\?\)/.test(msg) ? scriptLimitHint(this.scriptTimeoutMs) : undefined);
       result.error = { node: name, message: msg, ...(hint ? { hint } : {}) };
     }
-    result.ms = now() - t0;
+    result.ms = cookMs || now() - t0;
     if (this.inflight.get(key) === mine) this.inflight.delete(key);
     land({ geo: result.geo, sig: result.sig, timeDep, failed: !!result.error });
     ended(result.ms, result.error?.message);
@@ -1385,12 +1446,14 @@ export class Engine {
       members.sort((a, b) => rank.get(a.node)! - rank.get(b.node)!);
       const first = members[0];
       if (first === leader) continue;
-      const take = (r: NodeResult) => ({ cached: r.cached, warnings: r.warnings, ms: r.ms, stats: r.stats });
+      const take = (r: NodeResult) => ({ cached: r.cached, warnings: r.warnings, ms: r.ms, stats: r.stats, disk: r.disk, savedMs: r.savedMs });
       const a = take(first), b = take(leader);
       Object.assign(first, b);
       Object.assign(leader, a);
-      if (!first.stats) delete first.stats;
-      if (!leader.stats) delete leader.stats;
+      for (const r of [first, leader]) {
+        if (!r.stats) delete r.stats;
+        if (!r.disk) { delete r.disk; delete r.savedMs; }
+      }
     }
   }
 
