@@ -70,7 +70,7 @@ function cook(ctx: CookContext): Geometry {
   // trace
   const prm: FlowParams = {
     density: Math.max(0, Number(p.density)), direction: [dir[0], dir[1], dir[2]], length: [Number(p.length[0]), Number(p.length[1])], width: [Number(p.width[0]), Number(p.width[1])],
-    wobble: Number(p.wobble), breakup: Number(p.breakup), ledge: Number(p.ledge), pool: Number(p.pool), drip: !!p.drip, step: Number(p.step), seed: Number(p.seed),
+    wobble: Number(p.wobble), breakup: Number(p.breakup), ledge: Number(p.ledge), pool: Number(p.pool), drip: !!p.drip, step: Number(p.step), spill: Number(p.spill), seed: Number(p.seed),
   };
   const budget = simBudget(ctx, 'fewer runs (a lower density), shorter lengths or a larger step; or raise the limit');
   const cands = sampleSources(srcGeo, prm.seed);
@@ -83,6 +83,7 @@ function cook(ctx: CookContext): Geometry {
   ctx.stat('runs', runs.count);
   ctx.stat('segments', runs.segs);
   ctx.stat('drips', stats.drips);
+  ctx.stat('spills', stats.spills);
   ctx.stat('candidates', stats.candidates);
   ctx.stat('started', stats.started);
   ctx.stat('touching', stats.touching);
@@ -115,17 +116,19 @@ function cook(ctx: CookContext): Geometry {
   const C = new Float32Array(s.n), along = new Float32Array(s.n), head = new Float32Array(s.n), strength = new Float32Array(s.n), id = new Float32Array(s.n);
   rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id });
 
-  // layers: C, along, head, strength, id, mask
-  const first = resolve(s, C, 1);
+  // layers: C, along, head, strength, id, mask; resolved and padded together as one 5-channel map
+  const LAYERS = ['C', 'along', 'head', 'strength', 'id'] as const, NL = LAYERS.length;
+  const packed = new Float32Array(s.n * NL);
+  for (let k = 0; k < s.n; k++) { packed[k * NL] = C[k]; packed[k * NL + 1] = along[k]; packed[k * NL + 2] = head[k]; packed[k * NL + 3] = strength[k]; packed[k * NL + 4] = id[k]; }
+  const first = resolve(s, packed, NL);
   const img = new Image(W, H, outName(ctx));
   const pad = Math.max(0, Math.round(p.padding));
-  dilate(first.data, 1, W, H, first.coverage, pad, [0]);
-  img.set(MAIN_LAYER, first.data);
-  for (const [k, vals] of Object.entries({ along, head, strength, id })) {
-    const r = resolve(s, vals, 1);
-    dilate(r.data, 1, W, H, first.coverage, pad, [0]);
-    img.set(k, r.data);
-  }
+  dilate(first.data, NL, W, H, first.coverage, pad, [0, 0, 0, 0, 0]);
+  LAYERS.forEach((name, c) => {
+    const out = new Float32Array(W * H);
+    for (let i = 0; i < out.length; i++) out[i] = first.data[i * NL + c];
+    img.set(name === 'C' ? MAIN_LAYER : name, out);
+  });
   img.set('mask', first.coverage);
   let covered = 0;
   for (let i = 0; i < first.coverage.length; i++) if (first.coverage[i] > 0) covered++;
@@ -145,8 +148,9 @@ defineNode({
     'Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bolt* @name=hinge*"; or points or a mesh on input 1) where they touch another surface within 1 cm, ' +
     'one every 1 / density metres along each part (at least one per part), and walk down the receiving surface (every prim that is not a source): gravity projected onto the surface, bent sideways by 3D noise (wobble), ' +
     'snapped back onto the mesh, over edges and across uv seams, around bosses and over the underside of a lip. A surface whose normal is within ledge degrees of up stops the run, where it pools; ' +
+    'a pool whose ledge has an edge within the spill reach (metres) spills over the edge nearest to it and the run goes on below with less strength; a source standing on a ledge starts a pool and does the same; ' +
     'at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. ' +
-    'Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range, tapering to 30 % at the tail, and fading out over the last part unless the run ends in a pool), gaps (breakup) and wander. ' +
+    'Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. ' +
     'Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); ' +
     'strength = the run\'s random 0..1 (a threshold picks how many runs show, without tracing again); id = run number (0 = none); mask = coverage. The source parts themselves bake 0. ' +
     'Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).',
@@ -174,6 +178,7 @@ defineNode({
     pool: { type: 'float', default: 1.5, min: 1, desc: 'width multiplier of the pool where a run stops on a ledge', aliases: ['pool_width', 'puddle'] },
     drip: { type: 'bool', default: true, desc: 'a run reaching an overhang (a face turned down) falls along the direction to the next surface below and goes on; off: it ends there', aliases: ['drips'] },
     step: { type: 'float', default: 0, min: 0, desc: 'walking step in metres (0 = half the smallest width)', aliases: ['step_size'] },
+    spill: { type: 'float', default: 0.05, min: 0, desc: 'a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are', aliases: ['spill_reach', 'overflow'] },
     seed: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'seed of the run starts, lengths, widths, wander and gaps' },
   },
   outputs: 'image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask',

@@ -61,7 +61,7 @@ function cylPolys(r: number, y0: number, y1: number, sides: number, axis: 'y' | 
   return axis === 'y' ? out : out.map((p, i) => (i < sides ? p.slice().reverse() : i === sides ? lo : hi.slice().reverse()));
 }
 
-const PRM: FlowParams = { density: 40, direction: [0, -1, 0], length: [0.05, 0.25], width: [0.004, 0.012], wobble: 0, breakup: 0, ledge: 30, pool: 1.5, drip: true, step: 0, seed: 0 };
+const PRM: FlowParams = { density: 40, direction: [0, -1, 0], length: [0.05, 0.25], width: [0.004, 0.012], wobble: 0, breakup: 0, ledge: 30, pool: 1.5, drip: true, step: 0, spill: 0, seed: 0 };
 const prm = (o: Partial<FlowParams> = {}): FlowParams => ({ ...PRM, ...o });
 
 /** Trace the parts named "src" over the others. */
@@ -184,6 +184,34 @@ section('overhang: drip');
     check(off.stats.drips === 0 && Array.from({ length: off.runs.segs }, (_, k) => off.runs.A[k * 6 + 1]).every((y) => y > 0.4), 'drip off: the run ends at the edge');
 }
 
+
+// ---------------------------------------------------------------- spill over a narrow ledge
+section('ledge: spill over the edge');
+const stepped = (ledgeDepth: number, boltZ: number): Geometry => build([
+  { name: 'lower', polys: boxPolys(0, 0, -0.05, 1, 0.5, ledgeDepth - 0.02) },
+  { name: 'upper', polys: boxPolys(0, 0.5, -0.05, 1, 1, -0.02) },
+  { name: 'src', polys: boxPolys(0.4, 0.498, boltZ - 0.006, 0.45, 0.52, boltZ + 0.006) },
+]);
+/** The paths of the runs (not the pool lenses, whose size follows the width): a count and a hash of the positions. */
+const hashA = (rs: RunSet) => { let h = 0, c = 0; for (let k = 0; k < rs.segs; k++) { if (rs.POOL[k]) continue; c++; for (let i = 0; i < 6; i++) h = (Math.imul(h, 31) + Math.round(rs.A[k * 6 + i] * 1e9)) | 0; } return `${rs.segs}:${c}:${h}`; };
+{
+  const narrow = stepped(0.02, -0.01);
+  const segsBelow = (rs: RunSet, z: number) => Array.from({ length: rs.segs }, (_, k) => k).filter((k) => rs.A[k * 6 + 1] < 0.49 && rs.A[k * 6 + 4] < 0.49 && Math.abs(rs.A[k * 6 + 2] - z) < 0.003);
+  const none = trace(narrow, { spill: 0 });
+  // recorded from the build before spilling existed: with the reach at 0 the result is the same bit for bit
+  check(hashA(none.runs) === '15:13:-913485494' && segsBelow(none.runs, 0).length === 0, `spill 0: the runs are those of the build before spilling (${hashA(none.runs)}), nothing below the ledge`);
+  const sp = trace(narrow, { spill: 0.05 });
+  const below = segsBelow(sp.runs, 0);
+  check(sp.stats.spills > 0 && below.length > 0 && below.every((k) => sp.runs.AMP[k] < 1 && sp.runs.A[k * 6] > 0.36 && sp.runs.A[k * 6] < 0.49), `a bolt on a narrow ledge: ${sp.stats.spills} spill(s), ${below.length} segments on the wall below it, weaker than the pool (amp ${Math.min(...below.map((k) => sp.runs.AMP[k])).toFixed(2)})`);
+  const lensAt = Array.from({ length: sp.runs.segs }, (_, k) => k).filter((k) => sp.runs.POOL[k] && Math.abs(sp.runs.A[k * 6 + 1] - 0.5) < 0.01);
+  check(lensAt.length > 0, 'the pool lens stays on the ledge');
+  const wide = stepped(0.3, 0.14);
+  const wd = trace(wide, { spill: 0.05 });
+  check(wd.runs.count > 0 && wd.stats.spills === 0 && segsBelow(wd.runs, 0.28).length === 0 && wd.stats.ended.ledge === wd.runs.count, `a bolt in the middle of a wide shelf pools only (${wd.runs.count} pool run(s), no spill)`);
+  const far = trace(wide, { spill: 0.2 });
+  check(far.stats.spills > 0, 'a reach of 0.2 m does reach the edge of the same shelf');
+}
+
 // ---------------------------------------------------------------- gravity
 section('gravity');
 {
@@ -290,7 +318,7 @@ section('node: straight runs below a source');
     if (m[j * R + i] < 1 || c[j * R + i] < 0.5) continue;
     n++;
     const x = ((i + 0.5) / R) / SPAN * SIDE, y = ((R - j - 0.5) / R) / SPAN * SIDE;
-    if (x < 0.28 - 0.003 || x > 0.32 + 0.003 || y > 0.45 + 0.002 || y < 0.45 - 0.11) outside++;
+    if (x < 0.28 - 0.006 || x > 0.32 + 0.006 || y > 0.45 + 0.002 || y < 0.45 - 0.11) outside++;
   }
   check(n > 100 && outside === 0, `${n} texels on runs, all in the strip straight below the plate (${outside} outside)`);
   const bolt = await cookOn(engines.pool, { ...flow('uncut', { ...P, resolution: 128, keep_mesh: true }) }, 'f');

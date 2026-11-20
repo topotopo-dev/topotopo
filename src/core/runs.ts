@@ -34,6 +34,10 @@ export const OVERHANG = 0.26;
 export const MAX_RUNS = 20000;
 /** Spatial frequency of the sideways wander (per metre): it changes direction about every 8 cm. */
 const WOBBLE_FREQ = 12;
+/** Most spills over a ledge's edge one run may take. */
+const MAX_SPILLS = 3;
+/** Strength of a run after it spilled over an edge. */
+const SPILL_AMP = 0.65;
 /** Most drips one run may take. */
 const MAX_DRIPS = 6;
 
@@ -52,6 +56,8 @@ export interface FlowParams {
   drip: boolean;
   /** walking step in metres (0 = half the smallest width) */
   step: number;
+  /** metres: a pool on a ledge whose edge is this near spills over it and runs on below (0 = pools stay) */
+  spill: number;
   seed: number;
 }
 
@@ -153,6 +159,8 @@ export interface RunSet {
   ID: Int32Array;
   /** 1 = a pool lens (no gaps) */
   POOL: Uint8Array;
+  /** strength of each segment (1, less after a spill) */
+  AMP: Float32Array;
   /** drawn length of each run (index 0 unused) */
   runLen: Float32Array;
   /** a random 0..1 per run (index 0 unused) */
@@ -174,6 +182,8 @@ export interface TraceStats {
   ended: { ledge: number; length: number; fell: number; lost: number };
   /** drips that landed on a surface below */
   drips: number;
+  /** spills over the edge of a ledge */
+  spills: number;
   /** the density was thinned to the run limit */
   capped: boolean;
   /** parts that touch the surface (names) */
@@ -183,8 +193,9 @@ export interface TraceStats {
 export interface Traced { runs: RunSet; stats: TraceStats }
 
 class SegList {
-  A: number[] = []; NRM: number[] = []; HW: number[] = []; SS: number[] = []; ID: number[] = []; POOL: number[] = [];
-  push(a: ArrayLike<number>, b: ArrayLike<number>, na: ArrayLike<number>, nb: ArrayLike<number>, hwa: number, hwb: number, sa: number, sb: number, id: number, pool: number) {
+  A: number[] = []; NRM: number[] = []; HW: number[] = []; SS: number[] = []; ID: number[] = []; POOL: number[] = []; AMP: number[] = [];
+  push(a: ArrayLike<number>, b: ArrayLike<number>, na: ArrayLike<number>, nb: ArrayLike<number>, hwa: number, hwb: number, sa: number, sb: number, id: number, pool: number, amp = 1) {
+    this.AMP.push(amp);
     this.A.push(a[0], a[1], a[2], b[0], b[1], b[2]);
     this.NRM.push(na[0], na[1], na[2], nb[0], nb[1], nb[2]);
     this.HW.push(hwa, hwb); this.SS.push(sa, sb); this.ID.push(id); this.POOL.push(pool);
@@ -213,7 +224,7 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
   const noise = makeNoise('perlin', Math.floor(prm.seed * 131) + 17);
   const diag = (() => { const b = recv.bbox(); return Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1; })();
   const sc = closestScratch();
-  const stats: TraceStats = { started: 0, candidates: cands.part.length, touching: 0, ledgeRejected: 0, ended: { ledge: 0, length: 0, fell: 0, lost: 0 }, drips: 0, capped: false, touchingParts: [] };
+  const stats: TraceStats = { started: 0, candidates: cands.part.length, touching: 0, ledgeRejected: 0, ended: { ledge: 0, length: 0, fell: 0, lost: 0 }, drips: 0, spills: 0, capped: false, touchingParts: [] };
 
   /** smooth surface normal of triangle t at barycentric (b0, b1, b2), unit, into out */
   const smooth = (t: number, b0: number, b1: number, b2: number, out: number[]) => {
@@ -236,7 +247,8 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
     stats.touching++;
     touchingParts.add(cands.part[i]);
     smooth(t, sc.b0, sc.b1, sc.b2, tn);
-    if (dot(tn, up) >= ledgeCos || dot(tn, G) > OVERHANG) { stats.ledgeRejected++; continue; }
+    // a start on a ledge is a pool; it only goes anywhere when it can spill over an edge
+    if ((prm.spill <= 0 && dot(tn, up) >= ledgeCos) || dot(tn, G) > OVERHANG) { stats.ledgeRejected++; continue; }
     starts.push({ q: [sc.x, sc.y, sc.z], part: cands.part[i], key: randN(sd, i, 5) });
   }
   stats.touchingParts = [...touchingParts].sort((a, b) => a - b).map((i) => cands.names[i]);
@@ -281,6 +293,58 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
   const x = [0, 0, 0], n = [0, 0, 0], nq = [0, 0, 0], d = [0, 0, 0], tx = [0, 0, 0], dir = [0, 0, 0], q = [0, 0, 0], e = [0, 0, 0], neff = [0, 0, 0], lastDir = [0, 0, 0], nPrev = [0, 0, 0];
   const noiseAt = (px: number, py: number, pz: number, ox: number, oy: number, oz: number) => noise(px * WOBBLE_FREQ + ox, py * WOBBLE_FREQ + oy, pz * WOBBLE_FREQ + oz);
 
+  // the nearest edge of the ledge at p0 (normal nl) within `reach`: the pool spills there. Marches over the surface in
+  // 16 directions; an edge is where the surface ends (a step lands in the air) or turns down steeper than a ledge; a
+  // surface that rises in the way blocks that direction. E, EN (the normal to go on with) and ED (the direction) are set.
+  // a ledge that rolls over ends where the surface is clearly steeper than a ledge (4° more), so the run is not stopped again at once
+  const edgeCos = Math.cos((Math.min(89, Math.max(0, prm.ledge) + 4) * Math.PI) / 180);
+  const edgeE = [0, 0, 0], edgeN = [0, 0, 0], edgeD = [0, 0, 0];
+  const findEdge = (p0: number[], nl: number[], reach: number): boolean => {
+    const ax = Math.abs(nl[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const t1 = norm3([nl[1] * ax[2] - nl[2] * ax[1], nl[2] * ax[0] - nl[0] * ax[2], nl[0] * ax[1] - nl[1] * ax[0]]);
+    const t2 = [nl[1] * t1[2] - nl[2] * t1[1], nl[2] * t1[0] - nl[0] * t1[2], nl[0] * t1[1] - nl[1] * t1[0]];
+    const h2 = Math.max(h, reach / 24), steps = Math.ceil(reach / h2);
+    let best = Infinity, found = false;
+    const pp = [0, 0, 0], nc = [0, 0, 0], dd = [0, 0, 0], en = [0, 0, 0], eq = [0, 0, 0], ee = [0, 0, 0];
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * 2 * Math.PI, ca = Math.cos(a), sa = Math.sin(a);
+      dd[0] = t1[0] * ca + t2[0] * sa; dd[1] = t1[1] * ca + t2[1] * sa; dd[2] = t1[2] * ca + t2[2] * sa;
+      pp[0] = p0[0]; pp[1] = p0[1]; pp[2] = p0[2]; nc[0] = nl[0]; nc[1] = nl[1]; nc[2] = nl[2];
+      let travelled = 0, hit = false, isAir = false;
+      for (let i = 0; i < steps && !hit; i++) {
+        if (rays.nearest(pp[0] + nc[0] * 1e-4, pp[1] + nc[1] * 1e-4, pp[2] + nc[2] * 1e-4, dd[0], dd[1], dd[2], 1.05 * h2, 1e-6) < Infinity) break;
+        const sx = pp[0] + dd[0] * h2, sy = pp[1] + dd[1] * h2, sz = pp[2] + dd[2] * h2;
+        const t = bvh.closestInto(sx, sy, sz, 4 * h2, sc);
+        if (t < 0) { eq[0] = pp[0]; eq[1] = pp[1]; eq[2] = pp[2]; en[0] = dd[0] + G[0]; en[1] = dd[1] + G[1]; en[2] = dd[2] + G[2]; norm3(en); hit = true; isAir = true; }
+        else {
+          const qx = sc.x, qy = sc.y, qz = sc.z;
+          smooth(t, sc.b0, sc.b1, sc.b2, en);
+          ee[0] = sx - qx; ee[1] = sy - qy; ee[2] = sz - qz;
+          const de = Math.hypot(ee[0], ee[1], ee[2]);
+          if (de > 0.3 * h2 && dot(ee, en) > -0.2 * de) { eq[0] = qx; eq[1] = qy; eq[2] = qz; en[0] = ee[0] / de; en[1] = ee[1] / de; en[2] = ee[2] / de; hit = true; isAir = true; }
+          else if (dot(en, up) < edgeCos) { eq[0] = qx; eq[1] = qy; eq[2] = qz; hit = true; }
+          else { travelled += Math.hypot(qx - pp[0], qy - pp[1], qz - pp[2]); pp[0] = qx; pp[1] = qy; pp[2] = qz; nc[0] = en[0]; nc[1] = en[1]; nc[2] = en[2]; }
+        }
+        if (hit) {
+          const dist = travelled + Math.hypot(eq[0] - pp[0], eq[1] - pp[1], eq[2] - pp[2]);
+          if (dist > reach) break;
+          // the lowest of equally near edges
+          const score = dist * (1 - 0.15 * dot(dd, G));
+          if (score < best) {
+            best = score; found = true;
+            edgeE[0] = eq[0]; edgeE[1] = eq[1]; edgeE[2] = eq[2];
+            // an edge into the air goes on down the side below it: the normal pointing out, level
+            const up_ = dot(en, up);
+            const hx = en[0] - up_ * up[0], hy = en[1] - up_ * up[1], hz = en[2] - up_ * up[2], hl = Math.hypot(hx, hy, hz);
+            if (isAir && hl > 0.2) { edgeN[0] = hx / hl; edgeN[1] = hy / hl; edgeN[2] = hz / hl; } else { edgeN[0] = en[0]; edgeN[1] = en[1]; edgeN[2] = en[2]; }
+            edgeD[0] = dd[0]; edgeD[1] = dd[1]; edgeD[2] = dd[2];
+          }
+        }
+      }
+    }
+    return found;
+  };
+
   for (let r = 0; r < chosen.length; r++) {
     if ((r & 63) === 0) check?.();
     const id = r + 1, st = chosen[r];
@@ -288,7 +352,10 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
     // longer runs are the stronger ones: a threshold on strength drops the short ones first
     const L = lmin + (lmax - lmin) * Math.pow(0.45 * u1 + 0.55 * u2, 1.6);
     const w0 = wmin + (wmax - wmin) * u3;
-    const hw0 = 0.5 * w0, hwAt = (s: number) => hw0 * (1 - 0.7 * Math.min(1, s / L));
+    // a run is widest at its head (a small swell over the first 3 cm), thins to 30 % over its length
+    const hw0 = 0.5 * w0;
+    let ledgeFrom = 0, hwBase = hw0, sBase = 0, Lseg = L, sEnd = L, sBulb = 0, ampCur = 1, spills = 0;
+    const hwAt = (sv: number) => hwBase * (1 - 0.7 * Math.min(1, Math.max(0, sv - sBase) / Lseg)) * (1 + 0.3 * Math.max(0, 1 - (sv - sBulb) / 0.03));
     const bias = (randN(sd, id, 4) - 0.5) * 0.5;
     const ox = randN(sd, id, 6) * 97, oy = randN(sd, id, 7) * 97, oz = randN(sd, id, 8) * 97;
     const exitR = Math.max(0.0015, 1.2 * hw0);
@@ -303,14 +370,46 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
     let s = 0, hidden = 0, stuck = 0, drips = 0, reason: 'length' | 'ledge' | 'fell' | 'lost' = 'lost';
     let pa: number[] | null = emerged ? [x[0], x[1], x[2]] : null, na = [n[0], n[1], n[2]];
     lastDir[0] = G[0]; lastDir[1] = G[1]; lastDir[2] = G[2];
-    const maxSteps = Math.ceil((L + maxHidden) / h) + 200;
+    nPrev[0] = n[0]; nPrev[1] = n[1]; nPrev[2] = n[2];
     let ledgeHit = false;
+
+    /**
+     * The run is on a ledge at x: a pool lens there, and when an edge of the ledge is within the spill reach the pool
+     * runs to it (a trail at the pool's width) and the run goes on from the edge with less strength. False: it stays.
+     */
+    const onLedge = (): boolean => {
+      const hp = hwAt(s) * Math.max(1, prm.pool);
+      // sideways on the ledge: perpendicular to the way the run came and to the surface it came down
+      let lx = lastDir[1] * nPrev[2] - lastDir[2] * nPrev[1], ly = lastDir[2] * nPrev[0] - lastDir[0] * nPrev[2], lz = lastDir[0] * nPrev[1] - lastDir[1] * nPrev[0];
+      if (Math.hypot(lx, ly, lz) < 1e-6) { const ax = Math.abs(n[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]; lx = n[1] * ax[2] - n[2] * ax[1]; ly = n[2] * ax[0] - n[0] * ax[2]; lz = n[0] * ax[1] - n[1] * ax[0]; }
+      const ld = lx * n[0] + ly * n[1] + lz * n[2];
+      const lv = norm3([lx - ld * n[0], ly - ld * n[1], lz - ld * n[2]]);
+      const a = 2.5 * hp;
+      segs.push([x[0] - lv[0] * a, x[1] - lv[1] * a, x[2] - lv[2] * a], [x[0] + lv[0] * a, x[1] + lv[1] * a, x[2] + lv[2] * a], n, n, hp, hp, s, s, id, 1, ampCur);
+      if (!(prm.spill > 0) || spills >= MAX_SPILLS || !findEdge(x, n, prm.spill)) return false;
+      const dist = Math.hypot(edgeE[0] - x[0], edgeE[1] - x[1], edgeE[2] - x[2]);
+      segs.push(x, edgeE, n, n, hwAt(s), hwAt(s), s, s + dist, id, 0, ampCur);
+      s += dist; spills++; stats.spills++;
+      x[0] = edgeE[0]; x[1] = edgeE[1]; x[2] = edgeE[2];
+      n[0] = edgeN[0]; n[1] = edgeN[1]; n[2] = edgeN[2];
+      pa = [x[0], x[1], x[2]]; na = [n[0], n[1], n[2]];
+      lastDir[0] = edgeD[0]; lastDir[1] = edgeD[1]; lastDir[2] = edgeD[2];
+      nPrev[0] = n[0]; nPrev[1] = n[1]; nPrev[2] = n[2];
+      ledgeFrom = s + 0.012; ampCur *= SPILL_AMP; hwBase = Math.max(0.8 * hw0, 0.9 * hp); sBase = s; sBulb = s; Lseg = L; sEnd = s + Lseg; stuck = 0;
+      return true;
+    };
+    // a start on a ledge is a pool from the first: it spills over the nearest edge or stays
+    let maxSteps = Math.ceil((L * (1 + MAX_SPILLS) + maxHidden) / h) + 200;
+    if (prm.spill > 0 && dot(n, up) >= ledgeCos) {
+      emerged = true; s = 1e-3; pa = [x[0], x[1], x[2]];
+      if (!onLedge()) { reason = 'ledge'; ledgeHit = true; maxSteps = 0; }
+    }
     for (let step = 0; step < maxSteps; step++) {
       // flow: gravity on the tangent plane, bent sideways by noise
       const gn = dot(G, n);
       d[0] = G[0] - gn * n[0]; d[1] = G[1] - gn * n[1]; d[2] = G[2] - gn * n[2];
       const dl = Math.hypot(d[0], d[1], d[2]);
-      if (dl < 1e-3) { reason = 'ledge'; ledgeHit = true; break; }
+      if (dl < 1e-3) { if (emerged && onLedge()) continue; reason = 'ledge'; ledgeHit = true; break; }
       d[0] /= dl; d[1] /= dl; d[2] /= dl;
       tx[0] = n[1] * d[2] - n[2] * d[1]; tx[1] = n[2] * d[0] - n[0] * d[2]; tx[2] = n[0] * d[1] - n[1] * d[0];
       norm3(tx);
@@ -354,10 +453,10 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
         if (srcBvh!.closestInto(x[0], x[1], x[2], exitR, sc) < 0) { emerged = true; pa = [x[0], x[1], x[2]]; na = [n[0], n[1], n[2]]; s = 0; }
       } else {
         const s1 = s + move;
-        if (pa) segs.push(pa, x, na, n, hwAt(s), hwAt(s1), s, s1, id, 0);
+        if (pa) segs.push(pa, x, na, n, hwAt(s), hwAt(s1), s, s1, id, 0, ampCur);
         s = s1; pa = [x[0], x[1], x[2]]; na = [n[0], n[1], n[2]];
       }
-      if (dot(neff, up) >= ledgeCos) { reason = 'ledge'; ledgeHit = true; break; }
+      if (dot(neff, up) >= ledgeCos && s >= ledgeFrom) { if (emerged && onLedge()) continue; reason = 'ledge'; ledgeHit = true; break; }
       if (dot(neff, G) > OVERHANG) {
         // overhang: drip along gravity onto the surface below
         if (!prm.drip || drips >= MAX_DRIPS || !emerged) { reason = 'fell'; break; }
@@ -373,23 +472,12 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
         pa = [x[0], x[1], x[2]]; na = [n[0], n[1], n[2]];
         lastDir[0] = G[0]; lastDir[1] = G[1]; lastDir[2] = G[2];
         nPrev[0] = n[0]; nPrev[1] = n[1]; nPrev[2] = n[2];
-        if (dot(n, up) >= ledgeCos) { reason = 'ledge'; ledgeHit = true; break; }
+        if (dot(n, up) >= ledgeCos) { if (onLedge()) continue; reason = 'ledge'; ledgeHit = true; break; }
         continue;
       }
-      if (emerged && s >= L) { reason = 'length'; break; }
+      if (emerged && s >= sEnd) { reason = 'length'; break; }
     }
     if (!emerged && reason !== 'lost') reason = 'lost';
-    // a pool where the run stopped on a ledge: a lens along the ledge, `pool` times the run's width there
-    if (ledgeHit && emerged) {
-      const hp = hwAt(s) * Math.max(1, prm.pool);
-      // sideways on the ledge: perpendicular to the way the run came and to the surface it came down
-      let lx = lastDir[1] * nPrev[2] - lastDir[2] * nPrev[1], ly = lastDir[2] * nPrev[0] - lastDir[0] * nPrev[2], lz = lastDir[0] * nPrev[1] - lastDir[1] * nPrev[0];
-      if (Math.hypot(lx, ly, lz) < 1e-6) { lx = n[1] * G[2] - n[2] * G[1]; ly = n[2] * G[0] - n[0] * G[2]; lz = n[0] * G[1] - n[1] * G[0]; }
-      const ld = lx * n[0] + ly * n[1] + lz * n[2];
-      const lv = norm3([lx - ld * n[0], ly - ld * n[1], lz - ld * n[2]]);
-      const a = 2.5 * hp;
-      segs.push([x[0] - lv[0] * a, x[1] - lv[1] * a, x[2] - lv[2] * a], [x[0] + lv[0] * a, x[1] + lv[1] * a, x[2] + lv[2] * a], n, n, hp, hp, s, s, id, 1);
-    }
     const drawn = segs.ID.length > first;
     if (!drawn) continue; // never came out from under its source
     runLen.push(Math.max(s, 1e-6)); strength.push(u1); pooled.push(ledgeHit ? 1 : 0);
@@ -402,7 +490,7 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
   const rs: RunSet = {
     count: runLen.length - 1, segs: segs.ID.length,
     A: Float64Array.from(segs.A), NRM: Float32Array.from(segs.NRM), HW: Float32Array.from(segs.HW), SS: Float32Array.from(segs.SS),
-    ID: Int32Array.from(segs.ID), POOL: Uint8Array.from(segs.POOL), runLen: Float32Array.from(runLen), strength: Float32Array.from(strength), pooled: Uint8Array.from(pooled),
+    ID: Int32Array.from(segs.ID), POOL: Uint8Array.from(segs.POOL), AMP: Float32Array.from(segs.AMP), runLen: Float32Array.from(runLen), strength: Float32Array.from(strength), pooled: Uint8Array.from(pooled),
   };
   return { runs: rs, stats };
 }
@@ -519,11 +607,12 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
         hw *= 1 + 0.5 * breakup * noise(sAbs * FW + 0.13, 0.5, id * 0.77 + 0.11);
       }
       if (gate <= 0) continue;
-      // box-filtered coverage of the stripe [-hw, hw] over a window of the sample's size
-      const lo = Math.max(-hw, dist - 0.5 * tau), hi = Math.min(hw, dist + 0.5 * tau);
-      // a run that does not end in a pool fades out over its last part
-      const fade = pool || rs.pooled[id] ? 1 : 1 - 0.85 * smoothstep(0.55, 1, along);
-      const cov = hi > lo ? ((hi - lo) / tau) * gate * fade : 0;
+      // box-filtered coverage of the stripe [-hw, hw] over a window as wide as the sample or, for a soft edge, 0.6 of the run
+      const win = Math.max(tau, 0.6 * hw);
+      const lo = Math.max(-hw, dist - 0.5 * win), hi = Math.min(hw, dist + 0.5 * win);
+      // the strength of a run dies away along it (barely there at the tail) unless it ends in a pool; a spill is weaker
+      const fade = pool || rs.pooled[id] ? 1 : 1 - 0.96 * smoothstep(0.25, 1, along);
+      const cov = hi > lo ? ((hi - lo) / win) * gate * fade * rs.AMP[k] : 0;
       if (cov > best) { best = cov; bk = id; bAlong = along; }
     }
     if (bk < 0) continue;
