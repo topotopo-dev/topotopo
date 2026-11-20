@@ -16,7 +16,7 @@ import { createNodeHost } from '../src/host/node.ts';
 import { findImage } from '../src/core/image.ts';
 import type { Image } from '../src/core/image.ts';
 import { bakeMemoLimits, bakeMemoStats, bakeMemoUsage, memoBake } from '../src/core/bake.ts';
-import { CURVATURE_SCALE, CURVATURE_THIN, OPEN_SHARE, runCurvature, runRays, surfaceCloud, surfaceMesh } from '../src/core/surface.ts';
+import { CURVATURE_SCALE, CURVATURE_THIN, INTERP_COARSE, OPEN_SHARE, runCurvature, runInterp, runRays, surfaceCloud, surfaceMesh } from '../src/core/surface.ts';
 import { KERNELS } from '../src/core/kernels.ts';
 import { Geometry as Geo } from '../src/core/geometry.ts';
 import { RayScene } from '../src/core/analysis.ts';
@@ -618,6 +618,34 @@ section('islands smaller than a texel and hidden faces');
   const sides = t.idx.filter((k) => { const p = pAt(t, k); return Math.abs(p[0]) > 0.499 && p[1] > 0.3; });
   check(sides.every((k) => t.at('visibility', k) > 0.99), 'the sides read seen');
   check(t.c.stats.cloud_points > 0, `stat cloud_points (${t.c.stats.cloud_points})`);
+}
+
+section('an atlas packed for what is seen: the lookup follows where the points are, coarse islands read clusters');
+{
+  // two plates side by side, one part but two islands: the large one at a thousandth of the texel weight (most of the area,
+  // few texels), so its texels next to the small one gather that one's dense points
+  const g = (await cook({
+    gA: { type: 'grid', params: { size: [1.5, 1], center: [-0.5, 0, 0], rows: 12, cols: 18 } },
+    gB: { type: 'grid', params: { size: [0.5, 1], center: [0.5, 0, 0], rows: 12, cols: 6 } },
+    mg: { type: 'merge', in: ['gA', 'gB'] },
+    a1: { type: 'wrangle', in: ['mg'], params: { run_over: 'prims', code: 'f@texel_weight = @P.x > 0.25 ? 1 : 0.001;' } },
+    au: { type: 'uv_unwrap', in: ['a1'] },
+  }, 'au')).geo;
+  const { tris, mesh, sc } = cloudOfGeo(g, 512, 4);
+  const h = sc.grid.GH[3], nt = tris.length / 3;
+  check(sc.spacing < 0.25 * 4 * mesh.median && Math.abs(h - 2 * sc.spacing) < 1e-12, `the spacing is the median over the points (${(sc.spacing * 1000).toFixed(2)} mm), not over the area (${(4 * mesh.median * 1000).toFixed(1)} mm), and the grid cell is twice it`);
+  // samples on the coarse triangles: the clusters against every point, for a smooth value (the point's x + y + z)
+  const coarse: number[] = [];
+  for (let t = 0; t < nt; t++) if (sc.TR[t] > INTERP_COARSE * h) coarse.push(t);
+  const bs = [[1 / 3, 1 / 3], [0.6, 0.2], [0.2, 0.6], [0.2, 0.2]], n = coarse.length * bs.length;
+  const smp = { n, tri: new Int32Array(n), b1: new Float32Array(n), b2: new Float32Array(n) };
+  coarse.forEach((t, j) => bs.forEach(([u, v], q) => { smp.tri[j * 4 + q] = t; smp.b1[j * 4 + q] = u; smp.b2[j * 4 + q] = v; }));
+  const c = sc.cloud, CV = new Float32Array(c.n);
+  for (let i = 0; i < c.n; i++) CV[i] = c.P[i * 3] + c.P[i * 3 + 1] + c.P[i * 3 + 2];
+  const fast = await runInterp(runHere, smp, tris, mesh, sc, CV, 1), exact = await runInterp(runHere, smp, tris, mesh, sc, CV, 1, null, 0, Infinity);
+  let worst = 0, sum = 0;
+  for (let i = 0; i < n; i++) { const d = Math.abs(fast[i] - exact[i]); worst = Math.max(worst, d); sum += d; }
+  check(coarse.length > 50 && sum / n < 1e-4 && worst < 1e-3, `${coarse.length} coarse triangles read the clusters: mean difference ${(sum / n).toExponential(1)} m (< 0.1 mm), worst ${(worst * 1000).toFixed(2)} mm (< 1 mm) against every point`);
 }
 
 section('inconsistent windings and normals');

@@ -35,7 +35,9 @@
 //   interpolation      a texel sample takes the weighted mean of every cloud point of its own piece within R = 2 × the
 //                      local cloud spacing, weight (1 − d²/R²)² × max(0, n·nₚ)⁴ × the point's weight, so values do not
 //                      bleed around sharp edges, onto the far side of a thin plate or onto another part; with no weight
-//                      it takes the nearest point of its own triangle
+//                      it takes the nearest point of its own triangle. A texel of an island far coarser than the rest
+//                      (R over 4 grid cells: a hidden island packed smaller than a texel) takes the same mean over the
+//                      points merged into clusters (per grid cell, part and side), so it costs about what the others do
 //   surface curvature  per cloud point p with normal n, over the points q within the radius that are not buried (of any
 //                      part, so a junction between parts reads concave) whose normal turns less than 120° away:
 //                      c · r · Σ w (n_q − n)·(q − p) / (|q − p|² + ε²) / Σ w, w = (1 − d²/r²)² × the point's weight
@@ -847,19 +849,31 @@ export const CURVATURE_THIN = 8;
  * (so the two faces of an edge stay apart): area-weighted mean position and normal, summed area. For curvature at a
  * radius many times the spacing: the sum over the disc is the same integral at a coarser step.
  */
-export function thinCloud(c: Cloud, CB: Uint8Array | null, h: number): { n: number; P: Float64Array; N: Float64Array; W: Float32Array } {
-  const ids = new Map<string, number>(), P: number[] = [], N: number[] = [], W: number[] = [];
+export function thinCloud(c: Cloud, CB: Uint8Array | null, h: number): { n: number; P: Float64Array; N: Float64Array; W: Float32Array; piece: Int32Array; of: Int32Array } {
+  const P: number[] = [], N: number[] = [], W: number[] = [], piece: number[] = [], of = new Int32Array(c.n).fill(-1);
+  let lx = Infinity, ly = Infinity, lz = Infinity, hx = -Infinity, hy = -Infinity, hz = -Infinity, np = 1;
+  for (let i = 0; i < c.n; i++) {
+    const x = c.P[i * 3], y = c.P[i * 3 + 1], z = c.P[i * 3 + 2];
+    if (x < lx) lx = x; if (x > hx) hx = x; if (y < ly) ly = y; if (y > hy) hy = y; if (z < lz) lz = z; if (z > hz) hz = z;
+    if (c.piece[i] >= np) np = c.piece[i] + 1;
+  }
+  // a number per cell, side and part (a string where that number would not be exact)
+  const nx = Math.floor((hx - lx) / h) + 1, ny = Math.floor((hy - ly) / h) + 1, nz = Math.floor((hz - lz) / h) + 1;
+  const exact = nx * ny * nz * 6 * np < Number.MAX_SAFE_INTEGER;
+  const ids = new Map<number | string, number>();
   for (let i = 0; i < c.n; i++) {
     const w = c.wt[i];
     if ((CB && CB[i]) || !(w > 0)) continue;
-    const x = c.P[i * 3], y = c.P[i * 3 + 1], z = c.P[i * 3 + 2], nx = c.N[i * 3], ny = c.N[i * 3 + 1], nz = c.N[i * 3 + 2];
-    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
-    const side = ax >= ay && ax >= az ? (nx > 0 ? 0 : 1) : ay >= az ? (ny > 0 ? 2 : 3) : nz > 0 ? 4 : 5;
-    const key = `${Math.floor(x / h)},${Math.floor(y / h)},${Math.floor(z / h)},${c.piece[i]},${side}`;
+    const x = c.P[i * 3], y = c.P[i * 3 + 1], z = c.P[i * 3 + 2], nx_ = c.N[i * 3], ny_ = c.N[i * 3 + 1], nz_ = c.N[i * 3 + 2];
+    const ax = Math.abs(nx_), ay = Math.abs(ny_), az = Math.abs(nz_);
+    const side = ax >= ay && ax >= az ? (nx_ > 0 ? 0 : 1) : ay >= az ? (ny_ > 0 ? 2 : 3) : nz_ > 0 ? 4 : 5;
+    const ix = Math.floor((x - lx) / h), iy = Math.floor((y - ly) / h), iz = Math.floor((z - lz) / h);
+    const key = exact ? (((iz * ny + iy) * nx + ix) * 6 + side) * np + c.piece[i] : `${ix},${iy},${iz},${c.piece[i]},${side}`;
     let j = ids.get(key);
-    if (j === undefined) { j = W.length; ids.set(key, j); P.push(0, 0, 0); N.push(0, 0, 0); W.push(0); }
+    if (j === undefined) { j = W.length; ids.set(key, j); P.push(0, 0, 0); N.push(0, 0, 0); W.push(0); piece.push(c.piece[i]); }
+    of[i] = j;
     P[j * 3] += w * x; P[j * 3 + 1] += w * y; P[j * 3 + 2] += w * z;
-    N[j * 3] += w * nx; N[j * 3 + 1] += w * ny; N[j * 3 + 2] += w * nz;
+    N[j * 3] += w * nx_; N[j * 3 + 1] += w * ny_; N[j * 3 + 2] += w * nz_;
     W[j] += w;
   }
   const n = W.length, OP = new Float64Array(n * 3), ON = new Float64Array(n * 3);
@@ -868,7 +882,7 @@ export function thinCloud(c: Cloud, CB: Uint8Array | null, h: number): { n: numb
     const l = Math.hypot(N[j * 3], N[j * 3 + 1], N[j * 3 + 2]);
     if (l > 0) for (let q = 0; q < 3; q++) ON[j * 3 + q] = N[j * 3 + q] / l;
   }
-  return { n, P: OP, N: ON, W: Float32Array.from(W) };
+  return { n, P: OP, N: ON, W: Float32Array.from(W), piece: Int32Array.from(piece), of };
 }
 
 // ---------------------------------------------------------------- cloud → texel samples (kernel surface_interp)
@@ -876,6 +890,8 @@ export function thinCloud(c: Cloud, CB: Uint8Array | null, h: number): { n: numb
 export interface InterpArgs {
   /** values per cloud point */
   m: number;
+  /** radius above which a texel reads the clusters (A.KGH …), when they are given */
+  coarse?: number;
   deadline?: number;
 }
 
@@ -912,7 +928,8 @@ export function cloudGrid(P: Float64Array, n: number, h: number): { GH: Float64A
  * For texel samples [start, end) (A.tri, A.b1, A.b2: triangle and barycentrics): the weighted mean of the cloud values
  * (see the header) into A.V (m per sample), over every cloud point within R (the grid A.GH, A.GS, A.GI, A.GP). Shared:
  * A.tris, A.VP, A.VN (per vertex), A.TR (radius per triangle), A.TPiece, the cloud's A.CP, A.CN, A.CPiece, A.CV (m per
- * point) and its triangle lists A.TS, A.TPts.
+ * point) and its triangle lists A.TS, A.TPts; for coarse texels (radius over a.coarse) the clusters' grid A.KGH, A.KGS,
+ * A.KGI, A.KGP and their A.KN, A.KW, A.KPiece, A.KV.
  */
 export function surfaceInterpRange(a: InterpArgs, A: Record<string, any>, start: number, end: number): void {
   const tri: Int32Array = A.tri, b1: Float32Array = A.b1, b2: Float32Array = A.b2, V: Float32Array = A.V;
@@ -921,6 +938,8 @@ export function surfaceInterpRange(a: InterpArgs, A: Record<string, any>, start:
   const GH: Float64Array = A.GH, GS: Int32Array = A.GS, GI: Int32Array = A.GI, GP: Float64Array = A.GP;
   const ox = GH[0], oy = GH[1], oz = GH[2], h = GH[3], gx = GH[4], gy = GH[5], gz = GH[6];
   const CB: Uint8Array | undefined = A.CB;
+  const KGH: Float64Array | undefined = A.KGH, KGS: Int32Array = A.KGS, KGI: Int32Array = A.KGI, KGP: Float64Array = A.KGP;
+  const KN: Float64Array = A.KN, KW: Float32Array = A.KW, KPiece: Int32Array = A.KPiece, KV: Float32Array = A.KV, coarse = a.coarse ?? Infinity;
   const m = a.m, acc = new Float64Array(m), accB = new Float64Array(m);
   for (let i = start; i < end; i++) {
     if (late(a.deadline, i - start)) throw new Error(PAST_DEADLINE);
@@ -931,6 +950,30 @@ export function surfaceInterpRange(a: InterpArgs, A: Record<string, any>, start:
     const nl = Math.hypot(nx, ny, nz);
     if (nl > 0) { nx /= nl; ny /= nl; nz /= nl; }
     const R = TR[t], R2 = R * R, pc = TPiece[t];
+    if (KGH && R > coarse) {
+      // a coarse texel: the clusters within R (the full scan below when none faces its way)
+      const kox = KGH[0], koy = KGH[1], koz = KGH[2], kh = KGH[3], kgx = KGH[4], kgy = KGH[5], kgz = KGH[6];
+      const x0 = Math.max(0, Math.floor((px - R - kox) / kh)), x1 = Math.min(kgx - 1, Math.floor((px + R - kox) / kh));
+      const y0 = Math.max(0, Math.floor((py - R - koy) / kh)), y1 = Math.min(kgy - 1, Math.floor((py + R - koy) / kh));
+      const z0 = Math.max(0, Math.floor((pz - R - koz) / kh)), z1 = Math.min(kgz - 1, Math.floor((pz + R - koz) / kh));
+      acc.fill(0);
+      let sw = 0;
+      for (let cz = z0; cz <= z1; cz++) for (let cy = y0; cy <= y1; cy++) {
+        const row = (cz * kgy + cy) * kgx;
+        for (let k = KGS[row + x0], ke = KGS[row + x1 + 1]; k < ke; k++) {
+          const dx = KGP[k * 3] - px, dy = KGP[k * 3 + 1] - py, dz = KGP[k * 3 + 2] - pz, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= R2) continue;
+          const q = KGI[k];
+          if (KPiece[q] !== pc) continue;
+          const dn = nx * KN[q * 3] + ny * KN[q * 3 + 1] + nz * KN[q * 3 + 2];
+          if (!(dn > 0)) continue;
+          const d = 1 - d2 / R2, dn2 = dn * dn, w = d * d * dn2 * dn2 * KW[q];
+          sw += w;
+          for (let c = 0; c < m; c++) acc[c] += w * KV[q * m + c];
+        }
+      }
+      if (sw > 0) { for (let c = 0; c < m; c++) V[i * m + c] = acc[c] / sw; continue; }
+    }
     const x0 = Math.max(0, Math.floor((px - R - ox) / h)), x1 = Math.min(gx - 1, Math.floor((px + R - ox) / h));
     const y0 = Math.max(0, Math.floor((py - R - oy) / h)), y1 = Math.min(gy - 1, Math.floor((py + R - oy) / h));
     const z0 = Math.max(0, Math.floor((pz - R - oz) / h)), z1 = Math.min(gz - 1, Math.floor((pz + R - oz) / h));
@@ -1060,7 +1103,7 @@ export interface SurfaceCloud {
   TR: Float64Array;
   /** per cloud point: the unit normal of its flat triangle, on the side of its (smooth) normal; 0 when collapsed */
   FN: Float32Array;
-  /** grid step in texels and the median spacing in metres */
+  /** grid step in texels, and the median spacing in metres over the points (where the texels are) */
   k: number;
   spacing: number;
 }
@@ -1094,7 +1137,14 @@ export function surfaceCloud(mesh: SurfaceMesh, tris: Uint32Array, uv: Float64Ar
     if (x * cloud.N[i * 3] + y * cloud.N[i * 3 + 1] + z * cloud.N[i * 3 + 2] < 0) { x = -x; y = -y; z = -z; }
     FN[i * 3] = x / l; FN[i * 3 + 1] = y / l; FN[i * 3 + 2] = z / l;
   }
-  return { cloud, grid: cloudGrid(cloud.P, cloud.n, 2 * (spacing || fallback)), TR, FN, k, spacing };
+  // the spacing where the points are, the median over the points: an atlas packed for what is seen puts most texels on
+  // a small part of the surface, so the median over the area (the lattice's step) can be many times coarser, and a grid
+  // that coarse would scan thousands of points for each texel
+  const L = new Float64Array(cloud.n);
+  for (let i = 0; i < cloud.n; i++) L[i] = triL[cloud.tri[i]];
+  L.sort();
+  const at = cloud.n ? L[cloud.n >> 1] : 0;
+  return { cloud, grid: cloudGrid(cloud.P, cloud.n, 2 * (at || spacing || fallback)), TR, FN, k, spacing: at || spacing };
 }
 
 /**
@@ -1186,12 +1236,37 @@ export function runCurvature(run: RunKernel, sc: SurfaceCloud, radius: number, C
   return afterRun(run('surface_curvature', { count: c.n, args: { radius, self, deadline }, results: { V }, shared }) as any, () => V);
 }
 
-/** Cloud values (m per point) at every texel sample: n × m values. A texel takes buried points only when nothing else is near. */
-export function runInterp(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, mesh: SurfaceMesh, sc: SurfaceCloud, CV: Float32Array, m: number, CB: Uint8Array | null = null, deadline = 0): Float32Array | Promise<Float32Array> {
+/** Grid cells (2 × the spacing) over which a texel's radius reads the clusters instead of the points. */
+export const INTERP_COARSE = 4;
+
+/**
+ * Cloud values (m per point) at every texel sample: n × m values. A texel takes buried points only when nothing else is
+ * near; one whose radius is over `coarse` grid cells reads the clusters (Infinity: every texel reads the points).
+ */
+export function runInterp(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, mesh: SurfaceMesh, sc: SurfaceCloud, CV: Float32Array, m: number, CB: Uint8Array | null = null, deadline = 0, coarseCells = INTERP_COARSE): Float32Array | Promise<Float32Array> {
   const c = sc.cloud, V = new Float32Array(s.n * m);
   const args: InterpArgs = { m, deadline };
   const shared: Record<string, any> = { ...sc.grid, tris, VP: mesh.VP, VN: mesh.VN, TR: sc.TR, TPiece: mesh.triPiece, CP: c.P, CN: c.N, CW: c.wt, CPiece: c.piece, CV, TS: c.start, TPts: c.pts };
   if (CB) shared.CB = CB;
+  // coarse islands (R over `coarseCells` grid cells) read the cloud merged per grid cell, part and side, in a grid that
+  // many times coarser
+  const h = sc.grid.GH[3], coarse = coarseCells * h;
+  let any = false;
+  for (let t = 0; t < sc.TR.length && !any; t++) any = sc.TR[t] > coarse;
+  if (any) {
+    const K = thinCloud(c, CB, h), KV = new Float32Array(K.n * m), KS = new Float64Array(K.n);
+    for (let i = 0; i < c.n; i++) {
+      const j = K.of[i];
+      if (j < 0) continue;
+      const w = c.wt[i];
+      KS[j] += w;
+      for (let q = 0; q < m; q++) KV[j * m + q] += w * CV[i * m + q];
+    }
+    for (let j = 0; j < K.n; j++) if (KS[j] > 0) for (let q = 0; q < m; q++) KV[j * m + q] /= KS[j];
+    const G = cloudGrid(K.P, K.n, coarse);
+    Object.assign(shared, { KGH: G.GH, KGS: G.GS, KGI: G.GI, KGP: G.GP, KN: K.N, KW: K.W, KPiece: K.piece, KV });
+    args.coarse = coarse;
+  }
   return afterRun(run('surface_interp', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared }) as any, () => V);
 }
 

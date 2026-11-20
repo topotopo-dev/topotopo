@@ -173,10 +173,10 @@ const surfaceCurvature: Kernel = {
   run(a: CurvatureCloudArgs, A, start, end) { surfaceCurvatureRange(a, A, start, end); },
 };
 
-/** cloud values → texel samples (cloud, its grid and the mesh shared). */
+/** cloud values → texel samples (cloud, its grid and the mesh shared); a texel of a coarse island gathers many points. */
 const surfaceInterp: Kernel = {
   minElements: 16384,
-  chunksPerWorker: 2,
+  chunksPerWorker: 4,
   run(a: InterpArgs, A, start, end) { surfaceInterpRange(a, A, start, end); },
 };
 
