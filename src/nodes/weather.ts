@@ -579,7 +579,12 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     return weatherScale(q4(Math.hypot(ext[0], ext[1], ext[2])), q4(ext[1]), texel);
   });
   const keyOf = scaleOf.map((x) => JSON.stringify(x));
-  const groups = [...new Set(keyOf)].map((key) => ({ key, scale: scaleOf[keyOf.indexOf(key)], members: pieces.map((_, k) => k).filter((k) => keyOf[k] === key) }));
+  // a group's inputs are signed by its size and its pieces (a resolution change can move a piece into another group of
+  // the same size)
+  const groups = [...new Set(keyOf)].map((key) => {
+    const members = pieces.map((_, k) => k).filter((k) => keyOf[k] === key);
+    return { key, id: JSON.stringify([key, members.map((k) => pieces[k])]), scale: scaleOf[keyOf.indexOf(key)], members };
+  });
   // each size group is one nested cook over the whole square whose steps stay cached for the sliders: about 800 bytes
   // and 5 microseconds per texel per group (measured on a 16-piece kit at 2048 and 4096)
   const nVar = Math.max(1, Math.min(8, Math.round(Number(p.variants) || 1)));
@@ -613,11 +618,11 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     const env = gr.members.flatMap((k) => envOf[k]), envGeo = env.length ? Geometry.merge(env) : null;
     const jointGeo = joints.length ? Geometry.merge(gr.members.flatMap((k) => jointPlanes(moved[k], joints))) : null;
     const inputs: SubInput[] = [
-      { geo: gm, sig: sig('mesh', [prepKey, gr.key]) },
-      { geo: envGeo ?? new Geometry(), sig: sig('env', [prepKey, gr.key, p.mount, p.wall_side, p.above]) },
+      { geo: gm, sig: sig('mesh', [prepKey, gr.id]) },
+      { geo: envGeo ?? new Geometry(), sig: sig('env', [prepKey, gr.id, p.mount, p.wall_side, p.above]) },
       { geo: new Geometry(), sig: 'none' },
       { geo: new Geometry(), sig: 'none' },
-      { geo: jointGeo ?? new Geometry(), sig: sig('joints', [prepKey, gr.key, joints]) },
+      { geo: jointGeo ?? new Geometry(), sig: sig('joints', [prepKey, gr.id, joints]) },
     ];
     if (over.image) { const g = new Geometry(); g.volumes.push(over.image); inputs[3] = { geo: g, sig: sig('overrides', over.names) }; }
     return { inputs, env: !!envGeo, joints: !!jointGeo, handled, present: [...present].sort(), rustSources: rusting > 0 && rusting < gm.numPrims, galvSources: galv > 0 && galv < gm.numPrims };
@@ -637,7 +642,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     for (const [gi, gr] of groups.entries()) {
       const { inputs, env, joints: hasJoints, handled, present, rustSources, galvSources } = groupInputs[gi];
       const leakGeo = lp.length ? Geometry.merge(gr.members.map((k) => lp[k])) : null;
-      inputs[2] = leakGeo ? { geo: leakGeo, sig: sig('leaks', [prepKey, gr.key, p.leak_density, seed, p.exposure, p.mount, p.wall_side, p.above]) } : { geo: new Geometry(), sig: 'none' };
+      inputs[2] = leakGeo ? { geo: leakGeo, sig: sig('leaks', [prepKey, gr.id, p.leak_density, seed, p.exposure, p.mount, p.wall_side, p.above]) } : { geo: new Geometry(), sig: 'none' };
       nLeaks += leakGeo?.numPoints ?? 0;
       const opts: GraphOptions = {
         mode: 'masks', resolution: Number(p.resolution), padding: Number(p.padding), layout: 'keep', uv, mapUV: 'uv',

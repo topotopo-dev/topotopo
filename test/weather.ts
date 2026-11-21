@@ -628,6 +628,29 @@ section('every param: a second cook in one engine gives what a fresh engine give
   for (const [type, inert] of inertOf) check(!inert.size, `${type}: each change shows in the output${inert.size ? ` (no change from ${[...inert].join(', ')})` : ''}`);
 }
 
+section('weather_masks: a resolution change that regroups the pieces cooks as a fresh engine does');
+{
+  // two 4.8 m strips, one with a third of the other's uv size: two size groups at 512, one at 1024
+  const strip = (id: string, cx: number, u0: number, v0: number, su: number, sv: number): Nodes => ({
+    [`${id}_g`]: { type: 'grid', params: { size: [4.8, 0.05], divisions: [1, 1], center: [cx, 0.5, 0] } },
+    [`${id}_k`]: { type: 'wrangle', in: [`${id}_g`], params: { run_over: 'prims', code: `s@kit = "${id}";` } },
+    [`${id}_uv`]: { type: 'wrangle', in: [`${id}_k`], params: { run_over: 'vertices', code: `v@uv2 = set(${u0} + ${su} * (@P.x - (${cx}) + 2.4) / 4.8, ${v0} + ${sv} * (@P.z + 0.025) / 0.05, 0);` } },
+    [id]: { type: 'material', in: [`${id}_uv`], params: { name: 'c', base_color: '#9c978c', kind: 'concrete' } },
+  });
+  const graph = (resolution: number): Nodes => ({
+    ...strip('a', 0, 0.02, 0.02, 0.95, 0.45), ...strip('b', 10, 0.02, 0.52, 0.95 / 3, 0.45 / 3),
+    all: { type: 'merge', in: ['a', 'b'] },
+    w: { type: 'weather_masks', in: ['all'], params: { uv: 'uv2', piece: 'kit', resolution, samples: 4, padding: 2, channels: 'dirt edges', leak_density: 0, mount: 'ground' } },
+  });
+  const fresh = async () => { const e = new Engine(createNodeHost({ workers: 0 })); await e.init(); return e; };
+  const warm = await fresh();
+  const a = await cook(graph(512), 'w', warm);
+  const b = await cook(graph(1024), 'w', warm), c = await cook(graph(1024), 'w', await fresh());
+  const ib = findImage(b.geo, 'weather')!, ic = findImage(c.geo, 'weather')!;
+  const differ = [...ic.layers.keys()].filter((k) => !ib.layer(k) || !same(ib.layer(k)!, ic.layer(k)!));
+  check(a.stats.scale_groups === 2 && b.stats.scale_groups === 1 && !differ.length, `512 then 1024 in one engine (groups ${a.stats.scale_groups} → ${b.stats.scale_groups}) equals 1024 in a fresh one, every layer bit for bit${differ.length ? ` (differ: ${differ.join(', ')})` : ''}`);
+}
+
 section('serial and pooled results are bit-identical');
 {
   const pooled = new Engine(createNodeHost({ workers: 4, pool: { minElements: 1 } }));
