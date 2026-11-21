@@ -4,6 +4,7 @@ import type { AttribType } from '../core/geometry.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { Heightfield, heightfieldsOf } from '../core/heightfield.ts';
 import { imageFromJSON, imageToJSON, imagesOf } from '../core/image.ts';
+import type { Image } from '../core/image.ts';
 import { gridFromJSON, gridToJSON, gridsOf } from '../core/sdfgrid.ts';
 
 function tableToJSON(t: AttribTable) {
@@ -46,6 +47,13 @@ const edgeGroupsToJSON = (m: Map<string, EdgeSet>) => {
   return o;
 };
 
+/**
+ * The version of the native geometry JSON this code writes and reads. 2: an image layer that several images of the geometry
+ * share (the texel and island layers of the bakes of one mesh) is written once and the others say {same: [image, layer]}, and an
+ * image says "stated" when its size was stated. 1 files (no shared layers, a size is not stated) are read as they are.
+ */
+export const GEO_JSON_VERSION = 2;
+
 export function geoToJSON(g: Geometry) {
   const groups: Record<string, Record<string, number[]>> = { point: groupsToJSON(g.pointGroups), prim: groupsToJSON(g.primGroups) };
   // written only when present, so files without them are unchanged
@@ -53,7 +61,7 @@ export function geoToJSON(g: Geometry) {
   if (g.edgeGroups.size) groups.edge = edgeGroupsToJSON(g.edgeGroups);
   const out: Record<string, any> = {
     format: 'topotopo-geo',
-    version: 1,
+    version: GEO_JSON_VERSION,
     points: { count: g.numPoints, attribs: tableToJSON(g.points) },
     vertices: { count: g.numVertices, points: Array.from(g.vertexPoint), attribs: tableToJSON(g.vertices) },
     prims: { count: g.numPrims, start: Array.from(g.primStart), closed: Array.from(g.primClosed), attribs: tableToJSON(g.prims) },
@@ -80,7 +88,7 @@ export function geoToJSON(g: Geometry) {
   if (hfs.length) out.heightfields = hfs.map((h) => ({ name: h.name, width: h.width, height: h.height, cellSize: h.cellSize, origin: h.origin, layers: Object.fromEntries([...h.layers].map(([k, a]) => [k, Array.from(a)])) }));
   // image volumes (written only when present): size + layers as base64 float32 (core/image.ts)
   const imgs = imagesOf(g);
-  if (imgs.length) out.images = imgs.map(imageToJSON);
+  if (imgs.length) { const written = new Map<Float32Array, [number, string]>(); out.images = imgs.map((im, i) => imageToJSON(im, i, written)); }
   const grids = gridsOf(g);
   if (grids.length) {
     out.grids = grids.map(gridToJSON);
@@ -92,6 +100,7 @@ export function geoToJSON(g: Geometry) {
 
 export function geoFromJSON(j: any): Geometry {
   if (j?.format !== 'topotopo-geo' && j?.format !== 'polyforge-geo') throw new Error('not a topotopo-geo JSON file');
+  if (Number(j.version) > GEO_JSON_VERSION) throw new Error(`this topotopo-geo JSON file is version ${j.version}, written by a newer TopoTopo than this one, which reads up to version ${GEO_JSON_VERSION}: update TopoTopo to read it`);
   const g = new Geometry();
   g.points = tableFromJSON(j.points.count, j.points.attribs);
   if (!g.points.has('P')) g.points.add('P', 'float', 3);
@@ -148,7 +157,8 @@ export function geoFromJSON(j: any): Geometry {
     }
     g.volumes.push(hf);
   }
-  for (const im of j.images ?? []) g.volumes.push(imageFromJSON(im));
+  const read: Image[] = [];
+  for (const im of j.images ?? []) { const img = imageFromJSON(im, read); read.push(img); g.volumes.push(img); }
   for (const grid of j.grids ?? []) g.volumes.push(gridFromJSON(grid));
   if (j.volumeOrder !== undefined) {
     if (!Array.isArray(j.volumeOrder) || j.volumeOrder.length !== g.volumes.length) throw new Error('native JSON volumeOrder must list every stored volume');

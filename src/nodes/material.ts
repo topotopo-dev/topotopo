@@ -5,7 +5,7 @@ import { NodeError } from '../graph/types.ts';
 import { Geometry, sameImage } from '../core/geometry.ts';
 import { referenceableImages } from '../core/image.ts';
 import type { Image } from '../core/image.ts';
-import { MATERIAL_ATTRIB, normalizeMaterial, readMaterials, writeMaterials } from '../core/materials.ts';
+import { MATERIAL_ATTRIB, MATERIAL_KINDS, normalizeMaterial, readMaterials, writeMaterials } from '../core/materials.ts';
 import type { Material } from '../core/materials.ts';
 import { P, mask } from './util.ts';
 
@@ -45,6 +45,7 @@ defineNode({
     alpha_cutoff: { type: 'float', default: 0.5, min: 0, max: 1, desc: 'mask: discard where material alpha × texture alpha × vertex Alpha is below this value' },
     double_sided: { type: 'bool', default: false, desc: 'render both faces', aliases: ['doublesided', 'two_sided'] },
     unlit: { type: 'bool', default: false, desc: 'unlit shading (KHR_materials_unlit)', aliases: ['emissive_only', 'flat'] },
+    kind: { type: 'enum', options: ['', ...MATERIAL_KINDS], default: '', desc: 'what the material is made of and how it ages ("" = not said): painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, or keep (leave the part as it is); stored in the table, ignored by exporters, read by bake_material (a kind written here also applies to a material copied from input 1)', aliases: ['material_kind'] },
     base_color_map: { type: 'path', default: '', desc: 'base colour texture (sRGB PNG/JPEG path, or "image:<name>" for an image the geometry carries; "" = none); uses the uv attribute', aliases: ['basecolor_map', 'albedo_map', 'diffuse_map', 'color_map', 'basecolor_texture', 'base_color_texture'] },
     normal_map: { type: 'path', default: '', desc: 'tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none)', aliases: ['normal_texture', 'bump_map'] },
     roughness_map: { type: 'path', default: '', desc: 'roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel', aliases: ['roughness_texture', 'rough_map'] },
@@ -87,6 +88,7 @@ defineNode({
         textures: { baseColor: p.base_color_map, normal: p.normal_map, roughness: p.roughness_map },
       });
     }
+    if (p.kind) entry = { ...entry, kind: p.kind };
     // copied maps join the target's images; one that differs from a target image of the same name is renamed
     // "<material>_<map>" (as Geometry.merge does), and the entry follows
     const have = referenceableImages(g);

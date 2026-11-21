@@ -426,12 +426,15 @@ section('processes end with the pool in use');
 {
   const gfile = path.join(tmp, 'noise.json');
   fs.writeFileSync(gfile, JSON.stringify({ nodes: { g: { type: 'grid', params: { divisions: [100, 100] } }, n: { type: 'noise_displace', in: ['g'] }, w: { type: 'wrangle', in: ['n'], params: { code: '@Cd = [@P.y, 0, 0];' } } }, output: 'w' }));
-  const env = { ...process.env, TOPOTOPO_WORKERS: '3', TOPOTOPO_POOL_MIN: '1' };
+  // the disk cache is off for both runs, so the second cooks too; the lines before "geometry:" say how long the cook
+  // took (and, on a loaded machine, which nodes were slowest), which may differ between two runs of the same graph
+  const env = { ...process.env, TOPOTOPO_WORKERS: '3', TOPOTOPO_POOL_MIN: '1', TOPOTOPO_NODE_CACHE: 'off' };
   const t0 = performance.now();
   const r = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), gfile], { encoding: 'utf8', env, timeout: 60000 });
   check(r.status === 0 && /cooked/.test(r.stdout), `CLI with the pool forced exits (status ${r.status}, ${(performance.now() - t0).toFixed(0)} ms)${r.status ? ': ' + r.stderr.slice(0, 300) : ''}`);
-  const z = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), gfile], { encoding: 'utf8', env: { ...process.env, TOPOTOPO_WORKERS: '0' }, timeout: 60000 });
-  check(z.status === 0 && z.stdout.split('\n').slice(1).join('\n') === r.stdout.split('\n').slice(1).join('\n'), 'TOPOTOPO_WORKERS=0: the CLI prints the same summary');
+  const z = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), gfile], { encoding: 'utf8', env: { ...process.env, TOPOTOPO_WORKERS: '0', TOPOTOPO_NODE_CACHE: 'off' }, timeout: 60000 });
+  const summary = (out: string) => { const at = out.indexOf('\ngeometry:'); return at < 0 ? '' : out.slice(at); };
+  check(z.status === 0 && summary(r.stdout) !== '' && summary(z.stdout) === summary(r.stdout), 'TOPOTOPO_WORKERS=0: the CLI prints the same summary');
   // MCP server: closing stdin ends the process
   const ws = path.join(tmp, 'ws');
   const child = spawn(process.execPath, [path.join(ROOT, 'src', 'mcp', 'server.ts'), '--package', ws], { env, stdio: ['pipe', 'pipe', 'pipe'] });

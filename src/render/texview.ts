@@ -17,7 +17,7 @@ const SLOT_LABEL: Record<string, string> = { baseColor: 'BASE COLOR', normal: 'N
 
 /**
  * What the texture view shows for a spec: "" = every image (at most 16); an image name = that image (all its layers
- * when it has several); "image/layer" = one layer; a material name (or "material:<name>") = its maps in slot order.
+ * when it has several, except the texel and island layers of a bake); "image/layer" = one layer; a material name (or "material:<name>") = its maps in slot order.
  */
 function entriesFor(g: Geometry, spec: string, notes: string[]): Entry[] {
   const imgs = referenceableImages(g);
@@ -44,7 +44,8 @@ function entriesFor(g: Geometry, spec: string, notes: string[]): Entry[] {
       if (!img.layers.has(layer)) { notes.push(`texture view: image "${name}" has no layer "${layer}" (layers: ${[...img.layers.keys()].join(', ')})`); return []; }
       return [{ label: `${name}/${layer}`, img, layer }];
     }
-    return [...img.layers.keys()].map((l) => ({ label: l === img.mainLayer ? name : `${name}/${l}`, img, layer: l }));
+    // the texel size and island layers a bake writes are data for the filters, not maps to look at: "image/texel" still shows one
+    return [...img.layers.keys()].filter((l) => l !== 'texel' && l !== 'island').map((l) => ({ label: l === img.mainLayer ? name : `${name}/${l}`, img, layer: l }));
   }
   const all = [...imgs.values()];
   if (all.length > 16) notes.push(`texture view: ${all.length} images, showing the first 16 (name one with texture: "<image>")`);

@@ -87,7 +87,7 @@ function scalar(r: Rand, d: number, inLoop: boolean): string {
   return pick(r, [
     `(${a} + ${b})`, `(${a} - ${b})`, `(${a} * ${b})`, `sin(${a})`, `cos(${a} * 3)`, `abs(${a})`,
     `fit(${a}, -1, 1, 0, 1)`, `clamp(${a}, 0, 1)`, `min(${a}, ${b})`, `max(${a}, ${b})`, `smoothstep(0, 1, ${a})`,
-    `fbm(@P, 3, 2, 0.5)`, `ridged(@P, 2, 2, 0.5)`, `randrange(@ptnum, -1, 1)`, `(${a} > ${b} ? ${a} : ${b})`,
+    `fbm(@P, 3, 2, 0.5)`, `ridged(@P, 2, 2, 0.5)`, `randrange(@ptnum, -1, 1)`, `(${a} > ${b} ? ${a} : ${b})`, `(- ${a})`, `(- ${a} * ${b})`,
   ]);
 }
 
@@ -97,7 +97,7 @@ function vector(r: Rand, d: number, inLoop: boolean): string {
       `[${scalar(r, 0, inLoop)}, ${scalar(r, 0, inLoop)}, ${scalar(r, 0, inLoop)}]`, '[0, 1, 0]']);
   }
   const a = vector(r, d - 1, inLoop), b = vector(r, d - 1, inLoop), s = scalar(r, d - 1, inLoop);
-  return pick(r, [`add(${a}, ${b})`, `sub(${a}, ${b})`, `mul(${a}, ${s})`, `normalize(${a})`, `cross(${a}, ${b})`, `lerp(${a}, ${b}, 0.5)`]);
+  return pick(r, [`add(${a}, ${b})`, `sub(${a}, ${b})`, `mul(${a}, ${s})`, `neg(${a})`, `mul(${a}, -1)`, `div(${a}, -2)`, `normalize(${a})`, `cross(${a}, ${b})`, `lerp(${a}, ${b}, 0.5)`]);
 }
 
 function statement(r: Rand, d: number, inLoop = false): string {
@@ -163,6 +163,13 @@ const MALFORMED: { code: string; line?: number; knownGap?: string }[] = [
   { code: 'const s = `${@P.x}`;\nif (s) {\n  @P.y += /[{]/.test(s) ? 1 : 0;\n', line: 2 },
   // balanced the other way round: this compiled inside the kernel before (closing the wrapper and reopening it)
   { code: '}, __x = function(){', line: 1 },
+  // arithmetic operators on vectors: arrays turned into NaN or a string and were written into the attribute without a word
+  { code: 'v@N = -v@N;', line: 1 },
+  { code: '@P.y += 1;\n@N *= -1;', line: 2 },
+  { code: '@Cd = @Cd * 0.5;', line: 1 },
+  { code: '@P = @P + [0, 1, 0];', line: 1 },
+  { code: '@P.y += 1;\n@P.x += 1;\nv@d = -normalize(@P);', line: 3 },
+  { code: 'const q = [1, 2, 3];\nif (q > 0) @P.y += 1;', line: 2 },
 ];
 
 const HANGS = ['while(true){}', 'for(;;){ @P.y += 0; }', 'while (@P.y < 1e9) { @Cd = [0, 0, 0]; }', 'let k = 0;\nwhile (k >= 0) { k++; }'];
@@ -236,6 +243,14 @@ for (const [i, c] of cases.entries()) {
       else {
         const inv = checkGeo(r.geo);
         if (inv.length) problems.push(`checkGeo: ${inv.join(', ')}`);
+        // no float attribute of a valid snippet holds NaN or infinity (an array put through an operator used to leave NaN)
+        for (const cls of ['point', 'vertex', 'prim', 'detail'] as const) {
+          for (const [k, a] of r.geo.table(cls).map) {
+            if (a.type !== 'float' || a.isArray) continue;
+            const bad = Array.prototype.findIndex.call(a.data, (x: number) => !Number.isFinite(x));
+            if (bad >= 0) problems.push(`${cls} attribute ${k} is not finite at ${bad}: ${a.data[bad]}`);
+          }
+        }
         const again = await cookCase(engine, c);
         if (JSON.stringify(fingerprint(r.geo)) !== JSON.stringify(again.geo && fingerprint(again.geo))) problems.push('not deterministic (second cook differs)');
       }

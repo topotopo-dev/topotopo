@@ -55,11 +55,11 @@
     "uv": { "type": "uv_project", "in": ["named"], "params": { "method": "box", "scale": [0.1, 0.1] } },
     "steel": { "type": "material", "in": ["uv"], "params": { "name": "brushed_steel", "base_color": [0.72, 0.73, 0.75], "metallic": 1, "roughness": 0.32 } },
 
-    "grain": { "type": "tex_noise", "params": { "resolution": 256, "scale": 64, "octaves": 3, "seed": 6 } },
-    "brushed": { "type": "tex_directional_blur", "in": ["grain"], "params": { "length": 0.02, "angle": 0, "size": 0.1 } },
+    "grain": { "type": "tex_noise", "params": { "resolution": 256, "texture_size": 0.1, "feature": 0.0015625, "octaves": 3, "seed": 6 } },
+    "brushed": { "type": "tex_directional_blur", "in": ["grain"], "params": { "length": 0.02, "angle": 0 } },
     "brushed_color": { "type": "tex_colorize", "in": ["brushed"], "params": { "ramp": [[0, "#a9abae"], [1, "#d2d4d6"]] } },
     "brushed_rough": { "type": "tex_histogram_range", "in": ["brushed"], "params": { "range": 0.3, "position": 0.42 } },
-    "brushed_normal": { "type": "tex_normal_from_height", "in": ["brushed"], "params": { "depth": 0.00002, "size": 0.1 } },
+    "brushed_normal": { "type": "tex_normal_from_height", "in": ["brushed"], "params": { "depth": 0.00002 } },
     "brushed_maps": { "type": "merge", "in": ["brushed_color", "brushed_rough", "brushed_normal"] },
     "brushed_steel": { "type": "texture_to_material", "in": ["steel", "brushed_maps"], "params": { "material": "brushed_steel", "base_color": "brushed_color", "roughness": "brushed_rough", "normal": "brushed_normal" } },
 

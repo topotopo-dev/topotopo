@@ -331,6 +331,8 @@ export interface ResolvedParams {
   usesTime: boolean;
   /** params whose value is only known at cook time (dry run with reference functions) */
   deferred: string[];
+  /** the params the spec gave (under their own names), as against those that took their default */
+  given: string[];
 }
 
 /** Validate names, evaluate expressions and coerce types. */
@@ -375,7 +377,7 @@ export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined
       values[name] = pd.default;
     }
   }
-  return { values, errors, notes, warnings, outOfRange, usesTime, deferred };
+  return { values, errors, notes, warnings, outOfRange, usesTime, deferred, given: Object.keys(given).filter((k) => given[k] !== undefined) };
 }
 
 /** Evaluate a ramp at t. Values may be numbers or arrays. */

@@ -50,7 +50,9 @@ function edt1d(f: Float64Array, n: number, d: Float64Array, arg: Int32Array, v: 
  * site, nearest = its index (-1 when there is none). With wrap the image is periodic: each 1D pass runs over three
  * copies of its row or column and keeps the middle one, so the distance is to the nearest periodic copy of a site.
  */
-export function edt(sites: ArrayLike<number>, w: number, h: number, wrap: boolean): { d2: Float64Array; nearest: Int32Array } {
+export function edt(sites: ArrayLike<number>, w: number, h: number, wrap: boolean, aspect = 1): { d2: Float64Array; nearest: Int32Array } {
+  // aspect = a row's height over a column's width (texels that are not square): d2 is in squared column widths
+  const a2 = aspect * aspect;
   const m = Math.max(w, h) * (wrap ? 3 : 1);
   const f = new Float64Array(m), d = new Float64Array(m), arg = new Int32Array(m), v = new Int32Array(m), z = new Float64Array(m + 1);
   const d1 = new Float64Array(w * h), col = new Int32Array(w * h);
@@ -67,7 +69,7 @@ export function edt(sites: ArrayLike<number>, w: number, h: number, wrap: boolea
   }
   const d2 = new Float64Array(w * h), nearest = new Int32Array(w * h);
   for (let i = 0; i < w; i++)
-    pass(h, (q) => d1[q * w + i], (q, dist, a) => { d2[q * w + i] = dist; nearest[q * w + i] = a < 0 ? -1 : a * w + col[a * w + i]; });
+    pass(h, (q) => d1[q * w + i] / a2, (q, dist, a) => { d2[q * w + i] = dist * a2; nearest[q * w + i] = a < 0 ? -1 : a * w + col[a * w + i]; });
   return { d2, nearest };
 }
 
@@ -78,7 +80,7 @@ export function edt(sites: ArrayLike<number>, w: number, h: number, wrap: boolea
  * crossing, found around the nearest crossing pixel of an exact distance transform. Sub-pixel accurate, so a field
  * measured in metres is the same at any resolution. Without any crossing every pixel is ±(width + height).
  */
-export function signedDistance(a: Float32Array, w: number, h: number, threshold: number, wrap: boolean): Float32Array {
+export function signedDistance(a: Float32Array, w: number, h: number, threshold: number, wrap: boolean, aspect = 1): Float32Array {
   const n = w * h, inside = new Uint8Array(n);
   for (let k = 0; k < n; k++) inside[k] = a[k] >= threshold ? 1 : 0;
   // crossings: up to four per pixel, as offsets from its centre
@@ -110,7 +112,7 @@ export function signedDistance(a: Float32Array, w: number, h: number, threshold:
     return out;
   }
   // first guess: the nearest crossing around the nearest crossing pixel; vx, vy = the vector to it
-  const { nearest } = edt(cnt, w, h, wrap);
+  const { nearest } = edt(cnt, w, h, wrap, aspect);
   const vx = new Float32Array(n), vy = new Float32Array(n), vd = new Float64Array(n);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
@@ -124,7 +126,7 @@ export function signedDistance(a: Float32Array, w: number, h: number, threshold:
           for (let c = 0; c < cnt[q]; c++) {
             let ex = qi + ox[q * 4 + c] - i, ey = qj + oy[q * 4 + c] - j;
             if (wrap) { ex = wrapD(ex, w); ey = wrapD(ey, h); }
-            const dd = ex * ex + ey * ey;
+            const dd = ex * ex + ey * ey * aspect * aspect;
             if (dd < best) { best = dd; bx = ex; by = ey; }
           }
         }
@@ -140,7 +142,7 @@ export function signedDistance(a: Float32Array, w: number, h: number, threshold:
         const qi = i + di, qj = j + dj;
         if (!wrap && (qi < 0 || qj < 0 || qi >= w || qj >= h)) continue;
         const q = wrapI(qj, h) * w + wrapI(qi, w);
-        const ex = vx[q] + di, ey = vy[q] + dj, dd = ex * ex + ey * ey;
+        const ex = vx[q] + di, ey = vy[q] + dj, dd = ex * ex + ey * ey * aspect * aspect;
         if (dd < vd[k] - 1e-9) { vd[k] = dd; vx[k] = ex; vy[k] = ey; }
       }
   };
@@ -424,9 +426,9 @@ export function bevelHeight(d: Float32Array, distance: number, profile: (t: numb
  * Values of src (ch 1 or 4) carried out from the inside pixels to every pixel within maxPx pixels (each takes the
  * value of its nearest inside pixel; inside pixels keep their own); farther pixels are 0.
  */
-export function propagate(src: Float32Array, ch: number, inside: Uint8Array, w: number, h: number, maxPx: number, wrap: boolean): Float32Array {
+export function propagate(src: Float32Array, ch: number, inside: Uint8Array, w: number, h: number, maxPx: number, wrap: boolean, aspect = 1): Float32Array {
   const out = new Float32Array(src.length);
-  const { d2, nearest } = edt(inside, w, h, wrap);
+  const { d2, nearest } = edt(inside, w, h, wrap, aspect);
   const lim = maxPx * maxPx;
   for (let k = 0; k < w * h; k++) {
     const s = nearest[k];
@@ -452,6 +454,10 @@ export interface FloodOptions {
   wrap: boolean;
   /** metres per pixel (bbox_size) */
   texel: number;
+  /** the part of a larger image this is (an island's box): the pixel box [x0, y0] and the size of the whole image */
+  frame?: { x0: number; y0: number; width: number; height: number };
+  /** only these pixels can be part of a tile */
+  act?: Uint8Array | null;
 }
 
 /**
@@ -475,7 +481,7 @@ export function floodFill(a: Float32Array, w: number, h: number, o: FloodOptions
   const order = new Int32Array(n); // tile pixels, tile after tile
   let filled = 0;
   for (let s = 0; s < n; s++) {
-    if (label[s] >= 0 || !(a[s] >= th)) continue;
+    if (label[s] >= 0 || !(a[s] >= th) || (o.act && !o.act[s])) continue;
     const t = tiles.length;
     const T = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity, sw: 0, sx: 0, sy: 0, start: filled, count: 0 };
     tiles.push(T);
@@ -491,6 +497,7 @@ export function floodFill(a: Float32Array, w: number, h: number, o: FloodOptions
         const qx = px + dx, qy = py + dy;
         if (!wrap && (qx < 0 || qy < 0 || qx >= w || qy >= h)) continue;
         const q = wrapI(qy, h) * w + wrapI(qx, w);
+        if (o.act && !o.act[q]) continue;
         if (a[q] >= th) {
           if (label[q] < 0) { label[q] = t; ux[q] = qx; uy[q] = qy; queue[tail++] = q; }
         } else if (a[q] > 0 && touched[q] !== t && (dx === 0 || dy === 0)) {
@@ -511,7 +518,9 @@ export function floodFill(a: Float32Array, w: number, h: number, o: FloodOptions
     // a tile that wraps all the way around has no centre along that axis
     if (wrap && T.x1 - T.x0 + 1 >= w) x = 0;
     if (wrap && T.y1 - T.y0 + 1 >= h) y = 0;
-    let u = x / w, v = y / h;
+    // positions and the hashes below are in the whole image, whichever part of it this is
+    const fw = o.frame?.width ?? w, fh = o.frame?.height ?? h;
+    let u = (x + (o.frame?.x0 ?? 0)) / fw, v = (y + (o.frame?.y0 ?? 0)) / fh;
     if (wrap) { u -= Math.floor(u); v -= Math.floor(v); }
     cu[t] = u; cv[t] = 1 - v;
     // grid cells centred on multiples of 1/128 (where the centres of regular patterns fall), the index wrapped (a
