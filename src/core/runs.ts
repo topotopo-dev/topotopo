@@ -694,6 +694,32 @@ export interface RasterOpts {
 }
 
 /**
+ * A grid of cubic cells over a box, with the slabs along each axis that hold no sample left out: samples spread far
+ * apart (the pieces of a kit, moved apart to be weathered alone) keep the cell size their reach asks for instead of a
+ * box-wide grid coarsened to fit. Raw cell c on axis a is kept cell map[a][c], or -1 where no sample lies. The cell size
+ * grows only while the kept cells pass cap.
+ */
+interface SlabGrid { cs: number; raw: number[]; map: Int32Array<ArrayBuffer>[]; dx: number; dy: number; dz: number }
+function slabGrid(P: ArrayLike<number>, ids: ArrayLike<number> | null, n: number, skip: Uint8Array | null | undefined, mn: number[], mx: number[], cs: number, cap: number, grow: number): SlabGrid {
+  const count = ids ? ids.length : n;
+  for (;;) {
+    const raw = [0, 1, 2].map((a) => Math.max(1, Math.ceil((mx[a] - mn[a]) / cs)));
+    if (Math.max(...raw) > 1 << 24) { cs *= grow; continue; }
+    const map = raw.map((d) => new Int32Array(d).fill(-1));
+    for (let q = 0; q < count; q++) {
+      const i = ids ? ids[q] : q;
+      if (!ids && skip && skip[i]) continue;
+      const c0 = Math.floor((P[i * 3] - mn[0]) / cs), c1 = Math.floor((P[i * 3 + 1] - mn[1]) / cs), c2 = Math.floor((P[i * 3 + 2] - mn[2]) / cs);
+      if (c0 < 0 || c1 < 0 || c2 < 0 || c0 > raw[0] || c1 > raw[1] || c2 > raw[2]) continue;
+      map[0][Math.min(raw[0] - 1, c0)] = 0; map[1][Math.min(raw[1] - 1, c1)] = 0; map[2][Math.min(raw[2] - 1, c2)] = 0;
+    }
+    const dims = map.map((m) => { let k = 0; for (let c = 0; c < m.length; c++) if (m[c] === 0) m[c] = k++; return Math.max(1, k); });
+    if (dims[0] * dims[1] * dims[2] <= cap) return { cs, raw, map, dx: dims[0], dy: dims[1], dz: dims[2] };
+    cs *= grow;
+  }
+}
+
+/**
  * The run values at every sample: the strongest run there (a stripe of the run's width, box-filtered over the sample
  * size, with gaps from 3D noise along the run and a wandering width); along, head, strength and id of that run.
  * A grid over the segments holds each one in every cell its reach touches, where the reach is the farthest a sample can
@@ -721,7 +747,8 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
 
   // the grid
   let items: Int32Array | null = null, count: Int32Array | null = null;
-  let mnx = 0, mny = 0, mnz = 0, cs = 1, dx = 1, dy = 1, dz = 1;
+  let mnx = 0, mny = 0, mnz = 0, cs = 1, dx = 1, dy = 1, dz = 1, rx = 1, ry = 1, rz = 1;
+  let mapX: Int32Array<ArrayBuffer> = new Int32Array(1), mapY = mapX, mapZ = mapX;
   if (!opts.brute) {
     let r0 = 0, rAll = 0;
     mnx = mny = mnz = Infinity;
@@ -737,11 +764,10 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
       }
     }
     mnx -= 1e-6; mny -= 1e-6; mnz -= 1e-6;
-    cs = Math.max(r0 || rAll, 1e-4);
-    const dimsFor = (c: number) => [Math.max(1, Math.ceil((mxx - mnx) / c)), Math.max(1, Math.ceil((mxy - mny) / c)), Math.max(1, Math.ceil((mxz - mnz) / c))];
-    let dims = dimsFor(cs);
-    while (dims[0] * dims[1] * dims[2] > 2_000_000) { cs *= 1.4; dims = dimsFor(cs); }
-    [dx, dy, dz] = dims;
+    // cells where samples lie (slabs with none left out), as fine as the ordinary runs reach
+    const sg = slabGrid(P, null, n, inp.skip, [mnx, mny, mnz], [mxx, mxy, mxz], Math.max(r0 || rAll, 1e-4), 2_000_000, 1.4);
+    ({ cs, dx, dy, dz } = sg);
+    [rx, ry, rz] = sg.raw; [mapX, mapY, mapZ] = sg.map;
     const cells = dx * dy * dz;
     count = new Int32Array(cells + 1);
     let total = 0;
@@ -750,10 +776,18 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
       const x0 = Math.min(A[k * 6], A[k * 6 + 3]) - r, x1 = Math.max(A[k * 6], A[k * 6 + 3]) + r;
       const y0 = Math.min(A[k * 6 + 1], A[k * 6 + 4]) - r, y1 = Math.max(A[k * 6 + 1], A[k * 6 + 4]) + r;
       const z0 = Math.min(A[k * 6 + 2], A[k * 6 + 5]) - r, z1 = Math.max(A[k * 6 + 2], A[k * 6 + 5]) + r;
-      const i0 = Math.max(0, Math.floor((x0 - mnx) / cs)), i1 = Math.min(dx - 1, Math.floor((x1 - mnx) / cs));
-      const j0 = Math.max(0, Math.floor((y0 - mny) / cs)), j1 = Math.min(dy - 1, Math.floor((y1 - mny) / cs));
-      const k0 = Math.max(0, Math.floor((z0 - mnz) / cs)), k1 = Math.min(dz - 1, Math.floor((z1 - mnz) / cs));
-      for (let kk = k0; kk <= k1; kk++) for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) f((kk * dy + jj) * dx + ii);
+      const i0 = Math.max(0, Math.floor((x0 - mnx) / cs)), i1 = Math.min(rx - 1, Math.floor((x1 - mnx) / cs));
+      const j0 = Math.max(0, Math.floor((y0 - mny) / cs)), j1 = Math.min(ry - 1, Math.floor((y1 - mny) / cs));
+      const k0 = Math.max(0, Math.floor((z0 - mnz) / cs)), k1 = Math.min(rz - 1, Math.floor((z1 - mnz) / cs));
+      for (let kk = k0; kk <= k1; kk++) {
+        const mk = mapZ[kk];
+        if (mk < 0) continue;
+        for (let jj = j0; jj <= j1; jj++) {
+          const mj = mapY[jj];
+          if (mj < 0) continue;
+          for (let ii = i0; ii <= i1; ii++) { const mi = mapX[ii]; if (mi >= 0) f((mk * dy + mj) * dx + mi); }
+        }
+      }
     };
     for (let k = 0; k < ns; k++) {
       if ((k & 255) === 0) check?.();
@@ -777,8 +811,8 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     let list: Int32Array, s0: number, s1: number;
     if (all) { list = all; s0 = 0; s1 = ns; } else {
       const ci = Math.floor((px - mnx) / cs), cj = Math.floor((py - mny) / cs), ck = Math.floor((pz - mnz) / cs);
-      if (ci < 0 || cj < 0 || ck < 0 || ci >= dx || cj >= dy || ck >= dz) continue;
-      const cell = (ck * dy + cj) * dx + ci;
+      if (ci < 0 || cj < 0 || ck < 0 || ci >= rx || cj >= ry || ck >= rz) continue;
+      const cell = (mapZ[ck] * dy + mapY[cj]) * dx + mapX[ci];
       s0 = count![cell]; s1 = count![cell + 1];
       if (s0 === s1) continue;
       list = items!;
@@ -962,16 +996,14 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
       // cells a sixth of the farthest reach of this lattice's runs (a few wide stains do not coarsen the grid of the rest)
       let lvMax = 0;
       for (const k of segs) if (levelOf[ID[k]] === level) lvMax = Math.max(lvMax, reach(k));
-      let cs = Math.max(lvMax / 6, 1e-4);
-      const dimsFor = (c: number) => [Math.max(1, Math.ceil((mxx - mnx) / c)), Math.max(1, Math.ceil((mxy - mny) / c)), Math.max(1, Math.ceil((mxz - mnz) / c))];
-      let dims = dimsFor(cs);
-      while (dims[0] * dims[1] * dims[2] > 8_000_000) { cs *= 1.25; dims = dimsFor(cs); }
-      const [dx, dy, dz] = dims, cells = dx * dy * dz;
+      // (slabs with no sample left out: pieces far apart keep this cell size)
+      const sg = slabGrid(P, S, n, null, [mnx, mny, mnz], [mxx, mxy, mxz], Math.max(lvMax / 6, 1e-4), 8_000_000, 1.25);
+      const { cs, dx, dy, dz } = sg, [rx, ry, rz] = sg.raw, [mapX, mapY, mapZ] = sg.map, cells = dx * dy * dz;
       const start = new Int32Array(cells + 1), cellOf = new Int32Array(S.length);
       for (let q = 0; q < S.length; q++) {
         const i = S[q];
-        const ci = Math.min(dx - 1, Math.floor((P[i * 3] - mnx) / cs)), cj = Math.min(dy - 1, Math.floor((P[i * 3 + 1] - mny) / cs)), ck = Math.min(dz - 1, Math.floor((P[i * 3 + 2] - mnz) / cs));
-        cellOf[q] = (ck * dy + cj) * dx + ci; start[cellOf[q] + 1]++;
+        const ci = Math.min(rx - 1, Math.floor((P[i * 3] - mnx) / cs)), cj = Math.min(ry - 1, Math.floor((P[i * 3 + 1] - mny) / cs)), ck = Math.min(rz - 1, Math.floor((P[i * 3 + 2] - mnz) / cs));
+        cellOf[q] = (mapZ[ck] * dy + mapY[cj]) * dx + mapX[ci]; start[cellOf[q] + 1]++;
       }
       for (let c = 0; c < cells; c++) start[c + 1] += start[c];
       const list = new Int32Array(S.length), fill = start.slice(0, cells);
@@ -1002,11 +1034,13 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
           const ax = A[o], ay = A[o + 1], az = A[o + 2];
           const ex = A[o + 3] - ax, ey = A[o + 4] - ay, ez = A[o + 5] - az;
           const l2 = ex * ex + ey * ey + ez * ez, first = SS[k * 2] <= startS[r];
-          const i0 = Math.max(0, Math.floor((Math.min(ax, ax + ex) - rch - mnx) / cs)), i1 = Math.min(dx - 1, Math.floor((Math.max(ax, ax + ex) + rch - mnx) / cs));
-          const j0 = Math.max(0, Math.floor((Math.min(ay, ay + ey) - rch - mny) / cs)), j1 = Math.min(dy - 1, Math.floor((Math.max(ay, ay + ey) + rch - mny) / cs));
-          const k0 = Math.max(0, Math.floor((Math.min(az, az + ez) - rch - mnz) / cs)), k1 = Math.min(dz - 1, Math.floor((Math.max(az, az + ez) + rch - mnz) / cs));
+          const i0 = Math.max(0, Math.floor((Math.min(ax, ax + ex) - rch - mnx) / cs)), i1 = Math.min(rx - 1, Math.floor((Math.max(ax, ax + ex) + rch - mnx) / cs));
+          const j0 = Math.max(0, Math.floor((Math.min(ay, ay + ey) - rch - mny) / cs)), j1 = Math.min(ry - 1, Math.floor((Math.max(ay, ay + ey) + rch - mny) / cs));
+          const k0 = Math.max(0, Math.floor((Math.min(az, az + ez) - rch - mnz) / cs)), k1 = Math.min(rz - 1, Math.floor((Math.max(az, az + ez) + rch - mnz) / cs));
           for (let kk = k0; kk <= k1; kk++) for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
-            const cell = (kk * dy + jj) * dx + ii;
+            const mi = mapX[ii], mj = mapY[jj], mk = mapZ[kk];
+            if (mi < 0 || mj < 0 || mk < 0) continue;
+            const cell = (mk * dy + mj) * dx + mi;
             for (let e = start[cell]; e < start[cell + 1]; e++) {
               const q = list[e], i = S[q];
               const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
