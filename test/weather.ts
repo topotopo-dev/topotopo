@@ -658,6 +658,19 @@ section('the time limit stops it');
   const r = await err({ ...CAB, w: { type: 'weather', in: ['uv'], params: { ...CAB_W, resolution: 1024, samples: 64 } } }, 'w', e);
   const ms = performance.now() - t0;
   check(r.text.includes('stopped after') && r.text.includes('time limit') && ms < 30000, `stops with the limit named (${ms.toFixed(0)} ms): ${r.text.slice(0, 160)}`);
+  // a kit whose size groups would hold too much at its resolution says so, with what to lower (stopped early here)
+  const kit = (resolution: number) => ({
+    p_g: { type: 'box', params: { size: [1.2, 1, 0.12], center: [0, 0.5, 0] } },
+    s_g: { type: 'box', params: { size: [0.6, 0.04, 0.14], center: [0, 1.2, 0.13] } },
+    all: { type: 'merge', in: ['p_g', 's_g'] },
+    k: { type: 'wrangle', in: ['all'], params: { run_over: 'prims', code: 's@kit = @P.y > 1.1 ? "sill" : "panel";' } },
+    m: { type: 'material', in: ['k'], params: { name: 'precast', base_color: '#a39e94', kind: 'concrete' } },
+    uv2: { type: 'uv_unwrap', in: ['m'], params: { uv_attrib: 'uv2', resolution: 128, padding: 2 } },
+    w: { type: 'weather_masks', in: ['uv2'], params: { uv: 'uv2', piece: 'kit', resolution } },
+  });
+  const warned = async (resolution: number) => (await e.cook({ nodes: kit(resolution), output: 'w' })).warnings.map((w) => w.message).join(' | ');
+  const w4 = await warned(4096), w2 = await warned(2048);
+  check(/2 size groups at 4096 hold about 27 GB/.test(w4) && w4.includes('lower resolution') && !w2.includes('size groups'), `two size groups at 4096 warn of their memory, at 2048 not: ${w4.slice(0, 200)}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

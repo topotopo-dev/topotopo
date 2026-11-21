@@ -580,6 +580,11 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   });
   const keyOf = scaleOf.map((x) => JSON.stringify(x));
   const groups = [...new Set(keyOf)].map((key) => ({ key, scale: scaleOf[keyOf.indexOf(key)], members: pieces.map((_, k) => k).filter((k) => keyOf[k] === key) }));
+  // each size group is one nested cook over the whole square whose steps stay cached for the sliders: about 800 bytes
+  // and 5 microseconds per texel per group (measured on a 16-piece kit at 2048 and 4096)
+  const nVar = Math.max(1, Math.min(8, Math.round(Number(p.variants) || 1)));
+  const estGB = (groups.length * res * res * 800) / 1e9;
+  if (estGB > 16) ctx.warn(`${T_M}: ${groups.length} size groups at ${res} hold about ${Math.round(estGB)} GB while cooking and take about ${Math.max(1, Math.round((groups.length * nVar * res * res * 5e-6) / 60))} min; a lower resolution needs a quarter per halving, and pieces of fewer sizes need fewer groups (pieces within a quarter octave of each other share one)`);
   const leakOf = (seed: number) => Number(p.leak_density) > 0 ? moved.map((b, k) => {
     const sel = new Uint8Array(mesh.numPrims);
     for (let i = 0; i < mesh.numPrims; i++) sel[i] = pieceOf[i] === pieces[k] ? 1 : 0;
