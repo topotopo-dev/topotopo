@@ -83,6 +83,26 @@ function partsOf(g: Geometry): { id: string[]; names: string[] } {
   return { id, names: [...new Set(id)] };
 }
 
+/** The prims with no material. */
+function bareOf(g: Geometry): number[] {
+  const a = g.prims.get(MATERIAL_ATTRIB), out: number[] = [];
+  for (let i = 0; i < g.numPrims; i++) if (!a || !String(a.get(i) ?? '')) out.push(i);
+  return out;
+}
+
+const FALLBACK_MATERIAL = 'weather_part';
+/** weather_masks kind: the prims of g (a geometry of this cook) with no material get one of that kind. Whether any had none. */
+function fallbackMaterial(g: Geometry, kind: string): boolean {
+  const bare = bareOf(g);
+  if (!bare.length) return false;
+  const t = readMaterials(g);
+  t[FALLBACK_MATERIAL] = normalizeMaterial({ kind });
+  writeMaterials(g, t);
+  const a = g.prims.add(MATERIAL_ATTRIB, 'string', 1);
+  for (const i of bare) a.set(i, FALLBACK_MATERIAL);
+  return true;
+}
+
 function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; fallbackKind?: string }): Prepared {
   const { p } = ctx;
   const g = ctx.input(0);
@@ -93,6 +113,9 @@ function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; f
   const names = new Set<string>();
   if (matA) for (let i = 0; i < g.numPrims; i++) { const n = String(matA.get(i) ?? ''); if (n) names.add(n); }
   if (!names.size && !o.fallbackKind) throw new NodeError(`${T}: the input has no materials; it reads each part's material to choose how it ages`, `assign materials (material node, with its kind param)${T === T_M ? ', or say the kind of every part with kind' : ''}`);
+  const bare = bareOf(g);
+  // prims with no material are refused, never guessed (weather_masks can state their kind)
+  if (bare.length && !o.fallbackKind) throw new NodeError(`${T}: ${bare.length} prims have no material; it reads each part's material to choose how it ages`, T === T_M ? 'give them one (material node, with its kind), or say their kind with kind' : 'give them one (material node, with its kind; kind keep leaves a part as it is)');
   // a kind per material, never guessed
   const kinds: Record<string, string> = {}, missing: string[] = [];
   for (const n of names) {
@@ -131,6 +154,8 @@ function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; f
     if (sel && !sel.some((v) => v)) throw new NodeError(`${T}: handled "${handled}" matches no prims`, partsHint);
   }
   const mesh = g.subsetPrims(weathered);
+  // prims with no material take the stated kind, on one material for the bakes to read
+  if (o.fallbackKind && fallbackMaterial(mesh, o.fallbackKind)) kinds[FALLBACK_MATERIAL] = o.fallbackKind;
   const kept = nw < g.numPrims ? g.subsetPrims(weathered.map((v) => 1 - v)) : null;
   // uv overlaps in the bake uv: every texel is painted once
   if (o.layout === 'keep') {
@@ -159,15 +184,6 @@ function prepare(ctx: CookContext, T: string, o: { uv: string; layout: string; f
     const r = RUST_SOURCES.includes(k) ? 1 : k === 'galvanised' ? 2 : 0;
     wrust.set(i, r);
     if (r === 1) rusting++; else if (r === 2) galv++;
-  }
-  if (!matA || !names.size) {
-    // masks mode with a stated kind and no materials: one material for the bakes to read
-    const t = readMaterials(mesh);
-    t.weather_part = normalizeMaterial({ kind: o.fallbackKind });
-    writeMaterials(mesh, t);
-    const a = mesh.prims.add(MATERIAL_ATTRIB, 'string', 1);
-    for (let i = 0; i < mesh.numPrims; i++) a.set(i, 'weather_part');
-    kinds.weather_part = o.fallbackKind!;
   }
   const bbox = bboxOf(mesh);
   const ext = [0, 1, 2].map((i) => bbox.max[i] - bbox.min[i]);
@@ -249,16 +265,19 @@ const sigOf = (ctx: CookContext, what: string, extra: unknown) => `${what}:${has
  * before, so what the bakes keep per geometry (the edge wear's buried points and wear field per surroundings) is found
  * again when only a slider moved.
  */
-const lastInputs = new Map<string, Geometry>();
+const lastInputs = new WeakMap<object, Map<string, Geometry>>();
 const LAST_INPUTS = 32;
-function sameInputs(inputs: SubInput[]): SubInput[] {
+function sameInputs(engine: object, inputs: SubInput[]): SubInput[] {
+  // per engine, as its caches are: a fresh engine makes every input anew
+  let held = lastInputs.get(engine);
+  if (!held) lastInputs.set(engine, (held = new Map()));
   return inputs.map((x) => {
     // images (photos, overrides, the preview's masks) are not held: only the prepared meshes, planes and points
     if (x.geo.volumes.length) return x;
-    const had = lastInputs.get(x.sig);
-    if (had) { lastInputs.delete(x.sig); lastInputs.set(x.sig, had); return { ...x, geo: had }; }
-    lastInputs.set(x.sig, x.geo);
-    if (lastInputs.size > LAST_INPUTS) lastInputs.delete(lastInputs.keys().next().value!);
+    const had = held.get(x.sig);
+    if (had) { held.delete(x.sig); held.set(x.sig, had); return { ...x, geo: had }; }
+    held.set(x.sig, x.geo);
+    if (held.size > LAST_INPUTS) held.delete(held.keys().next().value!);
     return x;
   });
 }
@@ -270,7 +289,7 @@ function sameInputs(inputs: SubInput[]): SubInput[] {
 async function cookNested(ctx: CookContext, T: string, graph: GraphSpec, inputs: SubInput[], vars: Record<string, number>, target?: string, budget?: SimBudget): Promise<CookReport> {
   const outer = ctx.signal;
   const signal = budget ? { get aborted() { return !!outer?.aborted || budget.left() <= 0; } } : undefined;
-  const r = await ctx.subcook(graph, { inputs: sameInputs(inputs), vars, ...(target ? { target } : {}), ...(signal ? { signal } : {}) });
+  const r = await ctx.subcook(graph, { inputs: sameInputs(ctx.engine, inputs), vars, ...(target ? { target } : {}), ...(signal ? { signal } : {}) });
   for (const w of r.warnings) ctx.warn(`[${w.node}] ${w.message}`);
   if ((!r.ok || !r.geo) && budget && budget.left() <= 0 && !outer?.aborted) throw budget.error();
   if (!r.ok || !r.geo) {
@@ -320,7 +339,7 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
   const nLeaks = leaks?.points.numPoints ?? 0;
   const imgs: Image[] = [...(over.image ? [over.image] : []), ...(photosIn ? imagesOf(photosIn) : [])];
   const sig = (what: string, extra: unknown) => sigOf(ctx, what, extra);
-  const prepKey = [p.kinds, p.handled, layout];
+  const prepKey = [p.kinds];
   const inputs: SubInput[] = [
     { geo: prep.mesh, sig: sig('mesh', prepKey) },
     { geo: env ?? new Geometry(), sig: sig('env', [prepKey, p.mount, p.wall_side]) },
@@ -335,13 +354,14 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     photos, overrides: ov, match: null, material,
   };
   const vars = weatherVars({ wear: p.wear, dirt: p.dirt, rust: p.rust, age: p.age, seed: Number(p.seed) || 0, exposure: p.exposure, mount: p.mount });
-  const withImages = (extra: Image[]) => {
+  // the images of inputs 2 and 3 are signed by the signatures of those inputs (in sig); one made here by what it is made from
+  const withImages = (extra: Image[], made: unknown = null) => {
     const all = [...imgs, ...extra];
     if (!all.length) return;
     const g = new Geometry();
     g.volumes.push(...all);
     opts.images = true;
-    inputs[3] = { geo: g, sig: sig('images', all.map((i) => `${i.name}:${i.width}x${i.height}:${hashString(Array.from(i.layer(i.mainLayer)!.subarray(0, 4096)).join(','))}`)) };
+    inputs[3] = { geo: g, sig: sig('images', [all.map((i) => i.name), made]) };
   };
   if (Object.keys(ref).length && amount > 0) {
     // stage 1: the base alone (cached for the full cook), its mean colour and roughness on the covered texels
@@ -351,7 +371,8 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     const base = findImage(r1.geo!, 'base')!;
     budget.check();
     ctx.stat('match', amount);
-    withImages([matchImage(ctx, base, ref, photosIn)]);
+    // the match image is made from the base (signed by the nested cook), the reference and input 3
+    withImages([matchImage(ctx, base, ref, photosIn)], ['match', r1.results.get(r1.target)!.sig, ref]);
     opts.match = { image: 'match', amount };
   } else withImages([]);
   const graph = weatherGraph(opts);
@@ -372,6 +393,14 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     out.volumes.push(im);
     entry.textures = { ...(entry.textures ?? {}), orm: `image:${im.name}` };
     entry.packing = packing.join('');
+    // what the layout does not hold is the material's own value (exporters read a missing channel as the factor alone):
+    // the mean over the covered texels, said when the parts differ
+    for (const [has, field, c, what] of [[packing.includes('m'), 'metallic', 2, 'metallic'], [packing.includes('r') || packing.includes('s'), 'roughness', 1, 'roughness']] as const) {
+      if (has) continue;
+      const s = coveredStats(orm, c);
+      entry[field] = Math.round(s.mean * 1000) / 1000;
+      if (s.max - s.min > 0.05) ctx.warn(`${T_W}: packing "${String(p.packing)}" holds no ${what}: the material's ${what} is ${entry[field]} (the mean; the parts range ${s.min.toFixed(2)} to ${s.max.toFixed(2)}); a layout with ${field === 'metallic' ? 'm' : 'r or s'} keeps them apart`);
+    }
   }
   if (p.normal_format === 'directx') {
     const i = out.volumes.findIndex((v) => v.name === `${material}_normal`);
@@ -407,6 +436,14 @@ function texelsPerMetre(im: Image): number {
   for (let i = 0; i < im.width * im.height; i += 7) if ((!m || m[i] > 0.5) && t[i * ch] > 0) v.push(1 / t[i * ch]);
   v.sort((a, b) => a - b);
   return v.length ? Math.round(v[v.length >> 1]) : 0;
+}
+
+/** Mean, least and most of channel c of an RGBA image over its covered texels (layer mask). */
+function coveredStats(im: Image, c: number): { mean: number; min: number; max: number } {
+  const a = im.layer('C')!, m = im.layer('mask');
+  let s = 0, k = 0, min = Infinity, max = -Infinity;
+  for (let i = 0; i < im.width * im.height; i++) if (!m || m[i] > 0.5) { const v = a[i * 4 + c]; s += v; k++; if (v < min) min = v; if (v > max) max = v; }
+  return k ? { mean: s / k, min, max } : { mean: 0, min: 0, max: 0 };
 }
 
 /** The ORM and height of the stack in another channel layout (o r m h s x). */
@@ -550,11 +587,24 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   }) : [];
   const over = overridesOf(ctx, T_M, 2, [...WEATHER_MASKS, ...PACKED_MASKS]);
   const sig = (what: string, extra: unknown) => sigOf(ctx, what, extra);
-  const prepKey = [p.kinds, p.kind, p.handled, uv, pieceAttr];
+  const prepKey = [p.kinds, p.kind, uv, pieceAttr];
+  const handledExpr = String(p.handled ?? '').trim();
   /** the nested graph's inputs for the pieces of one group (the leak points are set per variant) */
   const groupInputs = groups.map((gr) => {
     const inG = new Set(gr.members.map((k) => pieces[k]));
     const gm = groups.length === 1 ? mesh : mesh.subsetPrims(Uint8Array.from(pieceOf, (x) => (inG.has(x) ? 1 : 0)));
+    // the kinds and the rust sources of this group's own prims (a bake of these pieces holds only their kinds)
+    const gmat = gm.prims.get(MATERIAL_ATTRIB), gw = gm.prims.get('wrust'), present = new Set<string>();
+    let rusting = 0, galv = 0;
+    for (let i = 0; i < gm.numPrims; i++) {
+      const k = gmat ? prep.kinds[String(gmat.get(i) ?? '')] : undefined;
+      if (k && k !== 'keep') present.add(k);
+      const r = Number(gw?.get(i) ?? 0);
+      if (r === 1) rusting++; else if (r === 2) galv++;
+    }
+    // handled parts: only when some are among these pieces
+    const hsel = handledExpr ? mask(gm, 'prim', handledExpr) : null;
+    const handled = hsel && hsel.some((x) => x) ? handledExpr : '';
     const env = gr.members.flatMap((k) => envOf[k]), envGeo = env.length ? Geometry.merge(env) : null;
     const jointGeo = joints.length ? Geometry.merge(gr.members.flatMap((k) => jointPlanes(moved[k], joints))) : null;
     const inputs: SubInput[] = [
@@ -565,28 +615,30 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
       { geo: jointGeo ?? new Geometry(), sig: sig('joints', [prepKey, gr.key, joints]) },
     ];
     if (over.image) { const g = new Geometry(); g.volumes.push(over.image); inputs[3] = { geo: g, sig: sig('overrides', over.names) }; }
-    return { inputs, env: !!envGeo, joints: !!jointGeo };
+    return { inputs, env: !!envGeo, joints: !!jointGeo, handled, present: [...present].sort(), rustSources: rusting > 0 && rusting < gm.numPrims, galvSources: galv > 0 && galv < gm.numPrims };
   });
   const jw = Math.max(1e-4, Number(p.joint_width) || 0.03);
   const variants = Math.max(1, Math.min(8, Math.round(Number(p.variants) || 1)));
   const out = ctx.input(0).clone();
   const packedImgs: Image[] = [];
+  let masksSig = '';
   for (let v = 0; v < variants; v++) {
     const seed = (Number(p.seed) || 0) + v * 1013;
     // the leak points move with the seed: thinned and jittered again
     const lp = leakOf(seed);
     const parts: Image[] = [];
     let nLeaks = 0, cooked: CookReport | null = null;
+    const groupSigs: string[] = [];
     for (const [gi, gr] of groups.entries()) {
-      const { inputs, env, joints: hasJoints } = groupInputs[gi];
+      const { inputs, env, joints: hasJoints, handled, present, rustSources, galvSources } = groupInputs[gi];
       const leakGeo = lp.length ? Geometry.merge(gr.members.map((k) => lp[k])) : null;
-      inputs[2] = leakGeo ? { geo: leakGeo, sig: sig('leaks', [prepKey, gr.key, p.leak_density, seed, p.exposure, p.mount, p.above]) } : { geo: new Geometry(), sig: 'none' };
+      inputs[2] = leakGeo ? { geo: leakGeo, sig: sig('leaks', [prepKey, gr.key, p.leak_density, seed, p.exposure, p.mount, p.wall_side, p.above]) } : { geo: new Geometry(), sig: 'none' };
       nLeaks += leakGeo?.numPoints ?? 0;
       const opts: GraphOptions = {
         mode: 'masks', resolution: Number(p.resolution), padding: Number(p.padding), layout: 'keep', uv, mapUV: 'uv',
-        kinds: prep.kinds, kindsPresent: prep.present, exposure: p.exposure as Exposure, handled: String(p.handled ?? '').trim(),
+        kinds: prep.kinds, kindsPresent: present, exposure: p.exposure as Exposure, handled,
         sun: p.sun, seed, scale: gr.scale, samples: Number(p.samples), env, leaks: !!leakGeo && leakGeo.numPoints > 0,
-        images: !!over.image, joints: hasJoints, rustSources: prep.rustSources, galvSources: prep.galvSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
+        images: !!over.image, joints: hasJoints, rustSources, galvSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
         photos: [], overrides: {}, match: null, material: name,
       };
       const graph = weatherGraph(opts);
@@ -596,6 +648,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
       const r = await cookNested(ctx, T_M, graph, inputs, vars, undefined, budget);
       budget.check();
       parts.push(findImage(r.geo!, `${name}_masks`)!);
+      groupSigs.push(r.results.get(r.target)!.sig);
       cooked = r;
     }
     const mi = parts.length === 1 ? parts[0] : mergeByCoverage(parts);
@@ -607,6 +660,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     for (const l of ['texel', 'island', 'mask']) { const a = mi.layer(l); if (a) im.set(l, a); }
     packedImgs.push(im);
     if (v === 0) {
+      masksSig = groupSigs.join('+');
       ctx.stat('leak_sources', nLeaks);
       if (cooked?.results) ctx.stat('texels_per_metre', texelsPerMetre(mi));
     }
@@ -621,7 +675,10 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
     const pv = previewGraph(name, uv, Number(p.resolution), channels, p.under);
     const g = new Geometry();
     g.volumes.push(packedImgs[0]);
-    const r = await cookNested(ctx, T_M, pv, [{ geo: ctx.input(0), sig: sig('preview_mesh', [uv]) }, { geo: g, sig: sig('preview_masks', [p.seed, p.wear, p.dirt, p.rust, p.age, p.exposure, p.mount, p.above, joints, jw, p.channels, p.kinds, p.kind, p.leak_density]) }], {});
+    // the mesh with its own materials (prims with none take kind's); the first variant signed by the cook that made it
+    let pmesh = ctx.input(0);
+    if (fallback && bareOf(pmesh).length) { pmesh = pmesh.clone(); fallbackMaterial(pmesh, fallback); }
+    const r = await cookNested(ctx, T_M, pv, [{ geo: pmesh, sig: sig('preview_mesh', [uv, fallback]) }, { geo: g, sig: sig('preview_masks', [masksSig, channels, name]) }], {});
     const pm = r.geo!;
     const pimgs = pm.volumes.filter((v) => v.name.startsWith(`${name}_preview`));
     out.volumes.push(...pimgs);
@@ -725,7 +782,7 @@ defineNode({
     overrides: { type: 'json', default: {}, desc: 'per layer of the stack: {"painted_metal_rust": {"color": "#5a2a14"}, "dust": {"opacity": 0}, "grime": {"image": "oil_photo", "size": 0.6}}; fields ' + OVERRIDE_FIELDS.join(', '), aliases: ['override'] },
     reference: { type: 'json', default: {}, desc: 'route B: what the base is pulled toward before weathering: {"color": "#6b665c", "roughness": 0.85} or {"image": "name"} (input 3); {} = none', aliases: ['target_look'] },
     match: { type: 'float', default: 0.6, min: 0, max: 1, desc: 'route B: how far toward the reference (0 = not at all)', aliases: ['pull'] },
-    packing: { type: 'string', default: 'orm', desc: 'channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma, mrox; glTF and usda exports read it by this layout', aliases: ['packed_layout'] },
+    packing: { type: 'string', default: 'orm', desc: 'channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma (stored as rmo: the map is named <material>_rmo), mrox; glTF and usda exports read it by this layout', aliases: ['packed_layout'] },
     normal_format: { type: 'enum', options: ['opengl', 'directx'], default: 'opengl', desc: 'green channel of the normal map: opengl (glTF, Blender) or directx (Unreal)' },
   },
   outputs: 'the mesh with the weathered material; images <material>_base_color, _normal, the packed map, _height, _masks',

@@ -8,8 +8,10 @@
 // normal convention; route B; the building kinds and growth; a slider re-cooks only the stack; serial and pooled
 // results are bit-identical; the time limit stops it.
 //   node test/weather.ts
+import { createHash } from 'node:crypto';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
+import { getNodeDef } from '../src/graph/registry.ts';
 import type { NodeProgress } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import type { Geometry } from '../src/core/geometry.ts';
@@ -23,7 +25,7 @@ import { vertexUV } from '../src/core/tangents.ts';
 import { triangulate } from '../src/core/topology.ts';
 import { WEATHER_MASKS, leakSources } from '../src/core/weather.ts';
 import { topicText } from '../src/mcp/docs.ts';
-import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
+import type { GraphSpec, NodeSpec, ParamDef } from '../src/graph/types.ts';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -151,6 +153,7 @@ section('every refusal names the cause and a way out');
     ['masks: a piece attribute that does not exist', { ...painted(), w: { type: 'weather_masks', in: ['uv'], params: { ...FAST, uv: 'uv', piece: 'kit_piece' } } }, 'no prim attribute "kit_piece"', 'prim attributes'],
     ['masks: surroundings with pieces', { ...painted(), pc: { type: 'wrangle', in: ['uv'], params: { run_over: 'prims', code: 's@piece = @primnum < 3 ? "a" : "b";' } }, ground: { type: 'grid', params: { size: [4, 4] } }, w: { type: 'weather_masks', in: ['pc', 'ground'], params: { ...FAST, uv: 'uv', piece: 'piece' } } }, 'each piece is weathered alone', 'single piece'],
     ['masks: no materials and no kind', { b: { type: 'box' }, uv: { type: 'uv_unwrap', in: ['b'] }, w: { type: 'weather_masks', in: ['uv'], params: { ...FAST, uv: 'uv' } } }, 'has no materials', 'kind'],
+    ['masks: some prims with no material and no kind', { ...painted(), b2: { type: 'box', params: { size: [0.2, 0.2, 0.2], center: [0, 0.5, 0] } }, all: { type: 'merge', in: ['m', 'b2'] }, uv: { type: 'uv_unwrap', in: ['all'], params: { resolution: 128, padding: 2 } }, w: { type: 'weather_masks', in: ['uv'], params: { ...FAST, uv: 'uv' } } }, '6 prims have no material', 'kind'],
   ];
   for (const [label, nodes, msg, hint] of cases) {
     const e = await err(nodes, 'w');
@@ -308,6 +311,15 @@ section('weather_masks: one packed image per variant, materials unchanged');
   }
   const pv = await cook({ ...panel, w: { type: 'weather_masks', in: ['uv2'], params: { ...FAST, preview: true } } }, 'w');
   check(!!findImage(pv.geo, 'weather_preview_base_color') && pv.geo.prims.get(MATERIAL_ATTRIB)?.get(0) === 'weather_preview' && pv.warnings.some((x) => x.includes('for looking')), 'preview adds a material for looking, and says so');
+  // kind: a part with no material takes it, in the masks and in the preview
+  const sill: NodeSpec = { type: 'box', params: { size: [0.6, 0.04, 0.14], center: [0, 0.6, 0.13] } };
+  const bare: Nodes = { ...panel, s: sill, all: { type: 'merge', in: ['m', 's'] }, uv2: { ...panel.uv2, in: ['all'] } };
+  const given: Nodes = { ...bare, sm: { type: 'material', in: ['s'], params: { name: 'sill', kind: 'concrete' } }, all: { type: 'merge', in: ['m', 'sm'] } };
+  const covered = (c: Cooked) => img(c, 'weather').layer('mask')!.reduce((n, v) => n + (v > 0.5 ? 1 : 0), 0);
+  const kb = await serial.cook({ nodes: { ...bare, w: { type: 'weather_masks', in: ['uv2'], params: { ...FAST, kind: 'concrete', preview: true } } }, output: 'w' });
+  const kg = await cook({ ...given, w: { type: 'weather_masks', in: ['uv2'], params: FAST } }, 'w');
+  const kbc = kb.ok ? { geo: kb.geo!, stats: {}, warnings: [] } : null;
+  check(!!kbc && covered(kbc) === covered(kg) && !!findImage(kbc.geo, 'weather_preview_base_color'), `kind: a part with no material is weathered as that kind, preview included (${kb.ok ? `${covered(kbc!)} covered texels, ${covered(kg)} with a material of that kind` : kb.errors.map((e) => e.message).join('; ')})`);
 }
 
 section('the material\'s maps survive zero weathering; its normal map is carried');
@@ -457,6 +469,32 @@ section('packing and the normal convention');
   const shot = async (g: Geometry) => (await renderGeometryAsync(g, renderArgs({ shading: 'pbr', textures: true, views: 'persp', size: 96, grid: false, footer: false }))).rgba;
   const [a, b] = [await shot(mrao.geo), await shot(cab.geo)];
   check(a.every((v, i) => Math.abs(v - b[i]) <= 1), 'the preview of the mrao + directx maps is the preview of the default layout');
+
+  // rma (roughness, metallic, ambient occlusion) is a named layout: packed, then rewritten for glTF as the default
+  const rma = await cook({ ...CAB, w: W({ ...CAB_W, packing: 'rma' }) }, 'w');
+  const R = findImage(rma.geo, 'weathered_rmo'), Oc = img(cab, 'weathered_orm').layer('C')!;
+  check(!!R && R.layer('C')!.every((v, i) => (i % 4 === 3 ? v === 1 : v === Oc[i - (i % 4) + [1, 2, 0][i % 4]])) && readMaterials(rma.geo).weathered.packing === 'rmo', `packing rma: R roughness, G metallic, B occlusion (${R ? R.name : 'no weathered_rmo'})`);
+  check(same(findImage(await glb(rma.geo), 'weathered_rmo_gltf'), findImage(ref, 'weathered_orm')), 'glb: the rma map is written as the orm of glTF');
+
+  // a layout without a channel: the material's own value stands in for it (exporters read the factor alone), occlusion
+  // missing is none; the means over the covered texels are those of the default layout
+  const covered = img(cab, 'weathered_orm').layer('mask')!;
+  const meanOf = (a: Float32Array, c: number) => { let s = 0, k = 0; for (let i = 0; i < covered.length; i++) if (covered[i] > 0.5) { s += a[i * 4 + c]; k++; } return s / k; };
+  const want = [0, 1, 2].map((c) => meanOf(Oc, c));
+  for (const [packing, lacks] of [['hro', 'm'], ['rmh', 'o'], ['omh', 'r'], ['moxs', '']] as const) {
+    const c = packing === 'hro' ? hro : await cook({ ...CAB, w: W({ ...CAB_W, packing }) }, 'w');
+    const back2 = await glb(c.geo), t2 = readMaterials(back2).weathered, im = findImage(back2, t2.textures!.orm!.slice(6))!.layer('C')!;
+    const got = [meanOf(im, 0), t2.roughness * meanOf(im, 1), t2.metallic * meanOf(im, 2)];
+    const u = new TextDecoder().decode(exportGeometry(c.geo, 'usda'));
+    const usdOk = lacks === '' ? /smoothness_map/.test(u) : lacks === 'o' ? !/inputs:occlusion\.connect/.test(u) : lacks === 'm' ? !/inputs:metallic\.connect/.test(u) && Math.abs(Number(/float inputs:metallic = ([\d.]+)/.exec(u)?.[1]) - want[2]) < 0.002 : !/inputs:roughness\.connect/.test(u) && Math.abs(Number(/float inputs:roughness = ([\d.]+)/.exec(u)?.[1]) - want[1]) < 0.002;
+    const glOk = got.every((v, k) => Math.abs(v - (k === 0 && lacks === 'o' ? 1 : want[k])) < 0.01);
+    check(glOk && usdOk, `packing ${packing} (${lacks ? `no ${lacks}` : 'smoothness'}): glb occlusion, roughness, metallic ${got.map(f3).join(', ')} for ${want.map((v, k) => f3(k === 0 && lacks === 'o' ? 1 : v)).join(', ')}; usda ${usdOk ? 'reads the material\'s value' : 'wrong'}`);
+  }
+  check(hro.warnings.some((x) => x.includes('holds no metallic') && x.includes('a layout with m')), 'parts of different metallic in a layout without m: said, with the way out');
+  // the preview: a slab of one kind (metallic 0 throughout) looks the same in hro as in orm
+  const slabOf = (packing: string): Nodes => ({ s: { type: 'box', params: { size: [1, 1.2, 0.15], center: [0, 0.6, 0] } }, m: { type: 'material', in: ['s'], params: { name: 'c', base_color: '#9c978c', kind: 'concrete' } }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 128, padding: 2 } }, w: W({ mount: 'ground', packing }) });
+  const [sh, so] = [await shot((await cook(slabOf('hro'), 'w')).geo), await shot((await cook(slabOf('orm'), 'w')).geo)];
+  check(sh.every((v, i) => Math.abs(v - so[i]) <= 1), 'the preview of a non-metal in hro is its preview in orm (not fully metallic)');
 }
 
 section('route B: unique maps pulled toward a stated reference');
@@ -511,6 +549,83 @@ section('a slider re-cooks only the stack');
   await ranCab({ rust: 0.5 });
   const rust = await ranCab({ rust: 0.8 });
   check(rust.length > 0 && rust.every((n) => ['stack', 'out', 'mask_images'].includes(n)), `rust 0.5 → 0.8 re-cooks the stack and the material only, no bake (${rust.join(', ')})`);
+}
+
+section('every param: a second cook in one engine gives what a fresh engine gives');
+{
+  // walked from the param tables, so a new param is checked too. One engine cooks the base and then the base with one
+  // param changed; a fresh engine cooks the changed graph; every image layer and the materials must agree bit for bit,
+  // and the change must show (else its key is not tested). A param whose type has no generic change needs a value here.
+  const hashOf = (g: Geometry) => {
+    const h = createHash('sha1');
+    for (const v of g.volumes) if (v instanceof Image) for (const [k, a] of v.layers) { h.update(`${v.name}/${k}:`); h.update(new Uint8Array(Float32Array.from(a).buffer)); }
+    h.update(JSON.stringify(readMaterials(g)));
+    return h.digest('hex');
+  };
+  const named: Record<string, Record<string, unknown>> = {
+    weather: { kinds: { paint: 'painted_wood' }, handled: '@name=body', material: 'aged', overrides: { dust: { opacity: 0 } }, reference: { color: '#c03020', roughness: 0.2 }, packing: 'hro' },
+    weather_masks: { kinds: { precast: 'bare_steel' }, handled: '@name=sill', uv: 'uv3', channels: 'edges dirt', joints: 'sides bottom', piece: 'kit', name: 'aged' },
+  };
+  const changed = (type: string, name: string, d: ParamDef, was: unknown): unknown => {
+    if (name in named[type]) return named[type][name];
+    const b = Number(was);
+    switch (d.type) {
+      case 'bool': return !was;
+      case 'enum': return d.options![(d.options!.indexOf(was as string) + 1) % d.options!.length];
+      case 'int': { const v = b + Math.max(1, Math.round(Math.abs(b) / 2)); return d.max !== undefined && v > d.max ? b - 1 : v; }
+      case 'float': { const v = b === 0 ? 0.3 : b * 1.5; return d.max !== undefined && v > d.max ? b * 0.5 : v; }
+      case 'vec3': return [1, 1, 0];
+      case 'color': return '#c03020';
+    }
+    return undefined;
+  };
+  // the cabinet on a uv in the middle of the square (the texels near the start are uncovered), route B on
+  const cabKeep: Nodes = { ...CAB, mid: { type: 'uv_transform', in: ['uv'], params: { scale: [0.5, 0.5] } } };
+  // a painted panel with a sill that has no material (kind gives it one), two kit pieces, two mask uv sets, the preview on,
+  // channels that rust, sun and the preview's under reach
+  const panelKit: Nodes = {
+    p_g: { type: 'box', params: { size: [1.2, 1, 0.12], center: [0, 0.5, 0] } },
+    p_n: { type: 'wrangle', in: ['p_g'], params: { run_over: 'prims', code: 's@name = "panel"; s@kit = "panel";' } },
+    p: { type: 'material', in: ['p_n'], params: { name: 'precast', base_color: '#a39e94', kind: 'painted_metal' } },
+    s_g: { type: 'box', params: { size: [0.6, 0.04, 0.14], center: [0, 0.6, 0.13] } },
+    s: { type: 'wrangle', in: ['s_g'], params: { run_over: 'prims', code: 's@name = "sill"; s@kit = "sill";' } },
+    all: { type: 'merge', in: ['p', 's'] },
+    uv2: { type: 'uv_unwrap', in: ['all'], params: { uv_attrib: 'uv2', resolution: 128, padding: 2 } },
+    uv3: { type: 'uv_unwrap', in: ['uv2'], params: { uv_attrib: 'uv3', resolution: 128, padding: 6 } },
+  };
+  const cases = [
+    ['weather', cabKeep, 'mid', { ...FAST, ...CAB_W, layout: 'keep', reference: { color: '#3a3630', roughness: 0.9 }, match: 1 }],
+    ['weather_masks', panelKit, 'uv3', { ...FAST, mount: 'wall', kind: 'concrete', joints: 'sides', preview: true, handled: '@name=panel', channels: 'coating fade rust leaks' }],
+    ['weather_masks', panelKit, 'uv3', { ...FAST, mount: 'wall', kind: 'concrete', joints: 'sides', preview: true, handled: '@name=panel', channels: 'coating joints edges dirt' }],
+  ] as const;
+  // four channels cannot show every param: a param is inert only when no case of its node shows it
+  const inertOf = new Map<string, Set<string>>();
+  for (const [type, scene, from, base] of cases) {
+    const def = getNodeDef(type)!;
+    const graph = (params: Record<string, unknown>): Nodes => ({ ...scene, w: { type, in: [from], params } });
+    const fresh = async () => { const e = new Engine(createNodeHost({ workers: 0 })); await e.init(); return e; };
+    const warm = await fresh();
+    const baseHash = hashOf((await cook(graph(base), 'w', warm)).geo);
+    const stale: string[] = [], inert = new Set<string>(), none: string[] = [];
+    let n = 0;
+    for (const [name, d] of Object.entries(def.params)) {
+      const was = name in base ? (base as Record<string, unknown>)[name] : d.default;
+      const to = changed(type, name, d, was);
+      if (to === undefined || JSON.stringify(to) === JSON.stringify(was)) { none.push(name); continue; }
+      const params = { ...base, [name]: to };
+      await cook(graph(base), 'w', warm);
+      const w = hashOf((await cook(graph(params), 'w', warm)).geo);
+      const c = hashOf((await cook(graph(params), 'w', await fresh())).geo);
+      n++;
+      if (w !== c) stale.push(`${name} ${JSON.stringify(was)} → ${JSON.stringify(to)}`);
+      if (c === baseHash) inert.add(name);
+    }
+    check(!none.length, `${type}: every param has a changed value here${none.length ? ` (none for ${none.join(', ')})` : ''}`);
+    check(!stale.length, `${type}: ${n} params changed one at a time: a second cook in one engine equals a fresh one${stale.length ? ` (stale: ${stale.join('; ')})` : ''}`);
+    const was = inertOf.get(type);
+    inertOf.set(type, was ? new Set([...was].filter((x) => inert.has(x))) : inert);
+  }
+  for (const [type, inert] of inertOf) check(!inert.size, `${type}: each change shows in the output${inert.size ? ` (no change from ${[...inert].join(', ')})` : ''}`);
 }
 
 section('serial and pooled results are bit-identical');

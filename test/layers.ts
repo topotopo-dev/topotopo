@@ -10,7 +10,8 @@ import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import { Image, findImage, resizeLayer } from '../src/core/image.ts';
-import { MATERIAL_KINDS, normalizeMaterial, readMaterials } from '../src/core/materials.ts';
+import { MATERIAL_KINDS, PACKINGS, normalizeMaterial, packedSources, parsePacking, readMaterials } from '../src/core/materials.ts';
+import { allNodeDefs } from '../src/graph/registry.ts';
 import { medianTexelSize } from '../src/core/texelsize.ts';
 import { HALF_STORED, f16round, toHalf } from '../src/core/half.ts';
 import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
@@ -491,6 +492,23 @@ section('bake_material: packed maps, uv, names');
   const ow = await cook(over, 'base');
   check(ow.warnings.filter((m) => m.includes('triangles overlap')).length === 1, 'overlapping uv are warned about once: ' + ow.warnings.filter((m) => m.includes('overlap')).join('; ').slice(0, 160));
   check((await cook(plane(), 'base')).warnings.length === 0, 'a clean unwrap bakes without a warning');
+}
+
+section('packed-map layouts: every named one parses');
+{
+  // the named layouts, and every layout a packing param's help names (a word that is a named layout or 3 to 4 layout letters)
+  const bad: string[] = [];
+  for (const k of Object.keys(PACKINGS)) if (typeof parsePacking(k) === 'string') bad.push(`PACKINGS.${k}`);
+  const docs: string[] = [];
+  for (const d of allNodeDefs()) for (const [name, pd] of Object.entries(d.params)) {
+    if (name !== 'packing') continue;
+    for (const w of pd.desc.split(/[^a-z_]+/)) if (w in PACKINGS || /^[ormhsx]{3,4}$/.test(w)) { docs.push(`${d.type}: ${w}`); if (typeof parsePacking(w) === 'string') bad.push(`${d.type}: ${w}`); }
+  }
+  check(!bad.length && docs.length >= 6, `${Object.keys(PACKINGS).length} named layouts and ${docs.length} named in the packing params' help all parse${bad.length ? ` (refused: ${bad.join(', ')})` : ''}`);
+  const rma = parsePacking('rma'), at = packedSources('rma');
+  check(Array.isArray(rma) && rma.join('') === 'rmo' && at?.r === 0 && at.m === 1 && at.o === 2, `rma is roughness R, metallic G, ambient occlusion B (${JSON.stringify(rma)})`);
+  const m = await serial.cook({ nodes: { quad: SCENE.quad, m: { type: 'material', in: ['quad'], params: { name: 'm', packing: 'rma' } } }, output: 'm' });
+  check(m.ok, `the material node takes packing rma${m.ok ? '' : ` (${m.errors.map((e) => e.message).join('; ')})`}`);
 }
 
 section('resolveKind');
