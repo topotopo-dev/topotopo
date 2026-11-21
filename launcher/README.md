@@ -15,7 +15,8 @@ runs
 
 with the TopoTopo folder as the working directory and the console-less creation flag (`CREATE_NO_WINDOW`).
 `<TopoTopo>` is the npm package the exe ships in (`<TopoTopo>\launcher\win32-x64\topotopo-open.exe`); a source checkout
-without `dist\` runs `src\cli.ts`. With no path it runs `open` alone. A relative path is made absolute first.
+(`src\cli.ts` is there, the npm package has no `src\`) runs `src\cli.ts`, even beside a `dist\` left from an earlier
+build. With no path it runs `open` alone. A relative path is made absolute first.
 
 Node.js, in this order:
 

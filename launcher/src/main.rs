@@ -7,7 +7,9 @@
 //!   "<node.exe>" "<TopoTopo>\dist\cli.js" open ["<absolute path>"...]
 //!
 //! in the TopoTopo folder, where <TopoTopo> is the npm package this exe ships in (it lives in
-//! <TopoTopo>\launcher\win32-x64\). A source checkout without dist\ runs src\cli.ts instead. Node.js is, in this order:
+//! <TopoTopo>\launcher\win32-x64\). A source checkout (src\cli.ts is there; the npm package has no src\) runs
+//! src\cli.ts, even beside a dist\ left from an earlier build, so it never runs older code than its source. Node.js is,
+//! in this order:
 //! the --node path (`topotopo setup` writes the node it runs with into the file links), the node.exe beside the npm
 //! prefix the package is installed in (where npm's own command shims look first), the Node.js installer's InstallPath
 //! in the registry, then the first node.exe on PATH. When TopoTopo cannot be started, or `open` fails, a message box
@@ -94,7 +96,7 @@ fn run() -> Result<(), Failure> {
         .and_then(Path::parent)
         .ok_or_else(|| fail(format!("The TopoTopo launcher is not inside a TopoTopo install: {}", exe.display())))?
         .to_path_buf();
-    let cli = [root.join("dist").join("cli.js"), root.join("src").join("cli.ts")]
+    let cli = [root.join("src").join("cli.ts"), root.join("dist").join("cli.js")]
         .into_iter()
         .find(|p| p.is_file())
         .ok_or_else(|| {

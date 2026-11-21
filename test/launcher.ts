@@ -177,6 +177,11 @@ if (mode === 'silent') process.exit(4);
   const checkoutExe = fakeTopoTopo(checkout, 'src/cli.ts');
   const src = await launch(checkoutExe, ['--node', node, kit]);
   check(src.code === 0 && same(src.rec?.script, path.join(checkout, 'src', 'cli.ts')), `a source checkout without dist\\ runs src\\cli.ts (${src.rec?.script})`);
+  // a source checkout with a dist\ left from an earlier build: still its source, never the older build
+  fs.mkdirSync(path.join(checkout, 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(checkout, 'dist', 'cli.js'), "process.stderr.write('the old build ran'); process.exit(9);\n");
+  const stale = await launch(checkoutExe, ['--node', node, kit]);
+  check(stale.code === 0 && same(stale.rec?.script, path.join(checkout, 'src', 'cli.ts')), `a source checkout with an old dist\\ beside it still runs src\\cli.ts (${stale.rec?.script ?? stale.stderr})`);
 
   // failures
   const failed = await launch(exe, ['--node', node, kit], { mode: 'fail' });
