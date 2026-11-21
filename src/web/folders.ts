@@ -432,7 +432,10 @@ function sidecarTargetName(name: string, has: (n: string) => boolean): string | 
   return first(`${b}.png`, `${b}.r16`);
 }
 
-/** A file's key while it is unchanged: its size and time. */
+/**
+ * A file's key while it is unchanged: its size and time. On a file system that keeps times to 2 seconds (FAT, exFAT) a
+ * rewrite of the same size within those 2 seconds keeps its key: what is kept for it is read again at its next change.
+ */
 const fileKey = (st: fs.Stats) => `${st.size}-${st.mtimeMs}`;
 
 /** Files what is read from them is kept for (past that, they are read again). */

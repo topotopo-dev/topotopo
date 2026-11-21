@@ -159,9 +159,24 @@ function bakeWord(text) {
 }
 
 // live updates: the front page reloads when packages come or go; a folder page reloads when its package's bake
-// finishes, and offers to when its folder changed on disk (not while something plays); a page made while its tree's
-// first audit was under way reloads when the audit is done (ev.audited: the tree)
+// finishes, and offers to when its folder changed on disk (not while something plays). A page or card made from no audit
+// of its tree, or from one before a change (data.wait, data-wait: that audit's number), reloads when the tree's audit as
+// it is is made: the event stream first says which trees have theirs (ev.audits), then each one made (ev.audited, ev.n)
 const playing = () => $$('audio, video').some((m) => !m.paused);
+// a reload that waits for what plays to stop
+let reloading = false;
+const reloadWhenStill = () => {
+  if (reloading) return;
+  reloading = true;
+  if (!playing()) return location.reload();
+  const still = () => { if (!playing()) location.reload(); };
+  document.addEventListener('pause', still, true);
+  document.addEventListener('ended', still, true);
+};
+const audited = (root, n) => {
+  if (page === 'front') { if ($$('.rcard[data-wait]').some((c) => c.dataset.root === root && n > Number(c.dataset.wait))) reloadWhenStill(); }
+  else if (page === 'folder' && data.wait !== undefined && root === data.root && n > data.wait) reloadWhenStill();
+};
 let banner = null;
 const offerReload = () => {
   if (banner) return;
@@ -175,15 +190,16 @@ const es = new EventSource('/api/events');
 es.onmessage = (m) => {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
+  if (ev.audits) { for (const [root, n] of Object.entries(ev.audits)) audited(root, n); return; }
+  if (ev.audited) { audited(ev.audited, ev.n); return; }
   if (page === 'front') {
-    if (ev.list || (ev.audited && document.querySelector(`.rcard.checking[data-root="${CSS.escape(ev.audited)}"]`))) location.reload();
+    if (ev.list) location.reload();
     else if (ev.package && !ev.baking) {
       const card = document.querySelector(`.card[data-key="${CSS.escape(ev.package)}"]`);
       const img = card?.querySelector('img');
       if (img) img.src = img.src.replace(/(\?v=[^&]*)?$/, `?v=${ev.version}`);
     }
   } else if (page === 'folder') {
-    if (data.checking && ev.audited === data.root) { if (!playing()) location.reload(); return; }
     if (data.package && ev.package === data.package) {
       if (ev.baking) bakeWord('Baking…');
       else if (playing()) offerReload(); else location.reload();

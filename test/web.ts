@@ -831,35 +831,87 @@ try {
     check(most === 1 && walk.flags.length === 30 && oneByOne === 30 && walk.flags.every((f) => /note\.md links to \.\.\/\.\.\/art\/pics\/gone\.png, which is not there/.test(f.what)),
       `90 links of 30 notes to the same folder: each real path asked once (at most ${most} times, ${asked.size} paths), the same 30 broken links as looked up one by one (${walk.flags.length} / ${oneByOne})`);
 
-    // a page answers while its tree's audit runs: with none yet it says the tree is being checked, and the event stream
-    // says when the audit is done; then a page shows the audit before while the next one is made
+    // a page answers while its tree's audit runs: with none yet it says the tree is being checked; made from the audit
+    // before a change it says the tree is checked again. Either waits for the audit of the tree as it is (its number), and
+    // hears of it however late it connects to the event stream
     const big = path.join(tmp, 'big');
     write(path.join(big, 'big.topows'), { libraries: [] });
     for (let i = 0; i < 400; i++) write(path.join(big, 'notes', `d${i % 20}`, `n${i}.md`), `[gone](gone-${i}.png) [up](../d${(i + 1) % 20}/n${(i + 1) % 400}.md)\n`);
-    // a slow disk: each look at a path of the tree takes a moment (the audit still gives the event loop its turns)
+    // and a package with an export older than its graph, exported again
+    const re = path.join(tmp, 'reexport');
+    write(path.join(re, 're.topows'), { libraries: [] });
+    for (let i = 0; i < 20; i++) write(path.join(re, 'notes', `n${i}.md`), `[next](n${(i + 1) % 20}.md)\n`);
+    const reCrate = createPackage({ name: 're', path: re, workspace: true }, 'props/crate', { title: 'Crate', graph: BOX });
+    const reSource = (graphSha: string) => ({ format: 'topotopo-export-source', version: 1, files: ['crate.glb'], source: { graph: 'main', graph_sha256: graphSha, output: null, node: 'b', frame: 1, fps: 24, vars: {}, seeds: {}, export: { format: 'glb', options: {} }, topotopo: '0' } });
+    write(path.join(reCrate.dir, 'exports', 'crate.glb'), 'glTF');
+    write(path.join(reCrate.dir, 'exports', 'crate.glb.source.json'), reSource(sha256Hex(canonicalJSON({ nodes: { b: { type: 'sphere' } }, output: 'b' }))));
+    // a slow disk: each look at a path of the trees takes a moment (the audits still give the event loop their turns)
+    const slow: [string, number][] = [[big, 0.2], [re, 2]];
     const lstat = fs.lstatSync;
-    (fs as any).lstatSync = (...a: Parameters<typeof lstat>) => { if (String(a[0]).startsWith(big)) { const t = performance.now(); while (performance.now() - t < 0.2) { /* a slow disk */ } } return (lstat as any)(...a); };
-    const bw = await startWeb({ config: { file: path.join(tmp, 'config.json'), libraries: [], workspaces: [{ name: 'big', path: big }], web: { port: 0, cors: [] } }, port: 0, bake: false, auditWait: 0 });
-    let events = '';
-    let stream: http.ClientRequest | undefined;
+    (fs as any).lstatSync = (...a: Parameters<typeof lstat>) => { const s = slow.find(([d]) => String(a[0]).startsWith(d)); if (s) { const t = performance.now(); while (performance.now() - t < s[1]) { /* a slow disk */ } } return (lstat as any)(...a); };
+    const bw = await startWeb({ config: { file: path.join(tmp, 'config.json'), libraries: [], workspaces: [{ name: 'big', path: big }, { name: 're', path: re }], web: { port: 0, cors: [] } }, port: 0, bake: false, auditWait: 0 });
+    const live = (html: string) => JSON.parse(/data-json="([^"]*)"/.exec(html)?.[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') ?? '{}');
+    const streams: http.ClientRequest[] = [];
+    const listen = () => {
+      const got = { text: '' };
+      const s = http.get({ host: '127.0.0.1', port: bw.port, path: '/api/events', headers: { host: `127.0.0.1:${bw.port}` } }, (res) => res.on('data', (c) => { got.text += c; }));
+      s.on('error', () => {});
+      streams.push(s);
+      return got;
+    };
+    const firstData = (text: string) => { const m = /data: (.*)/.exec(text); return m ? JSON.parse(m[1]) : null; };
+    /** the trees whose audit is ready, as a page that connects now hears first */
+    const readyNow = async (): Promise<Record<string, number>> => { const s = listen(); await until(() => s.text.includes('data: '), 5000); return firstData(s.text)?.audits ?? {}; };
+    const auditedN = (text: string, key: string) => Math.max(0, ...[...text.matchAll(/data: (.*)/g)].map((m) => JSON.parse(m[1])).filter((e) => e.audited === key).map((e) => e.n));
     try {
       const home = (await reqAt(bw.port, '/')).body.toString();
       const page = (await reqAt(bw.port, '/w/big/')).body.toString();
-      check(/<a class="rcard ws checking"[^>]*data-root="w\/big"/.test(home) && /checking for flags…/.test(home) && /<p class="notice checking">Checking the workspace for flags/.test(page) && !/class="flags"/.test(page) && /"checking":true/.test(page.replace(/&quot;/g, '"')),
-        'pages made while the first audit runs answer at once: the card and the page say the tree is being checked, no flags yet');
+      check(/<a class="rcard ws checking"[^>]*data-root="w\/big" data-wait="0"/.test(home) && /checking for flags…/.test(home) && /<p class="notice checking">Checking the workspace for flags/.test(page) && !/class="flags"/.test(page) && live(page).wait === 0,
+        'pages made while the first audit runs answer at once: the card and the page say the tree is being checked, no flags yet, and wait for its audit');
       const full = await until(async () => /<span class="ftotal">400 flags<\/span>/.test((await reqAt(bw.port, '/w/big/')).body.toString()), 30_000);
-      check(full, 'when the audit is done the page shows its 400 broken links');
-      stream = http.get({ host: '127.0.0.1', port: bw.port, path: '/api/events', headers: { host: `127.0.0.1:${bw.port}` } }, (res) => res.on('data', (c) => { events += c; }));
-      stream.on('error', () => {});
-      await until(() => events.includes(': hello'), 5000);
+      const shown = (await reqAt(bw.port, '/w/big/')).body.toString();
+      check(full && live(shown).wait === undefined && !/rechecking/.test(shown), 'when the audit is done the page shows its 400 broken links, and waits for nothing');
+      // a page made while the audit ran connects only after it was made (its script loads first): the event stream
+      // tells it first which trees have their audit, with its number
+      const late = listen();
+      await until(() => late.text.includes('data: '), 5000);
+      const ready = firstData(late.text)?.audits ?? {};
+      check(ready['w/big'] > 0, `a page that connects after its tree's audit was made still hears of it: the stream first lists the trees whose audit is ready (${JSON.stringify(ready)})`);
+      const before = ready['w/big'];
       write(path.join(big, 'notes', 'd0', 'extra.md'), '[gone](gone-extra.png)\n');
       bw.rescan();
       const during = (await reqAt(bw.port, '/w/big/')).body.toString();
-      check(/<span class="ftotal">400 flags<\/span>/.test(during) && !/notice checking/.test(during), 'the tree changed: a page answers at once with the audit before while the next one is made');
-      const done = await until(() => events.includes('"audited":"w/big"'), 30_000);
-      const next = /<span class="ftotal">401 flags<\/span>/.test((await reqAt(bw.port, '/w/big/')).body.toString());
-      check(done && next, `the event stream says when the next audit is made, and pages show it (${done} / ${next})`);
-    } finally { stream?.destroy(); bw.close(); (fs as any).lstatSync = lstat; }
+      const homeDuring = (await reqAt(bw.port, '/')).body.toString();
+      // the audit before is no news to a page that connects now (it is not of the tree as it is)
+      const listed = (await readyNow())['w/big'];
+      check(/<span class="ftotal">400 flags<\/span>/.test(during) && !/notice checking/.test(during) && /class="dim small rechecking">Re-checking after a change/.test(during) && live(during).wait === before
+        && new RegExp(`<a class="rcard ws rechecking"[^>]*data-root="w/big" data-wait="${before}"`).test(homeDuring) && /re-checking…/.test(homeDuring) && listed !== before,
+        `the tree changed: a page answers at once with the audit before, says it is checked again, and waits for the next (wait ${live(during).wait}, audit ${before}, listed ${listed})`);
+      const done = await until(() => auditedN(late.text, 'w/big') > before, 30_000);
+      const nextPage = (await reqAt(bw.port, '/w/big/')).body.toString();
+      check(done && /<span class="ftotal">401 flags<\/span>/.test(nextPage) && live(nextPage).wait === undefined && !/rechecking/.test(nextPage),
+        `the event stream says when the next audit is made (its number ${auditedN(late.text, 'w/big')} after ${before}), and the page made then shows it`);
+      check((await readyNow())['w/big'] === auditedN(late.text, 'w/big'), 'and a page that connects later hears of that one');
+
+      // he exports again and reloads at once: the package page shows the audit before (its export still older than its
+      // graph, as its flag) and says it is checked again; the exports list reads the export as it is; when the audit is
+      // made the package page shows the export made from its graph as it is
+      const crateUrl = '/w/re/props/crate/';
+      const staleMark = />crate\.glb<\/a> <span class="stale"/;
+      const settled = await until(async () => { const b = (await reqAt(bw.port, crateUrl)).body.toString(); return staleMark.test(b) && live(b).wait === undefined; }, 30_000);
+      check(settled && /exports\/crate\.glb was made from an older version of its graph/.test((await reqAt(bw.port, crateUrl)).body.toString()), 'a package page marks an export older than its graph, as its audit says');
+      const reBefore = (await readyNow())['w/re'] ?? 0;
+      write(path.join(reCrate.dir, 'exports', 'crate.glb.source.json'), reSource(sha256Hex(canonicalJSON(BOX))));
+      bw.rescan();
+      const reDuring = (await reqAt(bw.port, crateUrl)).body.toString();
+      const listing = (await reqAt(bw.port, `${crateUrl}exports/`)).body.toString();
+      check(staleMark.test(reDuring) && /class="dim small rechecking">Re-checking after a change/.test(reDuring) && live(reDuring).wait === reBefore && reBefore > 0 && !/class="stale"/.test(listing),
+        `exported again, the page reloaded at once: it shows the audit before and says it is checked again (wait ${live(reDuring).wait}); the exports list reads it as it is`);
+      const reDone = await until(() => auditedN(late.text, 'w/re') > reBefore, 30_000);
+      const reAfter = (await reqAt(bw.port, crateUrl)).body.toString();
+      check(reDone && !staleMark.test(reAfter) && !/exports\/crate\.glb was made from an older version/.test(reAfter) && live(reAfter).wait === undefined && !/rechecking/.test(reAfter),
+        `when its audit is made (number ${auditedN(late.text, 'w/re')}) the page it reloads to marks the export as made from its graph as it is, and waits for nothing`);
+    } finally { for (const s of streams) s.destroy(); bw.close(); (fs as any).lstatSync = lstat; }
   }
 
   // ------------------------------------------------------------------------------------------- markdown, links

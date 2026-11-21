@@ -102,6 +102,10 @@ export interface RootCardData {
   cut?: boolean;
   /** its first audit is under way: no counts yet (the page reloads when it is done) */
   checking?: boolean;
+  /** its counts are from an audit made before the tree's last change; the next is under way (the page reloads when it is done) */
+  rechecking?: boolean;
+  /** made from no audit (0) or an older one (its number): the page reloads when the tree's next audit is made */
+  wait?: number;
 }
 
 /** The front page's data: the workspaces, the libraries (TopoTopo's built-in one last), every package for the search. */
@@ -183,9 +187,10 @@ function rootCard(r: RootCardData) {
     : [
       stat(r.packages, 'package', 'packages'), stat(r.folders, 'folder', 'folders'), stat(r.files, 'file', 'files'),
       stat(r.flags, 'flag', 'flags', r.flags ? ' fstat' : r.cut ? '' : ' ok', r.cut ? '+' : ''),
+      ...(r.rechecking ? ['<span class="stat checking"><span>re-checking…</span></span>'] : []),
     ].join('');
   const sub = r.builtin ? 'TopoTopo\'s built-in library' : r.kind === 'w' ? `Workspace${r.engine ? ` · ${r.engine}` : ''}` : 'Library';
-  return `<a class="rcard${r.kind === 'w' ? ' ws' : ''}${r.checking ? ' checking' : ''}" href="${esc(r.url)}" data-root="${esc(`${r.kind}/${r.name}`)}">
+  return `<a class="rcard${r.kind === 'w' ? ' ws' : ''}${r.checking ? ' checking' : ''}${r.rechecking ? ' rechecking' : ''}" href="${esc(r.url)}" data-root="${esc(`${r.kind}/${r.name}`)}"${r.wait !== undefined ? ` data-wait="${r.wait}"` : ''}>
   ${mosaic(r.thumbs, r.name.slice(0, 2).toUpperCase())}
   <span class="rbody">
     <span class="rsub">${esc(sub)}</span>

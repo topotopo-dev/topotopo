@@ -315,11 +315,13 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   // event stream keep answering while a large tree is audited
   /**
    * `stale`: each package's exports older than their graphs (by the package's folderKey; its page marks them); `gen`: the
-   * tree's count of changes when the audit began; `dir`: the tree's folder
+   * tree's count of changes when the audit began; `dir`: the tree's folder; `n`: its number, counted up as audits are
+   * kept (a page made from an audit that is not of the tree as it is waits for one with a higher number)
    */
-  type Audit = { walk: Walk; flags: Flag[]; stale: Map<string, Set<string>>; at: number; gen: number; dir: string };
+  type Audit = { walk: Walk; flags: Flag[]; stale: Map<string, Set<string>>; at: number; gen: number; dir: string; n: number };
   /** the newest audit of each tree: kept after a change, until the next one is made */
   const audits = new Map<string, Audit>();
+  let auditCount = 0;
   /** the audits under way, and each tree's count of changes (an audit begun before a change is not of the tree as it is) */
   const auditing = new Map<string, { gen: number; made: Promise<Audit> }>();
   const changes = new Map<string, number>();
@@ -715,7 +717,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   /**
    * A tree's audit as it is now: its walk (counts, images, broken links in notes) and its packages' flags; one at a time
    * per tree (pages that ask meanwhile wait for the same one). The newest one made is kept, also one begun before a
-   * change (pages show it until the next is made), and the pages hear of it (an event).
+   * change (pages show it until the next is made); it is what this gives (an older one that ends late is dropped). When
+   * the one kept is of the tree as it is, the pages hear of it (an event with its number): each page made from an older
+   * one, or from none, reloads. One begun before a change is no news: the change makes another (rewarm).
    */
   const auditOf = (r: Root): Promise<Audit> => {
     const key = rootKey(r), have = audits.get(key);
@@ -724,13 +728,23 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const gen = changes.get(key) ?? 0, going = auditing.get(key);
     if (going && going.gen === gen) return going.made;
     const made = auditNow(r).then((x) => {
-      const a: Audit = { ...x, gen, dir: r.dir }, known = audits.get(key);
-      if (!known || known.dir !== a.dir || known.gen <= gen) { audits.set(key, a); broadcast({ audited: key }); }
+      const known = audits.get(key);
+      if (known && known.dir === r.dir && known.gen > gen) return known;
+      const a: Audit = { ...x, gen, dir: r.dir, n: ++auditCount };
+      audits.set(key, a);
+      if (fresh(r, a)) broadcast({ audited: key, n: a.n });
       return a;
     }).finally(() => { if (auditing.get(key)?.made === made) auditing.delete(key); });
     auditing.set(key, { gen, made });
     return made;
   };
+  /** The trees whose audit kept is of the tree as it is, with its number: what a page that connects now has missed. */
+  const auditsReady = () => Object.fromEntries(roots.flatMap((r) => { const a = audits.get(rootKey(r)); return a && fresh(r, a) ? [[rootKey(r), a.n]] : []; }));
+  /**
+   * What a page made from this audit waits for: undefined when it is of the tree as it is; else its number (0: none), and
+   * the page reloads when an audit of the tree with a higher number is made.
+   */
+  const waitOf = (r: Root, a: Audit | null) => (a && fresh(r, a) ? undefined : a?.n ?? 0);
   /**
    * The audit a page shows: the tree's audit as it is now when it is ready within auditWait, else the newest one made
    * (the next one goes on meanwhile), else null: none yet (the page says the tree is being checked).
@@ -744,7 +758,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const known = audits.get(rootKey(r));
     return known && known.dir === r.dir ? known : null;
   };
-  const auditNow = async (r: Root): Promise<Omit<Audit, 'gen' | 'dir'>> => {
+  const auditNow = async (r: Root): Promise<Omit<Audit, 'gen' | 'dir' | 'n'>> => {
     if (noteLinks.size > 100_000) noteLinks.clear();
     const walk = await walkTree(r, { links: noteLinks, slice: 8, limits: o.walkLimits });
     const pause = slicer();
@@ -834,8 +848,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   };
   const folderData = async (r: Root, rel: string, abs: string, askedNote: string | null = null): Promise<FolderPageData> => {
     const listing = listFolder(abs, rel, r.dir);
-    // none yet: the page shows no flags and says the tree is being checked (it reloads when that is done)
-    const audit = await shownAudit(r);
+    // none yet: the page shows no flags and says the tree is being checked; one from before a change: the page says it is
+    // checked again. Either reloads when the audit of the tree as it is is made (wait)
+    const audit = await shownAudit(r), wait = waitOf(r, audit);
     const engines = audit?.walk.engines ?? [];
     const engineAt = engines.find((e) => rel === e || rel.startsWith(e + '/'));
     const p = listing.topo.length ? byDir.get(folderKey(abs)) ?? null : null;
@@ -915,16 +930,17 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     return {
       root: { kind: r.kind, name: r.name, label: rootLabel(r) }, rel, crumbs, kicker, title: p ? p.manifest.title : name, stats, dir: abs,
       flags: own, below: [...below].sort(([a], [b]) => byName(a, b)).map(([at, fl]) => ({ at, url: urls.folder(r.kind, r.name, at), flags: fl })),
-      ...(!rel ? { uses: workspaceUses(r) } : {}), ...(!rel && audit?.walk.cut.length ? { cut: audit.walk.cut } : {}), ...(audit ? {} : { checking: true }),
+      ...(!rel ? { uses: workspaceUses(r) } : {}), ...(!rel && audit?.walk.cut.length ? { cut: audit.walk.cut } : {}), ...(audit ? wait !== undefined ? { rechecking: true } : {} : { checking: true }),
       ...(notice ? { notice } : {}), notes, moreNotes: unboxed.length, folders, files, engineAssets: listing.engineAssets, package: p ? packageData(p, audit) : null,
       ...(pictures.length ? { pictures } : {}),
-      live: { root: rootKey(r), rel, ...(p ? { package: keyOf(p) } : {}), ...(audit ? {} : { checking: true }), reveal: `${urls.folder(r.kind, r.name, rel)}?reveal` },
+      live: { root: rootKey(r), rel, ...(p ? { package: keyOf(p) } : {}), ...(wait !== undefined ? { wait } : {}), reveal: `${urls.folder(r.kind, r.name, rel)}?reveal` },
     };
   };
   // ---------------------------------------------------------------- front page data
   const rootCard = async (r: Root): Promise<RootCardData> => {
-    // none yet: the card has no counts and says the tree is being checked (the page reloads when that is done)
-    const a = await shownAudit(r), pk = r.builtin ? (scans.find((s) => s.name === BUILTIN_LIBRARY.name)?.packages ?? []) : packagesOf(r);
+    // none yet: the card has no counts and says the tree is being checked; one from before a change: its counts, and it
+    // says the tree is checked again. Either way the page reloads when the audit of the tree as it is is made (wait)
+    const a = await shownAudit(r), wait = waitOf(r, a), pk = r.builtin ? (scans.find((s) => s.name === BUILTIN_LIBRARY.name)?.packages ?? []) : packagesOf(r);
     const thumbs: string[] = [];
     for (const p of pk) { if (thumbs.length >= 4) break; const t = previewOf(p); if (t) thumbs.push(t); }
     for (const i of a?.walk.images ?? []) { if (thumbs.length >= 4) break; thumbs.push(urls.raw(r.kind, r.name, i)); }
@@ -932,7 +948,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const problem = g?.problem ? 'Its workspace file cannot be read: see its page' : !fs.existsSync(r.dir) ? 'Its folder is not there' : undefined;
     return {
       kind: r.kind, name: r.name, dir: r.dir, url: urls.folder(r.kind, r.name, ''), ...(engineLabel(r) ? { engine: engineLabel(r) } : {}), ...(r.builtin ? { builtin: true } : {}),
-      thumbs, packages: pk.length, folders: a?.walk.folders ?? 0, files: a?.walk.files ?? 0, flags: a ? flagsNow(r, a).length : 0, ...(a ? {} : { checking: true }), ...(problem ? { problem } : {}), ...(a?.walk.cut.length ? { cut: true } : {}),
+      thumbs, packages: pk.length, folders: a?.walk.folders ?? 0, files: a?.walk.files ?? 0, flags: a ? flagsNow(r, a).length : 0,
+      ...(a ? {} : { checking: true }), ...(wait !== undefined ? { wait, ...(a ? { rechecking: true } : {}) } : {}), ...(problem ? { problem } : {}), ...(a?.walk.cut.length ? { cut: true } : {}),
     };
   };
 
@@ -1041,6 +1058,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (u.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
         res.write(': hello\n\n');
+        // first, the trees whose audit is ready: a page made before it, which connects only after, still hears of it
+        res.write(`data: ${JSON.stringify({ audits: auditsReady() })}\n\n`);
         clients.add(res);
         req.on('close', () => clients.delete(res));
         return;
