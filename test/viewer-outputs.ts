@@ -12,6 +12,7 @@ import { unzipSync } from 'fflate';
 import * as THREE from 'three';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
+import { defineNode } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Session } from '../src/session.ts';
 import type { JSONEdit } from '../src/viewer/json-edit.ts';
@@ -331,6 +332,52 @@ try {
   viewer.close(); viewer = await startViewer(new Session(path.join(tmp, 'other'), engine, { exports: ws.exportDir }), 0);
   check((await list()).some((x: any) => x.origin === 'saved' && x.label === 'asset.glb'), 'saved outputs survive server restart');
 } finally { viewer.close(); }
+
+console.log('\n== the line of cooks');
+{
+  defineNode({
+    type: 'test_output_wait', category: 'flow', summary: 'test only: waits, then makes a point', inputs: [],
+    params: { tag: { type: 'int', default: 1, desc: 'point position' } },
+    cook: async (ctx) => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
+      const b = new GeoBuilder(); b.addPoint(ctx.p.tag, 0, 0); return b.build();
+    },
+  });
+  const dir = path.join(tmp, 'queue'); fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'queue.topo'), JSON.stringify({ title: 'Queue', graph: 'main' }));
+  const queue = new Session(dir, engine); queue.load();
+  queue.setGraph('second', { nodes: { a: { type: 'test_output_wait', params: { tag: 3 } }, b: { type: 'test_output_wait', params: { tag: 4 } } },
+    output: 'a', outputs: { last: { node: 'b', label: 'Last' } } });
+  queue.setGraph('main', { nodes: { a: { type: 'test_output_wait', params: { tag: 1 } }, b: { type: 'test_output_wait', params: { tag: 2 } } },
+    output: 'a', outputs: { next: { node: 'b', label: 'Next' } } });
+  viewer = await startViewer(queue, 0);
+  try {
+    const until = async (condition: (snapshot: any) => boolean) => {
+      for (let i = 0; i < 200; i++) {
+        const { data } = await get('api/outputs');
+        if (condition(data)) return data;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      throw new Error('the line of cooks did not reach the expected state');
+    };
+    const start = await until(({ progress }) => progress?.cooking === 'main');
+    const [first, next, third, last] = ['main', 'Next', 'second', 'Last'].map((label) => start.items.find((item: any) => item.label === label));
+    check([first, next, third, last].map((item) => item.line).join() === '0,1,2,3', 'the main graph cooks first and waiting results show their place in line');
+    check(start.progress.total === 4 && start.progress.waiting === 3 && start.progress.cooking === first.label && start.progress.left_ms === null,
+      'the first cook names itself in progress and has no time estimate');
+    const moved = await command('first', { id: last.id });
+    check(moved.status === 200 && moved.data.ok && moved.data.moved === true, 'a waiting output can move to the front');
+    const after = await until(({ progress }) => progress?.ready === 2);
+    check(after.items.filter((item: any) => item.status === 'ready').map((item: any) => item.id).sort().join() === [first.id, last.id].sort().join(),
+      'the picked output finishes after the running one, before the middle two');
+    check(typeof after.progress.left_ms === 'number' && after.progress.left_ms > 0, 'two finished cooks give a positive time estimate');
+    const end = await until(({ progress }) => progress?.ready === 4);
+    check(end.items.every((item: any) => !('line' in item)) && end.progress.waiting === 0 && end.progress.cooking === null && end.progress.left_ms === null,
+      'a finished line has four ready cards, no positions and no time estimate');
+    const ready = await command('first', { id: last.id });
+    check(ready.status === 200 && ready.data.ok && ready.data.moved === false, 'a ready output does not move');
+  } finally { viewer.close(); }
+}
 
 const v = createViews(() => ({ center: new THREE.Vector3(), radius: 100 })); v.layout(800, 600);
 const c = v.cam(1), hit = new THREE.Vector3(2, 3, 0), eye = c.eye, aim = c.target.clone();

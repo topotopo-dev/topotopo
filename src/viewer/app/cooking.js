@@ -14,6 +14,28 @@ export function fmtDuration(ms) {
 
 const firstLine = (s) => String(s ?? '').split('\n')[0];
 
+/** The progress row above the published output cards. */
+export function progressLine(progress) {
+  const { total = 0, ready = 0, failed = 0, cooking, left_ms } = progress ?? {};
+  const done = ready + failed, loading = done < total;
+  const hidden = total <= 1 || (!loading && !failed);
+  let text = loading ? `${ready} of ${total} ready` : `${ready} ready`;
+  if (loading && cooking) text += ` · cooking ${cooking}`;
+  if (loading && left_ms != null) {
+    const time = left_ms < 60000 ? `${Math.ceil(left_ms / 1000)} s` : `${Math.ceil(left_ms / 60000)} min`;
+    text += ` · about ${time} left`;
+  }
+  if (failed) text += ` · ${failed} failed`;
+  return { text, done, total, hidden };
+}
+
+/** The cook or wait shown on one loading card. */
+export function waitLine(item) {
+  if (item.line === 1) return 'waiting · next';
+  if (item.line > 1) return `waiting · ${item.line} before it`;
+  return 'cooking…';
+}
+
 /** A cook shows as running once it has run this long (ms): shorter ones do not flicker. */
 export const SHOW_AFTER = 150;
 

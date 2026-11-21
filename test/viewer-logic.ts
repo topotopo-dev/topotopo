@@ -602,6 +602,31 @@ section('cook state line');
     'stopping, and before the first cook');
 }
 
+section('output cook progress');
+{
+  const progress = { total: 735, ready: 312, failed: 0, waiting: 422, cooking: 'Ridge', left_ms: 181000 };
+  const line = cooking.progressLine(progress);
+  check(line.text === '312 of 735 ready · cooking Ridge · about 4 min left' && line.done === 312 && line.total === 735 && !line.hidden,
+    'output progress names the running cook and rounds the minutes up');
+  const seconds = cooking.progressLine({ ...progress, failed: 3, left_ms: 39150 });
+  check(seconds.text === '312 of 735 ready · cooking Ridge · about 40 s left · 3 failed' && seconds.done === 315,
+    'output progress rounds the seconds up and counts failures as done');
+  check(cooking.progressLine({ ...progress, left_ms: 60000 }).text === '312 of 735 ready · cooking Ridge · about 1 min left',
+    'a minute left is shown in minutes');
+  check(cooking.progressLine({ ...progress, cooking: null }).text === '312 of 735 ready · about 4 min left', 'the name is omitted between cooks');
+  check(cooking.progressLine({ ...progress, left_ms: null }).text === '312 of 735 ready · cooking Ridge', 'the time is omitted until there is an estimate');
+  check(cooking.progressLine({ ...progress, cooking: null, left_ms: null }).text === '312 of 735 ready', 'the ready count shows without a name or estimate');
+  const failed = cooking.progressLine({ ...progress, ready: 732, failed: 3, waiting: 0, cooking: null, left_ms: null });
+  check(failed.text === '732 ready · 3 failed' && failed.done === 735 && !failed.hidden, 'finished progress with failures shows both counts');
+  check(cooking.progressLine({ ...progress, ready: 735 }).hidden, 'finished progress without failures is hidden');
+  check(cooking.progressLine({ total: 1, ready: 0, failed: 0, cooking: 'Ridge' }).hidden
+    && cooking.progressLine({ total: 0, ready: 0, failed: 0 }).hidden, 'progress is hidden for one result or none');
+  check(cooking.waitLine({ line: 0 }) === 'cooking…', 'a running output says cooking');
+  check(cooking.waitLine({ line: 1 }) === 'waiting · next', 'the first waiting output says it is next');
+  check(cooking.waitLine({ line: 5 }) === 'waiting · 5 before it', 'a waiting output says how many cooks come before it');
+  check(cooking.waitLine({}) === 'cooking…', 'a loading output without a position says cooking');
+}
+
 section('the Packages tab: a package\'s state and source, the Scene tree\'s mark, an update\'s places');
 {
   const p = (o: any) => ({ package: 'studio/trees', version: '1.1', newer: [], working: [{ place: 'library "lib"', dir: '/lib/trees' }], followed: null, ...o });

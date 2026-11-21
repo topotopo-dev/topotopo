@@ -19,6 +19,8 @@
 .outputs-bar .primary, .inputs-bar .primary { flex: none; padding: 4px 12px; }
 .outputs-bar > button { flex: none; }
 .outputs-bar > .dim, .inputs-bar > .dim { flex: 1 1 0; min-width: 0; font-size: 11px; overflow-wrap: break-word; }
+.outputs-progress { order: 2; flex: 0 0 100%; display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11px; overflow-wrap: anywhere; }
+.outputs-progress progress { flex: none; width: 48px; height: 6px; accent-color: var(--sel); }
 @container (max-width: 319px) {
   .outputs-bar, .inputs-bar { padding: 8px 6px; }
   .outputs-bar .primary, .inputs-bar .primary { padding: 4px 8px; }
@@ -48,6 +50,7 @@ button:disabled { opacity: .45; cursor: default; }
 .output-pic { position: relative; flex: none; display: flex; }
 .output-cooking { display: none; position: absolute; left: 0; right: 0; bottom: 0; padding: 1px 3px; background: rgba(31, 33, 36, 0.85); color: var(--sel); font-size: 10px; text-align: center; }
 .output-card.cooking .output-cooking { display: block; }
+.output-card.waiting .output-cooking { color: var(--dim); }
 .output-card.stale .output-pic { opacity: .55; }
 .output-card .output-body { display: flex; flex: 1; flex-direction: column; min-width: 0; justify-content: center; gap: 3px; }
 .output-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }

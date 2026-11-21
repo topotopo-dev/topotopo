@@ -81,6 +81,7 @@ export interface OutputEntry {
   /** a published output: the formats that write it, best first (io/kinds.ts) */
   formats?: FormatFit[];
   status: 'loading' | 'ready' | 'error';
+  line?: number;
   revision: string; error?: string; summary?: string; width?: number; height?: number;
   layers?: string[]; layer?: string; image?: string; generated?: boolean;
   /** a published output's card has an Export button: `output` is its id (null = the graph's default output) */
@@ -136,7 +137,9 @@ export interface OutputsOptions {
 export function createOutputs(ws: Session, changed: () => void, opts: OutputsOptions = {}) {
   const store = new ArtifactStore(ws.exportDir);
   const items = new Map<string, Item>(), previewCache = new Map<string, Uint8Array>();
-  let queue = Promise.resolve(), closed = false, lastFiles = '', exportQueue = Promise.resolve();
+  const waiting: { item: Item; resolve: () => void }[] = [];
+  let running = false, cooking: Item | undefined, finished = 0, elapsed = 0;
+  let closed = false, lastFiles = '', exportQueue = Promise.resolve();
   const cache = async (key: string, make: () => Uint8Array | Promise<Uint8Array>) => {
     if (previewCache.has(key)) return previewCache.get(key)!;
     const bytes = await make();
@@ -181,44 +184,67 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
     items.set(e.id, prev);
     for (const v of items.values()) if (v.owner === item) { v.owner = prev; v.entry.status = 'ready'; delete v.entry.error; }
   };
-  const cook = (item: Item) => {
-    if (item.pending) return item.pending;
+  const cookItem = async (item: Item) => {
     const key = item.key, e = item.entry;
-    item.pending = queue = queue.catch(() => {}).then(async () => {
+    let started: number | undefined;
+    try {
+      // a graph whose cooks the person stopped is not cooked again on its own: the card waits for a change
+      if (!item.file && ws.held(e.graph!)) { unstop(item); return; }
+      started = performance.now();
+      cooking = item;
+      changed();
+      const r = item.file
+        ? await ws.engine.cook({ nodes: { file: { type: 'file', params: { path: item.file } } }, output: 'file' })
+        : await ws.cook(e.graph!, e.node, undefined, { kind: 'preview' });
+      if (item.key !== key || items.get(e.id) !== item) return;
+      // stopped for a newer value: the next refresh (after that value's cook) cooks the card again
+      if (r.stopped && !ws.held(e.graph!)) { item.key = undefined; return; }
+      if (r.stopped) { unstop(item, r.stopped); return; }
+      if (!r.ok || !r.geo) throw new Error(r.errors.map((x) => `${x.node}: ${x.message}`).join('\n') || 'no geometry');
+      delete item.prev;
+      item.geo = r.geo;
+      e.status = 'ready'; delete e.error; delete e.stale;
+      // a saved file that says what it is already (a heightmap by its sidecar) keeps that
+      const info = item.file && e.kind ? outputKind(r.geo) : describe(e, r.geo);
+      if (item.file && !e.parts) e.parts = info.kind;
+      const firstImage = referenceableImages(r.geo).values().next().value;
+      if (info.kind === 'image' && firstImage) {
+        item.img = firstImage; e.view = 'image'; e.width = firstImage.width; e.height = firstImage.height;
+        e.layers = [...firstImage.layers.keys()]; e.layer = firstImage.mainLayer;
+      } else if (!item.file) { e.view = 'model'; delete item.img; }
+      if (!item.file) e.revision = digest(`${key}:${r.results.get(r.target)?.sig ?? ''}`);
+      e.summary = summarize(r.geo);
+      addImages(item);
+    } catch (error) {
+      e.status = 'error'; e.error = String((error as Error | null)?.message ?? error);
+      // Keep the last valid preview but mark its image children stale as well.
+      for (const v of items.values()) if (v.owner === item) { v.entry.status = 'error'; v.entry.error = e.error; }
+    } finally {
+      if (started !== undefined && e.origin === 'published') { finished++; elapsed += performance.now() - started; }
+      cooking = undefined;
+      if (!closed) changed();
+    }
+  };
+  const run = async () => {
+    running = true;
+    while (waiting.length) {
       // Yield between outputs so navigation and metadata requests remain responsive.
       await new Promise<void>((resolve) => setImmediate(resolve));
-      if (closed || items.get(e.id) !== item) return;
+      const next = waiting.shift(); if (!next) break;
+      const { item, resolve } = next;
       try {
-        // a graph whose cooks the person stopped is not cooked again on its own: the card waits for a change
-        if (!item.file && ws.held(e.graph!)) { unstop(item); return; }
-        const r = item.file
-          ? await ws.engine.cook({ nodes: { file: { type: 'file', params: { path: item.file } } }, output: 'file' })
-          : await ws.cook(e.graph!, e.node, undefined, { kind: 'preview' });
-        if (item.key !== key || items.get(e.id) !== item) return;
-        // stopped for a newer value: the next refresh (after that value's cook) cooks the card again
-        if (r.stopped && !ws.held(e.graph!)) { item.key = undefined; return; }
-        if (r.stopped) { unstop(item, r.stopped); return; }
-        if (!r.ok || !r.geo) throw new Error(r.errors.map((x) => `${x.node}: ${x.message}`).join('\n') || 'no geometry');
-        delete item.prev;
-        item.geo = r.geo;
-        e.status = 'ready'; delete e.error; delete e.stale;
-        // a saved file that says what it is already (a heightmap by its sidecar) keeps that
-        const info = item.file && e.kind ? outputKind(r.geo) : describe(e, r.geo);
-        if (item.file && !e.parts) e.parts = info.kind;
-        const firstImage = referenceableImages(r.geo).values().next().value;
-        if (info.kind === 'image' && firstImage) {
-          item.img = firstImage; e.view = 'image'; e.width = firstImage.width; e.height = firstImage.height;
-          e.layers = [...firstImage.layers.keys()]; e.layer = firstImage.mainLayer;
-        } else if (!item.file) { e.view = 'model'; delete item.img; }
-        if (!item.file) e.revision = digest(`${key}:${r.results.get(r.target)?.sig ?? ''}`);
-        e.summary = summarize(r.geo);
-        addImages(item);
-      } catch (error) {
-        e.status = 'error'; e.error = String((error as Error).message);
-        // Keep the last valid preview but mark its image children stale as well.
-        for (const v of items.values()) if (v.owner === item) { v.entry.status = 'error'; v.entry.error = e.error; }
-      } finally { item.pending = undefined; if (!closed) changed(); }
-    });
+        if (!closed && items.get(item.entry.id) === item) await cookItem(item);
+      } catch { /* a failed turn must let the rest of the line cook */ }
+      finally { item.pending = undefined; resolve(); }
+    }
+    running = false;
+  };
+  const cook = (item: Item) => {
+    if (item.pending) return item.pending;
+    if (closed) return Promise.resolve();
+    if (!cooking && !waiting.length) { finished = 0; elapsed = 0; }
+    item.pending = new Promise<void>((resolve) => { waiting.push({ item, resolve }); });
+    if (!running) void run();
     return item.pending;
   };
   /** The last export of a published output to its current target, from the receipts. */
@@ -341,7 +367,8 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
       }
     }
     for (const [id, item] of items) if (!alive.has(id) && !item.owner) { items.delete(id); for (const [child, v] of items) if (v.owner === item) items.delete(child); }
-    const signature = JSON.stringify([...items.values()].filter((v) => v.files || v.entry.exportable).map((v) => [v.entry.id, v.entry.revision, v.entry.target, v.entry.saved]));
+    // A cook already reports its new preview revision when it ends.
+    const signature = JSON.stringify([...items.values()].filter((v) => v.files || v.entry.exportable).map((v) => [v.entry.id, v.files ? v.entry.revision : sessionRevision, v.entry.target, v.entry.saved]));
     if (signature !== lastFiles) { lastFiles = signature; changed(); }
   };
   const get = (id: string | null) => items.get(id ?? '') ?? err(404, 'output no longer exists');
@@ -378,20 +405,51 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
   return {
     /** Resolves when no export is under way (each writes its files through .part files renamed into place, one export at a time). */
     async idle(): Promise<void> { for (let q = exportQueue; ; q = exportQueue) { await q; if (q === exportQueue) return; } },
-    close() { closed = true; clearInterval(timer); ws.listeners.delete(listener); items.clear(); previewCache.clear(); },
+    close() {
+      closed = true; clearInterval(timer); ws.listeners.delete(listener); items.clear(); previewCache.clear();
+      for (const { item, resolve } of waiting.splice(0)) { item.pending = undefined; resolve(); }
+    },
     async handle(req: http.IncomingMessage, res: http.ServerResponse, u: URL, readJSON: (r: http.IncomingMessage) => Promise<any>): Promise<boolean> {
       if (!u.pathname.startsWith('/api/output')) return false;
       const send = (body: Uint8Array | string, type: string, name?: string, extra: Record<string, string> = {}) => {
         res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(name ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` } : {}), ...extra }); res.end(body);
       };
       const json = (j: unknown) => send(JSON.stringify(j), 'application/json');
-      const posts = ['/api/output/export', '/api/output/export-all', '/api/output/download'];
+      const posts = ['/api/output/export', '/api/output/export-all', '/api/output/download', '/api/output/first'];
       try {
         if (posts.includes(u.pathname) ? req.method !== 'POST' : req.method !== 'GET') err(405, posts.includes(u.pathname) ? 'POST required' : 'method not allowed');
         refresh();
         if (u.pathname === '/api/outputs') {
-          json({ items: [...items.values()].map((v) => v.entry), directory: ws.exportDir,
+          const lines = new Map<Item, number>();
+          if (cooking) lines.set(cooking, 0);
+          let position = 1;
+          for (const { item } of waiting) {
+            if (item.entry.origin === 'published' && item.entry.status === 'loading' && items.get(item.entry.id) === item) lines.set(item, position++);
+          }
+          const progress = { total: 0, ready: 0, failed: 0, waiting: 0, cooking: null as string | null, left_ms: null as number | null };
+          const entries = [...items.values()].map((item) => {
+            const e = item.entry;
+            if (e.origin !== 'published' || e.parent) return e;
+            progress.total++;
+            if (e.status === 'ready') progress.ready++;
+            if (e.status === 'error') progress.failed++;
+            const line = lines.get(item);
+            if (e.status !== 'loading' || line === undefined) return e;
+            if (line === 0) progress.cooking = e.label;
+            else progress.waiting++;
+            return { ...e, line };
+          });
+          const loading = progress.total - progress.ready - progress.failed;
+          if (loading && finished >= 2) progress.left_ms = elapsed / finished * loading;
+          json({ items: entries, progress, directory: ws.exportDir,
             formats: TARGET_FORMATS.map((f) => ({ format: f, label: FORMAT_LABELS[f], extension: targetExtension(f) })) });
+          return true;
+        }
+        if (u.pathname === '/api/output/first') {
+          const body = await readJSON(req), card = get(body?.id), item = card.owner ?? card;
+          const index = item.entry.origin === 'published' && item.entry.status === 'loading' ? waiting.findIndex((v) => v.item === item) : -1;
+          if (index > 0) waiting.unshift(...waiting.splice(index, 1));
+          json({ ok: true, moved: index > 0 });
           return true;
         }
         if (u.pathname === '/api/output/export') {
