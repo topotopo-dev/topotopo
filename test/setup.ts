@@ -271,7 +271,11 @@ try {
       'a setup that finds TopoTopo\'s own links without a record records that nothing was there before (the shortcut too)');
     const cleared = await say(['--remove'], opts);
     check(cleared.code === 0 && exportText(CLASSES) === before1 && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')), 'setup once more and --remove clear the links a lost record left');
+    // put .topo back as it was, values in their first order: a value added again goes last, so Keep is added again after it
     regRun('add', `${CLASSES}\\.topo`, '/ve', '/d', 'Other.App', '/f');
+    regRun('delete', `${CLASSES}\\.topo`, '/v', 'Keep', '/f');
+    regRun('add', `${CLASSES}\\.topo`, '/v', 'Keep', '/d', 'mine', '/f');
+    check(exportText(CLASSES) === before0, 'the test put the scratch key back as it was before setup');
 
     // ---- a Start menu file that was there is put back; paths with letters beyond ASCII survive
     fs.writeFileSync(lnk, 'someone else\'s shortcut');
