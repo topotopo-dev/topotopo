@@ -1,4 +1,5 @@
-// The Outputs tab: each graph's published outputs as cards (click one to see it alone, its textures below it). A card
+// The Outputs tab: each graph's published outputs as cards (click one to see it alone; its textures fold under it,
+// closed until opened, and folded ones load no pictures). A card
 // says what the output is (a mesh, a heightfield, packed instances … and its size: the server decides it from the
 // cooked geometry) and has two buttons: Download gets the export as a browser download (the file itself, or a zip of
 // its files) and Export writes it to its target in exports/, the files graph export targets and agents use. Both offer
@@ -36,6 +37,42 @@ export function targetSpec(item, choice, formats) {
   const custom = choice.path !== defaultPath(stem, choice.format, formats);
   return !custom && !Object.keys(keep).length ? choice.format : { format: choice.format, ...(custom ? { path: choice.path } : {}), ...keep };
 }
+/** What a card's picture loads: a result's or a texture's thumbnail, a saved image itself; '' for none. */
+export const thumbURL = (item) => (!['model', 'image'].includes(item.view) ? '' : item.view === 'image' && !item.generated ? url('file', item) : url('thumb', item));
+/** What a fold holds, on its line: "6 textures", "1 texture", "3 files". */
+export function foldWords(children) {
+  const n = children.length, images = children.every((c) => c.view === 'image');
+  return `${n} ${images ? 'texture' : 'file'}${n === 1 ? '' : 's'}`;
+}
+/**
+ * A group's cards in order: each result, then its children (its textures, a saved folder's files) while its fold is
+ * open. Folded children get no card, so their pictures are not loaded. `folds`: per result with children, its line
+ * and whether it is open.
+ */
+export function foldRows(entries, isOpen) {
+  const ids = new Set(entries.map((v) => v.id)), children = new Map();
+  for (const v of entries) if (ids.has(v.parent) && v.parent !== v.id) { if (!children.has(v.parent)) children.set(v.parent, []); children.get(v.parent).push(v); }
+  const rows = [], folds = new Map(), seen = new Set();
+  const visit = (item, shown) => {
+    if (seen.has(item.id)) return; seen.add(item.id);
+    if (shown) rows.push(item);
+    const kids = children.get(item.id); if (!kids) return;
+    const open = isOpen(item.id);
+    folds.set(item.id, { words: foldWords(kids), open });
+    for (const k of kids) visit(k, shown && open);
+  };
+  for (const v of entries) if (!ids.has(v.parent)) visit(v, true);
+  for (const v of entries) visit(v, true);
+  return { rows, folds };
+}
+/** The folds the person opened, by result id (stable across cooks), kept in `store`: every fold is closed until opened. */
+export function createFolds(store, key = 'outputs.open') {
+  const open = new Set(store.get(key, []));
+  return {
+    isOpen: (id) => open.has(id),
+    set(id, on) { if (on === open.has(id)) return; if (on) open.add(id); else open.delete(id); store.set(key, [...open]); },
+  };
+}
 export function createOutputPanel(ctx) {
   const host = document.getElementById('outputs'), details = document.getElementById('output-details');
   const image = createImageView(document.getElementById('viewport'), ctx.message);
@@ -50,6 +87,8 @@ export function createOutputPanel(ctx) {
   saved.append(text('summary', 'Saved files'), savedRows); saved.ontoggle = () => ctx.store.set('outputs.savedOpen', saved.open);
   const empty = text('div', 'No outputs yet: the results of the package\'s graphs show here once your agent has built one.', 'empty');
   const cards = new Map(), groups = new Map(); let input = null;
+  // a result's textures fold under its card, closed until the person opens them; remembered for this viewer
+  const folds = createFolds(ctx.store);
   host.append(bar, empty, live, saved);
   Object.defineProperty(P, 'count', { get: () => list.filter((v) => v.exportable).length });
   // the heightfield layer each output shows in red, remembered in this browser
@@ -181,10 +220,7 @@ export function createOutputPanel(ctx) {
       usedGroups.add(name);
       const parent = name === '__saved' ? savedRows : live;
       if (group.box.parentElement !== parent) parent.append(group.box);
-      const ordered = [], seen = new Set(), ids = new Set(entries.map((item) => item.id));
-      const visit = (item) => { if (seen.has(item.id)) return; seen.add(item.id); ordered.push(item); for (const child of entries) if (child.parent === item.id) visit(child); };
-      for (const item of entries) if (!ids.has(item.parent)) visit(item);
-      for (const item of entries) visit(item);
+      const { rows: ordered, folds: foldOf } = foldRows(entries, folds.isOpen);
       let previous = null;
       for (const item of ordered) {
         used.add(item.id); let card = cards.get(item.id);
@@ -198,10 +234,13 @@ export function createOutputPanel(ctx) {
           const badges = text('span', '', 'output-badges'), info = text('small', '', 'dim'), tags = text('span', '', 'output-tags');
           const target = text('button', '', 'output-target'), actions = text('span', '', 'output-actions');
           const down = text('button', 'Download', 'primary output-download'), go = text('button', 'Export', 'output-export');
-          target.title = 'change where this output exports'; go.type = target.type = down.type = 'button';
+          // "6 textures ▸": opens and closes the result's textures under its card
+          const fold = text('button', '', 'output-fold');
+          target.title = 'change where this output exports'; go.type = target.type = down.type = fold.type = 'button';
           head.append(label, badges);
-          actions.append(down, go); body.append(head, info, tags, target, actions); row.append(pic, body);
-          card = { row, thumb, icon, label, badges, info, tags, target, down, go, item }; cards.set(item.id, card);
+          actions.append(down, go); body.append(head, info, tags, target, actions, fold); row.append(pic, body);
+          card = { row, thumb, icon, label, badges, info, tags, target, down, go, fold, item }; cards.set(item.id, card);
+          fold.onclick = (e) => { if (e.detail) fold.blur(); folds.set(card.item.id, !folds.isOpen(card.item.id)); render(); };
           down.onclick = () => downloadItem(card.item, down);
           go.onclick = () => exportItem(card.item, go);
           target.onclick = () => exportItem(card.item, go, true);
@@ -211,7 +250,7 @@ export function createOutputPanel(ctx) {
           thumb.onerror = () => { thumb.hidden = true; icon.hidden = false; };
         }
         card.item = item;
-        const { row, thumb, icon, label, badges, info, tags, target, down, go } = card;
+        const { row, thumb, icon, label, badges, info, tags, target, down, go, fold } = card;
         const what = kindLine(item), detail = detailLine(item);
         row.classList.toggle('selected', item.id === selected); row.classList.toggle('child', !!item.parent);
         row.classList.toggle('cooking', item.status === 'loading'); row.classList.toggle('stale', !!item.stale && item.status !== 'loading');
@@ -226,8 +265,10 @@ export function createOutputPanel(ctx) {
           : item.download ? `download ${item.download.name}` : `download ${item.label}.png`;
         down.setAttribute('aria-label', `Download ${item.label}`);
         target.textContent = item.exportable ? targetLine(item) : ''; target.classList.toggle('unset', !item.target);
+        const f = foldOf.get(item.id); fold.hidden = !f;
+        if (f) { fold.textContent = `${f.words} ${f.open ? '▾' : '▸'}`; fold.setAttribute('aria-expanded', String(f.open)); fold.title = `${f.open ? 'hide' : 'show'} its ${f.words.replace(/^\d+ /, '')}`; }
         // while it cooks the card keeps its picture and its lines (the mark over the picture says it is cooking)
-        const src = ['model', 'image'].includes(item.view) ? item.view === 'image' && !item.generated ? url('file', item) : url('thumb', item) : '';
+        const src = thumbURL(item);
         if (item.status !== 'loading' && thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
         if (item.status === 'loading' && !thumb.dataset.source) { thumb.hidden = true; icon.hidden = false; }
         icon.textContent = item.view === 'model' ? '3D' : item.view === 'image' ? 'IMG' : (item.kind === 'metadata' ? 'JSON' : (item.files?.[0]?.name.split('.').pop() ?? 'file').toUpperCase().slice(0, 5));
