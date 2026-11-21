@@ -3,6 +3,7 @@
 // (src/host/unreal.ts, integrations/unreal/PROTOCOL.md), axes in rows and sockets, freshness and incremental cooks, a failed output
 // keeping its last good files, status, the jobs file, and that the plugin's C++ speaks the same protocol and exclusions. What the
 // plugin does in the editor (import, reimport, Auto Reimport) is not checked here.
+import './cache-guard.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
