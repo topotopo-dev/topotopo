@@ -20,6 +20,7 @@ import { skippedName, isCheckout } from '../scan.ts';
 import { workspaceFileIn } from '../package.ts';
 import { escHtml, markdownLinks, renderMarkdown, slug } from './markdown.ts';
 import type { LinkOut, MdLink } from './markdown.ts';
+import type { VarRow } from './pages.ts';
 
 // ---------------------------------------------------------------------------------------------------------- roots
 
@@ -86,11 +87,43 @@ export function plumbing(name: string, parentFiles: string[] | (() => string[]))
   return null;
 }
 
+/**
+ * What one walk of a tree reads of the file system, each thing read once (the tree is taken as it is while the walk
+ * runs; the next walk reads it again): real paths, lstats, link targets, the files of folders, stats, and where paths
+ * really are below their folder. Every rule of realBelow and resolveLink applies as without it.
+ */
+export interface TreeReads {
+  real: Map<string, string | null>;
+  lstat: Map<string, fs.Stats | undefined | null>;
+  link: Map<string, string | null>;
+  files: Map<string, string[]>;
+  stat: Map<string, fs.Stats | null>;
+  below: Map<string, RealBelow>;
+}
+export const treeReads = (): TreeReads => ({ real: new Map(), lstat: new Map(), link: new Map(), files: new Map(), stat: new Map(), below: new Map() });
+
+/** Read once per walk (`t`), or each time without one. */
+function readOnce<T>(m: Map<string, T> | undefined, key: string, read: () => T): T {
+  if (!m) return read();
+  if (m.has(key)) return m.get(key)!;
+  const v = read();
+  m.set(key, v);
+  return v;
+}
+/** fs.realpathSync.native, null when it cannot be read. */
+const realOf = (p: string, t?: TreeReads) => readOnce(t?.real, p, () => { try { return fs.realpathSync.native(p); } catch { return null; } });
+/** fs.lstatSync: undefined when nothing is there, null when it cannot be read. */
+const lstatOf = (p: string, t?: TreeReads) => readOnce(t?.lstat, p, () => { try { return fs.lstatSync(p, { throwIfNoEntry: false }); } catch { return null; } });
+const linkOf = (p: string, t?: TreeReads) => readOnce(t?.link, p, () => { try { return fs.readlinkSync(p); } catch { return null; } });
+const filesOf = (dir: string, t?: TreeReads) => readOnce(t?.files, dir, () => filesIn(dir));
+const statIn = (p: string, t?: TreeReads) => readOnce(t?.stat, p, () => statOf(p));
+
 /** Why a path from `base` along `parts` is not shown (a dot name or plumbing on the way, the last part included), or null. */
-function hiddenOnWay(base: string, parts: string[]): string | null {
+function hiddenOnWay(base: string, parts: string[], t?: TreeReads): string | null {
   let d = base;
   for (const p of parts) {
-    const why = p.startsWith('.') ? `${p} is a dot name` : plumbing(p, () => filesIn(d));
+    const dir = d;
+    const why = p.startsWith('.') ? `${p} is a dot name` : plumbing(p, () => filesOf(dir, t));
     if (why) return why;
     d = path.join(d, p);
   }
@@ -99,37 +132,45 @@ function hiddenOnWay(base: string, parts: string[]): string | null {
 
 const leaves = (r: string) => r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r);
 
+export type RealBelow = { rel: string } | { why: string; out: boolean };
+
 /**
  * Where an existing `abs` really is below `top`, links and short names resolved (fs.realpathSync.native: a junction,
  * a symlink, a Windows 8.3 name like GIT~1, the letter case on disk): its posix path from `top`, or why it is not shown
- * (it leads out of `top`, or through a dot folder or plumbing by another name; `dotsOnly`: a dot name only).
+ * (it leads out of `top`, or through a dot folder or plumbing by another name; `dotsOnly`: a dot name only). `t`: what
+ * a walk has read already.
  */
-export function realBelow(top: string, abs: string, dotsOnly = false): { rel: string } | { why: string; out: boolean } {
+export function realBelow(top: string, abs: string, dotsOnly = false, t?: TreeReads): RealBelow {
+  return readOnce(t?.below, `${dotsOnly ? 1 : 0}\0${top}\0${abs}`, () => realBelowNow(top, abs, dotsOnly, t));
+}
+
+function realBelowNow(top: string, abs: string, dotsOnly: boolean, t: TreeReads | undefined): RealBelow {
   const outside = { why: 'it leads out of the folder', out: true };
   const root = path.resolve(top), relative = path.relative(root, path.resolve(abs));
   if (leaves(relative)) return outside;
-  let realTop: string;
-  try { realTop = fs.realpathSync.native(top); } catch { return { why: 'it cannot be read', out: false }; }
+  const realTop = realOf(top, t);
+  if (realTop === null) return { why: 'it cannot be read', out: false };
   let parts = relative ? relative.split(path.sep) : [], current = realTop, links = 0;
   while (parts.length) {
     const part = parts.shift()!;
-    const hidden = part.startsWith('.') ? 'a dot name' : !dotsOnly && plumbing(part, () => filesIn(current));
+    const dir = current;
+    const hidden = part.startsWith('.') ? 'a dot name' : !dotsOnly && plumbing(part, () => filesOf(dir, t));
     if (hidden) return { why: `hidden plumbing by another name (${hidden})`, out: false };
     const next = path.join(current, part);
-    let st: fs.Stats | undefined;
-    try { st = fs.lstatSync(next, { throwIfNoEntry: false }); } catch { return { why: 'it cannot be read', out: false }; }
+    const st = lstatOf(next, t);
+    if (st === null) return { why: 'it cannot be read', out: false };
     if (!st) {
       // A missing child still belongs to its canonical parent. Never probe through a hidden alias just to
       // distinguish a missing file from one that exists.
-      const hiddenTail = dotsOnly ? parts.some((p) => p.startsWith('.')) : hiddenOnWay(current, [part, ...parts]);
+      const hiddenTail = dotsOnly ? parts.some((p) => p.startsWith('.')) : hiddenOnWay(current, [part, ...parts], t);
       if (hiddenTail) return { why: 'hidden plumbing', out: false };
       current = path.join(next, ...parts);
       break;
     }
     if (st.isSymbolicLink()) {
       if (++links > 40) return { why: 'too many symbolic links', out: false };
-      let target: string;
-      try { target = fs.readlinkSync(next); } catch { return { why: 'it cannot be read', out: false }; }
+      const target = linkOf(next, t);
+      if (target === null) return { why: 'it cannot be read', out: false };
       // readlink reads the link itself. Reject network and device targets before any call follows them.
       if (/^[\\/]{2}/.test(target)) return outside;
       const destination = path.resolve(current, target);
@@ -144,11 +185,13 @@ export function realBelow(top: string, abs: string, dotsOnly = false): { rel: st
     }
     // With links checked one component at a time, native realpath only expands this component's short name
     // and letter case. Check that expanded name before proceeding to any child.
-    try { current = fs.realpathSync.native(next); } catch { return { why: 'it cannot be read', out: false }; }
+    const real = realOf(next, t);
+    if (real === null) return { why: 'it cannot be read', out: false };
+    current = real;
     const r = path.relative(realTop, current);
     if (leaves(r)) return outside;
     const canonical = r ? r.split(path.sep) : [];
-    const why = dotsOnly ? canonical.some((p) => p.startsWith('.')) : hiddenOnWay(realTop, canonical);
+    const why = dotsOnly ? canonical.some((p) => p.startsWith('.')) : hiddenOnWay(realTop, canonical, t);
     if (why) return { why: 'hidden plumbing by another name', out: false };
   }
   return { rel: path.relative(realTop, current).split(path.sep).join('/') };
@@ -423,16 +466,50 @@ export function modelSource(file: string): ExportMade | null {
   } catch { return null; }
 }
 
+/** A file's key while it is unchanged: its size and time. */
+const fileKey = (st: fs.Stats) => `${st.size}-${st.mtimeMs}`;
+
+/**
+ * The hashes of a graph file that exports record, kept while the file is unchanged: its canonical hash (null: the file
+ * is no JSON), whether it has vars, and its hash with each vars set an export was made with (by that set's canonical
+ * JSON). A graph is read and hashed once per change however many exports name it, and once more per other vars set.
+ */
+interface GraphHashes { key: string; plain: string | null; vars: boolean; withVars: Map<string, string> }
+const graphHashes = new Map<string, GraphHashes>();
+/** The graph files and the vars sets per graph that hashes are kept for (past that, they are made again). */
+const MAX_GRAPHS = 4096, MAX_VARS_SETS = 64;
+const hasVars = (g: any) => !!(g && typeof g === 'object' && g.vars && typeof g.vars === 'object');
+
 /**
  * Whether the graph an export was made from changed since (the hash it recorded is not the graph file's, with the
  * vars it was made with); null when the graph cannot be read.
  */
 export function exportStale(graphFile: string, m: ExportMade): boolean | null {
+  const st = statOf(graphFile);
+  if (!st) return null;
+  const key = fileKey(st);
+  /** the graph, when this call read it */
   let g: any;
-  try { g = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { return null; }
-  if (sha256Hex(canonicalJSON(g)) === m.graph_sha256) return false;
-  if (g && typeof g === 'object' && g.vars && typeof g.vars === 'object' && sha256Hex(canonicalJSON({ ...g, vars: m.vars })) === m.graph_sha256) return false;
-  return true;
+  let h = graphHashes.get(graphFile);
+  if (h?.key !== key) {
+    let ok = true;
+    try { g = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { ok = false; }
+    h = { key, plain: ok ? sha256Hex(canonicalJSON(g)) : null, vars: ok && hasVars(g), withVars: new Map() };
+    if (graphHashes.size >= MAX_GRAPHS) graphHashes.clear();
+    graphHashes.set(graphFile, h);
+  }
+  if (h.plain === null) return null;
+  if (h.plain === m.graph_sha256) return false;
+  if (!h.vars) return true;
+  const varsKey = canonicalJSON(m.vars);
+  let withVars = h.withVars.get(varsKey);
+  if (withVars === undefined) {
+    if (g === undefined) { try { g = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { return null; } }
+    withVars = sha256Hex(canonicalJSON({ ...g, vars: m.vars }));
+    if (h.withVars.size >= MAX_VARS_SETS) h.withVars.clear();
+    h.withVars.set(varsKey, withVars);
+  }
+  return withVars !== m.graph_sha256;
 }
 
 // ---------------------------------------------------------------------------------------------------------- links
@@ -491,9 +568,9 @@ export function videoPlayer(url: string): string | null {
  * file); anything else stays text. A path is judged by its letters before the file system is asked anything: one that
  * is absolute (a drive, a network share \\host\share), leaves the root (or the engine project), or passes a dot folder
  * or plumbing stays text and is never looked up; only what is left is, and then by where it really is (links and short
- * names resolved). A lookup that fails says "not there"; this never throws.
+ * names resolved). A lookup that fails says "not there"; this never throws. `t`: what a walk has read already.
  */
-export function resolveLink(root: Root, folder: string, href: string): LinkTarget {
+export function resolveLink(root: Root, folder: string, href: string, t?: TreeReads): LinkTarget {
   const h = href.trim();
   if (!h) return { t: 'text', why: 'an empty link' };
   if (/^https?:\/\//i.test(h)) { const player = videoPlayer(h); return { t: 'web', url: h, ...(player ? { player } : {}) }; }
@@ -532,22 +609,22 @@ export function resolveLink(root: Root, folder: string, href: string): LinkTarge
   let abs = path.resolve(base, p);
   const r = path.relative(path.resolve(scope), abs);
   if (leaves(r)) return { t: 'text', why: 'outside this tree' };
-  const real = realBelow(scope, abs);
+  const real = realBelow(scope, abs, false, t);
   if ('why' in real) return { t: 'text', why: real.out ? 'outside this tree' : `not shown: ${real.why}` };
   // only now is the file system asked
-  let st = statOf(abs);
+  let st = statIn(abs, t);
   if (!st && game) {
     // /Game/Props/SM_Crate or /Game/Props/SM_Crate.SM_Crate: the package file SM_Crate.uasset (or a map's .umap)
     const noObj = abs.replace(/\.[^.\\/]+$/, '');
     for (const c of [abs + '.uasset', abs + '.umap', noObj + '.uasset', noObj + '.umap']) {
-      const s = statOf(c);
+      const s = statIn(c, t);
       if (s) { abs = c; st = s; break; }
     }
   }
   const lexical = () => { const x = path.relative(path.resolve(root.dir), abs); return leaves(x) ? null : x.split(path.sep).join('/'); };
   if (!st) return { t: 'path', abs, rel: lexical(), exists: false, dir: false, hash };
   // where it really is: a link or short name that leads out, or into plumbing, stays text
-  const inRoot = realBelow(root.dir, abs);
+  const inRoot = realBelow(root.dir, abs, false, t);
   return { t: 'path', abs, rel: 'rel' in inRoot ? inRoot.rel : null, exists: true, dir: st.isDirectory(), hash };
 }
 
@@ -770,13 +847,14 @@ const turn = () => new Promise<void>((r) => setImmediate(r));
  * Walk a root: count its folders and files (as its pages count them), keep its first images, and check every link of
  * its notes (.md files), a flag for each that leads to a missing file. Engine projects below the root, other
  * workspaces and TopoTopo checkouts are not entered (as the scan); plumbing is not either. A walk that stops short
- * says where (`cut`).
+ * says where (`cut`). The links are looked up with one TreeReads: what many links share is read once.
  */
 export async function walkTree(root: Root, o: WalkOptions = {}): Promise<Walk> {
   const t0 = performance.now();
   const lim = { ...WALK_LIMITS, ...o.limits };
   const out: Walk = { folders: 0, files: 0, notes: 0, images: [], engines: [], flags: [], cut: [], ms: 0 };
   const top = path.resolve(root.dir);
+  const reads = treeReads();
   const queue: { abs: string; rel: string; depth: number }[] = [{ abs: top, rel: '', depth: 0 }];
   let since = performance.now(), deep = false, many = false, notesCut = false;
   const pause = async () => { if (o.slice !== undefined && performance.now() - since > o.slice) { await turn(); since = performance.now(); } };
@@ -800,7 +878,7 @@ export async function walkTree(root: Root, o: WalkOptions = {}): Promise<Walk> {
       for (const href of noteHrefs(path.join(abs, f), o.links)) {
         // one link that cannot be looked up never hides the others
         let t: LinkTarget;
-        try { t = resolveLink(root, abs, href); } catch { continue; }
+        try { t = resolveLink(root, abs, href, reads); } catch { continue; }
         if (t.t === 'path' && !t.exists) out.flags.push({ kind: 'link', at: rel, note: f, what: `${f} links to ${href}, which is not there`, todo: 'Fix the link, or put the file there' });
       }
       await pause();
@@ -832,10 +910,38 @@ function noteHrefs(file: string, cache?: NoteLinks): string[] {
   return hrefs;
 }
 
+/**
+ * What the audits and the pages read of a graph file: the node types its nodes have, nested graphs included
+ * ("owner/name/output" when it uses a package), its count of nodes and its vars with their descriptions and ranges from
+ * its params (none of them when it cannot be read).
+ */
+export interface GraphSummary { types: string[]; nodes: number; vars: VarRow[] }
+const summaries = new Map<string, { key: string; summary: GraphSummary }>();
+
+/** A graph file's summary, kept while the file is unchanged (its size and time): read once per change. */
+export function graphSummary(file: string): GraphSummary {
+  const st = statOf(file);
+  if (!st) return { types: [], nodes: 0, vars: [] };
+  const key = fileKey(st), have = summaries.get(file);
+  if (have?.key === key) return have.summary;
+  const summary = readGraphSummary(file);
+  if (summaries.size >= MAX_GRAPHS) summaries.clear();
+  summaries.set(file, { key, summary });
+  return summary;
+}
+
 /** The node types a graph file's nodes have, nested graphs included ("owner/name/output" when it uses a package). */
-export function graphTypes(file: string): string[] {
+export const graphTypes = (file: string): string[] => graphSummary(file).types;
+
+function readGraphSummary(file: string): GraphSummary {
   let g: any;
-  try { g = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
+  try { g = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return { types: [], nodes: 0, vars: [] }; }
+  const o = g ?? {}, meta = o.params ?? {};
+  const vars: VarRow[] = Object.entries<unknown>(o.vars ?? {}).map(([k, v]) => ({ name: k, value: v, desc: meta[k]?.desc ?? meta[k]?.label, min: meta[k]?.min, max: meta[k]?.max }));
+  return { types: nodeTypes(g), nodes: Object.keys(o.nodes ?? {}).length, vars };
+}
+
+function nodeTypes(g: any): string[] {
   const out = new Set<string>();
   const walk = (x: any, depth: number) => {
     if (!x || typeof x !== 'object' || depth > 32) return;

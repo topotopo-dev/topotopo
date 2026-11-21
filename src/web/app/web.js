@@ -154,7 +154,8 @@ if (page === 'folder') {
 }
 
 // live updates: the front page reloads when packages come or go; a folder page reloads when its package's bake
-// finishes, and offers to when its folder changed on disk (not while something plays)
+// finishes, and offers to when its folder changed on disk (not while something plays); a page made while its tree's
+// first audit was under way reloads when the audit is done (ev.audited: the tree)
 const playing = () => $$('audio, video').some((m) => !m.paused);
 let banner = null;
 const offerReload = () => {
@@ -170,13 +171,14 @@ es.onmessage = (m) => {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
   if (page === 'front') {
-    if (ev.list) location.reload();
+    if (ev.list || (ev.audited && document.querySelector(`.rcard.checking[data-root="${CSS.escape(ev.audited)}"]`))) location.reload();
     else if (ev.package && !ev.baking) {
       const card = document.querySelector(`.card[data-key="${CSS.escape(ev.package)}"]`);
       const img = card?.querySelector('img');
       if (img) img.src = img.src.replace(/(\?v=[^&]*)?$/, `?v=${ev.version}`);
     }
   } else if (page === 'folder') {
+    if (data.checking && ev.audited === data.root) { if (!playing()) location.reload(); return; }
     if (data.package && ev.package === data.package) {
       if (ev.baking) { const b = document.getElementById('bake'); if (b) b.textContent = 'Baking…'; }
       else if (playing()) offerReload(); else location.reload();

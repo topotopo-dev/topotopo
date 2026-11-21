@@ -38,7 +38,7 @@ import { embedPage, esc, frontPage, importMap, modelPage, shell, count } from '.
 import type { CardData, OutputRow, PackageData, RootCardData, Urls, UserRow } from './pages.ts';
 import { folderPage } from './folder-page.ts';
 import type { FileItem, FolderCard, FolderPageData, NoteBox } from './folder-page.ts';
-import { PathError, byName, engineTitle, exportSources, exportStale, graphTypes, headingPrefix, kindOf, listFolder, noteHtml, noteId, plumbing, realBelow, resolveIn, rootKey, sendFile, walkTree } from './folders.ts';
+import { PathError, byName, engineTitle, exportSources, exportStale, graphSummary, graphTypes, headingPrefix, kindOf, listFolder, noteHtml, noteId, plumbing, realBelow, resolveIn, rootKey, sendFile, walkTree } from './folders.ts';
 import type { Flag, NoteEnv, NoteLinks, Root, Walk, WalkLimits } from './folders.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +50,13 @@ const EDITOR_START_MS = 60_000;
 const MAX_NOTE_BOXES = 24;
 /** TopoTopo's built-in library is read again for its page at most this often */
 const BUILTIN_AUDIT_MS = 60_000;
+/** a page waits this long for the audit of its tree as it is, then shows the one before (or none yet) */
+const AUDIT_WAIT_MS = 250;
+/** A pause that gives the event loop a turn once some milliseconds of work have passed since the last. */
+const slicer = (ms = 8) => {
+  let since = performance.now();
+  return async () => { if (performance.now() - since > ms) { await new Promise<void>((r) => setImmediate(r)); since = performance.now(); } };
+};
 /**
  * What the pages may load: their own files, and in notes the privacy players of YouTube and Vimeo, the only outside
  * content the web app shows (a note's link to an outside image stays a link).
@@ -83,6 +90,8 @@ export interface WebOptions {
   log?: (msg: string) => void;
   /** how far the audits walk (tests make them short) */
   walkLimits?: Partial<WalkLimits>;
+  /** how long a page waits for the audit of its tree as it is before it shows the one before (default 250 ms; tests wait longer) */
+  auditWait?: number;
   /** what ends the process after POST /api/stop has shut the web app down (`topotopo web`); without it the request is refused */
   onStop?: () => void;
 }
@@ -300,17 +309,21 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     if (!bakeOn || isBuiltin(p) || queue.pending(p.dir) || !hasDefault(p)) return;
     try { if (isStale(p) && queue.add(p.dir)) broadcast({ package: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
   };
-  // the audits: each tree's walk and flags, made when a page asks and forgotten when something in that tree changes;
-  // made again soon after (rewarm), so that a page seldom waits for one. A walk gives the event loop a turn every few
-  // milliseconds: pages, files and the event stream keep answering while a large tree is audited
-  type Audit = { walk: Walk; flags: Flag[]; at: number };
+  // the audits: each tree's walk and flags, made when a page asks and made again soon after something in that tree
+  // changes (rewarm). A page waits a moment for the audit of the tree as it is, then shows the one before: a page never
+  // waits for a large tree's audit. An audit gives the event loop a turn every few milliseconds: pages, files and the
+  // event stream keep answering while a large tree is audited
+  /** `gen`: the tree's count of changes when the audit began; `dir`: the tree's folder */
+  type Audit = { walk: Walk; flags: Flag[]; at: number; gen: number; dir: string };
+  /** the newest audit of each tree: kept after a change, until the next one is made */
   const audits = new Map<string, Audit>();
-  /** the audits under way, and each tree's count of changes (an audit begun before a change is not kept) */
+  /** the audits under way, and each tree's count of changes (an audit begun before a change is not of the tree as it is) */
   const auditing = new Map<string, { gen: number; made: Promise<Audit> }>();
   const changes = new Map<string, number>();
+  const auditWait = o.auditWait ?? AUDIT_WAIT_MS;
   /** the links of the notes the walks read, by file: a walk again reads only the notes that changed */
   const noteLinks: NoteLinks = new Map();
-  const forget = (key: string) => { audits.delete(key); changes.set(key, (changes.get(key) ?? 0) + 1); };
+  const forget = (key: string) => { changes.set(key, (changes.get(key) ?? 0) + 1); };
   const forgetAll = () => { for (const r of roots) forget(rootKey(r)); };
   let warm: ReturnType<typeof setTimeout> | undefined, closed = false;
   /** a `topotopo open` came from another version or engine code than this web app's: the pages say so */
@@ -607,23 +620,19 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     if (!Object.values(v.outputs).some(isDefault)) rows.unshift(row(name, v.default, false));
     return rows;
   };
-  /** The exports of a package older than the graph they were made from, by path below exports/. */
-  const staleExports = (p: Package) => {
-    const graphs = graphsOf(p), out = new Set<string>();
-    for (const e of exportSources(p.dir)) { const f = graphs.get(e.made.graph); if (f && exportStale(f, e.made)) out.add(e.rel); }
+  /**
+   * The exports of a package older than the graph they were made from, by path below exports/; the event loop gets a
+   * turn every few milliseconds (a graph read and hashed for the first time can take a while).
+   */
+  const staleExports = async (p: Package) => {
+    const graphs = graphsOf(p), out = new Set<string>(), pause = slicer();
+    for (const e of exportSources(p.dir)) { const f = graphs.get(e.made.graph); if (f && exportStale(f, e.made)) out.add(e.rel); await pause(); }
     return out;
   };
-  const packageData = (p: Package): PackageData => {
+  const packageData = async (p: Package): Promise<PackageData> => {
     const builtin = isBuiltin(p), s = builtin ? null : readBakeState(p.dir);
-    const graphs = [...graphsOf(p)].map(([name, file]) => {
-      let g: any = {};
-      try { g = JSON.parse(fs.readFileSync(file, 'utf8')) ?? {}; } catch { /* unreadable: listed without nodes */ }
-      const meta = g.params ?? {};
-      return {
-        name, nodes: Object.keys(g.nodes ?? {}).length,
-        vars: Object.entries(g.vars ?? {}).map(([k, v]) => ({ name: k, value: v, desc: meta[k]?.desc ?? meta[k]?.label, min: meta[k]?.min, max: meta[k]?.max })),
-      };
-    });
+    // unreadable: listed without nodes
+    const graphs = [...graphsOf(p)].map(([name, file]) => { const s = graphSummary(file); return { name, nodes: s.nodes, vars: s.vars }; });
     const abs = (u: string) => base + u;
     const m = p.manifest, homes = packageHomes(), r = rootOf(p);
     const versions = m.name ? publishedVersions(p.dir, m.name) : [];
@@ -634,7 +643,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     });
     const at = (sub: string, f: string) => urls.raw(r.kind, r.name, `${p.rel}/${sub}/${f}`);
     const model = (sub: string, f: string) => (/\.(glb|gltf)$/i.test(f) ? { model: urls.model(r.kind, r.name, `${p.rel}/${sub}/${f}`) } : {});
-    const stale = builtin ? new Set<string>() : staleExports(p);
+    const stale = builtin ? new Set<string>() : await staleExports(p);
     return {
       ...cardOf(p), builtin, rel: p.rel, place: games.some((g) => g.scan.packages.includes(p)) ? `in the workspace "${p.lib}"` : builtin ? 'in TopoTopo\'s built-in library' : `in library "${p.lib}"`, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
       attachments: builtin ? [] : listFiles(path.join(p.dir, 'attachments')).map((f) => ({ ...f, url: at('attachments', f.path), ...model('attachments', f.path) })),
@@ -667,7 +676,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
    * and has none, or changes no version holds; an export older than its graph; published outputs that no other package
    * of the workspace uses (`used`: node type → the folders of the packages whose graphs use it; null outside a workspace).
    */
-  const packageFlags = (p: Package, used: Map<string, Set<string>> | null): Flag[] => {
+  const packageFlags = async (p: Package, used: Map<string, Set<string>> | null): Promise<Flag[]> => {
     const out: Flag[] = [], at = p.rel, m = p.manifest;
     const s = readBakeState(p.dir);
     if (s && !s.ok && hasDefault(p) && !queue.pending(p.dir)) out.push({ kind: 'bake', at, what: `The preview of ${m.title} did not cook: ${firstLine(s.error) || 'no reason given'}`, todo: 'Open it in the editor to see why; it bakes again when the graph is saved, or press Re-bake' });
@@ -693,27 +702,47 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         }
       }
     }
-    for (const e of staleExports(p)) out.push({ kind: 'export', at, what: `exports/${e} was made from an older version of its graph`, todo: 'Export it again: the Export button in the editor, or ask your agent' });
+    for (const e of await staleExports(p)) out.push({ kind: 'export', at, what: `exports/${e} was made from an older version of its graph`, todo: 'Export it again: the Export button in the editor, or ask your agent' });
     return out;
   };
+  /** Whether an audit is of the tree as it is (made since its last change; TopoTopo's own library: recently). */
+  const fresh = (r: Root, a: Audit) => a.dir === r.dir && a.gen === (changes.get(rootKey(r)) ?? 0) && (!r.builtin || Date.now() - a.at < BUILTIN_AUDIT_MS);
   /**
-   * A tree's audit: its walk (counts, images, broken links in notes) and its packages' flags, kept until it changes;
-   * one at a time per tree (pages that ask meanwhile wait for the same one).
+   * A tree's audit as it is now: its walk (counts, images, broken links in notes) and its packages' flags; one at a time
+   * per tree (pages that ask meanwhile wait for the same one). The newest one made is kept, also one begun before a
+   * change (pages show it until the next is made), and the pages hear of it (an event).
    */
   const auditOf = (r: Root): Promise<Audit> => {
     const key = rootKey(r), have = audits.get(key);
-    if (have && (!r.builtin || Date.now() - have.at < BUILTIN_AUDIT_MS)) return Promise.resolve(have);
+    if (have && fresh(r, have)) return Promise.resolve(have);
     // one under way since the last change serves; one begun before it does not (its walk may have missed the change)
     const gen = changes.get(key) ?? 0, going = auditing.get(key);
     if (going && going.gen === gen) return going.made;
-    const made = auditNow(r).then((a) => { if ((changes.get(key) ?? 0) === gen) audits.set(key, a); return a; })
-      .finally(() => { if (auditing.get(key)?.made === made) auditing.delete(key); });
+    const made = auditNow(r).then((x) => {
+      const a: Audit = { ...x, gen, dir: r.dir }, known = audits.get(key);
+      if (!known || known.dir !== a.dir || known.gen <= gen) { audits.set(key, a); broadcast({ audited: key }); }
+      return a;
+    }).finally(() => { if (auditing.get(key)?.made === made) auditing.delete(key); });
     auditing.set(key, { gen, made });
     return made;
   };
-  const auditNow = async (r: Root): Promise<Audit> => {
+  /**
+   * The audit a page shows: the tree's audit as it is now when it is ready within auditWait, else the newest one made
+   * (the next one goes on meanwhile), else null: none yet (the page says the tree is being checked).
+   */
+  const shownAudit = async (r: Root): Promise<Audit | null> => {
+    const made = auditOf(r);
+    made.catch(() => { /* a page that stopped waiting: the next page asks again */ });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = await Promise.race([made, new Promise<null>((res) => { timer = setTimeout(() => res(null), auditWait); })]).finally(() => clearTimeout(timer));
+    if (waited) return waited;
+    const known = audits.get(rootKey(r));
+    return known && known.dir === r.dir ? known : null;
+  };
+  const auditNow = async (r: Root): Promise<Omit<Audit, 'gen' | 'dir'>> => {
     if (noteLinks.size > 100_000) noteLinks.clear();
     const walk = await walkTree(r, { links: noteLinks, slice: 8, limits: o.walkLimits });
+    const pause = slicer();
     const flags: Flag[] = [];
     const g = r.kind === 'w' ? games.find((x) => x.name === r.name) : undefined;
     if (g?.problem) flags.push({ kind: 'workspace', at: '', what: /\.topows: /.test(g.problem) ? `${path.basename(workspaceFilePath(r.dir))} cannot be read: ${g.problem.replace(/^.*?\.topows: /, '')}` : g.problem, todo: 'Fix the file as this says: until then TopoTopo cannot use the workspace (its folders still show here)' });
@@ -722,9 +751,12 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     let used: Map<string, Set<string>> | null = null;
     if (r.kind === 'w') {
       used = new Map();
-      for (const q of pk) for (const f of graphsOf(q).values()) for (const t of graphTypes(f)) { if (!used.has(t)) used.set(t, new Set()); used.get(t)!.add(folderKey(q.dir)); }
+      for (const q of pk) for (const f of graphsOf(q).values()) {
+        for (const t of graphTypes(f)) { if (!used.has(t)) used.set(t, new Set()); used.get(t)!.add(folderKey(q.dir)); }
+        await pause();
+      }
     }
-    for (const p of pk) { flags.push(...packageFlags(p, used)); await new Promise<void>((res) => setImmediate(res)); }
+    for (const p of pk) { flags.push(...await packageFlags(p, used)); await pause(); }
     walk.flags.forEach((f) => flags.push(f));
     // an engine project below the root is browsable, never audited
     const inEngine = (at: string) => walk.engines.some((e) => at === e || at.startsWith(e + '/'));
@@ -791,8 +823,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   };
   const folderData = async (r: Root, rel: string, abs: string, askedNote: string | null = null): Promise<FolderPageData> => {
     const listing = listFolder(abs, rel, r.dir);
-    const audit = await auditOf(r);
-    const engines = audit.walk.engines;
+    // none yet: the page shows no flags and says the tree is being checked (it reloads when that is done)
+    const audit = await shownAudit(r);
+    const engines = audit?.walk.engines ?? [];
     const engineAt = engines.find((e) => rel === e || rel.startsWith(e + '/'));
     const p = listing.topo.length ? byDir.get(folderKey(abs)) ?? null : null;
     const name = rel ? rel.split('/').pop()! : r.name;
@@ -806,7 +839,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       const why = listing.topo.length > 1 ? `it holds ${listing.topo.join(' and ')}, and a package has one .topo file` : unscanned(r.dir, abs, { engine: r.engine?.file ?? null }) ?? 'its manifest cannot be read, or its id is taken by another folder';
       notice = `This folder holds ${listing.topo.join(', ')} but is none of the packages of ${r.kind === 'w' ? 'the workspace' : 'the library'}: ${why}.`;
     }
-    const flagsHere = engineAt !== undefined ? [] : flagsNow(r, audit);
+    const flagsHere = engineAt !== undefined || !audit ? [] : flagsNow(r, audit);
     // a folder of hundreds of text files shows the first as boxes and lists the rest with the other files: its README
     // and documents before its text files, and always the notes with flags here and the note a link asked for
     const ranked = [...listing.notes].sort(noteOrder);
@@ -857,22 +890,23 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     return {
       root: { kind: r.kind, name: r.name, label: rootLabel(r) }, rel, crumbs, kicker, title: p ? p.manifest.title : name, stats, dir: abs,
       flags: own, below: [...below].sort(([a], [b]) => byName(a, b)).map(([at, fl]) => ({ at, url: urls.folder(r.kind, r.name, at), flags: fl })),
-      ...(!rel ? { uses: workspaceUses(r) } : {}), ...(!rel && audit.walk.cut.length ? { cut: audit.walk.cut } : {}),
-      ...(notice ? { notice } : {}), notes, moreNotes: unboxed.length, folders, files, engineAssets: listing.engineAssets, package: p ? packageData(p) : null,
-      live: { root: rootKey(r), rel, ...(p ? { package: keyOf(p) } : {}), reveal: `${urls.folder(r.kind, r.name, rel)}?reveal` },
+      ...(!rel ? { uses: workspaceUses(r) } : {}), ...(!rel && audit?.walk.cut.length ? { cut: audit.walk.cut } : {}), ...(audit ? {} : { checking: true }),
+      ...(notice ? { notice } : {}), notes, moreNotes: unboxed.length, folders, files, engineAssets: listing.engineAssets, package: p ? await packageData(p) : null,
+      live: { root: rootKey(r), rel, ...(p ? { package: keyOf(p) } : {}), ...(audit ? {} : { checking: true }), reveal: `${urls.folder(r.kind, r.name, rel)}?reveal` },
     };
   };
   // ---------------------------------------------------------------- front page data
   const rootCard = async (r: Root): Promise<RootCardData> => {
-    const a = await auditOf(r), pk = r.builtin ? (scans.find((s) => s.name === BUILTIN_LIBRARY.name)?.packages ?? []) : packagesOf(r);
+    // none yet: the card has no counts and says the tree is being checked (the page reloads when that is done)
+    const a = await shownAudit(r), pk = r.builtin ? (scans.find((s) => s.name === BUILTIN_LIBRARY.name)?.packages ?? []) : packagesOf(r);
     const thumbs: string[] = [];
     for (const p of pk) { if (thumbs.length >= 4) break; const t = previewOf(p); if (t) thumbs.push(t); }
-    for (const i of a.walk.images) { if (thumbs.length >= 4) break; thumbs.push(urls.raw(r.kind, r.name, i)); }
+    for (const i of a?.walk.images ?? []) { if (thumbs.length >= 4) break; thumbs.push(urls.raw(r.kind, r.name, i)); }
     const g = r.kind === 'w' ? games.find((x) => x.name === r.name) : undefined;
     const problem = g?.problem ? 'Its workspace file cannot be read: see its page' : !fs.existsSync(r.dir) ? 'Its folder is not there' : undefined;
     return {
       kind: r.kind, name: r.name, dir: r.dir, url: urls.folder(r.kind, r.name, ''), ...(engineLabel(r) ? { engine: engineLabel(r) } : {}), ...(r.builtin ? { builtin: true } : {}),
-      thumbs, packages: pk.length, folders: a.walk.folders, files: a.walk.files, flags: flagsNow(r, a).length, ...(problem ? { problem } : {}), ...(a.walk.cut.length ? { cut: true } : {}),
+      thumbs, packages: pk.length, folders: a?.walk.folders ?? 0, files: a?.walk.files ?? 0, flags: a ? flagsNow(r, a).length : 0, ...(a ? {} : { checking: true }), ...(problem ? { problem } : {}), ...(a?.walk.cut.length ? { cut: true } : {}),
     };
   };
 

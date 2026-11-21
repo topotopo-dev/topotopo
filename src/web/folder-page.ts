@@ -83,8 +83,10 @@ export interface FolderPageData {
   uses?: PackageData['uses'];
   /** a root whose audit stopped short: where, in words */
   cut?: string[];
-  /** what the page script needs: the root and folder (live updates), the package shown */
-  live: { root: string; rel: string; package?: string; reveal: string };
+  /** its tree's first audit is under way: no flags yet (the page reloads when it is done) */
+  checking?: boolean;
+  /** what the page script needs: the root and folder (live updates), the package shown, whether it waits for the audit */
+  live: { root: string; rel: string; package?: string; checking?: boolean; reveal: string };
 }
 
 /** Each flag's chip: what is wrong, in two words. */
@@ -216,6 +218,7 @@ export function folderPage(d: FolderPageData, u: Urls): string {
   </div>
   ${d.notice ? `<p class="notice">${esc(d.notice)}</p>` : ''}
   ${d.cut?.length ? `<p class="notice cut">Audited in part, a very large tree: ${esc(d.cut.join('; '))}. Flags past that are not counted.</p>` : ''}
+  ${d.checking ? `<p class="notice checking">Checking the ${esc(d.root.kind === 'w' ? 'workspace' : 'library')} for flags (broken links, stale exports, unpublished changes): they show here when that is done.</p>` : ''}
   ${flagsSection(d)}
   ${d.package ? packageBlock(d.package, u) + packageCols(d.package) : ''}
   ${notes}

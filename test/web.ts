@@ -57,7 +57,8 @@ fs.writeFileSync(path.join(crate.dir, 'attachments', 'evil.svg'), '<svg xmlns="h
 fs.writeFileSync(path.join(tmp, 'secret.txt'), 'secret');
 const cfg: WebConfig = { file: path.join(tmp, 'config.json'), libraries: [lib], workspaces: [], web: { port: 0, cors: ['http://board.local:3000'] } };
 
-const g = await startWeb({ config: cfg, port: 0 });
+// the pages here read flags: they wait for each audit however long a busy machine takes
+const g = await startWeb({ config: cfg, port: 0, auditWait: 60_000 });
 let f: WebServer | null = null;
 type Res = { status: number; headers: http.IncomingHttpHeaders; body: Buffer };
 const reqAt = (port: number, p: string, o: { method?: string; headers?: Record<string, string> } = {}) => new Promise<Res>((resolve, reject) => {
@@ -406,7 +407,7 @@ try {
     write(path.join(stable.dir, 'versions', '1.0', 'version.json'), { package: 'probe/stable', version: '1.0', note: 'first', published: '2026-10-01T00:00:00.000Z', big: false, hash: workingHash(stable.dir), outputs: { post }, default: post, topotopo: '0' });
   }
   const fcfg: WebConfig = { file: path.join(tmp, 'config.json'), libraries: [{ name: 'kit', path: kit }], workspaces: [{ name: 'yard', path: yard }, { name: 'old', path: path.join(tmp, 'old') }, { name: 'probe', path: probe }], web: { port: 0, cors: [] } };
-  f = await startWeb({ config: fcfg, port: 0, bake: false });
+  f = await startWeb({ config: fcfg, port: 0, bake: false, auditWait: 60_000 });
   const fr = (p: string, o: { method?: string; headers?: Record<string, string> } = {}) => reqAt(f!.port, p, o);
   const fp = (p: string) => page(p, f!.port);
 
@@ -702,7 +703,7 @@ try {
     check(first === 'turn' && first2 === 'walk', `a server's walk gives the event loop turns (pages keep answering while a large tree is audited): ${first} / ${first2}`);
     const cut = await walkTree(proot, { limits: { notes: 1, depth: 1 } });
     check(cut.cut.some((x) => /the first 1 notes were checked/.test(x)) && cut.cut.some((x) => /more than 1 below the root/.test(x)), `a walk that stops short says where (${cut.cut.join('; ')})`);
-    const h = await startWeb({ config: { file: path.join(tmp, 'config.json'), libraries: [], workspaces: [{ name: 'probe', path: probe }], web: { port: 0, cors: [] } }, port: 0, bake: false, walkLimits: { notes: 1 } });
+    const h = await startWeb({ config: { file: path.join(tmp, 'config.json'), libraries: [], workspaces: [{ name: 'probe', path: probe }], web: { port: 0, cors: [] } }, port: 0, bake: false, walkLimits: { notes: 1 }, auditWait: 60_000 });
     try {
       const home = (await reqAt(h.port, '/')).body.toString();
       const pr = (await reqAt(h.port, '/w/probe/')).body.toString();
