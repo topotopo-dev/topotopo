@@ -10,6 +10,7 @@ import { fmtBytes } from './units.js';
 import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
 import { kindLine, detailLine, kindBadge, kindTagsLine, liveText, layerChoices, shownLayer, detailChoices, PREVIEW_RES } from './output-info.js';
 import { inputImageURL } from './layers.js';
+import { progressLine, waitLine } from './cooking.js';
 
 const url = (route, item, more = {}) => `/api/output/${route}?` + new URLSearchParams({ id: item.id, rev: item.revision, ...more });
 const text = (tag, value, cls) => { const e = document.createElement(tag); e.textContent = value; if (cls) e.className = cls; return e; };
@@ -76,12 +77,16 @@ export function createFolds(store, key = 'outputs.open') {
 export function createOutputPanel(ctx) {
   const host = document.getElementById('outputs'), details = document.getElementById('output-details');
   const image = createImageView(document.getElementById('viewport'), ctx.message);
-  let list = [], formats = [], selected = null, directory = '', sequence = 0, lastList = '', initial = true, refreshing = null, refreshAgain = false, busy = false;
+  let list = [], formats = [], selected = null, directory = '', sequence = 0, lastSnapshot = '', initial = true, refreshing = null, refreshAgain = false, busy = false;
+  let progress = progressLine();
   // a result shown alone that is no card of this tab (a place of an update's before/after, packages.js)
   let other = null;
   const P = { active: null };
   const bar = document.createElement('div'), all = text('button', 'Export all'), barNote = text('span', '', 'dim');
-  bar.className = 'outputs-bar'; bar.append(all, barNote, ctx.thumbSizeButton());
+  const progressRow = text('div', '', 'outputs-progress'), meter = document.createElement('progress'), progressNote = text('span', '');
+  meter.setAttribute('aria-label', 'Output cook progress');
+  progressRow.hidden = true; progressRow.append(meter, progressNote);
+  bar.className = 'outputs-bar'; bar.append(all, barNote, ctx.thumbSizeButton(), progressRow);
   const live = document.createElement('div'), saved = document.createElement('details'), savedRows = document.createElement('div');
   saved.className = 'saved-outputs'; saved.open = ctx.store.get('outputs.savedOpen', false);
   saved.append(text('summary', 'Saved files'), savedRows); saved.ontoggle = () => ctx.store.set('outputs.savedOpen', saved.open);
@@ -208,6 +213,8 @@ export function createOutputPanel(ctx) {
     barNote.textContent = published.length ? `${withTarget.length} of ${published.length} with an export target` : '';
     // the bar holds the thumbnail size while there are cards; Export all while some are published
     all.hidden = barNote.hidden = !published.length; bar.hidden = !list.length; empty.hidden = !!list.length;
+    progressRow.hidden = progress.hidden;
+    if (!progress.hidden) { meter.max = progress.total; meter.value = progress.done; progressNote.textContent = progress.text; }
     for (const [name, entries] of grouped) {
       let group = groups.get(name);
       if (!group) {
@@ -226,7 +233,7 @@ export function createOutputPanel(ctx) {
         used.add(item.id); let card = cards.get(item.id);
         if (!card) {
           const row = document.createElement('div'); row.className = 'output-card'; row.tabIndex = 0; row.setAttribute('role', 'button'); row.dataset.output = item.id;
-          // the picture keeps what it showed while the result cooks again; a mark over it says it is cooking
+          // the picture keeps what it showed while the result cooks again
           const pic = text('span', '', 'output-pic'), thumb = document.createElement('img'); thumb.loading = 'lazy'; thumb.alt = '';
           const icon = text('span', 'FILE', 'file-icon'), cooking = text('span', 'cooking…', 'output-cooking');
           pic.append(thumb, icon, cooking);
@@ -239,7 +246,7 @@ export function createOutputPanel(ctx) {
           target.title = 'change where this output exports'; go.type = target.type = down.type = fold.type = 'button';
           head.append(label, badges);
           actions.append(down, go); body.append(head, info, tags, target, actions, fold); row.append(pic, body);
-          card = { row, thumb, icon, label, badges, info, tags, target, down, go, fold, item }; cards.set(item.id, card);
+          card = { row, thumb, icon, cooking, label, badges, info, tags, target, down, go, fold, item }; cards.set(item.id, card);
           fold.onclick = (e) => { if (e.detail) fold.blur(); folds.set(card.item.id, !folds.isOpen(card.item.id)); render(); };
           down.onclick = () => downloadItem(card.item, down);
           go.onclick = () => exportItem(card.item, go);
@@ -250,24 +257,26 @@ export function createOutputPanel(ctx) {
           thumb.onerror = () => { thumb.hidden = true; icon.hidden = false; };
         }
         card.item = item;
-        const { row, thumb, icon, label, badges, info, tags, target, down, go, fold } = card;
-        const what = kindLine(item), detail = detailLine(item);
+        const { row, thumb, icon, cooking, label, badges, info, tags, target, down, go, fold } = card;
+        const what = kindLine(item), detail = detailLine(item), wait = item.status === 'loading' ? waitLine(item) : '';
+        const waiting = !!wait && item.line > 0;
         row.classList.toggle('selected', item.id === selected); row.classList.toggle('child', !!item.parent);
-        row.classList.toggle('cooking', item.status === 'loading'); row.classList.toggle('stale', !!item.stale && item.status !== 'loading');
+        row.classList.toggle('cooking', !!wait); row.classList.toggle('waiting', waiting); row.classList.toggle('stale', !!item.stale && !wait);
+        cooking.textContent = waiting ? 'waiting' : 'cooking…';
         row.setAttribute('aria-label', `${item.label} — ${what || item.view}`); row.setAttribute('aria-pressed', String(item.id === selected));
-        go.hidden = target.hidden = !item.exportable; go.disabled = busy || item.status === 'loading';
-        go.title = item.target ? `write ${targetFile(item)} again (overwrites it)` : `choose a format and a file in ${directory || 'exports/'}, then export`;
+        go.hidden = target.hidden = !item.exportable; go.disabled = busy || !!wait;
+        go.title = wait || (item.target ? `write ${targetFile(item)} again (overwrites it)` : `choose a format and a file in ${directory || 'exports/'}, then export`);
         go.setAttribute('aria-label', `Export ${item.label}`);
         // Download: every card that has something to give (a published output, a texture, saved files)
         down.hidden = !(item.exportable || (item.generated && item.view === 'image') || item.download);
-        down.disabled = item.exportable && (item.status !== 'ready' || !item.formats?.length);
-        down.title = item.exportable ? (item.formats?.length ? 'choose a format and download the export (its files as one zip when there are several)' : item.status === 'ready' ? 'no format writes this output' : 'cooking…')
-          : item.download ? `download ${item.download.name}` : `download ${item.label}.png`;
+        down.disabled = !!wait || item.exportable && (item.status !== 'ready' || !item.formats?.length);
+        down.title = wait || (item.exportable ? (item.formats?.length ? 'choose a format and download the export (its files as one zip when there are several)' : item.status === 'ready' ? 'no format writes this output' : 'cooking…')
+          : item.download ? `download ${item.download.name}` : `download ${item.label}.png`);
         down.setAttribute('aria-label', `Download ${item.label}`);
         target.textContent = item.exportable ? targetLine(item) : ''; target.classList.toggle('unset', !item.target);
         const f = foldOf.get(item.id); fold.hidden = !f;
         if (f) { fold.textContent = `${f.words} ${f.open ? '▾' : '▸'}`; fold.setAttribute('aria-expanded', String(f.open)); fold.title = `${f.open ? 'hide' : 'show'} its ${f.words.replace(/^\d+ /, '')}`; }
-        // while it cooks the card keeps its picture and its lines (the mark over the picture says it is cooking)
+        // while it cooks the card keeps its picture and details
         const src = thumbURL(item);
         if (item.status !== 'loading' && thumb.dataset.source !== src) { thumb.dataset.source = src; thumb.hidden = !src; icon.hidden = !!src; if (src) thumb.src = src; }
         if (item.status === 'loading' && !thumb.dataset.source) { thumb.hidden = true; icon.hidden = false; }
@@ -288,7 +297,8 @@ export function createOutputPanel(ctx) {
         // an output that is not the kind its graph pins says so (publishing the package would block on it); one
         // whose cook was stopped shows the last finished result
         const warned = !item.error && item.warning;
-        info.textContent = item.error ?? (item.stale ? `out of date: its cook was stopped · ${detail}` : warned ? `not a "${item.pinned}" · ${detail}` : detail || (item.status === 'loading' ? 'cooking…' : ''));
+        const said = item.error ?? (item.stale ? `out of date: its cook was stopped · ${detail}` : warned ? `not a "${item.pinned}" · ${detail}` : detail);
+        info.textContent = wait && said ? `${wait} · ${said}` : wait || said;
         info.className = item.error ? 'err' : warned || item.stale ? 'warn' : 'dim'; info.title = item.error ?? (warned ? `${what}\n${item.warning}` : item.stale ? 'its cook was stopped: the card shows the last finished result; change a value to cook it again' : what);
         const next = previous ? previous.nextSibling : group.rows.firstChild; if (row !== next) group.rows.insertBefore(row, next); previous = row;
       }
@@ -331,8 +341,12 @@ export function createOutputPanel(ctx) {
     if (changedSelection) { image.hide(); ctx.hideModelPreview(); }
     selected = id; P.active = item; ctx.isolated = true; ctx.guides.setMode(null);
     render(); showDetails(item);
-    // it shows once it has cooked (the card says it is cooking)
-    if (item.status === 'loading') { ctx.emit('output'); return; }
+    if (item.status === 'loading') {
+      const line = item.parent ? list.find((v) => v.id === item.parent)?.line : item.line;
+      ctx.message(line > 0 ? `${item.label} is waiting to cook: ${line} before it · it cooks next now` : `${item.label} is cooking`);
+      if (!update) void post('first', { id }).then(({ moved }) => { if (moved) void P.refresh(); }).catch(() => {});
+      ctx.emit('output'); return;
+    }
     if (item.status === 'error') { ctx.message(item.error, 'err'); return; }
     await ctx.outputGraph?.(item);
     if (seq !== sequence) return;
@@ -370,9 +384,9 @@ export function createOutputPanel(ctx) {
       try {
         const response = await fetch('/api/outputs'), j = await response.json(); if (!response.ok) throw new Error(j.error);
         directory = j.directory; formats = j.formats ?? [];
-        const signature = JSON.stringify(j.items);
-        if (signature === lastList) return;
-        lastList = signature; const before = P.active; list = j.items;
+        const signature = JSON.stringify([j.items, j.progress]);
+        if (signature === lastSnapshot) return;
+        lastSnapshot = signature; const before = P.active; list = j.items; progress = progressLine(j.progress);
         const after = input?.id === selected ? input : other?.id === selected ? other : list.find((v) => v.id === selected); render(); ctx.emit('outputs');
         if (after && (after.revision !== before?.revision || after.status !== before?.status)) await P.select(after.id, true);
         else if (after) { P.active = after; showDetails(after); }
@@ -381,7 +395,7 @@ export function createOutputPanel(ctx) {
           // first the graph the page shows (the package's default graph), its default output
           initial = false;
           const top = list.filter((v) => v.generated && !v.parent), main = top.find((v) => v.graph === ctx.graph.name && v.output === null) ?? top.find((v) => v.graph === ctx.graph.name) ?? top[0];
-          if (main) await P.select(main.id);
+          if (main) { ctx.rememberOutputView?.(selected); await P.select(main.id, true); }
         }
       } catch (e) { ctx.message(e.message, 'err'); }
       finally { refreshing = null; if (refreshAgain) { refreshAgain = false; void P.refresh(); } }
