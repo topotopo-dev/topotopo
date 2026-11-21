@@ -432,8 +432,31 @@ function sidecarTargetName(name: string, has: (n: string) => boolean): string | 
   return first(`${b}.png`, `${b}.r16`);
 }
 
-/** The export source a sidecar records (its "format" names a TopoTopo sidecar), or null. */
-export function readSource(file: string): ExportMade | null {
+/** A file's key while it is unchanged: its size and time. */
+const fileKey = (st: fs.Stats) => `${st.size}-${st.mtimeMs}`;
+
+/** Files what is read from them is kept for (past that, they are read again). */
+const MAX_KEPT = 50_000;
+/**
+ * What `read` makes of a file, kept while the file is unchanged (its size and time): the walks and pages read each file
+ * again only when it changed; `none` when it is not there.
+ */
+function keptWhileUnchanged<T>(kept: Map<string, { key: string; value: T }>, file: string, none: T, read: () => T): T {
+  const st = statOf(file);
+  if (!st) return none;
+  const key = fileKey(st), have = kept.get(file);
+  if (have?.key === key) return have.value;
+  const value = read();
+  if (kept.size >= MAX_KEPT) kept.clear();
+  kept.set(file, { key, value });
+  return value;
+}
+
+const sourcesKept = new Map<string, { key: string; value: ExportMade | null }>();
+/** The export source a sidecar records (its "format" names a TopoTopo sidecar), or null; kept while the file is unchanged. */
+export const readSource = (file: string): ExportMade | null => keptWhileUnchanged(sourcesKept, file, null, () => readSourceNow(file));
+
+function readSourceNow(file: string): ExportMade | null {
   try {
     const fd = fs.openSync(file, 'r');
     let head: Buffer;
@@ -449,8 +472,14 @@ const madeOf = (s: any): ExportMade | null =>
     ? { graph: s.graph, output: typeof s.output === 'string' ? s.output : null, node: String(s.node ?? ''), graph_sha256: s.graph_sha256, vars: s.vars && typeof s.vars === 'object' ? s.vars : {} }
     : null;
 
-/** The source a GLB or glTF export carries in asset.extras.source, or null (its JSON is read, never its buffers). */
-export function modelSource(file: string): ExportMade | null {
+const modelSourcesKept = new Map<string, { key: string; value: ExportMade | null }>();
+/**
+ * The source a GLB or glTF export carries in asset.extras.source, or null (its JSON is read, never its buffers); kept
+ * while the file is unchanged.
+ */
+export const modelSource = (file: string): ExportMade | null => keptWhileUnchanged(modelSourcesKept, file, null, () => modelSourceNow(file));
+
+function modelSourceNow(file: string): ExportMade | null {
   try {
     if (/\.gltf$/i.test(file)) return fs.statSync(file).size <= 16 * 2 ** 20 ? madeOf(JSON.parse(fs.readFileSync(file, 'utf8'))?.asset?.extras?.source) : null;
     const fd = fs.openSync(file, 'r');
@@ -465,9 +494,6 @@ export function modelSource(file: string): ExportMade | null {
     } finally { fs.closeSync(fd); }
   } catch { return null; }
 }
-
-/** A file's key while it is unchanged: its size and time. */
-const fileKey = (st: fs.Stats) => `${st.size}-${st.mtimeMs}`;
 
 /**
  * The hashes of a graph file that exports record, kept while the file is unchanged: its canonical hash (null: the file
@@ -920,19 +946,10 @@ function noteHrefs(file: string, cache?: NoteLinks): string[] {
  * its params (none of them when it cannot be read).
  */
 export interface GraphSummary { types: string[]; nodes: number; vars: VarRow[] }
-const summaries = new Map<string, { key: string; summary: GraphSummary }>();
+const summaries = new Map<string, { key: string; value: GraphSummary }>();
 
 /** A graph file's summary, kept while the file is unchanged (its size and time): read once per change. */
-export function graphSummary(file: string): GraphSummary {
-  const st = statOf(file);
-  if (!st) return { types: [], nodes: 0, vars: [] };
-  const key = fileKey(st), have = summaries.get(file);
-  if (have?.key === key) return have.summary;
-  const summary = readGraphSummary(file);
-  if (summaries.size >= MAX_GRAPHS) summaries.clear();
-  summaries.set(file, { key, summary });
-  return summary;
-}
+export const graphSummary = (file: string): GraphSummary => keptWhileUnchanged(summaries, file, { types: [], nodes: 0, vars: [] }, () => readGraphSummary(file));
 
 /** The node types a graph file's nodes have, nested graphs included ("owner/name/output" when it uses a package). */
 export const graphTypes = (file: string): string[] => graphSummary(file).types;

@@ -792,6 +792,28 @@ try {
         `a graph that cannot be read says so for each export, and when it is mended they are as before (${[...broken].join(', ')} / ${[...back].join(', ')})`);
     } finally { (fs as any).readFileSync = readFile; }
 
+    // an export's sidecar is opened once per change, however many walks and checks read it
+    const side = path.join(tmp, 'sidecars');
+    const sidecar = (i: number, graphSha: string) => write(path.join(side, 'exports', `m${i}.glb.source.json`), { format: 'topotopo-export-source', version: 1, files: [`m${i}.glb`], source: { graph: 'main', graph_sha256: graphSha, output: null, node: 'b', frame: 1, fps: 24, vars: {}, seeds: {}, export: { format: 'glb', options: {} }, topotopo: '0' } });
+    write(path.join(side, 'side.topows'), { libraries: [] });
+    for (let i = 0; i < 10; i++) { write(path.join(side, 'exports', `m${i}.glb`), 'x'); sidecar(i, 'a'.repeat(64)); }
+    const opened: string[] = [];
+    const open = fs.openSync;
+    (fs as any).openSync = (...a: Parameters<typeof open>) => { if (/\.source\.json$/.test(String(a[0]))) opened.push(String(a[0])); return (open as any)(...a); };
+    try {
+      const sideRoot = { kind: 'w' as const, name: 'side', dir: side, engine: null };
+      await walkTree(sideRoot);
+      const firstOpens = opened.length;
+      exportSources(side);
+      await walkTree(sideRoot);
+      const again = opened.length - firstOpens;
+      sidecar(3, 'b'.repeat(64));
+      const changed = exportSources(side).find((e) => e.rel === 'm3.glb')?.made.graph_sha256;
+      await walkTree(sideRoot);
+      check(firstOpens === 10 && again === 0 && opened.length === 11 && changed === 'b'.repeat(64),
+        `10 sidecars: each opened once by the first walk, then by no check or walk until one changes, which is read again (${firstOpens}, ${again}, ${opened.length - firstOpens - again})`);
+    } finally { (fs as any).openSync = open; }
+
     // a walk looks up what its notes' links share once: each path's real path is asked once, and the flags are those of
     // the links looked up one by one
     const shared = path.join(tmp, 'shared-links');
