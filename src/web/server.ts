@@ -36,7 +36,7 @@ import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { BakeQueue } from './bake.ts';
 import { embedPage, esc, frontPage, importMap, modelPage, shell, count } from './pages.ts';
 import type { CardData, OutputRow, PackageData, RootCardData, Urls, UserRow } from './pages.ts';
-import { folderPage } from './folder-page.ts';
+import { PICTURE_STRIP, folderPage } from './folder-page.ts';
 import type { FileItem, FolderCard, FolderPageData, NoteBox } from './folder-page.ts';
 import { PathError, byName, engineTitle, exportSources, exportStale, graphTypes, headingPrefix, kindOf, listFolder, noteHtml, noteId, plumbing, realBelow, resolveIn, rootKey, sendFile, walkTree } from './folders.ts';
 import type { Flag, NoteEnv, NoteLinks, Root, Walk, WalkLimits } from './folders.ts';
@@ -848,6 +848,20 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       const made = f.made ? { graph: f.made.graph, output: f.made.output, stale: graphs?.get(f.made.graph) ? exportStale(graphs.get(f.made.graph)!, f.made) : null } : undefined;
       return { name: f.name, url: urls.raw(r.kind, r.name, f.rel), size: f.size, mtime: f.mtime, kind: f.kind, ...(f.kind === 'model' ? { model: urls.model(r.kind, r.name, f.rel) } : {}), ...(made ? { made } : {}) };
     });
+    // a package's folders of images (previews/, renders/…): its page shows their first pictures with its attachments.
+    // Not attachments/ and exports/ (shown above), inputs/ (masks and guides, not pictures to look at) and thumbs/ (the
+    // output thumbnails the outputs table shows). Only the names are read, and the first few files stat'ed: a renders/
+    // folder of thousands of frames costs one listing.
+    const pictures = !p ? [] : listing.folders.filter((f) => f.image && !f.engine && !f.workspace && !f.package && !/^(attachments|exports|inputs|thumbs)$/i.test(f.name)).map((f) => {
+      const dir = path.join(abs, f.name);
+      let names: string[] = [];
+      try { names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && !e.name.startsWith('.') && kindOf(e.name) === 'image').map((e) => e.name).sort(byName); } catch { /* unreadable: no strip */ }
+      const images = names.slice(0, PICTURE_STRIP).flatMap((n) => {
+        const st = fs.statSync(path.join(dir, n), { throwIfNoEntry: false });
+        return st ? [{ name: n, url: urls.raw(r.kind, r.name, `${f.rel}/${n}`), size: st.size, mtime: Math.round(st.mtimeMs), kind: 'image' as const }] : [];
+      });
+      return { name: f.name, url: urls.folder(r.kind, r.name, f.rel), images, count: names.length };
+    }).filter((x) => x.images.length);
     const own = flagsHere.filter((x) => x.at === rel);
     const below = new Map<string, Flag[]>();
     for (const x of flagsHere) if (x.at !== rel && under(rel, x.at)) { if (!below.has(x.at)) below.set(x.at, []); below.get(x.at)!.push(x); }
@@ -859,6 +873,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       flags: own, below: [...below].sort(([a], [b]) => byName(a, b)).map(([at, fl]) => ({ at, url: urls.folder(r.kind, r.name, at), flags: fl })),
       ...(!rel ? { uses: workspaceUses(r) } : {}), ...(!rel && audit.walk.cut.length ? { cut: audit.walk.cut } : {}),
       ...(notice ? { notice } : {}), notes, moreNotes: unboxed.length, folders, files, engineAssets: listing.engineAssets, package: p ? packageData(p) : null,
+      ...(pictures.length ? { pictures } : {}),
       live: { root: rootKey(r), rel, ...(p ? { package: keyOf(p) } : {}), reveal: `${urls.folder(r.kind, r.name, rel)}?reveal` },
     };
   };
