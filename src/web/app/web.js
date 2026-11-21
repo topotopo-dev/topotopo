@@ -159,8 +159,24 @@ function bakeWord(text) {
 }
 
 // live updates: the front page reloads when packages come or go; a folder page reloads when its package's bake
-// finishes, and offers to when its folder changed on disk (not while something plays)
+// finishes, and offers to when its folder changed on disk (not while something plays). A page or card made from no audit
+// of its tree, or from one before a change (data.wait, data-wait: that audit's number), reloads when the tree's audit as
+// it is is made: the event stream first says which trees have theirs (ev.audits), then each one made (ev.audited, ev.n)
 const playing = () => $$('audio, video').some((m) => !m.paused);
+// a reload that waits for what plays to stop
+let reloading = false;
+const reloadWhenStill = () => {
+  if (reloading) return;
+  reloading = true;
+  if (!playing()) return location.reload();
+  const still = () => { if (!playing()) location.reload(); };
+  document.addEventListener('pause', still, true);
+  document.addEventListener('ended', still, true);
+};
+const audited = (root, n) => {
+  if (page === 'front') { if ($$('.rcard[data-wait]').some((c) => c.dataset.root === root && n > Number(c.dataset.wait))) reloadWhenStill(); }
+  else if (page === 'folder' && data.wait !== undefined && root === data.root && n > data.wait) reloadWhenStill();
+};
 let banner = null;
 const offerReload = () => {
   if (banner) return;
@@ -174,6 +190,8 @@ const es = new EventSource('/api/events');
 es.onmessage = (m) => {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
+  if (ev.audits) { for (const [root, n] of Object.entries(ev.audits)) audited(root, n); return; }
+  if (ev.audited) { audited(ev.audited, ev.n); return; }
   if (page === 'front') {
     if (ev.list) location.reload();
     else if (ev.package && !ev.baking) {

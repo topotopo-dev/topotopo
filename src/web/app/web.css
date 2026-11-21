@@ -96,6 +96,7 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 .rcard.ws .stat b { font-size: clamp(18px, 1.6vw, 24px); }
 .stat.fstat b, .stat.fstat span { color: var(--accent); }
 .stat.ok b { color: var(--ok); }
+.stat.checking { justify-content: flex-end; font-style: italic; }
 .rprob { color: var(--err); font-size: 12px; }
 .rcut { color: var(--accent); font-size: 12px; }
 .path { color: var(--faint); font: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }

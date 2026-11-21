@@ -87,8 +87,15 @@ export interface FolderPageData {
   uses?: PackageData['uses'];
   /** a root whose audit stopped short: where, in words */
   cut?: string[];
-  /** what the page script needs: the root and folder (live updates), the package shown */
-  live: { root: string; rel: string; package?: string; reveal: string };
+  /** its tree's first audit is under way: no flags yet (the page reloads when it is done) */
+  checking?: boolean;
+  /** its flags are from an audit made before the tree's last change; the next is under way (the page reloads when it is done) */
+  rechecking?: boolean;
+  /**
+   * what the page script needs: the root and folder (live updates), the package shown, and when the page is made from no
+   * audit or an older one, the number of the one it shows (0: none; it reloads when the tree's next audit is made)
+   */
+  live: { root: string; rel: string; package?: string; wait?: number; reveal: string };
 }
 
 /** Each flag's chip: what is wrong, in two words. */
@@ -112,10 +119,14 @@ function kinds(flags: Flag[]) {
  */
 function flagsSection(d: FolderPageData) {
   const cut = d.cut?.length ? `<p class="notice cut">Audited in part, a very large tree: ${esc(d.cut.join('; '))}. Flags past that are not counted.</p>` : '';
+  // the tree's first audit is under way: no flags yet, and the page says so
+  if (d.checking) return `<p class="notice checking">Checking the ${esc(d.root.kind === 'w' ? 'workspace' : 'library')} for flags (broken links, stale exports, unpublished changes): they show here when that is done.</p>`;
+  // flags from before the tree's last change: a quiet word, the page updates when the next audit is done
+  const again = d.rechecking ? '<p class="dim small rechecking">Re-checking after a change: the page updates when that is done.</p>' : '';
   const below = d.below.reduce((n, b) => n + b.flags.length, 0);
-  if (!d.flags.length && !below) return cut;
+  if (!d.flags.length && !below) return cut + again;
   const where = below ? `${d.flags.length ? `${d.flags.length} here, ${below}` : ''} in ${count(d.below.length, 'folder')} below` : '';
-  return `${cut}<details class="flags" aria-label="Flags">
+  return `${cut}${again}<details class="flags" aria-label="Flags">
   <summary><span class="ftotal">${esc(count(d.flags.length + below, 'flag'))}</span>${where ? ` <span class="fwhere">${esc(where.trim())}</span>` : ''}<span class="fkinds">: ${esc(kinds([...d.flags, ...d.below.flatMap((b) => b.flags)]))}</span></summary>
   <div class="fbody">
   ${d.flags.length ? flagList(d.flags) : ''}
