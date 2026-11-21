@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE, parsePackageName } from './graph/scope.ts';
-import { MANIFEST_EXT, NAME_RE, PACKAGE_FOLDERS, graphFiles, topoFiles } from './session.ts';
+import { MANIFEST_EXT, NAME_RE, PACKAGE_FOLDERS, WORKSPACE_EXT, graphFiles, isWorkspaceFile, topoFiles, topowsFiles } from './session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from './config.ts';
 import { engineFile, readWorkspace, writeWorkspace } from './workspace.ts';
 import { folderKey, forgetScans, unscanned } from './scan.ts';
@@ -475,8 +475,60 @@ export function startPackage(dir: string, o: { title?: string } = {}): PackageSt
 
 // -------------------------------------------------------------------------------- where a package looks for packages
 
-/** The file at a game's root that makes it a workspace: the libraries every package inside it looks in. */
-export const WORKSPACE_FILE = 'topotopo-workspace.json';
+export { WORKSPACE_EXT };
+
+/**
+ * The workspace file of the folder `dir`: <name>.topows at the root of a game, the libraries every package inside it
+ * looks in; its file and the workspace's name, the file's name. null for a folder that holds no .topows file (one that
+ * holds the old file name is none either: oldWorkspace says what to do). Throws for a folder with more than one,
+ * naming them, and for a file name that is no workspace name.
+ */
+export function workspaceAt(dir: string): { file: string; name: string } | null {
+  const found = topowsFiles(dir);
+  if (!found.length) return null;
+  if (found.length > 1) throw new Error(`${dir} holds ${found.slice(0, -1).join(', ')} and ${found.at(-1)}: a workspace has one ${WORKSPACE_EXT} file, whose name is its name`);
+  const name = found[0].slice(0, -WORKSPACE_EXT.length);
+  if (!ID_RE.test(name)) throw new Error(`${path.join(dir, found[0])}: the file's name is the workspace's name: lower-case letters, digits, - and _ ("${slugify(name) || 'workspace'}${WORKSPACE_EXT}")`);
+  return { file: path.join(dir, found[0]), name };
+}
+
+/** The workspace file a folder had before it was <name>.topows. */
+const OLD_WORKSPACE_FILE = 'topotopo-workspace.json';
+
+/**
+ * What a folder that holds the old workspace file and no .topows file is told: the workspace's file is <name>.topows,
+ * named after the name it had (else after the folder). null for any other folder.
+ */
+export function oldWorkspace(dir: string): string | null {
+  const file = path.join(dir, OLD_WORKSPACE_FILE);
+  if (topowsFiles(dir).length || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return null;
+  let raw: any = null;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* not JSON: named after its folder */ }
+  const name = typeof raw?.name === 'string' && ID_RE.test(raw.name) ? raw.name : slugify(path.basename(path.resolve(dir))) || 'workspace';
+  return `${dir} holds ${OLD_WORKSPACE_FILE}, which TopoTopo no longer reads: rename it to ${name}${WORKSPACE_EXT}${raw?.name !== undefined ? ' and, in it, remove "name"' : ''}`;
+}
+
+/**
+ * The file in a folder's listing that makes it a workspace's root: its .topows file, or the old file name (a folder that
+ * holds that one is told what to do where it is read). undefined for a folder that is no workspace's root.
+ */
+export const workspaceFileIn = (files: string[]) => files.find(isWorkspaceFile) ?? files.find((f) => f === OLD_WORKSPACE_FILE);
+
+/** Whether the folder is a workspace's root, or was one under the old file name (a workspace file that cannot be used is said where it is read). */
+export const holdsWorkspace = (dir: string) => topowsFiles(dir).length > 0 || oldWorkspace(dir) !== null;
+
+/** The workspace file of a workspace's folder (workspaceAt); throws for a folder that is no workspace. */
+export function workspaceFile(dir: string): string {
+  const at = workspaceAt(dir);
+  if (!at) throw new Error(oldWorkspace(dir) ?? `${dir} is no workspace: it holds no ${WORKSPACE_EXT} file`);
+  return at.file;
+}
+
+/** The workspace file of a folder as a path to show in a message: never throws (a folder without one: where <name>.topows would be). */
+export function workspaceFilePath(dir: string): string {
+  try { const at = workspaceAt(dir); if (at) return at.file; } catch { /* two files, or a name that is no workspace name: said where it is read */ }
+  return path.join(dir, `${slugify(path.basename(path.resolve(dir))) || 'workspace'}${WORKSPACE_EXT}`);
+}
 /** A library's own file: its name, the same whatever path or registered name reaches the library. */
 export const LIBRARY_FILE = 'library.json';
 
@@ -484,7 +536,7 @@ export interface Located {
   /** the package the folder belongs to (itself or the nearest folder above with a .topo file) */
   package: string | null;
   /**
-   * the workspace around it: the nearest folder at or above the package (or the folder) with topotopo-workspace.json,
+   * the workspace around it: the nearest folder at or above the package (or the folder) with a .topows file,
    * when the workspace's scan reaches the package (src/scan.ts); else null
    */
   workspace: string | null;
@@ -500,7 +552,7 @@ export interface Located {
 export function locate(start: string): Located {
   const inside = packageDirOf(start);
   for (let d = path.resolve(inside ?? start); ; ) {
-    if (fs.existsSync(path.join(d, WORKSPACE_FILE))) {
+    if (holdsWorkspace(d)) {
       let engine: string | null;
       // a workspace file that cannot be read: said where the packages are looked up
       try { engine = engineFile(d, readWorkspace(d)); } catch { return { package: inside, workspace: d }; }
@@ -645,7 +697,7 @@ function libraryAround(start: string, registered: { name: string; path: string }
  */
 export function resolveListed(ws: string, entries: string[]): { libs: LibraryAt[]; problems: string[] } {
   const out = { libs: [] as LibraryAt[], problems: [] as string[] };
-  const file = path.join(ws, WORKSPACE_FILE);
+  const file = workspaceFilePath(ws);
   let cfg: WebConfig | null | undefined;
   const said = (entry: string, why: string) => out.problems.push(`${file} "libraries": "${entry}" ${why}; the other libraries still count`);
   const seen = new Set<string>();
@@ -683,7 +735,7 @@ export function resolveListed(ws: string, entries: string[]): { libs: LibraryAt[
 
 // -------------------------------------------------------------------------------- where a package keeps its copies
 
-/** The folder beside topotopo-workspace.json that holds the workspace's one shared copy of each package version. */
+/** The folder beside the workspace file that holds the workspace's one shared copy of each package version. */
 export const WORKSPACE_PACKAGES = 'topotopo-packages';
 
 /** Where a package keeps the copies of the packages it uses, and the file whose "uses" names the versions in use. */
@@ -700,7 +752,7 @@ export interface CopyStore {
 
 /**
  * Where a package keeps the copies of the packages it uses: in a workspace, the workspace's one shared copy for every package in it
- * (topotopo-packages/ beside topotopo-workspace.json, whose "uses" name one version of each package for the whole
+ * (topotopo-packages/ beside the workspace's .topows file, whose "uses" name one version of each package for the whole
  * game); else, and for a package that publishes versions (its uses are published with it), its own packages/ beside its
  * manifest.
  */
@@ -713,7 +765,7 @@ export function copiesFor(folder: string): CopyStore {
   try { pkg = readManifest(dir).name; } catch { /* not a package, or its manifest is not valid: its own folder */ }
   if (pkg) return own;
   const ws = locate(dir).workspace;
-  return ws ? { root: ws, packages: path.join(ws, WORKSPACE_PACKAGES), usesFile: path.join(ws, WORKSPACE_FILE), workspace: ws } : own;
+  return ws ? { root: ws, packages: path.join(ws, WORKSPACE_PACKAGES), usesFile: workspaceFilePath(ws), workspace: ws } : own;
 }
 
 /** The versions the packages of a store use: the "uses" of the package's manifest, or of the workspace's file. */

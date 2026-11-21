@@ -376,6 +376,8 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
   const timer = setInterval(() => { if (!closed) rescan(); }, 1500); timer.unref();
 
   return {
+    /** Resolves when no export is under way (each writes its files through .part files renamed into place, one export at a time). */
+    async idle(): Promise<void> { for (let q = exportQueue; ; q = exportQueue) { await q; if (q === exportQueue) return; } },
     close() { closed = true; clearInterval(timer); ws.listeners.delete(listener); items.clear(); previewCache.clear(); },
     async handle(req: http.IncomingMessage, res: http.ServerResponse, u: URL, readJSON: (r: http.IncomingMessage) => Promise<any>): Promise<boolean> {
       if (!u.pathname.startsWith('/api/output')) return false;

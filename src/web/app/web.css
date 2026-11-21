@@ -417,3 +417,9 @@ pre.txt { margin: 0.6em 0; white-space: pre-wrap; font: var(--mono); font-size: 
   .ftable .fx, .ftable .fd { display: none; }
   .vouts { padding-left: 16px; }
 }
+
+/* the quiet line at the top of every page when TopoTopo has changed since the web app started */
+.changed { padding: 4px 16px; background: var(--panel); border-bottom: 1px solid var(--line); color: var(--dim); font-size: 12px; text-align: center; }
+.changed button { margin: 0 4px; padding: 1px 8px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; }
+.changed button:hover { border-color: var(--faint); }
+.changed button:disabled { opacity: 0.5; cursor: default; }

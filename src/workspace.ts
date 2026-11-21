@@ -1,10 +1,11 @@
 // A workspace: a folder tree (a game, an archviz job) whose folders holding a .topo file are its packages, found by
-// scanning it (src/scan.ts). topotopo-workspace.json at its root names it, lists the shared libraries its packages use
+// scanning it (src/scan.ts). <name>.topows at its root (one per folder; the file's name is the workspace's name, as a
+// package's .topo file names the package) holds the workspace's settings: it lists the shared libraries its packages use
 // (registered names, or paths to folders outside the workspace), names the engine project the game is built with,
 // whether its own packages are followed live for looking, and the one version of each package the whole workspace
 // uses: its packages share one copy of it, in topotopo-packages/ beside the file (a package that publishes versions keeps
 // its own copies: its uses are published with it).
-//   {"name": "my-game", "libraries": ["props", "../shared/materials"],
+//   my-game.topows: {"libraries": ["props", "../shared/materials"],
 //    "engine": {"type": "godot", "project": "../project.godot"}, "follow": false, "uses": {"topotopo/props": "1.1"}}
 // Paths are written from the workspace's folder. Its preferred place is inside the engine's content folder (the Godot
 // project folder or a folder in it, Unreal's Content/ or a folder in it), so Explorer, the engine and the web app show
@@ -14,14 +15,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ID_RE } from './graph/scope.ts';
 import { BUILTIN_LIBRARY, addWorkspace, loadConfig } from './config.ts';
-import { WORKSPACE_FILE, WORKSPACE_PACKAGES, workspaceFlag, copiesFor, libraryEntry, locate, manifestAt, parseUses, program, resolveListed, slugify, within, workspaceRepoFiles, writeAtomic } from './package.ts';
+import { WORKSPACE_EXT, WORKSPACE_PACKAGES, workspaceFlag, copiesFor, libraryEntry, locate, manifestAt, parseUses, program, oldWorkspace, resolveListed, slugify, within, workspaceAt, workspaceFile, workspaceFilePath, workspaceRepoFiles, writeAtomic } from './package.ts';
 import { gatherCopies } from './packages/registry.ts';
 import { folderKey, forgetScans, scanTree } from './scan.ts';
 import type { Scan } from './scan.ts';
 import { detectEngine, engineTypeOf, godotIgnore, godotPresetReport, unrealSees } from './engines.ts';
 import type { EngineLink } from './engines.ts';
 
-export { WORKSPACE_FILE };
 export type { EngineLink };
 
 export interface WorkspaceManifest {
@@ -40,41 +40,44 @@ export interface WorkspaceManifest {
 export const assetsGone = (what: string) =>
   `${what} is gone: an export stays in its package's exports/ folder; put the workspace inside the engine project (Godot: the project folder or a folder in it; Unreal: Content/ or a folder in it) and the engine imports the exports from there`;
 
-/** topotopo-workspace.json checked and normalised; throws naming the problem. */
-export function parseWorkspace(raw: any, fallbackName: string): WorkspaceManifest {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${WORKSPACE_FILE} must be an object`);
-  const name = raw.name === undefined ? fallbackName : raw.name;
-  if (typeof name !== 'string' || !ID_RE.test(name)) throw new Error(`${WORKSPACE_FILE}: "name" must be lower-case letters, digits, - and _ ("my-game"), got ${JSON.stringify(name)}`);
+/** A workspace file's content checked and normalised (`name`: the file's name, the workspace's name); throws naming the problem. */
+export function parseWorkspace(raw: any, name: string): WorkspaceManifest {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('a workspace file must be an object');
+  if (Object.hasOwn(raw, 'name')) throw new Error('"name": the file\'s name is the workspace\'s name; remove "name"');
   const libraries = raw.libraries ?? [];
-  if (!Array.isArray(libraries) || libraries.some((l: unknown) => typeof l !== 'string')) throw new Error(`${WORKSPACE_FILE}: "libraries" must be a list of registered library names and paths from the workspace to folders outside it ("../shared/props")`);
+  if (!Array.isArray(libraries) || libraries.some((l: unknown) => typeof l !== 'string')) throw new Error(`"libraries" must be a list of registered library names and paths from the workspace to folders outside it ("../shared/props")`);
   let engine: WorkspaceManifest['engine'] = null;
   if (raw.engine === 'none') engine = 'none';
   else if (raw.engine !== undefined && raw.engine !== null) {
     const e = raw.engine;
-    if (e && typeof e === 'object' && e.assets !== undefined) throw new Error(`${WORKSPACE_FILE}: ${assetsGone('"engine.assets"')}; remove "assets"`);
+    if (e && typeof e === 'object' && e.assets !== undefined) throw new Error(`${assetsGone('"engine.assets"')}; remove "assets"`);
     if (!e || typeof e !== 'object' || (e.type !== 'godot' && e.type !== 'unreal') || typeof e.project !== 'string' || !e.project)
-      throw new Error(`${WORKSPACE_FILE}: "engine" must be {"type": "godot" | "unreal", "project": "../project.godot"} or "none"`);
+      throw new Error(`"engine" must be {"type": "godot" | "unreal", "project": "../project.godot"} or "none"`);
     engine = { type: e.type, project: e.project };
   }
-  if (raw.follow !== undefined && typeof raw.follow !== 'boolean') throw new Error(`${WORKSPACE_FILE}: "follow" must be true or false`);
-  const uses = parseUses(raw.uses, WORKSPACE_FILE);
+  if (raw.follow !== undefined && typeof raw.follow !== 'boolean') throw new Error('"follow" must be true or false');
+  const uses = parseUses(raw.uses);
   return { name, libraries: [...new Set(libraries.map((l: string) => l.trim().replace(/\\/g, '/')))], engine, follow: raw.follow === true, uses };
 }
 
-/** The workspace file of `dir` (the workspace's folder), checked. */
+/** The workspace file of `dir` (the workspace's folder), checked; the workspace's name is the file's name. */
 export function readWorkspace(dir: string): WorkspaceManifest {
-  const file = path.join(dir, WORKSPACE_FILE);
+  const file = workspaceFile(dir);
   let raw: any;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
-  try { return parseWorkspace(raw, slugify(path.basename(path.resolve(dir))) || 'workspace'); } catch (e: any) { throw new Error(`${file}: ${e.message.replace(`${WORKSPACE_FILE}: `, '')}`); }
+  try { return parseWorkspace(raw, workspaceAt(dir)!.name); } catch (e: any) { throw new Error(`${file}: ${e.message}`); }
 }
 
+/** Write a workspace's file, <name>.topows (a workspace renamed: its old file goes). */
 export function writeWorkspace(dir: string, m: WorkspaceManifest) {
-  const out: Record<string, unknown> = { name: m.name, libraries: m.libraries };
+  const out: Record<string, unknown> = { libraries: m.libraries };
   if (m.engine) out.engine = m.engine === 'none' ? 'none' : { type: m.engine.type, project: m.engine.project };
   if (m.follow) out.follow = true;
   if (Object.keys(m.uses).length) out.uses = m.uses;
-  writeAtomic(path.join(dir, WORKSPACE_FILE), JSON.stringify(out, null, 2) + '\n');
+  const had = workspaceAt(dir)?.file;
+  const file = path.join(dir, `${m.name}${WORKSPACE_EXT}`);
+  writeAtomic(file, JSON.stringify(out, null, 2) + '\n');
+  if (had && had !== file) fs.rmSync(had, { force: true });
   forgetScans();
 }
 
@@ -133,7 +136,7 @@ export function checkWorkspaceName(name: string, how = '--name <another name>', 
  * (its packages are found by themselves), a package's folder, a folder on another drive, a name not registered.
  */
 export function workspaceLibraryEntry(ws: string, given: string, cwd = process.cwd()): string {
-  const file = path.join(ws, WORKSPACE_FILE);
+  const file = workspaceFilePath(ws);
   const g = given.trim();
   if (g === BUILTIN_LIBRARY.name) throw new Error(`TopoTopo's built-in library is looked in by every package without being listed: ${file} "libraries" lists shared libraries only`);
   const abs = path.resolve(cwd, g);
@@ -180,7 +183,7 @@ function workspaceOf(start: string): string {
 export function workspaceLibrary(op: 'add' | 'remove', given: string, o: { at?: string; cwd?: string } = {}): string {
   const cwd = o.cwd ?? process.cwd();
   const ws = workspaceOf(o.at ?? cwd);
-  const m = readWorkspace(ws), file = path.join(ws, WORKSPACE_FILE);
+  const m = readWorkspace(ws), file = workspaceFilePath(ws);
   // entries are one library when they name one folder: a registered name and a path to its folder alike
   const folderOf = (e: string): string | null => {
     const k = libraryEntry(e);
@@ -211,10 +214,10 @@ export function workspaceLibrariesText(start: string): string {
   if (!ws) {
     let names = 'none is registered';
     try { names = loadConfig().libraries.map((l) => `"${l.name}"`).join(', ') || names; } catch { /* said as none */ }
-    return `${path.resolve(start)} is in no workspace: its package finds packages in every registered library (${names}), then in TopoTopo's built-in library; ${program()} workspace init <folder> makes a workspace, whose ${WORKSPACE_FILE} lists the shared libraries its packages use`;
+    return `${path.resolve(start)} is in no workspace: its package finds packages in every registered library (${names}), then in TopoTopo's built-in library; ${program()} workspace init <folder> makes a workspace, whose ${WORKSPACE_EXT} file lists the shared libraries its packages use`;
   }
   const m = readWorkspace(ws);
-  return `the workspace "${m.name}" lists ${m.libraries.length ? m.libraries.map((e) => `"${e}"`).join(', ') : 'no libraries'} in ${path.join(ws, WORKSPACE_FILE)} "libraries"
+  return `the workspace "${m.name}" lists ${m.libraries.length ? m.libraries.map((e) => `"${e}"`).join(', ') : 'no libraries'} in ${workspaceFilePath(ws)} "libraries"
 ${librariesLine(ws, m)}`;
 }
 
@@ -241,7 +244,7 @@ export interface InitWorkspaceOptions {
 }
 
 /**
- * Make `dir` a workspace: topotopo-workspace.json with its name (the engine project's, else the folder's), the shared
+ * Make `dir` a workspace: <name>.topows with its name (the engine project's, else the folder's), the shared
  * libraries given and the engine project (given, or found: the nearest at or above the folder, else below it; "none"
  * for none, kept). A folder that is a workspace already is changed only where an option says so (its name, engine and
  * follow; --library is for making one). It then says what Unreal will not see, the packages outside the engine
@@ -252,7 +255,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   const abs = path.resolve(dir);
   if (o.assets !== undefined) throw new Error(assetsGone('--assets'));
   if (!fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`${abs} is no folder`);
-  const had = fs.existsSync(path.join(abs, WORKSPACE_FILE));
+  const had = workspaceAt(abs) !== null || oldWorkspace(abs) !== null;
   const m: WorkspaceManifest = had ? readWorkspace(abs) : { name: slugify(path.basename(abs)) || 'workspace', libraries: [], engine: null, follow: false, uses: {} };
   if (had && o.libraries?.length) throw new Error(`--library is for making a workspace, and ${abs} is the workspace "${m.name}" already: ${program()} workspace library add <name or folder>${workspaceFlag(abs, o.cwd)} lists a library for it`);
   if (o.name !== undefined) {
@@ -304,7 +307,7 @@ export function initWorkspace(dir: string, o: InitWorkspaceOptions = {}): { dir:
   const gathered = gatherCopies(abs);
   const libs = resolveListed(abs, m.libraries);
   const text = [
-    `${had ? 'updated' : 'made'} the workspace "${m.name}" (${path.join(abs, WORKSPACE_FILE)})${registered ? `; ${registered}` : ''}`,
+    `${had ? 'updated' : 'made'} the workspace "${m.name}" (${workspaceFilePath(abs)})${registered ? `; ${registered}` : ''}`,
     `engine: ${m.engine === 'none' ? 'none (kept: --engine godot:<path> or unreal:<path> names one)' : m.engine ? `${m.engine.type} ${m.engine.project}${found}` : `none found (--engine godot:<path>|unreal:<path>|none)`}`,
     ...engineLines,
     `shared libraries: ${libs.libs.length ? libs.libs.map((l) => l.entry).join(', ') : `none yet (${program()} workspace library add <name or folder>${workspaceFlag(abs, o.cwd)} lists one)`}; its packages find each other by themselves, then look in these, then in TopoTopo's built-in library`,
@@ -328,7 +331,7 @@ export function workspaceText(start: string): string {
   const libs = resolveListed(ws, m.libraries);
   const scan = scanWorkspace(ws, m);
   const lines = [
-    `workspace "${m.name}" (${path.join(ws, WORKSPACE_FILE)})`,
+    `workspace "${m.name}" (${workspaceFilePath(ws)})`,
     `engine: ${m.engine === 'none' ? 'none' : m.engine ? `${m.engine.type} ${m.engine.project}` : 'none found'}`,
     `shared libraries: ${libs.libs.length ? libs.libs.map((l) => `${l.entry} (${l.root}${l.name !== l.entry ? `, named "${l.name}"` : ''})`).join(', ') : 'none'}; its packages find each other by themselves, then look in these, then in TopoTopo's built-in library`,
     `follow its own packages live: ${m.follow ? 'on (the working folders of its own packages, for looking; exports use the published versions)' : 'off'}`,

@@ -252,6 +252,8 @@ export interface Viewer {
   url: string;
   /** pages open now (event-stream connections) */
   clients: () => number;
+  /** resolves when no export is under way (an editor that is asked to end waits for it) */
+  idle: () => Promise<void>;
   /**
    * Show another package (the MCP workspace tool's open): the routes serve it from now on and every open page
    * reconnects and reloads, so the URL stays the same.
@@ -769,6 +771,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   return {
     url: `http://127.0.0.1:${actual}/`,
     clients: () => clients.size,
+    idle: () => outputs.idle(),
     pokePackages: (pkg, rel) => packages.poke(pkg, rel),
     setSession: (next: Session) => {
       if (next === ws || closed) return;

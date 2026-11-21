@@ -7,7 +7,8 @@
 // /p/<workspace or library>/<id>, which leads to its folder page, with its thumbnail and an iframe embed.
 // It reads files and serves baked previews; it never cooks: bakes run in child processes (BakeQueue) and "Open in
 // editor" starts a `topotopo edit` child. Bound to 127.0.0.1 on a fixed port (stable links); requests must name this
-// server as their Host, and writes must come from its own pages.
+// server as their Host, and writes must come from its own pages. `topotopo open` asks it (POST /api/open) for the page of a
+// package or workspace, which it lists for its run when the config does not (src/host/open.ts).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,18 +19,20 @@ import type { ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
-import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll } from './library.ts';
+import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll, scanLibrary } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { readWorkspace, engineFile } from '../workspace.ts';
-import { WORKSPACE_PACKAGES } from '../package.ts';
+import { WORKSPACE_PACKAGES, locate, manifestAt, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
-import { folderKey, forgetScans, forgetScansOf, scanTree, unscanned } from '../scan.ts';
+import { folderKey, forgetScans, forgetScansOf, scanSingle, scanTree, unscanned } from '../scan.ts';
 import { engineTypeOf } from '../engines.ts';
 import { graphFiles } from '../session.ts';
 import type { BakeState, LibraryScan, Package } from './library.ts';
-import type { WebConfig } from '../config.ts';
+import type { LibraryRef, WebConfig } from '../config.ts';
 import { builtinLibrary, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion, workingHash } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
+import { engineSha256 } from '../host/engine-code.ts';
+import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { BakeQueue } from './bake.ts';
 import { embedPage, esc, frontPage, importMap, modelPage, shell, count } from './pages.ts';
 import type { CardData, OutputRow, PackageData, RootCardData, Urls, UserRow } from './pages.ts';
@@ -59,6 +62,11 @@ const PAGE_CSP = "default-src 'self'; img-src 'self' data:; media-src 'self'; fr
  */
 const viewCsp = (map: string, framed: boolean) => `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-${crypto.createHash('sha256').update(map).digest('base64')}'; img-src 'self' data: blob:; connect-src 'self' data: blob:; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'${framed ? '' : "; frame-ancestors 'self'"}`;
 /** A note named so is shown first among the boxes of its folder. */
+/** What every page says once a `topotopo open` of another version or engine code has asked this web app for a page. */
+const CHANGED_BANNER = '<div class="changed" role="status">TopoTopo has changed since this server started. <button type="button" data-stop-topotopo>Stop TopoTopo</button> then open your file again.</div>';
+/** How long a bake that is running is given to finish when the web app is stopped, and an editor to leave. */
+// an editor is given longer than the export it may be finishing (EDITOR_GRACE_MS in src/packages/commands.ts)
+const BAKE_STOP_MS = 20_000, EDITOR_STOP_MS = 20_000;
 const README = /^(readme|index)\.(md|txt)$/i;
 
 class HttpError extends Error {
@@ -75,6 +83,8 @@ export interface WebOptions {
   log?: (msg: string) => void;
   /** how far the audits walk (tests make them short) */
   walkLimits?: Partial<WalkLimits>;
+  /** what ends the process after POST /api/stop has shut the web app down (`topotopo web`); without it the request is refused */
+  onStop?: () => void;
 }
 
 export interface WebServer {
@@ -98,7 +108,9 @@ export async function runningWeb(port: number): Promise<string | null> {
 /** The engine project a workspace file names, read as written even when the file is otherwise refused. */
 function engineWritten(ws: string): Root['engine'] {
   try {
-    const e = JSON.parse(fs.readFileSync(path.join(ws, 'topotopo-workspace.json'), 'utf8'))?.engine;
+    const file = workspaceAt(ws)?.file;
+    if (!file) return null;
+    const e = JSON.parse(fs.readFileSync(file, 'utf8'))?.engine;
     return e && (e.type === 'godot' || e.type === 'unreal') && typeof e.project === 'string' && e.project ? { type: e.type, file: path.resolve(ws, e.project) } : null;
   } catch { return null; }
 }
@@ -109,6 +121,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const cfg = o.config ?? loadConfig();
   const log = o.log ?? (() => {});
   const bakeOn = o.bake ?? true;
+  // what /api/health says of this server, hashed now so that a health check never waits for it (topotopo open compares them)
+  const engine = engineSha256();
   let base = '';
 
   // ---------------------------------------------------------------- workspaces and libraries
@@ -138,10 +152,41 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       packages: list.map((b) => ({ lib: BUILTIN_LIBRARY.name, id: b.id, dir: b.dir, rel: b.id, collection: '', manifest: b.manifest, updated: Date.parse(b.versions.at(-1)?.published ?? '') || 0 })),
     };
   };
-  /** the registered workspaces: their file (or what is wrong with it), engine project and scan */
-  let games: { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; engine: Root['engine']; scan: LibraryScan }[] = [];
+  /** a workspace: its file (or what is wrong with it), engine project and scan */
+  type Game = { name: string; dir: string; m: WorkspaceManifest | null; problem?: string; engine: Root['engine']; scan: LibraryScan };
+  /** the registered workspaces, and those `topotopo open` listed for this run */
+  let games: Game[] = [];
   /** every registered workspace and library as a tree of pages, TopoTopo's built-in library last */
   let roots: Root[] = [];
+  /** the names this run gave workspaces whose own name another workspace or library had (by folder) */
+  const runNames = new Map<string, string>();
+  /** the packages `topotopo open` listed one by one for this run: each a root of itself, nothing around it read */
+  const singles: { name: string; dir: string }[] = [];
+  /** the workspaces `topotopo open` added to the config's list in memory for this run */
+  const runListed = new Set<LibraryRef>();
+  /** the folders being watched (a root that is gone is let go) */
+  const watched = new Map<string, fs.FSWatcher>();
+  const stopWatching = (dir: string) => { watched.get(dir)?.close(); watched.delete(dir); };
+  const isDir = (d: string) => !!fs.statSync(d, { throwIfNoEntry: false })?.isDirectory();
+  /** a root `topotopo open` listed whose folder has gone (moved, renamed, deleted) is dropped from memory, quietly */
+  const dropGone = () => {
+    for (let i = singles.length - 1; i >= 0; i--) {
+      if (isDir(singles[i].dir)) continue;
+      log(`${singles[i].dir} is gone: no longer listed`);
+      stopWatching(singles[i].dir);
+      singles.splice(i, 1);
+    }
+    for (const w of [...runListed]) {
+      if (isDir(w.path)) continue;
+      log(`${w.path} is gone: no longer listed`);
+      stopWatching(path.resolve(w.path));
+      cfg.workspaces.splice(cfg.workspaces.indexOf(w), 1);
+      runListed.delete(w);
+      runNames.delete(folderKey(w.path));
+    }
+  };
+  /** what no timer, watcher or rescan lets take the process down: one line in the log */
+  const safe = (what: string, f: () => void) => { try { f(); } catch (e: any) { try { log(`${what}: ${e?.message ?? e}`); } catch { /* no log */ } } };
   const indexPackages = () => {
     packages.clear();
     byDir.clear();
@@ -151,38 +196,53 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (!byDir.has(folderKey(p.dir))) byDir.set(folderKey(p.dir), p);
     }
   };
-  /**
-   * Read the packages of the workspaces and libraries again: those of `roots` (their folders), else all of them. The
-   * audits stay: what changed decides which go (forget()).
-   */
-  const rescanPackages = (changed?: string[]) => {
-    if (changed) for (const d of changed) forgetScansOf(d);
-    else forgetScans();
-    // the libraries (but those inside a registered workspace) and the workspaces; TopoTopo's built-in library last,
-    // read again each time: a built-in package published while the web app runs shows
-    const all = scanAll(cfg);
-    games = [];
-    for (const [i, s] of all.entries()) {
-      if (!s.workspace) continue;
-      try {
-        const m = readWorkspace(s.root), e = engineFile(s.root, m);
-        games.push({ name: m.name, dir: s.root, m, engine: e && m.engine && m.engine !== 'none' ? { type: m.engine.type, file: e } : null, scan: s });
-      } catch (err: any) {
-        // the workspace file cannot be read: its folder pages still show its folders and packages (scanned with the
-        // engine project the file names), and the problem as a flag on it
-        const engine = engineWritten(s.root);
-        const t = scanTree(s.name, s.root, { engine: engine?.file ?? null });
-        all[i] = { ...t, problems: t.problems, workspace: true };
-        games.push({ name: s.name, dir: s.root, m: null, problem: err.message, engine, scan: all[i] });
-      }
+  /** A workspace's scan as a game: its file read, or when it cannot be, the problem and the folders still scanned. */
+  const gameFor = (scanned: LibraryScan): { game: Game; scan: LibraryScan } => {
+    // a workspace listed for this run under another name than its file's: its packages are that name's
+    const alias = runNames.get(folderKey(scanned.root));
+    const s: LibraryScan = alias && scanned.name !== alias
+      ? { ...scanned, name: alias, packages: scanned.packages.map((p) => Object.create(Object.getPrototypeOf(p), { ...Object.getOwnPropertyDescriptors(p), lib: { value: alias, enumerable: true, writable: true, configurable: true } })) }
+      : scanned;
+    try {
+      const m = readWorkspace(s.root), e = engineFile(s.root, m);
+      return { game: { name: runNames.get(folderKey(s.root)) ?? m.name, dir: s.root, m, engine: e && m.engine && m.engine !== 'none' ? { type: m.engine.type, file: e } : null, scan: s }, scan: s };
+    } catch (err: any) {
+      // the workspace file cannot be read: its folder pages still show its folders and packages (scanned with the
+      // engine project the file names), and the problem as a flag on it
+      const engine = engineWritten(s.root);
+      const t = scanTree(s.name, s.root, { engine: engine?.file ?? null });
+      const scan: LibraryScan = { ...t, problems: t.problems, workspace: true };
+      return { game: { name: s.name, dir: s.root, m: null, problem: err.message, engine, scan }, scan };
     }
-    scans = [...all, scanBuiltin()];
-    indexPackages();
+  };
+  const buildRoots = () => {
     roots = [
       ...games.map((g): Root => ({ kind: 'w', name: g.name, dir: g.dir, engine: g.engine })),
       ...scans.filter((s) => !s.workspace && s.name !== BUILTIN_LIBRARY.name).map((s): Root => ({ kind: 'l', name: s.name, dir: s.root, engine: null })),
       { kind: 'l', name: BUILTIN_LIBRARY.name, dir: BUILTIN_LIBRARY.path, engine: null, builtin: true },
     ];
+  };
+  /**
+   * Read the packages of the workspaces and libraries again: those of `roots` (their folders), else all of them. The
+   * audits stay: what changed decides which go (forget()).
+   */
+  const rescanPackages = (changed?: string[]) => {
+    dropGone();
+    if (changed) for (const d of changed) forgetScansOf(d);
+    else forgetScans();
+    // the libraries (but those inside a registered workspace) and the workspaces, then the packages opened one by one;
+    // TopoTopo's built-in library last, read again each time: a built-in package published while the web app runs shows
+    const all: LibraryScan[] = [...scanAll(cfg), ...singles.map((x) => scanSingle(x.name, x.dir))];
+    games = [];
+    for (const [i, s] of all.entries()) {
+      if (!s.workspace) continue;
+      const g = gameFor(s);
+      games.push(g.game);
+      all[i] = g.scan;
+    }
+    scans = [...all, scanBuiltin()];
+    indexPackages();
+    buildRoots();
   };
   /** The libraries' scans: a workspace's packages are its own. */
   const libraryScans = () => scans.filter((s) => !s.workspace);
@@ -253,6 +313,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const forget = (key: string) => { audits.delete(key); changes.set(key, (changes.get(key) ?? 0) + 1); };
   const forgetAll = () => { for (const r of roots) forget(rootKey(r)); };
   let warm: ReturnType<typeof setTimeout> | undefined, closed = false;
+  /** a `topotopo open` came from another version or engine code than this web app's: the pages say so */
+  let changedSince = false;
+  /** a request to stop has been accepted: from then on this is no web app to open files in (health says so, /api/open refuses) */
+  let stopRequested = false;
   const rewarm = () => {
     clearTimeout(warm);
     warm = setTimeout(async () => { for (const r of roots) { if (closed) return; try { await auditOf(r); } catch { /* its page says it */ } } }, 200);
@@ -272,9 +336,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   const onChange = () => {
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => {
+    changeTimer = setTimeout(() => safe('rescan after a change', () => {
       const before = [...packages.keys()].join('\n');
       rescanPackages([...changedRoots]);
+      watchRoots(); // a folder that was gone and is back is watched again
       for (const k of staleAudits) forget(k);
       for (const k of touched) { const p = packages.get(k); if (p) bakeIfStale(p); }
       for (const p of packages.values()) if (!readBakeState(p.dir)) bakeIfStale(p);
@@ -284,15 +349,26 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       changedFolders.clear();
       changedRoots.clear();
       staleAudits.clear();
-    }, 500);
+    }), 500);
   };
   const watchers: fs.FSWatcher[] = [];
-  for (const s of scans) {
-    if (s.name === BUILTIN_LIBRARY.name) continue; // nothing of it is baked here: read again at each rescan
+  /** Watch the folders of the scans not watched yet (those at the start, and those a request opened later). */
+  const watchRoots = () => { for (const s of scans) {
+    if (s.name === BUILTIN_LIBRARY.name || watched.has(s.root)) continue; // nothing of it is baked here: read again at each rescan
     try {
-      const w = fs.watch(s.root, { recursive: true }, (_ev, f) => {
+      const w = fs.watch(s.root, { recursive: true }, (_ev, f) => safe('watch', () => {
+        if (watched.get(s.root) !== w) return; // let go already: the events still queued are of a folder that is gone
         const rel = f ? String(f).split(path.sep).join('/') : '';
-        if (path.isAbsolute(rel)) return; // the root itself went away: the periodic rescan notices
+        if (path.isAbsolute(rel)) {
+          // the root itself went away (deleted, renamed or moved; Windows then sends its events by the thousand, with the
+          // root's full path): let the watch go and read the packages again now, not at the next periodic rescan
+          if (isDir(s.root)) return;
+          stopWatching(s.root);
+          changedRoots.add(s.root);
+          for (const r of roots) if (r.dir === s.root) staleAudits.add(rootKey(r));
+          onChange();
+          return;
+        }
         const parts = rel.split('/');
         if (parts.some((x) => x.startsWith('.') || x === 'node_modules')) return; // .web/, .cache/, .part files
         const p = scans.find((x) => x.root === s.root)?.packages.find((x) => rel === x.rel || rel.startsWith(x.rel + '/'));
@@ -306,21 +382,100 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           if (p || !(engine || parts.slice(0, -1).some((x) => plumbing(x, [])))) staleAudits.add(rootKey(r));
         }
         onChange();
-      });
-      w.on('error', () => w.close());
+      }));
+      w.on('error', () => { w.close(); if (watched.get(s.root) === w) watched.delete(s.root); });
       w.unref();
+      watched.set(s.root, w);
       watchers.push(w);
     } catch { /* no folder (a problem on the page) or no recursive watch: the periodic rescan covers it */ }
-  }
-  const periodic = setInterval(() => { rescan(); for (const p of packages.values()) bakeIfStale(p); rewarm(); }, RESCAN_MS);
+  } };
+  watchRoots();
+  const periodic = setInterval(() => safe('periodic rescan', () => { rescan(); for (const p of packages.values()) bakeIfStale(p); rewarm(); }), RESCAN_MS);
   periodic.unref();
+
+  // ---------------------------------------------------------------- pages for what topotopo open asks for
+  /** The name a workspace, library or package opened by itself takes: the wanted one, else it with -2, -3 … (one set of names). */
+  const freeName = (wanted: string): string => {
+    // every name in use: the config's, those of this run, the pages' (a workspace's own name is its file's) and the scans'
+    const taken = (n: string) => [...cfg.workspaces, ...cfg.libraries, ...singles, ...roots, ...games, ...scans, BUILTIN_LIBRARY].some((x) => x.name === n);
+    let name = wanted;
+    for (let n = 2; taken(name); n++) name = `${wanted}-${n}`;
+    return name;
+  };
+  /**
+   * Add one scan (a root listed for this run) and nothing else is read again: the pages know it at once, it is watched,
+   * and its packages are queued for a bake (the bake itself runs in a child process, after the answer).
+   */
+  const addScan = (s: LibraryScan) => {
+    let scan = s;
+    if (s.workspace) { const g = gameFor(s); games.push(g.game); scan = g.scan; }
+    // the libraries inside a workspace are the workspace's own
+    scans = [...scans.filter((x) => x.name === BUILTIN_LIBRARY.name ? false : !(s.workspace && !x.workspace && within(x.root, s.root))), scan, scans.find((x) => x.name === BUILTIN_LIBRARY.name) ?? scanBuiltin()];
+    indexPackages();
+    buildRoots();
+    watchRoots();
+    for (const p of scan.packages) bakeIfStale(p);
+    broadcast({ list: true });
+    rewarm();
+  };
+  /** List a workspace for this run (the config is not written): under its file's name, or another when that is taken. */
+  const addWorkspaceRoot = (dir: string, fileName: string): string => {
+    const name = freeName(fileName);
+    if (name !== fileName) runNames.set(folderKey(dir), name);
+    const ref = { name, path: dir };
+    cfg.workspaces.push(ref);
+    runListed.add(ref);
+    forgetScansOf(dir);
+    addScan(scanLibrary({ name, path: dir, workspace: true }));
+    return name;
+  };
+  /** List one package for this run as itself: nothing outside its folder is scanned, watched, served or baked. */
+  const addSingle = (dir: string, id: string) => {
+    const name = freeName(id);
+    singles.push({ name, dir });
+    addScan(scanSingle(name, dir));
+  };
+  /** The page of a package folder or a workspace folder, listed first when it is not. */
+  const openPage = (kind: 'package' | 'workspace', dir: string): string => {
+    if (kind === 'workspace') {
+      const file = workspaceAt(dir);
+      if (!file) throw new HttpError(400, `${dir} holds no .topows file`);
+      const have = games.find((g) => folderKey(g.dir) === folderKey(dir));
+      return urls.folder('w', have ? have.name : addWorkspaceRoot(dir, file.name), '');
+    }
+    let p = byDir.get(folderKey(dir));
+    if (!p) {
+      const at = locate(dir), ws = at.workspace ?? at.outside?.workspace;
+      const wsName = ws ? workspaceAt(ws)?.name ?? (slugify(path.basename(ws)) || 'workspace') : '';
+      const rel = ws ? path.relative(ws, dir).split(path.sep) : [];
+      // a copy the workspace uses (its topotopo-packages folder) has no page: the package it is a copy of has
+      if (ws && rel[0] === WORKSPACE_PACKAGES)
+        throw new HttpError(409, `${dir} is a copy of ${rel[1] && rel[2] ? `${rel[1]}/${rel[2]}` : 'a package'} that the workspace "${wsName}" uses (its ${WORKSPACE_PACKAGES} folder), which has no page: open the package itself, in the folder of the workspace or library that holds it`);
+      // made a moment ago, before the watch noticed: the roots around it (not all of them) are read again
+      const near = scans.filter((x) => x.name !== BUILTIN_LIBRARY.name && within(dir, x.root)).map((x) => x.root);
+      if (near.length) { rescanPackages(near); p = byDir.get(folderKey(dir)); }
+      if (!p && at.workspace) {
+        // the workspace the person works in is listed, as the workspace
+        if (!games.some((g) => folderKey(g.dir) === folderKey(at.workspace!))) addWorkspaceRoot(at.workspace, wsName);
+        p = byDir.get(folderKey(dir));
+      } else if (!p) {
+        const m = manifestAt(dir);
+        if (!m) throw new HttpError(400, `${dir} holds no .topo file`);
+        addSingle(dir, m.id);
+        p = byDir.get(folderKey(dir));
+      }
+    }
+    if (!p) throw new HttpError(409, `${dir} is a package the web app cannot list (another package there uses its id, or its manifest cannot be read): see its folder page`);
+    return pageOf(p);
+  };
 
   // ---------------------------------------------------------------- editors
   const editors = new Map<string, { child: ChildProcess; url: Promise<string> }>();
   const editorFor = (p: Package) => {
     const have = editors.get(p.dir);
     if (have && have.child.exitCode === null) return have.url;
-    const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    child.stdin!.on('error', () => {});
     const url = new Promise<string>((resolve, reject) => {
       let out = '', err = '';
       const t = setTimeout(() => { child.kill(); reject(new Error('the editor did not start within a minute')); }, EDITOR_START_MS);
@@ -336,6 +491,30 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     editors.set(p.dir, { child, url });
     return url;
   };
+
+  /**
+   * Stop the way a person would: no timer or watch runs on, a bake that is running gets time to finish (nothing queued
+   * starts), each editor is asked to end (its stdin is closed: its viewer closes and it leaves; only one that does not is
+   * ended), the pages' event streams close and the server stops listening.
+   */
+  let stopping: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => stopping ??= (async () => {
+    clearInterval(periodic); clearTimeout(changeTimer); clearTimeout(warm);
+    closed = true;
+    for (const w of watchers) w.close();
+    await Promise.all([
+      queue.stop(BAKE_STOP_MS),
+      ...[...editors.values()].map(({ child }) => new Promise<void>((resolve) => {
+        if (child.exitCode !== null) return resolve();
+        const t = setTimeout(() => { child.kill(); resolve(); }, EDITOR_STOP_MS);
+        child.once('exit', () => { clearTimeout(t); resolve(); });
+        child.stdin?.end();
+      })),
+    ]);
+    for (const c of clients) c.end();
+    server.close();
+    server.closeAllConnections?.();
+  })();
 
   const reveal = (dir: string) => {
     const [cmd, args] = process.platform === 'win32' ? ['explorer.exe', [dir]] : process.platform === 'darwin' ? ['open', [dir]] : ['xdg-open', [dir]];
@@ -537,7 +716,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const walk = await walkTree(r, { links: noteLinks, slice: 8, limits: o.walkLimits });
     const flags: Flag[] = [];
     const g = r.kind === 'w' ? games.find((x) => x.name === r.name) : undefined;
-    if (g?.problem) flags.push({ kind: 'workspace', at: '', what: `topotopo-workspace.json cannot be read: ${g.problem.replace(/^.*?topotopo-workspace\.json: /, '')}`, todo: 'Fix the file as this says: until then TopoTopo cannot use the workspace (its folders still show here)' });
+    if (g?.problem) flags.push({ kind: 'workspace', at: '', what: /\.topows: /.test(g.problem) ? `${path.basename(workspaceFilePath(r.dir))} cannot be read: ${g.problem.replace(/^.*?\.topows: /, '')}` : g.problem, todo: 'Fix the file as this says: until then TopoTopo cannot use the workspace (its folders still show here)' });
     for (const prob of scans.find((s) => s.root === r.dir && s.name === r.name)?.problems ?? []) if (!g?.problem || !prob.includes(g.problem)) flags.push({ kind: 'workspace', at: '', what: prob, todo: 'Fix it in the folder it names: until then that package is not found' });
     const pk = packagesOf(r);
     let used: Map<string, Set<string>> | null = null;
@@ -646,7 +825,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (f.engine) return { name: f.name, url, kind: 'engine', title: f.engine.title, sub: `${f.engine.type === 'godot' ? 'Godot' : 'Unreal'} project`, ...(f.image ? { thumb: urls.raw(r.kind, r.name, f.image) } : {}), flags: 0, packages: 0 };
       if (f.workspace) {
         let wsName = f.name;
-        try { wsName = JSON.parse(fs.readFileSync(path.join(fabs, 'topotopo-workspace.json'), 'utf8'))?.name ?? f.name; } catch { /* its folder's name */ }
+        try { wsName = workspaceAt(fabs)?.name ?? f.name; } catch { /* its folder's name */ }
         const reg = games.find((g) => folderKey(g.dir) === folderKey(fabs));
         return { name: f.name, url: reg ? urls.folder('w', reg.name, '') : url, kind: 'workspace', title: String(wsName), sub: reg ? 'another workspace' : 'another workspace, not registered', flags: 0, packages: 0 };
       }
@@ -741,7 +920,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     // pages may only be framed by the web app itself; the embed page is made to be framed by a board; the 3D views
     // load three.js through an inline import map (allowed by its hash) and nothing from other sites
     const map = importMap(urls);
-    const html = (body: string, framable: boolean | 'view' = false, code = 200) => send(code, body, MIME['.html'], { 'content-security-policy': framable === true ? viewCsp(map, true) : framable === 'view' ? viewCsp(map, false) : PAGE_CSP });
+    const html = (page: string, framable: boolean | 'view' = false, code = 200) => send(code, changedSince && framable !== true ? page.replace(/(<body[^>]*>)/, `$1${CHANGED_BANNER}`) : page, MIME['.html'], { 'content-security-policy': framable === true ? viewCsp(map, true) : framable === 'view' ? viewCsp(map, false) : PAGE_CSP });
     const json = (code: number, body: unknown, extra: Record<string, string> = {}) => send(code, JSON.stringify(body), MIME['.json'], extra);
     const redirect = (code: number, location: string) => { res.writeHead(code, { location, 'cache-control': 'no-store' }); res.end(); };
     try {
@@ -770,7 +949,35 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         const p = readStatic(threeDir, seg.slice(2).join('/'));
         return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream', { 'cache-control': 'max-age=3600' }) : send(404, 'not found');
       }
-      if (u.pathname === '/api/health') return json(200, { web: true, libraries: scans.length, packages: packages.size, baking: queue.size });
+      // a web app that is stopping (its bakes finish first, which can take seconds) is not one to open a file in: it says so
+      // with its pid, and `topotopo open` waits for it to leave and starts another
+      if (u.pathname === '/api/health' && stopRequested) return json(503, { web: true, stopping: true, pid: process.pid });
+      if (u.pathname === '/api/health') return json(200, { web: true, pid: process.pid, version: TOPOTOPO_VERSION, engine, open: true, libraries: scans.length, packages: packages.size, baking: queue.size });
+      if (u.pathname === '/api/open' || u.pathname === '/api/stop') {
+        // what only the program that starts the web app (and the page's own button) asks: a POST with a header that a page
+        // of another origin cannot send without a preflight, which is refused (the Host and Origin checks above apply too)
+        if (req.method !== 'POST') throw new HttpError(405, 'POST');
+        if (req.headers['x-topotopo-open'] !== '1') throw new HttpError(403, 'only topotopo open and this page may ask for this');
+        let text = '';
+        for await (const c of req) { text += c; if (text.length > 100_000) throw new HttpError(413, 'too long'); }
+        if (u.pathname === '/api/stop') {
+          // a request to stop: the answer first, then a stop the way a person would (bakes finish, editors end), then the process
+          if (!o.onStop) throw new HttpError(501, 'this web app was not started by topotopo web: it cannot be stopped from a request');
+          stopRequested = true;
+          json(200, { ok: true });
+          setTimeout(() => { shutdown().then(() => o.onStop!(), (e) => { log(`stop: ${e?.message ?? e}`); o.onStop!(); }); }, 50);
+          return;
+        }
+        if (stopRequested) throw new HttpError(503, 'this web app is stopping: open the file again in a moment');
+        // `topotopo open`: the page of a package or workspace, which the web app lists for this run when the config does not
+        // (nothing is written to the config). The program tells its version and engine code: when they are not this web
+        // app's, every page says so (changedSince)
+        let ask: any;
+        try { ask = JSON.parse(text); } catch { throw new HttpError(400, 'a JSON body {"kind", "dir"} is expected'); }
+        if ((ask?.kind !== 'package' && ask?.kind !== 'workspace') || typeof ask.dir !== 'string') throw new HttpError(400, 'a JSON body {"kind": "package" | "workspace", "dir": folder} is expected');
+        if ((typeof ask.version === 'string' && ask.version !== TOPOTOPO_VERSION) || (typeof ask.engine === 'string' && ask.engine !== engine)) changedSince = true;
+        return json(200, { url: openPage(ask.kind, path.resolve(ask.dir)) });
+      }
       if (u.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
         res.write(': hello\n\n');

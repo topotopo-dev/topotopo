@@ -85,6 +85,23 @@ npx topotopo refresh graph.json generated.json             # a regenerated graph
 npx topotopo mcp --package /absolute/path/to/package    # the MCP server over stdio
 ```
 
+**Open by double-click (Windows).** Install TopoTopo (`npm install -g topotopo`), then link the files once:
+
+```bash
+topotopo setup             # .topo and .topows get their icons and open in TopoTopo; no administrator rights
+topotopo open --stop       # when you want the background web app to end (it starts by itself and is reused)
+topotopo setup --remove    # puts the registry and the Start menu back as they were
+```
+
+After `setup`, double-clicking a package (`.topo`) or a workspace (`.topows`) opens it in your browser, through a
+local web app that starts unseen the first time and is reused after that. Right-clicking a folder offers **Open in
+TopoTopo** (on Windows 11 under *Show more options*), and **TopoTopo** is in the Start menu (the home page). Everything
+`setup` writes belongs to your user: your registry's `Software\Classes` and your Start menu. It records what it
+replaced in `~/.topotopo/setup.json` and `setup --remove` restores from that record; running `setup` twice changes
+nothing. Run it again after moving TopoTopo or changing the Node.js it runs with. If Windows already holds your own
+choice of program for `.topo` or `.topows` (an earlier "Always use this app"), `setup` says so and does not touch it:
+right-click a file, choose *Open with*, then TopoTopo, then *Always*. File links exist for Windows only so far.
+
 The current release is v0.4 ([release notes](docs/release/v0.4-release-notes.md)); earlier ones:
 [v0.3](docs/release/v0.3-release-notes.md), [v0.2](docs/release/v0.2-release-notes.md), the first tagged release. To try unreleased changes, build the tarball from a clone: `npm pack`, then
 `npm install -g ./topotopo-<version>.tgz` (or, without `-g`, into a folder of your own).
@@ -512,6 +529,13 @@ topotopo library add props D:/shared/props
 topotopo web
 ```
 
+`topotopo open <file.topo | file.topows | folder>` opens one package or workspace in your browser: it finds the web
+app of your user (a small lock file, `web.lock`, in `~/.topotopo`), starts one unseen when none runs, lists the
+package or workspace for that run when the config does not (the config is not changed) and opens its page. With no
+path it opens the home page; `topotopo open --stop` asks the web app it started to stop (running bakes finish, editors end) and waits for it; a web app from another version of TopoTopo is used as it is, and its pages say at the top that TopoTopo has changed since it started, with a button that stops it. A web app that has been asked to stop (a running bake finishes first) is waited for to leave, and another is started. A lock whose port accepts connections but never answers is given up after about 15 seconds. All the waits of `open` share 75 seconds. A package in no workspace or library is listed by itself, nothing around it is read. A path that does not exist, or a folder holding neither file, is one sentence on stderr
+and exit code 1. `TOPOTOPO_HOME` names the TopoTopo folder instead of `~/.topotopo`; `TOPOTOPO_BROWSER_LOG` names a
+file the address is written to instead of opening a browser (scripts and tests). On Windows, `topotopo setup` makes a double-click run it (see Setup).
+
 - **Front page**: each registered workspace and library as a card with a few pictures from inside and its counts of
   packages, folders, files and flags; TopoTopo's built-in library last. The search finds every package by name, tag
   and the packages it uses, and their outputs by name, kind and tag.
@@ -554,8 +578,8 @@ set of names; a library inside a registered workspace shows as the workspace's f
 
 ## Workspaces, packages and libraries
 
-Three words: a **workspace** is a folder tree, one production (a game, an archviz job), with `topotopo-workspace.json`
-at its root; every folder in it with a `.topo` file is a **package**, and the packages of a workspace find each other
+Three words: a **workspace** is a folder tree, one production (a game, an archviz job), with one `<name>.topows` file
+at its root (the file's name is the workspace's name); every folder in it with a `.topo` file is a **package**, and the packages of a workspace find each other
 by themselves; a **library** is a shared folder of packages registered on this machine (`topotopo library add <name>
 <folder>`), which a workspace lists to use it. TopoTopo's built-in library is always there.
 
@@ -567,7 +591,7 @@ keeps its content in `assets/`):
 ```text
 my-game/                         the Godot project
   project.godot
-  topotopo-workspace.json        {"name": "my-game", "libraries": ["props"], "engine": {"type": "godot", "project": "project.godot"}}
+  my-game.topows                 {"libraries": ["props"], "engine": {"type": "godot", "project": "project.godot"}}
   topotopo-packages/             one copy of each package version the workspace uses
   assets/props/lantern/          a package: lantern.topo, graphs/, inputs/, exports/, attachments/
   assets/levels/yard/            a package that uses studio/rocks from the props library
@@ -786,6 +810,7 @@ and nowhere else), and `npm test` fails while a built-in package's working folde
 | examples | `npm run test:examples [-- filter]` | every node type has an `example` (shown by `help` and in `docs/nodes.md`) and it cooks without errors or warnings: a node spec on the node's fixture inputs, a graph as written |
 | io | `node test/io.ts` | export → import round trips for every format |
 | interop | `npm run test:interop` | glTF (validator), Houdini `.geo`/`.bgeo`, CSV/PCG and points JSON round trips; instance rows and their Unreal transforms, per-instance glTF/USD attributes, packed `.geo`, textures, the Unreal Landscape bundle, `export:demo` |
+| setup | `npm run test:setup` | `topotopo setup` and `setup --remove` against a scratch registry key and Start menu folder (never the real ones): exactly the expected keys and values, quoting of paths with spaces and non-ASCII letters, `--node` before "%1", a second setup changes nothing, `--remove` leaves a `reg export` byte-identical to the one before and puts a replaced value or Start menu file back, each message (not Windows, not x64, launcher or icons missing, never built, a protected user choice); Windows only |
 | uv | `npm run test:uv` | unwrap/flatten/layout: finite uv in 0..1, topology kept, LSCM angle error, no island overlaps (also random island sets in the property test), uniform texel density, texel weights, fit atlas/udim/stack, orient world, long charts cut, thin charts joined, no stretched charts, slivers and merged parts, decimate and lod keeping the uv free of folds, box projection mirroring, inspect uv density and per-tile utilization, GLB round trip, uv view size |
 | render | `node test/render.ts` | every render option renders at the expected size; pixel probes for edge overlays, section caps (incl. inside-out), clip, glyphs, labels, legends, shading, the footer line, `view_labels: false`; default output unchanged by the new code paths |
 | remesh | `npm run test:remesh` | remesh_isotropic edge lengths, watertightness, Cd continuity, box features, adaptive size, group/boundary/seams, timing; decimate seams, lock_border, points; mesh_repair winding, duplicates, holes, non-manifold split, slivers, self-intersections; lod levels and names |
