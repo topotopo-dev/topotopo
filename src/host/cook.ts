@@ -35,7 +35,7 @@ import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
 import { packedSourceNames } from '../io/common.ts';
 import { PackageUses, contentSha, loadPackage, packageOutputs } from '../packages/registry.ts';
 import type { InvalidOutput, PackageOutput } from '../packages/registry.ts';
-import { WORKSPACE_FILE, copiesFor, locate, readManifest, renameInto, takeLock, writeAtomic } from '../package.ts';
+import { copiesFor, locate, readManifest, renameInto, takeLock, workspaceFilePath, writeAtomic } from '../package.ts';
 import { isEngineFile } from '../engines.ts';
 import { graphFiles } from '../session.ts';
 import { folderKey } from '../scan.ts';
@@ -229,7 +229,7 @@ const sameList = (a: string[] | undefined, b: string[]) => !!a && a.length === b
 
 /**
  * A record's path for a file: relative to the package (posix) inside the engine project or the workspace around it
- * (its topotopo-workspace.json, shared copies and libraries: every checkout has them at the same place relative to the
+ * (its .topows file, shared copies and libraries: every checkout has them at the same place relative to the
  * package), else absolute (posix).
  */
 function relOf(dir: string, roots: (string | null | undefined)[], abs: string): string {
@@ -532,7 +532,7 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
     const store = copiesFor(job.dir);
     const ws = locate(job.dir).workspace;
     const rel = (p: string) => relOf(job.dir, [flavour.project, ws], p);
-    const fixed =[manifestRel(job), ...(fs.existsSync(path.join(store.packages, 'lock.json')) ? [rel(path.join(store.packages, 'lock.json'))] : []), ...(ws ? [rel(path.join(ws, WORKSPACE_FILE))] : [])];
+    const fixed =[manifestRel(job), ...(fs.existsSync(path.join(store.packages, 'lock.json')) ? [rel(path.join(store.packages, 'lock.json'))] : []), ...(ws ? [rel(workspaceFilePath(ws))] : [])];
     const listings = new Map<string, string[]>();
     const listingOf = (folder: string) => { let l = listings.get(folder); if (!l) { l = listing(abs(folder)); listings.set(folder, l); } return l; };
 
@@ -759,7 +759,7 @@ export async function cookPackage(job: CookJob, flavour: Flavour, flags: CookFla
     const set = new Set<string>([rel(x.file), manifestRel(job), ...listing(path.join(job.dir, 'assets')).map((f) => `assets/${f}`)]);
     const store = copiesFor(job.dir);
     if (fs.existsSync(path.join(store.packages, 'lock.json'))) set.add(rel(path.join(store.packages, 'lock.json')));
-    if (ws) set.add(rel(path.join(ws, WORKSPACE_FILE)));
+    if (ws) set.add(rel(workspaceFilePath(ws)));
     for (const { abs, sha } of rec.files.values()) {
       if (OWN.some((d) => within(abs, d)) && !within(abs, job.dir)) continue;
       if (sha) shas.seen(abs, sha);

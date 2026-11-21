@@ -42,7 +42,7 @@ import type { WebConfig } from '../config.ts';
  */
 export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'workspace [folder]', what: 'the workspace around a folder: its engine project, the shared libraries it lists, its packages (every folder in it with a .topo file)' },
-  { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--library <name or folder>] [--follow | --no-follow]', what: 'make a folder a workspace (topotopo-workspace.json; the engine project at or above it is found, else one below; --library lists shared libraries when it is made; its packages share one copy of each package, moved into topotopo-packages/; --follow shows its own packages live from their working folders, for looking), or change its name, engine or follow' },
+  { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--library <name or folder>] [--follow | --no-follow]', what: 'make a folder a workspace (<name>.topows; the engine project at or above it is found, else one below; --library lists shared libraries when it is made; its packages share one copy of each package, moved into topotopo-packages/; --follow shows its own packages live from their working folders, for looking), or change its name, engine or follow' },
   { usage: 'workspace library add|remove <name or folder> [--workspace <folder>]', what: 'list or unlist a shared library the workspace\'s packages use: a registered library\'s name, or a folder outside the workspace (written as its path from the workspace)' },
   { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the web app\'s front page, or list the registered ones' },
   { usage: 'init [folder] [--name owner/name]', what: 'make a folder a package (<id>.topo, graphs/main.json), or set the name an existing package publishes under' },
@@ -140,7 +140,11 @@ export async function webCommand(argv: string[], prog: string, io: Io = consoleI
     const port = a.opt('--port') !== undefined ? Number(a.opt('--port')) : cfg.web.port;
     const { startWeb, runningWeb } = await import('../web/server.ts');
     try {
-      const g = await startWeb({ config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m) });
+      const g = await startWeb({
+        config: cfg, port, bake: !a.has('--no-bake'), log: (m) => io.out(m),
+        // POST /api/stop: the web app has shut down; this process removes its lock (when `topotopo open` made it) and ends
+        onStop: async () => { const { removeLockIfMine } = await import('../host/open.ts'); removeLockIfMine(); process.exit(0); },
+      });
       const n = cfg.libraries.length, w = cfg.workspaces.length;
       io.out(`web app: ${g.url}  (${w ? `${w} workspace${w === 1 ? '' : 's'}: ${cfg.workspaces.map((x) => x.name).join(', ')}; ` : ''}${n} librar${n === 1 ? 'y' : 'ies'}: ${cfg.libraries.map((l) => `${l.name} → ${l.path}`).join(', ') || 'none'}; Ctrl+C to stop)`);
       if (g.queue.size) io.out(`baking ${g.queue.size} package(s) in the background`);
@@ -219,6 +223,9 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
   });
 }
 
+/** How long an editor that is asked to end lets an export under way finish (the web app gives it a few seconds more before it is ended). */
+const EDITOR_GRACE_MS = 15_000;
+
 /** `edit [folder]`: the live viewer on a package, following changes other processes make to it. */
 export async function editCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
   return run(io, async () => {
@@ -235,6 +242,14 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
     if (a.has('--json')) {
       // started by the web app: report the URL, and stop once no page has been open for a while
       io.out(JSON.stringify({ url: v.url }));
+      // the web app ends the editor by closing its stdin: an export under way is let finish (its files are written through .part
+      // files renamed into place, so a cut would leave the old ones whole, but then not the new set), for at most
+      // EDITOR_GRACE_MS; then the viewer closes and the process leaves, as it would at its own end
+      process.stdin.on('end', () => {
+        const grace = new Promise<void>((r) => setTimeout(r, EDITOR_GRACE_MS));
+        void Promise.race([v.idle(), grace]).finally(() => { v.close(); process.exit(0); });
+      });
+      process.stdin.resume();
       let idleSince = Date.now();
       setInterval(() => {
         if (v.clients() > 0) idleSince = Date.now();

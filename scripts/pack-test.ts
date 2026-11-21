@@ -22,6 +22,10 @@
 //   catalog (TopoTopo's own packages too), a build that names a built-in package's output and copies the built-in package in from the installed
 //   built-in library, a build that uses sdf_grid, and the preview page with three.js served from the installed
 //   dependencies.
+// - `topotopo open <package>` from the installed bin: it starts the web app of the installed dist/ unseen, on a folder and
+//   a config of its own, records the address instead of opening a browser, the address answers, and a second open reuses it.
+// - On Windows, `topotopo setup` from the installed bin against a scratch registry key and Start menu folder (never the real ones):
+//   the file links name the installed launcher, Node.js and icons, and `setup --remove` leaves the scratch key as it was.
 // - On Windows, the launcher from the installed package (launcher/win32-x64/topotopo-open.exe): it finds the installed
 //   command line and a Node.js by itself and reports a failing open.
 // The bin always runs through `npm exec --no --`: it never downloads, so only the tarball under test can answer.
@@ -176,6 +180,69 @@ try {
     const said = (r.stderr ?? '').replace(/\r\n/g, '\n');
     check(r.status !== 0 && said.startsWith('TopoTopo could not open missing.topo.\n\n') && said.trim().split('\n').length > 2 && !said.includes('src/cli.ts'),
       `installed launcher runs the installed command line: open on a missing file fails and says why (exit ${r.status}: ${JSON.stringify(said.split('\n')[2] ?? '')})`);
+  }
+
+  // ------------------------------------------------------------------------------------------------ setup
+  if (process.platform === 'win32') {
+    step(`setup: npm exec --no -- ${BIN} setup, against a scratch registry key and Start menu folder`);
+    // the installed command line writes the file links against a scratch key (never HKCU\Software\Classes) and a temporary
+    // Start menu folder, they point at the installed launcher and icons, and setup --remove leaves the key as it was
+    const scratch = `HKCU\\Software\\TopoTopoTest-pack-${process.pid}`;
+    const startMenu = path.join(tmp, 'start menu');
+    const setupEnv = { ...process.env, TOPOTOPO_SETUP_CLASSES: `${scratch}\\Classes`, TOPOTOPO_SETUP_FILEEXTS: `${scratch}\\FileExts`, TOPOTOPO_SETUP_START_MENU: startMenu, TOPOTOPO_SETUP_NO_NOTIFY: '1', TOPOTOPO_HOME: path.join(tmp, 'setup-home') };
+    const reg = (...a: string[]) => spawnSync('reg.exe', a, { encoding: 'utf8', windowsHide: true });
+    const exportKey = (key: string) => { const f = path.join(tmp, `${Math.random().toString(36).slice(2)}.reg`); return reg('export', key, f, '/y').status === 0 ? fs.readFileSync(f).toString('utf16le') : null; };
+    const valueOf = (key: string, name?: string) => { const m = /REG_SZ\s+(.*)\r?$/m.exec(reg('query', key, ...(name ? ['/v', name] : ['/ve'])).stdout ?? ''); return m?.[1] ?? ''; };
+    try {
+      check(reg('add', `${scratch}\\Classes\\.topo`, '/ve', '/d', 'Other.App', '/f').status === 0, 'the scratch registry key is made');
+      const before = exportKey(`${scratch}\\Classes`);
+      const said = sh(`npm exec --no -- ${BIN} setup`, app, setupEnv);
+      const open = valueOf(`${scratch}\\Classes\\TopoTopo.Package\\shell\\open\\command`);
+      const launcherPath = path.join(installed, 'launcher', 'win32-x64', 'topotopo-open.exe');
+      const node = /--node "([^"]+)" "%1"$/.exec(open)?.[1];
+      check(open.startsWith(`"${launcherPath}" --node "`) && !!node && fs.existsSync(node), `setup from the installed package links the files to the installed launcher and the Node.js it runs with (${open})`);
+      const icons = ['Package', 'Workspace'].map((k) => valueOf(`${scratch}\\Classes\\TopoTopo.${k}\\DefaultIcon`));
+      check(icons[0] === path.join(installed, 'assets', 'icons', 'topotopo-package.ico') && icons[1] === path.join(installed, 'assets', 'icons', 'topotopo-workspace.ico') && icons.every((f) => fs.existsSync(f)),
+        'the icons are the installed package\'s and exist');
+      check(valueOf(`${scratch}\\Classes\\.topo`) === 'TopoTopo.Package' && valueOf(`${scratch}\\Classes\\.topows`) === 'TopoTopo.Workspace' && fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')) && /setup --remove/.test(said),
+        'the .topo and .topows links and the Start menu entry are made');
+      const removed = sh(`npm exec --no -- ${BIN} setup --remove`, app, setupEnv);
+      check(exportKey(`${scratch}\\Classes`) === before && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')) && /everything is as it was/.test(removed), 'setup --remove leaves the scratch key as it was and the Start menu entry gone');
+    } finally {
+      reg('delete', scratch, '/f');
+    }
+  }
+
+  // ------------------------------------------------------------------------------------------------ open
+  step(`open: npm exec --no -- ${BIN} open <package>`);
+  {
+    // the installed command line opens a package: it starts the web app (the installed dist/, unseen, on a free port of
+    // its own folder and config), records the address instead of opening a browser, and the address answers
+    const home = path.join(tmp, 'open-home');
+    fs.mkdirSync(home);
+    const net = await import('node:net');
+    const port = await new Promise<number>((resolve) => { const sv = net.createServer(); sv.listen(0, '127.0.0.1', () => { const p = (sv.address() as any).port as number; sv.close(() => resolve(p)); }); });
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ web: { port } }));
+    const kit = path.join(tmp, 'open-kit', 'demo-kit');
+    fs.mkdirSync(kit, { recursive: true });
+    sh(`npm exec --no -- ${BIN} init "${kit}"`, app);
+    const log = path.join(home, 'browser.log');
+    const openEnv = { ...process.env, TOPOTOPO_HOME: home, TOPOTOPO_CONFIG: path.join(home, 'config.json'), TOPOTOPO_BROWSER_LOG: log };
+    let lockPid = 0;
+    try {
+      const said = sh(`npm exec --no -- ${BIN} open "${path.join(kit, 'demo-kit.topo')}"`, app, openEnv);
+      const lock = JSON.parse(fs.readFileSync(path.join(home, 'web.lock'), 'utf8'));
+      lockPid = lock.pid;
+      const url = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '';
+      const res = url ? await fetch(url, { headers: { connection: 'close' }, signal: AbortSignal.timeout(20000) }).catch(() => null) : null;
+      check(/^opening http:\/\/127\.0\.0\.1:\d+\/l\/demo-kit\/$/m.test(said) && url === said.trim().replace(/^opening /, '') && lock.port === port && res?.status === 200, `open starts the web app from the installed dist/ and the package's page answers (${url}: ${res?.status})`);
+      sh(`npm exec --no -- ${BIN} open "${kit}"`, app, openEnv);
+      check(JSON.parse(fs.readFileSync(path.join(home, 'web.lock'), 'utf8')).pid === lockPid && fs.readFileSync(log, 'utf8').trim().split(String.fromCharCode(10)).length === 2, 'a second open reuses that web app');
+    } finally {
+      // the installed command stops the web app it started (its health confirms the pid)
+      const stopped = spawnSync('npm', ['exec', '--no', '--', BIN, 'open', '--stop'], { cwd: app, env: openEnv, encoding: 'utf8', shell: process.platform === 'win32', timeout: 60000 });
+      check(/stopped the web app/.test(stopped.stdout ?? '') && !!lockPid && !fs.existsSync(path.join(home, 'web.lock')), `open --stop ends the web app from the installed dist/ (${(stopped.stdout ?? '').trim()})`);
+    }
   }
 
   // ------------------------------------------------------------------------------------------------ Godot

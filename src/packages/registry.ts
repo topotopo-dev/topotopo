@@ -10,7 +10,7 @@
 //                                                   version.json (note, hash, interface)
 //   <package>/packages/<owner>/<name>/<version>/    the package's copy of a version it uses, or of one those use: flat,
 //                                                   each version once (in a workspace: topotopo-packages/ beside
-//                                                   topotopo-workspace.json, one copy for every package in it)
+//                                                   the workspace's .topows file, one copy for every package in it)
 //   <package>/packages/lock.json                    every copied version: its hash, where it came from (a path from the
 //                                                   folder of the copies, or a registered library's name) and its uses
 //
@@ -59,7 +59,7 @@ import { imageRef, referenceableImages } from '../core/image.ts';
 import { graphFiles, registerAssets } from '../session.ts';
 import type { Session, SessionPackages } from '../session.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
-import { BUILTIN_TEXT, VERSION_RE, WORKSPACE_FILE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestAt, manifestFile, oldManifestAbove, placeText, program, packageDirOf, packageId, readManifest, readUses, renameInto, withStoreLock, within, workspaceFlag, writeAtomic, writeManifest, writeUses } from '../package.ts';
+import { BUILTIN_TEXT, VERSION_RE, WORKSPACE_PACKAGES, copiesFor, isPackageName, locate, parseUses, librariesFor, libraryEntry, manifestAt, manifestFile, oldManifestAbove, placeText, workspaceFilePath, program, packageDirOf, packageId, readManifest, readUses, renameInto, withStoreLock, within, workspaceFlag, writeAtomic, writeManifest, writeUses } from '../package.ts';
 import { folderKey, forgetScans, scanTree } from '../scan.ts';
 import type { Scan } from '../scan.ts';
 import { readWorkspace, scanWorkspace } from '../workspace.ts';
@@ -1030,7 +1030,7 @@ export class PackageUses implements SessionPackages {
   }
 
   /** The file whose "uses" name the versions in use, for messages: the package's manifest ("forest.topo"), or the workspace's file. */
-  get usesFileName(): string { return this.store?.workspace ? WORKSPACE_FILE : this.store ? path.basename(this.store.usesFile) : 'the manifest'; }
+  get usesFileName(): string { return this.store ? path.basename(this.store.usesFile) : 'the manifest'; }
 
   /** The versions the package uses (its own, or its workspace's), as last read. */
   uses(): Record<string, string> { return this.root.uses; }
@@ -1127,7 +1127,7 @@ export class PackageUses implements SessionPackages {
       this.id = packageId(this.dir);
       const pkg = this.manifest.name, store = this.store!;
       if (store.workspace && Object.keys(this.manifest.uses).length)
-        throw new Error(`${manifestFile(this.dir)} lists "uses" (${Object.entries(this.manifest.uses).map(([k, v]) => `${k} ${v}`).join(', ')}), but the package is in the workspace ${store.workspace}, whose ${WORKSPACE_FILE} names the versions every package in it uses, with one copy of each: ${program()} workspace init ${store.workspace} moves them there`);
+        throw new Error(`${manifestFile(this.dir)} lists "uses" (${Object.entries(this.manifest.uses).map(([k, v]) => `${k} ${v}`).join(', ')}), but the package is in the workspace ${store.workspace}, whose ${path.basename(store.usesFile)} names the versions every package in it uses, with one copy of each: ${program()} workspace init ${store.workspace} moves them there`);
       // the package that publishes versions: its graphs name their own outputs, which cook from its graphs as they are now
       this.root = { ...this.root, uses: readUses(store), lock: readLockAt(store.packages), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
       this.error = null;
@@ -2622,8 +2622,8 @@ export function packagesText(pk: PackageUses, mcp = false): string {
   const m = pk.manifest, lines: string[] = [];
   if (pk.dir) {
     lines.push(`${pk.label} (${pk.dir})${m!.name ? `, the package ${m!.name}` : ''}`);
-    if (pk.store?.workspace) lines.push(`in ${pk.holder} (${pk.store.workspace}): its ${WORKSPACE_FILE} names the versions every package in it uses, one copy of each (${WORKSPACE_PACKAGES}/)`);
-  } else lines.push(`${pk.who} (${ws}), at its root, in no package: its ${WORKSPACE_FILE} names the versions every package in it uses, one copy of each (${WORKSPACE_PACKAGES}/)`);
+    if (pk.store?.workspace) lines.push(`in ${pk.holder} (${pk.store.workspace}): its ${path.basename(pk.store.usesFile)} names the versions every package in it uses, one copy of each (${WORKSPACE_PACKAGES}/)`);
+  } else lines.push(`${pk.who} (${ws}), at its root, in no package: its ${path.basename(workspaceFilePath(ws!))} names the versions every package in it uses, one copy of each (${WORKSPACE_PACKAGES}/)`);
   const problems: string[] = pk.dir ? [...pk.verifyCopies(), ...pk.check()] : [];
   let uses: Record<string, string> = {};
   try { uses = pk.usesHere(); } catch (e: any) { problems.push(e.message); }

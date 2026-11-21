@@ -104,6 +104,17 @@ export class BakeQueue {
     while (this.size) await new Promise((r) => setTimeout(r, 50));
   }
 
+  /**
+   * Stop for good the way a person would: nothing queued is started, a bake that is running is given `limitMs` to finish
+   * (it writes its files whole or not at all), and is ended only after that.
+   */
+  async stop(limitMs: number): Promise<void> {
+    this.closed = true;
+    this.queue = [];
+    for (const t0 = Date.now(); this.running && Date.now() - t0 < limitMs; ) await new Promise((r) => setTimeout(r, 50));
+    this.child?.kill();
+  }
+
   close() {
     this.closed = true;
     this.queue = [];

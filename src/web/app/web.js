@@ -186,3 +186,18 @@ es.onmessage = (m) => {
     if (ev.folders?.some((f) => f === here || f.startsWith(`${here}/`) && !f.slice(here.length + 1).includes('/'))) offerReload();
   }
 };
+
+// "TopoTopo has changed since this server started": the button stops the web app (POST /api/stop); the person opens the file again
+for (const b of $$('[data-stop-topotopo]')) {
+  b.addEventListener('click', async () => {
+    const bar = b.closest('.changed');
+    b.disabled = true;
+    try {
+      const r = await fetch('/api/stop', { method: 'POST', headers: { 'x-topotopo-open': '1' } });
+      if (!r.ok) throw new Error(`the web app answered ${r.status}`);
+      bar.textContent = 'TopoTopo has stopped. Open your file again.';
+    } catch (e) {
+      bar.textContent = `TopoTopo could not be stopped from here (${e.message}): run topotopo open --stop.`;
+    }
+  });
+}
