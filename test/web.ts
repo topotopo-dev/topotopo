@@ -355,7 +355,10 @@ try {
     write(path.join(crateP.dir, 'exports', 'fresh.glb.source.json'), source(graphSha(BOX)));
     write(path.join(crateP.dir, 'versions', 'x.txt'), 'x');
     write(path.join(crateP.dir, 'previews', 'front.png'), PNG);
-    const broken = createPackage(place, 'levels/broken', { title: 'Broken', graph: BOX });
+    write(path.join(crateP.dir, 'inputs', 'mask.png'), PNG);
+    write(path.join(crateP.dir, 'thumbs', 'box.png'), PNG);
+    for (let i = 0; i < 15; i++) write(path.join(crateP.dir, 'renders', `f${String(i).padStart(2, '0')}.png`), PNG);
+    const broken =createPackage(place, 'levels/broken', { title: 'Broken', graph: BOX });
     write(path.join(broken.dir, '.web', 'bake.json'), { key: 'k', at: 1, ok: false, error: '[rocks] unknown node type "scatter_rockz"\nmore' });
     const lamp = createPackage(place, 'props/lamp', { title: 'Lamp', graph: BOX });
     const edit = (dir: string, fn: (m: any) => void) => { const file = path.join(dir, `${path.basename(dir)}.topo`); const m = JSON.parse(fs.readFileSync(file, 'utf8')); fn(m); fs.writeFileSync(file, JSON.stringify(m, null, 2)); };
@@ -563,6 +566,9 @@ try {
       'a package: its preview, its exports, its pictures and its folders first; below the divider its graphs, its flags, the board snippets');
     check(/<section class="pictures" aria-label="Pictures"><h2><a class="hfolder" href="\/w\/yard\/props\/crate\/previews\/">previews\/<\/a> <span class="count">1<\/span><\/h2>\s*<div class="igrid few"><a class="tile" href="\/w\/yard\/props\/crate\/previews\/front\.png" data-view="image"/.test(crate)
       && /class="fcard k-folder" href="\/w\/yard\/props\/crate\/previews\/"/.test(crate), 'a package\'s folder of images shows them as a strip with its pictures; its card stays with the folders');
+    const rendersStrip = /<a class="hfolder" href="\/w\/yard\/props\/crate\/renders\/">renders\/<\/a> <span class="count">15<\/span><\/h2>([\s\S]*?)<\/div>\s*<p class="dim small more">and 3 more/.exec(crate);
+    check(!!rendersStrip && (rendersStrip[1].match(/class="tile"/g) ?? []).length === 12, `a folder of 15 images: a strip of 12 and "and 3 more" (${rendersStrip ? (rendersStrip[1].match(/class="tile"/g) ?? []).length : 'no strip'})`);
+    check(!/class="hfolder" href="\/w\/yard\/props\/crate\/(inputs|thumbs)\/"/.test(crate), 'inputs/ (masks and guides) and thumbs/ (output thumbnails) are no picture strips');
   }
 
   section('folder pages: flags that are not there');

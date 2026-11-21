@@ -80,8 +80,9 @@ export interface FolderPageData {
   /** Unreal's .uasset and .umap files here */
   engineAssets: number;
   package: PackageData | null;
-  /** a package's folders that hold images (previews/, renders/…; not attachments/ or exports/): their images */
-  pictures?: { name: string; url: string; images: FileItem[] }[];
+  /** a package's folders that hold images (previews/, renders/…; not attachments/, exports/, inputs/ or thumbs/): their
+   * first PICTURE_STRIP images and how many there are */
+  pictures?: { name: string; url: string; images: FileItem[]; count: number }[];
   /** a workspace's root: the one version of each package its packages use */
   uses?: PackageData['uses'];
   /** a root whose audit stopped short: where, in words */
@@ -164,11 +165,11 @@ function imagesPart(images: FileItem[]) {
 }
 
 /** A package's folder of images (previews/, renders/…) as a strip of its first pictures, the folder a click away. */
-const STRIP = 12;
+export const PICTURE_STRIP = 12;
 function strip(s: NonNullable<FolderPageData['pictures']>[number]) {
-  return `<h2><a class="hfolder" href="${esc(s.url)}">${esc(s.name)}/</a> <span class="count">${s.images.length}</span></h2>
-    ${tiles(s.images.slice(0, STRIP))}
-    ${s.images.length > STRIP ? `<p class="dim small more">and ${s.images.length - STRIP} more: <a href="${esc(s.url)}">open ${esc(s.name)}/</a></p>` : ''}`;
+  return `<h2><a class="hfolder" href="${esc(s.url)}">${esc(s.name)}/</a> <span class="count">${s.count}</span></h2>
+    ${tiles(s.images.slice(0, PICTURE_STRIP))}
+    ${s.count > PICTURE_STRIP ? `<p class="dim small more">and ${s.count - PICTURE_STRIP} more: <a href="${esc(s.url)}">open ${esc(s.name)}/</a></p>` : ''}`;
 }
 
 /** A package's pictures: its attachments, the images beside its manifest and those in its folders. */
