@@ -10,7 +10,7 @@ import { addLibrary, addWorkspace, loadConfig, removeLibrary } from '../src/conf
 import { initPackage, manifestAt, manifestFile, oldManifest, packageId, startPackage, notPackageFiles, parseManifest, packageDirOf, readManifest, slugify, writeManifest } from '../src/package.ts';
 import { bakeKey, createPackage, isStale, readBakeState, scanAll, scanLibrary } from '../src/web/library.ts';
 import { forgetScans, scanTree } from '../src/scan.ts';
-import { LIBRARY_FILE, WORKSPACE_FILE, librariesFor, libraryName, locate } from '../src/package.ts';
+import { LIBRARY_FILE, librariesFor, libraryName, locate } from '../src/package.ts';
 import { initWorkspace, parseWorkspace, readWorkspace, workspaceText } from '../src/workspace.ts';
 import { commands } from '../src/packages/commands.ts';
 import { bakePackage, BakeQueue } from '../src/web/bake.ts';
@@ -57,7 +57,7 @@ section('create and scan');
     const put = (rel: string, text: string) => { fs.mkdirSync(path.dirname(path.join(paths.path, rel)), { recursive: true }); fs.writeFileSync(path.join(paths.path, rel), text); };
     put('tool/Tool.csproj', '');
     put('other-game/project.godot', 'config/name="Other"\n');
-    put('nested-ws/topotopo-workspace.json', '{"name": "nested"}');
+    put('nested-ws/nested.topows', '{}');
     put('checkout/package.json', '{"name": "topotopo"}');
     const refused = (rel: string, why: RegExp) => {
       let said = '';
@@ -67,7 +67,7 @@ section('create and scan');
     const wrong = [
       refused('tool/bin/crate', /^bad package path "tool\/bin\/crate": tool\/bin: C#'s bin folder beside a \.csproj or \.sln, which the scan never enters/),
       refused('other-game/props/barrel', /^bad package path .*: other-game: another engine project \(it holds project\.godot\), which the scan does not enter/),
-      refused('nested-ws/x', /nested-ws: another workspace \(it holds topotopo-workspace\.json\), which the scan does not enter/),
+      refused('nested-ws/x', /nested-ws: another workspace \(it holds nested\.topows\), which the scan does not enter/),
       refused('checkout/y', /checkout: a TopoTopo checkout, which the scan does not enter/),
       refused('a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q', /a\/b\/c\/d\/e\/f\/g\/h\/i\/j\/k\/l\/m\/n\/o\/p\/q: more than 16 folders below .*, deeper than the scan looks/),
     ].filter(Boolean);
@@ -236,7 +236,7 @@ section('the scan: what it skips, what it enters, how deep');
   file('tool/Tool.csproj'); pkg('tool/bin/b'); pkg('tool/obj/o');
   pkg('plain/bin/kept');
   file('other-game/project.godot', 'config/name="Other"\n'); pkg('other-game/assets/p');
-  file('nested-ws/topotopo-workspace.json', '{"name": "nested"}'); pkg('nested-ws/p');
+  file('nested-ws/nested.topows', '{}'); pkg('nested-ws/p');
   file('checkout/package.json', '{"name": "topotopo"}'); pkg('checkout/library/x');
   file('notours/package.json', '{"name": "something"}'); pkg('notours/p');
   pkg('deep/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o');       // 16 folders below the root: found
@@ -275,7 +275,7 @@ section('the scan: what it skips, what it enters, how deep');
   const w = (f: string, d: unknown) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, typeof d === 'string' ? d : JSON.stringify(d)); };
   const shared = path.join(tmp, 'shared-materials');
   w(path.join(shared, LIBRARY_FILE), { name: 'game-materials' });
-  w(path.join(game, WORKSPACE_FILE), { name: 'game', libraries: ['../shared-materials', 'game-lib', './art/shared'] });
+  w(path.join(game, 'game.topows'), { libraries: ['../shared-materials', 'game-lib', './art/shared'] });
   fs.mkdirSync(path.join(game, 'art', 'shared'), { recursive: true });
   w(path.join(game, 'art', 'props', 'crate', 'crate.topo'), {});
   const crate = path.join(game, 'art', 'props', 'crate');
@@ -315,7 +315,7 @@ section('the scan: what it skips, what it enters, how deep');
   const again = initWorkspace(game, { name: 'mygame', engine: 'none' });
   check(again.manifest.name === 'mygame' && again.manifest.engine === 'none' && again.manifest.libraries.join() === '../ws-shared', 'workspace init again changes only what an option says');
   check(throws(() => initWorkspace(game, { engine: 'godot:nope/project.godot' }), /no file/) && throws(() => initWorkspace(game, { engine: 'blender:x' }), /godot:<path to project\.godot>/), 'a wrong --engine says what to write');
-  check(throws(() => parseWorkspace({ name: 'My Game' }, 'x'), /"name" must be lower-case/) && throws(() => parseWorkspace({ engine: { type: 'godot' } }, 'x'), /"engine" must be/)
+  check(throws(() => parseWorkspace({ name: 'my-game' }, 'my-game'), /"name": the file's name is the workspace's name; remove "name"/) && throws(() => parseWorkspace({ engine: { type: 'godot' } }, 'x'), /"engine" must be/)
     && throws(() => parseWorkspace({ follow: 'yes' }, 'x'), /"follow" must be true or false/), 'a malformed workspace file says what is wrong');
   check(throws(() => parseWorkspace({ engine: { type: 'godot', project: 'p.godot', assets: 'a' } }, 'x'), /"engine\.assets" is gone: an export stays in its package's exports\/ folder; put the workspace inside the engine project .*; remove "assets"/)
     && throws(() => initWorkspace(game, { assets: 'godot/assets' }), /^--assets is gone/), '"engine.assets" and --assets are refused, naming the change');
@@ -323,6 +323,31 @@ section('the scan: what it skips, what it enters, how deep');
   check(/^workspace "mygame"/.test(shown) && /engine: none/.test(shown) && /shared libraries: \.\.\/ws-shared/.test(shown) && /packages: 1\n {2}art\/props\/crate {2}package game\/crate$/m.test(shown),
     `workspace: what it is, from a package inside it; with no engine project of its own, a folder holding one is another project and is not scanned (${shown.split('\n').slice(0, 3).join(' | ')})`);
   check(throws(() => workspaceText(tmp), /is in no workspace: .* workspace init/), 'outside a workspace: how to make one');
+  // the workspace file is <name>.topows, one per folder, named like the workspace; the old file name is refused with the new one
+  {
+    const holder = path.join(tmp, 'ws-files');
+    fs.mkdirSync(holder, { recursive: true });
+    const old = path.join(holder, 'old-style');
+    fs.mkdirSync(old);
+    fs.writeFileSync(path.join(old, 'topotopo-workspace.json'), JSON.stringify({ name: 'old-style', libraries: [] }));
+    const oldSaid = /holds topotopo-workspace\.json, which TopoTopo no longer reads: rename it to old-style\.topows and, in it, remove "name"$/;
+    check(throws(() => readWorkspace(old), oldSaid) && throws(() => initWorkspace(old), oldSaid) && throws(() => workspaceText(old), oldSaid),
+      'a folder with the old workspace file name gets one clear error naming <name>.topows (reading, init and show)');
+    check(locate(old).workspace === old && scanTree('x', holder).workspaces.includes(old), 'a folder with the old file name is a workspace to locate and to the scan alike (the error says what to do where it is read)');
+    fs.rmSync(path.join(old, 'topotopo-workspace.json'));
+    const fresh = initWorkspace(old, { engine: 'none' });
+    check(fresh.manifest.name === 'old-style' && fs.readdirSync(old).filter((f) => f.endsWith('.topows')).join() === 'old-style.topows' && !('name' in JSON.parse(fs.readFileSync(path.join(old, 'old-style.topows'), 'utf8'))) && !fs.existsSync(path.join(old, 'topotopo-workspace.json')),
+      'workspace init writes <name>.topows, whose name is the folder name and not in the file');
+    const renamedTo = initWorkspace(old, { name: 'old-again' });
+    check(renamedTo.manifest.name === 'old-again' && fs.readdirSync(old).filter((f) => f.endsWith('.topows')).join() === 'old-again.topows' && readWorkspace(old).name === 'old-again',
+      'workspace init --name renames the file (one file in the folder, the old one gone)');
+    fs.writeFileSync(path.join(old, 'second.topows'), '{}');
+    check(throws(() => readWorkspace(old), /holds old-again\.topows and second\.topows: a workspace has one \.topows file, whose name is its name/), 'two workspace files in a folder are an error, naming both');
+    fs.rmSync(path.join(old, 'second.topows')); fs.rmSync(path.join(old, 'old-again.topows'));
+    fs.writeFileSync(path.join(old, 'Bad Name.topows'), '{}');
+    check(throws(() => readWorkspace(old), /Bad Name\.topows: the file's name is the workspace's name: lower-case letters, digits, - and _ \("bad-name\.topows"\)/), 'a workspace file whose name is no workspace name says what to rename it to');
+    check(scanTree('x', holder).workspaces.includes(old), 'a folder holding a .topows file is another workspace to the scan');
+  }
   const lines: string[] = [], io = { out: (x: string) => lines.push(x), err: (x: string) => lines.push(`ERR ${x}`) };
   const code = await commands.workspace(['add', game], 'topotopo', io);
   const listed = await commands.workspace(['list'], 'topotopo', io);
@@ -349,9 +374,8 @@ section('the scan: what it skips, what it enters, how deep');
   const newIn = await commands.library(['new', 'renamed', 'props/stool'], 'topotopo', io2);
   check(newIn === 0 && out.some((l) => /\/p\/renamed\/stool$/.test(l)) && scanAll().some((s) => s.workspace && s.name === 'renamed' && s.packages.some((p) => p.id === 'stool' && p.lib === 'renamed')),
     `library new and the scans use the workspace's name (${out.join(' | ')})`);
-  // renamed by hand in its file: the name in the file is the one used
-  const wsFile = path.join(game, WORKSPACE_FILE);
-  fs.writeFileSync(wsFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(wsFile, 'utf8')), name: 'by-hand' }));
+  // renamed by hand, its file renamed: the file's name is the one used
+  fs.renameSync(path.join(game, 'renamed.topows'), path.join(game, 'by-hand.topows'));
   forgetScans();
   out.length = 0;
   const byHand = await commands.library(['new', 'by-hand', 'props/bench'], 'topotopo', io2);
@@ -394,7 +418,7 @@ section('the scan: what it skips, what it enters, how deep');
   process.env.TOPOTOPO_CONFIG = cfgWas;
   check(!onlyWs.some((l) => /^no libraries/.test(l)) && /^workspace by-hand/.test(onlyWs[0] ?? ''), `with only workspaces registered, library list does not say there is nothing (${onlyWs[0]})`);
   addWorkspace('other-ws', named);
-  fs.writeFileSync(path.join(named, WORKSPACE_FILE), JSON.stringify({ name: 'other-ws' }));
+  fs.writeFileSync(path.join(named, 'other-ws.topows'), '{}');
   check(throws(() => initWorkspace(game, { name: 'other-ws' }), /"other-ws" is the name of another registered workspace .*: give the workspace another name/), 'a workspace takes no name another registered workspace has');
 }
 
@@ -421,12 +445,12 @@ section('the engine project: at or above the workspace first, then below; what U
     && /export preset "Web" includes \*\.json, so it would ship TopoTopo's files/.test(atRoot.text) && !/"Clean"/.test(atRoot.text),
     'it reports the presets that would ship TopoTopo\'s files, with the exclude_filter entries each lacks, and edits nothing');
   check(fs.readFileSync(path.join(godot, 'export_presets.cfg'), 'utf8').includes('exclude_filter="*/graphs/*"'), 'the presets stay as they were');
-  fs.rmSync(path.join(godot, 'topotopo-workspace.json'));
+  fs.rmSync(path.join(godot, 'valley.topows'));
   const fromRepo = initWorkspace(repo, { name: 'valley-repo' });
   check(fromRepo.manifest.engine !== 'none' && fromRepo.manifest.engine?.project === 'game/project.godot' && /\(found below the workspace\)/.test(fromRepo.text) && /^packages: 1/m.test(fromRepo.text) && !/packages outside the engine project/.test(fromRepo.text),
     `a workspace at the repository's root: the project found below, game/assets/… found too (${fromRepo.text.split('\n').slice(0, 2).join(' | ')})`);
   // a workspace inside the Godot project: the project above it, written upward
-  fs.rmSync(path.join(repo, 'topotopo-workspace.json'));
+  fs.rmSync(path.join(repo, 'valley-repo.topows'));
   const inside = initWorkspace(path.join(godot, 'assets'), { name: 'valley-assets' });
   check(inside.manifest.engine !== 'none' && inside.manifest.engine?.project === '../project.godot', `a workspace inside the project: the project above it, its path leading upward (${inside.manifest.engine && inside.manifest.engine !== 'none' ? inside.manifest.engine.project : ''})`);
   // --engine names the project over the one detection finds, its path written from the workspace (leading upward too)

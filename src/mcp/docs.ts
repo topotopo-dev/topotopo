@@ -3,6 +3,7 @@ import type { GraphSpec, NodeDef, ParamDef } from '../graph/types.ts';
 import { CATEGORY_ORDER } from '../graph/registry.ts';
 import { PACKAGE_COMMANDS } from '../packages/commands.ts';
 import { GODOT_COMMANDS } from '../host/godot-commands.ts';
+import { UNREAL_COMMANDS } from '../host/unreal-commands.ts';
 import { graphLines } from './graphlines.ts';
 import { examplesIndexText } from './examples.ts';
 
@@ -32,7 +33,7 @@ PARTICLES: particles(emitter points, collision mesh, field) = Houdini POPs in on
 ESCAPE HATCHES: wrangle (per-element JS with @P/@Cd syntax), script (whole-geometry JS with the engine library), sdf_expr (signed distance functions). If a node is missing, write it with these.
 TERRAIN: heightfield → heightfield_noise → heightfield_erode → masks / heightfield_path → heightfield_scatter + copy_to_points, heightfield_to_mesh; heightfield_crop works on one tile of a big map; export png16 for an Unreal Landscape, or unreal_landscape for the landscape + layers + instances bundle. See help topic "heightfield".
 PHYSICS: rbd_settle drops pieces (packed instances) onto a terrain/container/ground until they rest, so scattered rocks and props sit in contact; rbd_stack drops them one at a time into piles. See help topic "rbd".
-WORKSPACE, PACKAGE, LIBRARY: a package is a folder of graphs and the models they make, marked by one <id>.topo file; every tool works in the open package. A workspace is a folder tree with topotopo-workspace.json at its root, best inside the engine's content folder (the Godot project, Unreal's Content/): every folder in it with a .topo file is a package, its packages find each other by themselves, use the shared libraries its file lists and share one copy of each package version, and their exports stay in each package's exports/, where the engine imports them. A library is a registered folder of packages, shared across workspaces; outside a workspace a package finds packages in every registered library. The web app (topotopo web) shows the workspaces and libraries (the person's board links to them), and TopoTopo ships one library built in. The workspace tool works on all three: workspace {action:"list"} finds a package, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one, {action:"show"} says what the open package's workspace holds, {action:"check"} cooks what it relies on and lists what broke (after a TopoTopo update). See help topic "workspace".
+WORKSPACE, PACKAGE, LIBRARY: a package is a folder of graphs and the models they make, marked by one <id>.topo file; every tool works in the open package. A workspace is a folder tree with one <name>.topows file at its root (the file's name is the workspace's name), best inside the engine's content folder (the Godot project, Unreal's Content/): every folder in it with a .topo file is a package, its packages find each other by themselves, use the shared libraries its file lists and share one copy of each package version, and their exports stay in each package's exports/, where the engine imports them. A library is a registered folder of packages, shared across workspaces; outside a workspace a package finds packages in every registered library. The web app (topotopo web) shows the workspaces and libraries (the person's board links to them), and TopoTopo ships one library built in. The workspace tool works on all three: workspace {action:"list"} finds a package, {action:"open"} makes it the folder every tool works in, {action:"create"} starts one, {action:"show"} says what the open package's workspace holds, {action:"check"} cooks what it relies on and lists what broke (after a TopoTopo update). See help topic "workspace".
 PACKAGES: a package uses the published outputs of other packages as node types, {"type": "owner/name/output"} (help {nodes:[...]} gives their params and version); a build that names one adds it to the package once the graph validates. TopoTopo's own packages are four packages built into TopoTopo, used the same way: topotopo/architecture (walls, windows, doors, houses, roofs, stairs, railings, floors), topotopo/nature (rocks, cliffs, trees, bushes, logs, forests, grass), topotopo/props (barrels, crates, pallets, sandbags, pipes) and topotopo/street (roads, lamp posts, bollards, benches, signs, fences, cables), e.g. {"type": "topotopo/nature/rock", "params": {"size": 2}}. Only a package's graphs use packages: when the server starts it makes its folder a package if the folder holds nothing but a package's own folders (its first reply says so), and workspace {action:"init"} makes any other folder one when the person says so. workspace {action:"packages"} lists them, {action:"search", query?, kind?, tag?} finds outputs in the places the package looks in ("a conifer", every terrain) and says whether the package can use each, {action:"libraries", add} lists a shared library the person names for the workspace, {action:"publish", dry_run:true} says what publishing would do (show it to the person; publish {note} only when they say so), {action:"outdated"} lists newer versions, {action:"update", package} shows the before/after of an update, which you apply (from, to, apply:true) only when the person says so. See help topic "packages".`;
 
 /**
@@ -70,7 +71,7 @@ export { graphLines };
 
 export const TOPICS: Record<string, string> = {
   workspace: `WORKSPACE, PACKAGE, LIBRARY (the three words, and the workspace tool)
-- A WORKSPACE is a folder tree: one production, a game, an archviz job, with topotopo-workspace.json at its root. Its
+- A WORKSPACE is a folder tree: one production, a game, an archviz job, with one <name>.topows file at its root. Its
   best place is inside the engine's content folder (Godot: the project folder or a folder in it; Unreal: Content/ or a
   folder in it), so Explorer, the engine and the web app show one tree and the engine imports each package's exports/.
 - A PACKAGE is a folder of graphs and the models they make, marked by one <id>.topo file, its manifest (the file's
@@ -111,8 +112,8 @@ Put reference images the person gives you in attachments/, guide files in inputs
 board or concept pages, so the package page and the board link both ways. To find a ready-made output ("a conifer",
 every terrain): workspace {action:"search", query?, kind?, tag?}.
 
-WORKSPACES: topotopo-workspace.json at the workspace's root:
-  {"name": "my-game", "libraries": ["props", "../shared/materials"],
+WORKSPACES: <name>.topows at the workspace's root, one per folder; the file's name is the workspace's name (my-game.topows), as a package's .topo file names the package:
+  {"libraries": ["props", "../shared/materials"],
    "engine": {"type": "godot", "project": "../project.godot"}, "follow": false, "uses": {"topotopo/props": "1.1"}}
 Paths are written from the workspace's folder. The person makes one: CLI topotopo workspace init <folder>
 [--engine godot:<path>|unreal:<path>|none] [--library <name or folder>] [--follow]; MCP workspace
@@ -155,8 +156,8 @@ says what the open package's workspace holds: its packages as the scan finds the
   and why; it changes nothing but missing .gdignore files. Run it after a TopoTopo update.
 
 LIBRARIES AND THE WEB APP: a library holds packages in folders below it; the parent folders ("props") are a package's
-collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340)
-mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries: the front page
+collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340; \`topotopo open <file.topo|file.topows|folder>\` opens one package or
+workspace in the browser, starting the web app unseen when none runs and listing it for that run) mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries: the front page
 shows each as a card (TopoTopo's built-in library last) and searches every package and output; every folder is a page
 (/w/<workspace>/<path>/, /l/<library>/<path>/) with its flags, its package when it holds a .topo file (preview,
 versions, outputs with their kinds and tags, the packages that use it and those it uses, graphs, exports), its notes,
@@ -1176,7 +1177,7 @@ so it cooks anywhere without the libraries, and what it uses never changes by it
 about, and the warning goes once the copy is restored. init writes a .gitattributes that keeps versions/ and packages/
 byte for byte, and a .gitignore for packages/.cache.json (the hashes of the copies' files, kept between runs) and
 packages/.lock (held while a command, the viewer or an MCP server writes the manifest and the lock).
-IN A WORKSPACE (a folder tree with topotopo-workspace.json; CLI: topotopo workspace init): its packages share one copy
+IN A WORKSPACE (a folder tree with a .topows file; CLI: topotopo workspace init): its packages share one copy
 of each package version, in topotopo-packages/ beside that file, whose "uses" names the version the whole workspace uses.
 A first use in any of its packages adds the package there; Update compares every place every package uses it and
 changes them all; remove is refused while a package still names it. A package that publishes versions keeps its own "uses"
@@ -1343,6 +1344,53 @@ The plugin's contract (jobs file, progress lines, record schema, freshness): int
 
 THE CLI COMMANDS:
 ${GODOT_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
+  unreal: `UNREAL (packages inside an Unreal project's Content/, imported by the TopoTopoImport plugin)
+A package in a folder of its own under the project's Content/ (not a plugin's, for now) imports as <id>.topo, a source asset: the plugin (topotopo unreal setup puts it in
+Plugins/TopoTopoImport/; Unreal 5.8; C++ source, which Unreal builds on opening) cooks each published output and brings it in as
+Unreal assets, kept current by Auto Reimport. Levels use those assets, never the package asset, which stays in the editor.
+
+WHAT IS COOKED: the package's published outputs, by the rule of the cook for Godot (help topic "godot"), at frame 1 with var defaults,
+from the working folder. The cooked files are the plugin's intermediate files: Saved/TopoTopo/<the folder's content path>/<id>/, out of
+Auto Reimport's sight.
+WHAT EACH KIND BECOMES (a report's outputs carry the steps as "import"):
+  mesh        a Static Mesh <folder>/<id>/<id> with materials and textures in Materials/ and Textures/, _lod<n> pieces as its LODs,
+              scene_null points as sockets tagged TopoTopo
+  instances   one Static Mesh per packed source in Meshes/; <id>_Instances, a TopoTopo Instances asset: drag it into a level for
+              hierarchical instanced static meshes; <id>_Points, a PCG Data Asset whose attribute MeshPath names each mesh
+  points      <id>_Points, a PCG Data Asset; every extra column an attribute
+  textures    one Texture per image
+  terrain     the unreal_landscape bundle on disk; Place Terrain in Level on the package asset brings it in (needs TopoTopoPCG: --with-pcg)
+  scene       with a heightfield as terrain, else as mesh and instances
+  curves, material, volume   not imported yet: listed as skipped, with why
+Axes: Unreal X = x, Y = z, Z = y, in centimetres, for meshes (Interchange converts the GLB), rows and sockets.
+
+OPTIONS come from <id>.topo.import [params] (the package asset's Import Options), and the flags override them:
+  outputs/folder "outputs" (relative to the package, or /Game/...)      --into </Game/folder>
+  outputs/per_output_folders true                                        --flat
+  outputs/skip "" (comma-separated output ids)                           --skip a,b
+  instances/mode 0 Instanced (packed) | 1 Expand (real copies)           --instancing packed|expand
+
+REIMPORT: the .topo changing reimports through Auto Reimport (Editor Preferences > Loading & Saving). A change under graphs/, assets/,
+inputs/ or topotopo-packages/ (the viewer, an agent over MCP, by hand), and whatever changed while the editor was closed, cooks in the
+background and imports when the editor is free (Editor Preferences > Plugins > TopoTopo > Live Cook). Only outputs whose deps changed
+cook, only steps whose files' hashes changed import, assets update where they are, instance actors in open levels rebuild. A failed
+output keeps its last good assets; the error is on the package asset and in Message Log > TopoTopo. An output no longer published
+leaves its assets; they are listed as orphans. Right-click the package asset: Reimport, Recook (everything again), Open in TopoTopo
+(the live viewer), Show Cook Report, Place Terrain in Level. The console command TopoTopo.CookAll [force] does every package.
+
+THE RECORD <package>/.topotopo/unreal.json (commit it with the .uasset files) is the same record as Godot's; a checkout without
+Saved/TopoTopo/ is still current.
+EXIT CODES: 0 every output ok; 1 an output or package failed or timed out (records and reports still written);
+2 usage, setup or protocol error, a published copy, a package outside Content/, directly in it or in a plugin's (nothing written).
+SHARED FOLDERS: each package needs output folders of its own; a file another package placed is refused, naming both packages. A flat
+folder whose outputs would make two assets of one name fails the second.
+AUTO REIMPORT skips folders named graphs, assets, inputs, exports, versions, packages, attachments, .topotopo or topotopo-packages
+anywhere under Content/ (the exclusions setup writes): a folder of yours with such a name is imported by hand.
+CI: topotopo unreal status <project> --strict exits 1 when a package is stale, failed or never cooked or Auto Reimport still sees its folders.
+The plugin's contract (import steps, what differs from the cook for Godot): integrations/unreal/PROTOCOL.md.
+
+THE CLI COMMANDS:
+${UNREAL_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
   trim_sheets: `TRIM SHEETS (one description, then map, bake, check)
 Search words: trim sheet, trim band, hotspot, texture a railing, uvs along a path.
 A trim sheet is one texture whose horizontal bands each repeat along u: stone courses, a coping, a step, a metal

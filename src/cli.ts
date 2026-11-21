@@ -28,6 +28,11 @@
 //   node src/cli.ts view <graph.json> [--port 7341]      live 3D viewer in the browser, re-cooks on every save;
 //                                                         guides and dropped files go to the package's inputs/
 //   node src/cli.ts web [--port 7340] [--library dir]  the web app for the workspaces and libraries (src/packages/commands.ts)
+//   node src/cli.ts open [<file.topo | file.topows | folder>]   open a package or workspace in the browser (what a
+//                                                         double-click runs); starts the web app unseen when none runs;
+//                                                         open --stop stops that web app
+//   node src/cli.ts setup [--remove]                      Windows: file links so a double-click opens a package or
+//                                                         workspace, a folder menu entry, the Start menu; --remove undoes it
 //   node src/cli.ts library add|remove|list|new|bake …    registered libraries and packages; edit [folder] opens the
 //                                                         live viewer on a package
 // The workspace around packages (src/workspace.ts), a package and the packages it uses (src/packages/commands.ts,
@@ -56,6 +61,10 @@
 //   node src/cli.ts cook --jobs <jobs.json> [--force] [--no-cache] [--progress json]
 //   node src/cli.ts godot setup <godot project folder> [--no-enable]
 //   node src/cli.ts godot status <godot project folder> [--strict] [--json]
+// A package's published outputs cooked for an Unreal project, and the Unreal plugin (src/host/unreal.ts, integrations/unreal/PROTOCOL.md):
+//   node src/cli.ts cook <.topo | package folder | folder>... --for unreal [--into </Game/folder>] [--flat] [--skip a,b] [--instancing packed|expand] [--force] [--no-cache] [--timeout <s>] [--report <file>] [--progress json] [--quiet]
+//   node src/cli.ts unreal setup <unreal project folder or .uproject> [--no-enable] [--with-pcg]
+//   node src/cli.ts unreal status <unreal project folder or .uproject> [--strict] [--json]
 // Installed from npm the same commands are `topotopo …` (package.json bin → dist/cli.js, built by npm run build).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -79,6 +88,7 @@ import { outputKind } from './io/kinds.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { PACKAGE_COMMANDS } from './packages/commands.ts';
 import { GODOT_COMMANDS } from './host/godot-commands.ts';
+import { UNREAL_COMMANDS } from './host/unreal-commands.ts';
 import { setProgram, writeAtomic } from './package.ts';
 import { refreshGraph, refreshNotes } from './graph/refresh.ts';
 import { isGraph } from './graph/types.ts';
@@ -195,12 +205,16 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; guides and files dropped on the page go to the package's inputs/, beside the file in no package)`,
     `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
     `       ${prog} web [--port 7340] [--library <folder>] [--no-bake]   (the web app: the registered workspaces and every library's packages, stable links for a board)`,
+    `       ${prog} open [<file.topo | file.topows | folder>]   (open a package or workspace in the browser, starting the web app unseen when none runs: what double-clicking the file runs; no path: the home page; open --stop stops that web app; $TOPOTOPO_HOME names the TopoTopo folder, $TOPOTOPO_BROWSER_LOG a file to write the address to instead of opening a browser)`,
+    `       ${prog} setup [--remove]   (Windows: after this, double-clicking a .topo package or .topows workspace opens it in TopoTopo with its icon, folders get "Open in TopoTopo" in the right-click menu and TopoTopo is in the Start menu; per user, no administrator rights; setup --remove puts the registry and the Start menu back as they were; $TOPOTOPO_HOME names the TopoTopo folder, which holds the record setup undoes from)`,
     `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
     '       a package and the packages it uses (a folder named must exist; default: the current folder\'s package; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
     ...PACKAGE_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
     '       Godot (exit 0 ok, 1 an output or package failed, 2 usage or setup; --help-topic godot):',
     ...GODOT_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
+    '       Unreal (the same exit codes; --help-topic unreal):',
+    ...UNREAL_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
   ].join('\n'));
   process.exit(0);
 }
@@ -278,18 +292,30 @@ if (argv[0] === 'view') {
   const { viewGraphFile } = await import('./viewer/graph-file.ts');
   try { await viewGraphFile(file, { name: graphName(file), port: opt('--port') !== undefined ? Number(opt('--port')) : undefined, follow: followArgs }); }
   catch (e) { fail(`${prog} view: ${(e as Error).message}`); }
+} else if (argv[0] === 'open') {
+  // `topotopo open [<file|folder>]`: a package or workspace in the browser, through the web app of this user (src/host/open.ts)
+  const { openCommand } = await import('./host/open.ts');
+  const { consoleIo } = await import('./packages/commands.ts');
+  process.exit(await openCommand(argv.slice(1), prog, consoleIo));
+} else if (argv[0] === 'setup') {
+  // `topotopo setup [--remove]`: the Windows file links, folder menu entry and Start menu entry (src/host/setup.ts)
+  const { setupCommand } = await import('./host/setup.ts');
+  const { consoleIo } = await import('./packages/commands.ts');
+  process.exit(await setupCommand(argv.slice(1), prog, consoleIo));
 } else if (['web', 'library', 'edit', 'workspace', 'init', 'libraries', 'use', 'remove', 'packages', 'publish', 'search', 'outdated', 'check', 'update'].includes(argv[0])) {
   // the web app, its libraries and its editor; a package and the packages it uses (src/packages/commands.ts). A command that ends
   // gives its exit code; the web app and the editor keep running
   const { commands } = await import('./packages/commands.ts');
   const code = await commands[argv[0]](argv.slice(1), prog);
   if (typeof code === 'number') process.exit(code);
-} else if (argv[0] === 'cook' || argv[0] === 'godot') {
-  // a package's published outputs cooked into a Godot project, and the Godot plugin's setup and status
-  // (src/host/godot.ts, src/host/cook.ts): exit 0, 1 (an output or package failed), 2 (usage, setup or protocol)
-  const { cookCommand, godotCommand } = await import('./host/godot.ts');
+} else if (argv[0] === 'cook' || argv[0] === 'godot' || argv[0] === 'unreal') {
+  // a package's published outputs cooked into an engine project, and the engine plugins' setup and status
+  // (src/host/cook-command.ts, godot.ts, unreal.ts, cook.ts): exit 0, 1 (an output or package failed), 2 (usage, setup or protocol)
+  const { cookCommand } = await import('./host/cook-command.ts');
+  const { godotCommand } = await import('./host/godot.ts');
+  const { unrealCommand } = await import('./host/unreal.ts');
   const { consoleIo } = await import('./packages/commands.ts');
-  process.exit(await (argv[0] === 'cook' ? cookCommand : godotCommand)(argv.slice(1), consoleIo));
+  process.exit(await (argv[0] === 'cook' ? cookCommand : argv[0] === 'godot' ? godotCommand : unrealCommand)(argv.slice(1), consoleIo));
 } else if (argv[0] === 'mcp') {
   // `topotopo mcp [--package dir] [--viewer]`: the MCP server over stdio; src/mcp/server.ts reads the remaining
   // arguments from process.argv and runs until the client closes stdin
