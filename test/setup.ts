@@ -146,8 +146,8 @@ try {
     check(noLauncher.code === 1 && noLauncher.err.length === 1 && /^this TopoTopo install is missing launcher\/win32-x64\/topotopo-open\.exe: install TopoTopo again$/.test(noLauncher.err[0]), `the launcher missing: one sentence (${noLauncher.err[0]})`);
     const noIcons = await say([], { ...opts, root: install(path.join(tmp, 'no icons'), ['assets/icons/topotopo-package.ico', 'assets/icons/topotopo-workspace.ico']) });
     check(noIcons.code === 1 && /missing assets\/icons\/topotopo-package\.ico and assets\/icons\/topotopo-workspace\.ico: install TopoTopo again$/.test(noIcons.err[0] ?? ''), `the icons missing: one sentence (${noIcons.err[0]})`);
-    const noDist = await say([], { ...opts, root: install(path.join(tmp, 'no dist'), ['dist/cli.js']) });
-    check(noDist.code === 1 && noDist.err.length === 1 && /^this is a source checkout that was never built \(dist\/cli\.js is missing\): run npm run build once, then topotopo setup again$/.test(noDist.err[0]), `a source checkout that was never built: one sentence (${noDist.err[0]})`);
+    const noCli = await say([], { ...opts, root: install(path.join(tmp, 'no cli'), ['dist/cli.js']) });
+    check(noCli.code === 1 && noCli.err.length === 1 && /^this TopoTopo install is missing dist\/cli\.js: install TopoTopo again$/.test(noCli.err[0]), `no command line (neither src/cli.ts nor dist/cli.js): one sentence (${noCli.err[0]})`);
     check(exportText(CLASSES) === before0 && !fs.existsSync(path.join(home, 'setup.json')) && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')), 'none of those messages changed the registry, the Start menu or the TopoTopo folder');
 
     // ---- a Start menu override that is empty or not a full path is refused, never the real Start menu
@@ -311,22 +311,17 @@ try {
     await say(['--remove'], opts);
     check(exportText(CLASSES) === before0, 'and --remove puts the scratch key back');
 
-    // ---- through the command line (a source checkout without dist/ is the one-sentence message; with dist/ the whole round trip)
+    // ---- through the command line: the whole round trip, from this source checkout, built or not
     const env = { ...process.env, TOPOTOPO_SETUP_CLASSES: CLASSES, TOPOTOPO_SETUP_FILEEXTS: FILEEXTS, TOPOTOPO_SETUP_START_MENU: startMenu, TOPOTOPO_SETUP_NO_NOTIFY: '1', TOPOTOPO_HOME: path.join(tmp, 'cli home') };
     const cli = (...a: string[]) => spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), ...a], { env, encoding: 'utf8', windowsHide: true, timeout: 120_000 });
     const help = cli('--help');
     check(help.status === 0 && /setup \[--remove\]   \(Windows: /.test(help.stdout), 'the command line help describes setup');
     const nope = cli('setup', '--remove');
     check(nope.status === 0 && /^nothing to remove/.test(nope.stdout) && !nope.stderr, 'the command line: setup --remove without a setup is a no-op');
-    if (fs.existsSync(path.join(ROOT, 'dist', 'cli.js'))) {
-      const viaCli = cli('setup');
-      check(viaCli.status === 0 && fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')) && !!dump(CLASSES).get('.topo\\openwithprogids'), 'the command line: setup writes the scratch key and the Start menu entry');
-      const gone = cli('setup', '--remove');
-      check(gone.status === 0 && exportText(CLASSES) === before0 && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')), 'the command line: setup --remove puts it all back');
-    } else {
-      const unbuilt = cli('setup');
-      check(unbuilt.status === 1 && /^this is a source checkout that was never built \(dist\/cli\.js is missing\): run npm run build once, then node src\/cli\.ts setup again\s*$/.test(unbuilt.stderr) && exportText(CLASSES) === before0, `the command line in a source checkout that was never built says so (${unbuilt.stderr.trim()})`);
-    }
+    const viaCli = cli('setup');
+    check(viaCli.status === 0 && fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')) && !!dump(CLASSES).get('.topo\\openwithprogids'), `the command line: setup writes the scratch key and the Start menu entry (${viaCli.stderr.trim()})`);
+    const gone = cli('setup', '--remove');
+    check(gone.status === 0 && exportText(CLASSES) === before0 && !fs.existsSync(path.join(startMenu, 'TopoTopo.lnk')), 'the command line: setup --remove puts it all back');
   }
 } catch (e: any) {
   fail++;

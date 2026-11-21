@@ -55,7 +55,7 @@ const POWERSHELL = path.join(SYSTEM32, 'WindowsPowerShell', 'v1.0', 'powershell.
 export interface SetupOptions {
   /** the person's TopoTopo folder (default: topotopoHome()) */
   home?: string;
-  /** the TopoTopo install: the folder that holds launcher/, assets/ and dist/ (default: the one this file is in) */
+  /** the TopoTopo install: the folder that holds launcher/, assets/ and src/ or dist/ (default: the one this file is in) */
   root?: string;
   /** the Node.js the links run (default: the one running this) */
   node?: string;
@@ -324,9 +324,10 @@ export async function setupCommand(argv: string[], prog: string, io: Io, o: Setu
     const root = path.resolve(o.root ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..'));
     const launcher = path.join(root, 'launcher', 'win32-x64', EXE);
     const icons = { package: path.join(root, 'assets', 'icons', 'topotopo-package.ico'), workspace: path.join(root, 'assets', 'icons', 'topotopo-workspace.ico') };
-    const absent = [launcher, icons.package, icons.workspace].filter((f) => !fs.existsSync(f)).map((f) => path.relative(root, f).replace(/\\/g, '/'));
+    // the command line the launcher runs: src/cli.ts in a source checkout, else dist/cli.js (the npm package)
+    const cli = [path.join(root, 'src', 'cli.ts'), path.join(root, 'dist', 'cli.js')].find((f) => fs.existsSync(f)) ?? path.join(root, 'dist', 'cli.js');
+    const absent = [launcher, icons.package, icons.workspace, cli].filter((f) => !fs.existsSync(f)).map((f) => path.relative(root, f).replace(/\\/g, '/'));
     if (absent.length) throw new Say(`this TopoTopo install is missing ${absent.join(' and ')}: install TopoTopo again`);
-    if (!fs.existsSync(path.join(root, 'dist', 'cli.js'))) throw new Say(`this is a source checkout that was never built (dist/cli.js is missing): run npm run build once, then ${prog} setup again`);
 
     const classes = classesKey();
     const fileExts = userKey(process.env.TOPOTOPO_SETUP_FILEEXTS ?? REAL_FILEEXTS, 'TOPOTOPO_SETUP_FILEEXTS');
