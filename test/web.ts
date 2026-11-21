@@ -29,7 +29,7 @@ import { builtinLibrary, workingHash } from '../src/packages/registry.ts';
 import { esc, frontPage } from '../src/web/pages.ts';
 import { folderPage } from '../src/web/folder-page.ts';
 import { markdownLinks, renderMarkdown } from '../src/web/markdown.ts';
-import { imageSize, linkText, listFolder, PathError, resolveIn, resolveLink, videoPlayer, walkTree } from '../src/web/folders.ts';
+import { exportSources, exportStale, imageSize, linkText, listFolder, PathError, resolveIn, resolveLink, videoPlayer, walkTree } from '../src/web/folders.ts';
 import { canonicalJSON } from '../src/io/source.ts';
 import { sha256Hex } from '../src/core/sha256.ts';
 
@@ -535,6 +535,7 @@ try {
     check(/<details class="flags"[\s\S]*?01-overview\.md links to gone\.png, which is not there[\s\S]*?Fix the link, or put the file there/.test(notes) && /res:\/\/scenes\/none\.tscn, which is not there/.test(notes), 'a link to a missing file is a flag on its folder, with what to do');
     const crateP = (await fr('/w/yard/props/crate/')).body.toString();
     check(/exports\/crate\.glb was made from an older version of its graph/.test(crateP) && !/exports\/fresh\.glb was made/.test(crateP), 'an export older than its graph is a flag; one made from the graph as it is is not');
+    check(/>crate\.glb<\/a> <span class="stale"/.test(crateP) && !/>fresh\.glb<\/a> <span class="stale"/.test(crateP), 'and the package\'s list of exports marks the same one as older than its graph');
     const broken = (await fr('/w/yard/levels/broken/')).body.toString();
     check(/The preview of Broken did not cook: \[rocks\] unknown node type &quot;scatter_rockz&quot;<\/span>/.test(broken), 'a package whose preview did not cook is a flag, with why');
     const lamp = (await fr('/w/yard/props/lamp/')).body.toString();
@@ -754,6 +755,89 @@ try {
       const fixed = await until(async () => !/b\.md links to gone\.png/.test((await reqAt(lv.port, '/w/live/')).body.toString()), 10_000);
       check(flagged && fixed, `a broken link written while the server runs is a flag on its root, and goes when it is fixed (${flagged} / ${fixed})`);
     } finally { lv.close(); }
+  }
+
+  section('audits of a large tree: each thing read once, pages that do not wait');
+  {
+    // a graph is read and hashed once per change, however many exports name it: those made from it as it is, those
+    // older than it, those made with other vars
+    const kit = path.join(tmp, 'hashes', 'kit');
+    const graph = { vars: { size: 1 }, nodes: { b: { type: 'box', params: { size: '$size' } } }, output: 'b' };
+    const graphFile = path.join(kit, 'graphs', 'main.json');
+    write(graphFile, graph);
+    const sha = (spec: object) => sha256Hex(canonicalJSON(spec));
+    const made = (name: string, graphSha: string, vars: object) => write(path.join(kit, 'exports', `${name}.glb.source.json`), { format: 'topotopo-export-source', version: 1, files: [`${name}.glb`], source: { graph: 'main', graph_sha256: graphSha, output: null, node: 'b', frame: 1, fps: 24, vars, seeds: {}, export: { format: 'glb', options: {} }, topotopo: '0' } });
+    for (let i = 0; i < 20; i++) made(`a-fresh-${i}`, sha(graph), { size: 1 });
+    for (let i = 0; i < 5; i++) made(`b-old-${i}`, sha({ ...graph, output: 'old' }), { size: 1 });
+    for (let i = 0; i < 5; i++) made(`c-vars-${i}`, sha({ ...graph, vars: { size: 2 } }), { size: 2 });
+    const reads = { n: 0 };
+    const readFile = fs.readFileSync;
+    (fs as any).readFileSync = (...a: Parameters<typeof readFile>) => { if (path.resolve(String(a[0])) === path.resolve(graphFile)) reads.n++; return (readFile as any)(...a); };
+    try {
+      const stale = () => exportSources(kit).map((e) => `${e.rel.replace(/-\d+\.glb$/, '')}:${exportStale(graphFile, e.made)}`);
+      const first = new Set(stale()), firstReads = reads.n;
+      check(first.size === 3 && first.has('a-fresh:false') && first.has('b-old:true') && first.has('c-vars:false') && firstReads === 2,
+        `30 exports of one graph: it is read twice, once for its hash and once for the other vars set (${firstReads} reads; ${[...first].join(', ')})`);
+      stale();
+      check(reads.n === firstReads, `checked again, unchanged: it is not read again (${reads.n - firstReads} reads)`);
+      write(graphFile, { ...graph, nodes: { b: { type: 'sphere' } } });
+      const after = new Set(stale());
+      check(after.size === 3 && after.has('a-fresh:true') && after.has('b-old:true') && after.has('c-vars:true') && reads.n - firstReads === 2,
+        `the graph changed: read again once per vars set, and every export is older than it (${reads.n - firstReads} reads; ${[...after].join(', ')})`);
+      write(graphFile, '{ not json');
+      const broken = new Set(stale());
+      write(graphFile, graph);
+      const back = new Set(stale());
+      check(broken.size === 3 && [...broken].every((x) => x.endsWith(':null')) && back.has('a-fresh:false') && back.has('c-vars:false') && back.has('b-old:true'),
+        `a graph that cannot be read says so for each export, and when it is mended they are as before (${[...broken].join(', ')} / ${[...back].join(', ')})`);
+    } finally { (fs as any).readFileSync = readFile; }
+
+    // a walk looks up what its notes' links share once: each path's real path is asked once, and the flags are those of
+    // the links looked up one by one
+    const shared = path.join(tmp, 'shared-links');
+    write(path.join(shared, 'shared.topows'), { libraries: [] });
+    write(path.join(shared, 'art', 'pics', 'a.png'), PNG);
+    for (let i = 0; i < 30; i++) write(path.join(shared, 'docs', `n${String(i).padStart(2, '0')}`, 'note.md'), `[a](../../art/pics/a.png) [gone](../../art/pics/gone.png) [top](/art/pics/a.png)\n`);
+    const sroot = { kind: 'w' as const, name: 'shared', dir: shared, engine: null };
+    const asked = new Map<string, number>();
+    const native = fs.realpathSync.native;
+    fs.realpathSync.native = ((p: any, o?: any) => { asked.set(String(p), (asked.get(String(p)) ?? 0) + 1); return (native as any)(p, o); }) as typeof native;
+    let walk;
+    try { walk = await walkTree(sroot); } finally { fs.realpathSync.native = native; }
+    const most = Math.max(...asked.values());
+    const oneByOne = fs.readdirSync(path.join(shared, 'docs')).flatMap((d) => ['../../art/pics/a.png', '../../art/pics/gone.png', '/art/pics/a.png'].map((h) => resolveLink(sroot, path.join(shared, 'docs', d), h))).filter((t) => t.t === 'path' && !t.exists).length;
+    check(most === 1 && walk.flags.length === 30 && oneByOne === 30 && walk.flags.every((f) => /note\.md links to \.\.\/\.\.\/art\/pics\/gone\.png, which is not there/.test(f.what)),
+      `90 links of 30 notes to the same folder: each real path asked once (at most ${most} times, ${asked.size} paths), the same 30 broken links as looked up one by one (${walk.flags.length} / ${oneByOne})`);
+
+    // a page answers while its tree's audit runs: with none yet it says the tree is being checked, and the event stream
+    // says when the audit is done; then a page shows the audit before while the next one is made
+    const big = path.join(tmp, 'big');
+    write(path.join(big, 'big.topows'), { libraries: [] });
+    for (let i = 0; i < 400; i++) write(path.join(big, 'notes', `d${i % 20}`, `n${i}.md`), `[gone](gone-${i}.png) [up](../d${(i + 1) % 20}/n${(i + 1) % 400}.md)\n`);
+    // a slow disk: each look at a path of the tree takes a moment (the audit still gives the event loop its turns)
+    const lstat = fs.lstatSync;
+    (fs as any).lstatSync = (...a: Parameters<typeof lstat>) => { if (String(a[0]).startsWith(big)) { const t = performance.now(); while (performance.now() - t < 0.2) { /* a slow disk */ } } return (lstat as any)(...a); };
+    const bw = await startWeb({ config: { file: path.join(tmp, 'config.json'), libraries: [], workspaces: [{ name: 'big', path: big }], web: { port: 0, cors: [] } }, port: 0, bake: false, auditWait: 0 });
+    let events = '';
+    let stream: http.ClientRequest | undefined;
+    try {
+      const home = (await reqAt(bw.port, '/')).body.toString();
+      const page = (await reqAt(bw.port, '/w/big/')).body.toString();
+      check(/<a class="rcard ws checking"[^>]*data-root="w\/big"/.test(home) && /checking for flags…/.test(home) && /<p class="notice checking">Checking the workspace for flags/.test(page) && !/class="flags"/.test(page) && /"checking":true/.test(page.replace(/&quot;/g, '"')),
+        'pages made while the first audit runs answer at once: the card and the page say the tree is being checked, no flags yet');
+      const full = await until(async () => /<span class="ftotal">400 flags<\/span>/.test((await reqAt(bw.port, '/w/big/')).body.toString()), 30_000);
+      check(full, 'when the audit is done the page shows its 400 broken links');
+      stream = http.get({ host: '127.0.0.1', port: bw.port, path: '/api/events', headers: { host: `127.0.0.1:${bw.port}` } }, (res) => res.on('data', (c) => { events += c; }));
+      stream.on('error', () => {});
+      await until(() => events.includes(': hello'), 5000);
+      write(path.join(big, 'notes', 'd0', 'extra.md'), '[gone](gone-extra.png)\n');
+      bw.rescan();
+      const during = (await reqAt(bw.port, '/w/big/')).body.toString();
+      check(/<span class="ftotal">400 flags<\/span>/.test(during) && !/notice checking/.test(during), 'the tree changed: a page answers at once with the audit before while the next one is made');
+      const done = await until(() => events.includes('"audited":"w/big"'), 30_000);
+      const next = /<span class="ftotal">401 flags<\/span>/.test((await reqAt(bw.port, '/w/big/')).body.toString());
+      check(done && next, `the event stream says when the next audit is made, and pages show it (${done} / ${next})`);
+    } finally { stream?.destroy(); bw.close(); (fs as any).lstatSync = lstat; }
   }
 
   // ------------------------------------------------------------------------------------------- markdown, links

@@ -7,6 +7,7 @@
 // to the Godot project, /Game/ to Unreal's Content/, YouTube and Vimeo to their privacy players); files are served
 // with ranges; and a tree is audited for its flags: links to missing files, previews that did not cook, versions not
 // published, exports older than their graphs, published outputs no package of the workspace uses.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type http from 'node:http';
@@ -14,7 +15,6 @@ import { MANIFEST_EXT } from '../session.ts';
 import { engineAbove, engineTypeOf, godotProjectOf } from '../engines.ts';
 import type { EngineType } from '../engines.ts';
 import { canonicalJSON } from '../io/source.ts';
-import { sha256Hex } from '../core/sha256.ts';
 import { jsonFormat, SIDECAR_FORMATS, SIDECAR_HEAD_BYTES } from '../io/sidecars.ts';
 import { skippedName, isCheckout } from '../scan.ts';
 import { workspaceFileIn } from '../package.ts';
@@ -479,6 +479,8 @@ const graphHashes = new Map<string, GraphHashes>();
 /** The graph files and the vars sets per graph that hashes are kept for (past that, they are made again). */
 const MAX_GRAPHS = 4096, MAX_VARS_SETS = 64;
 const hasVars = (g: any) => !!(g && typeof g === 'object' && g.vars && typeof g.vars === 'object');
+/** SHA-256 of a graph's canonical JSON as exports record it (src/io/source.ts), by Node's own hash: the same digest, sooner. */
+const graphSha = (canonical: string) => crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
 
 /**
  * Whether the graph an export was made from changed since (the hash it recorded is not the graph file's, with the
@@ -494,7 +496,9 @@ export function exportStale(graphFile: string, m: ExportMade): boolean | null {
   if (h?.key !== key) {
     let ok = true;
     try { g = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { ok = false; }
-    h = { key, plain: ok ? sha256Hex(canonicalJSON(g)) : null, vars: ok && hasVars(g), withVars: new Map() };
+    h = { key, plain: ok ? graphSha(canonicalJSON(g)) : null, vars: ok && hasVars(g), withVars: new Map() };
+    // with its own vars, a graph's hash is its canonical hash (the same text)
+    if (h.vars) h.withVars.set(canonicalJSON(g.vars), h.plain!);
     if (graphHashes.size >= MAX_GRAPHS) graphHashes.clear();
     graphHashes.set(graphFile, h);
   }
@@ -505,7 +509,7 @@ export function exportStale(graphFile: string, m: ExportMade): boolean | null {
   let withVars = h.withVars.get(varsKey);
   if (withVars === undefined) {
     if (g === undefined) { try { g = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { return null; } }
-    withVars = sha256Hex(canonicalJSON({ ...g, vars: m.vars }));
+    withVars = graphSha(canonicalJSON({ ...g, vars: m.vars }));
     if (h.withVars.size >= MAX_VARS_SETS) h.withVars.clear();
     h.withVars.set(varsKey, withVars);
   }

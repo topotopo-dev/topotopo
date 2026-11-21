@@ -313,8 +313,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   // changes (rewarm). A page waits a moment for the audit of the tree as it is, then shows the one before: a page never
   // waits for a large tree's audit. An audit gives the event loop a turn every few milliseconds: pages, files and the
   // event stream keep answering while a large tree is audited
-  /** `gen`: the tree's count of changes when the audit began; `dir`: the tree's folder */
-  type Audit = { walk: Walk; flags: Flag[]; at: number; gen: number; dir: string };
+  /**
+   * `stale`: each package's exports older than their graphs (by the package's folderKey; its page marks them); `gen`: the
+   * tree's count of changes when the audit began; `dir`: the tree's folder
+   */
+  type Audit = { walk: Walk; flags: Flag[]; stale: Map<string, Set<string>>; at: number; gen: number; dir: string };
   /** the newest audit of each tree: kept after a change, until the next one is made */
   const audits = new Map<string, Audit>();
   /** the audits under way, and each tree's count of changes (an audit begun before a change is not of the tree as it is) */
@@ -629,7 +632,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     for (const e of exportSources(p.dir)) { const f = graphs.get(e.made.graph); if (f && exportStale(f, e.made)) out.add(e.rel); await pause(); }
     return out;
   };
-  const packageData = async (p: Package): Promise<PackageData> => {
+  /** A package's page data; its exports older than their graphs as the audit shown says (none before the first audit). */
+  const packageData = (p: Package, audit: Audit | null): PackageData => {
     const builtin = isBuiltin(p), s = builtin ? null : readBakeState(p.dir);
     // unreadable: listed without nodes
     const graphs = [...graphsOf(p)].map(([name, file]) => { const s = graphSummary(file); return { name, nodes: s.nodes, vars: s.vars }; });
@@ -643,7 +647,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     });
     const at = (sub: string, f: string) => urls.raw(r.kind, r.name, `${p.rel}/${sub}/${f}`);
     const model = (sub: string, f: string) => (/\.(glb|gltf)$/i.test(f) ? { model: urls.model(r.kind, r.name, `${p.rel}/${sub}/${f}`) } : {});
-    const stale = builtin ? new Set<string>() : await staleExports(p);
+    const stale = builtin ? new Set<string>() : audit?.stale.get(folderKey(p.dir)) ?? new Set<string>();
     return {
       ...cardOf(p), builtin, rel: p.rel, place: games.some((g) => g.scan.packages.includes(p)) ? `in the workspace "${p.lib}"` : builtin ? 'in TopoTopo\'s built-in library' : `in library "${p.lib}"`, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
       attachments: builtin ? [] : listFiles(path.join(p.dir, 'attachments')).map((f) => ({ ...f, url: at('attachments', f.path), ...model('attachments', f.path) })),
@@ -674,9 +678,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   /**
    * What is wrong with a package that TopoTopo can tell from its files: its preview did not cook; it publishes versions
    * and has none, or changes no version holds; an export older than its graph; published outputs that no other package
-   * of the workspace uses (`used`: node type → the folders of the packages whose graphs use it; null outside a workspace).
+   * of the workspace uses (`used`: node type → the folders of the packages whose graphs use it; null outside a workspace;
+   * `stale`: its exports older than their graphs, staleExports).
    */
-  const packageFlags = async (p: Package, used: Map<string, Set<string>> | null): Promise<Flag[]> => {
+  const packageFlags = (p: Package, used: Map<string, Set<string>> | null, stale: Set<string>): Flag[] => {
     const out: Flag[] = [], at = p.rel, m = p.manifest;
     const s = readBakeState(p.dir);
     if (s && !s.ok && hasDefault(p) && !queue.pending(p.dir)) out.push({ kind: 'bake', at, what: `The preview of ${m.title} did not cook: ${firstLine(s.error) || 'no reason given'}`, todo: 'Open it in the editor to see why; it bakes again when the graph is saved, or press Re-bake' });
@@ -702,7 +707,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         }
       }
     }
-    for (const e of await staleExports(p)) out.push({ kind: 'export', at, what: `exports/${e} was made from an older version of its graph`, todo: 'Export it again: the Export button in the editor, or ask your agent' });
+    for (const e of stale) out.push({ kind: 'export', at, what: `exports/${e} was made from an older version of its graph`, todo: 'Export it again: the Export button in the editor, or ask your agent' });
     return out;
   };
   /** Whether an audit is of the tree as it is (made since its last change; TopoTopo's own library: recently). */
@@ -756,11 +761,17 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         await pause();
       }
     }
-    for (const p of pk) { flags.push(...await packageFlags(p, used)); await pause(); }
+    const stale = new Map<string, Set<string>>();
+    for (const p of pk) {
+      const s = await staleExports(p);
+      stale.set(folderKey(p.dir), s);
+      flags.push(...packageFlags(p, used, s));
+      await pause();
+    }
     walk.flags.forEach((f) => flags.push(f));
     // an engine project below the root is browsable, never audited
     const inEngine = (at: string) => walk.engines.some((e) => at === e || at.startsWith(e + '/'));
-    return { walk, flags: flags.filter((f) => !inEngine(f.at)), at: Date.now() };
+    return { walk, flags: flags.filter((f) => !inEngine(f.at)), stale, at: Date.now() };
   };
   const under = (rel: string, at: string) => !rel || at === rel || at.startsWith(rel + '/');
   /** A tree's flags as they are now: a preview that did not cook is no flag while it bakes again. */
@@ -905,7 +916,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       root: { kind: r.kind, name: r.name, label: rootLabel(r) }, rel, crumbs, kicker, title: p ? p.manifest.title : name, stats, dir: abs,
       flags: own, below: [...below].sort(([a], [b]) => byName(a, b)).map(([at, fl]) => ({ at, url: urls.folder(r.kind, r.name, at), flags: fl })),
       ...(!rel ? { uses: workspaceUses(r) } : {}), ...(!rel && audit?.walk.cut.length ? { cut: audit.walk.cut } : {}), ...(audit ? {} : { checking: true }),
-      ...(notice ? { notice } : {}), notes, moreNotes: unboxed.length, folders, files, engineAssets: listing.engineAssets, package: p ? await packageData(p) : null,
+      ...(notice ? { notice } : {}), notes, moreNotes: unboxed.length, folders, files, engineAssets: listing.engineAssets, package: p ? packageData(p, audit) : null,
       ...(pictures.length ? { pictures } : {}),
       live: { root: rootKey(r), rel, ...(p ? { package: keyOf(p) } : {}), ...(audit ? {} : { checking: true }), reveal: `${urls.folder(r.kind, r.name, rel)}?reveal` },
     };
