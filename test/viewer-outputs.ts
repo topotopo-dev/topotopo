@@ -32,6 +32,7 @@ import { startViewer } from '../src/viewer/server.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import { createOutputs, outputZip } from '../src/viewer/outputs.ts';
+import { createFolds, foldRows, foldWords, thumbURL } from '../src/viewer/app/outputs.js';
 import { CAMERA_NAMES, createViews, viewLabel, viewName } from '../src/viewer/app/camera.js';
 import * as km from '../src/viewer/app/keymap.js';
 import { channelPixels, zoomImage } from '../src/viewer/app/image-view.js';
@@ -150,6 +151,22 @@ try {
   check(bundle?.files.length === 3 && items.some((x: any) => x.parent === bundle.id && x.view === 'image'), 'bundled images individually inspectable');
   check(bundle.files.find((f: any) => f.name === 'source.json')?.role === 'source' && !items.some((x: any) => x.parent === bundle.id && x.label === 'source.json')
     && bundle.view === 'image' && bundle.download.zip && bundle.download.name === 'maps.zip', 'a textures folder\'s source.json is metadata of the folder, not a card; the card is an image, downloaded as maps.zip');
+  // The Outputs tab folds a result's textures (a saved folder's files) under its card, closed until opened; a folded
+  // texture has no card, so its picture is never requested. The open folds live in the viewer's store, by result id.
+  const kept = new Map<string, unknown>(), foldStore = { get: (k: string, d: unknown) => (kept.has(k) ? kept.get(k) : d), set: (k: string, v: unknown) => { kept.set(k, JSON.parse(JSON.stringify(v))); } };
+  const assetCards = (list: any[]) => list.filter((x: any) => x.origin === 'published' && x.graph === 'asset');
+  const pictures = (rows: any[]) => rows.map((x): string => thumbURL(x)).filter(Boolean).map((u) => new URLSearchParams(u.split('?')[1]).get('id'));
+  const folded = foldRows(assetCards(items), createFolds(foldStore).isOpen);
+  check(texture.parent === model.id && folded.rows.length === assetCards(items).length - 1 && !folded.rows.some((x: any) => x.parent)
+    && folded.folds.get(model.id)?.words === '1 texture' && folded.folds.get(model.id)?.open === false && !pictures(folded.rows).includes(texture.id) && pictures(folded.rows).includes(model.id),
+    'a result\'s texture is folded under its card by default ("1 texture"), and its picture is not requested');
+  createFolds(foldStore).set(model.id, true);
+  const opened = foldRows(assetCards(items), createFolds(foldStore).isOpen), at = opened.rows.findIndex((x: any) => x.id === model.id);
+  check(opened.folds.get(model.id)?.open === true && opened.rows[at + 1]?.id === texture.id && pictures(opened.rows).includes(texture.id),
+    'opened, its textures show right under it with their pictures, and the fold stays open for a new panel (a reload)');
+  const savedFold = foldRows(items.filter((x: any) => x.origin === 'saved'), createFolds(foldStore).isOpen);
+  check(savedFold.folds.get(bundle.id)?.words === '2 textures' && !savedFold.rows.some((x: any) => x.parent === bundle.id), 'a saved textures folder folds its images too ("2 textures")');
+  check(foldWords([{ view: 'image' }, { view: 'file' }, { view: 'file' }]) === '3 files' && foldWords([{ view: 'image' }]) === '1 texture', 'fold words: "3 files", "1 texture"');
   const zipped = await fetch(viewer.url + `api/output/zip?id=${bundle.id}`);
   const entries = unzipSync(new Uint8Array(await zipped.arrayBuffer()));
   check(Object.keys(entries).length === 3 && !!entries['atlas_AO.png'] && !!entries['source.json'] && /filename\*=UTF-8''maps\.zip/.test(zipped.headers.get('content-disposition') ?? ''), 'ZIP preserves companion files');
@@ -254,6 +271,11 @@ try {
   await ws.edit('asset', [{ op: 'vars', vars: { size: 4 } }]);
   items = await settled();
   check(items.find((x: any) => x.id === ref.id).revision !== ref.revision, 'referenced graph edits refresh dependent outputs');
+  const recooked = items.find((x: any) => x.id === model.id), reopened = foldRows(assetCards(items), createFolds(foldStore).isOpen);
+  check(recooked.revision !== model.revision && reopened.folds.get(model.id)?.open === true && reopened.rows.some((x: any) => x.id === texture.id),
+    'a fold the person opened stays open when the result cooks again');
+  createFolds(foldStore).set(model.id, false);
+  check(!foldRows(assetCards(items), createFolds(foldStore).isOpen).rows.some((x: any) => x.parent), 'and closes again');
   // Export all: every target, the outputs without one listed
   const everything = await command('export-all', {});
   check(everything.status === 200 && everything.data.written.length === 3 && everything.data.skipped.some((s: any) => s.graph === 'another'), 'Export all writes every target and lists the outputs without one');
