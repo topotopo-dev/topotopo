@@ -1,11 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-<!-- TopoTopo workspace (.topows), drawn for 32 and 48 px. -->
-  <defs><linearGradient id="front" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#68727e"/><stop offset="1" stop-color="#4f5761"/></linearGradient></defs>
-  <path d="M2 6Q2 4 4 4H12L14.5 6.5H28Q30 6.5 30 8.5V27H2Z" fill="#3b4149"/>
-  <rect x="5" y="8" width="22" height="5" fill="#f3efea"/>
-  <path d="M2 11H30V26Q30 28 28 28H4Q2 28 2 26Z" fill="url(#front)"/>
-  <rect x="2" y="11" width="28" height="1" fill="#8f99a5"/>
-  <polygon points="16,14 24,18 16,22 8,18" fill="#f4a26c"/><polygon points="8,18 16,22 16,25 8,21" fill="#d9622b"/><polygon points="24,18 16,22 16,25 24,21" fill="#a8461a"/>
-  <polygon points="16,13 22,16 16,19 10,16" fill="#f4a26c"/><polygon points="10,16 16,19 16,22 10,19" fill="#d9622b"/><polygon points="22,16 16,19 16,22 22,19" fill="#a8461a"/>
-  <polygon points="16,12 20,14 16,16 12,14" fill="#f4a26c"/><polygon points="12,14 16,16 16,19 12,17" fill="#d9622b"/><polygon points="20,14 16,16 16,19 20,17" fill="#a8461a"/>
+<!-- TopoTopo workspace (.topows), drawn for 32 px and 48 px. -->
+  <polygon points="16,9 31,16.5 16,24 1,16.5" fill="#f2897d"/><polygon points="1,16.5 16,24 16,28 1,20.5" fill="#d8453b"/><polygon points="31,16.5 16,24 16,28 31,20.5" fill="#a52f28"/><polygon points="16,7 27,12.5 16,18 5,12.5" fill="#9fd27b"/><polygon points="5,12.5 16,18 16,22 5,16.5" fill="#58a63a"/><polygon points="27,12.5 16,18 16,22 27,16.5" fill="#3d7d27"/><polygon points="16,5 23,8.5 16,12 9,8.5" fill="#f8d56c"/><polygon points="9,8.5 16,12 16,16 9,12.5" fill="#e1a823"/><polygon points="23,8.5 16,12 16,16 23,12.5" fill="#ad7d12"/>
 </svg>
