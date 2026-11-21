@@ -29,7 +29,7 @@ pixels and removes an entire component, retaining the holes of surviving compone
 
 The output is closed XY curves with point `uv`, primitive `class` (stable row-major component ID),
 `contour_id` and `hole` (0/1). IDs may have gaps after filtering. Outer contours are counter-clockwise in XY,
-holes clockwise. The canvas starts at (0,0), has `width` metres along X, and follows the original aspect along Y.
+holes clockwise. The canvas starts at (0,0), has `extent` metres along X (0, the default, is the metres the image covers), and follows the original aspect along Y.
 Transparent margins are retained. Detail `image_size` is [widthPixels,heightPixels]; `image_width` is metres.
 Simplification only accepts removals that do not cross or swallow another boundary and whose accumulated
 distance error stays within `tolerance` pixels. It can retain more vertices than a plain polyline simplifier.
@@ -92,7 +92,7 @@ Use `texture_to_material` to attach the atlas images.
 
 ## Padding and opacity
 
-`tex_dilate` copies the nearest valid source into a band of `radius` pixels. It uses RGBA alpha by default,
+`tex_dilate` copies the nearest valid source into a band of `distance` metres (the example gives the atlas's gutter in pixels as `padding` and divides by the atlas's texel size). It uses RGBA alpha by default,
 or an explicit same-sized mask through input 1 with `mask_image`, `mask_layer` and `mask_channel`.
 Validity is strictly greater than `mask_threshold`. Grey source images require an explicit mask.
 Like every texture filter it names its result after its own node; to pad one image of the atlas in place, set

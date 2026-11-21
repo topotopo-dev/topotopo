@@ -23,7 +23,8 @@ import { connectivity } from '../core/topology.ts';
 import { minDistanceSelect } from '../core/pcg.ts';
 import { P, simBudget } from './util.ts';
 import { wasmCallUnderBudget } from './wasmcall.ts';
-import { codeVarDecl, codeVarNames, codeVarValues } from '../core/usercode.ts';
+import { codeVarNames, codeVarValues } from '../core/usercode.ts';
+import { PixelSyntaxError, compilePixelFunction } from '../core/pixelexpr.ts';
 import { scriptVarsGuard } from '../core/snippet-lib.ts';
 import { getLoadedKernels, loadHostKernels } from '../wasm/kernels.ts';
 import type { ErosionResult, FillSinksResult, FlowAccumulationResult, Kernels } from '../wasm/kernels.ts';
@@ -748,17 +749,15 @@ defineNode({
         if (own.has(n)) hiddenVars.add(n);
         else varNames.push(n);
       }
-      const body = /\breturn\b/.test(code) ? code : `return (${code});`;
       // run like a wrangle: the body is parsed on its own first (a complete function body cannot close the wrapper
       // it is pasted into, so nothing runs while compiling), and the whole layer is computed under the host's time
       // limit, which also covers async continuations and reading the message of whatever the code throws
-      const syntax = engine.host.checkSyntax?.(`"use strict";${body}`);
-      if (syntax) throw new NodeError(`${ctx.type}: expression syntax error: ${syntax.message}${code.includes('\n') ? ` (line ${syntax.line})` : ''}`);
       let make;
       try {
-        make = engine.host.compile(`(function(__L, __B, __vars, __varsGuard){ "use strict"; ${codeVarDecl(varNames)}\nreturn function(k, i, j, x, z, u, v, cell, value){ ${decl.join(' ')}\n${body}\n}; })`);
+        make = compilePixelFunction(engine.host, code, 'i, j, x, z, u, v, cell, value', decl, varNames);
       } catch (e: any) {
-        throw new NodeError(`${ctx.type}: expression syntax error: ${e.message}`);
+        if (e instanceof PixelSyntaxError) throw new NodeError(`${ctx.type}: ${e.message}`);
+        throw e;
       }
       const f = make(L, B, codeVarValues(vars, varNames), scriptVarsGuard(engine.host));
       const old = hf.read(p.layer);

@@ -12,6 +12,10 @@
 //                 those numbers): a base colour image written to PNG then has the same bytes as the colours that
 //                 made it, and glTF / USD read it as sRGB, as both require. So no image needs a colour-space tag,
 //                 and the texture view shows what the files will hold.
+//   size          metres the image's width covers on the model (default 1): one texel is size / width metres along u and
+//                 along v, which every texture node reads to turn its lengths in metres into texels. A bake that knows
+//                 its uv also writes a layer "texel" (metres per texel along u and v) and "island" (uv island ids), and
+//                 then a node converts per texel and keeps every island to itself (core/texscale.ts)
 //   layers        "C" is the image itself (Houdini COP plane name); nodes add others: "id" (per-cell random value of
 //                 patterns and cells), "mask" (bake coverage), "convex" / "concave" (curvature bakes), user layers
 //
@@ -38,6 +42,14 @@ export class Image implements ImageVolume {
   width: number;
   height: number;
   layers: Map<string, Float32Array>;
+  /** metres the width covers (see the header); 1 unless a generator, a file or a bake says otherwise */
+  size = 1;
+  /**
+   * Whether `size` was stated: a generator was given texture_size (any value, 1 included), or the image comes from a bake, a
+   * heightfield, a pack or a file with texture_size. Only the default 1 m is not stated: a node that turns pixels into metres
+   * (tex_to_heightfield, trace_image) refuses it. Every image made from another takes it with `takeSize`.
+   */
+  sizeStated = false;
 
   constructor(width: number, height: number, name = 'image', layers?: Map<string, Float32Array>) {
     if (!(Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1)) throw new Error(`image needs at least 1 × 1 pixels (got ${width} × ${height})`);
@@ -73,10 +85,19 @@ export class Image implements ImageVolume {
     return this;
   }
 
-  clone(): Image { return new Image(this.width, this.height, this.name, new Map(this.layers)); }
+  clone(): Image { const c = new Image(this.width, this.height, this.name, new Map(this.layers)); return c.takeSize(this); }
 
   /** The same size and name without layers. */
-  emptyLike(name = this.name): Image { return new Image(this.width, this.height, name); }
+  emptyLike(name = this.name): Image { return new Image(this.width, this.height, name).takeSize(this); }
+
+  /** Say how many metres the width covers (stated, unless `stated` is false: the default of a generator nobody set). */
+  setSize(metres: number, stated = true): this { this.size = metres; this.sizeStated = stated; return this; }
+
+  /** The metres another image covers, scaled by `by` (a crop covers part of them), and whether they were stated. */
+  takeSize(from: { size: number; sizeStated?: boolean }, by = 1): this { this.size = from.size * by; this.sizeStated = !!from.sizeStated; return this; }
+
+  /** Metres one texel covers where nothing says otherwise: size / width (texels are square). */
+  get texel(): number { return this.size / this.width; }
 }
 
 export function isImage(v: Volume): v is ImageVolume {
@@ -85,7 +106,10 @@ export function isImage(v: Volume): v is ImageVolume {
 
 /** The Image class behind an image volume (wraps foreign implementations of the interface). */
 export function asImage(v: ImageVolume): Image {
-  return v instanceof Image ? v : new Image(v.width, v.height, v.name, new Map(v.layers));
+  if (v instanceof Image) return v;
+  const img = new Image(v.width, v.height, v.name, new Map(v.layers));
+  if (v.size > 0) { img.size = v.size; img.sizeStated = v.sizeStated ?? v.size !== 1; }
+  return img;
 }
 
 /** The images of a geometry, in volume order. */
@@ -251,7 +275,9 @@ export function imageSummary(g: Geometry): string[] {
   const max = 16;
   for (const img of imgs.slice(0, max)) {
     const ls = [...img.layers.keys()].map((k) => layerDescription(img, k));
-    out.push(`image "${img.name}": ${img.width}×${img.height}, layers: ${ls.length ? ls.join(', ') : '(none)'}`);
+    // the metres the width covers, when it is not the default 1: what every length node after it works against
+    const covers = img.size !== 1 || img.sizeStated ? ` covering ${fmt(img.size)} m (${fmt((img.size / img.width) * 1000)} mm a texel)` : '';
+    out.push(`image "${img.name}": ${img.width}×${img.height}${covers}, layers: ${ls.length ? ls.join(', ') : '(none)'}`);
   }
   if (imgs.length > max) out.push(`… ${imgs.length - max} more image(s)`);
   return out;
@@ -291,17 +317,26 @@ export function opaque(a: Float32Array, ch: number): boolean {
 // ---------------------------------------------------------------- JSON (io/json.ts)
 
 /** Layers as base64 of their little-endian float32 bytes (compact and exact); grey/RGBA follows from the length. */
-export function imageToJSON(img: Image): Record<string, any> {
-  const layers: Record<string, string> = {};
-  for (const [k, a] of img.layers) layers[k] = f32ToBase64(a);
-  return { name: img.name, width: img.width, height: img.height, layers };
+export function imageToJSON(img: Image, index = 0, written?: Map<Float32Array, [number, string]>): Record<string, any> {
+  // a layer that an earlier image of the same geometry holds too (the bakes of one mesh share their texel and island
+  // layers) is written once and named by that image's position afterwards
+  const layers: Record<string, string | { same: [number, string] }> = {};
+  for (const [k, a] of img.layers) {
+    const had = written?.get(a);
+    if (had) layers[k] = { same: had };
+    else { layers[k] = f32ToBase64(a); written?.set(a, [index, k]); }
+  }
+  return { name: img.name, width: img.width, height: img.height, ...(img.size !== 1 || img.sizeStated ? { size: img.size } : {}), ...(img.sizeStated ? { stated: true } : {}), layers };
 }
 
 /** An image from imageToJSON output (layers as base64 float32, or plain number arrays). */
-export function imageFromJSON(j: any): Image {
+export function imageFromJSON(j: any, before: Image[] = []): Image {
   const img = new Image(Number(j?.width), Number(j?.height), String(j?.name ?? 'image'));
+  if (Number(j?.size) > 0) img.setSize(Number(j.size), j.stated === true);
   for (const [k, v] of Object.entries(j?.layers ?? {})) {
-    const a = typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);
+    const same = (v as any)?.same;
+    const a = same ? before[same[0]]?.layer(same[1]) : typeof v === 'string' ? base64ToF32(v) : Float32Array.from(v as number[]);
+    if (!a) throw new Error(`image "${img.name}" layer "${k}" repeats a layer of image ${same?.[0]} that is not there`);
     if (!channelsOf(a, img.count)) throw new Error(`image "${img.name}" layer "${k}": ${a.length} values for ${img.width} × ${img.height} pixels`);
     img.layers.set(k, a);
   }

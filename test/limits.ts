@@ -14,6 +14,7 @@
 //     there as on the cooking thread, and a later cook works.
 // Runs in a child process with a hard wall-clock limit, so a limit that does not hold fails the test instead of
 // crashing or hanging it.
+import './cache-guard.ts';
 import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
@@ -43,11 +44,12 @@ const section = (s: string) => console.log(`\n== ${s}`);
 
 // ------------------------------------------------------------------ every count has a max
 section('int params that count something have a max');
-/** int params that are not counts: seeds, frames, indices (clamped by their nodes), an offset and a pixel height in a formula */
+/** int params that are not counts: seeds, frames, indices (clamped by their nodes), an offset, a pixel height in a formula, and padding in pixels (a trim sheet rejects a gap the bands no longer fit) */
 const NOT_COUNTS = [
   'rbd_settle.seed', 'rbd_stack.seed', 'drape.seed', 'inflate.seed',
   'particles.start_frame', 'rbd_settle.start_frame', 'rbd_stack.start_frame', 'solver.start_frame',
   'switch.index', 'input.index', 'lod.level', 'polybridge.twist', 'lod.screen_height',
+  'trim_sheet.gap',
 ];
 {
   const unbounded: string[] = [], seen = new Set<string>();

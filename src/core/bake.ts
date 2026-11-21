@@ -38,9 +38,11 @@ export interface TexelMap {
 /**
  * Rasterise triangles (vertex index triples into `uv`, 2 floats per vertex) into a w × h texel grid. Centre-inside
  * texels first; then, with conservative, texels within half a texel diagonal of a triangle that no triangle covers
- * take the closest point on the nearest one. `skip` leaves triangles out (masked prims).
+ * take the closest point on the nearest one. `skip` leaves triangles out (masked prims). `key` (per triangle) settles a
+ * texel two triangles claim equally (a centre on their shared edge, or as near both) by the smaller key instead of by
+ * triangle order: a key from where the triangle is makes the result independent of prim order.
  */
-export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, conservative = true, skip?: Uint8Array | null): TexelMap {
+export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: number, h: number, conservative = true, skip?: Uint8Array | null, key?: ArrayLike<number>): TexelMap {
   const n = w * h, nt = Math.floor(tris.length / 3);
   const tri = new Int32Array(n).fill(-1), b1 = new Float32Array(n), b2 = new Float32Array(n);
   let degenerate = 0, outside = 0;
@@ -65,12 +67,14 @@ export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: n
         const w2 = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * inv; // weight of c
         if (w1 < -1e-9 || w2 < -1e-9 || w1 + w2 > 1 + 1e-9) continue;
         const k = j * w + i;
+        if (key && tri[k] >= 0 && key[tri[k]] <= key[t]) continue;
         tri[k] = t; b1[k] = w1; b2[k] = w2;
       }
     }
   }
   if (conservative) {
-    const best = new Float32Array(n).fill(Infinity);
+    // the distances kept exactly, so a near tie is settled by the key and not by which triangle came first
+    const best = new Float64Array(n).fill(Infinity);
     const R = Math.SQRT1_2 + 1e-6, R2 = R * R;
     for (let t = 0; t < nt; t++) {
       if (!(Math.abs(area2[t]) > 1e-12)) continue;
@@ -83,7 +87,7 @@ export function rasterizeUV(uv: ArrayLike<number>, tris: ArrayLike<number>, w: n
           const k = j * w + i;
           if (tri[k] >= 0 && best[k] === Infinity) continue; // covered by a centre test
           const q = closestOnTri(i + 0.5, j + 0.5, ax, ay, bx, by, cx, cy);
-          if (q.d2 > R2 || q.d2 >= best[k]) continue;
+          if (q.d2 > R2 || q.d2 > best[k] || (q.d2 === best[k] && (!key || key[tri[k]] <= key[t]))) continue;
           best[k] = q.d2; tri[k] = t; b1[k] = q.w1; b2[k] = q.w2;
         }
     }
@@ -117,6 +121,133 @@ function closestOnTri(px: number, py: number, ax: number, ay: number, bx: number
   return set(vb * den, vc * den);
 }
 
+// ---------------------------------------------------------------- one rasterisation per mesh
+
+const bakeMemo = new WeakMap<object, Map<string, unknown>>();
+
+/** How often memoBake made a value and how often it reused one (tests read it). */
+export const bakeMemoStats = { made: 0, reused: 0 };
+
+/** The memo's limits: total bytes of the values it keeps and how many values (the oldest used are released first). */
+export const bakeMemoLimits = { bytes: 512 * 1024 * 1024, entries: 64 };
+
+interface MemoEntry { g: WeakRef<object>; key: string; bytes: number }
+/** Every kept value, least recently used first (a Map keeps insertion order). */
+const memoOrder = new Map<number, MemoEntry>();
+const memoIds = new WeakMap<object, Map<string, number>>();
+let memoBytes = 0, memoNext = 0;
+// a mesh that is collected takes its values with it: drop their entries from the count
+const memoGone = new FinalizationRegistry<number[]>((ids) => {
+  for (const id of ids) {
+    const e = memoOrder.get(id);
+    if (e) { memoBytes -= e.bytes; memoOrder.delete(id); }
+  }
+});
+const memoGoneIds = new WeakMap<object, number[]>();
+
+/** What the memo keeps now: the values and their bytes (typed arrays counted by their buffers). */
+export function bakeMemoUsage(): { entries: number; bytes: number } {
+  return { entries: memoOrder.size, bytes: memoBytes };
+}
+
+/** The bytes a memo value holds: its typed arrays, found through plain objects, arrays and class fields. */
+function bytesOf(v: unknown, seen = new Set<object>(), depth = 0): number {
+  if (!v || typeof v !== 'object' || seen.has(v) || depth > 6) return 0;
+  seen.add(v);
+  if (ArrayBuffer.isView(v)) return v.byteLength;
+  if (v instanceof ArrayBuffer) return v.byteLength;
+  let n = 0;
+  if (Array.isArray(v)) { for (const x of v) n += bytesOf(x, seen, depth + 1); return n; }
+  if (v instanceof Map) { for (const x of v.values()) n += bytesOf(x, seen, depth + 1); return n; }
+  for (const k of Object.keys(v)) n += bytesOf((v as any)[k], seen, depth + 1);
+  return n;
+}
+
+function memoForget(id: number): void {
+  const e = memoOrder.get(id);
+  if (!e) return;
+  memoOrder.delete(id);
+  memoBytes -= e.bytes;
+  const g = e.g.deref();
+  if (g) { bakeMemo.get(g)?.delete(e.key); memoIds.get(g)?.delete(e.key); }
+}
+
+/** Release the oldest values until the memo is within its limits; the newest value always stays. */
+function memoTrim(): void {
+  for (const id of memoOrder.keys()) {
+    if (memoOrder.size <= 1 || (memoBytes <= bakeMemoLimits.bytes && memoOrder.size <= bakeMemoLimits.entries)) break;
+    memoForget(id);
+  }
+}
+
+/**
+ * A memo value that grew after it was stored (a lazily filled field): count its bytes again and keep the memo within
+ * its limits. It becomes the most recently used.
+ */
+export function bakeMemoGrew(g: object, key: string): void {
+  const id = memoIds.get(g)?.get(key), e = id === undefined ? undefined : memoOrder.get(id);
+  const v = bakeMemo.get(g)?.get(key);
+  if (!e || v === undefined) return;
+  const bytes = bytesOf(v);
+  memoBytes += bytes - e.bytes;
+  e.bytes = bytes;
+  memoOrder.delete(id!);
+  memoOrder.set(id!, e);
+  memoTrim();
+}
+
+/** Release one value now (nothing when it is not kept). */
+export function bakeMemoDrop(g: object, key: string): void {
+  const id = memoIds.get(g)?.get(key);
+  if (id !== undefined) memoForget(id);
+  else bakeMemo.get(g)?.delete(key);
+}
+
+/**
+ * A value derived from a mesh, made once per (mesh object, key) and shared by every bake that asks for it: the covered
+ * samples of a uv raster, the per-sample positions and normals, the surface cloud, the ray scene. Cooked geometry is
+ * immutable, so the object itself is a safe key. A value lives no longer than its mesh, and the memo keeps at most
+ * `bakeMemoLimits` (bytes and values): the least recently used values are released first. Callers must not write into
+ * what it returns. A `make` that throws stores nothing; one that returns a promise keeps its result, or nothing if it
+ * fails.
+ */
+export function memoBake<T>(g: object, key: string, make: () => T): T {
+  let m = bakeMemo.get(g);
+  if (!m) { m = new Map(); bakeMemo.set(g, m); }
+  let ids = memoIds.get(g);
+  if (!ids) {
+    ids = new Map();
+    memoIds.set(g, ids);
+    const gone: number[] = [];
+    memoGoneIds.set(g, gone);
+    memoGone.register(g, gone);
+  }
+  if (m.has(key)) {
+    bakeMemoStats.reused++;
+    // most recently used: to the back of the line
+    const id = ids.get(key);
+    const e = id === undefined ? undefined : memoOrder.get(id);
+    if (e) { memoOrder.delete(id!); memoOrder.set(id!, e); }
+    return m.get(key) as T;
+  }
+  const v = make();
+  m.set(key, v);
+  bakeMemoStats.made++;
+  const id = memoNext++, bytes = bytesOf(v);
+  memoOrder.set(id, { g: new WeakRef(g), key, bytes });
+  ids.set(key, id);
+  memoGoneIds.get(g)!.push(id);
+  memoBytes += bytes;
+  memoTrim();
+  // a value still being made: kept as its result once it comes (its bytes counted then), dropped if it fails (a cook
+  // stopped by its time limit leaves nothing behind)
+  if (v instanceof Promise) {
+    const own = () => memoIds.get(g)?.get(key) === id;
+    v.then((x) => { if (own()) { m!.set(key, x); bakeMemoGrew(g, key); } }, () => { if (own()) memoForget(id); });
+  }
+  return v;
+}
+
 // ---------------------------------------------------------------- covered samples
 
 /** The covered samples of a (supersampled) texel map: what the bakes evaluate. */
@@ -133,6 +264,8 @@ export interface BakeSamples {
   tri: Int32Array;
   b1: Float32Array;
   b2: Float32Array;
+  /** sample-grid index (row-major in the S×S raster), so a second raster can be read at the same place */
+  pix: Int32Array;
   degenerate: number;
   outside: number;
 }
@@ -142,17 +275,17 @@ export function bakeSamples(uv: ArrayLike<number>, tris: ArrayLike<number>, W: n
   const w = W * S, h = H * S;
   const map = rasterizeUV(uv, tris, w, h, true, skip);
   const n = map.covered;
-  const texel = new Int32Array(n), tri = new Int32Array(n), b1 = new Float32Array(n), b2 = new Float32Array(n);
+  const texel = new Int32Array(n), tri = new Int32Array(n), b1 = new Float32Array(n), b2 = new Float32Array(n), pix = new Int32Array(n);
   let k = 0;
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       const q = j * w + i, t = map.tri[q];
       if (t < 0) continue;
       texel[k] = Math.floor(j / S) * W + Math.floor(i / S);
-      tri[k] = t; b1[k] = map.b1[q]; b2[k] = map.b2[q];
+      pix[k] = q; tri[k] = t; b1[k] = map.b1[q]; b2[k] = map.b2[q];
       k++;
     }
-  return { W, H, S, n, texel, tri, b1, b2, degenerate: map.degenerate, outside: map.outside };
+  return { W, H, S, n, texel, tri, b1, b2, pix, degenerate: map.degenerate, outside: map.outside };
 }
 
 /** Per-sample interpolation of per-vertex values (`size` floats per vertex index of the triangulation). */
@@ -212,10 +345,11 @@ export function resolve(s: BakeSamples, vals: ArrayLike<number>, ch: number): { 
  * Padding (edge dilation): every texel with coverage 0 within `padding` texels of a covered texel copies the nearest
  * covered texel; the rest get `background`. A front grows ring by ring from the island borders (8-neighbours, each
  * texel keeping the Euclidean-nearest source among the neighbours that reach it), so the cost follows the padded band,
- * not the image (the exact distance transform is used for very wide padding). Writes vals in place; returns the number
- * of texels filled by padding.
+ * not the image (the exact distance transform is used for very wide padding). paddingMap() returns, per texel, the texel it copies (itself when covered, -1 when nothing is within reach)
+ * so one map pads every layer of an image (applyPadding); dilate() does both for one layer, in place, and returns the
+ * number of texels filled by padding.
  */
-export function dilate(vals: Float32Array, ch: number, w: number, h: number, coverage: Float32Array, padding: number, background: number[]): number {
+export function paddingMap(coverage: Float32Array, w: number, h: number, padding: number): Int32Array {
   const n = w * h;
   const src = new Int32Array(n).fill(-1);
   let front: number[] = [];
@@ -256,16 +390,24 @@ export function dilate(vals: Float32Array, ch: number, w: number, h: number, cov
       front = next;
     }
   }
+  for (let k = 0; k < n; k++) src[k] = src[k] >= 0 ? k : src[k] <= -2 ? -2 - src[k] : -1;
+  return src;
+}
+
+/** Copy every texel of vals (ch values each) from the texel its padding map names; texels with none get `background`. Returns the number of texels filled from another texel. */
+export function applyPadding(vals: Float32Array, ch: number, map: Int32Array, background: number[]): number {
   let filled = 0;
-  for (let k = 0; k < n; k++) {
-    if (src[k] >= 0) continue;
-    if (src[k] <= -2) {
-      const s = -2 - src[k];
-      for (let c = 0; c < ch; c++) vals[k * ch + c] = vals[s * ch + c];
-      filled++;
-    } else for (let c = 0; c < ch; c++) vals[k * ch + c] = background[c] ?? 0;
+  for (let k = 0; k < map.length; k++) {
+    const s = map[k];
+    if (s === k) continue;
+    if (s >= 0) { for (let c = 0; c < ch; c++) vals[k * ch + c] = vals[s * ch + c]; filled++; }
+    else for (let c = 0; c < ch; c++) vals[k * ch + c] = background[c] ?? 0;
   }
   return filled;
+}
+
+export function dilate(vals: Float32Array, ch: number, w: number, h: number, coverage: Float32Array, padding: number, background: number[]): number {
+  return applyPadding(vals, ch, paddingMap(coverage, w, h, padding), background);
 }
 
 /** Normalise 3-vectors in place (zero vectors stay zero). */
@@ -339,17 +481,27 @@ export function vertexPositions(g: Geometry): Float64Array {
  * Returns the island of each triangle (0..count-1, in order of first appearance).
  */
 export function uvIslands(g: Geometry, uv: ArrayLike<number>, tris: ArrayLike<number>): { triIsland: Int32Array; count: number } {
-  const nt = Math.floor(tris.length / 3);
-  const key = new Map<string, number>();
-  const corner = new Int32Array(nt * 3);
-  for (let i = 0; i < nt * 3; i++) {
-    const v = tris[i];
-    const k = `${g.vertexPoint[v]}:${Math.round(uv[v * 2] * 1e6)}:${Math.round(uv[v * 2 + 1] * 1e6)}`;
-    let id = key.get(k);
-    if (id === undefined) { id = key.size; key.set(k, id); }
-    corner[i] = id;
-  }
-  const parent = new Int32Array(key.size);
+  const nt = Math.floor(tris.length / 3), nc = nt * 3;
+  // corners with the same point and the same uv (to a millionth) are one: bucket them by point, then compare within a bucket
+  let np = 0;
+  for (let i = 0; i < nc; i++) { const p = g.vertexPoint[tris[i]]; if (p >= np) np = p + 1; }
+  const start = new Int32Array(np + 1);
+  for (let i = 0; i < nc; i++) start[g.vertexPoint[tris[i]] + 1]++;
+  for (let p = 0; p < np; p++) start[p + 1] += start[p];
+  const fillAt = start.slice(0, np), order = new Int32Array(nc);
+  for (let i = 0; i < nc; i++) order[fillAt[g.vertexPoint[tris[i]]]++] = i;
+  const corner = new Int32Array(nc).fill(-1), qu = new Float64Array(nc), qv = new Float64Array(nc);
+  for (let i = 0; i < nc; i++) { qu[i] = Math.round(uv[tris[i] * 2] * 1e6); qv[i] = Math.round(uv[tris[i] * 2 + 1] * 1e6); }
+  let ids = 0;
+  for (let p = 0; p < np; p++)
+    for (let a = start[p]; a < start[p + 1]; a++) {
+      const i = order[a];
+      if (corner[i] >= 0) continue;
+      corner[i] = ids;
+      for (let b = a + 1; b < start[p + 1]; b++) { const j = order[b]; if (corner[j] < 0 && qu[j] === qu[i] && qv[j] === qv[i]) corner[j] = ids; }
+      ids++;
+    }
+  const parent = new Int32Array(ids);
   for (let i = 0; i < parent.length; i++) parent[i] = i;
   const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
   const unite = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; };

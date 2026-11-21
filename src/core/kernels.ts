@@ -23,6 +23,9 @@ import { colliderFromArrays, collideRange } from './xpbd.ts';
 import { particlesRange } from './particles.ts';
 import type { StepArgs } from './particles.ts';
 import { getLoadedKernels } from '../wasm/kernels.ts';
+import { TriBVH } from './spatial.ts';
+import { bakeDistanceRange, bakeNoiseRange, edgeWearRange, surfaceBuriedRange, surfaceCurvatureRange, surfaceInterpRange, surfaceRaysRange, surfaceSpreadRange } from './surface.ts';
+import type { CurvatureCloudArgs, EdgeWearArgs, InterpArgs, NoiseArgs, SpreadArgs, SurfaceRayArgs } from './surface.ts';
 
 export type TypedArray =
   | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array | Uint8ClampedArray;
@@ -102,7 +105,9 @@ const occlusion: Kernel = {
   chunksPerWorker: 4,
   run(a: { mode: any; samples: number; maxDistance: number; bias: number; coneAngle: number; seed: number }, A, start, end, ctx) {
     const scene = ctx.memo('rayscene:' + ctx.sharedKey, () => RayScene.fromArrays(A as any));
-    rayMeasure(A.P, A.N, scene, a, A.sel ?? null, A.out, start, end);
+    // the visibility measure shares a second scene (the surroundings) as the arrays o_T, o_nodes, o_child, o_order, o_triPt
+    const behind = A.o_T ? ctx.memo('rayscene-behind:' + ctx.sharedKey, () => RayScene.fromArrays({ T: A.o_T, nodes: A.o_nodes, child: A.o_child, order: A.o_order, triPt: A.o_triPt } as any)) : null;
+    rayMeasure(A.P, A.N, scene, a, A.sel ?? null, A.out, start, end, behind);
   },
 };
 
@@ -136,6 +141,73 @@ const bakeCurvature: Kernel = {
   minElements: 16384,
   chunksPerWorker: 2,
   run(a: CurvatureArgs, A, start, end) { curvatureRange(a, A, start, end); },
+};
+
+// ---------------------------------------------------------------- surface measures (src/core/surface.ts)
+
+/** bake_measure: hemisphere and cone rays per cloud point (scene T…triPt; surroundings for contact cT…ctriPt). */
+const surfaceRays: Kernel = {
+  minElements: 1024,
+  chunksPerWorker: 4,
+  run(a: SurfaceRayArgs, A, start, end, ctx) {
+    const scene = ctx.memo('rayscene:' + ctx.sharedKey, () => RayScene.fromArrays(A as any));
+    const contact = A.cT ? ctx.memo('contact:' + ctx.sharedKey, () => TriBVH.fromArrays({ T: A.cT, nodes: A.cnodes, child: A.cchild, order: A.corder, triPt: A.ctriPt })) : null;
+    surfaceRaysRange(a, A, scene, contact, start, end);
+  },
+};
+
+/** bake_measure / bake_curvature method surface: which cloud points lie inside another part (scene and its parts shared). */
+const surfaceBuried: Kernel = {
+  minElements: 4096,
+  chunksPerWorker: 4,
+  run(a: { bias: number; deadline?: number }, A, start, end, ctx) {
+    const scene = ctx.memo('buryscene:' + ctx.sharedKey, () => RayScene.fromArrays(A as any));
+    surfaceBuriedRange(a, A, scene, start, end);
+  },
+};
+
+/** bake_measure / bake_curvature method surface: curvature per cloud point (cloud and its grid shared). */
+const surfaceCurvature: Kernel = {
+  minElements: 8192,
+  chunksPerWorker: 2,
+  run(a: CurvatureCloudArgs, A, start, end) { surfaceCurvatureRange(a, A, start, end); },
+};
+
+/** cloud values → texel samples (cloud, its grid and the mesh shared); a texel of a coarse island gathers many points. */
+const surfaceInterp: Kernel = {
+  minElements: 16384,
+  chunksPerWorker: 4,
+  run(a: InterpArgs, A, start, end) { surfaceInterpRange(a, A, start, end); },
+};
+
+/** bake_edge_wear: edge proximity per texel sample (the cloud's edge points and their grids shared). */
+const surfaceSpread: Kernel = {
+  minElements: 8192,
+  chunksPerWorker: 4,
+  run(a: SpreadArgs, A, start, end) { surfaceSpreadRange(a, A, start, end); },
+};
+
+/** bake_edge_wear: the wear field per texel sample (noise only near edges, so the cost varies). */
+const edgeWear: Kernel = {
+  minElements: 16384,
+  chunksPerWorker: 4,
+  run(a: EdgeWearArgs, A, start, end) { edgeWearRange(a, A, start, end); },
+};
+
+/** bake_measure noise: 3D noise at each texel sample's position. */
+const bakeNoiseK: Kernel = {
+  minElements: 32768,
+  run(a: NoiseArgs, A, start, end) { bakeNoiseRange(a, A, start, end); },
+};
+
+/** bake_measure distance: closest distance from each texel sample to a target surface (its BVH shared). */
+const bakeDistanceK: Kernel = {
+  minElements: 16384,
+  chunksPerWorker: 2,
+  run(a: { maxD: number; deadline?: number }, A, start, end, ctx) {
+    const bvh = ctx.memo('bvh:' + ctx.sharedKey, () => TriBVH.fromArrays(A as any));
+    bakeDistanceRange(a, A, bvh, start, end);
+  },
 };
 
 // ---------------------------------------------------------------- scatter (src/core/scatter.ts)
@@ -282,6 +354,14 @@ export const KERNELS: Record<string, Kernel> = {
   tex_cells: texCellsK,
   bake_project: bakeProject,
   bake_curvature: bakeCurvature,
+  surface_rays: surfaceRays,
+  surface_buried: surfaceBuried,
+  surface_curvature: surfaceCurvature,
+  surface_interp: surfaceInterp,
+  surface_spread: surfaceSpread,
+  edge_wear: edgeWear,
+  bake_noise: bakeNoiseK,
+  bake_distance: bakeDistanceK,
   kd_build: kdBuild,
   scatter_candidates: scatterCandidates,
   scatter_elim_neighbours: scatterElimNeighbours,

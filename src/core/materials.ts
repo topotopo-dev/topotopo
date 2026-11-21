@@ -7,7 +7,8 @@
 // Texture entries are file paths (as given to the material node; exporters read or reference them) or
 // "image:<name>", an image volume carried by the geometry (texture nodes, core/image.ts; exporters encode it); the
 // key is absent when a material has no texture, so tables without textures are unchanged. "orm" is a packed
-// occlusion (R) / roughness (G) / metallic (B) map, the glTF and Unreal convention.
+// occlusion (R) / roughness (G) / metallic (B) map, the glTF and Unreal convention. "kind" (optional, one of
+// MATERIAL_KINDS) says how the material ages; it is data for the surface nodes and no exporter writes it.
 //
 // Geometry.merge (every node that merges) unions the tables, after making names distinct: a material or an
 // "image:<name>" image that two inputs define differently is renamed in the later input (its table and prim
@@ -31,7 +32,15 @@ export interface Material {
    * (grey), orm (occlusion R, roughness G, metallic B)
    */
   textures?: MaterialTextures;
+  /**
+   * What the material is made of and how it ages (one of MATERIAL_KINDS; absent = not said). Data only: exporters
+   * ignore it, and bake_material writes a mask per kind.
+   */
+  kind?: string;
 }
+
+/** The material kinds: how a surface ages. "keep" marks a part that is left as it is (glass, lights, dark slots). */
+export const MATERIAL_KINDS = ['painted_metal', 'cast_metal', 'galvanised', 'bare_steel', 'stainless', 'plastic', 'rubber', 'concrete', 'painted_wood', 'decal', 'keep'] as const;
 
 export interface MaterialTextures { baseColor?: string; normal?: string; roughness?: string; orm?: string }
 
@@ -83,6 +92,7 @@ export function normalizeMaterial(m: any): Material {
     doubleSided: typeof m?.doubleSided === 'boolean' ? m.doubleSided : d.doubleSided,
     unlit: typeof m?.unlit === 'boolean' ? m.unlit : d.unlit,
     ...textureField(m?.textures),
+    ...(typeof m?.kind === 'string' && m.kind.trim() ? { kind: m.kind.trim() } : {}),
   };
 }
 
@@ -197,4 +207,51 @@ export function primMaterials(g: Geometry): string[] | null {
   const h = g.prims.get('shop_materialpath');
   if (h && h.type === 'string') return (h.data as string[]).map(materialBasename);
   return null;
+}
+
+/**
+ * The whole names (lower case, as a material is called) that stand for a kind when nothing says it: a material called
+ * "painted_steel" or "Paint" is painted metal. Whole names only: "worn_metal" or "dark_iron" could be several kinds.
+ */
+export const KIND_NAMES: Readonly<Record<string, readonly string[]>> = {
+  painted_metal: ['painted_metal', 'painted_steel', 'paint'],
+  cast_metal: ['cast_metal', 'cast_iron', 'cast'],
+  galvanised: ['galvanised', 'galvanized', 'zinc', 'galvanised_steel'],
+  bare_steel: ['bare_steel', 'steel', 'iron', 'bare_metal'],
+  stainless: ['stainless', 'stainless_steel'],
+  plastic: ['plastic'],
+  rubber: ['rubber'],
+  concrete: ['concrete'],
+  painted_wood: ['painted_wood', 'wood_painted'],
+  decal: ['decal', 'label', 'sticker', 'sign', 'print'],
+  keep: ['keep'],
+};
+
+export interface ResolvedKind {
+  /** the kind ("" = none could be told) */
+  kind: string;
+  /** where it came from: the `kinds` map, the material's own kind field, or its whole name */
+  from: 'kinds' | 'material' | 'name' | 'none';
+  /** a kind that was written (kinds map or the material's field) but is not one of MATERIAL_KINDS */
+  unknown?: string;
+}
+
+/**
+ * The kind of a material, in this order: the entry for its name in `kinds`, its own `kind` field, its whole name
+ * (case-insensitive) when that is a kind or one of its names (KIND_NAMES); else none. A written kind that is not in
+ * MATERIAL_KINDS is reported in `unknown` and not replaced by a guess.
+ */
+export function resolveKind(name: string, material: Material | undefined, kinds?: Record<string, unknown> | null): ResolvedKind {
+  const written = (v: unknown, from: 'kinds' | 'material'): ResolvedKind | null => {
+    if (v === undefined || v === null || v === '') return null;
+    const s = String(v);
+    return (MATERIAL_KINDS as readonly string[]).includes(s) ? { kind: s, from } : { kind: '', from, unknown: s };
+  };
+  const a = kinds && Object.hasOwn(kinds, name) ? written(kinds[name], 'kinds') : null;
+  if (a) return a;
+  const b = written(material?.kind, 'material');
+  if (b) return b;
+  const lower = name.trim().toLowerCase();
+  for (const [k, names] of Object.entries(KIND_NAMES)) if (names.includes(lower)) return { kind: k, from: 'name' };
+  return { kind: '', from: 'none' };
 }

@@ -282,7 +282,8 @@ function edt1d(f: Float64Array, n: number, d: Float64Array, arg: Int32Array, v: 
  * Exact Euclidean distance transform: squared distance in samples² from every sample to the nearest site
  * (sites[k] != 0) and the index of that site (-1 when there are none).
  */
-export function distanceTransform(sites: ArrayLike<number>, w: number, h: number): { d2: Float64Array; nearest: Int32Array } {
+export function distanceTransform(sites: ArrayLike<number>, w: number, h: number, aspect = 1): { d2: Float64Array; nearest: Int32Array } {
+  const a2 = aspect * aspect; // a row is `aspect` column widths tall: d2 is in squared column widths
   const n = Math.max(w, h);
   const f = new Float64Array(n), d = new Float64Array(n), arg = new Int32Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
   const d1 = new Float64Array(w * h), col = new Int32Array(w * h);
@@ -294,10 +295,10 @@ export function distanceTransform(sites: ArrayLike<number>, w: number, h: number
   }
   const d2 = new Float64Array(w * h), nearest = new Int32Array(w * h);
   for (let i = 0; i < w; i++) {
-    for (let j = 0; j < h; j++) f[j] = d1[j * w + i];
+    for (let j = 0; j < h; j++) f[j] = d1[j * w + i] / a2;
     edt1d(f, h, d, arg, v, z);
     for (let j = 0; j < h; j++) {
-      d2[j * w + i] = d[j];
+      d2[j * w + i] = d[j] * a2;
       const jj = arg[j];
       nearest[j * w + i] = jj < 0 ? -1 : jj * w + col[jj * w + i];
     }

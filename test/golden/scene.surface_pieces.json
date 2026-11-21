@@ -1,0 +1,83 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
+    },
+    "bbox": null,
+    "counts": {
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
+      "volumes": 2
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 128,
+          "size": 0.629898,
+          "width": 128
+        },
+        "kind": "image",
+        "layers": {
+          "C": "bfba5ad0f0e4f7de",
+          "cavity": "f46378e89ad4903a",
+          "edges": "82d5bd7f26635831",
+          "forms": "a83c6db3d16f2edd",
+          "island": "ad2413ef5ff1c5c9",
+          "mask": "43252545bec9d71f",
+          "occlusion": "bfba5ad0f0e4f7de",
+          "texel": "27f6800f796d827d"
+        },
+        "name": "measure"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 128,
+          "size": 0.629898,
+          "width": 128
+        },
+        "kind": "image",
+        "layers": {
+          "C": "ac0c3ef5a5c537a3",
+          "bare": "f478ca4510bda41b",
+          "chip": "61e2a8bd2d2755f3",
+          "concave": "c2fffa434de17689",
+          "convex": "d3d4fc1150b95acb",
+          "core": "5fc0ea2779fdc775",
+          "handled": "36a0b025a9c5935f",
+          "island": "ad2413ef5ff1c5c9",
+          "mask": "43252545bec9d71f",
+          "texel": "27f6800f796d827d"
+        },
+        "name": "wear"
+      }
+    ]
+  },
+  "name": "scene.surface_pieces",
+  "ok": true,
+  "source": "test/scenes/surface_pieces.json",
+  "warnings": []
+}

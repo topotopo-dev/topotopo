@@ -1,6 +1,7 @@
 // The engine core never touches Node or DOM APIs directly; a Host supplies them.
 // src/host/node.ts implements this for Node (MCP server, CLI). A browser host
 // (Web Worker + fetch/OPFS) can implement the same interface for the future GUI.
+import type { Geometry } from '../core/geometry.ts';
 
 /**
  * A job for a worker thread: run the registered kernel `kernel` (src/core/kernels.ts, or a host kernel such as
@@ -149,6 +150,49 @@ export interface Host {
    * and package cooks all honour them. Absent: the engine's defaults.
    */
   limits?: { scriptMs?: number; simMs?: number };
+  /**
+   * A store that keeps node results between runs (src/host/diskcache.ts): the engine asks it when a node misses its
+   * memory cache and offers it the results of nodes that cooked for at least its `minMs`. Absent: nothing is kept.
+   */
+  persist?: NodeStore;
+}
+
+/**
+ * A file, or the listing of a folder, that a result was made from, as it was when it was read: `p` its absolute path,
+ * `k` 'f' for a file or 'd' for a folder listing, `s` its stamp (HostFiles.fileStamp: modification time and size; for a
+ * folder the JSON list of its file names). A stored result is only good while every one of them is as it was.
+ */
+export interface FileDep { p: string; k: 'f' | 'd'; s: string }
+
+/** A node result as a NodeStore keeps it. */
+export interface StoredNode {
+  geo: Geometry;
+  /** the files the result depended on, its inputs' and its own (the engine checks them when it loads the result) */
+  deps: FileDep[];
+  /** the warnings the node's own cook raised (those of its params and of being deprecated are raised again every cook) */
+  warnings: string[];
+  /** the numbers the node recorded while cooking (CookContext.stat) */
+  stats?: Record<string, number>;
+  /** how long the node's own cook took, in milliseconds */
+  cookMs: number;
+}
+
+/**
+ * Node results kept between runs, by an identity string the engine builds: everything the result is a function of that
+ * the host cannot see (the node's content signature material, the scope's files folder, the frame of a time-dependent
+ * node). The store adds what it knows about itself (the engine's code). It never fails a cook: a result it cannot read
+ * or write is a miss.
+ */
+export interface NodeStore {
+  /** results of nodes that cooked at least this many milliseconds are offered to save() */
+  readonly minMs: number;
+  /**
+   * The result kept under an identity, or null. `accept` is asked about the result's files before its arrays are read;
+   * a result it refuses is a miss.
+   */
+  load(identity: string, accept?: (deps: FileDep[]) => boolean): Promise<StoredNode | null>;
+  /** Keep a result; one that cannot be stored (volumes that are functions, too large, no space) is dropped. */
+  save(identity: string, node: StoredNode): Promise<void>;
 }
 
 /** What nodes read files with (a cook scope's files, src/graph/scope.ts): relative paths resolve against one folder. */

@@ -1,4 +1,5 @@
 // Exercise selection before import in fresh processes, including simulated engines without SIMD support.
+import './cache-guard.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 

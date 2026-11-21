@@ -232,7 +232,7 @@ export function fingerprint(g: Geometry): Fingerprint {
         };
       }
       if (vol.kind === 'image') {
-        // images: size and a hash of each layer's quantised values (length says grey or RGBA)
+        // images: size (and the metres their width covers, when not 1) and a hash of each layer's quantised values (length says grey or RGBA)
         const layers: Record<string, string> = {};
         for (const name of [...vol.layers.keys()].sort()) {
           const h = new Hasher();
@@ -241,7 +241,7 @@ export function fingerprint(g: Geometry): Fingerprint {
           for (let i = 0; i < a.length; i++) h.float(a[i], ATTR_Q);
           layers[name] = h.hex();
         }
-        return { name: vol.name, kind: vol.kind, bounds: { min: [], max: [] }, image: { width: vol.width, height: vol.height }, layers };
+        return { name: vol.name, kind: vol.kind, bounds: { min: [], max: [] }, image: { width: vol.width, height: vol.height, ...(vol.size !== 1 ? { size: round(vol.size, 1e6) } : {}) }, layers };
       }
       const h = new Hasher();
       const { min, max } = vol.bounds;

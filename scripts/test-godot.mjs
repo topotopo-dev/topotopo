@@ -69,7 +69,7 @@ const env = {
   XDG_CONFIG_HOME: path.join(home, 'config'), XDG_DATA_HOME: path.join(home, 'data'), XDG_CACHE_HOME: path.join(home, 'cache'),
   ...(process.platform === 'win32' ? {} : { HOME: home }),
   TOPOTOPO_CLI: CLI, TOPOTOPO_NODE: process.execPath,
-  TOPOTOPO_CACHE: path.join(tmp, 'topotopo-cache'), TOPOTOPO_CONFIG: path.join(tmp, 'topotopo-config.json'),
+  TOPOTOPO_CACHE: path.join(tmp, 'topotopo-cache'), TOPOTOPO_NODE_CACHE_DIR: path.join(tmp, 'topotopo-node-cache'), TOPOTOPO_CONFIG: path.join(tmp, 'topotopo-config.json'),
 };
 delete env.TOPOTOPO_LIBRARIES;
 for (const k of ['APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME']) fs.mkdirSync(env[k], { recursive: true });

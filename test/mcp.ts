@@ -1,5 +1,6 @@
 // End-to-end MCP test: spawns the stdio server like a real client and exercises every tool.
 //   node test/mcp.ts
+import './cache-guard.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,7 +40,7 @@ fs.writeFileSync(path.join(wsDir, 'notes.md'), 'what this folder is for\n');
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [path.join(root, 'src/mcp/server.ts'), '--package', wsDir],
-  env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile },
+  env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile, TOPOTOPO_NODE_CACHE_DIR: process.env.TOPOTOPO_NODE_CACHE_DIR! },
   stderr: 'pipe',
 });
 const client = new Client({ name: 'topotopo-test', version: '0.0.1' });
@@ -492,7 +493,7 @@ for (const named of [false, true]) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-default-'));
   const dir = named ? fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-mcp-empty-')) : path.join(cwd, 'topotopo');
   const own = new Client({ name: 'topotopo-test-new', version: '0.0.1' });
-  await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts'), ...(named ? ['--package', dir] : [])], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile }, stderr: 'pipe' }));
+  await own.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'src/mcp/server.ts'), ...(named ? ['--package', dir] : [])], cwd, env: { ...getDefaultEnvironment(), TOPOTOPO_CONFIG: configFile, TOPOTOPO_NODE_CACHE_DIR: process.env.TOPOTOPO_NODE_CACHE_DIR! }, stderr: 'pipe' }));
   const r: any = await own.callTool({ name: 'workspace', arguments: { action: 'packages' } });
   const txt = r.content.map((c: any) => c.text ?? '').join('\n');
   const at = manifestAt(dir), id = at?.id ?? null;

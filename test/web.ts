@@ -14,6 +14,7 @@
 // outside the tree, plumbing by another name), and the page's look in its markup. Last the markdown renderer and the
 // link rules alone.
 //   node test/web.ts
+import './cache-guard.ts';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
