@@ -258,6 +258,9 @@ function mergeByCoverage(parts: Image[]): Image {
 }
 
 /** The signature of a prepared input: what it was made from and how. */
+/** at most this many leak points per weather cook, and per piece of a weather_masks kit */
+const LEAK_CAP = 20000, LEAK_CAP_PIECE = 8000;
+
 const sigOf = (ctx: CookContext, what: string, extra: unknown) => `${what}:${hashString(JSON.stringify([ctx.inputSigs, extra]))}`;
 
 /**
@@ -294,6 +297,10 @@ async function cookNested(ctx: CookContext, T: string, graph: GraphSpec, inputs:
   if ((!r.ok || !r.geo) && budget && budget.left() <= 0 && !outer?.aborted) throw budget.error();
   if (!r.ok || !r.geo) {
     const e = r.errors[0];
+    // the run bakes' limits name params of bake_flow a weather user does not set: say it in this node's terms
+    if (e && /_runs$/.test(e.node) && /more than [\d,]+ segments|too many texel cells/.test(e.message)) {
+      throw new NodeError(`${T}: the dirt and rust runs would be too many to trace (${e.message.replace(/^bake_flow: the runs (would need|cover) /, '')})`, 'a lower leak_density: fewer runs start per metre of edge');
+    }
     throw new NodeError(`${T}: ${e ? `${e.node}: ${e.message}` : 'the nested graph failed'}`, e?.hint);
   }
   return r;
@@ -335,8 +342,9 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
   const amount = Math.max(0, Math.min(1, Number(p.match) || 0));
   // the surroundings: input 1 or the stated mount, and the parts of kind keep (glass, a sign) that occlude and shelter
   const env = withKept(ctx.hasInput(1) && ctx.input(1).numPrims ? ctx.input(1) : mountPlane(prep.bbox, p.mount, p.wall_side), prep.kept);
-  const leaks = Number(p.leak_density) > 0 ? leakSources(prep.mesh, { density: Number(p.leak_density), seed: Number(p.seed) || 0, rain: p.exposure !== 'indoor', blockers: env, max: 20000 }) : null;
+  const leaks = Number(p.leak_density) > 0 ? leakSources(prep.mesh, { density: Number(p.leak_density), seed: Number(p.seed) || 0, rain: p.exposure !== 'indoor', blockers: env, max: LEAK_CAP }) : null;
   const nLeaks = leaks?.points.numPoints ?? 0;
+  if (leaks && leaks.found > nLeaks) ctx.warn(`${T_W}: leak points capped at ${LEAK_CAP}: ${leaks.found} found, thinned evenly along the edges; a lower leak_density keeps them all`);
   const imgs: Image[] = [...(over.image ? [over.image] : []), ...(photosIn ? imagesOf(photosIn) : [])];
   const sig = (what: string, extra: unknown) => sigOf(ctx, what, extra);
   const prepKey = [p.kinds];
@@ -593,7 +601,7 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   const leakOf = (seed: number) => Number(p.leak_density) > 0 ? moved.map((b, k) => {
     const sel = new Uint8Array(mesh.numPrims);
     for (let i = 0; i < mesh.numPrims; i++) sel[i] = pieceOf[i] === pieces[k] ? 1 : 0;
-    return leakSources(mesh, { density: Number(p.leak_density), seed: seed + k * 7919, rain: p.exposure !== 'indoor', blockers: envOf[k].length ? Geometry.merge(envOf[k]) : null, prims: sel, topEdge: p.above === 'source' ? b : null, max: 8000 }).points;
+    return leakSources(mesh, { density: Number(p.leak_density), seed: seed + k * 7919, rain: p.exposure !== 'indoor', blockers: envOf[k].length ? Geometry.merge(envOf[k]) : null, prims: sel, topEdge: p.above === 'source' ? b : null, max: LEAK_CAP_PIECE });
   }) : [];
   const over = overridesOf(ctx, T_M, 2, [...WEATHER_MASKS, ...PACKED_MASKS]);
   const sig = (what: string, extra: unknown) => sigOf(ctx, what, extra);
@@ -635,7 +643,11 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
   for (let v = 0; v < variants; v++) {
     const seed = (Number(p.seed) || 0) + v * 1013;
     // the leak points move with the seed: thinned and jittered again
-    const lp = leakOf(seed);
+    const found = leakOf(seed), lp = found.map((x) => x.points);
+    if (v === 0) {
+      const over = found.map((x, k) => [k, x.found, x.points.numPoints]).filter(([, f, n]) => f > n);
+      if (over.length) ctx.warn(`${T_M}: leak points capped at ${LEAK_CAP_PIECE} per piece: ${over.slice(0, 6).map(([k, f]) => `${pieces[k] || 'the piece'} ${f}`).join(', ')}${over.length > 6 ? ` and ${over.length - 6} more` : ''} found, thinned evenly along the edges; a lower leak_density keeps them all`);
+    }
     const parts: Image[] = [];
     let nLeaks = 0, cooked: CookReport | null = null;
     const groupSigs: string[] = [];

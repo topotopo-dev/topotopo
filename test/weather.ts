@@ -438,6 +438,26 @@ section('leak sources: a wall with a sill and a coping');
   check(!!w && [...Array(l.points.numPoints).keys()].every((i) => (w.get(i) as number) > 0 && (w.get(i) as number) <= 1), 'each source carries its rain weight w');
 }
 
+section('leak sources: the cap thins every edge alike and says so');
+{
+  // 40 boxes in a row: at 500 per metre they find more than the cap, and every box keeps its share
+  const boxes: Nodes = {};
+  for (let i = 0; i < 40; i++) boxes[`b${i}`] = { type: 'box', params: { size: [0.5, 0.8, 0.3], center: [i * 2, 0.4, 0] } };
+  boxes.all = { type: 'merge', in: Object.keys(boxes) };
+  const g = (await cook(boxes, 'all')).geo;
+  const l = leakSources(g, { density: 500, seed: 0, rain: true, max: 20000 });
+  const per = new Array(40).fill(0);
+  for (let i = 0; i < l.points.numPoints; i++) per[Math.round(l.points.P[i * 3] / 2)]++;
+  check(l.found > 20000 && l.points.numPoints === 20000 && Math.min(...per) >= 0.9 * Math.max(...per), `${l.found} found, 20000 kept, every box keeps its share (${Math.min(...per)} to ${Math.max(...per)} per box)`);
+  const all: Nodes = { ...boxes, m: { type: 'material', in: ['all'], params: { name: 'c', base_color: '#9c978c', kind: 'concrete' } }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 256, padding: 2 } } };
+  // the weather node warns of the cap, and these runs are too many to trace: it says what to lower in its own params
+  const r = await serial.cook({ nodes: { ...all, w: { type: 'weather', in: ['uv'], params: { ...FAST, leak_density: 500 } } }, output: 'w' });
+  const msg = r.warnings.map((x) => x.message).find((x) => x.includes('leak points capped')) ?? '';
+  check(/capped at 20000: \d{5,} found/.test(msg) && msg.includes('leak_density'), `the weather node says so: ${msg.slice(0, 160)}`);
+  const e = r.errors[0];
+  check(!r.ok && !!e && /too many to trace/.test(e.message) && !!e.hint?.includes('leak_density') && !e.hint.includes('step'), `too many runs are refused in the node's own terms: ${e?.message} (${e?.hint})`);
+}
+
 section('packing and the normal convention');
 {
   const hro = await cook({ ...CAB, w: W({ ...CAB_W, packing: 'hro', normal_format: 'directx' }) }, 'w');

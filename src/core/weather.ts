@@ -340,10 +340,11 @@ export interface LeakOptions {
   topEdge?: Box | null;
   /** only prims where this is 1 are measured (the weathered ones) */
   prims?: Uint8Array | null;
-  /** at most this many points (the densest are thinned) */
+  /** at most this many points (thinned evenly along the edges, the weakest first) */
   max?: number;
 }
-export interface LeakSources { points: Geometry; count: { ledge: number; under: number; top: number } }
+/** The leak points (attribute w), how many each kind of edge gave, and how many were found before the cap thinned them. */
+export interface LeakSources { points: Geometry; count: { ledge: number; under: number; top: number }; found: number }
 
 const COS_UP = Math.cos((55 * Math.PI) / 180), STEEP = 0.5;
 
@@ -493,13 +494,19 @@ export function leakSources(g: Geometry, o: LeakOptions): LeakSources {
       }
     }
   }
-  // thin to the cap, keeping the strongest
+  // thin to the cap: every point stronger than the weakest kept, and of those as strong as it an even share along the
+  // edges (every edge keeps its part, not the first ones found)
   let keep = wts.map((_, i) => i);
-  if (o.max && keep.length > o.max) keep = keep.sort((x, y) => wts[y] - wts[x]).slice(0, o.max).sort((x, y) => x - y);
+  if (o.max && keep.length > o.max) {
+    const cut = [...wts].sort((x, y) => y - x)[o.max - 1];
+    const above = keep.filter((i) => wts[i] > cut), tied = keep.filter((i) => wts[i] === cut), need = o.max - above.length;
+    const picked = Array.from({ length: need }, (_, j) => tied[Math.floor(((j + 0.5) * tied.length) / need)]);
+    keep = [...above, ...picked].sort((x, y) => x - y);
+  }
   const out = new Geometry({ positions: keep.flatMap((i) => [pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]]) });
   const w = out.points.add('w', 'float', 1);
   keep.forEach((i, j) => w.set(j, wts[i]));
-  return { points: out, count };
+  return { points: out, count, found: wts.length };
 }
 
 // ---------------------------------------------------------------- the graph
