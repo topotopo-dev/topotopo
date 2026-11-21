@@ -177,12 +177,12 @@ export const flagBadge = (n: number) => (n ? `<span class="fbadge" title="${esc(
 
 function rootCard(r: RootCardData) {
   const stat = (n: number, one: string, many: string, cls = '', more = '') => `<span class="stat${cls}"><b>${n.toLocaleString('en')}${more}</b> <span>${n === 1 && !more ? one : many}</span></span>`;
-  // the flags first: the figure a look at the card is for (while the first audit is under way, it says so instead)
+  // what is in it first, its flags last (while its first audit is under way, the card says so instead of counts)
   const stats = r.checking
     ? [stat(r.packages, 'package', 'packages'), '<span class="stat checking"><span>checking for flags…</span></span>'].join('')
     : [
-      stat(r.flags, 'flag', 'flags', r.flags ? ' fstat' : r.cut ? '' : ' ok', r.cut ? '+' : ''),
       stat(r.packages, 'package', 'packages'), stat(r.folders, 'folder', 'folders'), stat(r.files, 'file', 'files'),
+      stat(r.flags, 'flag', 'flags', r.flags ? ' fstat' : r.cut ? '' : ' ok', r.cut ? '+' : ''),
     ].join('');
   const sub = r.builtin ? 'TopoTopo\'s built-in library' : r.kind === 'w' ? `Workspace${r.engine ? ` · ${r.engine}` : ''}` : 'Library';
   return `<a class="rcard${r.kind === 'w' ? ' ws' : ''}${r.checking ? ' checking' : ''}" href="${esc(r.url)}" data-root="${esc(`${r.kind}/${r.name}`)}">
@@ -218,7 +218,6 @@ export function frontPage(d: WebData, u: Urls): string {
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
 </header>
 <main class="wrap front">
-${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''}</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
 <section class="roots" id="workspaces">
   <h2>Workspaces <span class="count">${d.workspaces.length}</span></h2>
   ${ws}
@@ -232,13 +231,13 @@ ${d.problems.length ? `<details class="problems"><summary>${d.problems.length} p
   <div class="grid">${d.packages.map((c) => card(c, u)).join('\n')}</div>
   <p class="empty" id="nomatch" hidden>Nothing matches. <button class="btn" type="button" data-clear>Clear the search</button></p>
 </section>
+${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''}</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
 </main>`, { page: 'front' });
 }
 
-/** A package's versions with their notes and dates, and the outputs its newest version publishes with their kinds and tags. */
-function packageSection(pk: NonNullable<PackageData['package']>): string {
-  if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the package's folder publishes the first, which other packages can then use as <code>${esc(pk.name)}</code>.</p>${usedBySection(pk.usedBy ?? [])}`;
-  const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a package relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
+/** The outputs a package's newest version publishes, with their thumbnails, kinds and tags ('' before its first version). */
+function outputsSection(pk: NonNullable<PackageData['package']>): string {
+  if (!pk.versions.length || !pk.outputs.length) return '';
   const outputs = pk.outputs.map((o) => {
     const what = [`node "${o.node}" of graph "${o.graph}"`, o.params.length ? `params ${o.params.join(', ')}` : '', o.inputs.length ? `input${o.inputs.length > 1 ? 's' : ''} ${o.inputs.join(', ')}` : ''].filter(Boolean).join(' · ');
     const marks = kindTagMarks(o);
@@ -246,8 +245,14 @@ function packageSection(pk: NonNullable<PackageData['package']>): string {
   }).join('');
   return `<h2>Published outputs <span class="count">${pk.outputs.length}</span></h2>
     <div class="table"><table class="vars outputs"><tbody>${outputs}</tbody></table></div>
-    <p class="dim small">The outputs of ${esc(pk.versions[0].version)}: a package's graph uses one as a node type, <code>{"type": "${esc(pk.outputs[0]?.type ?? pk.name)}"}</code>, with its params.</p>
-    <h2>Versions <span class="count">${pk.versions.length}</span></h2>
+    <p class="dim small">The outputs of ${esc(pk.versions[0].version)}: a package's graph uses one as a node type, <code>{"type": "${esc(pk.outputs[0]?.type ?? pk.name)}"}</code>, with its params.</p>`;
+}
+
+/** A package's versions with their notes and dates (each opens to the outputs it published), and the packages that use it. */
+function versionsSection(pk: NonNullable<PackageData['package']>): string {
+  if (!pk.versions.length) return `<h2>Versions</h2><p class="dim">No version published yet: <code>topotopo publish --note "…"</code> in the package's folder publishes the first, which other packages can then use as <code>${esc(pk.name)}</code>.</p>${usedBySection(pk.usedBy ?? [])}`;
+  const big = (v: VersionRow) => (v.big ? ' <span class="tag" title="something a package relies on goes away or means something else">big</span>' : v.marked ? ' <span class="tag" title="its author marked it big">big</span>' : '');
+  return `<h2>Versions <span class="count">${pk.versions.length}</span></h2>
     ${versionList(pk.versions, big)}
     ${usedBySection(pk.usedBy ?? [])}`;
 }
@@ -276,23 +281,17 @@ export function usesSection(uses: PackageData['uses']): string {
     <table class="vars uses"><tbody>${uses.map((x) => `<tr><th>${x.url ? `<a href="${esc(x.url)}">${esc(x.name)}</a>` : esc(x.name)}</th><td>${esc(x.version)}</td><td class="unotes"><span class="urow">${x.newest ? `<span class="newer">${esc(x.newest)} is out</span>` : ''}${x.published ? `<span class="udate">${esc(day(x.published))}</span>` : ''}${x.note ? `<span class="unote" title="${esc(x.note)}">${esc(x.note)}</span>` : ''}</span></td></tr>`).join('')}</tbody></table>`;
 }
 
+/** A package's bake as its page shows it: none for a built-in package or one without its default graph. */
+const bakeOf = (p: PackageData) => (p.status === 'empty' || p.builtin ? null : p.bake);
+
 /**
- * A package on its folder page, the top part: its 3D view (the baked preview) beside what it is, its links, its
- * actions (Open in editor, Re-bake), how its preview cooked and the snippets for a board.
+ * A package on its folder page, the top part: its 3D view (the baked preview) beside what it is, its tags and links,
+ * its actions (Open in editor, Re-bake) and a word while it bakes. How its preview cooked is below the divider
+ * (packageDetails).
  */
 export function packageBlock(p: PackageData, u: Urls): string {
   const edit = u.edit(p.lib, p.id);
-  const snippet = (label: string, value: string) => `<label class="copy"><span>${label}</span><input readonly value="${esc(value)}"><button type="button" data-copy>Copy</button></label>`;
-  const b = p.status === 'empty' || p.builtin ? null : p.bake;
-  const example = p.package?.outputs.find((o) => !o.alias)?.type;
-  const bakeLine = p.builtin
-    ? `One of TopoTopo's own packages: every package can use its outputs. Ask your agent to use one by its name${example ? `, such as ${example}` : ''}.`
-    : p.status === 'empty'
-    ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
-    : p.status === 'baking' ? 'Baking its preview…'
-    : !b ? 'Not baked yet.'
-    : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${(b.points ?? 0).toLocaleString('en')} points, ${(b.prims ?? 0).toLocaleString('en')} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
-    : `Bake failed ${when(b.at)}`;
+  const b = bakeOf(p);
   // the 3D view; else the preview picture at its own size; else a short word that there is none yet, and why
   const none = p.status === 'empty' ? 'No preview yet: this package has no graph to bake' : p.status === 'baking' ? 'No preview yet: baking it…' : b && !b.ok ? 'No preview: its graph did not cook' : 'No preview yet';
   const view = p.glb
@@ -311,45 +310,65 @@ export function packageBlock(p: PackageData, u: Urls): string {
     <div class="actions">
       ${edit ? `<a class="btn primary" href="${esc(edit)}" target="_blank" rel="noopener">Open in editor</a>` : ''}
       ${p.builtin || p.status === 'empty' ? '' : `<button class="btn" type="button" data-post="${esc(`${u.package(p.lib, p.id)}/bake`)}">Re-bake</button>`}
+      <span class="bakenow" id="bakenow" aria-live="polite">${p.status === 'baking' ? 'Baking…' : ''}</span>
     </div>
+  </aside>
+</section>`;
+}
+
+/** Two parts side by side on a wide screen; one alone takes the row. */
+const cols = (cls: string, a: string, b: string) =>
+  (a || b ? `<section class="${cls}"><div class="pkgcols${a && b ? '' : ' solo'}">${a ? `<div>${a}</div>` : ''}${b ? `<div>${b}</div>` : ''}</div></section>` : '');
+
+/**
+ * A package on its folder page, right below its preview: what it makes. The outputs it publishes beside its exports
+ * (the files to download; those older than their graph marked).
+ */
+export function packageOutputs(p: PackageData): string {
+  return cols('pkgout', p.package ? outputsSection(p.package) : '', p.exports.length ? `<h2>Exports <span class="count">${p.exports.length}</span></h2>${fileList(p.exports)}` : '');
+}
+
+/** A package on its folder page, after its pictures: its versions and the packages that use it, beside the packages it uses. */
+export function packageRelations(p: PackageData): string {
+  return cols('pkgrel', p.package ? versionsSection(p.package) : '', usesSection(p.uses));
+}
+
+/**
+ * A package on its folder page, below the divider: its graphs and their vars (each folded to one line), how its
+ * preview baked (the error when it did not cook) and the bake's warnings.
+ */
+export function packageDetails(p: PackageData): string {
+  const b = bakeOf(p);
+  const example = p.package?.outputs.find((o) => !o.alias)?.type;
+  const bakeLine = p.builtin
+    ? `One of TopoTopo's own packages: every package can use its outputs. Ask your agent to use one by its name${example ? `, such as ${example}` : ''}.`
+    : p.status === 'empty'
+    ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
+    : p.status === 'baking' ? 'Baking its preview…'
+    : !b ? 'Not baked yet.'
+    : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${(b.points ?? 0).toLocaleString('en')} points, ${(b.prims ?? 0).toLocaleString('en')} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
+    : `Bake failed ${when(b.at)}`;
+  const graphs = p.graphs.length
+    ? `<div class="graphs">${p.graphs.map((g) => `<details class="graph"><summary><b>${esc(g.name)}</b>${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes${g.vars.length ? ` · ${g.vars.length} vars` : ''}</span></summary>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</details>`).join('')}</div>`
+    : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its workspace tool opens the package); open the editor to watch it appear.</p>';
+  return `<section class="pkgdetails">
+    <h2>Graphs <span class="count">${p.graphs.length}</span></h2>
+    ${graphs}
     <p class="bake ${b && !b.ok ? 'err' : ''}${p.status === 'empty' ? ' empty' : ''}" id="bake">${esc(bakeLine)}</p>
     ${b && !b.ok && b.error ? `<pre class="error">${esc(b.error)}</pre>` : ''}
     ${b?.warnings?.length ? `<details class="warn"><summary>${b.warnings.length} warning${b.warnings.length > 1 ? 's' : ''}</summary><pre>${esc(b.warnings.join('\n'))}</pre></details>` : ''}
+  </section>`;
+}
+
+/** A package on its folder page, last: the snippets for a board, where it is and its stable link. */
+export function packageEnd(p: PackageData, u: Urls): string {
+  const snippet = (label: string, value: string) => `<label class="copy"><span>${label}</span><input readonly value="${esc(value)}"><button type="button" data-copy>Copy</button></label>`;
+  return `<section class="pkgend">
     <details class="board"><summary>On your board</summary>
     ${snippet('Link', p.share.link)}
     ${snippet('Image', `<a href="${p.share.link}"><img src="${p.share.thumb}" alt="${esc(p.title)}" width="256"></a>`)}
     ${snippet('3D embed', `<iframe src="${p.share.embed}" width="640" height="480" style="border:0" allow="fullscreen" title="${esc(p.title)}"></iframe>`)}
     </details>
-  </aside>
-</section>`;
-}
-
-/**
- * A package on its folder page, right below its preview: its published outputs and versions, the packages that use it
- * and those it uses beside its graphs and their vars and its exports (those older than their graph marked). One column
- * when it publishes no versions and uses no package.
- */
-export function packageCols(p: PackageData): string {
-  const graphs = p.graphs.length
-    ? `<div class="graphs">${p.graphs.map((g) => `<details class="graph"${p.graphs.length <= 3 ? ' open' : ''}><summary><b>${esc(g.name)}</b>${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes${g.vars.length ? ` · ${g.vars.length} vars` : ''}</span></summary>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</details>`).join('')}</div>`
-    : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its workspace tool opens the package); open the editor to watch it appear.</p>';
-  const left = `${p.package ? packageSection(p.package) : ''}${usesSection(p.uses)}`;
-  return `<section class="pkgmore">
-    <div class="pkgcols${left ? '' : ' solo'}">
-      ${left ? `<div>${left}</div>` : ''}
-      <div>
-        <h2>Graphs <span class="count">${p.graphs.length}</span></h2>
-        ${graphs}
-        ${p.exports.length ? `<h2>Exports <span class="count">${p.exports.length}</span></h2>${fileList(p.exports)}` : ''}
-      </div>
-    </div>
-  </section>`;
-}
-
-/** A package on its folder page, last: its attachments, where it is and its stable link. */
-export function packageEnd(p: PackageData, u: Urls): string {
-  return `<section class="pkgend">
-    ${attachments(p)}
     <p class="dim small">${esc(p.place)}${p.created ? ` · created ${esc(p.created)}` : ''} · updated ${esc(when(p.updated))} · <a href="${esc(u.package(p.lib, p.id))}">stable link</a></p>
   </section>`;
 }
@@ -358,7 +377,7 @@ export function packageEnd(p: PackageData, u: Urls): string {
  * A package's attachments: its images as tiles and its other files as a list. Many images show one from each
  * folder first (its first by name: a concept before its renders), the rest a click away.
  */
-function attachments(p: PackageData): string {
+export function packageAttachments(p: PackageData): string {
   if (!p.attachments.length) return '';
   const images = p.attachments.filter((f) => f.image), other = p.attachments.filter((f) => !f.image);
   const tile = (f: PackageData['attachments'][number]) => `<a class="tile" href="${esc(f.url)}" data-view="image" data-name="${esc(f.path)}"><img src="${esc(f.url)}" alt="" loading="lazy" decoding="async"><span>${esc(f.path)}</span></a>`;

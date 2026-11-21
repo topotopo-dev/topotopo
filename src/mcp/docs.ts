@@ -159,9 +159,10 @@ LIBRARIES AND THE WEB APP: a library holds packages in folders below it; the par
 collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340; \`topotopo open <file.topo|file.topows|folder>\` opens one package or
 workspace in the browser, starting the web app unseen when none runs and listing it for that run) mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries: the front page
 shows each as a card (TopoTopo's built-in library last) and searches every package and output; every folder is a page
-(/w/<workspace>/<path>/, /l/<library>/<path>/) with its flags, its package when it holds a .topo file (preview,
-versions, outputs with their kinds and tags, the packages that use it and those it uses, graphs, exports), its notes,
-its subfolders and its files by type (images, sounds and videos in players, models in 3D). Notes: every .md and .txt
+(/w/<workspace>/<path>/, /l/<library>/<path>/) that leads with what a person looks at: its package when it holds a
+.topo file (preview, outputs with their kinds and tags, exports, pictures, versions, the packages that use it and those
+it uses), its subfolders and its files by type (images, sounds and videos in players, models in 3D); below a divider
+its notes, a package's graphs and bake, and its flags. Notes: every .md and .txt
 file of a folder is a box on its page, in file name order; markdown renders, and a link shows what it leads to (an
 image inline, a sound or video in a player, a .glb in 3D, a folder as a card, a YouTube or Vimeo address in its
 player), relative to the note's folder, res:// from the Godot project, /Game/ from Unreal's Content/; a link to a

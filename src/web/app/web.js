@@ -146,11 +146,16 @@ if (page === 'folder') {
       try {
         const res = await fetch(b.dataset.post, { method: 'POST' });
         const j = await res.json().catch(() => ({}));
-        if (/\/bake$/.test(b.dataset.post)) document.getElementById('bake').textContent = j.ok ? 'Baking…' : `Could not bake: ${j.error ?? res.status}`;
+        if (/\/bake$/.test(b.dataset.post)) bakeWord(j.ok ? 'Baking…' : `Could not bake: ${j.error ?? res.status}`);
       } finally { setTimeout(() => { b.disabled = false; }, 800); }
     });
   }
   for (const b of $$('[data-reveal]')) b.addEventListener('click', () => fetch(data.reveal, { method: 'POST' }));
+}
+
+// a package's bake in a word: beside its Re-bake button, and in its bake line below the divider
+function bakeWord(text) {
+  for (const id of ['bakenow', 'bake']) { const el = document.getElementById(id); if (el) el.textContent = text; }
 }
 
 // live updates: the front page reloads when packages come or go; a folder page reloads when its package's bake
@@ -180,7 +185,7 @@ es.onmessage = (m) => {
   } else if (page === 'folder') {
     if (data.checking && ev.audited === data.root) { if (!playing()) location.reload(); return; }
     if (data.package && ev.package === data.package) {
-      if (ev.baking) { const b = document.getElementById('bake'); if (b) b.textContent = 'Baking…'; }
+      if (ev.baking) bakeWord('Baking…');
       else if (playing()) offerReload(); else location.reload();
       return;
     }

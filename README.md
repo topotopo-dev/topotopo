@@ -540,10 +540,11 @@ file the address is written to instead of opening a browser (scripts and tests).
 - **Front page**: each registered workspace and library as a card with a few pictures from inside and its counts of
   packages, folders, files and flags; TopoTopo's built-in library last. The search finds every package by name, tag
   and the packages it uses, and their outputs by name, kind and tag.
-- **Folder pages** at `/w/<workspace>/<path>/` and `/l/<library>/<path>/`: the folder's flags, its notes, a card per
-  subfolder (with a picture and counts) and its files by type: images to view large, sounds and videos in players,
-  models (`.glb`, `.gltf`) in 3D on a click, the rest to open or download. The same addresses serve the files, read
-  only and with ranges (players seek); SVG and HTML are downloads only.
+- **Folder pages** at `/w/<workspace>/<path>/` and `/l/<library>/<path>/` lead with what there is to look at: a card
+  per subfolder (with a picture and counts) and the folder's files by type: images to view large, sounds and videos in
+  players, models (`.glb`, `.gltf`) in 3D on a click, the rest to open or download. Below one divider come its notes
+  and its flags. The same addresses serve the files, read only and with ranges (players seek); SVG and HTML are
+  downloads only.
 - **Notes**: every `.md` and `.txt` file in a folder is a box on its page: a `README` first, then documents, then
   text files, each in file name order (`01-overview.md` first). A folder of many notes shows 24 as boxes (always those
   with a flag) and lists the rest with its files; a link to one of them opens it on its folder's page. Markdown
@@ -556,16 +557,18 @@ file the address is written to instead of opening a browser (scripts and tests).
   Paths are read from the note's folder (`/` from the workspace's root); `res://` from the Godot project, `/Game/`
   from Unreal's `Content/`. A link to a missing file is struck through. A path that leaves the tree, names a drive or
   a network share (`\\host\share`) or passes hidden folders stays text and is never looked up.
-- **Packages**: a folder with a `.topo` file shows its package on its page, in one piece: the baked preview in 3D
-  (the wheel scrolls the page until you click into it, or hold Ctrl), description, tags and links, Open in editor and
-  Re-bake, its published outputs, versions, the packages that use it and those it uses, its graphs and exports; then
-  its notes and attachments. Previews bake by themselves when graphs change; after a failed bake the last good preview
-  stays, marked.
-- **Flags**, at the top of a page and counted on the cards of the folders above it: a link in a note to a missing
-  file, a preview that did not cook (with why), a package that publishes versions and has none or has changes no
-  version holds, an export older than its graph (its recorded source no longer matches the graph), published outputs
-  that no package of the workspace uses. Each says what to do. Audits run in the background and are made again for
-  the workspace or library that changed; a very large tree is audited in part, and its pages say where it stopped.
+- **Packages**: a folder with a `.topo` file shows its package on its page: the baked preview in 3D (the wheel
+  scrolls the page until you click into it, or hold Ctrl), description, tags and links, Open in editor and Re-bake;
+  its published outputs and exports; its pictures (attachments, and the images in its folders such as `previews/`);
+  its versions, the packages that use it and those it uses; its folders and files. Below the divider: its notes, its
+  graphs (each folded to a line), how its preview baked, its flags and the snippets for a board. Previews bake by
+  themselves when graphs change; after a failed bake the last good preview stays, marked.
+- **Flags**, one line below a page's divider that opens to the list, and counted on the cards of the folders above
+  it: a link in a note to a missing file, a preview that did not cook (with why), a package that publishes versions
+  and has none or has changes no version holds, an export older than its graph (its recorded source no longer matches
+  the graph), published outputs that no package of the workspace uses. Each says what to do. Audits run in the
+  background and are made again for the workspace or library that changed; a very large tree is audited in part, and
+  its pages say where it stopped.
 - **Hidden**: dot folders, `node_modules`, `topotopo-packages/`, a package's `versions/` and `packages/`, the engines'
   caches (`.godot`, `Intermediate`, `Saved`, `DerivedDataCache`, `Binaries`) and the files Godot writes beside yours
   (`*.import`, `*.uid`), also when reached by another name (a link, a Windows short name); Unreal's `.uasset` and

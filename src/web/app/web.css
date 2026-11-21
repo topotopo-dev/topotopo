@@ -1,6 +1,7 @@
 /* The web app's pages (src/web/pages.ts, folder-page.ts): the viewer's neutral dark editor colours and its amber
-   accent. The front page's workspace and library cards, a folder page's flags, package, notes as documents, folder
-   cards and files by type, and the viewer dialog. One column on a phone. */
+   accent. The front page's workspace and library cards; a folder page's package, folder cards and files by type, then
+   below a divider its notes as documents, a package's details and the flags; and the viewer dialog. One column on a
+   phone. */
 :root {
   --bg: #1f2124; --panel: #26282c; --panel2: #2c2f33; --line: #3a3d42; --text: #d6d9dd; --dim: #8c939b; --faint: #5d636b;
   --view: #2b2d31; --accent: #f0a030; --accent-bg: rgba(240, 160, 48, 0.12); --err: #e5675f; --err-bg: rgba(229, 103, 95, 0.1); --ok: #8fbf7f;
@@ -56,7 +57,7 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 #clear { padding: 5px 10px; }
 
 .wrap { max-width: 1440px; margin: 0 auto; padding: 8px 24px 64px; }
-.problems { margin: 18px 0 0; padding: 8px 12px; border: 1px solid var(--err); border-radius: 6px; color: var(--err); }
+.problems { margin: 40px 0 0; padding: 8px 12px; border: 1px solid var(--err); border-radius: 6px; color: var(--err); }
 .problems ul { margin: 6px 0 0; padding-left: 18px; color: var(--text); font: var(--mono); }
 
 /* pictures as one tile: one, two, three or four */
@@ -124,14 +125,20 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 .s-empty { color: var(--dim); font-style: italic; }
 .s-baking { color: var(--accent); }
 
-/* a folder page: its head, a notice, its flags */
+/* a folder page: its head, a notice, the divider before what is read and checked, its flags (one line that opens) */
 .folder .head { padding: 26px 0 6px; }
 .kicker { margin: 0 0 6px; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; }
 .hstats { margin: 8px 0 0; color: var(--dim); }
 .notice { margin: 16px 0 0; padding: 10px 14px; border-left: 3px solid var(--faint); background: var(--panel); border-radius: 0 6px 6px 0; color: var(--dim); }
-.flags { margin: 20px 0 0; padding: 14px 18px 12px; background: var(--accent-bg); border: 1px solid rgba(240, 160, 48, 0.35); border-radius: var(--radius); }
-.flags h2 { margin: 0 0 10px; color: var(--accent); font-size: 15px; }
-.flags .count { color: var(--dim); }
+.divider { display: flex; align-items: center; gap: 14px; margin: 64px 0 0; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
+.divider::after { content: ""; flex: 1; border-top: 1px solid var(--faint); }
+.flags { margin: 24px 0 0; background: var(--accent-bg); border: 1px solid rgba(240, 160, 48, 0.35); border-radius: var(--radius); }
+.flags > summary { padding: 10px 16px; cursor: pointer; color: var(--dim); font-size: 13px; }
+.flags > summary:hover .ftotal { text-decoration: underline; }
+.ftotal { color: var(--accent); font-weight: 600; font-size: 14px; }
+.flags[open] > summary { border-bottom: 1px solid rgba(240, 160, 48, 0.25); }
+.flags .fbody { padding: 14px 18px 12px; }
+.flags .fbody > .fgroup:first-child { margin-top: 0; }
 .flaglist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .flag { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 2px 12px; align-items: baseline; }
 .fkind { grid-row: span 2; justify-self: start; padding: 1px 7px; border-radius: 3px; background: rgba(240, 160, 48, 0.18); color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
@@ -139,9 +146,7 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 .fwhat { overflow-wrap: anywhere; }
 .ftodo { color: var(--dim); font-size: 13px; }
 .ftodo::before { content: "→ "; color: var(--faint); }
-.below { margin-top: 10px; }
-.below summary { cursor: pointer; color: var(--dim); font-size: 13px; }
-.fgroup { margin: 12px 0 0 2px; }
+.fgroup { margin: 14px 0 0 2px; }
 .fat { display: inline-block; margin-bottom: 6px; font: var(--mono); color: var(--text); }
 
 /* a package on its folder page */
@@ -162,8 +167,9 @@ img.view.pic { width: auto; height: auto; max-width: 100%; aspect-ratio: auto; m
 .desc { white-space: pre-line; margin: 0 0 12px; font: var(--read); font-size: 14px; }
 .links { margin: 10px 0; padding-left: 18px; }
 .links a { color: var(--accent); }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
-.bake { color: var(--dim); font-size: 12px; margin: 6px 0; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0 8px; }
+.bakenow { color: var(--accent); font-size: 12px; }
+.bake { color: var(--dim); font-size: 12px; margin: 10px 0 6px; }
 .bake.err { color: var(--err); }
 .bake.empty { color: var(--text); }
 pre.error, .warn pre { margin: 6px 0; padding: 8px; max-height: 200px; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; white-space: pre-wrap; }
@@ -175,7 +181,12 @@ pre.error { color: var(--err); }
 .copy input { min-width: 0; padding: 4px 6px; border-radius: 3px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: var(--mono); }
 .copy button { padding: 4px 10px; border-radius: 3px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
 .copy button.done { color: var(--ok); border-color: var(--ok); }
-.pkgmore { margin-top: 8px; }
+.pkgout, .pkgrel { margin-top: 8px; }
+.pkgend { margin-top: 24px; }
+.pkgend .board summary { margin-top: 0; }
+.pictures h2 .hfolder { font: var(--mono); font-size: 14px; text-decoration: none; }
+.pictures h2 .hfolder:hover { color: var(--accent); text-decoration: underline; }
+.pictures .more { margin: 10px 0 0; }
 .othumb { display: block; width: 96px; height: 96px; margin-bottom: 4px; background: var(--view); border-radius: 4px; object-fit: cover; }
 .versions { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
 .version { border-bottom: 1px solid var(--line); }
@@ -240,15 +251,6 @@ td .tags { margin-top: 4px; }
 .md > :where(:not(.table, .lblocks, .props, pre)) { max-width: 78ch; }
 .notes.one .md > * { max-width: none; }
 .note.clip .md { max-height: var(--clip); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent); mask-image: linear-gradient(to bottom, #000 82%, transparent); }
-/* one note with pictures: the pictures beside it on a wide screen */
-.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 28px; align-items: start; }
-.split .notes.one { max-width: 860px; }
-@media (min-width: 1280px) {
-  .split { grid-template-columns: minmax(0, 860px) minmax(0, 1fr); }
-  .split .notes.short .note { --clip: 820px; }
-  .split .side h2 { margin-top: 24px; }
-  .split .side .igrid.few { grid-template-columns: minmax(0, 1fr); }
-}
 .note .more { display: block; margin: -4px auto 14px; padding: 5px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
 .note .more:hover { border-color: var(--accent); color: var(--accent); }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 1.3em 0 0.5em; color: var(--text); line-height: 1.25; font-weight: 650; }
@@ -411,7 +413,7 @@ pre.txt { margin: 0.6em 0; white-space: pre-wrap; font: var(--mono); font-size: 
   .fkind { grid-row: auto; }
   .md { padding: 4px 16px 14px; }
   .note, .notes.many .note { --clip: 360px; }
-  .notes.short .note, .split .notes.short .note { --clip: 320px; }
+  .notes.short .note { --clip: 320px; }
   .arow { grid-template-columns: minmax(0, 1fr) auto auto 28px; gap: 4px 10px; }
   .arow audio { grid-column: 1 / -1; grid-row: 2; }
   .unote { display: none; }
