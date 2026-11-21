@@ -12757,7 +12757,7 @@ Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bo
 | `step` | float | `0` | 0..5 |  | `step_size` | walking step in metres (0 = half the smallest width) |
 | `spill` | float | `0.05` | 0..50 |  | `spill_reach`, `overflow` | a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are |
 | `seed` | int | `0` | 0..2147483647 |  |  | seed of the run starts, lengths, widths, wander and gaps |
-| `stain` | float | `0` | 0..20 |  | `stain_width`, `halo` | a broad faint stain around each run, its half width this many times the run's head width (0 = none): layer stain, widest at the head and narrowing to under half down the run, no gaps, fading sideways and to nothing at the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash |
+| `stain` | float | `0` | 0..20 |  | `stain_width`, `halo` | a broad faint stain around each run, its half width this many times the run's head width (0 = none; a spill wider than 1.5 times the widest width counts as that): layer stain, widest at the head and narrowing to under half down the run, no gaps, fading sideways and to nothing at the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash |
 | `stain_skew` | float | `0` | 0..8 |  | `stain_contrast` | each run's stain times its strength (0..1; the longer runs are the stronger) to this power: 0 = every stain alike, 2 = most faint and a few strong |
 
 **Writes:** image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask (and stain when asked for)
@@ -17136,7 +17136,7 @@ Input 0: a mesh with uv and materials, each with a kind. The maps of the materia
 | `overrides` | json | `{}` |  |  | `override` | per layer of the stack: {"painted_metal_rust": {"color": "#5a2a14"}, "dust": {"opacity": 0}, "grime": {"image": "oil_photo", "size": 0.6}}; fields color, opacity, roughness, roughness_offset, metallic, height, color_mode, image, normal, roughness_image, size |
 | `reference` | json | `{}` |  |  | `target_look` | route B: what the base is pulled toward before weathering: {"color": "#6b665c", "roughness": 0.85} or {"image": "name"} (input 3); {} = none |
 | `match` | float | `0.6` | 0..1 |  | `pull` | route B: how far toward the reference (0 = not at all) |
-| `packing` | string | `"orm"` |  |  | `packed_layout` | channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma, mrox; glTF and usda exports read it by this layout |
+| `packing` | string | `"orm"` |  |  | `packed_layout` | channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma (stored as rmo: the map is named <material>_rmo), mrox; glTF and usda exports read it by this layout |
 | `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` |  | green channel of the normal map: opengl (glTF, Blender) or directx (Unreal) |
 
 **Writes:** the mesh with the weathered material; images <material>_base_color, _normal, the packed map, _height, _masks

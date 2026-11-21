@@ -46,12 +46,12 @@
         },
         "kind": "image",
         "layers": {
-          "C": "80f7bed937b8842b",
-          "coating": "ddb7a59e907c2e40",
-          "dirt": "a9dd13f2290dc334",
-          "edges": "b461c0ed0eed7597",
+          "C": "d6b28f67c6585915",
+          "coating": "3fa812ddb715fac7",
+          "dirt": "1c2d21b0a857d96e",
+          "edges": "237ba5c5f515b7b3",
           "island": "19727268b1d09f96",
-          "leaks": "5164f7eda418eb1f",
+          "leaks": "db7c7c2e4f6c0694",
           "mask": "5963c5b542beec4f",
           "texel": "cca48525b745925f"
         },
