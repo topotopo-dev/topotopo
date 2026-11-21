@@ -805,7 +805,16 @@ function instanceJobs(doc: Document, buffer: ReturnType<Document['createBuffer']
   // a packed prim's "material" (pack carries it onto the instance) applies where its source has none of its own, as
   // unpacking does: one instanced mesh per source and material
   const flat = new Map<number, Geometry>();
-  const flatOf = (s: number) => { let f = flat.get(s); if (!f) { f = flattenSource(g.packedSources[s]); flat.set(s, f); } return f; };
+  const flatOf = (s: number) => {
+    let f = flat.get(s);
+    if (!f) {
+      const src = g.packedSources[s];
+      if (!src) throw new Error(`a packed prim names packed source ${s}, and the geometry has ${g.packedSources.length} (the node that made it is broken)`);
+      f = flattenSource(src);
+      flat.set(s, f);
+    }
+    return f;
+  };
   const ownMat = (s: number) => { const a = flatOf(s).prims.get('material'); return !!a && a.type === 'string' && (a.data as string[]).some((x) => !!x); };
   const pm = g.prims.get('material'), pmat = pm && pm.type === 'string' ? (pm.data as string[]) : null;
   const bySrc = new Map<string, { s: number; mat: string; prims: number[] }>();

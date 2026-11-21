@@ -14,6 +14,10 @@
 // - The cook for Godot from the installed bin: `topotopo cook <package> --for godot --progress json` on the neutral props
 //   of the cook tests in a Godot project, `topotopo godot status` reading it as current, and `topotopo godot setup`
 //   copying the addon the package carries (integrations/godot/addons/topotopo, every file of it in the tarball).
+// - The cook for Unreal from the installed bin: `topotopo cook <package> --for unreal --progress json` on the same props in
+//   an Unreal project's Content/, `topotopo unreal status` reading it as current, and `topotopo unreal setup --with-pcg`
+//   copying both plugins the package carries (integrations/unreal/TopoTopoImport and TopoTopoPCG, every file of them in
+//   the tarball), enabling them with TopoTopoPCG's target platforms, and recording the installed command line.
 // - The library: `import 'topotopo'` (exports map) and its types (tsc on a consumer file), the built-in library, the
 //   bundled font, the worker pool entry (dist/host/worker.js) and the SDF grid kernels, all from the installed location,
 //   and rbd_settle with the Rapier physics engine (@dimforge/rapier3d-compat) resolved from the installed dependencies.
@@ -100,6 +104,13 @@ try {
   const addonMissing = addonFiles.filter((f) => !files.includes(f));
   check(addonFiles.length > 10 && !addonMissing.length && !files.some((f) => /^integrations\/godot\/(tests|demo)\//.test(f)),
     `tarball has every file of the Godot addon (${addonFiles.length}) and not its tests or demo${addonMissing.length ? `; missing: ${addonMissing.join(', ')}` : ''}`);
+  // both Unreal plugins, whole, as source (topotopo unreal setup copies them into a project; the project builds them)
+  const unrealFiles: string[] = [];
+  const walkUnreal = (dir: string, rel: string) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = `${rel}/${e.name}`; if (e.isDirectory()) walkUnreal(path.join(dir, e.name), r); else unrealFiles.push(r); } };
+  for (const plugin of ['TopoTopoImport', 'TopoTopoPCG']) walkUnreal(path.join(ROOT, 'integrations', 'unreal', plugin), `integrations/unreal/${plugin}`);
+  const unrealMissing = unrealFiles.filter((f) => !files.includes(f));
+  check(unrealFiles.length > 40 && !unrealMissing.length && !files.some((f) => /^integrations\/unreal\/[^/]+\/(Binaries|Intermediate)\//.test(f)),
+    `tarball has every file of both Unreal plugins (${unrealFiles.length}) and no build output${unrealMissing.length ? `; missing: ${unrealMissing.join(', ')}` : ''}`);
   const wasmBytes = info.files.filter((f: any) => f.path.endsWith('.wasm')).reduce((sum: number, f: any) => sum + f.size, 0);
   check(wasmBytes > 0 && wasmBytes <= 2_500_000, `tarball WASM totals ${wasmBytes} bytes (limit 2500000)`);
   // the examples and their cards (src/mcp/examples.ts, help {examples}), and each example package's manifest, graphs and inputs
@@ -266,6 +277,27 @@ try {
   check(/copied the addon/.test(setup) && fs.existsSync(path.join(game, 'addons', 'topotopo', 'plugin.cfg')) && fs.existsSync(path.join(game, 'addons', 'topotopo', 'plugin.gd'))
     && fs.readFileSync(path.join(game, 'project.godot'), 'utf8').includes('enabled=PackedStringArray("res://addons/topotopo/plugin.cfg")'),
     `godot setup copies the addon the installed package carries into addons/topotopo/ and enables it (${setup.split('\n')[0]})`);
+
+  // ------------------------------------------------------------------------------------------------ Unreal
+  step(`Unreal: npm exec --no -- ${BIN} cook … --for unreal`);
+  // an Unreal project with the same props in Content/, cooked by the installed bin, then the plugins set up from it
+  const ue = path.join(tmp, 'unreal game');
+  copy(path.join(ROOT, 'test', 'data', 'cook', 'props'), path.join(ue, 'Content', 'props'));
+  fs.writeFileSync(path.join(ue, 'Game.uproject'), JSON.stringify({ FileVersion: 3, EngineAssociation: '5.8', Plugins: [] }, null, '\t') + '\n');
+  const ueProgress = sh(`npm exec --no -- ${BIN} cook "${path.join(ue, 'Content', 'props')}" --for unreal --progress json --quiet`, app, cookEnv).split(/\r?\n/).filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+  const ueCrate = path.join(ue, 'Saved', 'TopoTopo', 'Game', 'props', 'outputs', 'crate', 'crate.glb');
+  check(ueProgress.at(-1)?.event === 'done' && ueProgress.at(-1)?.ok && fs.existsSync(ueCrate) && fs.readFileSync(ueCrate).subarray(0, 4).toString() === 'glTF' && fs.existsSync(path.join(ue, 'Content', 'props', '.topotopo', 'unreal.json')),
+    `cook --for unreal writes the outputs below Saved/ and the record (${ueProgress.filter((e) => e.event === 'output').map((e) => `${e.output}:${e.state}`).join(' ')})`);
+  const ueSetup = sh(`npm exec --no -- ${BIN} unreal setup "${ue}" --with-pcg`, app, cookEnv);
+  const uproject = JSON.parse(fs.readFileSync(path.join(ue, 'Game.uproject'), 'utf8'));
+  const entry = (n: string) => uproject.Plugins.find((p: any) => p.Name === n);
+  const record = JSON.parse(fs.readFileSync(process.env.TOPOTOPO_CONFIG!, 'utf8')).install ?? {};
+  check(/copied the plugin/.test(ueSetup) && fs.existsSync(path.join(ue, 'Plugins', 'TopoTopoImport', 'Source', 'TopoTopoImportEditor', 'Private', 'TopoTopoImporter.cpp'))
+    && fs.existsSync(path.join(ue, 'Plugins', 'TopoTopoPCG', 'TopoTopoPCG.uplugin')) && entry('TopoTopoImport')?.Enabled === true
+    && entry('TopoTopoPCG')?.SupportedTargetPlatforms?.join() === 'Win64' && path.resolve(record.cli ?? '').toLowerCase() === path.join(installed, 'dist', 'cli.js').toLowerCase(),
+    `unreal setup --with-pcg copies both plugins the installed package carries, enables them and records the installed CLI (${ueSetup.split('\n')[0]})`);
+  const ueStatus = sh(`npm exec --no -- ${BIN} unreal status "${ue}" --strict`, app, cookEnv);
+  check(/every package is current/.test(ueStatus), `unreal status --strict reads the package as current after setup (${ueStatus.trim().split('\n').at(-1)})`);
 
   // ------------------------------------------------------------------------------------------------ library
   step(`library: import '${NAME}' from the installed package`);
