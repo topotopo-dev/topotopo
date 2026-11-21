@@ -1,10 +1,11 @@
-// A folder page of the web app (/w/<workspace>/<path…>/, /l/<library>/<path…>/): the folder's flags, its package when
-// it is one (src/web/pages.ts packageBlock, packageCols, packageEnd: the package in one piece), its notes as boxes (kept
-// short when pictures, folders or a package come after them; one note with pictures beside it on a wide screen), a card
-// per subfolder (the empty ones as one line of links) and its files by type: images to view large, audio and video in
-// players, models in 3D on a click, the rest to open or download. A pure function of its data (src/web/server.ts
-// gathers it, src/web/folders.ts reads the folder) and a URL builder.
-import { count, esc, flagBadge, mosaic, packageBlock, packageCols, packageEnd, shell, size, usesSection, when } from './pages.ts';
+// A folder page of the web app (/w/<workspace>/<path…>/, /l/<library>/<path…>/). First what a person looks at: its
+// package when it is one (src/web/pages.ts: its preview, what it makes, its pictures, its versions), a card per
+// subfolder (the empty ones as one line of links) and its files by type: images to view large, audio and video in
+// players, models in 3D on a click, the rest to open or download. Then, below one divider, what is read and checked: its
+// notes as boxes (folded, shorter when the page has pictures, folders or a package), a package's graphs and how its
+// preview baked, the flags as one line that opens, a package's board snippets and where it is. A pure function of its
+// data (src/web/server.ts gathers it, src/web/folders.ts reads the folder) and a URL builder.
+import { count, esc, flagBadge, mosaic, packageAttachments, packageBlock, packageDetails, packageEnd, packageOutputs, packageRelations, shell, size, usesSection, when } from './pages.ts';
 import type { PackageData, Urls } from './pages.ts';
 import type { FileKind, Flag } from './folders.ts';
 
@@ -79,6 +80,8 @@ export interface FolderPageData {
   /** Unreal's .uasset and .umap files here */
   engineAssets: number;
   package: PackageData | null;
+  /** a package's folders that hold images (previews/, renders/…; not attachments/ or exports/): their images */
+  pictures?: { name: string; url: string; images: FileItem[] }[];
   /** a workspace's root: the one version of each package its packages use */
   uses?: PackageData['uses'];
   /** a root whose audit stopped short: where, in words */
@@ -102,21 +105,26 @@ function kinds(flags: Flag[]) {
   return [...n].map(([k, c]) => `${c} ${(word[k] ?? [k, k])[c === 1 ? 0 : 1]}`).join(', ');
 }
 
+/**
+ * The flags as one line that opens: how many, where (here, in its folders) and of which kinds; open, the folder's own
+ * flags and then those of each folder below it. A root's audit that stopped short says so before them.
+ */
 function flagsSection(d: FolderPageData) {
+  const cut = d.cut?.length ? `<p class="notice cut">Audited in part, a very large tree: ${esc(d.cut.join('; '))}. Flags past that are not counted.</p>` : '';
   const below = d.below.reduce((n, b) => n + b.flags.length, 0);
-  if (!d.flags.length && !below) return '';
-  const all = d.below.flatMap((b) => b.flags);
-  return `<section class="flags" aria-label="Flags">
-  <h2>${esc(count(d.flags.length + below, 'flag'))}${below && d.flags.length ? ` <span class="count">${esc(`${d.flags.length} here, ${below} in its folders`)}</span>` : below ? ' <span class="count">in its folders</span>' : ''}</h2>
+  if (!d.flags.length && !below) return cut;
+  const where = below ? `${d.flags.length ? `${d.flags.length} here, ${below}` : ''} in ${count(d.below.length, 'folder')} below` : '';
+  return `${cut}<details class="flags" aria-label="Flags">
+  <summary><span class="ftotal">${esc(count(d.flags.length + below, 'flag'))}</span>${where ? ` <span class="fwhere">${esc(where.trim())}</span>` : ''}<span class="fkinds">: ${esc(kinds([...d.flags, ...d.below.flatMap((b) => b.flags)]))}</span></summary>
+  <div class="fbody">
   ${d.flags.length ? flagList(d.flags) : ''}
-  ${below ? `<details class="below"${d.flags.length || below > 6 ? '' : ' open'}><summary>${esc(count(below, 'flag'))} in ${esc(count(d.below.length, 'folder'))} below: ${esc(kinds(all))}</summary>
-    ${d.below.map((b) => `<div class="fgroup"><a class="fat" href="${esc(b.url)}">${esc(b.at)}</a>${flagList(b.flags.slice(0, 20))}${b.flags.length > 20 ? `<p class="dim small">and ${b.flags.length - 20} more: <a href="${esc(b.url)}">open the folder</a></p>` : ''}</div>`).join('')}
-  </details>` : ''}
-</section>`;
+  ${d.below.map((b) => `<div class="fgroup"><a class="fat" href="${esc(b.url)}">${esc(b.at)}</a>${flagList(b.flags.slice(0, 20))}${b.flags.length > 20 ? `<p class="dim small">and ${b.flags.length - 20} more: <a href="${esc(b.url)}">open the folder</a></p>` : ''}</div>`).join('')}
+  </div>
+</details>`;
 }
 
 /**
- * The notes as boxes. Three or more fold shorter, and so do notes with pictures, folders or a package after them
+ * The notes as boxes. Three or more fold shorter, and so do the notes of a page with pictures, folders or a package
  * (`short`): the page stays an overview, each note a click from whole.
  */
 function notesSection(d: FolderPageData, short: boolean) {
@@ -146,13 +154,30 @@ function folderCard(c: FolderCard) {
   </a>`;
 }
 
+const tile = (f: FileItem) => `<a class="tile" href="${esc(f.url)}" data-view="image" data-name="${esc(f.name)}" title="${esc(`${f.name} · ${size(f.size)}`)}"><img src="${esc(f.url)}" alt="" loading="lazy" decoding="async"><span>${esc(f.name)}</span></a>`;
+const tiles = (images: FileItem[]) => `<div class="igrid${images.length <= 4 ? ' few' : ''}">${images.map(tile).join('')}</div>`;
+
 /** The folder's images as tiles. */
 function imagesPart(images: FileItem[]) {
   return images.length ? `<h2>Images <span class="count">${images.length}</span></h2>
-    <div class="igrid${images.length <= 4 ? ' few' : ''}">${images.map((f) => `<a class="tile" href="${esc(f.url)}" data-view="image" data-name="${esc(f.name)}" title="${esc(`${f.name} · ${size(f.size)}`)}"><img src="${esc(f.url)}" alt="" loading="lazy" decoding="async"><span>${esc(f.name)}</span></a>`).join('')}</div>` : '';
+    ${tiles(images)}` : '';
 }
 
-/** The folder's files by type (`withImages`: its images too, unless they stand beside its note). */
+/** A package's folder of images (previews/, renders/…) as a strip of its first pictures, the folder a click away. */
+const STRIP = 12;
+function strip(s: NonNullable<FolderPageData['pictures']>[number]) {
+  return `<h2><a class="hfolder" href="${esc(s.url)}">${esc(s.name)}/</a> <span class="count">${s.images.length}</span></h2>
+    ${tiles(s.images.slice(0, STRIP))}
+    ${s.images.length > STRIP ? `<p class="dim small more">and ${s.images.length - STRIP} more: <a href="${esc(s.url)}">open ${esc(s.name)}/</a></p>` : ''}`;
+}
+
+/** A package's pictures: its attachments, the images beside its manifest and those in its folders. */
+function picturesSection(d: FolderPageData, p: PackageData, images: FileItem[]) {
+  const parts = [packageAttachments(p), imagesPart(images), ...(d.pictures ?? []).map(strip)].filter(Boolean);
+  return parts.length ? `<section class="pictures" aria-label="Pictures">${parts.join('\n')}</section>` : '';
+}
+
+/** The folder's files by type (`withImages`: its images too, unless its package's pictures show them). */
 function filesSection(d: FolderPageData, u: Urls, withImages: boolean) {
   const by = (k: FileKind) => d.files.filter((f) => f.kind === k);
   const images = by('image'), audio = by('audio'), video = by('video'), models = by('model'), other = by('other');
@@ -197,12 +222,23 @@ function foldersSection(d: FolderPageData) {
 export function folderPage(d: FolderPageData, u: Urls): string {
   const crumbs = d.crumbs.map((c, i) => (i === d.crumbs.length - 1 ? `<span aria-current="page">${esc(c.name)}</span>` : `<a href="${esc(c.url)}">${esc(c.name)}</a>`)).join('<span class="sep">/</span>');
   const empty = !d.notes.length && !d.folders.length && !d.files.length && !d.engineAssets && !d.package;
+  const p = d.package;
   const images = d.files.filter((f) => f.kind === 'image');
-  // one note and pictures: the pictures beside the note on a wide screen; notes before pictures, folders or a
-  // package's attachments stay short
-  const split = d.notes.length === 1 && images.length > 0 && !d.package;
-  const short = images.length > 0 || d.folders.length > 0 || !!d.package;
-  const notes = split ? `<div class="split">${notesSection(d, short)}<section class="files side" aria-label="Images">${imagesPart(images)}</section></div>` : notesSection(d, short);
+  // the notes of a page with pictures, folders or a package fold shorter
+  const short = images.length > 0 || d.folders.length > 0 || !!p;
+  // first what a person looks at: a package's preview, what it makes, its pictures and versions; the folders as
+  // cards; the files by type
+  const look = [
+    ...(p ? [packageBlock(p, u), packageOutputs(p), picturesSection(d, p, images), packageRelations(p)] : []),
+    foldersSection(d),
+    d.uses?.length ? `<section class="wsuses">${usesSection(d.uses)}</section>` : '',
+    filesSection(d, u, !p),
+    empty ? '<p class="empty">This folder is empty.</p>' : '',
+  ].filter(Boolean).join('\n  ');
+  // then, below the divider, what is read and checked: the notes, a package's graphs and bake, the flags, a package's
+  // board snippets and where it is
+  const read = [notesSection(d, short), p ? packageDetails(p) : '', flagsSection(d), p ? packageEnd(p, u) : ''].filter(Boolean).join('\n  ');
+  const divider = look && read ? '<div class="divider" role="separator"><span>Notes and details</span></div>' : '';
   return shell(`${d.title} · TopoTopo`, u, `<header class="bar">
   <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
   <nav class="crumbs" aria-label="Folders">${crumbs}</nav>
@@ -215,15 +251,9 @@ export function folderPage(d: FolderPageData, u: Urls): string {
     <p class="hstats">${esc(d.stats)}</p>
   </div>
   ${d.notice ? `<p class="notice">${esc(d.notice)}</p>` : ''}
-  ${d.cut?.length ? `<p class="notice cut">Audited in part, a very large tree: ${esc(d.cut.join('; '))}. Flags past that are not counted.</p>` : ''}
-  ${flagsSection(d)}
-  ${d.package ? packageBlock(d.package, u) + packageCols(d.package) : ''}
-  ${notes}
-  ${d.package ? packageEnd(d.package, u) : ''}
-  ${foldersSection(d)}
-  ${d.uses?.length ? `<section class="wsuses">${usesSection(d.uses)}</section>` : ''}
-  ${filesSection(d, u, !split)}
-  ${empty ? '<p class="empty">This folder is empty.</p>' : ''}
+  ${look}
+  ${divider}
+  ${read}
   <p class="foot"><code>${esc(d.dir)}</code></p>
 </main>
 <dialog id="viewer" aria-label="View">

@@ -94,6 +94,12 @@ try {
     const pg = await page('/p/game/crate');
     const ph = pg.body.toString();
     check(pg.status === 200 && ph.includes('concept.png') && ph.includes('http://board.local/x') && ph.includes(`http://127.0.0.1:${g.port}/embed/game/crate`) && ph.includes(`http://127.0.0.1:${g.port}/p/game/crate`), 'the package\'s folder page: attachments, links, the board snippets with the absolute stable URLs');
+    const at = (s: string) => ph.indexOf(s);
+    check(at('class="pkgblock"') > 0 && at('class="pkgblock"') < at('<section class="pictures"') && at('<section class="pictures"') < at('<h2>Attachments') && at('<h2>Attachments') < at('class="divider"')
+      && at('class="divider"') < at('<section class="pkgdetails">') && at('<section class="pkgdetails">') < at('id="bake"') && at('id="bake"') < at('<details class="board">') && at('<details class="board">') < at('stable link</a>'),
+      'a package\'s page: its preview and its pictures first; below the divider its graphs, how it baked, the board snippets and where it is');
+    check(/<div class="actions">[\s\S]*?Re-bake<\/button>\s*<span class="bakenow" id="bakenow" aria-live="polite">(Baking…)?<\/span>\s*<\/div>/.test(ph) && !/<details class="graph" open/.test(ph) && /<details class="graph"><summary><b>main<\/b>/.test(ph),
+      'beside its buttons a word while it bakes; its graphs folded to a line each');
     check((await req('/p/game/nope')).status === 404, 'an unknown package is 404');
     check((await req('/static/web.css')).status === 200 && (await req('/app/embed.js')).status === 200 && (await req('/vendor/three/build/three.module.js')).status === 200, 'styles, the embed module and three.js are served');
     check((await req('/static/../server.ts')).status === 404, 'no files outside the static folder');
@@ -282,6 +288,7 @@ try {
     const u = { home: '/', package: () => '/p', thumb: () => '/t', glb: () => '/g', embed: () => '/e', file: () => '/f', edit: () => null, folder: () => '/w/', raw: () => '/r', model: () => '/m', asset: (n: string) => n, app: (n: string) => n, three: '/3/' };
     const html = frontPage({ workspaces: [], libraries: [], packages: [], problems: ['<script>'] }, u);
     check(html.includes('&lt;script&gt;') && html.includes('library add') && html.includes('workspace init'), 'problems are escaped; an empty web app says how to add a workspace and a library');
+    check(html.indexOf('<details class="problems">') > html.indexOf('id="libraries"') && html.indexOf('id="libraries"') > html.indexOf('id="workspaces"'), 'the front page: the workspaces and libraries first, problems after them');
   }
 
   // ------------------------------------------------------------------------------------------- folder pages
@@ -347,6 +354,7 @@ try {
     write(path.join(crateP.dir, 'exports', 'fresh.glb'), fs.readFileSync(path.join(crate.dir, '.web', 'preview.glb')));
     write(path.join(crateP.dir, 'exports', 'fresh.glb.source.json'), source(graphSha(BOX)));
     write(path.join(crateP.dir, 'versions', 'x.txt'), 'x');
+    write(path.join(crateP.dir, 'previews', 'front.png'), PNG);
     const broken = createPackage(place, 'levels/broken', { title: 'Broken', graph: BOX });
     write(path.join(broken.dir, '.web', 'bake.json'), { key: 'k', at: 1, ok: false, error: '[rocks] unknown node type "scatter_rockz"\nmore' });
     const lamp = createPackage(place, 'props/lamp', { title: 'Lamp', graph: BOX });
@@ -520,7 +528,7 @@ try {
   section('folder pages: flags');
   {
     const notes = (await fr('/w/yard/notes/')).body.toString();
-    check(/<section class="flags"[\s\S]*?01-overview\.md links to gone\.png, which is not there[\s\S]*?Fix the link, or put the file there/.test(notes) && /res:\/\/scenes\/none\.tscn, which is not there/.test(notes), 'a link to a missing file is a flag on its folder, with what to do');
+    check(/<details class="flags"[\s\S]*?01-overview\.md links to gone\.png, which is not there[\s\S]*?Fix the link, or put the file there/.test(notes) && /res:\/\/scenes\/none\.tscn, which is not there/.test(notes), 'a link to a missing file is a flag on its folder, with what to do');
     const crateP = (await fr('/w/yard/props/crate/')).body.toString();
     check(/exports\/crate\.glb was made from an older version of its graph/.test(crateP) && !/exports\/fresh\.glb was made/.test(crateP), 'an export older than its graph is a flag; one made from the graph as it is is not');
     const broken = (await fr('/w/yard/levels/broken/')).body.toString();
@@ -533,12 +541,28 @@ try {
     const root = (await fr('/w/yard/')).body.toString();
     const cardFlags = (href: string) => { const at = root.indexOf(`k-folder" href="${href}"`); return /<span class="fbadge"[^>]*>(\d+) flags?<\/span>/.exec(root.slice(at, root.indexOf('</a>', at)))?.[1]; };
     check(cardFlags('/w/yard/notes/') === '3' && cardFlags('/w/yard/props/') === '4' && cardFlags('/w/yard/levels/') === '1', `flags roll up into each folder card (notes ${cardFlags('/w/yard/notes/')}, props ${cardFlags('/w/yard/props/')}, levels ${cardFlags('/w/yard/levels/')})`);
-    check(/<details class="below"><summary>9 flags in 6 folders below: /.test(root), 'the root sums its folders\' flags');
+    check(/<details class="flags" aria-label="Flags">\s*<summary><span class="ftotal">9 flags<\/span> <span class="fwhere">in 6 folders below<\/span><span class="fkinds">: \d+ broken links?, /.test(root), 'the root sums its folders\' flags, in one line that opens');
     const home = (await fr('/')).body.toString();
     const card = home.slice(home.indexOf('data-root="w/yard"'), home.indexOf('</a>', home.indexOf('data-root="w/yard"')));
-    check(/<span class="stats"><span class="stat fstat"><b>9<\/b> <span>flags<\/span>/.test(card) && /<b>4<\/b> <span>packages<\/span>/.test(card), 'and so does the workspace\'s card on the front page, its flags first');
+    check(/<span class="stats"><span class="stat"><b>4<\/b> <span>packages<\/span>/.test(card) && /<span class="stat fstat"><b>9<\/b> <span>flags<\/span><\/span><\/span>/.test(card), 'and so does the workspace\'s card on the front page: what is in it first, its flags last');
     check(/<span class="fkind">stale export<\/span>/.test(crateP) && /<span class="fkind">bake failed<\/span>/.test(broken) && /<span class="fkind">unpublished<\/span>/.test(lamp) && /<span class="fkind">unused outputs<\/span>/.test(posts) && /<span class="fkind">broken link<\/span>/.test(notes),
       'each flag\'s chip says what is wrong');
+  }
+
+  section('folder pages: what a person looks at first, then the divider');
+  {
+    const order = (h: string, ...marks: string[]) => marks.every((m, i) => h.indexOf(m) >= 0 && (i === 0 || h.indexOf(marks[i - 1]) < h.indexOf(m)));
+    const root = (await fr('/w/yard/')).body.toString();
+    check(order(root, '<section class="folders"', 'class="divider"', '<details class="flags"', '<p class="foot">'), 'a workspace\'s root: its folders first, its flags below the divider');
+    const notes = (await fr('/w/yard/notes/')).body.toString();
+    check(order(notes, '<h2>Images', '<h2>Videos', 'class="divider"', 'id="note-01-overview.md"', '<details class="flags"'), 'a folder: its pictures and files first; below the divider its notes, then its flags');
+    const only = (await fr('/w/probe/notes/')).body.toString();
+    check(!/class="divider"/.test(only) && order(only, '<div class="head">', 'id="note-01-a.md"', '<details class="flags"'), 'a folder of notes alone: its notes are what it shows, no divider above them');
+    const crate = (await fr('/w/yard/props/crate/')).body.toString();
+    check(order(crate, 'class="pkgblock"', '<section class="pkgout">', '<h2>Exports', '<section class="pictures"', '<section class="folders"', 'class="divider"', '<section class="pkgdetails">', '<details class="flags"', '<section class="pkgend">'),
+      'a package: its preview, its exports, its pictures and its folders first; below the divider its graphs, its flags, the board snippets');
+    check(/<section class="pictures" aria-label="Pictures"><h2><a class="hfolder" href="\/w\/yard\/props\/crate\/previews\/">previews\/<\/a> <span class="count">1<\/span><\/h2>\s*<div class="igrid few"><a class="tile" href="\/w\/yard\/props\/crate\/previews\/front\.png" data-view="image"/.test(crate)
+      && /class="fcard k-folder" href="\/w\/yard\/props\/crate\/previews\/"/.test(crate), 'a package\'s folder of images shows them as a strip with its pictures; its card stays with the folders');
   }
 
   section('folder pages: flags that are not there');
@@ -683,7 +707,8 @@ try {
     const quay = (await fr('/w/probe/levels/quay/')).body.toString();
     check(/<div class="view none"><span class="cube"><\/span><p>No preview yet: this package has no graph to bake<\/p><\/div>/.test(quay) && !/data-post="[^"]*\/bake"/.test(quay), 'a package with no graph: a short frame that says so, and no Re-bake');
     check((await fr('/p/probe/quay/bake', { method: 'POST' })).status === 400 && !fs.existsSync(path.join(probe, 'levels', 'quay', '.web', 'bake.json')), 'and nothing is baked when asked: there is nothing to bake');
-    check(/<div class="pkgcols solo">/.test(quay), 'a package that publishes no versions and uses none: its graphs and exports in one column, no empty one beside them');
+    check(!/class="pkgcols/.test(quay) && /class="divider"[\s\S]*<h2>Graphs <span class="count">0<\/span>/.test(quay), 'a package that makes nothing yet, publishes no versions and uses none: no empty parts, its graphs below the divider');
+    check(/<section class="pkgout"><div class="pkgcols solo"><div><h2>Exports <span class="count">1<\/span>/.test(kitCard), 'a package with exports and no versions: its exports in one column, no empty one beside them');
     const yard2 = (await fr('/w/probe/levels/yard2/')).body.toString();
     check(/<div class="stage old"><img class="view pic" src="\/p\/probe\/yard2\/thumb\.png[^"]*" alt="Yard2" width="512" height="512"><span class="oldmark">Last good preview: the newest graph did not cook<\/span><\/div>/.test(yard2), 'a bake that failed: the last good preview, at its own size, dimmed and marked');
     const sounds = (await fr('/w/probe/sounds/')).body.toString();

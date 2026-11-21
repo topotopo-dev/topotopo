@@ -848,6 +848,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       const made = f.made ? { graph: f.made.graph, output: f.made.output, stale: graphs?.get(f.made.graph) ? exportStale(graphs.get(f.made.graph)!, f.made) : null } : undefined;
       return { name: f.name, url: urls.raw(r.kind, r.name, f.rel), size: f.size, mtime: f.mtime, kind: f.kind, ...(f.kind === 'model' ? { model: urls.model(r.kind, r.name, f.rel) } : {}), ...(made ? { made } : {}) };
     });
+    // a package's folders of images (previews/, renders/…): its page shows their pictures with its attachments
+    const pictures = !p ? [] : listing.folders.filter((f) => f.image && !f.engine && !f.workspace && !f.package && !/^(attachments|exports)$/i.test(f.name)).map((f) => ({
+      name: f.name, url: urls.folder(r.kind, r.name, f.rel),
+      images: listFolder(path.join(abs, f.name), f.rel, r.dir).files.filter((x) => x.kind === 'image').map((x) => ({ name: x.name, url: urls.raw(r.kind, r.name, x.rel), size: x.size, mtime: x.mtime, kind: x.kind })),
+    })).filter((x) => x.images.length);
     const own = flagsHere.filter((x) => x.at === rel);
     const below = new Map<string, Flag[]>();
     for (const x of flagsHere) if (x.at !== rel && under(rel, x.at)) { if (!below.has(x.at)) below.set(x.at, []); below.get(x.at)!.push(x); }
@@ -859,6 +864,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       flags: own, below: [...below].sort(([a], [b]) => byName(a, b)).map(([at, fl]) => ({ at, url: urls.folder(r.kind, r.name, at), flags: fl })),
       ...(!rel ? { uses: workspaceUses(r) } : {}), ...(!rel && audit.walk.cut.length ? { cut: audit.walk.cut } : {}),
       ...(notice ? { notice } : {}), notes, moreNotes: unboxed.length, folders, files, engineAssets: listing.engineAssets, package: p ? packageData(p) : null,
+      ...(pictures.length ? { pictures } : {}),
       live: { root: rootKey(r), rel, ...(p ? { package: keyOf(p) } : {}), reveal: `${urls.folder(r.kind, r.name, rel)}?reveal` },
     };
   };
