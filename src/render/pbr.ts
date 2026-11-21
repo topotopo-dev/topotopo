@@ -38,7 +38,7 @@
 // unreadable or not PNG (shaded without them).
 import type { Geometry } from '../core/geometry.ts';
 import { Image, channelsOf, imageRef, referenceableImages, resizeLayer } from '../core/image.ts';
-import { DEFAULT_MATERIAL, materialAlphaMode, mergeMaterialTables, primMaterials, readMaterials } from '../core/materials.ts';
+import { DEFAULT_MATERIAL, materialAlphaMode, mergeMaterialTables, packedSources, primMaterials, readMaterials, toOrmLayout } from '../core/materials.ts';
 import type { Material } from '../core/materials.ts';
 import { cornerTangents, loadMikkTSpace, mikkTSpaceReady, shadingFrame, vertexUV } from '../core/tangents.ts';
 import { imageRowOfV } from '../core/texcoord.ts';
@@ -98,8 +98,22 @@ const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1
 const linearToSrgb = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
 
 /** Mip chain of a layer (1 or 4 channels), optionally sRGB-decoded first (colour), area-averaged down to 1 × 1. */
-function mips(img: Image, srgb: boolean): Mip[] {
-  const src = img.layer(img.mainLayer)!, ch = channelsOf(src, img.count) || 1;
+/** A DirectX normal map read as OpenGL (green flipped); a packed map in another layout read as occlusion R, roughness
+ *  G, metallic B (Material.normalFormat, Material.packing). */
+const FLIP_GREEN = { tag: 'directx', f: (d: Float32Array, n: number, ch: number) => {
+  const out = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) for (let j = 0; j < 4; j++) out[i * 4 + j] = ch === 1 ? (j === 3 ? 1 : d[i]) : d[i * ch + j];
+  for (let i = 0; i < n; i++) out[i * 4 + 1] = 1 - out[i * 4 + 1];
+  return out;
+} };
+const ormConv = (packing: string | undefined) => {
+  const at = packedSources(packing);
+  return at ? { tag: `pack:${packing}`, f: (d: Float32Array, n: number, ch: number) => { const out = new Float32Array(n * 4); toOrmLayout(d, n, ch, 1, at, out); return out; } } : undefined;
+};
+
+function mips(img: Image, srgb: boolean, conv?: (data: Float32Array, n: number, ch: number) => Float32Array): Mip[] {
+  let src = img.layer(img.mainLayer)!, ch = channelsOf(src, img.count) || 1;
+  if (conv) { src = conv(src, img.count, ch); ch = 4; }
   const base = srgb ? Float32Array.from(src, (x, i) => (ch === 4 && i % 4 === 3 ? x : srgbToLinear(Math.max(0, x)))) : src;
   const out: Mip[] = [{ w: img.width, h: img.height, ch, data: base }];
   let m = out[0];
@@ -232,9 +246,9 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
   const P = g.P, vp = g.vertexPoint;
   const problems: string[] = [];
   const mipCache = new Map<string, Mip[] | null>();
-  const mapOf = (mat: string, slot: string, path: string | undefined, srgb: boolean): Mip[] | null => {
+  const mapOf = (mat: string, slot: string, path: string | undefined, srgb: boolean, conv?: { tag: string; f: (data: Float32Array, n: number, ch: number) => Float32Array }): Mip[] | null => {
     if (!path) return null;
-    const key = `${path}\u0000${srgb}`;
+    const key = `${path}\u0000${srgb}\u0000${conv?.tag ?? ''}`;
     if (mipCache.has(key)) return mipCache.get(key)!;
     let img: Image | null = null;
     const ref = imageRef(path);
@@ -246,7 +260,7 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       if (f instanceof Image) img = f;
       else problems.push(`material "${mat}" ${slot} "${path}" ${f ?? 'was not loaded (render through renderGeometryAsync with readFile)'}`);
     }
-    const chain = img ? mips(img, srgb) : null;
+    const chain = img ? mips(img, srgb, conv?.f) : null;
     mipCache.set(key, chain);
     return chain;
   };
@@ -272,8 +286,8 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       name: label, base: src.baseColor.map((c) => srgbToLinear(Math.max(0, Math.min(1, c)))),
       metallic: src.metallic, roughness: src.roughness,
       emissive: src.emissive.map((e) => srgbToLinear(Math.max(0, Math.min(1, e / emax))) * emax), unlit: src.unlit,
-      baseMap: mapOf(label, 'base colour', t.baseColor, true), normalMap: mapOf(label, 'normal', t.normal, false),
-      ormMap: mapOf(label, 'orm', t.orm, false), roughMap: t.orm ? null : mapOf(label, 'roughness', t.roughness, false), size: [1, 1],
+      baseMap: mapOf(label, 'base colour', t.baseColor, true), normalMap: mapOf(label, 'normal', t.normal, false, src.normalFormat === 'directx' ? FLIP_GREEN : undefined),
+      ormMap: mapOf(label, 'orm', t.orm, false, ormConv(src.packing)), roughMap: t.orm ? null : mapOf(label, 'roughness', t.roughness, false), size: [1, 1],
       alpha: Math.max(0, Math.min(1, src.alpha)), cutoff: src.alphaCutoff ?? 0.5,
     };
     for (const c of [m.baseMap, m.normalMap, m.ormMap, m.roughMap]) if (c) { m.size[0] = Math.max(m.size[0], c[0].w); m.size[1] = Math.max(m.size[1], c[0].h); }

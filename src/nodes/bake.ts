@@ -7,7 +7,8 @@
 // on the worker pool (kernels "occlusion", "bake_project", "bake_curvature"). Algorithms: core/bake.ts.
 import type { Geometry } from '../core/geometry.ts';
 import { Image, MAIN_LAYER, imageRef, referenceableImages, sampleUV } from '../core/image.ts';
-import { MATERIAL_KINDS, primMaterials, readMaterials, resolveKind } from '../core/materials.ts';
+import { MATERIAL_KINDS, parsePacking, primMaterials, readMaterials, resolveKind } from '../core/materials.ts';
+import type { PackedChannel } from '../core/materials.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import { bakedImageSize, triangleTexelSizes } from '../core/texelsize.ts';
 import { markGutter } from '../core/texscale.ts';
@@ -963,9 +964,14 @@ defineBake({
     'baked prims use and a 0/1 layer "kind_<kind>" per kind present (masks: all, materials, kinds or none), layer "texel" ' +
     '(R = metres one texel covers along u, G along v, at that texel: tex_layers builds its normal map from it, so a step has the same ' +
     'slope at any resolution and on any shape of image) and layer "island" (the uv island, so a filter can stay on one). Maps are read ' +
-    'with the mesh\'s "uv" attribute (the uv a material\'s maps use), whatever uv_attrib the bake is laid out with. A material\'s normal ' +
-    'map is not carried (its detail is not in the stack yet: a warning names the material), nor is the occlusion of an orm map: give ' +
-    'tex_layers an occlusion expression. Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning ' +
+    'with the uv attribute map_uv ("uv": the uv the maps of a material use), whatever uv_attrib the bake is laid out with, at uv / tile when ' +
+    'the material states the metres one repeat covers (its tile field: a metric uv and tiling maps). A packed map is read by the ' +
+    'packing of its material (orm by default; hro, rma, moxs or any letters o, r, m, h, s, x): roughness and metallic as above, its occlusion ' +
+    'into layer "occlusion" and its height into layer "height" (written when some material has them; 1 and 0.5 elsewhere). The ' +
+    'normal map of a material is carried into layer "normal" (RGBA, OpenGL, written when some material has one): the map normal of each sample is turned ' +
+    'from the tangent frame of map_uv into the tangent frame of the uv of the bake (MikkTSpace of each uv with the vertex normals of the mesh, ' +
+    'cusp 60°, as exporters and engines compute it; a directx map is flipped first), so tex_layers keeps the detail under its layers. ' +
+    'Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning ' +
     'lists the renames and two materials never share a name). A texel that two materials share takes the first sample\'s material for ' +
     'the labels (as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is, in this order, ' +
     'the `kinds` entry for its name, its own `kind` field (the material node\'s kind param), its whole name when that is a kind or ' +
@@ -978,9 +984,10 @@ defineBake({
   params: {
     ...BAKE_PARAMS(),
     kinds: { type: 'json', default: {}, desc: 'kind per material name, e.g. {"zinc_steel": "galvanised"}; wins over the material\'s own kind (kinds: ' + KIND_LIST + ')', aliases: ['material_kinds'] },
+    map_uv: { type: 'string', default: 'uv', desc: 'the uv attribute the maps of the materials are read with (they may tile on it); the bake itself is laid out on uv_attrib', aliases: ['maps_uv', 'texture_uv'] },
     masks: { type: 'enum', options: ['all', 'materials', 'kinds', 'none'], default: 'all', desc: 'which 0/1 mask layers to write: mat_<material>, kind_<kind>, both or neither', aliases: ['mask_layers', 'labels'] },
   },
-  outputs: 'image <name> (default: the node name): C base colour RGBA, roughness, metallic, mat_<material> (0/1 per material), kind_<kind> (0/1 per kind present), texel (RGBA: R metres per texel along u, G along v), island, mask; stats size, texel_mm, texels, coverage',
+  outputs: 'image <name> (default: the node name): C base colour RGBA, roughness, metallic, occlusion and height (when a packed map has them), normal (when a material has a normal map), mat_<material> (0/1 per material), kind_<kind> (0/1 per kind present), texel (RGBA: R metres per texel along u, G along v), island, mask; stats size, texel_mm, texels, coverage',
   example: {
     nodes: {
       box: { type: 'box' },
@@ -1024,31 +1031,34 @@ defineBake({
     if (unassigned) throw new NodeError(`${type}: ${unassigned} prim${unassigned > 1 ? 's have' : ' has'} no material`, 'give every baked prim one (material node; an empty group assigns all prims), or bake a group');
     // maps: only images the geometry carries can be read here
     const pool = referenceableImages(g);
-    interface MapSet { color?: Image; rough?: Image; orm?: Image }
+    interface MapSet { color?: Image; rough?: Image; orm?: Image; normal?: Image; packing: PackedChannel[]; tile: number; dx: boolean }
     const maps = new Map<string, MapSet>();
-    const withNormal: string[] = [];
     for (const name of order) {
-      const tx = table[name].textures ?? {};
-      const found: MapSet = {};
-      for (const [slot, label, key] of [['baseColor', 'base colour', 'color'], ['roughness', 'roughness', 'rough'], ['orm', 'occlusion-roughness-metallic', 'orm']] as const) {
+      const m = table[name], tx = m.textures ?? {};
+      const packing = parsePacking(m.packing ?? 'orm');
+      if (typeof packing === 'string') throw new NodeError(`${type}: material "${name}": ${packing}`);
+      const found: MapSet = { packing, tile: m.tile ?? 0, dx: m.normalFormat === 'directx' };
+      for (const [slot, label, key] of [['baseColor', 'base colour', 'color'], ['roughness', 'roughness', 'rough'], ['orm', 'packed', 'orm'], ['normal', 'normal', 'normal']] as const) {
         const path = tx[slot];
         if (!path) continue;
         const ref = imageRef(path);
         if (ref === null) throw new NodeError(`${type}: material "${name}" has its ${label} map in a file ("${path}"); bakes read only images the geometry carries`, 'load it with image_file and set the map to "image:<name>"');
         const im = pool.get(ref);
-        if (!im) throw new NodeError(`${type}: material "${name}" uses image "${ref}" for its ${label}, which input 0 does not carry`, `images: ${[...pool.keys()].join(', ') || '(none)'}; load it with image_file and set the map to "image:<name>"`);
+        if (!im) throw new NodeError(`${type}: material "${name}" uses image "${ref}" for its ${label} map, which input 0 does not carry`, `images: ${[...pool.keys()].join(', ') || '(none)'}; load it with image_file and set the map to "image:<name>"`);
         found[key] = im;
       }
-      if (found.color || found.rough || found.orm) maps.set(name, found);
-      if (tx.normal) withNormal.push(name);
+      if (found.color || found.rough || found.orm || found.normal) maps.set(name, found);
     }
-    if (withNormal.length) ctx.warn(`${type}: material${withNormal.length > 1 ? 's' : ''} ${quoted(withNormal)} ${withNormal.length > 1 ? 'have' : 'has'} a normal map; its detail is not carried into the stack (tex_layers makes a new normal from the layers' height)`);
-    // the maps read the mesh's "uv", the uv a material's maps use, whatever the bake is laid out with
+    // the maps read the uv the materials' maps use (map_uv, "uv" by default), whatever the bake is laid out with
+    const mapName = String(p.map_uv || 'uv');
     let mapUV: Float64Array | null = null;
     if (maps.size) {
-      mapUV = p.uv_attrib && p.uv_attrib !== 'uv' ? readUVNamed(g, 'uv') : b.uv;
-      if (!mapUV) throw new NodeError(`${type}: materials ${quoted([...maps.keys()])} have maps, which read the "uv" attribute that input 0 does not have`, `a bake with uv_attrib "${p.uv_attrib}" still reads the maps with "uv"; give the mesh its map uv there, or remove the maps`);
+      mapUV = mapName === (p.uv_attrib || 'uv') ? b.uv : readUVNamed(g, mapName);
+      if (!mapUV) throw new NodeError(`${type}: materials ${quoted([...maps.keys()])} have maps, which read the "${mapName}" attribute that input 0 does not have`, `map_uv names the uv the maps use (the bake is laid out on uv_attrib "${p.uv_attrib || 'uv'}"); give the mesh its map uv there, or remove the maps`);
     }
+    const anyPacked = (c: PackedChannel) => [...maps.values()].some((s) => s.orm && s.packing.includes(c));
+    const withOcc = anyPacked('o'), withHeight = anyPacked('h');
+    const withNormalMap = [...maps.values()].some((s) => s.normal);
     // kinds
     const asked = p.kinds && typeof p.kinds === 'object' && !Array.isArray(p.kinds) ? (p.kinds as Record<string, unknown>) : null;
     if (p.kinds && !asked) throw new NodeError(`${type}: kinds must be an object of material name → kind`, `e.g. {"zinc_steel": "galvanised"}; kinds: ${KIND_LIST}`);
@@ -1081,26 +1091,39 @@ defineBake({
       ctx.warn(`${type}: the uv of ${ov.within + ov.across} pair${ov.within + ov.across > 1 ? 's' : ''} of triangles overlap (first: ${uvPairText(g, b.uv, b.tris, b.triPrim, first.t[0], first.t[1])}); a texel they share holds the last one's values: unwrap again or lay the islands out (uv_layout)`);
     }
     // per-sample values
-    const n = b.s.n, S = b.s.S, nt = b.s.W * b.s.H;
+    const n = b.s.n, nt = b.s.W * b.s.H;
     const C = new Float32Array(n * 4), R = new Float32Array(n), M = new Float32Array(n);
+    const O = withOcc ? new Float32Array(n).fill(1) : null, Hm = withHeight ? new Float32Array(n).fill(0.5) : null;
     const sampleMat = new Int32Array(n);
     const UV = mapUV ? interpolate(b.s, b.tris, mapUV, 2) : null;
     const tmp = new Float32Array(4);
-    const read = (im: Image, i: number) => { const a = im.layer(im.mainLayer)!, ch = im.channels(im.mainLayer); sampleUV(a, ch, im.width, im.height, UV![i * 2], UV![i * 2 + 1], tmp, true); return ch; };
+    let tile = 0;
+    const read = (im: Image, i: number) => {
+      const a = im.layer(im.mainLayer)!, ch = im.channels(im.mainLayer), k = tile > 0 ? 1 / tile : 1;
+      sampleUV(a, ch, im.width, im.height, UV![i * 2] * k, UV![i * 2 + 1] * k, tmp, true);
+      return ch;
+    };
     for (let i = 0; i < n; i++) {
       const mi = primMat[b.triPrim[b.s.tri[i]]];
       sampleMat[i] = mi;
       const name = order[mi], m = table[name], mp = maps.get(name);
       let r = m.baseColor[0], gr = m.baseColor[1], bl = m.baseColor[2], al = m.alpha, rough = m.roughness, metal = m.metallic;
       if (mp) {
+        tile = mp.tile;
         if (mp.color) {
           if (read(mp.color, i) === 4) { r = tmp[0]; gr = tmp[1]; bl = tmp[2]; al = m.alpha * tmp[3]; } else { r = gr = bl = tmp[0]; }
         }
         if (mp.orm) {
-          // glTF: the factors multiply the packed map (G roughness, B metallic); a grey map is one value for all three
+          // the channels the layout names; the factors multiply roughness and metallic (glTF); a grey map is one value for all
           const ch = read(mp.orm, i);
-          rough = (ch === 4 ? tmp[1] : tmp[0]) * m.roughness;
-          metal = (ch === 4 ? tmp[2] : tmp[0]) * m.metallic;
+          mp.packing.forEach((c, k) => {
+            const v = ch === 4 ? tmp[k] : tmp[0];
+            if (c === 'r') rough = v * m.roughness;
+            else if (c === 's') rough = (1 - v) * m.roughness;
+            else if (c === 'm') metal = v * m.metallic;
+            else if (c === 'o' && O) O[i] = v;
+            else if (c === 'h' && Hm) Hm[i] = v;
+          });
         } else if (mp.rough) {
           rough = read(mp.rough, i) === 4 ? tmp[1] : tmp[0];
         }
@@ -1112,12 +1135,75 @@ defineBake({
     const { texel: texelLayer, island: islandLayer, first } = texelLayers(b, P3);
     const texMat = new Int32Array(nt).fill(-1);
     for (let i = 0; i < n; i++) if ((first ? first[b.s.texel[i]] : i) === i) texMat[b.s.texel[i]] = sampleMat[i];
-    const { img, map } = finishImage(b, C, 4, [0, 0, 0, 1], {
-      roughness: { vals: R, ch: 1, background: [0.5] },
-      metallic: { vals: M, ch: 1, background: [0] },
-      texel: texelLayer,
-      island: islandLayer,
+    const finishWith = (normal: Float32Array | null) => finishMaterial(ctx, b, {
+      C, R, M, O, Hm, normal, texelLayer, islandLayer, texMat, order, layerOf, kinds, kindsPresent,
     });
+    if (!withNormalMap) return finishWith(null);
+    // the materials' normal maps, re-expressed in the tangent frame of the bake's uv (see normalsInBakeFrame)
+    const carry = () => {
+      const N = normalsInBakeFrame(b, mapUV!, mapName === (p.uv_attrib || 'uv'), UV!, (i) => maps.get(order[sampleMat[i]]));
+      if (N.flat) ctx.warn(`${type}: ${N.flat} sample(s) have no tangent frame (collapsed uv); their normal is flat`);
+      return finishWith(N.vals);
+    };
+    return mikkTSpaceReady() && mikkTSpaceHeapBytes() <= MIKK_RESET_BYTES ? carry() : loadMikkTSpace().then(carry);
+  },
+});
+
+/**
+ * The materials' normal maps at every sample of the bake, as a tangent-space normal (RGBA, OpenGL) in the frame of
+ * the bake's uv. A map is in the tangent frame of the uv it is read with (map_uv: MikkTSpace of that uv with the mesh's
+ * vertex normals, cusp 60°, the frame every exporter and engine computes); each sample's map normal is turned into
+ * object space with that frame and written in the frame of the bake's uv, computed the same way. When the two uv are
+ * the same attribute the frames are the same and the map's value is copied. A directx map has its green flipped
+ * first. Materials without a normal map give (0.5, 0.5, 1).
+ */
+function normalsInBakeFrame(b: Bake, mapUV: Float64Array, sameUV: boolean, UV: Float64Array, setOf: (i: number) => { normal?: Image; tile: number; dx: boolean } | undefined): { vals: Float32Array; flat: number } {
+  const n = b.s.n, out = new Float32Array(n * 4);
+  const VN = resolveVertexNormals(b.g, 60);
+  const TB = sameUV ? null : interpolateCorners(b.s, cornerTangents(b.g, b.tris, VN, b.uv).tangents, 4);
+  const TA = sameUV ? null : interpolateCorners(b.s, cornerTangents(b.g, b.tris, VN, mapUV).tangents, 4);
+  const fa = new Float64Array(9), fb = new Float64Array(9), tmp = new Float32Array(4);
+  let flat = 0;
+  for (let i = 0; i < n; i++) {
+    out[i * 4] = 0.5; out[i * 4 + 1] = 0.5; out[i * 4 + 2] = 1; out[i * 4 + 3] = 1;
+    const set = setOf(i);
+    if (!set?.normal) continue;
+    const im = set.normal, a = im.layer(im.mainLayer)!, ch = im.channels(im.mainLayer), k = set.tile > 0 ? 1 / set.tile : 1;
+    sampleUV(a, ch, im.width, im.height, UV[i * 2] * k, UV[i * 2 + 1] * k, tmp, true);
+    let x = (ch === 4 ? tmp[0] : 0.5) * 2 - 1, y = (ch === 4 ? tmp[1] : 0.5) * 2 - 1, z = (ch === 4 ? tmp[2] : 1) * 2 - 1;
+    if (set.dx) y = -y;
+    if (!sameUV) {
+      const nx = b.N[i * 3], ny = b.N[i * 3 + 1], nz = b.N[i * 3 + 2];
+      if (!shadingFrame(nx, ny, nz, TA![i * 4], TA![i * 4 + 1], TA![i * 4 + 2], TA![i * 4 + 3], fa) || !shadingFrame(nx, ny, nz, TB![i * 4], TB![i * 4 + 1], TB![i * 4 + 2], TB![i * 4 + 3], fb)) { flat++; continue; }
+      // map frame → object space → bake frame
+      const ox = x * fa[0] + y * fa[3] + z * fa[6], oy = x * fa[1] + y * fa[4] + z * fa[7], oz = x * fa[2] + y * fa[5] + z * fa[8];
+      x = ox * fb[0] + oy * fb[1] + oz * fb[2]; y = ox * fb[3] + oy * fb[4] + oz * fb[5]; z = ox * fb[6] + oy * fb[7] + oz * fb[8];
+    }
+    const l = Math.hypot(x, y, z) || 1;
+    out[i * 4] = 0.5 + (0.5 * x) / l; out[i * 4 + 1] = 0.5 + (0.5 * y) / l; out[i * 4 + 2] = 0.5 + (0.5 * z) / l;
+  }
+  return { vals: out, flat };
+}
+
+interface MaterialBakeValues {
+  C: Float32Array; R: Float32Array; M: Float32Array; O: Float32Array | null; Hm: Float32Array | null; normal: Float32Array | null;
+  texelLayer: { vals: Float32Array; ch: number; background: number[] }; islandLayer: { vals: Float32Array; ch: number; background: number[] };
+  texMat: Int32Array; order: string[]; layerOf: string[]; kinds: string[]; kindsPresent: string[];
+}
+
+function finishMaterial(ctx: CookContext, b: Bake, v: MaterialBakeValues): Geometry {
+  const { p } = ctx, nt = b.s.W * b.s.H;
+  const { texMat, order, layerOf, kinds, kindsPresent } = v;
+    const extra: Record<string, { vals: Float32Array; ch: number; background: number[] }> = {
+      roughness: { vals: v.R, ch: 1, background: [0.5] },
+      metallic: { vals: v.M, ch: 1, background: [0] },
+    };
+    if (v.O) extra.occlusion = { vals: v.O, ch: 1, background: [1] };
+    if (v.Hm) extra.height = { vals: v.Hm, ch: 1, background: [0.5] };
+    if (v.normal) extra.normal = { vals: v.normal, ch: 4, background: [0.5, 0.5, 1, 1] };
+    extra.texel = v.texelLayer;
+    extra.island = v.islandLayer;
+    const { img, map } = finishImage(b, v.C, 4, [0, 0, 0, 1], extra);
     // the labels from one material index per texel, padded through the same map as every layer
     const labels: Record<string, Float32Array> = {};
     const matLayers = p.masks === 'all' || p.masks === 'materials' ? order.map((_, mi) => (labels[layerOf[mi]] = new Float32Array(nt))) : null;
@@ -1138,5 +1224,4 @@ defineBake({
     ctx.stat('size', img.size);
     ctx.stat('texel_mm', (img.size / b.s.W) * 1000);
     return wrapImage(b, img);
-  },
-});
+}

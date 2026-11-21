@@ -663,6 +663,8 @@ export interface RasterOut {
   head: Float32Array;
   strength: Float32Array;
   id: Float32Array;
+  /** the broad stain around the runs (RasterOpts.stain), when asked for */
+  stain?: Float32Array;
 }
 
 const smoothstep = (a: number, b: number, x: number) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -672,6 +674,49 @@ export interface RasterOpts {
   check?: () => void;
   /** test every segment at every sample, without the grid (a reference for tests) */
   brute?: boolean;
+  /**
+   * The half width of a broad, faint stain around each run as a multiple of the run's head width (0 = none; out.stain):
+   * it narrows to 45 % of that down the run, has no gaps, fades sideways ((1 − d²/w²)²) and along the run
+   * ((1 − along)²) to nothing at the tail; where stains of runs meet they add up
+   * (1 − Π(1 − v), one term per run), so many faint runs under an edge merge into a wash.
+   */
+  stain?: number;
+  /** each run's stain times its strength (0..1) to this power: 0 = all alike, 2 = most faint and a few strong */
+  stainSkew?: number;
+  /** the widest head half width a stain is drawn from (a spill spread wide on a ledge stains no wider than a run) */
+  stainMaxHW?: number;
+  /**
+   * Draw the stain exactly only at every step-th sample of the sample grid (both ways) and interpolate between them;
+   * a sample whose four lattice corners are not all on its island and its surface is drawn exactly. pix is each
+   * sample's index in the grid of gw × gh samples, island its uv island.
+   */
+  stainLattice?: { pix: Int32Array; gw: number; gh: number; step: number; island: ArrayLike<number>; tau?: number };
+}
+
+/**
+ * A grid of cubic cells over a box, with the slabs along each axis that hold no sample left out: samples spread far
+ * apart (the pieces of a kit, moved apart to be weathered alone) keep the cell size their reach asks for instead of a
+ * box-wide grid coarsened to fit. Raw cell c on axis a is kept cell map[a][c], or -1 where no sample lies. The cell size
+ * grows only while the kept cells pass cap.
+ */
+interface SlabGrid { cs: number; raw: number[]; map: Int32Array<ArrayBuffer>[]; dx: number; dy: number; dz: number }
+function slabGrid(P: ArrayLike<number>, ids: ArrayLike<number> | null, n: number, skip: Uint8Array | null | undefined, mn: number[], mx: number[], cs: number, cap: number, grow: number): SlabGrid {
+  const count = ids ? ids.length : n;
+  for (;;) {
+    const raw = [0, 1, 2].map((a) => Math.max(1, Math.ceil((mx[a] - mn[a]) / cs)));
+    if (Math.max(...raw) > 1 << 24) { cs *= grow; continue; }
+    const map = raw.map((d) => new Int32Array(d).fill(-1));
+    for (let q = 0; q < count; q++) {
+      const i = ids ? ids[q] : q;
+      if (!ids && skip && skip[i]) continue;
+      const c0 = Math.floor((P[i * 3] - mn[0]) / cs), c1 = Math.floor((P[i * 3 + 1] - mn[1]) / cs), c2 = Math.floor((P[i * 3 + 2] - mn[2]) / cs);
+      if (c0 < 0 || c1 < 0 || c2 < 0 || c0 > raw[0] || c1 > raw[1] || c2 > raw[2]) continue;
+      map[0][Math.min(raw[0] - 1, c0)] = 0; map[1][Math.min(raw[1] - 1, c1)] = 0; map[2][Math.min(raw[2] - 1, c2)] = 0;
+    }
+    const dims = map.map((m) => { let k = 0; for (let c = 0; c < m.length; c++) if (m[c] === 0) m[c] = k++; return Math.max(1, k); });
+    if (dims[0] * dims[1] * dims[2] <= cap) return { cs, raw, map, dx: dims[0], dy: dims[1], dz: dims[2] };
+    cs *= grow;
+  }
 }
 
 /**
@@ -684,6 +729,7 @@ export interface RasterOpts {
 export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: number, out: RasterOut, opts: RasterOpts = {}): void {
   const n = inp.P.length / 3, check = opts.check;
   out.C.fill(0); out.along.fill(0); out.head.fill(0); out.strength.fill(0); out.id.fill(0);
+  out.stain?.fill(0);
   if (!rs.segs || !n) return;
   const A = rs.A, ns = rs.segs;
   // the filter window of a sample is its size, but a few coarse triangles do not set the reach (the median decides)
@@ -701,7 +747,8 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
 
   // the grid
   let items: Int32Array | null = null, count: Int32Array | null = null;
-  let mnx = 0, mny = 0, mnz = 0, cs = 1, dx = 1, dy = 1, dz = 1;
+  let mnx = 0, mny = 0, mnz = 0, cs = 1, dx = 1, dy = 1, dz = 1, rx = 1, ry = 1, rz = 1;
+  let mapX: Int32Array<ArrayBuffer> = new Int32Array(1), mapY = mapX, mapZ = mapX;
   if (!opts.brute) {
     let r0 = 0, rAll = 0;
     mnx = mny = mnz = Infinity;
@@ -717,11 +764,10 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
       }
     }
     mnx -= 1e-6; mny -= 1e-6; mnz -= 1e-6;
-    cs = Math.max(r0 || rAll, 1e-4);
-    const dimsFor = (c: number) => [Math.max(1, Math.ceil((mxx - mnx) / c)), Math.max(1, Math.ceil((mxy - mny) / c)), Math.max(1, Math.ceil((mxz - mnz) / c))];
-    let dims = dimsFor(cs);
-    while (dims[0] * dims[1] * dims[2] > 2_000_000) { cs *= 1.4; dims = dimsFor(cs); }
-    [dx, dy, dz] = dims;
+    // cells where samples lie (slabs with none left out), as fine as the ordinary runs reach
+    const sg = slabGrid(P, null, n, inp.skip, [mnx, mny, mnz], [mxx, mxy, mxz], Math.max(r0 || rAll, 1e-4), 2_000_000, 1.4);
+    ({ cs, dx, dy, dz } = sg);
+    [rx, ry, rz] = sg.raw; [mapX, mapY, mapZ] = sg.map;
     const cells = dx * dy * dz;
     count = new Int32Array(cells + 1);
     let total = 0;
@@ -730,10 +776,18 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
       const x0 = Math.min(A[k * 6], A[k * 6 + 3]) - r, x1 = Math.max(A[k * 6], A[k * 6 + 3]) + r;
       const y0 = Math.min(A[k * 6 + 1], A[k * 6 + 4]) - r, y1 = Math.max(A[k * 6 + 1], A[k * 6 + 4]) + r;
       const z0 = Math.min(A[k * 6 + 2], A[k * 6 + 5]) - r, z1 = Math.max(A[k * 6 + 2], A[k * 6 + 5]) + r;
-      const i0 = Math.max(0, Math.floor((x0 - mnx) / cs)), i1 = Math.min(dx - 1, Math.floor((x1 - mnx) / cs));
-      const j0 = Math.max(0, Math.floor((y0 - mny) / cs)), j1 = Math.min(dy - 1, Math.floor((y1 - mny) / cs));
-      const k0 = Math.max(0, Math.floor((z0 - mnz) / cs)), k1 = Math.min(dz - 1, Math.floor((z1 - mnz) / cs));
-      for (let kk = k0; kk <= k1; kk++) for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) f((kk * dy + jj) * dx + ii);
+      const i0 = Math.max(0, Math.floor((x0 - mnx) / cs)), i1 = Math.min(rx - 1, Math.floor((x1 - mnx) / cs));
+      const j0 = Math.max(0, Math.floor((y0 - mny) / cs)), j1 = Math.min(ry - 1, Math.floor((y1 - mny) / cs));
+      const k0 = Math.max(0, Math.floor((z0 - mnz) / cs)), k1 = Math.min(rz - 1, Math.floor((z1 - mnz) / cs));
+      for (let kk = k0; kk <= k1; kk++) {
+        const mk = mapZ[kk];
+        if (mk < 0) continue;
+        for (let jj = j0; jj <= j1; jj++) {
+          const mj = mapY[jj];
+          if (mj < 0) continue;
+          for (let ii = i0; ii <= i1; ii++) { const mi = mapX[ii]; if (mi >= 0) f((mk * dy + mj) * dx + mi); }
+        }
+      }
     };
     for (let k = 0; k < ns; k++) {
       if ((k & 255) === 0) check?.();
@@ -757,8 +811,8 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     let list: Int32Array, s0: number, s1: number;
     if (all) { list = all; s0 = 0; s1 = ns; } else {
       const ci = Math.floor((px - mnx) / cs), cj = Math.floor((py - mny) / cs), ck = Math.floor((pz - mnz) / cs);
-      if (ci < 0 || cj < 0 || ck < 0 || ci >= dx || cj >= dy || ck >= dz) continue;
-      const cell = (ck * dy + cj) * dx + ci;
+      if (ci < 0 || cj < 0 || ck < 0 || ci >= rx || cj >= ry || ck >= rz) continue;
+      const cell = (mapZ[ck] * dy + mapY[cj]) * dx + mapX[ci];
       s0 = count![cell]; s1 = count![cell + 1];
       if (s0 === s1) continue;
       list = items!;
@@ -810,6 +864,232 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     const hd = Math.max(0, 1 - bAlong / 0.35);
     out.head[i] = v * hd * hd; out.strength[i] = rs.strength[bk]; out.id[i] = rs.key[bk];
   }
+  if (out.stain && opts.stain && opts.stain > 0) rasterStain(rs, inp, tauCap, opts.stain, out.stain, opts);
+}
+
+/**
+ * The broad stain (RasterOpts.stain) in its own pass over the drawn segments that are not pools: it reaches several
+ * times as far as the runs, so the grid of the runs stays as fine as the runs. Each run writes into the samples it
+ * reaches (a grid of the samples, each listed once), so the cost and memory follow the samples and the pairs of a
+ * segment and a sample near it, however many runs there are; with a lattice only its samples (and those it cannot
+ * interpolate) are reached.
+ */
+function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain: Float32Array, opts: RasterOpts): void {
+  const n = inp.P.length / 3, ns = rs.segs, check = opts.check, P = inp.P, N = inp.N;
+  // the head half width of each run (its widest drawn segment end, not a pool lens): the stain's width at the head
+  const headHW = new Float32Array(rs.runLen.length);
+  // and where it is first drawn (out from under its source): the stain begins there, with no round cap above it
+  const startS = new Float32Array(rs.runLen.length).fill(Infinity);
+  for (let k = 0; k < ns; k++) {
+    const id = rs.ID[k];
+    if (rs.POOL[k] !== 1) headHW[id] = Math.max(headHW[id], rs.HW[k * 2], rs.HW[k * 2 + 1]);
+    if (rs.AMP[k] > 0) startS[id] = Math.min(startS[id], rs.SS[k * 2]);
+  }
+  if (opts.stainMaxHW && opts.stainMaxHW > 0) for (let r = 0; r < headHW.length; r++) headHW[r] = Math.min(headHW[r], opts.stainMaxHW);
+  // the stain's segments: the drawn segments that are not pools, consecutive ones of a run joined into chords at most a
+  // quarter of the run's narrowest stain half width long, every joined vertex within a twentieth of it of the chord, on
+  // one surface (a wide stain then tests each sample a few times, not once per short segment of its run)
+  const cA: number[] = [], cN: number[] = [], cS: number[] = [], cAmp: number[] = [], cId: number[] = [];
+  let chain: number[] = [];
+  const flush = () => {
+    if (!chain.length) return;
+    const a = chain[0], b = chain[chain.length - 1];
+    cA.push(rs.A[a * 6], rs.A[a * 6 + 1], rs.A[a * 6 + 2], rs.A[b * 6 + 3], rs.A[b * 6 + 4], rs.A[b * 6 + 5]);
+    cN.push(rs.NRM[a * 6], rs.NRM[a * 6 + 1], rs.NRM[a * 6 + 2], rs.NRM[b * 6 + 3], rs.NRM[b * 6 + 4], rs.NRM[b * 6 + 5]);
+    cS.push(rs.SS[a * 2], rs.SS[b * 2 + 1]);
+    let amp = 0;
+    for (const k of chain) amp = Math.max(amp, rs.AMP[k]);
+    cAmp.push(amp); cId.push(rs.ID[a]);
+    chain = [];
+  };
+  const joins = (k: number): boolean => {
+    const a = chain[0], last = chain[chain.length - 1], id = rs.ID[k];
+    if (rs.ID[last] !== id) return false;
+    const Q = rs.A;
+    if (Math.abs(Q[last * 6 + 3] - Q[k * 6]) + Math.abs(Q[last * 6 + 4] - Q[k * 6 + 1]) + Math.abs(Q[last * 6 + 5] - Q[k * 6 + 2]) > 1e-9) return false;
+    // on one surface: the normals along the chord stay within about 6 degrees of its first
+    const R = rs.NRM, nl = Math.hypot(R[a * 6], R[a * 6 + 1], R[a * 6 + 2]) || 1;
+    for (const e of [k * 6, k * 6 + 3]) if ((R[a * 6] * R[e] + R[a * 6 + 1] * R[e + 1] + R[a * 6 + 2] * R[e + 2]) < 0.995 * nl * (Math.hypot(R[e], R[e + 1], R[e + 2]) || 1)) return false;
+    const lim = 0.25 * K * headHW[id] * 0.45;
+    const ax = Q[a * 6], ay = Q[a * 6 + 1], az = Q[a * 6 + 2], ex = Q[k * 6 + 3] - ax, ey = Q[k * 6 + 4] - ay, ez = Q[k * 6 + 5] - az;
+    const l2 = ex * ex + ey * ey + ez * ez;
+    if (l2 > lim * lim) return false;
+    for (const j of chain) {
+      const px = Q[j * 6 + 3] - ax, py = Q[j * 6 + 4] - ay, pz = Q[j * 6 + 5] - az;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, (px * ex + py * ey + pz * ez) / l2)) : 0;
+      const dx = px - ex * t, dy = py - ey * t, dz = pz - ez * t;
+      if (dx * dx + dy * dy + dz * dz > (0.2 * lim) ** 2) return false;
+    }
+    return true;
+  };
+  for (let k = 0; k < ns; k++) {
+    if (rs.POOL[k] === 1 || !(rs.AMP[k] > 0)) { flush(); continue; }
+    if (chain.length && !joins(k)) flush();
+    chain.push(k);
+  }
+  flush();
+  const A = Float64Array.from(cA), NRM = Float32Array.from(cN), SS = Float64Array.from(cS), AMP = Float32Array.from(cAmp), ID = Int32Array.from(cId);
+  const segs = Array.from({ length: ID.length }, (_, k) => k);
+  if (!segs.length) return;
+  const skew = Math.max(0, opts.stainSkew ?? 0), runW = new Float32Array(rs.runLen.length);
+  for (let r = 0; r < runW.length; r++) runW[r] = skew > 0 ? Math.max(0, Math.min(1, rs.strength[r])) ** skew : 1;
+  /** the farthest the stain reaches from segment k (widest at the head), plus half a sample */
+  const reach = (k: number) => K * headHW[ID[k]] + 0.5 * tauCap;
+  let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity, rMax = 0;
+  for (const k of segs) {
+    const r = reach(k);
+    if (r > rMax) rMax = r;
+    for (let e = 0; e < 2; e++) {
+      const x = A[k * 6 + e * 3], y = A[k * 6 + e * 3 + 1], z = A[k * 6 + e * 3 + 2];
+      mnx = Math.min(mnx, x - r); mny = Math.min(mny, y - r); mnz = Math.min(mnz, z - r);
+      mxx = Math.max(mxx, x + r); mxy = Math.max(mxy, y + r); mxz = Math.max(mxz, z + r);
+    }
+  }
+  mnx -= 1e-6; mny -= 1e-6; mnz -= 1e-6;
+  // each run is drawn on a lattice of samples as coarse as its stain is wide (the base step, doubled while a third of
+  // its head half width still spans the step, to 8 samples: coarser lattices leave too many samples near island borders
+  // and on curved surfaces to draw exactly): a wide stain is smooth, so it needs few exact samples. Every lattice
+  // is drawn alone, the rest of its samples interpolated, and the lattices add up like the runs (1 - prod(1 - stain))
+  const lat = opts.stainLattice, base = lat ? Math.max(1, Math.floor(lat.step)) : 1, skip = inp.skip;
+  const levelOf = new Int8Array(runW.length);
+  if (lat && lat.tau && lat.tau > 0) for (let r = 0; r < levelOf.length; r++) {
+    const fit = (K * headHW[r]) / (3 * lat.tau);
+    while (base << (levelOf[r] + 1) <= Math.min(fit, 8)) levelOf[r]++;
+  }
+  const levels = [...new Set(segs.map((k) => levelOf[ID[k]]))].sort((x, y) => x - y);
+  const drawLevel = (level: number, out: Float32Array): void => {
+    const f = base << level;
+    // the samples that take the stain exactly: every one, or the lattice and those whose four corners do not all lie on
+    // their island and surface (the rest are interpolated from the lattice afterwards)
+    let at: Int32Array | null = null, onLat: Uint8Array | null = null;
+    const corner = (i: number, x: number, y: number): number => {
+      if (!lat || !at || !onLat || x >= lat.gw || y >= lat.gh) return -1;
+      const j = at[y * lat.gw + x];
+      if (j < 0 || !onLat[j] || (skip && skip[j]) || lat.island[j] !== lat.island[i]) return -1;
+      return N[i * 3] * N[j * 3] + N[i * 3 + 1] * N[j * 3 + 1] + N[i * 3 + 2] * N[j * 3 + 2] >= 0.95 ? j : -1;
+    };
+    const exact = new Uint8Array(n);
+    if (!lat || f === 1) { for (let i = 0; i < n; i++) if (!(skip && skip[i])) exact[i] = 1; }
+    else {
+      const { pix, gw } = lat;
+      at = new Int32Array(gw * lat.gh).fill(-1); onLat = new Uint8Array(n);
+      for (let i = 0; i < n; i++) at[pix[i]] = i;
+      for (let i = 0; i < n; i++) { const x = pix[i] % gw, y = (pix[i] - x) / gw; if (!(x % f) && !(y % f)) onLat[i] = 1; }
+      for (let i = 0; i < n; i++) {
+        if ((i & 4095) === 0) check?.();
+        if (skip && skip[i]) continue;
+        if (onLat[i]) { exact[i] = 1; continue; }
+        const x = pix[i] % gw, y = (pix[i] - x) / gw, x0 = x - (x % f), y0 = y - (y % f);
+        if (corner(i, x0, y0) < 0 || corner(i, x0 + f, y0) < 0 || corner(i, x0, y0 + f) < 0 || corner(i, x0 + f, y0 + f) < 0) exact[i] = 1;
+      }
+    }
+    // those samples in a grid of cells (each sample listed once, in its own cell), over the
+    // box the segments reach: the cost follows the pairs of a segment and a sample near it, not the number of runs
+    const S: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (!exact[i]) continue;
+      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+      if (x >= mnx && x <= mxx && y >= mny && y <= mxy && z >= mnz && z <= mxz) S.push(i);
+    }
+    const rest = new Float64Array(S.length).fill(1);
+    if (S.length) {
+      // cells a sixth of the farthest reach of this lattice's runs (a few wide stains do not coarsen the grid of the rest)
+      let lvMax = 0;
+      for (const k of segs) if (levelOf[ID[k]] === level) lvMax = Math.max(lvMax, reach(k));
+      // (slabs with no sample left out: pieces far apart keep this cell size)
+      const sg = slabGrid(P, S, n, null, [mnx, mny, mnz], [mxx, mxy, mxz], Math.max(lvMax / 6, 1e-4), 8_000_000, 1.25);
+      const { cs, dx, dy, dz } = sg, [rx, ry, rz] = sg.raw, [mapX, mapY, mapZ] = sg.map, cells = dx * dy * dz;
+      const start = new Int32Array(cells + 1), cellOf = new Int32Array(S.length);
+      for (let q = 0; q < S.length; q++) {
+        const i = S[q];
+        const ci = Math.min(rx - 1, Math.floor((P[i * 3] - mnx) / cs)), cj = Math.min(ry - 1, Math.floor((P[i * 3 + 1] - mny) / cs)), ck = Math.min(rz - 1, Math.floor((P[i * 3 + 2] - mnz) / cs));
+        cellOf[q] = (mapZ[ck] * dy + mapY[cj]) * dx + mapX[ci]; start[cellOf[q] + 1]++;
+      }
+      for (let c = 0; c < cells; c++) start[c + 1] += start[c];
+      const list = new Int32Array(S.length), fill = start.slice(0, cells);
+      for (let q = 0; q < S.length; q++) list[fill[cellOf[q]]++] = q;
+      // the segments run by run (each run's strongest segment per sample, then the runs added up: 1 - prod(1 - best))
+      const runs = runW.length, byRun = new Int32Array(runs + 1);
+      for (const k of segs) byRun[ID[k] + 1]++;
+      for (let r = 0; r < runs; r++) byRun[r + 1] += byRun[r];
+      const order = new Int32Array(segs.length), put = byRun.slice(0, runs);
+      for (const k of segs) order[put[ID[k]]++] = k;
+      const best = new Float64Array(S.length), mark = new Int32Array(S.length).fill(-1), touched: number[] = [];
+      let done = 0;
+      for (let r = 0; r < runs; r++) {
+        const s0 = byRun[r], s1 = byRun[r + 1];
+        if (s0 === s1 || levelOf[r] !== level) continue;
+        // a run too faint to show anywhere (at most 1/1024 of stain) adds nothing
+        let amp = 0;
+        for (let m = s0; m < s1; m++) amp = Math.max(amp, AMP[order[m]]);
+        if (amp * runW[r] < 1 / 1024) continue;
+        for (let m = s0; m < s1; m++) {
+          if ((done++ & 255) === 0) check?.();
+          const k = order[m], o = k * 6;
+          // the stain narrows and fades down the run: this segment reaches at most as far as at its upper end, and one
+          // past the run's visible tail adds nothing
+          const a0 = Math.min(1, Math.min(SS[k * 2], SS[k * 2 + 1]) / rs.runLen[r]);
+          if ((1 - a0) * (1 - a0) * AMP[k] * runW[r] < 1 / 1024) continue;
+          const rch = K * headHW[r] * (1 - 0.55 * a0) + 0.5 * tauCap;
+          const ax = A[o], ay = A[o + 1], az = A[o + 2];
+          const ex = A[o + 3] - ax, ey = A[o + 4] - ay, ez = A[o + 5] - az;
+          const l2 = ex * ex + ey * ey + ez * ez, first = SS[k * 2] <= startS[r];
+          const i0 = Math.max(0, Math.floor((Math.min(ax, ax + ex) - rch - mnx) / cs)), i1 = Math.min(rx - 1, Math.floor((Math.max(ax, ax + ex) + rch - mnx) / cs));
+          const j0 = Math.max(0, Math.floor((Math.min(ay, ay + ey) - rch - mny) / cs)), j1 = Math.min(ry - 1, Math.floor((Math.max(ay, ay + ey) + rch - mny) / cs));
+          const k0 = Math.max(0, Math.floor((Math.min(az, az + ez) - rch - mnz) / cs)), k1 = Math.min(rz - 1, Math.floor((Math.max(az, az + ez) + rch - mnz) / cs));
+          for (let kk = k0; kk <= k1; kk++) for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
+            const mi = mapX[ii], mj = mapY[jj], mk = mapZ[kk];
+            if (mi < 0 || mj < 0 || mk < 0) continue;
+            const cell = (mk * dy + mj) * dx + mi;
+            for (let e = start[cell]; e < start[cell + 1]; e++) {
+              const q = list[e], i = S[q];
+              const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
+              let t = l2 > 0 ? ((px - ax) * ex + (py - ay) * ey + (pz - az) * ez) / l2 : 0;
+              // no round cap above where the run is first drawn
+              if (t < 0 && first) continue;
+              t = t < 0 ? 0 : t > 1 ? 1 : t;
+              const cx = ax + ex * t - px, cy = ay + ey * t - py, cz = az + ez * t - pz;
+              const d2 = cx * cx + cy * cy + cz * cz;
+              const sAbs = SS[k * 2] + (SS[k * 2 + 1] - SS[k * 2]) * t;
+              const along = Math.min(1, sAbs / rs.runLen[r]);
+              // widest at the head, narrowing to under half down the run: many runs under an edge merge into a wash there
+              // and part into streaks lower down
+              const sw = K * headHW[r] * (1 - 0.55 * along);
+              if (d2 >= sw * sw) continue;
+              // the sample lies on the same surface: its normal agrees with the run's there
+              const mx = NRM[o] + (NRM[o + 3] - NRM[o]) * t, my = NRM[o + 1] + (NRM[o + 4] - NRM[o + 1]) * t, mz = NRM[o + 2] + (NRM[o + 5] - NRM[o + 2]) * t;
+              if (N[i * 3] * mx + N[i * 3 + 1] * my + N[i * 3 + 2] * mz < 0.5 * Math.sqrt(mx * mx + my * my + mz * mz)) continue;
+              const qq = 1 - d2 / (sw * sw), fade = 1 - along, v = qq * qq * fade * fade * AMP[k] * runW[r];
+              if (mark[q] !== r) { mark[q] = r; best[q] = 0; touched.push(q); }
+              if (v > best[q]) best[q] = v;
+            }
+          }
+        }
+        for (const q of touched) rest[q] *= 1 - Math.min(1, best[q]);
+        touched.length = 0;
+      }
+    }
+    for (let i = 0; i < n; i++) if (exact[i]) out[i] = 0;
+    for (let q = 0; q < S.length; q++) out[S[q]] = 1 - rest[q];
+    if (!lat || f === 1 || !at || !onLat) return;
+    // every other sample from the four lattice corners around it
+    const { pix, gw } = lat;
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 0) check?.();
+      if (exact[i] || (skip && skip[i])) continue;
+      const x = pix[i] % gw, y = (pix[i] - x) / gw, x0 = x - (x % f), y0 = y - (y % f);
+      const a = corner(i, x0, y0), b = corner(i, x0 + f, y0), c = corner(i, x0, y0 + f), d = corner(i, x0 + f, y0 + f);
+      const tx = (x - x0) / f, ty = (y - y0) / f;
+      out[i] = (out[a] * (1 - tx) + out[b] * tx) * (1 - ty) + (out[c] * (1 - tx) + out[d] * tx) * ty;
+    }
+  };
+  if (levels.length === 1) { drawLevel(levels[0], stain); return; }
+  const unstained = new Float64Array(n).fill(1), one = new Float32Array(n);
+  for (const level of levels) {
+    drawLevel(level, one);
+    for (let i = 0; i < n; i++) unstained[i] *= 1 - one[i];
+  }
+  for (let i = 0; i < n; i++) if (!(skip && skip[i])) stain[i] = 1 - unstained[i];
 }
 
 // ---------------------------------------------------------------- texel size

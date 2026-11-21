@@ -662,6 +662,7 @@ export class Engine {
     this.concurrent = !!host.pool && host.pool.size > 0;
     if (host.limits?.scriptMs) this.scriptTimeoutMs = host.limits.scriptMs;
     if (host.limits?.simMs) this.simTimeoutMs = host.limits.simMs;
+    if (host.cacheBytes) this.cache.maxBytes = host.cacheBytes;
   }
 
   async init() {
@@ -1450,7 +1451,8 @@ export class Engine {
         const into = mergeMeta([inMeta, nestedMeta]);
         const r = await engine.cook(g, {
           fps: time.fps, ...inherit, ...o, depth: depth + 1, ancestors: chain(),
-          onNode: opts.onNode, signal: opts.signal, within: [...(opts.within ?? []), name], scope: o.scope ?? scope,
+          // a signal of the node's own (a deadline for the whole nested cook) holds the cook's signal in it
+          onNode: opts.onNode, signal: o.signal ?? opts.signal, within: [...(opts.within ?? []), name], scope: o.scope ?? scope,
           ...(o.inputs ? { inputs: o.inputs.map((i) => ({ ...i, deps: into.deps, unsafe: into.unsafe })) } : {}),
         });
         takeNested(r);

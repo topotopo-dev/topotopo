@@ -92,6 +92,21 @@ export function limitsFromEnv(env: Record<string, string | undefined> = process.
   return { ...(scriptMs ? { scriptMs } : {}), ...(simMs ? { simMs } : {}) };
 }
 
+/** The share of the machine's memory an engine keeps cooked results in, unless TOPOTOPO_CACHE_MB says otherwise. */
+export const CACHE_MEMORY_SHARE = 0.25;
+
+/**
+ * The bytes of cooked results an engine keeps in memory (Host.cacheBytes): TOPOTOPO_CACHE_MB in megabytes, else a quarter
+ * of the machine's memory. A value that is not a positive number fails the host, saying so.
+ */
+export function cacheBytesFromEnv(env: Record<string, string | undefined> = process.env, totalBytes = os.totalmem()): number {
+  const raw = env.TOPOTOPO_CACHE_MB;
+  if (raw === undefined || raw.trim() === '') return Math.round(totalBytes * CACHE_MEMORY_SHARE);
+  const mb = Number(raw);
+  if (!(Number.isFinite(mb) && mb > 0)) throw new Error(`TOPOTOPO_CACHE_MB must be a positive number of megabytes (e.g. 4000 for 4 GB), got "${raw}"`);
+  return Math.round(mb * 1e6);
+}
+
 /** The process-wide pool of hosts created with the environment's settings (created lazily: no thread until used). */
 let envPool: WorkerPool | undefined | null = null;
 
@@ -253,6 +268,7 @@ export function createNodeHost(opts: NodeHostOptions = {}): Host {
     name: 'node',
     pool,
     limits: limitsFromEnv(),
+    cacheBytes: cacheBytesFromEnv(),
     persist: opts.nodeCache ? openNodeCache(opts.nodeCache === true ? {} : opts.nodeCache) ?? undefined : undefined,
     resolvePath: resolveIn(baseDir),
     async readFile(p) {

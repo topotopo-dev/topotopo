@@ -37,10 +37,76 @@ export interface Material {
    * ignore it, and bake_material writes a mask per kind.
    */
   kind?: string;
+  /**
+   * Metres one repeat of the material's maps covers on a metric uv (1 uv unit = 1 m): the maps are read at uv / tile.
+   * Absent = the maps fill 0..1 of the uv. Data for the bakes; exporters write the maps as they are (an engine material
+   * tiles them itself).
+   */
+  tile?: number;
+  /**
+   * Channel layout of the packed map (textures.orm), one letter per channel R, G, B (and A): o occlusion, r roughness,
+   * m metallic, h height, s smoothness (1 − roughness), x unused. Absent = "orm" (glTF, Unreal). See parsePacking.
+   */
+  packing?: string;
+  /** Green-channel convention of the normal map: absent = OpenGL (+Y up); "directx" = the green channel flipped. */
+  normalFormat?: 'directx';
 }
 
-/** The material kinds: how a surface ages. "keep" marks a part that is left as it is (glass, lights, dark slots). */
-export const MATERIAL_KINDS = ['painted_metal', 'cast_metal', 'galvanised', 'bare_steel', 'stainless', 'plastic', 'rubber', 'concrete', 'painted_wood', 'decal', 'keep'] as const;
+/**
+ * The material kinds: how a surface ages. "keep" marks a part that is left as it is (glass, lights, dark slots).
+ * Painted kinds have a coat that comes off (chips, peeling, flaking) over a substrate that then weathers on its own;
+ * bare kinds have no coat and only stain, dull, rust or grow over.
+ */
+export const MATERIAL_KINDS = ['painted_metal', 'cast_metal', 'galvanised', 'bare_steel', 'stainless', 'plastic', 'rubber', 'concrete', 'painted_concrete', 'painted_plaster', 'painted_wood', 'bare_wood', 'asphalt', 'ceramic', 'decal', 'keep'] as const;
+
+/** The channels a packed map can hold (parsePacking). */
+export type PackedChannel = 'o' | 'r' | 'm' | 'h' | 's' | 'x';
+/** Named channel layouts of a packed map: the glTF / Unreal one, and common others (in their names a = ambient occlusion, o). */
+export const PACKINGS: Readonly<Record<string, string>> = { orm: 'orm', arm: 'orm', hro: 'hro', rma: 'rmo', mrao: 'mrox', mask_map: 'moxs' };
+
+/**
+ * A packed-map layout: one letter per channel (R, G, B and optionally A) from o (occlusion), r (roughness), m (metallic),
+ * h (height), s (smoothness = 1 − roughness), x (unused), or a named layout (PACKINGS). Returns the letters, or a
+ * message saying what is wrong.
+ */
+export function parsePacking(code: unknown): PackedChannel[] | string {
+  const raw = String(code ?? '').trim().toLowerCase();
+  const s = PACKINGS[raw] ?? raw;
+  if (!/^[ormhsx]{3,4}$/.test(s)) return `packing "${String(code)}" is not a layout: 3 or 4 letters from o (occlusion), r (roughness), m (metallic), h (height), s (smoothness), x (unused), e.g. "orm" or "hro"; or one of ${Object.keys(PACKINGS).join(', ')}`;
+  const letters = s.split('') as PackedChannel[];
+  for (const c of 'ormhs') if (letters.filter((x) => x === c).length > 1) return `packing "${String(code)}" names ${c} twice`;
+  if (letters.includes('r') && letters.includes('s')) return `packing "${String(code)}" holds both roughness and smoothness`;
+  return letters;
+}
+
+/** Where glTF's occlusion, roughness and metallic sit in a packed map: channel index (−1 = not in it); `smooth` = the
+ *  roughness channel holds smoothness (1 − roughness). */
+export interface PackedSources { o: number; r: number; m: number; smooth: boolean }
+
+/** The channels of a material's packed map other than glTF's own layout (orm); null for orm or no stated layout. */
+export function packedSources(packing: string | undefined): PackedSources | null {
+  if (!packing) return null;
+  const letters = parsePacking(packing);
+  if (typeof letters === 'string' || letters.join('') === 'orm') return null;
+  const s = letters.indexOf('s');
+  return { o: letters.indexOf('o'), r: s >= 0 ? s : letters.indexOf('r'), m: letters.indexOf('m'), smooth: s >= 0 };
+}
+
+/**
+ * The texels of a packed map (n texels of ch interleaved channels; `one` = the value of 1, 255 for 8 bits) in glTF's
+ * layout, written to out as RGBA: occlusion R, roughness G, metallic B, 1 in A. A channel the layout lacks is 1, so the
+ * material's own factor holds alone.
+ */
+export function toOrmLayout(src: ArrayLike<number>, n: number, ch: number, one: number, at: PackedSources, out: { [i: number]: number }): void {
+  const get = (i: number, c: number) => (c < 0 ? one : ch === 1 ? src[i] : c < ch ? src[i * ch + c] : one);
+  for (let i = 0; i < n; i++) {
+    out[i * 4] = get(i, at.o);
+    const r = get(i, at.r);
+    out[i * 4 + 1] = at.smooth && at.r >= 0 ? one - r : r;
+    out[i * 4 + 2] = get(i, at.m);
+    out[i * 4 + 3] = one;
+  }
+}
 
 export interface MaterialTextures { baseColor?: string; normal?: string; roughness?: string; orm?: string }
 
@@ -93,6 +159,9 @@ export function normalizeMaterial(m: any): Material {
     unlit: typeof m?.unlit === 'boolean' ? m.unlit : d.unlit,
     ...textureField(m?.textures),
     ...(typeof m?.kind === 'string' && m.kind.trim() ? { kind: m.kind.trim() } : {}),
+    ...(typeof m?.tile === 'number' && Number.isFinite(m.tile) && m.tile > 0 ? { tile: m.tile } : {}),
+    ...(typeof m?.packing === 'string' && m.packing.trim() && m.packing.trim().toLowerCase() !== 'orm' ? { packing: m.packing.trim().toLowerCase() } : {}),
+    ...(m?.normalFormat === 'directx' ? { normalFormat: 'directx' as const } : {}),
   };
 }
 
@@ -221,8 +290,13 @@ export const KIND_NAMES: Readonly<Record<string, readonly string[]>> = {
   stainless: ['stainless', 'stainless_steel'],
   plastic: ['plastic'],
   rubber: ['rubber'],
-  concrete: ['concrete'],
+  concrete: ['concrete', 'bare_concrete', 'precast_concrete'],
+  painted_concrete: ['painted_concrete'],
+  painted_plaster: ['painted_plaster', 'plaster'],
   painted_wood: ['painted_wood', 'wood_painted'],
+  bare_wood: ['bare_wood', 'wood', 'timber'],
+  asphalt: ['asphalt', 'roof_felt', 'bitumen'],
+  ceramic: ['ceramic', 'tiles', 'ceramic_tiles'],
   decal: ['decal', 'label', 'sticker', 'sign', 'print'],
   keep: ['keep'],
 };

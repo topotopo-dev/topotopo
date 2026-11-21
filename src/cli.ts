@@ -10,7 +10,7 @@
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--vertex-colors] [--no-materials]
 //                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
 //                   (every option of the export tool has a flag; booleans take --name / --no-name)
-//                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--uv-per-piece] [--json]]
+//                   [--inspect summary|attributes|topology|all|uv|budget|scene [--uv-resolution 1024] [--uv-attrib uv2] [--uv-per-piece] [--json]]
 //   Results of nodes that cooked for 0.5 s or more are kept on disk between runs (src/host/diskcache.ts); --no-cache leaves
 //   that alone, TOPOTOPO_NODE_CACHE_DIR moves the folder, TOPOTOPO_NODE_CACHE=off switches it off.
 //   --output picks a named output (the graph's "outputs"); --var overrides a graph var for this run (src/graph/vars.ts).
@@ -74,7 +74,7 @@ import { Engine, resolveTime } from './graph/engine.ts';
 import type { CookReport, FrameRange } from './graph/engine.ts';
 import { allNodeDefs } from './graph/registry.ts';
 import { KINDS } from './graph/outputs.ts';
-import { createNodeHost, limitsFromEnv } from './host/node.ts';
+import { cacheBytesFromEnv, createNodeHost, limitsFromEnv } from './host/node.ts';
 import { diskCacheLines, timingLines } from './graph/timing.ts';
 import { renderGeometryAsync } from './render/raster.ts';
 import { parseViews } from './render/raster.ts';
@@ -117,7 +117,7 @@ const uopt = (u: Unit, f: string) => { for (const l of [u.args, u.base]) { const
 const uhas = (u: Unit, f: string) => u.args.includes(f) || u.base.includes(f);
 const fail = (msg: string): never => { console.error(msg); process.exit(1); };
 // the time limits every engine of this process takes from the environment: a value that is not a number fails here
-try { limitsFromEnv(); } catch (e) { fail((e as Error).message); }
+try { limitsFromEnv(); cacheBytesFromEnv(); } catch (e) { fail((e as Error).message); }
 /** A graph file's name as a graph (view mode) and in receipts and default export file names. */
 const graphName = (file: string) => path.basename(file).replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z]/, 'g$&') || 'graph';
 // the command as the user typed it: the sources from a clone, or the package's bin (dist/cli.js)
@@ -134,7 +134,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
     '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb]',
-    '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--uv-per-piece] [--json]',
+    '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--uv-attrib uv2] [--uv-per-piece] [--json]',
     '           summary: one screen (counts, triangles, bbox in mm, parts, materials, images, uv state, closed or open edges)',
     '           topology: a closed solid or why not (open edges after welding seam splits, non-manifold, flipped, inward), with where',
     '           uv: overlaps (in-tile, tiling, across LODs), utilization, texel density; budget: triangles per part, per LOD and per node',
@@ -156,6 +156,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           A result is used when the node\'s signature (type, params, inputs), the engine\'s code and every file it was made from (the node\'s own and those of the nodes below it, side files and fonts too, by modification time and size: a tool that keeps both is not noticed) are as they were.',
     '           Never stored: a node that cooks a graph inside itself (foreach, graph_ref, assets, package outputs, solver; the nodes inside are), a result with an SDF volume, and anything made from a URL, a .blend converted by Blender, a node type a scope defines used inside another graph, a solver, or a script that runs nodes with lib.run)',
     '         time limits (environment, milliseconds; also for the MCP server and the viewer): TOPOTOPO_SCRIPT_TIMEOUT_MS (user code: expressions, wrangles, a whole script; default 30000), TOPOTOPO_SIM_TIMEOUT_MS (one cook of a simulation node; default 600000)',
+    '         memory for cooked results: TOPOTOPO_CACHE_MB (megabytes; default a quarter of the memory of the machine)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',
     '         [--follow owner/name] (use that package\'s working folder, where the package finds it, instead of its copy, for this run: renders, inspect and exports use it, unpublished (the export\'s source record lists it under "followed"); repeat it)',
@@ -464,7 +465,7 @@ async function cook() {
   /** The --inspect report of a cook: text, or the uv / budget / scene report as JSON with --json. */
   async function inspectText(r: CookReport, u: Unit): Promise<string> {
     const inspectDetail = inspectOf(u), uvRes = uopt(u, '--uv-resolution') !== undefined ? Number(uopt(u, '--uv-resolution')) : undefined;
-    const geo = r.geo!, json = uhas(u, '--json'), perPiece = uhas(u, '--uv-per-piece');
+    const geo = r.geo!, json = uhas(u, '--json'), perPiece = uhas(u, '--uv-per-piece'), uvAttrib = uopt(u, '--uv-attrib');
     if (inspectDetail === 'scene') {
       // the glb export with the export options given, read back
       const res = await serializeExport(geo, 'glb', 'scene.glb', exportArgs(u), engine.host);
@@ -474,9 +475,9 @@ async function cook() {
       const warn = res.warnings.map((w) => `warning: ${w}`);
       return json ? JSON.stringify(rep, null, 2) : [...sceneReportText(rep), ...warn].join('\n');
     }
-    if (inspectDetail === 'uv' && json) return JSON.stringify(uvReport(geo, { resolution: uvRes, perPiece }), null, 2);
+    if (inspectDetail === 'uv' && json) return JSON.stringify(uvReport(geo, { resolution: uvRes, perPiece, attribute: uvAttrib }), null, 2);
     if (inspectDetail === 'budget' && json) return JSON.stringify(budgetReport(geo, nodeBudgetInput(graph, r.results)), null, 2);
-    return inspect(geo, { detail: inspectDetail as any, uvResolution: uvRes, uvPerPiece: perPiece, nodes: inspectDetail === 'budget' ? nodeBudgetInput(graph, r.results) : undefined });
+    return inspect(geo, { detail: inspectDetail as any, uvResolution: uvRes, uvPerPiece: perPiece, uvAttrib, nodes: inspectDetail === 'budget' ? nodeBudgetInput(graph, r.results) : undefined });
   }
 
   function report(r: CookReport) {

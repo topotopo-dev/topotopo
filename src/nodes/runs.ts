@@ -126,39 +126,48 @@ function cook(ctx: CookContext): Geometry {
   let skipSamples: Uint8Array | null = null;
   if (srcMask) { skipSamples = new Uint8Array(s.n); for (let k = 0; k < s.n; k++) skipSamples[k] = srcMask[triPrim[s.tri[k]]]; }
   const C = new Float32Array(s.n), along = new Float32Array(s.n), head = new Float32Array(s.n), strength = new Float32Array(s.n), id = new Float32Array(s.n);
+  const stainK = Math.max(0, Number(p.stain) || 0), stain = stainK > 0 ? new Float32Array(s.n) : undefined;
+  // texel sizes and islands, as every bake writes them (the stain's lattice keeps to the islands)
+  const tl = texelLayers({ s, uv, tris, g } as unknown as Bake, pos);
+  // the stain is smooth: drawn exactly on a lattice of samples a third of its narrowest half width apart, between them
+  // interpolated
+  const medTau = (() => { const t: number[] = []; for (let k = 0; k < s.n; k += Math.max(1, Math.floor(s.n / 4096))) t.push(tau[k]); t.sort((a, b) => a - b); return t[t.length >> 1] || 1; })();
+  const latStep = Math.max(1, Math.min(8, Math.floor((stainK * 0.5 * Math.min(prm.width[0], prm.width[1])) / (3 * medTau))));
+  // the narrowest stain sets the finest lattice; wider ones are drawn on coarser lattices (core/runs.ts rasterStain)
+  const stainLattice = stain ? { pix: s.pix, gw: W * S, gh: H * S, step: latStep, island: tl.island.vals, tau: medTau } : undefined;
   const tRaster = performance.now();
-  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id }, { check: () => budget.check() }); } catch (e) {
+  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, { check: () => budget.check(), stain: stainK, stainSkew: Math.max(0, Number(p.stain_skew) || 0), stainMaxHW: 0.75 * Math.max(prm.width[0], prm.width[1]), stainLattice }); } catch (e) {
     if (e instanceof FlowLimit) throw new NodeError(`${type}: the runs cover too many texel cells (${e.count.toLocaleString('en-US')} registrations)`, 'lower pool or width, or density');
     throw e;
   }
 
   ctx.stat('raster_ms', Math.round(performance.now() - tRaster));
   // layers: C, along, head, strength, id, mask. C and head are means over the texel's samples (an empty sample counts 0);
-  // along, strength and id are those of the run that covers the texel most: never a mean with empty samples or other runs
-  const NL = 5;
-  const CH = new Float32Array(s.n * 2);
-  for (let k = 0; k < s.n; k++) { CH[k * 2] = C[k]; CH[k * 2 + 1] = head[k]; }
-  const first = resolve(s, CH, 2);
+  // along, strength and id are those of the run that covers the texel most: never a mean with empty samples or other runs;
+  // stain (when asked for) a mean as C
+  const NL = stain ? 6 : 5, NM = stain ? 3 : 2;
+  const CH = new Float32Array(s.n * NM);
+  for (let k = 0; k < s.n; k++) { CH[k * NM] = C[k]; CH[k * NM + 1] = head[k]; if (stain) CH[k * NM + 2] = stain[k]; }
+  const first = resolve(s, CH, NM);
   const bestK = new Int32Array(W * H).fill(-1), bestC = new Float32Array(W * H).fill(-1);
   for (let k = 0; k < s.n; k++) { const t = s.texel[k]; if (C[k] > bestC[t]) { bestC[t] = C[k]; bestK[t] = k; } }
   const data = new Float32Array(W * H * NL);
   for (let t = 0; t < W * H; t++) {
-    data[t * NL] = first.data[t * 2]; data[t * NL + 3] = first.data[t * 2 + 1];
+    data[t * NL] = first.data[t * NM]; data[t * NL + 3] = first.data[t * NM + 1];
+    if (stain) data[t * NL + 5] = first.data[t * NM + 2];
     const k = bestK[t];
     if (k >= 0 && C[k] > 0) { data[t * NL + 1] = along[k]; data[t * NL + 2] = strength[k]; data[t * NL + 4] = id[k]; }
   }
   const img = new Image(W, H, outName(ctx));
   img.setSize(bakedImageSize(pos, uv, tris, W, H, skip)); // as every bake
   const pad = Math.max(0, Math.round(p.padding));
-  dilate(data, NL, W, H, first.coverage, pad, [0, 0, 0, 0, 0]);
-  // channel order in `data`: C, along, strength, head, id
-  ['C', 'along', 'strength', 'head', 'id'].forEach((name, c) => {
+  dilate(data, NL, W, H, first.coverage, pad, new Array(NL).fill(0));
+  // channel order in `data`: C, along, strength, head, id (, stain)
+  ['C', 'along', 'strength', 'head', 'id', ...(stain ? ['stain'] : [])].forEach((name, c) => {
     const out = new Float32Array(W * H);
     for (let i = 0; i < out.length; i++) out[i] = data[i * NL + c];
     img.set(name === 'C' ? MAIN_LAYER : name, out);
   });
-  // texel sizes and islands, as every bake writes them
-  const tl = texelLayers({ s, uv, tris, g } as unknown as Bake, pos);
   const T = resolve(s, tl.texel.vals, 4).data, I = resolve(s, tl.island.vals, 1).data;
   dilate(T, 4, W, H, first.coverage, pad, tl.texel.background);
   dilate(I, 1, W, H, first.coverage, pad, tl.island.background);
@@ -187,7 +196,7 @@ defineNode({
     'at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. ' +
     'Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. ' +
     'Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); ' +
-    'strength = the run\'s random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. ' +
+    'strength = the run\'s random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); stain (with stain above 0) = a broad faint stain around the runs, a mean like C; mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. ' +
     'Water goes down the geometry, not down authored normals: the flow direction comes from face normals, smoothed only between faces that meet within 40°, so a face wound the wrong way reads as turned down and lets water through. The bottom of a groove whose sides are steeper than ledge pools, and runs on along it when it slopes. ' +
     'The metre constants of a run (gaps, wander, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. ' +
     'Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).',
@@ -217,8 +226,10 @@ defineNode({
     step: { type: 'float', default: 0, min: 0, max: 5, desc: 'walking step in metres (0 = half the smallest width)', aliases: ['step_size'] },
     spill: { type: 'float', default: 0.05, min: 0, max: 50, desc: 'a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are', aliases: ['spill_reach', 'overflow'] },
     seed: { type: 'int', default: 0, min: 0, max: 2147483647, desc: 'seed of the run starts, lengths, widths, wander and gaps' },
+    stain: { type: 'float', default: 0, min: 0, max: 20, desc: 'a broad faint stain around each run, its half width this many times the run\'s head width (0 = none; a spill wider than 1.5 times the widest width counts as that): layer stain, widest at the head and narrowing to under half down the run, no gaps, fading sideways and to nothing at the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash', aliases: ['stain_width', 'halo'] },
+    stain_skew: { type: 'float', default: 0, min: 0, max: 8, desc: 'each run\'s stain times its strength (0..1; the longer runs are the stronger) to this power: 0 = every stain alike, 2 = most faint and a few strong', aliases: ['stain_contrast'] },
   },
-  outputs: 'image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask',
+  outputs: 'image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask (and stain when asked for)',
   usesNodeName: NAMED_BY_NODE,
   example: {
     nodes: {

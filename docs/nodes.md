@@ -2,7 +2,7 @@
 
 # TopoTopo node reference
 
-267 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+271 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
@@ -27,7 +27,7 @@ validation, the MCP `catalog`/`help` tools and this page.
 - [package](#package-nodes): [topotopo/architecture](#topotopoarchitecture) · [topotopo/architecture/arch](#topotopoarchitecturearch) · [topotopo/architecture/beam_truss](#topotopoarchitecturebeam_truss) · [topotopo/architecture/brick_wall](#topotopoarchitecturebrick_wall) · [topotopo/architecture/door_frame](#topotopoarchitecturedoor_frame) · [topotopo/architecture/hex_grid_floor](#topotopoarchitecturehex_grid_floor) · [topotopo/architecture/house](#topotopoarchitecturehouse) · [topotopo/architecture/lineup](#topotopoarchitecturelineup) · [topotopo/architecture/pillar](#topotopoarchitecturepillar) · [topotopo/architecture/railing](#topotopoarchitecturerailing) · [topotopo/architecture/roof_gable](#topotopoarchitectureroof_gable) · [topotopo/architecture/roof_hip](#topotopoarchitectureroof_hip) · [topotopo/architecture/roof_skeleton](#topotopoarchitectureroof_skeleton) · [topotopo/architecture/scaffold](#topotopoarchitecturescaffold) · [topotopo/architecture/spiral_stairs](#topotopoarchitecturespiral_stairs) · [topotopo/architecture/stairs](#topotopoarchitecturestairs) · [topotopo/architecture/tile_floor](#topotopoarchitecturetile_floor) · [topotopo/architecture/wall_segment](#topotopoarchitecturewall_segment) · [topotopo/architecture/window_frame](#topotopoarchitecturewindow_frame) · [topotopo/nature](#topotoponature) · [topotopo/nature/bush](#topotoponaturebush) · [topotopo/nature/cliff_block](#topotoponaturecliff_block) · [topotopo/nature/forest_patch](#topotoponatureforest_patch) · [topotopo/nature/grass_clumps](#topotoponaturegrass_clumps) · [topotopo/nature/lineup](#topotoponaturelineup) · [topotopo/nature/log](#topotoponaturelog) · [topotopo/nature/rock](#topotoponaturerock) · [topotopo/nature/scatter_rocks](#topotoponaturescatter_rocks) · [topotopo/nature/tree_lowpoly](#topotoponaturetree_lowpoly) · [topotopo/props](#topotopoprops) · [topotopo/props/barrel](#topotopopropsbarrel) · [topotopo/props/crate](#topotopopropscrate) · [topotopo/props/lineup](#topotopopropslineup) · [topotopo/props/pallet](#topotopopropspallet) · [topotopo/props/pipe_run](#topotopopropspipe_run) · [topotopo/props/sandbag_wall](#topotopopropssandbag_wall) · [topotopo/street](#topotopostreet) · [topotopo/street/bench](#topotopostreetbench) · [topotopo/street/bollard](#topotopostreetbollard) · [topotopo/street/cable](#topotopostreetcable) · [topotopo/street/fence](#topotopostreetfence) · [topotopo/street/lamp_post](#topotopostreetlamp_post) · [topotopo/street/lineup](#topotopostreetlineup) · [topotopo/street/road_strip](#topotopostreetroad_strip) · [topotopo/street/sign_post](#topotopostreetsign_post)
 - [pcg](#pcg-nodes): [attribute_from_map](#attribute_from_map) · [cluster](#cluster) · [mask](#mask) · [orient](#orient) · [points_along_curve](#points_along_curve) · [prune](#prune)
 - [sim](#sim-nodes): [drape](#drape) · [inflate](#inflate) · [particles](#particles) · [rbd_settle](#rbd_settle) · [rbd_stack](#rbd_stack)
-- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_edge_wear](#bake_edge_wear) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material)
+- [texture](#texture-nodes): [bake_ao](#bake_ao) · [bake_curvature](#bake_curvature) · [bake_edge_wear](#bake_edge_wear) · [bake_flow](#bake_flow) · [bake_height](#bake_height) · [bake_island_id](#bake_island_id) · [bake_mask](#bake_mask) · [bake_material](#bake_material) · [bake_measure](#bake_measure) · [bake_normal](#bake_normal) · [bake_position](#bake_position) · [bake_thickness](#bake_thickness) · [bake_triplanar](#bake_triplanar) · [bake_vertex_color](#bake_vertex_color) · [bake_world_normal](#bake_world_normal) · [heightfield_to_tex](#heightfield_to_tex) · [image_file](#image_file) · [tex_ao](#tex_ao) · [tex_auto_levels](#tex_auto_levels) · [tex_bevel](#tex_bevel) · [tex_blend](#tex_blend) · [tex_blur](#tex_blur) · [tex_cells](#tex_cells) · [tex_channel](#tex_channel) · [tex_clamp](#tex_clamp) · [tex_colorize](#tex_colorize) · [tex_compact](#tex_compact) · [tex_constant](#tex_constant) · [tex_crop](#tex_crop) · [tex_curvature](#tex_curvature) · [tex_curves](#tex_curves) · [tex_dilate](#tex_dilate) · [tex_directional_blur](#tex_directional_blur) · [tex_distance](#tex_distance) · [tex_edge_detect](#tex_edge_detect) · [tex_flood_fill](#tex_flood_fill) · [tex_gradient](#tex_gradient) · [tex_grunge](#tex_grunge) · [tex_height_from_normal](#tex_height_from_normal) · [tex_height_to_ao](#tex_height_to_ao) · [tex_histogram_range](#tex_histogram_range) · [tex_histogram_scan](#tex_histogram_scan) · [tex_histogram_select](#tex_histogram_select) · [tex_invert](#tex_invert) · [tex_layers](#tex_layers) · [tex_levels](#tex_levels) · [tex_make_tile](#tex_make_tile) · [tex_noise](#tex_noise) · [tex_normal_blend](#tex_normal_blend) · [tex_normal_from_height](#tex_normal_from_height) · [tex_normal_invert](#tex_normal_invert) · [tex_normal_normalize](#tex_normal_normalize) · [tex_output](#tex_output) · [tex_pack](#tex_pack) · [tex_pattern](#tex_pattern) · [tex_quantize](#tex_quantize) · [tex_scratches](#tex_scratches) · [tex_sdf_boolean](#tex_sdf_boolean) · [tex_sdf_from_mask](#tex_sdf_from_mask) · [tex_sdf_op](#tex_sdf_op) · [tex_sdf_shape](#tex_sdf_shape) · [tex_sdf_to_mask](#tex_sdf_to_mask) · [tex_shape](#tex_shape) · [tex_slope_blur](#tex_slope_blur) · [tex_splatter](#tex_splatter) · [tex_text](#tex_text) · [tex_threshold](#tex_threshold) · [tex_tile_sampler](#tex_tile_sampler) · [tex_to_heightfield](#tex_to_heightfield) · [tex_transform](#tex_transform) · [tex_warp](#tex_warp) · [texture_to_material](#texture_to_material) · [weather](#weather) · [weather_masks](#weather_masks)
 
 ## generate nodes
 
@@ -3732,10 +3732,14 @@ Writes the prim string attribute "material" for the selected prims and adds (or 
 | `alpha_cutoff` | float | `0.5` | 0..1 |  |  | mask: discard where material alpha × texture alpha × vertex Alpha is below this value |
 | `double_sided` | bool | `false` |  |  | `doublesided`, `two_sided` | render both faces |
 | `unlit` | bool | `false` |  |  | `emissive_only`, `flat` | unlit shading (KHR_materials_unlit) |
-| `kind` | enum | `""` |  | ``, `painted_metal`, `cast_metal`, `galvanised`, `bare_steel`, `stainless`, `plastic`, `rubber`, `concrete`, `painted_wood`, `decal`, `keep` | `material_kind` | what the material is made of and how it ages ("" = not said): painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, or keep (leave the part as it is); stored in the table, ignored by exporters, read by bake_material (a kind written here also applies to a material copied from input 1) |
+| `kind` | enum | `""` |  | ``, `painted_metal`, `cast_metal`, `galvanised`, `bare_steel`, `stainless`, `plastic`, `rubber`, `concrete`, `painted_concrete`, `painted_plaster`, `painted_wood`, `bare_wood`, `asphalt`, `ceramic`, `decal`, `keep` | `material_kind` | what the material is made of and how it ages ("" = not said): painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_concrete, painted_plaster, painted_wood, bare_wood, asphalt, ceramic, decal, or keep (leave the part as it is); stored in the table, ignored by exporters, read by bake_material (a kind written here also applies to a material copied from input 1) |
 | `base_color_map` | path | `""` |  |  | `basecolor_map`, `albedo_map`, `diffuse_map`, `color_map`, `basecolor_texture`, `base_color_texture` | base colour texture (sRGB PNG/JPEG path, or "image:<name>" for an image the geometry carries; "" = none); uses the uv attribute |
 | `normal_map` | path | `""` |  |  | `normal_texture`, `bump_map` | tangent-space normal map (PNG/JPEG path or "image:<name>", OpenGL convention: +Y up; "" = none) |
 | `roughness_map` | path | `""` |  |  | `roughness_texture`, `rough_map` | roughness texture (grey PNG/JPEG path or "image:<name>"; "" = none); glTF reads its green channel |
+| `packed_map` | path | `""` |  |  | `orm_map`, `mask_map`, `arm_map` | packed map (PNG/JPEG path or "image:<name>"; "" = none) whose channels packing names; the glTF / Unreal occlusion-roughness-metallic map by default |
+| `packing` | string | `"orm"` |  |  | `packed_layout`, `channel_layout` | channel layout of packed_map, one letter per channel R, G, B (A): o occlusion, r roughness, m metallic, h height, s smoothness, x unused; "orm" (glTF, Unreal), "hro" (R height, G roughness, B occlusion), "rma", "moxs" (a Unity HDRP mask map); glTF and usda exports and the preview read it by this layout (glTF holds the map rewritten as orm) |
+| `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` | `normal_convention` | green-channel convention of normal_map: opengl (+Y up: glTF, Blender) or directx (Unreal); bakes, the preview and the glTF and usda exports read it (glTF holds the map rewritten as opengl) |
+| `tile` | float | `0` | 0.. |  | `tile_size`, `tiling_metres`, `texture_size` | metres one repeat of the maps covers on a metric uv (1 uv unit = 1 m), e.g. 3 for a concrete map tiling every 3 m; 0 = the maps fill 0..1 of the uv. Bakes read the maps at uv / tile; exporters write uv and maps as they are (the engine material does the tiling) |
 
 **Writes:** prim "material" (string), detail "materials" (JSON table); with a source, the images its maps use
 
@@ -9621,8 +9625,9 @@ Charts grow over faces of similar orientation (weights below); each chart is fla
 | `texel_weight` | string | `"texel_weight"` |  |  |  | prim attribute scaling the texel density of each chart (mean over its polygons by area; 2 = twice the texels per metre, values <= 0 count as 1, so attrib_create with a group weights those parts); missing = all 1 |
 | `visibility_weight` | float | `0` | 0..1 |  |  | texel density by visibility, 0..1: texels per metre of each polygon times lerp(1, max(0.05, open), weight), where open is how much of its hemisphere is not blocked by the geometry or the surroundings input (rays from points spread over the polygon by area, unlimited; a quarter of the hemisphere counts as fully open): faces against a wall (also one flush with them) or inside a closed part get a twentieth of the density, open faces keep it, and the rest of the atlas grows. It is openness, so a face deep inside a recess gets less. A chart that mixes hidden and visible faces is weighted by its mean. An existing prim attribute called visibility is replaced when the weight is above 0. 0 = off (the layout is as without it). Writes prim visibility; stats count the faces and the share of the area at the minimum, and a warning says so when a quarter of the area reads hidden with no surroundings connected (normals facing inwards) |
 | `iterations` | int | `4` | 1..64 |  |  | chart orders the packer tries; the densest wins |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `output_uv` | the vertex uv set to write (e.g. "uv2" for a second set of masks or lightmaps; the uv the materials use stays as it is) |
 
-**Writes:** vertex uv, prim chart, prim atlas (fit stack with several atlases), prim visibility (visibility_weight above 0)
+**Writes:** vertex uv (or the uv_attrib set), prim chart, prim atlas (fit stack with several atlases), prim visibility (visibility_weight above 0)
 
 **Example**
 
@@ -12719,7 +12724,7 @@ category: `texture` · aliases: `flow_bake`, `bake_runs`, `bake_drips`, `bake_st
 
 Bake runs that flow down the surface under gravity from source parts (rust under bolts, rain streaks under a ledge): traced in 3D across uv seams, varied in length and width, thin, breaking up, pooling on ledges.
 
-Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bolt* @name=hinge*"; or points or a mesh on input 1) where they touch another surface within 1 cm, one every 1 / density metres along each part (at least one per part), and walk down the receiving surface (every prim that is not a source): gravity projected onto the surface, bent sideways by 3D noise (wobble), snapped back onto the mesh, over edges and across uv seams, around bosses and over the underside of a lip. A surface whose normal is within ledge degrees of up stops the run, where it pools; a pool whose ledge has an edge within the spill reach (metres) spills over the edge nearest to it and the run goes on below with less strength; a source standing on a ledge starts a pool and does the same; at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); strength = the run's random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. Water goes down the geometry, not down authored normals: the flow direction comes from face normals, smoothed only between faces that meet within 40°, so a face wound the wrong way reads as turned down and lets water through. The bottom of a groove whose sides are steeper than ledge pools, and runs on along it when it slopes. The metre constants of a run (gaps, wander, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).
+Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bolt* @name=hinge*"; or points or a mesh on input 1) where they touch another surface within 1 cm, one every 1 / density metres along each part (at least one per part), and walk down the receiving surface (every prim that is not a source): gravity projected onto the surface, bent sideways by 3D noise (wobble), snapped back onto the mesh, over edges and across uv seams, around bosses and over the underside of a lip. A surface whose normal is within ledge degrees of up stops the run, where it pools; a pool whose ledge has an edge within the spill reach (metres) spills over the edge nearest to it and the run goes on below with less strength; a source standing on a ledge starts a pool and does the same; at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); strength = the run's random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); stain (with stain above 0) = a broad faint stain around the runs, a mean like C; mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. Water goes down the geometry, not down authored normals: the flow direction comes from face normals, smoothed only between faces that meet within 40°, so a face wound the wrong way reads as turned down and lets water through. The bottom of a groove whose sides are steeper than ledge pools, and runs on along it when it slopes. The metre constants of a run (gaps, wander, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).
 
 **Inputs**
 
@@ -12752,8 +12757,10 @@ Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bo
 | `step` | float | `0` | 0..5 |  | `step_size` | walking step in metres (0 = half the smallest width) |
 | `spill` | float | `0.05` | 0..50 |  | `spill_reach`, `overflow` | a pool on a ledge (or a source standing on one) whose nearest edge is within this many metres spills over that edge and runs on down the surface below with 65 % of the strength; a ledge wider than this keeps the pool; 0 = pools stay where they are |
 | `seed` | int | `0` | 0..2147483647 |  |  | seed of the run starts, lengths, widths, wander and gaps |
+| `stain` | float | `0` | 0..20 |  | `stain_width`, `halo` | a broad faint stain around each run, its half width this many times the run's head width (0 = none; a spill wider than 1.5 times the widest width counts as that): layer stain, widest at the head and narrowing to under half down the run, no gaps, fading sideways and to nothing at the tail; where stains meet they add up (1 − Π(1 − v)), so many runs under an edge merge into a wash |
+| `stain_skew` | float | `0` | 0..8 |  | `stain_contrast` | each run's stain times its strength (0..1; the longer runs are the stronger) to this power: 0 = every stain alike, 2 = most faint and a few strong |
 
-**Writes:** image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask
+**Writes:** image <name> (default: the node name): C run mask 0..1, along, head, strength, id, mask (and stain when asked for)
 
 **Example**
 
@@ -13049,7 +13056,7 @@ category: `texture` · aliases: `material_bake`, `bake_materials`, `bake_materia
 
 Bake the material table into uv space: base colour, roughness and metallic from each prim's material, a 0/1 mask per material and per kind, and the texel size and uv island of every texel.
 
-Reads the prim attribute "material" and the detail table "materials" (the material node) and writes, in the uv space of the mesh (uv_attrib): C = the base colour (RGBA; where a material's base colour map is an "image:<name>" the geometry carries, the colour it shows), layer "roughness" and layer "metallic" (the material's values; a packed orm map gives roughness from its green and metallic from its blue channel times the factors, a roughness map its green channel), a 0/1 layer "mat_<material>" per material the baked prims use and a 0/1 layer "kind_<kind>" per kind present (masks: all, materials, kinds or none), layer "texel" (R = metres one texel covers along u, G along v, at that texel: tex_layers builds its normal map from it, so a step has the same slope at any resolution and on any shape of image) and layer "island" (the uv island, so a filter can stay on one). Maps are read with the mesh's "uv" attribute (the uv a material's maps use), whatever uv_attrib the bake is laid out with. A material's normal map is not carried (its detail is not in the stack yet: a warning names the material), nor is the occlusion of an orm map: give tex_layers an occlusion expression. Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning lists the renames and two materials never share a name). A texel that two materials share takes the first sample's material for the labels (as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is, in this order, the `kinds` entry for its name, its own `kind` field (the material node's kind param), its whole name when that is a kind or one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about (a texel they share holds the last one's values). Stats: size (the metres the image width covers: the median texel size over the image's texels times the width, which the image carries for the filters after it) and texel_mm.
+Reads the prim attribute "material" and the detail table "materials" (the material node) and writes, in the uv space of the mesh (uv_attrib): C = the base colour (RGBA; where a material's base colour map is an "image:<name>" the geometry carries, the colour it shows), layer "roughness" and layer "metallic" (the material's values; a packed orm map gives roughness from its green and metallic from its blue channel times the factors, a roughness map its green channel), a 0/1 layer "mat_<material>" per material the baked prims use and a 0/1 layer "kind_<kind>" per kind present (masks: all, materials, kinds or none), layer "texel" (R = metres one texel covers along u, G along v, at that texel: tex_layers builds its normal map from it, so a step has the same slope at any resolution and on any shape of image) and layer "island" (the uv island, so a filter can stay on one). Maps are read with the uv attribute map_uv ("uv": the uv the maps of a material use), whatever uv_attrib the bake is laid out with, at uv / tile when the material states the metres one repeat covers (its tile field: a metric uv and tiling maps). A packed map is read by the packing of its material (orm by default; hro, rma, moxs or any letters o, r, m, h, s, x): roughness and metallic as above, its occlusion into layer "occlusion" and its height into layer "height" (written when some material has them; 1 and 0.5 elsewhere). The normal map of a material is carried into layer "normal" (RGBA, OpenGL, written when some material has one): the map normal of each sample is turned from the tangent frame of map_uv into the tangent frame of the uv of the bake (MikkTSpace of each uv with the vertex normals of the mesh, cusp 60°, as exporters and engines compute it; a directx map is flipped first), so tex_layers keeps the detail under its layers. Layer names are valid identifiers (a material "Paint.001" is "mat_Paint_001"; a warning lists the renames and two materials never share a name). A texel that two materials share takes the first sample's material for the labels (as bake_island_id does for ids); colours are averaged over the samples. The kind of a material is, in this order, the `kinds` entry for its name, its own `kind` field (the material node's kind param), its whole name when that is a kind or one of its names (painted_steel, paint, rubber, label …); a material that none tells has no kind layer. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap); layer "mask" holds the coverage, and the image carries the metres its width covers (the size of a typical texel times the width: inspect shows it), which every texture node after it reads its lengths in metres against. Bakes that read a high-res mesh on input 1 add layer "missed": 1 where the cage ray found no high surface (stat missed); cage_attrib sets the cage per part and match_name keeps each named piece to the high prims of its name. This is the base of tex_layers (its input 0), which reads layers roughness and metallic as the base values, texel and island for the normal, mask as coverage, and the masks mat_* and kind_* in its expressions. Faces whose uv overlap are warned about (a texel they share holds the last one's values). Stats: size (the metres the image width covers: the median texel size over the image's texels times the width, which the image carries for the filters after it) and texel_mm.
 
 **Inputs**
 
@@ -13068,10 +13075,11 @@ Reads the prim attribute "material" and the detail table "materials" (the materi
 | `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
 | `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
 | `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
-| `kinds` | json | `{}` |  |  | `material_kinds` | kind per material name, e.g. {"zinc_steel": "galvanised"}; wins over the material's own kind (kinds: painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_wood, decal, keep) |
+| `kinds` | json | `{}` |  |  | `material_kinds` | kind per material name, e.g. {"zinc_steel": "galvanised"}; wins over the material's own kind (kinds: painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_concrete, painted_plaster, painted_wood, bare_wood, asphalt, ceramic, decal, keep) |
+| `map_uv` | string | `"uv"` |  |  | `maps_uv`, `texture_uv` | the uv attribute the maps of the materials are read with (they may tile on it); the bake itself is laid out on uv_attrib |
 | `masks` | enum | `"all"` |  | `all`, `materials`, `kinds`, `none` | `mask_layers`, `labels` | which 0/1 mask layers to write: mat_<material>, kind_<kind>, both or neither |
 
-**Writes:** image <name> (default: the node name): C base colour RGBA, roughness, metallic, mat_<material> (0/1 per material), kind_<kind> (0/1 per kind present), texel (RGBA: R metres per texel along u, G along v), island, mask; stats size, texel_mm, texels, coverage
+**Writes:** image <name> (default: the node name): C base colour RGBA, roughness, metallic, occlusion and height (when a packed map has them), normal (when a material has a normal map), mat_<material> (0/1 per material), kind_<kind> (0/1 per kind present), texel (RGBA: R metres per texel along u, G along v), island, mask; stats size, texel_mm, texels, coverage
 
 **Example**
 
@@ -13430,6 +13438,79 @@ Substance Painter "Thickness". Input 0 needs non-overlapping uv in 0..1 (uv_unwr
     }
   },
   "output": "thick"
+}
+```
+
+### bake_triplanar
+
+category: `texture` · aliases: `triplanar`, `bake_projection`, `project_texture`, `box_projection`
+
+Project tiling images (a photograph, a scanned surface) onto a mesh in world metres from three axes and bake them into its uv: colour, roughness and a normal map, with no uv seam showing.
+
+Every texel reads the images at its 3D position: from the X axis at (−z, y), from Y at (x, −z), from Z at (x, y), each turned so the image is never mirrored seen from outside, divided by size (the metres one repeat covers; 0 = the colour image's own size, which image_file or a generator states) and shifted by offset (and by a random part of a repeat per seed). The three are blended by the normal, |n|^sharpness per axis: flat faces take one projection, and the turn between them blends over a short band. So the result follows the model in 3D: the same on both sides of a uv seam, the same scale on every island. The normal image is turned into world space per projection (the whiteout triplanar blend) and written in the tangent frame of the bake's uv (MikkTSpace, as bake_normal), so it stays right on any uv layout. C = colour (RGBA), layers roughness (when a roughness image is named: its grey, or the green of a colour image) and normal (when a normal image is named), texel, island and mask. tex_layers takes all three through a layer's image field.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh to bake (needs uv without overlaps) |
+| 1 | `images` | yes | no | geometry carrying the tiling images (image_file, texture nodes) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `resolution` | ivec2 | `[1024,1024]` | 1..8192 |  | `res`, `output_size`, `dimensions`, `image_size` | image size in pixels [width, height] (one number = square; at most 16,777,216 pixels); powers of two suit GPUs |
+| `supersample` | int | `1` | 1..4 |  | `ssaa`, `antialiasing`, `subsampling` | samples per texel along each axis (2 = 4 samples averaged: smoother edges, 4× the work) |
+| `padding` | int | `4` | 0..256 |  | `dilation`, `margin`, `edge_padding` | dilate islands by this many texels (no background bleeding in mipmaps) |
+| `uv_attrib` | string | `"uv"` |  |  | `uv_name`, `uvattrib` | vertex or point uv attribute to bake into |
+| `group` | group (prim) | `""` |  |  |  | prims to bake ("" = all); the others leave their texels empty |
+| `keep_mesh` | bool | `false` |  |  | `keep_input`, `keep` | output the input mesh with the image added (off: only the image) |
+| `name` | string | `""` |  |  | `image_name`, `output_name` | image name ("" = this node's name); materials reference it as "image:<name>" |
+| `color` | string | `""` |  |  | `base_color`, `image` | the colour image ("" = the first image of input 1) |
+| `normal` | string | `""` |  |  | `normal_map` | a tangent-space normal image tiling with it ("" = none) |
+| `roughness` | string | `""` |  |  | `roughness_map` | a roughness image tiling with it ("" = none) |
+| `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` |  | green-channel convention of the normal image (the result is OpenGL) |
+| `size` | float | `0` | 0.. |  | `tile`, `scale`, `world_size` | metres one repeat of the images covers on the model (0 = the colour image's stated size) |
+| `sharpness` | float | `4` | 1..32 |  | `blend`, `falloff` | how sharply the projections hand over at a turn (higher = a shorter blend) |
+| `offset` | vec3 | `[0,0,0]` |  |  |  | shift of the pattern in metres |
+| `seed` | int | `0` | 0..2147483647 |  |  | shifts the pattern by a random part of a repeat (0 = no shift) |
+
+**Writes:** image <name> (default: the node name): C colour, roughness, normal, texel, island, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box"
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "box"
+      ]
+    },
+    "rust": {
+      "type": "tex_noise",
+      "params": {
+        "resolution": 128,
+        "texture_size": 0.5
+      }
+    },
+    "proj": {
+      "type": "bake_triplanar",
+      "in": [
+        "uv",
+        "rust"
+      ],
+      "params": {
+        "resolution": 256
+      }
+    }
+  },
+  "output": "proj"
 }
 ```
 
@@ -14226,6 +14307,97 @@ Substance: Gradient Map; Houdini COP: Ramp lookup. ramp keys [[pos, colour], …
     }
   },
   "output": "out"
+}
+```
+
+### tex_compact
+
+category: `texture` · aliases: `image_compact`, `keep_layers`, `layers_keep`
+
+Keep only the named layers of images and store the 0..1 ones as 16-bit floats: less memory for bakes that stay cached between cooks.
+
+For every image of input 0 (or the one named by image), keeps the layers keep names ("" = all) and stores those half names as 16-bit floats: about three significant digits, so 0..1 masks come back within 0.0003 and whole numbers exactly up to 2048 (ids above that, such as island, are left out of half by default). The values are rounded the same way on every runtime; where it has Float16Array (Node 24, current browsers) they also take half the memory, elsewhere they stay 32-bit arrays. Names are separated by spaces; * matches any run of characters and !name leaves a name out ("* !island"). An image that loses its main layer C has its first kept layer as the main one (the layer filters read, and the one tex_layers names after the image), so keep C when other nodes read the layers by name. A keep name that matches no layer of any image is reported. Nodes after it read the layers as usual (texture filters take a 32-bit copy). Stats: layers (kept), dropped, half, and mb (megabytes the images take after it, a shared layer once).
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `images` | no | no | geometry with images (bakes) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `keep` | string | `""` |  |  | `layers` | layers to keep, by name ("" = all; e.g. "C occ cav kind_*") |
+| `half` | string | `"* !island"` |  |  | `half_layers`, `f16` | kept layers stored as 16-bit floats (names, * and !name; "" = none) |
+| `image` | string | `""` |  |  | `input_image` | the image to compact ("" = every image of input 0) |
+
+**Writes:** input 0 with each image holding the kept layers, those named by half at 16 bits
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "size": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "box"
+      ],
+      "params": {
+        "resolution": 64
+      }
+    },
+    "bake": {
+      "type": "bake_measure",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 64,
+        "name": "m",
+        "measures": [
+          {
+            "by": "facing",
+            "name": "top"
+          },
+          {
+            "by": "height",
+            "name": "ht"
+          },
+          {
+            "by": "noise",
+            "name": "grain",
+            "size": [
+              0.2,
+              0.2,
+              0.2
+            ]
+          }
+        ]
+      }
+    },
+    "compact": {
+      "type": "tex_compact",
+      "in": [
+        "bake"
+      ],
+      "params": {
+        "keep": "top ht texel island mask"
+      }
+    }
+  },
+  "output": "compact"
 }
 ```
 
@@ -15212,6 +15384,8 @@ Input 0 is the base: an image whose C is the base colour and whose layers "rough
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `layers` | json | `[]` |  |  | `stack` | the layers, bottom to top: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top)", "opacity": 1, "color": "#a69d8b" \| [r, g, b] \| [[0, "#5c2a14"], [1, "#9a4a20"]], "color_by": "0", "color_mode": "normal" \| "multiply" \| "overlay" \| "lighten", "roughness": 0.95, "roughness_offset": 0, "metallic": 0, "height": 0.0003, "signed": false}]; name and mask are required, the rest optional (a field left out leaves that channel alone) |
+| `masks` | json | `[]` |  |  | `named_masks` | named masks, computed first in order: [{"name": "dust", "mask": "smoothstep(0.4, 0.8, top) * grain"}]; every later mask, layer mask, color_by and the occlusion read each by its name (computed once however many read it), and they are written as the layers of image <name>_masks (clamped to 0..1; "write": false leaves one out: a step between masks) |
+| `outputs` | enum | `"both"` |  | `both`, `maps`, `masks` | `output` | what to write: the maps, the masks image (when masks are named), or both |
 | `occlusion` | code | `""` |  |  | `ao`, `occlusion_expression` | expression for ORM red (occlusion 0..1) over the same variables ("" = 1) |
 | `base_roughness` | float | `-1` | -1..1 |  | `roughness` | roughness of the whole base, 0..1 (-1 = read the base's layer "roughness"; an error when it has none) |
 | `base_metallic` | float | `-1` | -1..1 |  | `metallic` | metallic of the whole base, 0..1 (-1 = read the base's layer "metallic"; an error when it has none) |
@@ -16918,5 +17092,234 @@ Input 0 is the mesh (with uv), input 1 the images (merge several texture branche
     }
   },
   "output": "out"
+}
+```
+
+### weather
+
+category: `texture` · aliases: `weathering`, `age_material`, `wear_and_tear`, `grunge_material`, `smart_material`
+
+Weather a model in one node: paint chips on edges and where hands go, grime in cavities, dust on tops, splash at the ground, rain and rust runs from where the shape sheds water, sun fade and moss, each by the material kind of the part. Out come base colour, normal and a packed map on one material, every mask in one image.
+
+Input 0: a mesh with uv and materials, each with a kind. The maps of the materials (base colour, roughness, packed, normal; tiling in metres with the material's tile) are read with the uv as it comes (kept as uv_maps) and baked onto the atlas, so their look survives: at zero weathering the maps are the material's. layout visible re-packs the islands with more texels where they show (uv_layout visibility_weight), keep bakes on the uv as it is (it must not overlap), unwrap charts it again (tiling uv that folds, trim sheets). Input 1: surroundings (a wall, the ground: they block rays and catch drips); with none, mount adds a plane. Input 2: images whose layers, named like the masks, replace them before the stack. Input 3: photographs for image layers (overrides {"<layer>": {"image": "rust_photo", "size": 0.5}}: colour, roughness and normal projected in world metres from three axes, bake_triplanar, so no uv seam shows) and a route B reference. Kinds (the material node's kind, or kinds here; never guessed from names): painted ones lose their coat (painted_metal: chips to primer, bare steel, rust in the chip cores; cast_metal: larger chips, pitting, iron, heavier rust; painted_concrete: chips to concrete; painted_plaster: peels in larger sheets, water marks; painted_wood: flakes to wood that greys; decal: fades and scratches), bare ones stain, darken or grey through the whole surface and only wear lighter at edges (concrete: damp, stains, efflorescence below runs, worn arrises, moss; bare_steel: mill scale, flash and heavy rust, and it sources rust runs onto what is below; galvanised: dulls, white bloom, red rust on edges above rust 0.6; stainless: smudges where handled, tea stain; plastic: chalks in the sun, scuffs; rubber: greys; bare_wood: greys in the sun, damp low down; asphalt: fades, stains pool on flats; ceramic: chips to bisque); keep leaves a part as it is. Shared over every kind: film (sheltered paint duller), grime, dust, splash (mount ground), dirt runs, rust runs, moss on growing kinds outdoors, and blotch and grain on roughness. Dirt runs start where the shape sheds water, measured, not named: the outer edge of every face turned up that meets a steep face below at a convex edge (copings, parapets, sills, ledges, plate and canopy tops) and the wall under a face turned down that meets it at a concave edge (under a balcony slab or canopy), or, when the wall is a separate piece, the wall that short level rays from just below the lip of an overhang reach (under a coping or sill that is its own box), one point every 1 / leak_density metres, kept with the chance of the rain that reaches its ledge (rays up against the model and its surroundings; indoors a fixed chance, as water below windows). Named parts add to them: handled parts wear, rust sources (bare_steel, and galvanised above rust 0.6) run rust onto what is below. mount and exposure scale them. Route B (a prop with its own unique maps): layout keep, and reference {"color": "#6b665c", "roughness": 0.85} or {"image": "name"} with match pulls the mean colour and roughness toward it before the weathering (the variation stays). Out: the mesh with material `material` on every weathered prim (parts of kind keep keep theirs), images <material>_base_color, _normal (in normal_format), the packed map (_orm, or _<packing> in the stated layout, h = height around 0.5 at 5 mm per unit) and _masks holding every mask as a layer: edge_wear, chip, bare, core, handled, cavity, occlusion, grime, dust, splash, fade, rust, runs_rust, runs_dirt, streaks, growth, damp, joints, blotch, grain (and the steps between them). Built from bakes (uv_layout, bake_material, bake_measure twice: rays and shape, then seeded noise; bake_edge_wear, bake_mask, bake_flow for rust and dirt runs, bake_triplanar per photo) and one tex_layers stack, cooked as a nested graph: each step is cached by its own signature, so dirt and rust re-cook only the stack, wear and age (age wears the edges too) also the chip threshold of the edge wear (its wear field is kept), and seed also the noise, the edge wear and the runs. Worn edges are bake_edge_wear: its amount is the wear slider after age and exposure, its focus the handled parts, and chip, bare and core (nested, capped per face: at most about a third of any face chips) are the masks of the same names; edge_wear is its raw wear field. Runs are a dark narrow core in a broad faint stain (bake_flow stain), nearly straight on flat faces; their drip points gather at the ends of a ledge, at its joints and low end and around a few spots along it. Splash is densest at the ground and thins upward into spatter with a ragged top, lighter under an overhang. The graph for the defaults, to copy and take over any step (vars k_* are the sliders after age and exposure, x_* the exposure weights): {"nodes":{"mesh":{"type":"input","params":{"index":0}},"surroundings":{"type":"input","params":{"index":1}},"leak_sources":{"type":"input","params":{"index":2}},"atlas":{"type":"uv_layout","in":["mesh","surroundings"],"params":{"visibility_weight":1,"resolution":1024,"padding":8}},"base":{"type":"bake_material","in":["atlas"],"params":{"resolution":1024,"padding":4,"uv_attrib":"uv","map_uv":"uv_maps","kinds":{"paint":"painted_metal"},"name":"base","masks":"kinds"}},"measure":{"type":"bake_measure","in":["atlas","surroundings"],"params":{"resolution":1024,"padding":4,"uv_attrib":"uv","measures":[{"by":"occlusion","name":"occ"},{"by":"cavity","name":"cav","max_distance":0.02},{"by":"shelter","name":"shel","direction":[0,1,0],"cone":35},{"by":"visibility","name":"vis"},{"by":"facing","name":"top","min":0,"max":20,"falloff":25},{"by":"facing","name":"sun","direction":[0,1,0],"min":0,"max":45,"falloff":90},{"by":"height","name":"ht"},{"by":"height","name":"low","min":0,"max":0,"falloff":0.2}],"samples":32,"name":"m"}},"noise":{"type":"bake_measure","in":["atlas"],"params":{"resolution":1024,"padding":4,"uv_attrib":"uv","seed":0,"name":"n","measures":[{"by":"noise","name":"patch","size":[0.15,0.15,0.15]},{"by":"noise","name":"grain","size":[0.004,0.004,0.004],"octaves":3},{"by":"noise","name":"blotch","size":[0.4,0.4,0.4]},{"by":"noise","name":"ragged","size":[0.03,0.03,0.03]},{"by":"noise","name":"streak","size":[0.03,0.35,0.03]},{"by":"noise","name":"pits","noise":"worley","size":[0.004,0.004,0.004],"octaves":1},{"by":"noise","name":"moss","size":[0.06,0.06,0.06],"fractal":"turbulence"}]}},"wear":{"type":"bake_edge_wear","in":["atlas","surroundings"],"params":{"resolution":1024,"padding":4,"uv_attrib":"uv","name":"ew","amount":"=k_amount","radius":0.006,"reach":0.012,"chip_size":0.006,"patch_size":0.15,"seed":0}},"parts":{"type":"bake_mask","in":["atlas"],"params":{"resolution":1024,"padding":4,"uv_attrib":"uv","attrib":"wpart","name":"part"}},"dirt_runs":{"type":"bake_flow","in":["atlas","leak_sources"],"params":{"resolution":1024,"padding":4,"uv_attrib":"uv","seed":0,"length":[0.03,1],"width":[0.0015,0.005],"wobble":0.04,"breakup":0.3,"stain":6,"stain_skew":2,"name":"rd"}},"dirt_runs_kept":{"type":"tex_compact","in":["dirt_runs"],"params":{"keep":"C strength stain","half":"*"}},"parts_kept":{"type":"tex_compact","in":["parts"],"params":{"keep":"C","half":""}},"wear_kept":{"type":"tex_compact","in":["wear"],"params":{"keep":"C chip bare core convex concave","half":"*"}},"noise_kept":{"type":"tex_compact","in":["noise"],"params":{"keep":"C patch grain blotch ragged streak","half":"*"}},"measure_kept":{"type":"tex_compact","in":["measure"],"params":{"keep":"C occ cav shel vis top sun ht low","half":"*"}},"mask_images":{"type":"merge","in":["measure_kept","noise_kept","wear_kept","parts_kept","dirt_runs_kept"]},"stack":{"type":"tex_layers","in":["base","mask_images"],"params":{"masks":[{"name":"pv","mask":"0.8 + 0.4 * frac(part * 13.37 + k_seed * 0.618)","write":false},{"name":"convex","mask":"ew_convex","write":false},{"name":"occlusion","mask":"m_occ"},{"name":"cavity","mask":"clamp(m_cav * 1.4 + ew_concave * 0.6, 0, 1)"},{"name":"handled","mask":"0"},{"name":"edge_wear","mask":"ew"},{"name":"chip","mask":"ew_chip"},{"name":"bare","mask":"ew_bare"},{"name":"core","mask":"ew_core"},{"name":"edges_soft","mask":"clamp(smoothstep(0.1, 0.6, convex) * (0.3 + 0.8 * n_patch) * k_wear, 0, 1)","write":false},{"name":"peel","mask":"smoothstep(k_cut - 0.1, k_cut - 0.04, (chip * 0.5 + n_patch * 0.8 + m_low * k_ground * 0.4) * pv)","write":false},{"name":"blotch","mask":"n_blotch"},{"name":"grain","mask":"n_grain"},{"name":"patch_mix","mask":"n_patch * 0.6 + n_blotch * 0.4","write":false},{"name":"grime","mask":"clamp(k_dirt * (cavity * 1.1 + (1 - m_occ) * 0.9) * (0.4 + 0.9 * n_blotch) * (0.7 + 0.6 * (1 - m_ht)) * pv + handled * k_dirt * 0.35 * n_patch, 0, 1)"},{"name":"dust","mask":"clamp(k_dirt * x_dust * smoothstep(0.15, 0.8, m_top) * (1 - x_wash + x_wash * m_shel) * (0.35 + 0.9 * n_grain) , 0, 1)"},{"name":"splashd","mask":"m_low * (0.55 + 0.9 * n_ragged)","write":false},{"name":"splash","mask":"k_ground * clamp(x_splash * k_dirt * 1.3, 0, 1) * clamp(max(smoothstep(0.45, 0.85, splashd), smoothstep(1 - 0.55 * splashd, 1.06 - 0.55 * splashd, n_grain) * smoothstep(0.08, 0.3, splashd)), 0, 1) * (0.6 + 0.5 * n_blotch) * (1 - 0.6 * m_shel)"},{"name":"fade","mask":"clamp(k_fade * m_sun * m_vis * (0.7 + 0.6 * n_blotch), 0, 1)"},{"name":"rust","mask":"clamp(k_rust * x_rust * (0.45 + 0.8 * n_blotch) * (0.7 + 0.5 * cavity + 0.3 * m_top + 0.3 * m_low), 0, 1)"},{"name":"rust_core","mask":"clamp(0, 0, 1)","write":false},{"name":"rust_stain","mask":"clamp(0, 0, 1)","write":false},{"name":"runs_rust","mask":"clamp(rust_core + rust_stain * 0.6, 0, 1)"},{"name":"dirt_core","mask":"rd * smoothstep(0.7, 1, rd_strength) * clamp(k_dirt * x_runs_dirt * 1.5, 0, 1)","write":false},{"name":"dirt_stain","mask":"smoothstep(0.12, 0.85, rd_stain) * clamp(k_dirt * x_runs_dirt * 1.8, 0, 1)","write":false},{"name":"runs_dirt","mask":"clamp(dirt_core + dirt_stain * 0.6, 0, 1)"},{"name":"streaks","mask":"clamp(k_dirt * x_runs_dirt * (1 - m_top) * smoothstep(0.62, 0.8, n_streak) * smoothstep(0.35, 0.65, n_blotch) * m_ht * m_ht * 1.4, 0, 1)"},{"name":"damp","mask":"clamp(x_damp * clamp(k_dirt * 2, 0, 1) * (k_ground * m_low * 0.8 + cavity * 0.4 + runs_dirt * 0.5) * (0.45 + n_patch), 0, 1)"},{"name":"growth","mask":"0"},{"name":"joints","mask":"0"}],"layers":[{"name":"painted_metal_fade","mask":"base_kind_painted_metal * fade","color":"#d6d2c8","opacity":0.55,"roughness_offset":0.25},{"name":"painted_metal_primer","mask":"base_kind_painted_metal * chip","color":"#8e8b84","roughness":0.75,"metallic":0,"height":-0.00004},{"name":"painted_metal_bare","mask":"base_kind_painted_metal * bare","color":"#9a9a96","roughness":0.4,"metallic":1,"height":-0.00008},{"name":"painted_metal_rust","mask":"base_kind_painted_metal * clamp(core * 1.1 + bare * 0.45, 0, 1) * clamp(0.2 + rust * 1.1, 0, 1)","color":[[0,"#3e1c0e"],[0.5,"#64301a"],[1,"#8a4420"]],"color_by":"grain","roughness":0.9,"metallic":0,"height":0.0001},{"name":"film","mask":"(1 - occlusion) * clamp(k_dirt, 0, 1)","color":[0.86,0.86,0.86],"color_mode":"multiply","roughness_offset":0.1},{"name":"grime_film","mask":"clamp(k_dirt * 1.3, 0, 1) * (0.3 + 0.7 * smoothstep(0.2, 0.8, patch_mix))","color":[0.86,0.84,0.81],"color_mode":"multiply","roughness_offset":0.06},{"name":"bottom","mask":"clamp(k_dirt * 1.4, 0, 1) * (1 - smoothstep(0.0, 0.1 + 0.08 * n_ragged + 0.05 * n_patch, m_ht)) * (0.7 + 0.3 * n_blotch)","color":[0.8,0.77,0.73],"color_mode":"multiply","roughness_offset":0.05},{"name":"soil","mask":"clamp(k_dirt * (0.35 + 0.6 * blotch) * (0.6 + 0.7 * (1 - m_ht)), 0, 1)","color":[0.84,0.82,0.78],"color_mode":"multiply","roughness_offset":0.05},{"name":"grime","mask":"grime","color":"#3d3529","roughness":0.9,"metallic":0},{"name":"dust","mask":"dust","color":"#a69d8b","roughness":0.95,"metallic":0},{"name":"splash","mask":"splash","color":[[0,"#3a3128"],[0.5,"#54473a"],[1,"#6e604d"]],"color_by":"blotch","opacity":0.85,"roughness":0.9,"metallic":0},{"name":"streaks","mask":"streaks","color":"#5f574b","opacity":0.4,"roughness_offset":0.05},{"name":"dirt_stain","mask":"dirt_stain","color":"#4c4338","opacity":0.55,"roughness_offset":0.06},{"name":"runs_dirt","mask":"dirt_core","color":"#3e372d","opacity":0.25,"roughness_offset":0.1},{"name":"rust_stain","mask":"rust_stain","color":"#9a5a2c","opacity":0.5,"roughness_offset":0.08},{"name":"runs_rust","mask":"rust_core","color":[[0,"#6a3418"],[1,"#a45a26"]],"color_by":"grain","opacity":0.9,"roughness":0.85,"metallic":0},{"name":"blotch","mask":"(blotch * 2 - 1) * clamp(k_dirt + k_age, 0, 1)","signed":true,"roughness_offset":0.07},{"name":"grain","mask":"(grain * 2 - 1) * clamp(k_dirt + k_age, 0, 1)","signed":true,"roughness_offset":0.05}],"outputs":"both","padding":4,"name":"weathered"}},"out":{"type":"texture_to_material","in":["atlas","stack"],"params":{"material":"weathered","base_color":"weathered_base_color","normal":"weathered_normal","orm":"weathered_orm"}}},"output":"out"}
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh with uv and materials (each with a kind) |
+| 1 | `surroundings` | yes | no | what it stands on or hangs from: blocks rays, catches drips (replaces the mount plane) |
+| 2 | `overrides` | yes | no | images whose layers, named like the masks, replace those masks |
+| 3 | `photos` | yes | no | images for image layers (overrides "image") and the route B reference |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `wear` | float | `0.5` | 0..1 |  | `edge_wear`, `chips` | chipped and worn edges, wear where hands and tools touch |
+| `dirt` | float | `0.5` | 0..1 |  | `grime` | grime in cavities, dust on tops, splash at the ground, dirt runs below ledges |
+| `rust` | float | `0.5` | 0..1 |  | `corrosion` | rust in chips and on bare steel, rust runs below rusting parts |
+| `age` | float | `0.5` | 0..1 |  | `years` | 0 new, 0.5 about ten years, 1 decades: sun fade, chalking, zinc dulling, greying wood, moss; it also scales the other three |
+| `seed` | int | `0` | 0..2147483647 |  |  | changes where things happen (which stretches of an edge chip, where runs start, the patches), not how much |
+| `exposure` | enum | `"outdoor"` |  | `outdoor`, `sheltered`, `indoor` |  | outdoor: rain runs, sun fade, washed tops, splash, moss; sheltered: dust holds, little rain; indoor: no rain or rust runs, dust, more handling (water marks only below windows and at ceiling corners) |
+| `mount` | enum | `"free"` |  | `free`, `ground`, `wall` |  | what the object stands on, stated, never guessed: ground = a plane at the lowest point (splash band, contact grime); wall = a plane at the wall_side of the bounding box (the back is hidden: few texels, no wear; dust gathers against it); input 1 replaces the plane |
+| `wall_side` | enum | `"-z"` |  | `-z`, `+z`, `-x`, `+x` |  | mount wall: the side of the bounding box on the wall |
+| `kinds` | json | `{}` |  |  | `material_kinds` | kind per material name, e.g. {"zinc_steel": "galvanised", "glass": "keep"}; wins over the material's own kind (kinds: painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_concrete, painted_plaster, painted_wood, bare_wood, asphalt, ceramic, decal, keep) |
+| `handled` | group (prim) | `""` |  |  |  | parts hands and tools touch ("@name=handle*"): they wear more and stainless smudges there; "" = none (never guessed from names) |
+| `sun` | vec3 | `[0,1,0]` |  |  |  | where the sun comes from (fade, chalk, greying): straight up by default, a model does not know where south is |
+| `padding` | int | `4` | 0..64 |  | `dilation` | texels the islands are padded by |
+| `samples` | int | `32` | 4..256 |  |  | rays per cloud point of the occlusion, cavity, shelter and visibility bake |
+| `leak_density` | float | `120` | 0..500 |  | `runs_per_metre` | run starts per metre of ledge, sill, coping or overhang edge, and per metre where a rusting part meets the surface (0 = no runs): most runs are faint, a few strong, and under a long edge they merge into a wash |
+| `resolution` | int | `1024` | 64..8192 |  | `res`, `size` | map size: 1024 is about 10 s, 2048 for hero props |
+| `layout` | enum | `"visible"` |  | `visible`, `keep`, `unwrap` |  | visible: re-pack the uv islands, more texels where they show; keep: bake on the uv as it is (route B, no overlaps); unwrap: chart again (tiling uv that folds, trim sheets) |
+| `material` | string | `"weathered"` |  |  | `name` | name of the output material and prefix of its images |
+| `overrides` | json | `{}` |  |  | `override` | per layer of the stack: {"painted_metal_rust": {"color": "#5a2a14"}, "dust": {"opacity": 0}, "grime": {"image": "oil_photo", "size": 0.6}}; fields color, opacity, roughness, roughness_offset, metallic, height, color_mode, image, normal, roughness_image, size |
+| `reference` | json | `{}` |  |  | `target_look` | route B: what the base is pulled toward before weathering: {"color": "#6b665c", "roughness": 0.85} or {"image": "name"} (input 3); {} = none |
+| `match` | float | `0.6` | 0..1 |  | `pull` | route B: how far toward the reference (0 = not at all) |
+| `packing` | string | `"orm"` |  |  | `packed_layout` | channel layout of the packed map: letters o occlusion, r roughness, m metallic, h height, s smoothness, x unused; orm (glTF, Unreal), hro (R height, G roughness, B occlusion), rma (stored as rmo: the map is named <material>_rmo), mrox; glTF and usda exports read it by this layout |
+| `normal_format` | enum | `"opengl"` |  | `opengl`, `directx` |  | green channel of the normal map: opengl (glTF, Blender) or directx (Unreal) |
+
+**Writes:** the mesh with the weathered material; images <material>_base_color, _normal, the packed map, _height, _masks
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "body": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.5,
+          0.8,
+          0.3
+        ],
+        "center": [
+          0,
+          0.4,
+          0
+        ]
+      }
+    },
+    "top": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.6,
+          0.04,
+          0.4
+        ],
+        "center": [
+          0,
+          0.82,
+          0
+        ]
+      }
+    },
+    "parts": {
+      "type": "merge",
+      "in": [
+        "body",
+        "top"
+      ]
+    },
+    "paint": {
+      "type": "material",
+      "in": [
+        "parts"
+      ],
+      "params": {
+        "name": "paint",
+        "base_color": "#4f6b48",
+        "roughness": 0.45,
+        "kind": "painted_metal"
+      }
+    },
+    "uv": {
+      "type": "uv_unwrap",
+      "in": [
+        "paint"
+      ]
+    },
+    "weather": {
+      "type": "weather",
+      "in": [
+        "uv"
+      ],
+      "params": {
+        "resolution": 256,
+        "samples": 8,
+        "mount": "ground"
+      }
+    }
+  },
+  "output": "weather"
+}
+```
+
+### weather_masks
+
+category: `texture` · aliases: `weather_mask`, `weathering_masks`, `grunge_masks`, `mask_pack`
+
+Weathering as packed masks for an engine material: dirt, leaks and runs, worn edges, coating lost (by default) in one RGBA image per seeded variant, on a uv set you laid out; materials unchanged. Kit pieces are weathered each as if alone; borders (water from above, joints, ground) are stated, never guessed.
+
+For buildings and kits whose engine material blends its own tiling textures: the masks go on a second uv set (uv, e.g. "uv2": an atlas without overlaps, one island per piece or more), the materials keep their tiling uv. Each variant is one image <name>, <name>_2, …: C packs channels (R G B A; default dirt leaks edges coating), and each channel is also a layer by its name. The variants share the structure (edges, shelter, where water can run) and differ in which stretches wear, where runs start and where the patches lie. piece names a prim attribute that tells the pieces of a merged kit apart: each is moved apart for the bakes, so it is weathered as if alone (no shadow or stain from a neighbour), and the mount and borders apply per piece. Borders, as stated: above open (rain on its own tops, as measured), covered (something sits on it: no rain or sky from above), source (water arrives along its top edge: runs from the whole top); joints "sides bottom top" darken a band joint_width wide along those borders of each piece (the joint lines of precast panels); mount ground adds splash and moss at the bottom. Worn edges (edges) is the chip layer of bake_edge_wear (everywhere the top coat is gone, the primer ring included) with a faint rub along the edges; coating lost (coating) is its bare layer (down to the substrate) on painted kinds, with the larger peeling of age. Kinds (the material node's kind, or kinds here; never guessed from names): painted ones lose their coat (painted_metal: chips to primer, bare steel, rust in the chip cores; cast_metal: larger chips, pitting, iron, heavier rust; painted_concrete: chips to concrete; painted_plaster: peels in larger sheets, water marks; painted_wood: flakes to wood that greys; decal: fades and scratches), bare ones stain, darken or grey through the whole surface and only wear lighter at edges (concrete: damp, stains, efflorescence below runs, worn arrises, moss; bare_steel: mill scale, flash and heavy rust, and it sources rust runs onto what is below; galvanised: dulls, white bloom, red rust on edges above rust 0.6; stainless: smudges where handled, tea stain; plastic: chalks in the sun, scuffs; rubber: greys; bare_wood: greys in the sun, damp low down; asphalt: fades, stains pool on flats; ceramic: chips to bisque); keep leaves a part as it is. Shared over every kind: film (sheltered paint duller), grime, dust, splash (mount ground), dirt runs, rust runs, moss on growing kinds outdoors, and blotch and grain on roughness. Coating lost is 0 on bare kinds. kind gives the kind of prims whose material says none (or of a mesh with no materials). Dirt runs start where the shape sheds water, measured, not named: the outer edge of every face turned up that meets a steep face below at a convex edge (copings, parapets, sills, ledges, plate and canopy tops) and the wall under a face turned down that meets it at a concave edge (under a balcony slab or canopy), or, when the wall is a separate piece, the wall that short level rays from just below the lip of an overhang reach (under a coping or sill that is its own box), one point every 1 / leak_density metres, kept with the chance of the rain that reaches its ledge (rays up against the model and its surroundings; indoors a fixed chance, as water below windows). Named parts add to them: handled parts wear, rust sources (bare_steel, and galvanised above rust 0.6) run rust onto what is below. mount and exposure scale them. preview bakes the material of the mesh on the mask uv and blends the first variant over it like a simple engine material (dirt darkens and roughens, leaks tint, worn edges lighten, coating lost shows under): material <name>_preview, for looking only. Input 2: images whose layers, named like the masks, replace them. The graph for one variant: {"nodes":{"mesh":{"type":"input","params":{"index":0}},"surroundings":{"type":"input","params":{"index":1}},"leak_sources":{"type":"input","params":{"index":2}},"base":{"type":"bake_material","in":["mesh"],"params":{"resolution":2048,"padding":4,"uv_attrib":"uv2","map_uv":"uv","kinds":{"paint":"painted_metal"},"name":"base","masks":"kinds"}},"measure":{"type":"bake_measure","in":["mesh","surroundings"],"params":{"resolution":2048,"padding":4,"uv_attrib":"uv2","measures":[{"by":"occlusion","name":"occ"},{"by":"cavity","name":"cav","max_distance":0.02},{"by":"shelter","name":"shel","direction":[0,1,0],"cone":35},{"by":"visibility","name":"vis"},{"by":"facing","name":"top","min":0,"max":20,"falloff":25},{"by":"facing","name":"sun","direction":[0,1,0],"min":0,"max":45,"falloff":90},{"by":"height","name":"ht"},{"by":"height","name":"low","min":0,"max":0,"falloff":0.2}],"samples":32,"name":"m"}},"noise":{"type":"bake_measure","in":["mesh"],"params":{"resolution":2048,"padding":4,"uv_attrib":"uv2","seed":0,"name":"n","measures":[{"by":"noise","name":"patch","size":[0.15,0.15,0.15]},{"by":"noise","name":"grain","size":[0.004,0.004,0.004],"octaves":3},{"by":"noise","name":"blotch","size":[0.4,0.4,0.4]},{"by":"noise","name":"ragged","size":[0.03,0.03,0.03]},{"by":"noise","name":"streak","size":[0.03,0.35,0.03]},{"by":"noise","name":"pits","noise":"worley","size":[0.004,0.004,0.004],"octaves":1},{"by":"noise","name":"moss","size":[0.06,0.06,0.06],"fractal":"turbulence"}]}},"wear":{"type":"bake_edge_wear","in":["mesh","surroundings"],"params":{"resolution":2048,"padding":4,"uv_attrib":"uv2","name":"ew","amount":"=k_amount","radius":0.006,"reach":0.012,"chip_size":0.006,"patch_size":0.15,"seed":0}},"parts":{"type":"bake_mask","in":["mesh"],"params":{"resolution":2048,"padding":4,"uv_attrib":"uv2","attrib":"wpart","name":"part"}},"dirt_runs":{"type":"bake_flow","in":["mesh","leak_sources"],"params":{"resolution":2048,"padding":4,"uv_attrib":"uv2","seed":0,"length":[0.03,1],"width":[0.0015,0.005],"wobble":0.04,"breakup":0.3,"stain":6,"stain_skew":2,"name":"rd"}},"dirt_runs_kept":{"type":"tex_compact","in":["dirt_runs"],"params":{"keep":"C strength stain","half":"*"}},"parts_kept":{"type":"tex_compact","in":["parts"],"params":{"keep":"C","half":""}},"wear_kept":{"type":"tex_compact","in":["wear"],"params":{"keep":"C chip bare core convex concave","half":"*"}},"noise_kept":{"type":"tex_compact","in":["noise"],"params":{"keep":"C patch grain blotch ragged streak","half":"*"}},"measure_kept":{"type":"tex_compact","in":["measure"],"params":{"keep":"C occ cav shel vis top sun ht low","half":"*"}},"mask_images":{"type":"merge","in":["measure_kept","noise_kept","wear_kept","parts_kept","dirt_runs_kept"]},"stack":{"type":"tex_layers","in":["base","mask_images"],"params":{"masks":[{"name":"pv","mask":"0.8 + 0.4 * frac(part * 13.37 + k_seed * 0.618)","write":false},{"name":"convex","mask":"ew_convex","write":false},{"name":"occlusion","mask":"m_occ"},{"name":"cavity","mask":"clamp(m_cav * 1.4 + ew_concave * 0.6, 0, 1)"},{"name":"handled","mask":"0"},{"name":"edge_wear","mask":"ew"},{"name":"chip","mask":"ew_chip"},{"name":"bare","mask":"ew_bare"},{"name":"core","mask":"ew_core"},{"name":"edges_soft","mask":"clamp(smoothstep(0.1, 0.6, convex) * (0.3 + 0.8 * n_patch) * k_wear, 0, 1)","write":false},{"name":"peel","mask":"smoothstep(k_cut - 0.1, k_cut - 0.04, (chip * 0.5 + n_patch * 0.8 + m_low * k_ground * 0.4) * pv)","write":false},{"name":"blotch","mask":"n_blotch"},{"name":"grain","mask":"n_grain"},{"name":"patch_mix","mask":"n_patch * 0.6 + n_blotch * 0.4","write":false},{"name":"grime","mask":"clamp(k_dirt * (cavity * 1.1 + (1 - m_occ) * 0.9) * (0.4 + 0.9 * n_blotch) * (0.7 + 0.6 * (1 - m_ht)) * pv + handled * k_dirt * 0.35 * n_patch, 0, 1)"},{"name":"dust","mask":"clamp(k_dirt * x_dust * smoothstep(0.15, 0.8, m_top) * (1 - x_wash + x_wash * m_shel) * (0.35 + 0.9 * n_grain) , 0, 1)"},{"name":"splashd","mask":"m_low * (0.55 + 0.9 * n_ragged)","write":false},{"name":"splash","mask":"k_ground * clamp(x_splash * k_dirt * 1.3, 0, 1) * clamp(max(smoothstep(0.45, 0.85, splashd), smoothstep(1 - 0.55 * splashd, 1.06 - 0.55 * splashd, n_grain) * smoothstep(0.08, 0.3, splashd)), 0, 1) * (0.6 + 0.5 * n_blotch) * (1 - 0.6 * m_shel)"},{"name":"fade","mask":"clamp(k_fade * m_sun * m_vis * (0.7 + 0.6 * n_blotch), 0, 1)"},{"name":"rust","mask":"clamp(k_rust * x_rust * (0.45 + 0.8 * n_blotch) * (0.7 + 0.5 * cavity + 0.3 * m_top + 0.3 * m_low), 0, 1)"},{"name":"rust_core","mask":"clamp(0, 0, 1)","write":false},{"name":"rust_stain","mask":"clamp(0, 0, 1)","write":false},{"name":"runs_rust","mask":"clamp(rust_core + rust_stain * 0.6, 0, 1)"},{"name":"dirt_core","mask":"rd * smoothstep(0.7, 1, rd_strength) * clamp(k_dirt * x_runs_dirt * 1.5, 0, 1)","write":false},{"name":"dirt_stain","mask":"smoothstep(0.12, 0.85, rd_stain) * clamp(k_dirt * x_runs_dirt * 1.8, 0, 1)","write":false},{"name":"runs_dirt","mask":"clamp(dirt_core + dirt_stain * 0.6, 0, 1)"},{"name":"streaks","mask":"clamp(k_dirt * x_runs_dirt * (1 - m_top) * smoothstep(0.62, 0.8, n_streak) * smoothstep(0.35, 0.65, n_blotch) * m_ht * m_ht * 1.4, 0, 1)"},{"name":"damp","mask":"clamp(x_damp * clamp(k_dirt * 2, 0, 1) * (k_ground * m_low * 0.8 + cavity * 0.4 + runs_dirt * 0.5) * (0.45 + n_patch), 0, 1)"},{"name":"growth","mask":"0"},{"name":"joints","mask":"0"},{"name":"dirt","mask":"clamp(max(grime, max(dust, max(splash, growth * 0.8))) + joints * 0.9 + damp * 0.3, 0, 1)"},{"name":"leaks","mask":"clamp(runs_dirt + runs_rust + streaks * 0.6, 0, 1)"},{"name":"edges","mask":"clamp(chip + edges_soft * 0.5, 0, 1)"},{"name":"coating","mask":"(base_kind_painted_metal) * clamp(bare + peel * 0.7, 0, 1)"},{"name":"zero","mask":"0"},{"name":"one","mask":"1"}],"layers":[],"outputs":"masks","padding":4,"name":"weather"}}},"output":"stack"}
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `geo` | no | no | mesh with the mask uv set (and materials with kinds, or kind) |
+| 1 | `surroundings` | yes | no | what one piece stands on or against (replaces the mount plane) |
+| 2 | `overrides` | yes | no | images whose layers, named like the masks, replace those masks |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `wear` | float | `0.5` | 0..1 |  | `edge_wear`, `chips` | chipped and worn edges, wear where hands and tools touch |
+| `dirt` | float | `0.5` | 0..1 |  | `grime` | grime in cavities, dust on tops, splash at the ground, dirt runs below ledges |
+| `rust` | float | `0.5` | 0..1 |  | `corrosion` | rust in chips and on bare steel, rust runs below rusting parts |
+| `age` | float | `0.5` | 0..1 |  | `years` | 0 new, 0.5 about ten years, 1 decades: sun fade, chalking, zinc dulling, greying wood, moss; it also scales the other three |
+| `seed` | int | `0` | 0..2147483647 |  |  | changes where things happen (which stretches of an edge chip, where runs start, the patches), not how much |
+| `exposure` | enum | `"outdoor"` |  | `outdoor`, `sheltered`, `indoor` |  | outdoor: rain runs, sun fade, washed tops, splash, moss; sheltered: dust holds, little rain; indoor: no rain or rust runs, dust, more handling (water marks only below windows and at ceiling corners) |
+| `mount` | enum | `"free"` |  | `free`, `ground`, `wall` |  | what the object stands on, stated, never guessed: ground = a plane at the lowest point (splash band, contact grime); wall = a plane at the wall_side of the bounding box (the back is hidden: few texels, no wear; dust gathers against it); input 1 replaces the plane |
+| `wall_side` | enum | `"-z"` |  | `-z`, `+z`, `-x`, `+x` |  | mount wall: the side of the bounding box on the wall |
+| `kinds` | json | `{}` |  |  | `material_kinds` | kind per material name, e.g. {"zinc_steel": "galvanised", "glass": "keep"}; wins over the material's own kind (kinds: painted_metal, cast_metal, galvanised, bare_steel, stainless, plastic, rubber, concrete, painted_concrete, painted_plaster, painted_wood, bare_wood, asphalt, ceramic, decal, keep) |
+| `handled` | group (prim) | `""` |  |  |  | parts hands and tools touch ("@name=handle*"): they wear more and stainless smudges there; "" = none (never guessed from names) |
+| `sun` | vec3 | `[0,1,0]` |  |  |  | where the sun comes from (fade, chalk, greying): straight up by default, a model does not know where south is |
+| `padding` | int | `4` | 0..64 |  | `dilation` | texels the islands are padded by |
+| `samples` | int | `32` | 4..256 |  |  | rays per cloud point of the occlusion, cavity, shelter and visibility bake |
+| `leak_density` | float | `120` | 0..500 |  | `runs_per_metre` | run starts per metre of ledge, sill, coping or overhang edge, and per metre where a rusting part meets the surface (0 = no runs): most runs are faint, a few strong, and under a long edge they merge into a wash |
+| `uv` | string | `"uv2"` |  |  | `uv_attrib`, `mask_uv` | the uv set the masks go on (no overlaps) |
+| `resolution` | int | `2048` | 64..8192 |  | `res`, `size` | mask size (2048 or 4096 for a kit atlas) |
+| `channels` | string | `"dirt leaks edges coating"` |  |  | `channel_map`, `layout` | the mask in each channel R G B (A): dirt, leaks, edges, coating, edge_wear, chip, bare, core, handled, cavity, occlusion, grime, dust, splash, fade, rust, runs_rust, runs_dirt, streaks, growth, damp, joints, blotch, grain, zero, one |
+| `variants` | int | `1` | 1..8 |  | `count` | seeded variants on the same uv, one image each |
+| `kind` | enum | `""` |  | ``, `painted_metal`, `cast_metal`, `galvanised`, `bare_steel`, `stainless`, `plastic`, `rubber`, `concrete`, `painted_concrete`, `painted_plaster`, `painted_wood`, `bare_wood`, `asphalt`, `ceramic`, `decal` |  | kind of the prims whose material says none ("" = refuse them) |
+| `piece` | string | `""` |  |  | `piece_attrib`, `pieces` | prim attribute naming the pieces of a kit, each weathered alone ("" = one piece) |
+| `above` | enum | `"open"` |  | `open`, `covered`, `source` | `top_edge` | what is above each piece: open (rain on its tops), covered (nothing from above), source (water arrives along its top edge) |
+| `joints` | string | `""` |  |  | `joint_edges` | borders of each piece that are joints, darkened: "sides", "bottom", "top" ("" = none) |
+| `joint_width` | float | `0.03` | 0.001..1 |  |  | width of the joint band on each piece (metres) |
+| `preview` | bool | `false` |  |  |  | add a preview material on the mask uv (for looking only) |
+| `under` | color | `"#9a958c"` |  |  |  | preview: the colour coating lost shows |
+| `name` | string | `"weather"` |  |  |  | name of the mask images |
+
+**Writes:** the mesh as it came with images <name> (and <name>_2 …): C packed, a layer per channel, texel, island, mask
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "panel": {
+      "type": "box",
+      "params": {
+        "size": [
+          1.2,
+          1,
+          0.12
+        ],
+        "center": [
+          0,
+          0.5,
+          0
+        ]
+      }
+    },
+    "concrete": {
+      "type": "material",
+      "in": [
+        "panel"
+      ],
+      "params": {
+        "name": "precast",
+        "base_color": "#a39e94",
+        "roughness": 0.9,
+        "kind": "concrete"
+      }
+    },
+    "uv2": {
+      "type": "uv_unwrap",
+      "in": [
+        "concrete"
+      ],
+      "params": {
+        "uv_attrib": "uv2"
+      }
+    },
+    "masks": {
+      "type": "weather_masks",
+      "in": [
+        "uv2"
+      ],
+      "params": {
+        "resolution": 256,
+        "samples": 8,
+        "mount": "ground",
+        "joints": "sides bottom"
+      }
+    }
+  },
+  "output": "masks"
 }
 ```

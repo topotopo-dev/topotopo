@@ -1417,6 +1417,47 @@ there. bake_mask is the union of the group's prims where they overlap.
 CHECKING: --inspect uv adds a trim section per band (faces, area, v coverage, texel density, stretch) and counts
 faces outside every band or straddling two. Render with --views sheet for the labelled sheet, and --color-by
 trim_band for the model in the same colours.`,
+  weathering: `WEATHERING (weather and weather_masks: wear, dirt, rust and age by the material kind)
+Search words: weathering, wear and tear, grunge, dirt, rust, edge wear, leaks, smart material, mask pack.
+Two nodes, one way of measuring. Each part ages by its material's kind (the material node's kind param, or kinds
+{"material": "kind"} on the node; never guessed from names; "keep" leaves a part as it is). What the object stands on
+is stated with mount (ground, wall, free), the parts hands touch with handled (a group). Dirt runs start where the
+shape sheds water (tops meeting steep faces at a convex edge: sills, copings, ledges), rust runs below bare steel.
+Sliders wear, dirt, rust, age and the seed; exposure outdoor, sheltered or indoor. Worn edges come from
+bake_edge_wear (chip, bare and core, capped per face); in weather_masks, edges is its chip layer and coating its
+bare layer.
+
+MAPS (weather): unique maps for one prop. The material's own maps are read in metres (its tile) on the uv it comes
+with, and kept: at zero weathering the maps are the material's. Out: material "weathered" with base colour, normal
+and a packed map (packing orm by default, or hro, rma, …; normal_format opengl or directx) and <material>_masks, an
+image with every mask as a layer.
+  {"nodes": {
+    "body": {"type": "box", "params": {"size": [0.5, 0.8, 0.3], "center": [0, 0.4, 0]}},
+    "paint": {"type": "material", "in": ["body"], "params": {"name": "paint", "base_color": "#4f6b48", "kind": "painted_metal"}},
+    "uv": {"type": "uv_unwrap", "in": ["paint"]},
+    "weather": {"type": "weather", "in": ["uv"], "params": {"mount": "wall", "wall_side": "-z", "wear": 0.6, "dirt": 0.5}}},
+   "output": "weather"}
+A layer can take a photograph: connect image_file nodes to input 3 and set overrides {"grime": {"image": "oil",
+"size": 0.6}} (metres one repeat covers); it is projected in world metres from three axes, so no uv seam shows.
+Route B (the prop already has unique maps): layout keep, reference {"color": "#6b665c", "roughness": 0.85} and
+match 0.6 pull the base toward the reference before the weathering.
+
+MASKS (weather_masks): for an engine material that blends its own tiling textures (buildings, kits). The masks go
+on a second uv set without overlaps (uv_unwrap uv_attrib "uv2"); materials stay as they are. One RGBA image per
+variant (weather, weather_2, …): channels "dirt leaks edges coating" by default, each also a layer by its name.
+Borders are stated: above source (water arrives along the top edge), joints "sides bottom", mount ground. piece names
+a prim attribute: each piece of a kit is weathered as if alone. preview adds a blended material to look at.
+  {"nodes": {
+    "panel": {"type": "box", "params": {"size": [3, 2.8, 0.2], "center": [0, 1.4, 0]}},
+    "concrete": {"type": "material", "in": ["panel"], "params": {"name": "precast", "kind": "concrete", "tile": 3}},
+    "uv2": {"type": "uv_unwrap", "in": ["concrete"], "params": {"uv_attrib": "uv2"}},
+    "masks": {"type": "weather_masks", "in": ["uv2"], "params": {"mount": "ground", "above": "source", "joints": "sides bottom", "variants": 3}}},
+   "output": "masks"}
+
+TAKING A STEP OVER: both nodes cook a nested graph (bakes, then one tex_layers stack); their help shows it for the
+defaults. A slider re-cooks only the stack (wear also the edge wear threshold), the seed also the noise, the edge
+wear and the runs. Input 2 replaces masks by name (an
+image named "dust", or a layer "dust"). Check with --inspect, render with --shading pbr --textures.`,
   uv: `UV TOOLKIT (uv = vertex attribute (u, v, 0); seams are edges where the corner uv differs)
 Which node:
   uv_project   planar/box/cylindrical/spherical projection. Fast, no packing (uv = position / scale, over many tiles):
@@ -1493,7 +1534,7 @@ per chart 5 % / median / 95 %, the lowest and highest chart and where; texels/m 
 per_piece:true when every prim "name" has its own 0..1 layout (the objects of a multi-object OBJ, each with its own
 texture): overlaps are tested within each piece only, each piece lists its overlapping pairs and covered share
 (utilization is the mean over the pieces), and a whole file is checked in one call.
-CLI: --inspect uv --uv-resolution 1024 [--uv-per-piece] [--json].
+CLI: --inspect uv --uv-resolution 1024 [--uv-attrib uv2] [--uv-per-piece] [--json] (--uv-attrib reports another uv set).
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
   render: `RENDER (pick the overlay that answers your question; everything is off by default)

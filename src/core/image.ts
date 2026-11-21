@@ -346,7 +346,8 @@ export function imageFromJSON(j: any, before: Image[] = []): Image {
 const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
 function f32ToBase64(a: Float32Array): string {
-  const c = LITTLE ? a : Float32Array.from(a);
+  // a 16-bit layer (tex_compact) is written as the float32 values it holds
+  const c = LITTLE && a instanceof Float32Array ? a : Float32Array.from(a);
   const bytes = new Uint8Array(c.buffer, c.byteOffset, c.byteLength);
   if (!LITTLE) for (let i = 0; i < bytes.length; i += 4) { const t0 = bytes[i], t1 = bytes[i + 1]; bytes[i] = bytes[i + 3]; bytes[i + 1] = bytes[i + 2]; bytes[i + 2] = t1; bytes[i + 3] = t0; }
   let s = '';

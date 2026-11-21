@@ -151,6 +151,11 @@ export interface Host {
    */
   limits?: { scriptMs?: number; simMs?: number };
   /**
+   * How many bytes of cooked results an engine on this host keeps in memory (Engine.cache.maxBytes). The Node host gives
+   * a quarter of the machine's memory, or TOPOTOPO_CACHE_MB. Absent: the engine's default (1.5 GB).
+   */
+  cacheBytes?: number;
+  /**
    * A store that keeps node results between runs (src/host/diskcache.ts): the engine asks it when a node misses its
    * memory cache and offers it the results of nodes that cooked for at least its `minMs`. Absent: nothing is kept.
    */

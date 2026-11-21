@@ -55,6 +55,10 @@
 //   "image:<name>" paths are image volumes of the geometry (texture nodes), encoded to PNG in memory; an "orm" map is
 //   both the metallicRoughness and the occlusion texture; the material's metallic / roughness are then the factors that multiply it
 //   (texture_to_material sets them to 1, or to the values it was given).
+//   A packed map in another layout (Material.packing) is written rewritten as glTF's orm (a channel the layout lacks is
+//   1, so the factor holds alone; no occlusion texture without an o channel), a DirectX normal map (normalFormat) with
+//   its green flipped back; the material extras then name the rewritten images. Such a map that is not a PNG stops the
+//   export with a sentence that points to the texture export.
 //   options.source (how the export was made, io/source.ts) → asset.extras.source.
 //
 // Import
@@ -81,8 +85,8 @@ import { resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { TANGENT_ATTRIB, cornerTangents, loadMikkTSpace, tangentProblem, transformTangents, vertexUV } from '../core/tangents.ts';
 import { gltfV } from '../core/texcoord.ts';
 import { posText, primWhere } from '../core/report.ts';
-import { DEFAULT_MATERIAL, exportFactors, materialAlphaMode, mergeMaterialTables, normalizeMaterial, primMaterials, texturePaths, writeMaterials } from '../core/materials.ts';
-import type { Material, MaterialTable, MaterialTextures } from '../core/materials.ts';
+import { DEFAULT_MATERIAL, exportFactors, materialAlphaMode, mergeMaterialTables, normalizeMaterial, packedSources, primMaterials, texturePaths, toOrmLayout, writeMaterials } from '../core/materials.ts';
+import type { Material, MaterialTable, MaterialTextures, PackedSources } from '../core/materials.ts';
 import { m4apply, m4applyDir, m4fromQuat, m4invert, m4mul, m4normalMatrix, m4scale, m4translate } from '../core/math.ts';
 import { EMPTY_ATTRIB, PARENT_ATTRIB, sceneEmpties } from '../core/scene.ts';
 import type { SceneEmpty } from '../core/scene.ts';
@@ -370,6 +374,40 @@ function roughnessBesideMetallic(st: MatState, path: string): Texture | null {
   })() });
 }
 
+/**
+ * A map rewritten in glTF's convention, once per map: a packed map in another layout (Material.packing) as occlusion R,
+ * roughness G, metallic B; a DirectX normal map (Material.normalFormat) with its green channel flipped back. glTF holds
+ * one layout, so a map that is not a PNG cannot be rewritten and the export stops, saying how to get the maps out.
+ */
+function inGltfConvention(st: MatState, name: string, path: string, what: string, convert: (png: ReturnType<typeof decodePNG>) => Uint8Array): Texture | null {
+  if (!st.data) return null;
+  const src = st.data.get(path);
+  if (!src) return textureFor(st, path);
+  const refuse = (why: string) => new Error(`glTF: material "${name}": ${what} "${path}" ${why}, and glTF reads only its own convention (packed map: occlusion R, roughness G, metallic B; normal map: OpenGL, green up); write the maps as they are with the texture export (format textures), or bake them in glTF's convention (packing orm, normal_format opengl)`);
+  if (imageMime(src) !== 'image/png') throw refuse('is not a PNG, so it cannot be rewritten');
+  const stem = (path.startsWith('image:') ? path.slice(6) : baseOf(path).replace(/\.[^.]*$/, '')) + '_gltf';
+  let png;
+  try { png = decodePNG(src); } catch (e: any) { throw refuse(`cannot be read (${e?.message ?? e})`); }
+  return textureFor(st, `${path}\u0000gltf`, { name: stem, bytes: convert(png) });
+}
+
+const ormOf = (st: MatState, at: PackedSources) => (png: ReturnType<typeof decodePNG>) => {
+  const n = png.width * png.height, k = 255 / png.maxValue, src = png.maxValue === 255 ? png.data : Array.from(png.data, (v) => Math.round(v * k));
+  const out = new Uint8Array(n * 4);
+  toOrmLayout(src, n, png.channels, 255, at, out);
+  return encodePNG(out, png.width, png.height, st.deflate ?? zlibStored);
+};
+
+const openglNormalOf = (st: MatState) => (png: ReturnType<typeof decodePNG>) => {
+  const n = png.width * png.height, c = png.channels, k = 255 / png.maxValue, out = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < 3; j++) out[i * 4 + j] = Math.round(png.data[i * c + (c >= 3 ? j : 0)] * k);
+    out[i * 4 + 1] = 255 - out[i * 4 + 1];
+    out[i * 4 + 3] = 255;
+  }
+  return encodePNG(out, png.width, png.height, st.deflate ?? zlibStored);
+};
+
 function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: boolean, tint?: number[]): GMaterial {
   const key = `${name}\u0000${vertexColors ? 1 : 0}${blend ? 1 : 0}${tint ? `\u0000${tint.join(',')}` : ''}`;
   let m = st.cache.get(key);
@@ -377,7 +415,12 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   const isDefault = !name;
   const mat = isDefault ? st.defaultMat : st.table[name] ?? normalizeMaterial({});
   const tex = (slot: keyof MaterialTextures) => (mat.textures?.[slot] ? textureFor(st, mat.textures[slot]!) : null);
-  const baseTex = tex('baseColor'), normalTex = tex('normal'), ormTex = tex('orm');
+  // a packed map in another layout and a DirectX normal map are written in glTF's convention (the material extras then
+  // name the rewritten images, so a re-import reads them as they are)
+  const at = packedSources(mat.packing), directx = mat.normalFormat === 'directx' && !!mat.textures?.normal;
+  const baseTex = tex('baseColor');
+  const normalTex = directx ? inGltfConvention(st, name, mat.textures!.normal!, 'its DirectX normal map', openglNormalOf(st)) : tex('normal');
+  const ormTex = at && mat.textures?.orm ? inGltfConvention(st, name, mat.textures.orm, `its packed map (layout ${mat.packing})`, ormOf(st, at)) : tex('orm');
   // an ORM map (occlusion R, roughness G, metallic B) is glTF's own layout: it is both the metallicRoughness and the
   // occlusion texture, and replaces a separate roughness map
   let roughTex = ormTex ?? tex('roughness');
@@ -401,7 +444,7 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   if (baseTex) m.setBaseColorTexture(baseTex);
   if (normalTex) m.setNormalTexture(normalTex);
   if (roughTex) m.setMetallicRoughnessTexture(roughTex);
-  if (ormTex) m.setOcclusionTexture(ormTex);
+  if (ormTex && !(at && at.o < 0)) m.setOcclusionTexture(ormTex);
   const emax = Math.max(...mat.emissive);
   if (emax > 1) {
     m.setEmissiveFactor([toLinear(mat.emissive[0] / emax), toLinear(mat.emissive[1] / emax), toLinear(mat.emissive[2] / emax)]);
@@ -411,9 +454,19 @@ function getMaterial(st: MatState, name: string, vertexColors: boolean, blend: b
   m.setAlphaMode(materialAlphaMode(mat));
   if (mat.alphaMode === 'MASK') m.setAlphaCutoff(mat.alphaCutoff ?? 0.5);
   if (mat.unlit) m.setExtension('KHR_materials_unlit', st.doc.createExtension(KHRMaterialsUnlit).createUnlit());
-  m.setExtras({ topotopo: isDefault ? { default: true } : { material: mat } });
+  m.setExtras({ topotopo: isDefault ? { default: true } : { material: at || directx ? asWritten(mat, !!at, directx) : mat } });
   st.cache.set(key, m);
   return m;
+}
+
+/** A material as its glTF form holds it once its maps were rewritten in glTF's convention: image volumes the rewritten
+ *  images (named as their textures), the layout fields gone; a map read from a file keeps its path and its field (the
+ *  file is still in that layout). */
+function asWritten(mat: Material, packed: boolean, directx: boolean): Material {
+  const t = { ...mat.textures }, out: Material = { ...mat, textures: t };
+  if (packed && t.orm?.startsWith('image:')) { t.orm = `${t.orm}_gltf`; delete out.packing; }
+  if (directx && t.normal?.startsWith('image:')) { t.normal = `${t.normal}_gltf`; delete out.normalFormat; }
+  return out;
 }
 
 /** Display (sRGB-encoded) value to linear and back: glTF's factors and COLOR_0 are linear, TopoTopo colours are display

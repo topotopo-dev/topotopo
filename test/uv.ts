@@ -664,5 +664,18 @@ for (const [fixture, halves] of [['NOISY_ROCK', true], ['NOISY_QUAD_ROCK', false
     && /"rotate" for uv_layout: it is now orient/.test(said), `the old names are errors that name the new ones:\n${said}`);
 }
 
+// uv_unwrap into a second uv set: the new charts go there and the uv the materials use stays as it was
+{
+  const proj = { box: { type: 'box' }, out: { type: 'uv_project', in: ['box'], params: { method: 'box' } } };
+  const before = (await cook(proj)).geo;
+  const { geo } = await cook({ ...proj, two: { type: 'uv_unwrap', in: ['out'], params: { uv_attrib: 'uv2' } } }, 'two');
+  const a = before.findAttrib('uv')!, b = geo.findAttrib('uv'), c = geo.findAttrib('uv2', ['vertex']);
+  check(!!c && c.cls === 'vertex', 'uv_unwrap uv_attrib "uv2" writes vertex uv2');
+  const same = !!b && b.cls === a.cls && (b.attr.data as Float64Array).length === (a.attr.data as Float64Array).length && (b.attr.data as Float64Array).every((v, i) => v === (a.attr.data as Float64Array)[i]);
+  check(same || geo.numVertices !== before.numVertices, `and keeps uv as it was (${b?.cls} uv, ${geo.numVertices} vertices)`);
+  const r2 = uvReport(geo, { resolution: 512, attribute: 'uv2' });
+  check(r2.overlap.pairs === 0, `the second set has no overlaps (${r2.overlap.pairs})`);
+}
+
 console.log(fail ? `\n${fail} uv check(s) failed` : '\nuv: all checks passed');
 process.exit(fail ? 1 : 0);

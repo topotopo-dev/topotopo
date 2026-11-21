@@ -158,7 +158,9 @@ function engineHolds(): boolean {
 class Unstorable extends Error {}
 
 type Typed = Float64Array | Float32Array | Int32Array | Uint8Array;
-const KINDS = { f64: Float64Array, f32: Float32Array, i32: Int32Array, u8: Uint8Array } as const;
+/** 16-bit image layers (tex_compact) where the runtime has Float16Array: kept as 16-bit floats, typed as float32 ones. */
+const F16: typeof Float32Array | undefined = (globalThis as any).Float16Array;
+const KINDS = { f64: Float64Array, f32: Float32Array, i32: Int32Array, u8: Uint8Array, ...(F16 ? { f16: F16 } : {}) } as Record<'f64' | 'f32' | 'i32' | 'u8' | 'f16', { new (n: number): Typed; new (b: ArrayBufferLike, o: number, n: number): Typed; BYTES_PER_ELEMENT: number }>;
 type Kind = keyof typeof KINDS;
 
 /** The arrays of a result, in the order the file stores them. */
@@ -176,7 +178,7 @@ class Arrays {
     return index;
   }
   private store(a: ArrayBufferView): number {
-    const kind: Kind | undefined = a instanceof Float64Array ? 'f64' : a instanceof Float32Array ? 'f32' : a instanceof Int32Array ? 'i32' : a instanceof Uint8Array ? 'u8' : undefined;
+    const kind: Kind | undefined = a instanceof Float64Array ? 'f64' : a instanceof Float32Array ? 'f32' : a instanceof Int32Array ? 'i32' : a instanceof Uint8Array ? 'u8' : F16 && a instanceof F16 ? 'f16' : undefined;
     if (!kind) throw new Unstorable(`an array of a kind that is not stored (${a.constructor?.name})`);
     this.views.push(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
     this.kinds.push([kind, (a as Typed).length]);
@@ -326,7 +328,7 @@ function unpackGeometry(j: any, arrays: Typed[]): Geometry {
     must(Number.isInteger(v.width) && Number.isInteger(v.height) && v.width >= 1 && v.height >= 1 && v.width * v.height <= 2 ** 31, 'volume size');
     const count = v.width * v.height;
     const layers = new Map<string, Float32Array>(v.layers.map(([k, i]: [string, number]) => {
-      const a = arrayOf(arrays, i, Float32Array, null, `layer ${k}`);
+      const a = arrayOf(arrays, i, F16 && arrays[i] instanceof F16 ? F16 : Float32Array, null, `layer ${k}`);
       must(a.length === count || (v.k === 'image' && a.length === count * 4), `layer ${k}: ${a.length} values for ${v.width} × ${v.height}`);
       return [k, a];
     }));

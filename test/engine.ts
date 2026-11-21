@@ -1318,6 +1318,14 @@ section('time limits from the environment in every host, and where the time went
   let bad = '';
   try { limitsFromEnv({ TOPOTOPO_SCRIPT_TIMEOUT_MS: '2min' }); } catch (e: any) { bad = e.message; }
   check(/TOPOTOPO_SCRIPT_TIMEOUT_MS must be a positive number of milliseconds .*got "2min"/.test(bad), `limits: a value that is not a positive number fails (${bad})`);
+  const { cacheBytesFromEnv, createNodeHost } = await import('../src/host/node.ts');
+  const { Engine } = await import('../src/graph/engine.ts');
+  let badCache = '';
+  try { cacheBytesFromEnv({ TOPOTOPO_CACHE_MB: 'lots' }, 8e9); } catch (e: any) { badCache = e.message; }
+  check(cacheBytesFromEnv({}, 8e9) === 2e9 && cacheBytesFromEnv({ TOPOTOPO_CACHE_MB: '4000' }, 8e9) === 4e9 && /TOPOTOPO_CACHE_MB must be a positive number/.test(badCache),
+    `cache budget: a quarter of the machine's memory, or TOPOTOPO_CACHE_MB; a bad value fails (${badCache})`);
+  const cacheHost = createNodeHost({ workers: 0 });
+  check(new Engine(cacheHost).cache.maxBytes === cacheHost.cacheBytes && cacheHost.cacheBytes === cacheBytesFromEnv(), 'cache budget: an engine on the Node host keeps what the host allows');
   const limited = new Engine({ ...createNodeHost({ baseDir: tmp }), limits: { scriptMs: 1234, simMs: 5678 } });
   check(limited.scriptTimeoutMs === 1234 && limited.simTimeoutMs === 5678 && new Engine(createNodeHost({ baseDir: tmp })).scriptTimeoutMs === 30000, 'an engine starts with its host\'s limits (default 30 s without)');
 
