@@ -20,13 +20,13 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createPackage } from '../src/web/library.ts';
 import type { WebConfig } from '../src/config.ts';
 import { startWeb, runningWeb } from '../src/web/server.ts';
 import type { WebServer } from '../src/web/server.ts';
 import { builtinLibrary, workingHash } from '../src/packages/registry.ts';
-import { esc, frontPage } from '../src/web/pages.ts';
+import { esc, frontPage, runningWords } from '../src/web/pages.ts';
 import { folderPage } from '../src/web/folder-page.ts';
 import { markdownLinks, renderMarkdown } from '../src/web/markdown.ts';
 import { exportSources, exportStale, imageSize, linkText, listFolder, PathError, resolveIn, resolveLink, videoPlayer, walkTree } from '../src/web/folders.ts';
@@ -36,6 +36,7 @@ import { sha256Hex } from '../src/core/sha256.ts';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-web-'));
 // a config of its own: the libraries registered on this machine play no part
 process.env.TOPOTOPO_CONFIG = path.join(tmp, 'config.json');
+process.env.TOPOTOPO_PORT = '0';
 delete process.env.TOPOTOPO_LIBRARIES;
 fs.writeFileSync(process.env.TOPOTOPO_CONFIG, JSON.stringify({ libraries: [{ name: 'game', path: path.join(tmp, 'lib') }] }));
 let failures = 0, passes = 0;
@@ -83,6 +84,143 @@ const page = async (p: string, port = g.port): Promise<Res & { url: string }> =>
 };
 
 try {
+  section('the running bar and the status');
+  {
+    const res = await req('/api/status');
+    const status = JSON.parse(res.body.toString());
+    check(res.status === 200 && status.ok === true && status.stoppable === false && status.baking === g.queue.size
+      && Number.isInteger(status.memory) && status.memory > 0 && Array.isArray(status.editors) && status.editors.length === 0,
+      'the status reports the web app memory, bake queue, editors and whether it can stop');
+    check((await req('/api/status', { headers: { host: 'other.example' } })).status === 403
+      && !(await req('/api/status', { headers: { origin: 'http://other.example' } })).headers['access-control-allow-origin'],
+      'the status has the same Host and Origin rules as other API reads');
+    const pages = await Promise.all([req('/'), page('/p/game/crate'), req('/l/no-such-library/')]);
+    check(pages.every((r) => (r.body.toString().match(/<footer class="running"/g) ?? []).length === 1
+      && r.body.includes('An editor stops by itself 10 minutes after its last tab is closed.')
+      && r.body.includes('Stops TopoTopo and its editors. Open a file to start it again.')), 'every shell page carries one running bar with the editor and stop tooltips');
+    const small = runningWords('120 MB'), large = runningWords('1.3 GB', '2', '3');
+    check(small.running + small.memory === 'TopoTopo is running · 120 MB', 'the running text gives the memory without an editor count');
+    check(large.running + large.editors + large.memory === 'TopoTopo is running · 2 editors open · 1.3 GB',
+      'the running text gives the editor count and memory');
+    check(large.previews === ' · making 3 previews' && small.preview === ' · making 1 preview' && small.editor === ' · 1 editor open',
+      'the running text uses singular for one editor and one preview');
+    check(small.stopped === 'TopoTopo has stopped. Open a file to start it again.', 'the stopped text says to open a file again');
+    check(small.lost === 'TopoTopo is not running any more. Open a file to start it again.', 'the lost-contact text says the web app is gone');
+  }
+
+  section('an editor starts behind a page');
+  {
+    const editorLib = { name: 'editor', path: path.join(tmp, 'editor-lib') };
+    const good = createPackage(editorLib, 'good', { title: 'Test <editor>', graph: BOX });
+    const broken = createPackage(editorLib, 'broken', { graph: BOX });
+    fs.rmdirSync(path.join(broken.dir, 'inputs'));
+    write(path.join(broken.dir, 'inputs'), 'a file in place of the inputs folder');
+    let stopped = false;
+    const web = await startWeb({ config: { ...cfg, libraries: [editorLib], workspaces: [] }, port: 0, bake: false, onStop: () => { stopped = true; } });
+    const get = (p: string) => reqAt(web.port, p);
+    const status = async () => JSON.parse((await get('/api/status')).body.toString());
+    const editUrl = `/p/editor/${good.id}/edit`, brokenUrl = `/p/editor/${broken.id}/edit`;
+    const wait = async (url: string) => {
+      const r = await get(`${url}?wait=1`);
+      return { status: r.status, ...JSON.parse(r.body.toString()) };
+    };
+    try {
+      check((await status()).stoppable === true, 'the status offers Stop TopoTopo when the web app can be stopped');
+      const at = performance.now(), start = await get(editUrl), ms = performance.now() - at;
+      check(start.status === 200 && start.headers['content-type']?.startsWith('text/html') && ms < 2000
+        && start.body.includes('Starting the editor for Test &lt;editor&gt;…') && start.body.includes('The first start of a large package can take a minute.')
+        && start.body.includes('<footer class="running"'), `the editor returns a starting page at once (${Math.round(ms)} ms)`);
+      const starting = await wait(editUrl);
+      check(starting.status === 200 && starting.ok && starting.starting === true, 'the editor status says that it is starting');
+      let url = '';
+      check(await until(async () => { url ||= (await wait(editUrl)).url ?? ''; return !!url; }, 60_000), 'the starting editor reports its URL when ready');
+      const again = await get(editUrl);
+      check(!!url && again.status === 302 && again.headers.location === url, 'the ready editor opens directly on the next visit');
+      check(await until(async () => {
+        const s = await status();
+        return s.editors.length === 1 && s.editors[0].package === 'Test <editor>' && Number.isInteger(s.editors[0].memory)
+          && s.editors[0].memory > 0 && s.memory > s.editors[0].memory;
+      }, 40_000), 'the status gives the editor title and memory and counts it in the total');
+
+      const failedPage = await get(brokenUrl);
+      check(failedPage.status === 200 && failedPage.headers['content-type']?.startsWith('text/html')
+        && failedPage.body.includes('Try again') && failedPage.body.includes('Show folder') && failedPage.body.includes('Back to the package'),
+        'a broken package starts behind HTML with the actions for a failed start');
+      let error = '';
+      check(await until(async () => {
+        if (!error) { const r = await wait(brokenUrl); if (r.status === 500 && r.ok === false) error = r.error; }
+        return error.includes('inputs');
+      }, 60_000), 'a failed start reports its reason as a JSON error on the wait route');
+      check((await wait(brokenUrl)).status !== 500, 'the failed start is reported once');
+      const executable = process.execPath;
+      try {
+        process.execPath = '';
+        const immediate = await get(brokenUrl);
+        check(immediate.status === 500 && immediate.headers['content-type']?.startsWith('text/html') && immediate.body.includes('The editor could not start.'),
+          'a synchronous error starting the editor has a readable HTML page');
+      } finally { process.execPath = executable; }
+      check((await get(brokenUrl)).status === 200, 'a plain visit after a failure retries');
+
+      const stop = await reqAt(web.port, '/api/stop', { method: 'POST', headers: { 'x-topotopo-open': '1' } });
+      const editorGone = async () => { try { await fetch(url, { signal: AbortSignal.timeout(1000) }); return false; } catch { return true; } };
+      check(stop.status === 200 && await until(() => stopped, 25_000) && !!url && await editorGone(), 'stopping the web app waits for the editor to exit and closes its port');
+    } finally { web.close(); }
+  }
+
+  section('published copies');
+  {
+    const source = createPackage({ name: 'scratch', path: tmp }, 'frozen-source', { title: 'Frozen source', graph: BOX });
+    write(path.join(source.dir, 'frozen-source.topo'), { title: 'Frozen source', name: 'scratch/frozen-source' });
+    const cli = path.resolve('src/cli.ts');
+    execFileSync(process.execPath, [cli, 'publish', source.dir, '--note', 'first version']);
+    const copy = path.join(source.dir, 'versions', '1.0');
+    const files = () => JSON.stringify(fs.readdirSync(copy, { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile()).map((e) => path.join(e.parentPath, e.name)).sort()
+      .map((file) => [path.relative(copy, file), fs.statSync(file).size]));
+
+    const beforeEdit = files();
+    const edit = spawnSync(process.execPath, [cli, 'edit', copy, '--json'], {
+      encoding: 'utf8', timeout: 30_000,
+    });
+    check(edit.status === 1 && !edit.stdout.trim() && edit.stderr.trim() === `${copy} is a published copy, which is never changed: open its package's folder (${source.dir})` && files() === beforeEdit,
+      'edit refuses a published version without starting or writing to it');
+
+    const dependencies = path.join(source.dir, 'packages');
+    const dependency = path.join(dependencies, 'vendor', 'alias', '4.2');
+    fs.cpSync(copy, dependency, { recursive: true });
+    const copiesWeb = await startWeb({ config: { ...cfg, libraries: [{ name: 'copies', path: dependencies }], workspaces: [] }, port: 0 });
+    try {
+      const open = async (dir: string) => {
+        const res = await fetch(`${copiesWeb.url}api/open`, { method: 'POST', headers: { 'x-topotopo-open': '1' }, body: JSON.stringify({ kind: 'package', dir }) });
+        const result = await res.json() as { url?: string; error?: string };
+        return { status: res.status, ...result };
+      };
+      const beforeOpen = files();
+      const opened = await open(copy);
+      const openedPage = opened.url ? (await page(opened.url, copiesWeb.port)).body.toString() : '';
+      check(opened.status === 200 && opened.url === '/l/frozen-source/?copy=1.0'
+        && openedPage.includes('You opened the published copy 1.0. Published copies are never changed: this is the package it was published from.'),
+        'opening a published version lands on its working package with a notice');
+      check(!(await reqAt(copiesWeb.port, '/l/frozen-source/?copy=%3Cscript%3E')).body.includes('You opened the published copy'), 'an invalid copy version shows no notice');
+      await sleep(3000);
+      check(!copiesWeb.queue.pending(copy) && !fs.existsSync(path.join(copy, '.web')) && files() === beforeOpen,
+        'opening a published version leaves its files and preview folder untouched');
+      const refused = await open(dependency);
+      check(refused.status === 409 && refused.error === `${dependency} is a copy of scratch/frozen-source 1.0 that ${source.dir} uses, which is never changed and has no page: open the package itself`,
+        'a dependency copy is refused with the package and version in its record');
+      fs.unlinkSync(path.join(dependency, 'version.json'));
+      copiesWeb.rescan();
+      const noRecord = await open(dependency);
+      check(noRecord.status === 409 && noRecord.error === `${dependency} is a copy of vendor/alias 4.2 that ${source.dir} uses, which is never changed and has no page: open the package itself`,
+        'a dependency copy without a record is refused with the package and version in its path');
+      const copiedFolder = await reqAt(copiesWeb.port, '/l/copies/vendor/alias/4.2/');
+      check(!/Open in editor|Re-bake/.test(copiedFolder.body.toString())
+        && (await reqAt(copiesWeb.port, '/p/copies/frozen-source/edit')).status === 404
+        && (await reqAt(copiesWeb.port, '/p/copies/frozen-source/bake', { method: 'POST' })).status === 404
+        && !fs.existsSync(path.join(dependency, '.web')), 'a scan rooted inside packages never exposes a copy for editing or baking');
+    } finally { copiesWeb.close(); }
+  }
+
   section('pages');
   {
     const home = await req('/');

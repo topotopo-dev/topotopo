@@ -118,6 +118,16 @@ export const when = (ms: number) => (ms ? new Date(ms).toISOString().slice(0, 16
 export const count = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
 const STATUS: Record<string, string> = { ok: '', failed: 'bake failed', baking: 'baking…', new: 'not baked yet', empty: 'no default graph yet' };
 
+export function runningWords(memory = '{memory}', editors = '{count}', previews = '{count}') {
+  return {
+    running: 'TopoTopo is running', memory: ` · ${memory}`,
+    editor: ' · 1 editor open', editors: ` · ${editors} editors open`,
+    preview: ' · making 1 preview', previews: ` · making ${previews} previews`,
+    stopped: 'TopoTopo has stopped. Open a file to start it again.',
+    lost: 'TopoTopo is not running any more. Open a file to start it again.',
+  };
+}
+
 export function shell(title: string, u: Urls, body: string, opts: { page: string; data?: object }) {
   return `<!doctype html>
 <html lang="en">
@@ -131,9 +141,32 @@ export function shell(title: string, u: Urls, body: string, opts: { page: string
 </head>
 <body data-page="${opts.page}"${opts.data ? ` data-json="${esc(JSON.stringify(opts.data))}"` : ''}>
 ${body}
+<footer class="running" id="running" data-words="${esc(JSON.stringify(runningWords()))}">
+  <span role="status"><span id="running-state">TopoTopo is running</span><span id="running-editors" title="An editor stops by itself 10 minutes after its last tab is closed."></span><span id="running-memory"></span><span id="running-previews"></span></span>
+  <button class="btn" type="button" data-stop-topotopo title="Stops TopoTopo and its editors. Open a file to start it again." hidden>Stop TopoTopo</button>
+</footer>
 </body>
 </html>
 `;
+}
+
+export function editorPage(title: string, edit: string, back: string, u: Urls, error?: string) {
+  return shell(`Editor for ${title} · TopoTopo`, u, `<header class="bar"><a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a></header>
+<main class="wrap folder">
+  <div class="head">
+    <h1 id="editor-heading">${error === undefined ? `Starting the editor for ${esc(title)}…` : 'The editor could not start.'}</h1>
+    <div id="editor-wait"${error === undefined ? '' : ' hidden'}>
+      <p class="hstats"><span id="editor-seconds">0</span> s</p>
+      <p>The first start of a large package can take a minute.</p>
+    </div>
+    <p id="editor-error" class="notice"${error === undefined ? ' hidden' : ''}>${esc(error)}</p>
+    <p id="editor-actions"${error === undefined ? ' hidden' : ''}>
+      <a class="btn primary" href="${esc(edit)}">Try again</a>
+      <button class="btn" type="button" data-reveal>Show folder</button>
+      <a class="btn" href="${esc(back)}">Back to the package</a>
+    </p>
+  </div>
+</main>`, { page: 'editor', data: { starting: error === undefined, reveal: edit.replace(/edit$/, 'reveal') } });
 }
 
 /** A package's full name and newest version, as a card and a package's folder page mark it. */

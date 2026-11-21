@@ -150,7 +150,32 @@ if (page === 'folder') {
       } finally { setTimeout(() => { b.disabled = false; }, 800); }
     });
   }
-  for (const b of $$('[data-reveal]')) b.addEventListener('click', () => fetch(data.reveal, { method: 'POST' }));
+}
+
+for (const b of $$('[data-reveal]')) b.addEventListener('click', () => fetch(data.reveal, { method: 'POST' }).catch(() => {}));
+
+if (page === 'editor' && data.starting) {
+  const started = Date.now();
+  const seconds = document.getElementById('editor-seconds');
+  const waitForEditor = async () => {
+    seconds.textContent = Math.floor((Date.now() - started) / 1000);
+    try {
+      const res = await fetch('?wait=1', { signal: AbortSignal.timeout(5000) });
+      const r = await res.json();
+      if (r.url) return location.replace(r.url);
+      if (!r.ok) {
+        document.getElementById('editor-heading').textContent = 'The editor could not start.';
+        document.getElementById('editor-wait').hidden = true;
+        const reason = document.getElementById('editor-error');
+        reason.textContent = r.error;
+        reason.hidden = false;
+        document.getElementById('editor-actions').hidden = false;
+        return;
+      }
+    } catch { /* the status bar reports lost contact */ }
+    setTimeout(waitForEditor, 500);
+  };
+  setTimeout(waitForEditor, 500);
 }
 
 // a package's bake in a word: beside its Re-bake button, and in its bake line below the divider
@@ -210,17 +235,68 @@ es.onmessage = (m) => {
   }
 };
 
-// "TopoTopo has changed since this server started": the button stops the web app (POST /api/stop); the person opens the file again
-for (const b of $$('[data-stop-topotopo]')) {
-  b.addEventListener('click', async () => {
-    const bar = b.closest('.changed');
-    b.disabled = true;
-    try {
-      const r = await fetch('/api/stop', { method: 'POST', headers: { 'x-topotopo-open': '1' } });
-      if (!r.ok) throw new Error(`the web app answered ${r.status}`);
-      bar.textContent = 'TopoTopo has stopped. Open your file again.';
-    } catch (e) {
-      bar.textContent = `TopoTopo could not be stopped from here (${e.message}): run topotopo open --stop.`;
-    }
-  });
+function runningBarWords(words, status) {
+  if (status === 'stopped' || status === 'lost') return [words[status], '', '', ''];
+  const mb = status.memory / 2 ** 20;
+  const memory = mb < 1024 ? `${mb.toFixed(0)} MB` : `${(mb / 1024).toFixed(1)} GB`;
+  const editors = status.editors.length, baking = status.baking;
+  return [words.running,
+    editors === 0 ? '' : editors === 1 ? words.editor : words.editors.replace('{count}', editors),
+    words.memory.replace('{memory}', memory),
+    baking === 0 ? '' : baking === 1 ? words.preview : words.previews.replace('{count}', baking)];
+}
+
+const running = document.getElementById('running');
+const words = JSON.parse(running.dataset.words);
+const runningParts = ['running-state', 'running-editors', 'running-memory', 'running-previews'].map((id) => document.getElementById(id));
+const stopButton = running.querySelector('button');
+const showStatus = (status) => {
+  const parts = runningBarWords(words, status);
+  runningParts.forEach((el, i) => { if (el.textContent !== parts[i]) el.textContent = parts[i]; });
+  running.classList.toggle('warning', status === 'lost');
+  stopButton.hidden = !status.stoppable;
+};
+
+let statusPending = false, statusFailures = 0, stopping = false, stopped = false;
+const refreshStatus = async () => {
+  if (statusPending || stopping || stopped) return;
+  statusPending = true;
+  try {
+    const res = await fetch('/api/status', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error();
+    const status = await res.json();
+    if (!status.ok) throw new Error();
+    if (stopping || stopped) return;
+    if (statusFailures >= 2) return location.reload();
+    statusFailures = 0;
+    showStatus(status);
+  } catch {
+    if (!stopping && !stopped && ++statusFailures >= 2) showStatus('lost');
+  } finally { statusPending = false; }
+};
+const statusTimer = setInterval(() => { if (document.visibilityState === 'visible') void refreshStatus(); }, 5000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void refreshStatus(); });
+void refreshStatus();
+
+for (const b of $$('[data-stop-topotopo]')) b.addEventListener('click', stopTopoTopo);
+async function stopTopoTopo(e) {
+  if (stopping || stopped) return;
+  stopping = true;
+  const b = e.currentTarget;
+  const banner = b.closest('.changed');
+  b.disabled = true;
+  try {
+    const r = await fetch('/api/stop', { method: 'POST', headers: { 'x-topotopo-open': '1' } });
+    if (!r.ok) throw new Error(`the web app answered ${r.status}`);
+    stopped = true;
+    clearInterval(statusTimer);
+    es.close();
+    showStatus('stopped');
+    if (banner) banner.textContent = words.stopped;
+  } catch (e) {
+    const text = `TopoTopo could not be stopped from here (${e.message}).`;
+    if (banner) banner.textContent = text;
+    else runningParts[0].textContent = text;
+    b.disabled = false;
+  } finally { stopping = false; }
 }

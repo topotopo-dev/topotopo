@@ -16,13 +16,14 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll, scanLibrary } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { readWorkspace, engineFile } from '../workspace.ts';
-import { WORKSPACE_PACKAGES, locate, manifestAt, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
+import { VERSION_RE, WORKSPACE_PACKAGES, locate, manifestAt, packageDirOf, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
 import { folderKey, forgetScans, forgetScansOf, scanSingle, scanTree, unscanned } from '../scan.ts';
 import { engineTypeOf } from '../engines.ts';
@@ -32,9 +33,10 @@ import type { LibraryRef, WebConfig } from '../config.ts';
 import { builtinLibrary, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion, workingHash } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 import { engineSha256 } from '../host/engine-code.ts';
+import { isPublishedCopy } from '../host/godot.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { BakeQueue } from './bake.ts';
-import { embedPage, esc, frontPage, importMap, modelPage, shell, count } from './pages.ts';
+import { editorPage, embedPage, esc, frontPage, importMap, modelPage, shell, count } from './pages.ts';
 import type { CardData, OutputRow, PackageData, RootCardData, Urls, UserRow } from './pages.ts';
 import { PICTURE_STRIP, folderPage } from './folder-page.ts';
 import type { FileItem, FolderCard, FolderPageData, NoteBox } from './folder-page.ts';
@@ -75,6 +77,18 @@ const CHANGED_BANNER = '<div class="changed" role="status">TopoTopo has changed 
 // an editor is given longer than the export it may be finishing (EDITOR_GRACE_MS in src/packages/commands.ts)
 const BAKE_STOP_MS = 20_000, EDITOR_STOP_MS = 20_000;
 const README = /^(readme|index)\.(md|txt)$/i;
+
+/** A copy opened through an alias is still a copy of the same package. */
+function publishedFolder(topo: string): string | null {
+  const dir = path.dirname(topo);
+  if (isPublishedCopy(topo)) return dir;
+  let real: string;
+  try { real = fs.realpathSync.native(dir); } catch { return null; }
+  return real !== dir && isPublishedCopy(path.join(real, path.basename(topo))) ? real : null;
+}
+
+const publishedPackage = (p: Package) => publishedFolder(path.join(p.dir, `${p.id}.topo`));
+const workingScan = (s: LibraryScan): LibraryScan => ({ ...s, packages: s.packages.filter((p) => !publishedPackage(p)) });
 
 class HttpError extends Error {
   status: number;
@@ -249,7 +263,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       games.push(g.game);
       all[i] = g.scan;
     }
-    scans = [...all, scanBuiltin()];
+    scans = [...all.map(workingScan), scanBuiltin()];
     indexPackages();
     buildRoots();
   };
@@ -267,7 +281,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     let p = packages.get(`${lib}/${id}`);
     // made a moment ago, before the watch noticed: read the packages again, at most every few seconds
     if (!p && Date.now() - missRescan > 3000) { missRescan = Date.now(); rescanPackages(); p = packages.get(`${lib}/${id}`); }
-    if (!p) throw new HttpError(404, `no package "${id}" in library "${lib}"`);
+    if (!p || publishedPackage(p)) throw new HttpError(404, `no package "${id}" in library "${lib}"`);
     return p;
   };
   /** The workspace or library a package's folder page is in (workspaces and libraries share one set of names). */
@@ -427,6 +441,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const addScan = (s: LibraryScan) => {
     let scan = s;
     if (s.workspace) { const g = gameFor(s); games.push(g.game); scan = g.scan; }
+    scan = workingScan(scan);
     // the libraries inside a workspace are the workspace's own
     scans = [...scans.filter((x) => x.name === BUILTIN_LIBRARY.name ? false : !(s.workspace && !x.workspace && within(x.root, s.root))), scan, scans.find((x) => x.name === BUILTIN_LIBRARY.name) ?? scanBuiltin()];
     indexPackages();
@@ -450,8 +465,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   /** List one package for this run as itself: nothing outside its folder is scanned, watched, served or baked. */
   const addSingle = (dir: string, id: string) => {
     const name = freeName(id);
+    const scan = scanSingle(name, dir);
+    if (scan.packages.some(publishedPackage)) return;
     singles.push({ name, dir });
-    addScan(scanSingle(name, dir));
+    addScan(scan);
   };
   /** The page of a package folder or a workspace folder, listed first when it is not. */
   const openPage = (kind: 'package' | 'workspace', dir: string): string => {
@@ -461,14 +478,30 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       const have = games.find((g) => folderKey(g.dir) === folderKey(dir));
       return urls.folder('w', have ? have.name : addWorkspaceRoot(dir, file.name), '');
     }
+    const m = manifestAt(dir), copy = m && publishedFolder(m.file);
     let p = byDir.get(folderKey(dir));
-    if (!p) {
-      const at = locate(dir), ws = at.workspace ?? at.outside?.workspace;
+    if (!p || copy) {
+      const at = locate(copy ?? dir), ws = at.workspace ?? at.outside?.workspace;
       const wsName = ws ? workspaceAt(ws)?.name ?? (slugify(path.basename(ws)) || 'workspace') : '';
-      const rel = ws ? path.relative(ws, dir).split(path.sep) : [];
+      const rel = ws ? path.relative(ws, copy ?? dir).split(path.sep) : [];
       // a copy the workspace uses (its topotopo-packages folder) has no page: the package it is a copy of has
-      if (ws && rel[0] === WORKSPACE_PACKAGES)
+      if (ws && rel[0]?.toLowerCase() === WORKSPACE_PACKAGES)
         throw new HttpError(409, `${dir} is a copy of ${rel[1] && rel[2] ? `${rel[1]}/${rel[2]}` : 'a package'} that the workspace "${wsName}" uses (its ${WORKSPACE_PACKAGES} folder), which has no page: open the package itself, in the folder of the workspace or library that holds it`);
+      if (copy) {
+        const parent = path.dirname(copy), source = path.dirname(parent), version = path.basename(copy);
+        if (path.basename(parent).toLowerCase() === 'versions' && VERSION_RE.test(version)) {
+          const original = manifestAt(source);
+          if (original && !publishedFolder(original.file)) return `${openPage('package', source)}?copy=${encodeURIComponent(version)}`;
+        }
+        const storage = path.dirname(source);
+        const holder = packageDirOf(parent) ?? ws ?? (path.basename(storage).toLowerCase() === WORKSPACE_PACKAGES ? path.dirname(storage) : parent);
+        let name = `${path.basename(source)}/${path.basename(parent)}`, v = version;
+        try {
+          const record = JSON.parse(fs.readFileSync(path.join(copy, 'version.json'), 'utf8'));
+          if (typeof record?.package === 'string' && typeof record?.version === 'string') { name = record.package; v = record.version; }
+        } catch { /* the folder names still say which copy it is */ }
+        throw new HttpError(409, `${dir} is a copy of ${name} ${v} that ${holder} uses, which is never changed and has no page: open the package itself`);
+      }
       // made a moment ago, before the watch noticed: the roots around it (not all of them) are read again
       const near = scans.filter((x) => x.name !== BUILTIN_LIBRARY.name && within(dir, x.root)).map((x) => x.root);
       if (near.length) { rescanPackages(near); p = byDir.get(folderKey(dir)); }
@@ -477,7 +510,6 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         if (!games.some((g) => folderKey(g.dir) === folderKey(at.workspace!))) addWorkspaceRoot(at.workspace, wsName);
         p = byDir.get(folderKey(dir));
       } else if (!p) {
-        const m = manifestAt(dir);
         if (!m) throw new HttpError(400, `${dir} holds no .topo file`);
         addSingle(dir, m.id);
         p = byDir.get(folderKey(dir));
@@ -488,26 +520,45 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   };
 
   // ---------------------------------------------------------------- editors
-  const editors = new Map<string, { child: ChildProcess; url: Promise<string> }>();
+  const editors = new Map<string, { child: ChildProcess; package: string; url: string | null; memory: number | null }>();
+  const editorErrors = new Map<string, string>();
+  const editorAlive = (child: ChildProcess) => !!child.pid && child.exitCode === null && child.signalCode === null && !child.killed;
+  const editorReason = (error: unknown) => {
+    const text = (error instanceof Error ? error.message : String(error)).trim().replace(/\s*[\r\n]+\s*/g, ' ');
+    return /[.!?]$/.test(text) ? text : `${text}.`;
+  };
   const editorFor = (p: Package) => {
-    const have = editors.get(p.dir);
-    if (have && have.child.exitCode === null) return have.url;
     const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const editor = { child, package: p.manifest.title, url: null as string | null, memory: null as number | null };
+    editors.set(p.dir, editor);
     child.stdin!.on('error', () => {});
-    const url = new Promise<string>((resolve, reject) => {
-      let out = '', err = '';
-      const t = setTimeout(() => { child.kill(); reject(new Error('the editor did not start within a minute')); }, EDITOR_START_MS);
-      child.stdout!.on('data', (d) => {
-        out += d;
-        const line = out.split('\n').find((l) => l.startsWith('{'));
-        if (line) { clearTimeout(t); try { resolve(JSON.parse(line).url); } catch (e) { reject(e); } }
-      });
-      child.stderr!.on('data', (d) => { if (err.length < 4000) err += d; });
-      child.on('exit', (code) => { clearTimeout(t); editors.delete(p.dir); reject(new Error(`the editor stopped (exit ${code}): ${err.trim().split('\n').slice(-3).join(' ')}`)); });
+    let err = '', failed = false;
+    const failStart = (reason: unknown) => {
+      if (editor.url || failed || editors.get(p.dir) !== editor) return;
+      failed = true;
+      editorErrors.set(p.dir, editorReason(reason));
+    };
+    const t = setTimeout(() => {
+      failStart('The editor did not start within a minute.');
+      safe('stop editor', () => { child.kill(); });
+    }, EDITOR_START_MS);
+    t.unref();
+    const output = createInterface({ input: child.stdout!, crlfDelay: Infinity });
+    output.on('error', () => {});
+    output.on('line', (line) => {
+      let msg: any;
+      try { msg = JSON.parse(line); } catch { return; }
+      if (!failed && !editor.url && typeof msg?.url === 'string' && msg.url) { editor.url = msg.url; clearTimeout(t); }
+      else if (editor.url && typeof msg?.memory === 'number' && Number.isFinite(msg.memory)) editor.memory = msg.memory;
     });
-    url.catch(() => {});
-    editors.set(p.dir, { child, url });
-    return url;
+    child.stderr!.on('data', (d) => { if (err.length < 4000) err += d; });
+    child.on('error', failStart);
+    child.on('close', (code, signal) => {
+      clearTimeout(t);
+      const detail = err.trim().split('\n').slice(-3).join(' ');
+      failStart(`The editor stopped (${signal ?? `exit ${code}`})${detail ? `: ${detail}` : ''}`);
+      if (editors.get(p.dir) === editor) editors.delete(p.dir);
+    });
   };
 
   /**
@@ -517,15 +568,16 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
    */
   let stopping: Promise<void> | undefined;
   const shutdown = (): Promise<void> => stopping ??= (async () => {
-    clearInterval(periodic); clearTimeout(changeTimer); clearTimeout(warm);
+    clearInterval(periodic); clearInterval(keepAlive); clearTimeout(changeTimer); clearTimeout(warm);
     closed = true;
     for (const w of watchers) w.close();
     await Promise.all([
       queue.stop(BAKE_STOP_MS),
       ...[...editors.values()].map(({ child }) => new Promise<void>((resolve) => {
-        if (child.exitCode !== null) return resolve();
-        const t = setTimeout(() => { child.kill(); resolve(); }, EDITOR_STOP_MS);
-        child.once('exit', () => { clearTimeout(t); resolve(); });
+        if (!editorAlive(child)) return resolve();
+        const t = setTimeout(() => { safe('stop editor', () => { child.kill(); }); resolve(); }, EDITOR_STOP_MS);
+        t.unref();
+        child.once('close', () => { clearTimeout(t); resolve(); });
         child.stdin?.end();
       })),
     ]);
@@ -846,19 +898,22 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const rank = (n: string) => (README.test(n) ? 0 : /\.md$/i.test(n) ? 1 : 2);
     return rank(a.name) - rank(b.name) || byName(a.name, b.name);
   };
-  const folderData = async (r: Root, rel: string, abs: string, askedNote: string | null = null): Promise<FolderPageData> => {
+  const folderData = async (r: Root, rel: string, abs: string, askedNote: string | null, copy: string | null): Promise<FolderPageData> => {
     const listing = listFolder(abs, rel, r.dir);
     // none yet: the page shows no flags and says the tree is being checked; one from before a change: the page says it is
     // checked again. Either reloads when the audit of the tree as it is is made (wait)
     const audit = await shownAudit(r), wait = waitOf(r, audit);
     const engines = audit?.walk.engines ?? [];
     const engineAt = engines.find((e) => rel === e || rel.startsWith(e + '/'));
-    const p = listing.topo.length ? byDir.get(folderKey(abs)) ?? null : null;
+    const found = listing.topo.length ? byDir.get(folderKey(abs)) : undefined;
+    const p = found && !publishedPackage(found) ? found : null;
     const name = rel ? rel.split('/').pop()! : r.name;
     const crumbs = [{ name: r.name, url: urls.folder(r.kind, r.name, '') }, ...rel.split('/').filter(Boolean).map((s, i, a) => ({ name: s, url: urls.folder(r.kind, r.name, a.slice(0, i + 1).join('/')) }))];
     // a .topo here that is none of the tree's packages: why the scan leaves it out
     let notice: string | undefined;
-    if (engineAt !== undefined) {
+    if (p && copy && VERSION_RE.test(copy)) {
+      notice = `You opened the published copy ${copy}. Published copies are never changed: this is the package it was published from.`;
+    } else if (engineAt !== undefined) {
       const e = engineTypeOf(fs.readdirSync(path.join(r.dir, ...engineAt.split('/'))).find((f) => engineTypeOf(f)) ?? '');
       notice = `${engineAt === rel ? 'This is' : 'This is inside'} the ${e === 'unreal' ? 'Unreal' : 'Godot'} project: shown as it is, not audited for flags.`;
     } else if (listing.topo.length && !p) {
@@ -1030,6 +1085,12 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       // with its pid, and `topotopo open` waits for it to leave and starts another
       if (u.pathname === '/api/health' && stopRequested) return json(503, { web: true, stopping: true, pid: process.pid });
       if (u.pathname === '/api/health') return json(200, { web: true, pid: process.pid, version: TOPOTOPO_VERSION, engine, open: true, libraries: scans.length, packages: packages.size, baking: queue.size });
+      if (u.pathname === '/api/status') {
+        if (write) throw new HttpError(405, 'GET');
+        const running = [...editors.values()].filter(({ child }) => editorAlive(child)).map(({ package: title, memory }) => ({ package: title, memory }));
+        const memory = running.reduce((sum, editor) => sum + (editor.memory ?? 0), process.memoryUsage().rss);
+        return json(200, { ok: true, stoppable: !!o.onStop, baking: queue.size, memory, editors: running });
+      }
       if (u.pathname === '/api/open' || u.pathname === '/api/stop') {
         // what only the program that starts the web app (and the page's own button) asks: a POST with a header that a page
         // of another origin cannot send without a preflight, which is refused (the Host and Origin checks above apply too)
@@ -1042,7 +1103,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           if (!o.onStop) throw new HttpError(501, 'this web app was not started by topotopo web: it cannot be stopped from a request');
           stopRequested = true;
           json(200, { ok: true });
-          setTimeout(() => { shutdown().then(() => o.onStop!(), (e) => { log(`stop: ${e?.message ?? e}`); o.onStop!(); }); }, 50);
+          setTimeout(() => { shutdown().then(() => o.onStop!(), (e) => { log(`stop: ${e?.message ?? e}`); o.onStop!(); }); }, 50).unref();
           return;
         }
         if (stopRequested) throw new HttpError(503, 'this web app is stopping: open the file again in a moment');
@@ -1106,7 +1167,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           if (!slash || found.rel !== found.parts.join('/')) return redirect(301, `${urls.folder(r.kind, r.name, found.rel)}${u.search}`);
           if (r.builtin) refreshBuiltin();
           const asked = u.searchParams.get('note');
-          return html(folderPage(await folderData(r, found.rel, found.abs, asked && kindOf(asked) === 'note' && !/[\\/]/.test(asked) ? asked : null), urls));
+          return html(folderPage(await folderData(r, found.rel, found.abs, asked && kindOf(asked) === 'note' && !/[\\/]/.test(asked) ? asked : null, u.searchParams.get('copy')), urls));
         }
         if (slash) return redirect(301, urls.raw(r.kind, r.name, found.rel));
         if (write) throw new HttpError(405, 'files are read only here');
@@ -1119,8 +1180,40 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         return html(embedPage({ lib: p.lib, id: p.id, title: p.manifest.title, glb, version: c.version, packageUrl: urls.package(p.lib, p.id) }, urls), true);
       }
       if (seg[0] === 'p' && seg.length >= 3) {
-        const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
         const rest = seg.slice(3);
+        if (rest[0] === 'edit') {
+          const wait = u.searchParams.get('wait') === '1';
+          let p: Package;
+          try {
+            p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
+            if (isBuiltin(p)) throw new HttpError(400, 'TopoTopo\'s built-in packages are not edited or baked here: TopoTopo\'s repository publishes them');
+            if (stopRequested) throw new HttpError(503, 'TopoTopo is stopping.');
+          } catch (e) {
+            const code = e instanceof HttpError ? e.status : 500;
+            const error = editorReason(e);
+            return wait ? json(code, { ok: false, error }) : html(missingPage(error, '/'), false, code);
+          }
+          const editor = editors.get(p.dir);
+          if (wait) {
+            const error = editorErrors.get(p.dir);
+            if (error !== undefined) { editorErrors.delete(p.dir); return json(500, { ok: false, error }); }
+            if (editor?.url && editorAlive(editor.child)) return json(200, { ok: true, url: editor.url });
+            if (editor && !editor.url) return json(200, { ok: true, starting: true });
+            return json(404, { ok: false, error: 'The editor is no longer starting.' });
+          }
+          const edit = urls.edit(p.lib, p.id)!, back = pageOf(p);
+          if (editor?.url && editorAlive(editor.child)) return redirect(302, editor.url);
+          if (!editor || !editorAlive(editor.child) || editorErrors.has(p.dir)) {
+            editorErrors.delete(p.dir);
+            try { editorFor(p); } catch (e) {
+              const reason = editorReason(e);
+              editorErrors.set(p.dir, reason);
+              return html(editorPage(p.manifest.title, edit, back, urls, reason), false, 500);
+            }
+          }
+          return html(editorPage(p.manifest.title, edit, back, urls));
+        }
+        const p = find(decodeURIComponent(seg[1]), decodeURIComponent(seg[2]));
         // a package's stable address leads to its folder page
         if (!rest.length || (rest.length === 1 && !rest[0])) return redirect(302, pageOf(p));
         // a package's thumbnail of one of its outputs (thumbs/<output>.png), nothing else of that folder
@@ -1149,12 +1242,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           return send(200, fs.readFileSync(file), rest[0] === 'thumb.png' ? 'image/png' : MIME['.glb'], { etag, 'cache-control': 'no-cache' });
         }
         if (rest[0] === 'files' && rest.length > 1) return sendFile(req, res, packageFile(p, rest.slice(1).join('/')));
-        if ((rest[0] === 'edit' || rest[0] === 'bake') && isBuiltin(p)) throw new HttpError(400, 'TopoTopo\'s built-in packages are not edited or baked here: TopoTopo\'s repository publishes them');
-        if (rest[0] === 'edit') {
-          const url = await editorFor(p);
-          return redirect(302, url);
-        }
         if (rest[0] === 'bake') {
+          if (isBuiltin(p)) throw new HttpError(400, 'TopoTopo\'s built-in packages are not edited or baked here: TopoTopo\'s repository publishes them');
           if (req.method !== 'POST') throw new HttpError(405, 'POST to bake again');
           if (!hasDefault(p)) throw new HttpError(400, `no default graph yet: ${p.manifest.title} has no graph "${p.manifest.bake.graph ?? p.manifest.graph}" to bake`);
           const queued = queue.add(p.dir);

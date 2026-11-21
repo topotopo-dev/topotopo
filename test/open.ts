@@ -34,8 +34,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const own = new Set<number>();
 const killOwn = (pid: number) => {
   if (!own.delete(pid)) return; // never a pid this test did not start
-  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
-  else { try { process.kill(pid); } catch { /* gone */ } }
+  if (process.platform === 'win32' && spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }).status === 0) return;
+  try { process.kill(pid); } catch { /* gone */ }
 };
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const waitGone = async (pid: number) => { for (let i = 0; i < 100 && alive(pid); i++) await sleep(100); };
@@ -284,10 +284,18 @@ try {
   for (let i = 0; i < 400; i++) { const h = await probe(lock1!.port, 5000); if (h.state === 'live' && !(h.health as any).baking) break; await sleep(100); }
   const stopBake = mkPkg('stoppers', 'stop-bake'), stopBake2 = mkPkg('stoppers', 'stop-bake-two');
   await opened(path.join(stopBake, 'stop-bake.topo'));
-  const edit = await fetch(`${base}/p/stop-bake/stop-bake/edit`, { redirect: 'manual', headers: { connection: 'close' }, signal: AbortSignal.timeout(60_000) });
-  const editorUrl = edit.headers.get('location') ?? '';
+  const edit = `${base}/p/stop-bake/stop-bake/edit`;
+  const starting = await get(edit);
+  let editorUrl = '';
+  for (const started = Date.now(); Date.now() - started < 60_000; ) {
+    const r = await get(`${edit}?wait=1`);
+    if (r.status !== 200) break;
+    const ready = JSON.parse(r.text);
+    if (ready.url) { editorUrl = ready.url; break; }
+    await sleep(500);
+  }
   const editorPort = editorUrl ? Number(new URL(editorUrl).port) : 0;
-  check(edit.status === 302 && editorPort > 0 && await connects(editorPort), `the editor of the opened package runs (${editorUrl})`);
+  check(starting.status === 200 && editorPort > 0 && await connects(editorPort), `the editor of the opened package runs (${editorUrl})`);
   await opened(path.join(stopBake2, 'stop-bake-two.topo'));
 
   // ---- --stop ends the web app this call started, and only it
