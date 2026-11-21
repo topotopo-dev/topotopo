@@ -32,7 +32,8 @@ import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig, removeLibrary } from '../config.ts';
 import { createPackage, isStale, placeNamed, readBakeState, scanAll, workspaceRef } from '../web/library.ts';
-import { initPackage, locate, oldManifestAbove, packageDirOf, slugify, workspaceFlag } from '../package.ts';
+import { VERSION_RE, initPackage, locate, manifestAt, manifestFile, oldManifestAbove, packageDirOf, slugify, workspaceFlag } from '../package.ts';
+import { isPublishedCopy } from '../host/godot.ts';
 import { forgetScans } from '../scan.ts';
 import type { WebConfig } from '../config.ts';
 
@@ -231,6 +232,13 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
   return run(io, async () => {
     const a = args(argv, ['--port'], ['--json'], `usage: ${prog} edit [folder] [--port 7341] [--json]`);
     const dir = packageOf(a.rest[0], prog);
+    const topo = manifestFile(dir), real = fs.realpathSync.native(dir);
+    const copy = isPublishedCopy(topo) ? dir : isPublishedCopy(path.join(real, path.basename(topo))) ? real : null;
+    if (copy) {
+      const versions = path.dirname(copy), source = path.dirname(versions);
+      const ownVersion = path.basename(versions).toLowerCase() === 'versions' && VERSION_RE.test(path.basename(copy)) && manifestAt(source);
+      fail(`${dir} is a published copy, which is never changed: open its package's folder${ownVersion ? ` (${source})` : ''}`);
+    }
     const { Engine } = await import('../graph/engine.ts');
     const { createNodeHost } = await import('../host/node.ts');
     const { openPackage } = await import('../open.ts');
@@ -242,6 +250,8 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
     if (a.has('--json')) {
       // started by the web app: report the URL, and stop once no page has been open for a while
       io.out(JSON.stringify({ url: v.url }));
+      const reportMemory = () => io.out(JSON.stringify({ memory: process.memoryUsage().rss }));
+      reportMemory();
       // the web app ends the editor by closing its stdin: an export under way is let finish (its files are written through .part
       // files renamed into place, so a cut would leave the old ones whole, but then not the new set), for at most
       // EDITOR_GRACE_MS; then the viewer closes and the process leaves, as it would at its own end
@@ -252,9 +262,10 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
       process.stdin.resume();
       let idleSince = Date.now();
       setInterval(() => {
+        reportMemory();
         if (v.clients() > 0) idleSince = Date.now();
         else if (Date.now() - idleSince > 10 * 60_000) { v.close(); process.exit(0); }
-      }, 30_000);
+      }, 30_000).unref();
     } else io.out(`edit: ${v.url}  (${dir}; Ctrl+C to stop)`);
   });
 }
