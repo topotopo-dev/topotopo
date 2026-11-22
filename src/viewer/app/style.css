@@ -9,6 +9,8 @@
   --mono: 11px/1.35 ui-monospace, Consolas, "SF Mono", monospace;
 }
 * { box-sizing: border-box; }
+/* scrollbars in the panels' own greys, not the browser's white */
+html { scrollbar-color: var(--faint) transparent; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--font); overflow: hidden; }
 #app {
@@ -136,7 +138,8 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .welcome-box h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .welcome-box h2 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
 .welcome-box p { margin: 8px 0; }
-.welcome-box code { font: var(--mono); color: var(--text); background: var(--bg); padding: 1px 4px; border-radius: 2px; overflow-wrap: anywhere; }
+.welcome-box code { font: var(--mono); color: var(--text); background: var(--bg); padding: 1px 4px; border-radius: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.welcome-box button { font-size: 11px; padding: 0 6px; }
 .welcome-sub { color: var(--dim); font: var(--mono); overflow-wrap: anywhere; }
 .welcome-lead { font-size: 14px; color: var(--sel); }
 .welcome-builtin { margin: 0; padding-left: 18px; }

@@ -90,7 +90,7 @@ export function createOutputPanel(ctx) {
   const live = document.createElement('div'), saved = document.createElement('details'), savedRows = document.createElement('div');
   saved.className = 'saved-outputs'; saved.open = ctx.store.get('outputs.savedOpen', false);
   saved.append(text('summary', 'Saved files'), savedRows); saved.ontoggle = () => ctx.store.set('outputs.savedOpen', saved.open);
-  const empty = text('div', 'No outputs yet: the results of the package\'s graphs show here once your agent has built one.', 'empty');
+  const empty = text('div', 'No outputs yet: the results of the package\'s graphs show here.', 'empty');
   const cards = new Map(), groups = new Map(); let input = null;
   // a result's textures fold under its card, closed until the person opens them; remembered for this viewer
   const folds = createFolds(ctx.store);

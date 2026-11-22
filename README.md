@@ -138,8 +138,9 @@ npm run preview
 
 The viewer opens a package (`topotopo edit <package>`, the MCP server's package, or `topotopo view graph.json`) with
 the package's default graph in view; the browser tab is named after the package. A package's graphs are the files in
-`graphs/` and the graph files beside its manifest, `<id>.topo`. A package without graphs shows its name, a pointer to
-TopoTopo's built-in packages and what to ask your agent; a folder that is no package says so and how to make it one. The left panel
+`graphs/` and the graph files beside its manifest, `<id>.topo`. A package without graphs shows its name, how a graph gets
+built, the line that connects Claude Code to its folder, and TopoTopo's built-in packages. A folder that is no package
+says so and how to make it one. The left panel
 has four tabs: **Scene** (the graph's nodes and guides), **Outputs**, **Inputs** and, in a package, **Packages** (see
 [Packages](#packages)). **Outputs**, the default, shows each graph's results, one card per result, and their textures;
 click one to inspect it alone, and **Scene** in the top bar returns to the whole scene. Publish extra results in graph

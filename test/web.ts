@@ -420,7 +420,8 @@ try {
     const at = grid.indexOf('data-key="game/empty"'), card = grid.slice(at, grid.indexOf('</a>', at));
     check(card.includes('<span class="status s-empty">no default graph yet</span>') && !card.includes('bake failed'), 'a new package\'s card says it has no default graph yet, never a failed bake');
     const pg = (await page('/p/game/empty')).body.toString();
-    check(/No default graph yet: this package has no graphs\. Ask your agent to build one/.test(pg) && !/class="bake err/.test(pg) && /No graphs yet\. Ask your agent to build one/.test(pg),
+    check(pg.includes('No default graph yet: this package has no graphs. Open in editor shows how one gets built; the preview appears here when it exists.')
+      && !/class="bake err/.test(pg) && pg.includes('<p class="dim">No graphs yet.</p>'),
       'its page says what to do, not an error');
     check(!fs.existsSync(path.join(empty.dir, '.web', 'bake.json')), 'nothing is baked before it has a default graph');
     const bp = (await page('/p/game/beside')).body.toString();
@@ -496,7 +497,7 @@ try {
     const pp = await page('/p/topotopo/props');
     const pph = pp.body.toString();
     check(pp.url === '/l/topotopo/props/' && /<h1>Props<\/h1>/.test(pph) && /class="pkgline">Package <span class="pkg"[^>]*>topotopo\/props 1\.0<\/span>/.test(pph) && /<img class="othumb" src="\/p\/topotopo\/props\/thumbs\/barrel\.png"[^>]*><code>topotopo\/props\/barrel<\/code>/.test(pph)
-      && /<h2>Used by <span class="count">0<\/span>/.test(pph) && /One of TopoTopo&#39;s own packages: every package can use its outputs/.test(pph) && !/Open in editor|data-post="[^"]*bake"/.test(pph),
+      && /<h2>Used by <span class="count">0<\/span>/.test(pph) && /One of TopoTopo&#39;s own packages: every package can use its outputs by name/.test(pph) && !/Open in editor|data-post="[^"]*bake"/.test(pph),
       'a built-in package has a folder page: its versions, its outputs with their thumbnails, the packages that use it, nothing to edit or bake');
     const th = await req('/p/topotopo/props/thumbs/barrel.png'), thumb = await req('/p/topotopo/props/thumb.png');
     check(th.status === 200 && th.headers['content-type'] === 'image/png' && thumb.status === 200 && thumb.body.length > 1000 && (await req('/p/topotopo/props/thumbs/..%2Fprops.topo')).status === 404

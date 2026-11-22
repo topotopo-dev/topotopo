@@ -133,8 +133,8 @@ export function createProps(ctx) {
       k.append(row(m.kind === 'volume' ? 'corners' : 'CVs', list));
     } else k.append(row('point', xyz(m.points[0])));
     out.push(k);
-    // what the agent reads
-    const a = group('attributes your agent reads');
+    // what a graph reads from the guide
+    const a = group('what a graph reads');
     const t = el('table', 'attrs');
     for (const r of M.markerAttributes(m)) {
       const tr = el('tr');
@@ -142,7 +142,7 @@ export function createProps(ctx) {
       t.append(tr);
     }
     const elems = M.markerElements(m);
-    a.append(t, el('div', 'hint', `inputs/markers.json${ctx.guides.saving() ? ' (saving…)' : ''}: ${elems.text}. Read it with {"type":"file","params":{"path":"inputs/markers.json"}}; this one: group "${M.groupOf(m)}", every ${m.kind}: "@role=${m.kind}"`));
+    a.append(t, el('div', 'hint', `inputs/markers.json${ctx.guides.saving() ? ' (saving…)' : ''}: ${elems.text}`));
     out.push(a);
     return out;
   }

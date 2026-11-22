@@ -178,8 +178,8 @@ export function createPackagesPanel(ctx, host) {
   };
   const copyBox = (text, label = 'Copy') => {
     const box = el('div', 'pkg-copy'), field = el('input');
-    field.readOnly = true; field.value = text; field.setAttribute('aria-label', 'line for your agent');
-    const b = button(label, '', 'copy this line, then give it to your agent', async () => {
+    field.readOnly = true; field.value = text; field.setAttribute('aria-label', 'line to copy');
+    const b = button(label, '', 'copy this line', async () => {
       field.select();
       try { await navigator.clipboard.writeText(text); } catch { document.execCommand('copy'); }
       b.textContent = 'Copied'; setTimeout(() => { b.textContent = label; }, 1500);
@@ -225,9 +225,9 @@ export function createPackagesPanel(ctx, host) {
         for (const t of h.tags) tags.append(el('span', 'tag', t));
         const state = h.used ? `in use (${h.used})` : h.self ? 'this package' : l.standing === 'unlisted' ? `the workspace would list library "${l.name}"` : 'ready to use';
         row.append(name, ...(kind ? [kind] : []), el('span', 'pkg-hitstate dim', state), tags);
-        row.title = `${h.type}${h.label ? ` (${h.label})` : ''} · ${kindTagsLine(h)}${h.description ? `\n${h.description}` : ''}\nTo use it, ask your agent: use ${h.type}`;
-        row.append(button('Copy name', 'pkg-hitcopy', `copy ${h.type}: your agent uses it as a node type`, async () => {
-          try { await navigator.clipboard.writeText(h.type); ctx.message(`copied ${h.type}: ask your agent to use it`, 'ok'); } catch { ctx.message(h.type); }
+        row.title = `${h.type}${h.label ? ` (${h.label})` : ''} · ${kindTagsLine(h)}${h.description ? `\n${h.description}` : ''}\nTo use it, give this name to your AI agent.`;
+        row.append(button('Copy name', 'pkg-hitcopy', `copy ${h.type}`, async () => {
+          try { await navigator.clipboard.writeText(h.type); ctx.message(`copied ${h.type}`, 'ok'); } catch { ctx.message(h.type); }
         }));
         parts.push(row);
       }
@@ -256,7 +256,7 @@ export function createPackagesPanel(ctx, host) {
     if (P.package?.name) parts.push(authorBox());
     if (!rows.length && P.package) {
       const e = el('div', 'pkg-empty');
-      e.append(el('p', '', 'This package uses no packages yet.'), el('p', 'dim', 'Packages are ready-made parts: TopoTopo\'s built-in packages (houses, walls, trees, rocks, props, roads) and your team\'s libraries. Find one above, then ask your agent to use it, for example: "add topotopo/street/lamp_post along the road".'));
+      e.append(el('p', '', 'This package uses no packages yet.'), el('p', 'dim', 'Packages are ready-made parts: TopoTopo\'s built-in packages (houses, walls, trees, rocks, props, roads) and your team\'s libraries. Find one above, then ask your AI agent to use it, for example: "add topotopo/street/lamp_post along the road".'));
       parts.push(e);
     }
     for (const p of rows) parts.push(card(p));
@@ -332,7 +332,7 @@ export function createPackagesPanel(ctx, host) {
     if (p.mustChange) {
       const m = el('div', 'pkg-must');
       m.append(el('div', 'pkg-sub', `Updated to ${p.mustChange.to}: the package's graphs must change; until they do, they report these errors:`), list(p.mustChange.items, 'err'));
-      m.append(el('div', 'pkg-sub', 'Give your agent this line:'), copyBox(agentLine({ target: { package: p.package, to: p.mustChange.to }, mustChange: p.mustChange.items }, P.package?.id)));
+      m.append(el('div', 'pkg-sub', 'Give this line to your AI agent:'), copyBox(agentLine({ target: { package: p.package, to: p.mustChange.to }, mustChange: p.mustChange.items }, P.package?.id)));
       m.append(button('Dismiss', '', 'hide this list (the nodes report their errors until the graphs change)', () => P.dismiss(p.package)));
       box.append(m);
     }
@@ -380,7 +380,7 @@ export function createPackagesPanel(ctx, host) {
       if (c.bigBecause?.length) lines.push(fold('Why it is big', list(c.bigBecause)));
       if (c.changes?.length) lines.push(fold(`${c.changes.length} change${c.changes.length === 1 ? '' : 's'}`, list(c.changes)));
       if (c.warnings?.length) lines.push(fold(`${c.warnings.length} warning${c.warnings.length === 1 ? '' : 's'}`, list(c.warnings)));
-      lines.push(el('div', 'pkg-note', 'Publishing itself is your agent\'s step (or topotopo publish --note "…" in the package folder).'));
+      lines.push(el('div', 'pkg-note', 'To publish, ask your AI agent or run topotopo publish --note "…" in the package folder.'));
       box.append(...lines);
     }
     return box;
@@ -408,7 +408,7 @@ export function createPackagesPanel(ctx, host) {
     b.append(fold('Details', more));
     if (r.mustChange.length) {
       b.append(el('div', 'pkg-sub err', `With ${t.to} the package's graphs must change; until they do, they report these errors:`), list(r.mustChange, 'err'));
-      b.append(el('div', 'pkg-sub', 'Your agent can make these changes. Give it this line:'), copyBox(agentLine(r, P.package?.id)));
+      b.append(el('div', 'pkg-sub', 'Your AI agent can make these changes. Give it this line:'), copyBox(agentLine(r, P.package?.id)));
     }
     const acts = el('div', 'pkg-actions');
     if (confirming.has(t.package)) {

@@ -1,6 +1,6 @@
 // What the viewer says about the package it shows (GET /api/package): the page's title, the graph shown first, and the
-// welcome in the viewport while there is no graph: a package's name with a pointer to TopoTopo's built-in packages and to the agent
-// that builds the graphs, or, for a folder that is no package, that it is none and how to make it one. The plain
+// welcome in the viewport while there is no graph: how graphs get built, the line that connects Claude Code to this
+// folder and TopoTopo's built-in packages. A folder that is no package also says how to make it one. The plain
 // functions are tested in Node (test/viewer-logic.ts).
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -33,6 +33,8 @@ export function unreadMessage(unread = [], names = []) {
  */
 export function welcomeOf(info) {
   const builtin = info?.builtin ?? [];
+  const connect = typeof info?.connect === 'string' && info.connect
+    ? ['No agent connected yet? For Claude Code, run: ' + info.connect] : [];
   const unread = info?.unread?.length ? {
     lead: `A graph file of this ${info.package ? 'package' : 'folder'} cannot be read.`,
     steps: [...info.unread.map(({ file, error }) => `${file}: ${error}`), 'Fix the file (or put back an earlier copy of it) and it shows here at once.'],
@@ -43,8 +45,9 @@ export function welcomeOf(info) {
       kind: 'package', title: p.title || p.id, sub: `package ${p.id}${p.name ? ` · publishes as ${p.name}` : ''}`, builtin,
       lead: 'This package has no graphs yet.',
       steps: [
-        'Ask your agent to build one here, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s built-in packages."',
-        'It shows here as soon as your agent builds it, and so does every change after that.',
+        'A graph is built by an AI agent connected to TopoTopo, such as Claude Code. Ask it, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s built-in packages."',
+        'It shows here as soon as it is built, and so does every change after that.',
+        ...connect,
       ],
       ...unread,
     };
@@ -55,8 +58,9 @@ export function welcomeOf(info) {
     lead: 'This folder is not a TopoTopo package.',
     steps: [
       'A package keeps its graphs, the packages they use and their exports together, and shows in the web app.',
-      `Ask your agent to make this folder a package, or run: topotopo init "${folder}"`,
-      'Your agent can also build a graph here as it is: it shows here at once.',
+      `To make this folder a package, run: topotopo init "${folder}"`,
+      'An AI agent connected to TopoTopo, such as Claude Code, can also build a graph here as it is: it shows here at once.',
+      ...connect,
     ],
     ...unread,
   };
@@ -69,13 +73,33 @@ export function renderWelcome(host, info, show) {
   const w = welcomeOf(info), box = el('div', 'welcome-box');
   box.append(el('h1', '', w.title), el('div', 'welcome-sub', w.sub), el('p', 'welcome-lead', w.lead));
   for (const s of w.steps) {
-    // a command to type shows as one
+    // show a command as code and give it a Copy button
     const p = el('p'), at = s.indexOf('run: ');
-    if (at < 0) p.textContent = s; else p.append(s.slice(0, at + 5), el('code', '', s.slice(at + 5)));
+    if (at < 0) p.textContent = s;
+    else {
+      const command = s.slice(at + 5), code = el('code', '', command), copy = el('button', '', 'Copy');
+      copy.type = 'button';
+      let copied;
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(command); } catch {
+          const selection = window.getSelection(), range = document.createRange();
+          if (!selection) return;
+          range.selectNodeContents(code);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          if (!document.execCommand('copy')) return;
+          selection.removeAllRanges();
+        }
+        copy.textContent = 'Copied';
+        clearTimeout(copied);
+        copied = setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+      };
+      p.append(s.slice(0, at + 5), code, ' ', copy);
+    }
     box.append(p);
   }
   if (w.builtin.length) {
-    box.append(el('h2', '', 'TopoTopo\'s built-in packages: ready-made parts your agent can use'));
+    box.append(el('h2', '', 'TopoTopo\'s built-in packages: ready-made parts for your graphs'));
     const list = el('ul', 'welcome-builtin');
     for (const k of w.builtin) {
       const li = el('li');
@@ -85,6 +109,6 @@ export function renderWelcome(host, info, show) {
     }
     box.append(list);
   }
-  box.append(el('p', 'dim', 'Reference files (meshes, curves, images) dropped anywhere on this page go to inputs/, where your agent reads them.'));
+  box.append(el('p', 'dim', 'Reference files (meshes, curves, images) dropped anywhere on this page go to inputs/, where the graphs read them.'));
   host.replaceChildren(box);
 }
