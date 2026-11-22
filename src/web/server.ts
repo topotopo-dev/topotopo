@@ -34,9 +34,11 @@ import { builtinLibrary, compareVersions, copyRecord, isDefaultOutput, published
 import type { VersionInfo } from '../packages/registry.ts';
 import { engineSha256 } from '../host/engine-code.ts';
 import { isPublishedCopy } from '../host/godot.ts';
-import { TOPOTOPO_VERSION } from '../host/version.ts';
+import { CACHE_MAX_BYTES, cacheClear, cacheRoot, cacheUsage } from '../host/cook.ts';
+import { NODE_CACHE_MAX_BYTES, clearNodeCache, nodeCacheFolder, nodeCacheUsage } from '../host/diskcache.ts';
+import { TOPOTOPO_VERSION, fetchLatestVersion, isNewerVersion } from '../host/version.ts';
 import { BakeQueue } from './bake.ts';
-import { editorPage, embedPage, esc, frontPage, importMap, modelPage, shell, count } from './pages.ts';
+import { editorPage, embedPage, esc, frontPage, importMap, modelPage, shell, count, storagePage } from './pages.ts';
 import type { CardData, OutputRow, PackageData, RootCardData, Urls, UserRow } from './pages.ts';
 import { PICTURE_STRIP, folderPage } from './folder-page.ts';
 import type { FileItem, FolderCard, FolderPageData, NoteBox } from './folder-page.ts';
@@ -95,6 +97,47 @@ class HttpError extends Error {
   constructor(status: number, msg: string) { super(msg); this.status = status; }
 }
 
+/** Bytes in a package's storage folder, or null if there is no such folder. */
+async function storedBytes(at: string, seen: Set<string>, folderOnly = true): Promise<number | null> {
+  const st = await fs.promises.lstat(at, { bigint: true }).catch(() => null);
+  if (st?.isDirectory()) {
+    let bytes = 0;
+    for (const name of await fs.promises.readdir(at).catch(() => [])) {
+      bytes += await storedBytes(path.join(at, name), seen, false) ?? 0;
+    }
+    return bytes;
+  }
+  if (folderOnly || !st?.isFile()) return null;
+  if (st.nlink > 1n) {
+    const key = `${st.dev}:${st.ino}`;
+    if (seen.has(key)) return 0;
+    seen.add(key);
+  }
+  return Number(st.size);
+}
+
+async function packageStorage(listed: Package[]) {
+  const previews = { id: 'previews', bytes: 0, packages: 0, clear: false };
+  const versions = { id: 'versions', bytes: 0, packages: 0, clear: false };
+  const dirs = new Set<string>(), previewFiles = new Set<string>(), versionFiles = new Set<string>();
+  for (const p of listed) {
+    const st = await fs.promises.lstat(p.dir, { bigint: true }).catch(() => null);
+    if (!st?.isDirectory()) continue;
+    const key = st.ino ? `${st.dev}:${st.ino}` : folderKey(p.dir);
+    if (dirs.has(key)) continue;
+    dirs.add(key);
+    const preview = await storedBytes(webDir(p.dir), previewFiles);
+    if (preview !== null) { previews.bytes += preview; previews.packages++; }
+    const published = await storedBytes(path.join(p.dir, 'versions'), versionFiles);
+    const copies = await storedBytes(path.join(p.dir, 'packages'), versionFiles);
+    if (published !== null || copies !== null) {
+      versions.bytes += (published ?? 0) + (copies ?? 0);
+      versions.packages++;
+    }
+  }
+  return [previews, versions];
+}
+
 export interface WebOptions {
   /** default: the config's web.port (7340); 0 picks a free port (tests) */
   port?: number;
@@ -108,6 +151,10 @@ export interface WebOptions {
   auditWait?: number;
   /** what ends the process after POST /api/stop has shut the web app down (`topotopo web`); without it the request is refused */
   onStop?: () => void;
+  /** Cache folders shown and cleared by Storage. */
+  storage?: { nodes?: string; cooks?: string };
+  /** Read the newest published version when asked. */
+  latestVersion?: () => Promise<string>;
 }
 
 export interface WebServer {
@@ -144,6 +191,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const cfg = o.config ?? loadConfig();
   const log = o.log ?? (() => {});
   const bakeOn = o.bake ?? true;
+  const storage = { nodes: o.storage?.nodes ?? nodeCacheFolder(), cooks: o.storage?.cooks ?? cacheRoot() };
   // what /api/health says of this server, hashed now so that a health check never waits for it (topotopo open compares them)
   const engine = engineSha256();
   let base = '';
@@ -1084,6 +1132,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           problems: libraryScans().filter((s) => s.name !== BUILTIN_LIBRARY.name && !fs.existsSync(s.root)).map((s) => `library "${s.name}": no folder ${s.root}`),
         }, urls));
       }
+      if (u.pathname === '/storage') {
+        if (write) throw new HttpError(405, 'GET');
+        return html(storagePage(urls, { nodes: { dir: storage.nodes, limit: NODE_CACHE_MAX_BYTES }, cooks: { dir: storage.cooks, limit: CACHE_MAX_BYTES } }));
+      }
       if (seg[0] === 'static') { const p = readStatic(assetDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'app') { const p = readStatic(appDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'vendor' && seg[1] === 'three') {
@@ -1100,13 +1152,49 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         const memory = running.reduce((sum, editor) => sum + (editor.memory ?? 0), process.memoryUsage().rss);
         return json(200, { ok: true, stoppable: !!o.onStop, baking: queue.size, memory, editors: running });
       }
-      if (u.pathname === '/api/open' || u.pathname === '/api/stop') {
+      if (u.pathname === '/api/storage') {
+        if (req.method !== 'GET') throw new HttpError(405, 'GET');
+        const listed = [...packages.values()].filter((p) => !isBuiltin(p));
+        const [nodes, cooks, own] = await Promise.all([
+          nodeCacheUsage(storage.nodes), cacheUsage(storage.cooks), packageStorage(listed),
+        ]);
+        return json(200, { ok: true, items: [
+          { id: 'nodes', ...nodes, limit: NODE_CACHE_MAX_BYTES, dir: storage.nodes, clear: true },
+          { id: 'cooks', ...cooks, limit: CACHE_MAX_BYTES, dir: storage.cooks, clear: true },
+          ...own,
+        ] });
+      }
+      if (u.pathname === '/api/version/latest') {
+        if (req.method !== 'GET') throw new HttpError(405, 'GET');
+        const current = TOPOTOPO_VERSION;
+        try {
+          const latest = await (o.latestVersion ?? fetchLatestVersion)();
+          return json(200, { ok: true, current, latest, newer: isNewerVersion(latest, current) });
+        } catch (e) {
+          return json(200, { ok: false, error: `npmjs.com could not be reached: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
+      const storageAction = u.pathname === '/api/storage/clear' || u.pathname === '/api/storage/reveal';
+      if (u.pathname === '/api/open' || u.pathname === '/api/stop' || storageAction) {
         // what only the program that starts the web app (and the page's own button) asks: a POST with a header that a page
         // of another origin cannot send without a preflight, which is refused (the Host and Origin checks above apply too)
         if (req.method !== 'POST') throw new HttpError(405, 'POST');
         if (req.headers['x-topotopo-open'] !== '1') throw new HttpError(403, 'only topotopo open and this page may ask for this');
         let text = '';
         for await (const c of req) { text += c; if (text.length > 100_000) throw new HttpError(413, 'too long'); }
+        if (storageAction) {
+          let what: unknown;
+          try { what = JSON.parse(text)?.what; } catch { /* a JSON body is required */ }
+          if (what !== 'nodes' && what !== 'cooks') throw new HttpError(400, 'a JSON body {"what": "nodes" | "cooks"} is expected');
+          const dir = storage[what];
+          if (u.pathname === '/api/storage/clear') {
+            const freed = await (what === 'nodes' ? clearNodeCache(dir) : cacheClear(dir));
+            return json(200, { ok: true, freed });
+          }
+          if (!(await fs.promises.lstat(dir).catch(() => null))?.isDirectory()) throw new HttpError(404, 'the cache folder is not there');
+          reveal(path.resolve(dir));
+          return json(200, { ok: true });
+        }
         if (u.pathname === '/api/stop') {
           // a request to stop: the answer first, then a stop the way a person would (bakes finish, editors end), then the process
           if (!o.onStop) throw new HttpError(501, 'this web app was not started by topotopo web: it cannot be stopped from a request');

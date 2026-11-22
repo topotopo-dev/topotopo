@@ -19,7 +19,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { encodePNG } from '../src/render/png.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
 import { contentSha } from '../src/packages/registry.ts';
-import { COOK_PROTOCOL, RECORD_SCHEMA, canonicalText, freshness, listing, readRecord } from '../src/host/cook.ts';
+import { COOK_PROTOCOL, RECORD_SCHEMA, cacheClear, cacheUsage, canonicalText, freshness, listing, readRecord } from '../src/host/cook.ts';
 import type { CookRecord, EngineOptions, PackageReport } from '../src/host/cook.ts';
 import { cookCommand } from '../src/host/cook-command.ts';
 import { GODOT_COMMANDS, GODOT_GLTF_EXTENSIONS, GODOT_HIDDEN, enablePlugin, excludeAddon, glbJson, godotCommand, godotSetup, godotStatus, markPng, pngPackage } from '../src/host/godot.ts';
@@ -241,6 +241,24 @@ section('the cache: a second checkout of the package is a copy, not a cook');
   const n = await cookPkg(path.join(project('c2'), 'props'), '--no-cache');
   check(['crate', 'panels', 'props', 'scatter'].every((k) => states(n.rep)[k] === 'written'), `--no-cache cooks them (${stateText(n.rep)})`);
   check(fs.existsSync(path.join(tmp, 'cache', 'cook', 'blobs')), 'the cache lives in $TOPOTOPO_CACHE/cook');
+}
+
+section('measuring and clearing the cook cache');
+{
+  const root = path.join(tmp, 'storage');
+  const entry = 'a'.repeat(64);
+  write(path.join(root, 'blobs', 'b'.repeat(64)), 'blob');
+  write(path.join(root, 'blobs', 'c'.repeat(64)), 'blobs');
+  write(path.join(root, entry, 'manifest.json'), '{}');
+  write(path.join(root, 'keep.txt'), 'keep');
+  write(path.join(root, 'other', 'keep.txt'), 'keep');
+  const usage = await cacheUsage(root);
+  check(usage.bytes === 11 && usage.files === 3, 'cook cache usage counts the blobs and the entry manifest');
+  check(await cacheClear(root) === 11, 'clearing the cook cache reports the bytes removed');
+  check(fs.readdirSync(root).sort().join(',') === 'keep.txt,other' && fs.existsSync(path.join(root, 'other', 'keep.txt')),
+    'clearing removes the blob and entry folders and leaves other files and folders');
+  const missing = path.join(tmp, 'no-cook-cache'), empty = await cacheUsage(missing);
+  check(empty.bytes === 0 && empty.files === 0 && await cacheClear(missing) === 0, 'a missing cook cache is empty');
 }
 
 section('the cache is keyed by the engine code: an engine edit under the same version cooks again');

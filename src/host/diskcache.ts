@@ -50,6 +50,7 @@ const zstdDecompress = promisify(zlib.zstdDecompress);
 const MAGIC = 'TTNODE1\0';
 const EXT = '.ttnode';
 const TMP = '.tmp';
+const MEMO = 'engine.json';
 /** Temporary files older than this are the leftovers of a process that died while writing. */
 const STALE_TMP_MS = 3600_000;
 const CHUNK = 64 * 2 ** 20;
@@ -74,6 +75,39 @@ export function nodeCacheFolder(env: Env = process.env, platform: string = proce
     : platform === 'darwin' ? path.join(home, 'Library', 'Caches')
     : (env.XDG_CACHE_HOME || path.join(home, '.cache'));
   return path.join(base, 'topotopo', 'nodes');
+}
+
+async function scanNodeCache(dir: string, clear: boolean): Promise<{ bytes: number; files: number }> {
+  let bytes = 0, files = 0;
+  const seen = new Set<string>();
+  if (!(await fsp.lstat(dir).catch(() => null))?.isDirectory()) return { bytes, files };
+  for (const name of await fsp.readdir(dir).catch(() => [])) {
+    if (!name.endsWith(EXT) && !name.endsWith(TMP) && name !== MEMO) continue;
+    const file = path.join(dir, name);
+    const st = await fsp.lstat(file, { bigint: true }).catch(() => null);
+    if (!st?.isFile()) continue;
+    if (clear) {
+      try { await fsp.unlink(file); } catch { continue; }
+      if (st.nlink > 1n) continue;
+    } else if (st.nlink > 1n) {
+      const key = `${st.dev}:${st.ino}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    bytes += Number(st.size);
+    files++;
+  }
+  return { bytes, files };
+}
+
+/** The results, temporary files and engine memo held by this cache. */
+export async function nodeCacheUsage(dir: string): Promise<{ bytes: number; files: number }> {
+  return scanNodeCache(dir, false);
+}
+
+/** Remove the cache's files, leaving the folder in place. */
+export async function clearNodeCache(dir: string): Promise<number> {
+  return (await scanNodeCache(dir, true)).bytes;
 }
 
 // ---------------------------------------------------------------- the engine's identity
@@ -123,7 +157,7 @@ function engineIdentity(dir: string): string | null {
   if (engineMemo) return engineMemo.id;
   const { stamp, newest } = engineStamp();
   if (newest > performance.timeOrigin) return engineOff();
-  const memoFile = path.join(dir, 'engine.json');
+  const memoFile = path.join(dir, MEMO);
   let known: Record<string, string> = {};
   try { known = JSON.parse(fs.readFileSync(memoFile, 'utf8')) ?? {}; } catch { /* none yet */ }
   let code = typeof known[stamp] === 'string' && /^[0-9a-f]{64}$/.test(known[stamp]) ? known[stamp] : '';

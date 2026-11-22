@@ -1,7 +1,9 @@
 // The web app's pages as plain HTML strings: the front page (the registered workspaces and libraries as cards, a
 // search over every package and output), the package block a package's folder page shows (src/web/folder-page.ts),
-// the embed page a board frames and the 3D view of a model file. Pure functions of their data and a URL builder.
-// Styles and the small page script are files: app/web.css and app/web.js here, app/embed.js in the viewer.
+// the storage page, the embed page a board frames and the 3D view of a model file. Pure functions of their data and a
+// URL builder. Styles and the small page script are files: app/web.css and app/web.js here, app/embed.js in the viewer.
+
+import { TOPOTOPO_VERSION } from '../host/version.ts';
 
 export interface Urls {
   home: string;
@@ -145,10 +147,47 @@ ${body}
 <footer class="running" id="running" data-words="${esc(JSON.stringify(runningWords()))}">
   <span role="status"><span id="running-state">TopoTopo is running</span><span id="running-editors" title="An editor stops by itself 10 minutes after its last tab is closed."></span><span id="running-memory"></span><span id="running-previews"></span></span>
   <button class="btn" type="button" data-stop-topotopo title="Stops TopoTopo and its editors. Open a file to start it again." hidden>Stop TopoTopo</button>
+  <span class="running-version">version ${esc(TOPOTOPO_VERSION)} · ${opts.page === 'storage' ? 'Storage' : '<a href="/storage">Storage</a>'}</span>
 </footer>
 </body>
 </html>
 `;
+}
+
+/** The storage page: each cache with its folder and its size cap (bytes); the sizes are filled in by the page's script. */
+export function storagePage(u: Urls, caches: { nodes: { dir: string; limit: number }; cooks: { dir: string; limit: number } }) {
+  const nodeLimit = size(caches.nodes.limit).replace('.00 GB', ' GB');
+  const cookLimit = size(caches.cooks.limit).replace('.00 GB', ' GB');
+  const rows = [
+    { id: 'nodes', dir: caches.nodes.dir, name: 'Results of slow nodes', description: `Kept so that a graph opens fast the next time. Up to ${nodeLimit}: the ones used longest ago go first.` },
+    { id: 'cooks', dir: caches.cooks.dir, name: 'Cooked files for game engines', description: `What a cook for Godot or Unreal made, kept so that the same cook is not made twice. Up to ${cookLimit}.` },
+    { id: 'previews', name: 'Previews', description: 'The picture and 3D preview of each package, in a .web folder inside it. A missing one is made again.' },
+    { id: 'versions', name: 'Published versions', description: 'Every version a package published and its copies of the packages it uses, inside the package. TopoTopo never removes these.' },
+  ];
+  return shell('Storage · TopoTopo', u, `<header class="bar"><a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a></header>
+<main class="wrap folder storage">
+  <div class="head">
+    <h1>Storage</h1>
+    <p>What TopoTopo keeps on this computer. Clearing a cache is safe: TopoTopo makes the results again when they are needed, which takes longer the first time.</p>
+    <p class="storage-actions">
+      <b>TopoTopo ${esc(TOPOTOPO_VERSION)}</b>
+      <button class="btn" type="button" id="check-version">Check for a newer version</button>
+      <span class="dim" id="version-note" role="status">Asks npmjs.com for the newest version number. Nothing else is sent.</span>
+    </p>
+    <p class="storage-actions" id="version-command" hidden><code>npm install -g topotopo@latest</code> <button class="btn" type="button" data-copy>Copy</button></p>
+  </div>
+  ${rows.map(({ id, dir, name, description }) => `<section class="storage-row" data-storage="${id}">
+    <h2>${name}</h2>
+    <p>${description}</p>
+    <p class="hstats" role="status"><span data-storage-size>measuring…</span> <span data-storage-message></span></p>
+    ${dir === undefined ? '' : `<p class="storage-path"><code>${esc(dir)}</code></p>
+    <p class="storage-actions">
+      <button class="btn" type="button" data-storage-reveal>Show folder</button>
+      <button class="btn" type="button" data-storage-clear disabled>Clear</button>
+      <button class="btn ghost" type="button" data-storage-cancel hidden>Cancel</button>
+    </p>`}
+  </section>`).join('\n')}
+</main>`, { page: 'storage' });
 }
 
 export function editorPage(title: string, edit: string, back: string, u: Urls, error?: string) {

@@ -421,6 +421,48 @@ export function cacheRoot(): string {
   return path.join(process.env.TOPOTOPO_CACHE ? path.resolve(process.env.TOPOTOPO_CACHE) : path.join(os.homedir(), '.topotopo', 'cache'), 'cook');
 }
 
+async function scanCookCache(root: string, clear: boolean): Promise<{ bytes: number; files: number }> {
+  let bytes = 0, files = 0;
+  const seen = new Set<string>();
+  const fsp = fs.promises;
+  async function visit(at: string, folderOnly = false): Promise<void> {
+    const st = await fsp.lstat(at, { bigint: true }).catch(() => null);
+    if (!st) return;
+    if (st.isDirectory()) {
+      for (const name of await fsp.readdir(at).catch(() => [])) await visit(path.join(at, name));
+      if (clear) await fsp.rmdir(at).catch(() => {});
+      return;
+    }
+    if (folderOnly) return;
+    if (clear) {
+      try { await fsp.unlink(at); } catch { return; }
+    }
+    if (!st.isFile()) return;
+    if (st.nlink > 1n) {
+      const key = `${st.dev}:${st.ino}`;
+      if (clear || seen.has(key)) return;
+      seen.add(key);
+    }
+    bytes += Number(st.size);
+    files++;
+  }
+  if (!(await fsp.lstat(root).catch(() => null))?.isDirectory()) return { bytes, files };
+  for (const name of await fsp.readdir(root).catch(() => [])) {
+    if (name === 'blobs' || /^[0-9a-f]{64}$/i.test(name)) await visit(path.join(root, name), true);
+  }
+  return { bytes, files };
+}
+
+/** The files in the blob and cache entry folders. */
+export async function cacheUsage(root: string): Promise<{ bytes: number; files: number }> {
+  return scanCookCache(root, false);
+}
+
+/** Remove the blob and cache entry folders, leaving the cache root in place. */
+export async function cacheClear(root: string): Promise<number> {
+  return (await scanCookCache(root, true)).bytes;
+}
+
 /** A cached result: the deps it read and their hashes, the folders it listed, its files (by name in its folder: blob). */
 interface Candidate { deps: Record<string, string>; folders: Record<string, string[]>; files: Record<string, string>; kind: string; instances: Record<string, number>; warnings: string[] }
 
