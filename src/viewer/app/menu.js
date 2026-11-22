@@ -5,24 +5,32 @@ import { menuStep } from './toolbar.js';
 let open;
 
 export function openMenu(anchor, items, { onPick, place }) {
-  if (open?.anchor === anchor) {
+  if (anchor && open?.anchor === anchor) {
     const { close } = open;
     close();
     return close;
   }
   open?.close();
 
-  const viewport = anchor.closest('#viewport'), doc = viewport.ownerDocument, win = doc.defaultView;
+  const viewport = anchor ? anchor.closest('#viewport') : document.getElementById('viewport');
+  const doc = viewport.ownerDocument, win = doc.defaultView;
   const menu = doc.createElement('div');
   menu.className = 'menu';
   menu.setAttribute('role', 'menu');
-  menu.setAttribute('aria-labelledby', anchor.id);
+  if (anchor) menu.setAttribute('aria-labelledby', anchor.id);
+  else menu.setAttribute('aria-label', 'actions');
   const rows = items.map((item) => {
     if (item.separator) {
       const line = doc.createElement('div');
       line.className = 'menu-separator';
       line.setAttribute('role', 'separator');
       return line;
+    }
+    if (item.heading) {
+      const heading = doc.createElement('div');
+      heading.className = 'menu-heading';
+      heading.textContent = item.heading;
+      return heading;
     }
     const row = doc.createElement('button');
     row.type = 'button';
@@ -38,7 +46,7 @@ export function openMenu(anchor, items, { onPick, place }) {
   menu.append(...rows);
 
   function outside(e) {
-    if (!menu.contains(e.target) && !anchor.contains(e.target)) close();
+    if (!menu.contains(e.target) && !anchor?.contains(e.target)) close();
   }
   function keydown(e) {
     e.stopPropagation();
@@ -53,9 +61,12 @@ export function openMenu(anchor, items, { onPick, place }) {
   }
   function position() {
     if (!menu.offsetWidth) return close();
-    const v = viewport.getBoundingClientRect(), a = anchor.getBoundingClientRect();
-    const x = a.right - v.left - (place === 'beside' ? 0 : menu.offsetWidth);
-    const y = (place === 'beside' ? a.top : a.bottom) - v.top;
+    let { x, y } = place;
+    if (anchor) {
+      const v = viewport.getBoundingClientRect(), a = anchor.getBoundingClientRect();
+      x = a.right - v.left - (place === 'beside' ? 0 : menu.offsetWidth);
+      y = (place === 'beside' ? a.top : a.bottom) - v.top;
+    }
     menu.style.left = `${Math.max(0, Math.min(x, viewport.clientWidth - menu.offsetWidth))}px`;
     menu.style.top = `${Math.max(0, Math.min(y, viewport.clientHeight - menu.offsetHeight))}px`;
   }
@@ -67,14 +78,14 @@ export function openMenu(anchor, items, { onPick, place }) {
     doc.removeEventListener('pointerdown', outside, true);
     doc.removeEventListener('keydown', keydown);
     win.removeEventListener('blur', close);
-    anchor.setAttribute('aria-expanded', 'false');
+    anchor?.setAttribute('aria-expanded', 'false');
     if (menu.contains(doc.activeElement)) doc.activeElement.blur();
-    anchor.blur();
+    anchor?.blur();
     menu.remove();
   }
 
   open = { anchor, close };
-  anchor.setAttribute('aria-expanded', 'true');
+  anchor?.setAttribute('aria-expanded', 'true');
   viewport.append(menu);
   doc.addEventListener('pointerdown', outside, true);
   doc.addEventListener('keydown', keydown);

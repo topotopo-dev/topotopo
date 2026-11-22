@@ -14,12 +14,12 @@ export const ROWS = [
   { label: 'wire / shaded / shaded + wire', text: '5 / 6 / 7', keys: { 5: 'displayWire', 6: 'displayShaded', 7: 'displayShadedWire' } },
   { label: 'select tool (leaves placing)', text: 'Q', keys: { Q: 'selectMode' } },
   {
-    label: 'make a null / curve / area / volume', text: 'Shift+1 / 2 / 3 / 4',
+    label: 'make a null / curve / area / volume (also the + button and right click)', text: 'Shift+1 / 2 / 3 / 4',
     keys: { 'Shift+1': 'placeNull', 'Shift+2': 'placeCurve', 'Shift+3': 'placeArea', 'Shift+4': 'placeVolume' },
   },
-  { label: 'finish / remove the last point / cancel, while placing', text: 'Enter / Backspace / Esc', keys: { Enter: 'finish', Backspace: 'removeLast', Esc: 'cancel' } },
+  { label: 'finish / remove the last point / cancel, while placing', text: 'Enter or double-click / Backspace / Esc', keys: { Enter: 'finish', Backspace: 'removeLast', Esc: 'cancel' } },
   ...SELECTION_ROWS.map(([label, text]) => ({ label, text })),
-  { label: 'add a CV to a curve or an area / remove one', text: 'double-click its line / the CV' },
+  { label: 'add a point to a curve or an area / remove one', text: 'double-click its line / the point, or right click' },
   { label: 'delete the selection', text: 'Delete', keys: { Delete: 'delete' } },
   {
     label: 'undo / redo (guides and vars)', text: 'Ctrl+Z / Ctrl+Y, Ctrl+Shift+Z',

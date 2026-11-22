@@ -171,8 +171,8 @@ next node (long nodes such as erosion stop between their iterations; others fini
 view keeps the last finished result. Changing a value while a cook runs starts over with the newest value. The status
 bar also says what the view shows and its size; other messages appear over the view and clear themselves.
 **Edge check** in the viewport's shading menu draws open, non-manifold and flipped edges as the render tool does.
-**Guides** lay a scene out by hand where sliders are not enough: the **+** button in the viewport (or Shift+1–4)
-places nulls, draws curves and areas and drags volumes, on your reference layers or the ground. In select mode, drag a
+**Guides** lay a scene out by hand where sliders are not enough: the **+** button in the viewport, a right click or Shift+1–4
+places a null, draws a curve or an area and sets a volume's two corners, on your reference layers or the ground. Drag a
 guide to move it and a point (a CV, a null, a volume's corner) to move that point; double-click a curve's line to add
 a CV and a CV to remove it; every change is one undo step. Guides are saved as `inputs/markers.json`, curves and areas
 as polylines and nulls as points, each with its `name` and `role`, and a graph reads them like any input

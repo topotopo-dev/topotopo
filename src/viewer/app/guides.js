@@ -14,6 +14,7 @@ import { COLORS, fatSegments, lineMaterial, disposeTree } from './scene.js';
 import { fmtLen } from './units.js';
 import { AXIS_VIEWS } from './camera.js';
 import { parseId, pieceId } from './selection.js';
+import { isDoubleClick, isDrag } from './pointer.js';
 
 export const guideId = (id) => `guide:${id}`;
 /** Whether a guide's CVs are selected one by one (curves and areas); a null and a volume select whole. */
@@ -178,7 +179,7 @@ export function createGuides(ctx) {
     for (const [id, d] of G.drawn) if (!seen.has(id)) { ctx.guidesRoot.remove(d.obj); disposeTree(d.obj); G.drawn.delete(id); }
     ctx.requestRender();
   };
-  /** The draft being placed: curve or area CVs with the rubber band to the cursor, or the volume being dragged. */
+  /** The draft being placed: curve or area CVs with the rubber band to the cursor, or the volume's live box. */
   G.drawDraft = () => {
     for (const o of [...G.draftRoot.children]) { G.draftRoot.remove(o); disposeTree(o); }
     const d = G.draft;
@@ -196,24 +197,27 @@ export function createGuides(ctx) {
   };
 
   // ------------------------------------------------------------------ saving: the whole list, the latest wins
-  let saving = false;
+  let saving = false, added = null;
   const save = ctx.coalesce(async () => {
     const body = M.markersBody(G.list);
     if (body === G.saved) return;
+    const announce = !added;
     saving = true;
     const r = await api.saveMarkers(body).finally(() => { saving = false; });
     if (r.ok) {
       G.saved = body;
-      const file = `inputs/markers.json${ctx.layers.where ? ' ' + ctx.layers.where : ''}`;
-      if (M.markersBody(G.list) !== body) { /* a newer list is on its way */ }
-      else if (G.mode) G.hint(` · saved to ${file}`);
-      else ctx.message(r.count ? `${r.count} guide${r.count === 1 ? '' : 's'} saved to ${file} (${r.points} points, ${r.prims} prims)` : `no guides: ${file} removed`, 'ok');
+      if (announce && !G.mode && M.markersBody(G.list) === body) {
+        const file = `inputs/markers.json${ctx.layers.where ? ' ' + ctx.layers.where : ''}`;
+        ctx.message(r.count ? `${r.count} guide${r.count === 1 ? '' : 's'} saved to ${file} (${r.points} points, ${r.prims} prims)` : `no guides: ${file} removed`, 'ok');
+      }
     } else ctx.message(`guides not saved — ${r.error}`, 'err');
     ctx.emit('guides');
   });
   G.saving = () => saving || (G.saved === null ? G.list.length > 0 : M.markersBody(G.list) !== G.saved);
   const canLoad = () => M.shouldReloadGuides(G.saving(), !!(G.draft || G.down || G.dragging));
   const setList = (list) => {
+    // A placement already has its own confirmation, even if its save waits behind another edit.
+    if (list.at(-1) !== added) added = null;
     G.list = M.cloneMarkers(list);
     entries();
     ctx.selection.prune(alive);
@@ -255,6 +259,7 @@ export function createGuides(ctx) {
   G.add = (m) => {
     const marker = { id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), kind: m.kind, name: M.nextName(G.list, m.kind), points: m.points,
       ...(m.kind === 'site' ? { radius: G.defaults.radius } : {}), ...(m.kind === 'volume' ? { height: G.defaults.height } : {}) };
+    added = marker;
     G.change(`add ${marker.name}`, (list) => { list.push(marker); });
     ctx.selection.apply([guideId(marker.id)]);
     return marker;
@@ -355,109 +360,116 @@ export function createGuides(ctx) {
   };
 
   // ------------------------------------------------------------------ placement modes
+  let note = '', lastPointClick = null;
   const HINT = {
-    site: () => 'Place null — click the ground or the geometry · Esc leaves',
-    path: () => (G.draft ? `Draw curve — ${G.draft.points.length} CV${G.draft.points.length === 1 ? '' : 's'} · click adds one · Enter finishes · Backspace removes the last · Esc cancels` : 'Draw curve — click CVs along it · Enter finishes · Esc leaves'),
-    zone: () => (G.draft ? `Draw area — ${G.draft.points.length} corner${G.draft.points.length === 1 ? '' : 's'} · click adds one · Enter or a click on the first corner closes it · Backspace removes the last · Esc cancels` : 'Draw area — click its corners · Enter closes it · Esc leaves'),
-    volume: () => (G.draft ? `Drag volume — ${fmtLen(Math.abs(G.draft.b.x - G.draft.a.x))} × ${fmtLen(Math.abs(G.draft.b.z - G.draft.a.z))} m, ${fmtLen(G.defaults.height)} m high` : 'Drag volume — drag a rectangle on the ground or the geometry; it rises by its height · Esc leaves'),
+    site: () => 'Null: click the ground or the geometry',
+    path: (n) => n ? `Curve: ${n} CV${n === 1 ? '' : 's'} · click to add one` : 'Curve: click to add a CV',
+    zone: (n) => n ? `Area: ${n} corner${n === 1 ? '' : 's'} · click to add one, or click the first corner to close it` : 'Area: click to add a corner',
+    volume: () => {
+      const d = G.draft;
+      return d ? `Volume: click the opposite corner · ${fmtLen(Math.abs(d.b.x - d.a.x))} × ${fmtLen(Math.abs(d.b.z - d.a.z))} m, ${fmtLen(G.defaults.height)} m high` : 'Volume: click one corner';
+    },
   };
-  G.hint = (extra = '') => { if (G.mode) ctx.message(HINT[G.mode]() + extra, 'busy'); };
+  G.hintState = () => {
+    if (!G.mode) return null;
+    const n = G.draft?.points?.length ?? 0, hasPoints = hasCVs({ kind: G.mode });
+    return { text: HINT[G.mode](n), finish: hasPoints ? n >= M.minPoints(G.mode) : null, removeLast: hasPoints ? n > 0 : null, note };
+  };
+  const hint = (text = '') => { note = text; ctx.emit('hint'); };
   G.setMode = (kind) => {
     G.draft = null; G.cursor = null; G.down = null;
+    lastPointClick = null; note = '';
     G.mode = kind;
     G.drawDraft();
     ctx.emit('mode');
-    if (kind) G.hint(); else ctx.message('');
+  };
+  const placed = (m) => {
+    G.setMode(null);
+    const marker = G.add(m);
+    ctx.message(`added ${marker.name}`, 'ok', 1500, 1500);
   };
   const finish = () => {
-    const d = G.draft;
-    if (!d?.points) return false;
-    const need = M.minPoints(d.kind);
-    if (d.points.length < need) { G.hint(` · a${d.kind === 'zone' ? 'n area' : ' curve'} needs ${need} points`); return true; }
-    G.draft = null; G.cursor = null; G.drawDraft();
-    G.add({ kind: d.kind, points: d.points });
-    G.hint(` · added ${G.list[G.list.length - 1].name}`);
-    return true;
+    if (G.mode !== 'path' && G.mode !== 'zone') return;
+    const points = G.draft?.points ?? [], need = M.minPoints(G.mode);
+    if (points.length < need) return hint(G.mode === 'zone' ? 'an area needs 3 points' : 'a curve needs 2 points');
+    placed({ kind: G.mode, points });
   };
   /** Enter, Backspace, Esc in a placement mode; true when handled. */
   G.key = (action) => {
     if (!G.mode) return false;
-    if (action === 'finish') return finish() || true;
+    if (action === 'finish') { finish(); return true; }
     if (action === 'removeLast') {
       if (!G.draft?.points) return true;
       G.draft.points.pop();
       if (!G.draft.points.length) { G.draft = null; G.cursor = null; }
-      G.drawDraft(); G.hint();
+      lastPointClick = null;
+      G.drawDraft(); hint();
       return true;
     }
     if (action === 'cancel') {
-      if (G.draft) { G.draft = null; G.cursor = null; G.drawDraft(); G.hint(' · cancelled'); return true; }
       G.setMode(null);
-      return false; // Esc goes on to clear the selection
+      return true;
     }
     return false;
   };
   const mm = (p) => [M.mm(p.x), M.mm(p.y), M.mm(p.z)];
+  const addPoint = (p) => {
+    if (G.mode === 'site') return placed({ kind: 'site', points: [mm(p)] });
+    if (G.mode === 'volume') G.draft = { kind: 'volume', y: p.y, a: p.clone(), b: p.clone() };
+    else {
+      G.draft ??= { kind: G.mode, points: [] };
+      G.draft.points.push(mm(p));
+    }
+    G.cursor = null;
+    G.drawDraft(); hint();
+  };
+  G.startAt = (kind, point) => {
+    G.setMode(kind);
+    if (point) addPoint(point);
+  };
   /** The scene is still being drawn: the output's cook and GLB in flight, or a shown reference layer loading. */
   const sceneLoading = () => !!ctx.output?.loading || !!ctx.layers?.loading?.();
-  const LOADING = ' · the scene is still loading: place it once it is drawn';
-  /**
-   * Where a click puts a guide point: the surface under the pointer, else the grid plane; but while the scene is still
-   * loading a click on no surface places nothing (the terrain not drawn yet would leave the guide on the grid under it).
-   */
-  const placeAt = (slot, x, y) => {
-    const hit = ctx.surfacePoint(slot, x, y);
-    return hit && !hit.surface && sceneLoading() ? { wait: true } : hit;
-  };
   /** A left press in a placement mode (x, y in viewport pixels). */
-  G.pointerDown = (slot, x, y) => {
-    G.down = { slot, x, y };
-    if (G.mode !== 'volume') return;
-    const hit = placeAt(slot, x, y);
-    if (hit?.wait) G.down.wait = true;
-    else if (hit) { G.draft = { kind: 'volume', y: hit.point.y, a: hit.point.clone(), b: hit.point.clone() }; G.drawDraft(); }
-  };
+  G.pointerDown = (_slot, x, y) => { G.down = { x, y }; };
   G.pressCancel = () => { G.down = null; };
   G.pointerMove = (slot, x, y) => {
     if (!G.mode) return;
     if (G.draft?.kind === 'volume') {
-      if (!G.down) return;
-      // on the level of the first corner, through the view the drag began in
-      const p = ctx.planePoint(G.down.slot, x, y, G.draft.y);
-      if (p) { G.draft.b = p; G.drawDraft(); G.hint(); }
+      const p = ctx.planePoint(slot, x, y, G.draft.y);
+      if (p) { G.draft.b = p; G.drawDraft(); ctx.emit('hint'); }
     } else if (G.draft?.points?.length) {
       const hit = ctx.surfacePoint(slot, x, y);
       G.cursor = hit ? hit.point : null;
       G.drawDraft();
     }
   };
-  /** The release of a left press: one click adds exactly one point (or one null); a drag finishes a volume. */
-  G.pointerUp = (slot, x, y) => {
+  /** A placement click adds a point or finishes the guide. */
+  G.pointerUp = (slot, x, y, t = performance.now()) => {
     const down = G.down;
     G.down = null;
-    if (!G.mode || !down) return;
-    const moved = Math.hypot(x - down.x, y - down.y);
-    if (G.mode === 'volume') {
-      const d = G.draft;
-      G.draft = null; G.drawDraft();
-      if (!d) return G.hint(down.wait ? LOADING : ' · nothing under the pointer');
-      if (moved < 5 || Math.abs(d.b.x - d.a.x) < 0.01 || Math.abs(d.b.z - d.a.z) < 0.01) return G.hint(' · drag to draw the box');
-      G.add({ kind: 'volume', points: [[M.mm(d.a.x), M.mm(d.y), M.mm(d.a.z)], [M.mm(d.b.x), M.mm(d.y), M.mm(d.b.z)]] });
-      return G.hint(` · added ${G.list[G.list.length - 1].name}`);
+    if (!G.mode || !down || isDrag(x - down.x, y - down.y)) return;
+    const d = G.draft;
+    if (d?.kind === 'volume') {
+      const p = ctx.planePoint(slot, x, y, d.y);
+      if (!p) return hint('nothing under the pointer');
+      d.b = p;
+      if (Math.abs(p.x - d.a.x) < 0.01 || Math.abs(p.z - d.a.z) < 0.01) {
+        G.drawDraft();
+        return hint('the volume needs a size');
+      }
+      return placed({ kind: 'volume', points: [mm(d.a), mm(p)] });
     }
-    if (moved > 5) return; // a drag is not a click
-    if (G.mode === 'zone' && G.draft?.points.length >= 3) {
-      const f = ctx.views.project(slot, V3(G.draft.points[0]));
-      if (f && Math.hypot(f.x - x, f.y - y) < 10) { finish(); return; }
+    if (d?.kind === 'zone' && d.points.length >= 3) {
+      const f = ctx.views.project(slot, V3(d.points[0]));
+      if (f && Math.hypot(f.x - x, f.y - y) < 10) return finish();
     }
-    const hit = placeAt(slot, x, y);
-    if (hit?.wait) return G.hint(LOADING);
-    if (!hit) return G.hint(' · nothing under the pointer');
-    const p = mm(hit.point);
-    if (G.mode === 'site') { const m = G.add({ kind: 'site', points: [p] }); return G.hint(` · added ${m.name}`); }
-    if (!G.draft) G.draft = { kind: G.mode, points: [] };
-    G.draft.points.push(p);
-    G.drawDraft(); G.hint();
+    const click = { x, y, t };
+    if (isDoubleClick(lastPointClick, click)) return finish();
+    const hit = ctx.surfacePoint(slot, x, y);
+    if (!hit) return hint('nothing under the pointer');
+    if (!hit.surface && sceneLoading()) return hint('the scene is still loading: place it once it is drawn');
+    if (G.mode === 'path' || G.mode === 'zone') lastPointClick = click;
+    addPoint(hit.point);
   };
   G.leave = () => { if (G.cursor) { G.cursor = null; G.drawDraft(); } };
 
