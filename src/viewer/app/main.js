@@ -25,7 +25,8 @@ import { compareLine, cookLine, isRunning } from './cooking.js';
 import { pageTitle, defaultGraph, renderWelcome, unreadMessage } from './welcome.js';
 import { kindLine, resultName } from './output-info.js';
 import * as PT from './pointer.js';
-import { moveGizmo, hitGizmo } from './transform.js';
+import { moveGizmo, hitGizmo, ringPoints, rotateGizmo, hitRing, scaleGizmo, hitScale } from './transform.js';
+import { turnY } from './markers.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -430,35 +431,70 @@ function gizmoShapes(slot, target, camera = views.camera(slot)) {
   const at = new THREE.Vector3(...target.pivot);
   const pivot = views.project(slot, at, camera);
   if (!pivot) return [];
+  const depth = (p) => -p.clone().applyMatrix4(camera.matrixWorldInverse).z;
+  const project = (p) => {
+    const point = new THREE.Vector3(...p), to = views.project(slot, point, camera);
+    return to && { ...to, depth: depth(point) };
+  };
   let unit = views.worldPerPixel(slot) * GIZMO_PX;
   // Perspective metres per pixel grow with the pivot's depth, relative to the camera target's depth.
-  if (camera.isPerspectiveCamera) unit *= -at.clone().applyMatrix4(camera.matrixWorldInverse).z / views.cam(slot).dist;
+  if (camera.isPerspectiveCamera) unit *= depth(at) / views.cam(slot).dist;
+  if (ctx.tool === 'rotate') {
+    const rings = Object.fromEntries(target.rings.map((axis) => [axis, ringPoints(target.pivot, axis, unit).map(project)]));
+    return rotateGizmo(rings);
+  }
   const axes = {};
-  ['x', 'y', 'z'].forEach((axis, i) => {
-    const end = at.clone().setComponent(i, at.getComponent(i) + unit);
-    const to = views.project(slot, end, camera);
-    // how far the arrow's end is from the camera: the nearer arrow is drawn, and picked, on top
-    axes[axis] = to && { ...to, depth: -end.applyMatrix4(camera.matrixWorldInverse).z };
-  });
+  if (ctx.tool === 'move' || target.scales === 'axes') {
+    ['x', 'y', 'z'].forEach((axis, i) => {
+      const end = target.pivot.slice();
+      end[i] += unit;
+      axes[axis] = project(ctx.tool === 'scale' ? turnY(end, target.pivot, target.frame) : end);
+    });
+  }
+  if (ctx.tool === 'scale') return scaleGizmo(pivot, axes, GIZMO_PX, target.scales);
   return moveGizmo(pivot, axes, GIZMO_PX);
+}
+function gizmoHit(shapes, x, y) {
+  if (ctx.tool === 'rotate') return hitRing(shapes, x, y);
+  const id = ctx.tool === 'scale' ? hitScale(shapes, x, y) : hitGizmo(shapes, x, y);
+  return id ? { id } : null;
 }
 function gizmoAt(slot, x, y) {
   const target = ctx.guides.gizmoTarget();
-  return target ? hitGizmo(gizmoShapes(slot, target), x, y) : null;
+  if (!target) return null;
+  const shapes = gizmoShapes(slot, target), hit = gizmoHit(shapes, x, y);
+  return hit ? { ...hit, shape: shapes.find((shape) => shape.id === hit.id) } : null;
+}
+/** What lights up under the pointer: nothing behind a gizmo shape, unless a modifier is held (the press then skips the gizmo). */
+function hoverAt(slot, x, y, plain = true) {
+  if (plain && slot >= 0 && gizmoAt(slot, x, y)) slot = -1;
+  ctx.select.hover(slot, x, y);
 }
 function gizmoMark(shape, highlight) {
-  const axis = shape.kind === 'arrow' ? shape.id : Object.keys(AXIS_COLORS).find((a) => !shape.id.includes(a));
-  const color = highlight ? '#ffd24a' : AXIS_COLORS[axis];
+  const axis = shape.kind === 'square' ? Object.keys(AXIS_COLORS).find((a) => !shape.id.includes(a)) : shape.id;
+  const color = highlight ? '#ffd24a' : shape.kind === 'centre' ? '#f0a030' : AXIS_COLORS[axis];
+  if (shape.kind === 'ring') {
+    const points = shape.points;
+    const path = points.map((p, k) => p ? `${points[k - 1] ? 'L' : 'M'}${p.x},${p.y}` : '').join(' ');
+    const first = points[0], last = points.at(-1);
+    const close = first && last ? ` L${first.x},${first.y}` : '';
+    return `<path d="${path}${close}" fill="none" stroke="${color}" stroke-width="2"/>`;
+  }
+  if (shape.kind === 'centre') {
+    return `<rect x="${shape.at.x - 6}" y="${shape.at.y - 6}" width="12" height="12" fill="none" stroke="${color}"/>`;
+  }
   if (shape.kind === 'square') {
     return `<polygon points="${shape.corners.map(({ x, y }) => `${x},${y}`).join(' ')}" fill="${color}" fill-opacity=".35" stroke="${color}" stroke-width="1"/>`;
   }
   const { from, to } = shape;
+  const line = `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}" stroke-width="2.5"/>`;
+  if (shape.kind === 'stem') return `${line}<rect x="${to.x - 3.5}" y="${to.y - 3.5}" width="7" height="7" fill="${color}"/>`;
   const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy);
   const ux = dx / length, uy = dy / length, bx = to.x - 9 * ux, by = to.y - 9 * uy;
-  return `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}" stroke-width="2.5"/><polygon points="${to.x},${to.y} ${bx - 4 * uy},${by + 4 * ux} ${bx + 4 * uy},${by - 4 * ux}" fill="${color}"/>`;
+  return `${line}<polygon points="${to.x},${to.y} ${bx - 4 * uy},${by + 4 * ux} ${bx + 4 * uy},${by - 4 * ux}" fill="${color}"/>`;
 }
 
-/** Readouts, the move tool handles, labels and the pivot cross of every view (DOM, no WebGL). */
+/** Readouts, gizmos, labels and the pivot cross of every view (DOM, no WebGL). */
 function drawOverlays() {
   const viewportWidth = viewport.clientWidth;
   const selBox = ctx.selection.size ? ctx.select.selectionBounds() : null;
@@ -504,11 +540,11 @@ function drawOverlays() {
     const q = pivot && views.project(i, pivot, camera);
     const cross = q ? `<g stroke="#f0a030" stroke-width="1.5"><line x1="${q.x - 6}" y1="${q.y}" x2="${q.x + 6}" y2="${q.y}"/><line x1="${q.x}" y1="${q.y - 6}" x2="${q.x}" y2="${q.y + 6}"/></g>` : '';
     const shapes = target ? gizmoShapes(i, target, camera) : [];
-    const hover = cursor.slot === i && (!drag || drag.kind === 'press') ? hitGizmo(shapes, cursor.x, cursor.y) : null;
+    const hover = cursor.slot === i && (!drag || drag.kind === 'press') ? gizmoHit(shapes, cursor.x, cursor.y)?.id : null;
     if (hover) gizmoHover = hover;
-    const handles = shapes.filter((shape) => !activeGizmo || shape.id === activeGizmo)
+    const marks = shapes.filter((shape) => !activeGizmo || shape.id === activeGizmo)
       .map((shape) => gizmoMark(shape, shape.id === (activeGizmo ?? hover))).join('');
-    ov.marks.innerHTML = cross || handles ? `<g transform="translate(${-s.rect.x} ${-s.rect.y})">${handles}${cross}</g>` : '';
+    ov.marks.innerHTML = cross || marks ? `<g transform="translate(${-s.rect.x} ${-s.rect.y})">${marks}${cross}</g>` : '';
   }
   if (activeGizmo || gizmoHover) canvas.style.cursor = 'move';
   else if (!drag) {
@@ -614,7 +650,7 @@ ctx.on('hint', renderHint);
 
 function syncTop() {
   const tool = ctx.guides.mode ? 'add' : ctx.tool;
-  for (const [id, pressed] of [['tool-select', tool === 'select'], ['tool-move', tool === 'move'], ['tool-add', tool === 'add'], ['quad', views.quad]]) {
+  for (const [id, pressed] of [...TOOL_BUTTONS.map(({ id }) => [id, id === `tool-${tool}`]), ['quad', views.quad]]) {
     const el = $(id);
     el.classList.toggle('on', pressed);
     el.setAttribute('aria-pressed', String(pressed));
@@ -671,8 +707,8 @@ function run(action, point = null) {
     case 'viewPersp': case 'viewTop': case 'viewFront': case 'viewRight':
       return setViewCamera(action.slice(4).toLowerCase());
     case 'ortho': views.toggleOrtho(views.active); saveViews(); return ctx.requestRender();
-    case 'selectMode': case 'moveMode':
-      ctx.tool = action === 'moveMode' ? 'move' : 'select';
+    case 'selectMode': case 'moveMode': case 'rotateMode': case 'scaleMode':
+      ctx.tool = action.slice(0, -4);
       return ctx.guides.setMode(null);
     case 'displayWire': case 'displayShaded': case 'displayShadedWire':
       slot.shading = { displayWire: 'wire', displayShaded: 'shaded', displayShadedWire: 'shadedWire' }[action]; break;
@@ -802,8 +838,8 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   // nothing happens until the release (a click) or a few pixels of travel (a drag): pointermove decides which
   const shape = !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey ? gizmoAt(slot, x, y) : null;
-  if (shape) suppressDoublePress = true;
-  const hit = shape ? { kind: 'gizmo', shape, ray: views.ray(slot, x, y).ray } : ctx.select.pick(slot, x, y);
+  if (shape) { suppressDoublePress = true; ctx.select.hover(-1); }
+  const hit = shape ? { kind: 'gizmo', shape, ray: views.ray(slot, x, y).ray, tool: ctx.tool } : ctx.select.pick(slot, x, y);
   const plan = PT.pressPlan({ target: hit?.kind ?? 'empty', shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, movable: !!hit?.handle });
   drag = { kind: 'press', slot, x, y, id: e.pointerId, hit, plan };
 });
@@ -828,8 +864,8 @@ canvas.addEventListener('pointermove', (e) => {
         ctx.guides.dragStart(slot, x0, y0, hit.handle);
         requestOverlays();
       } else if (plan.drag === 'gizmo') {
-        drag = { kind: 'gizmo', slot, id };
-        ctx.guides.gizmoStart(hit.shape, hit.ray);
+        drag = { kind: 'gizmo', slot, id, x: x0, y: y0 };
+        if (hit.tool === ctx.tool) ctx.guides.gizmoStart(hit.shape, hit.ray, GIZMO_PX);
       } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); requestOverlays(); }
       else drag = navDrag('tumble', slot, x0, y0, id);
     } else if (drag.kind === 'place' && PT.isDrag(x - drag.x, y - drag.y)) {
@@ -845,7 +881,7 @@ canvas.addEventListener('pointermove', (e) => {
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
     } else if (drag.kind === 'guide') ctx.guides.dragMove(drag.slot, x, y);
-    else if (drag.kind === 'gizmo') ctx.guides.gizmoMove(views.ray(drag.slot, x, y).ray);
+    else if (drag.kind === 'gizmo') ctx.guides.gizmoMove(views.ray(drag.slot, x, y).ray, x - drag.x, y - drag.y);
     else if (drag.kind === 'box') ctx.select.move(x, y);
     return;
   }
@@ -853,9 +889,7 @@ canvas.addEventListener('pointermove', (e) => {
   const slot = trackCursor(x, y);
   requestOverlays();
   if (ctx.guides.mode) { if (slot >= 0) ctx.guides.pointerMove(slot, x, y); }
-  // a move handle is in front of what lies under it, so nothing behind it lights up
-  else if (slot >= 0 && !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && gizmoAt(slot, x, y)) ctx.select.hover(-1);
-  else ctx.select.hover(slot, x, y);
+  else hoverAt(slot, x, y, !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey);
 });
 function showContextMenu({ handle, slot, x, y }, place) {
   setActive(slot);
@@ -884,7 +918,7 @@ const endDrag = (e, cancel = false) => {
   const { x, y } = at(e);
   if (!cancel) trackCursor(x, y);
   // what is under the cursor now that the camera has moved
-  if (d.kind === 'nav') { saveViews(); if (!cancel) ctx.select.hover(views.slotAt(x, y), x, y); }
+  if (d.kind === 'nav') { saveViews(); if (!cancel) hoverAt(cursor.slot, x, y); }
   else if (d.kind === 'navPress' && !cancel && e.button === 2 && d.context && !ctx.guides.mode && !PT.isDrag(x - d.x, y - d.y)) showContextMenu(d, { x, y });
   else if (d.kind === 'place') { if (cancel) ctx.guides.pressCancel(); else ctx.guides.pointerUp(d.slot, x, y, e.timeStamp); }
   else if (d.kind === 'guide') ctx.guides.dragEnd(cancel);
@@ -897,7 +931,7 @@ const endDrag = (e, cancel = false) => {
   }
   requestOverlays();
 };
-// A placement or a move handle click does not double-click the guide underneath.
+// A placement or a gizmo click does not double-click the guide underneath.
 canvas.addEventListener('click', (e) => { suppressDoubleClick = suppressDoublePress || (e.detail > 1 && suppressDoubleClick); });
 canvas.addEventListener('dblclick', (e) => {
   if (suppressDoubleClick || ctx.guides.mode || drag) return;
@@ -920,7 +954,7 @@ canvas.addEventListener('wheel', (e) => {
   const hit = ctx.select.navigationPoint(slot, x, y); if (hit) views.anchor(slot, hit);
   views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
   clearTimeout(canvas.wheelTimer); canvas.wheelTimer = setTimeout(saveViews, 300);
-  ctx.select.hover(slot, x, y);
+  hoverAt(slot, x, y);
   ctx.requestRender();
 }, { passive: false });
 

@@ -51,7 +51,7 @@ const throws = (f: () => unknown) => { try { f(); return null; } catch (e: any) 
 
 section('keys and mouse (section 9)');
 {
-  check(km.ROWS.length === 18 + pt.SELECTION_ROWS.length
+  check(km.ROWS.length === 20 + pt.SELECTION_ROWS.length
     && km.ROWS.every((r: any) => typeof r.label === 'string' && r.label.length > 0 && typeof r.text === 'string' && r.text.length > 0),
     'every row has a label and binding text');
   const seen = new Set<string>();
@@ -95,9 +95,9 @@ section('keys and mouse (section 9)');
     'Ctrl+Z undoes and Ctrl+Y and Ctrl+Shift+Z redo');
   check(m(ev('?', 'Slash', shift)) === 'overlay' && m(ev('/', 'Slash', shift)) === 'overlay' && m(ev('/', 'Slash')) === null,
     'Shift with the slash key opens the overlay whether the event says "?" or "/"');
-  check(['E', 'R', 'X', 'C', 'V', 'Z'].every((k) => m(ev(k.toLowerCase(), 'Key' + k)) === null)
+  check(['X', 'C', 'V', 'Z'].every((k) => m(ev(k.toLowerCase(), 'Key' + k)) === null)
     && m(ev('2', 'Digit2', { altKey: true })) === null,
-    'E, R, X, C, V, Z and Alt+2 are unbound');
+    'X, C, V, Z and Alt+2 are unbound');
   check(Array.from({ length: 10 }, (_, n) => m(ev(String(n), 'Numpad' + n))).every((a) => a === null)
     && m(ev('Home', 'Numpad7')) === null && m(ev('Delete', 'NumpadDecimal')) === null,
     'numpad digits and decimal are unbound with NumLock on or off');
@@ -737,22 +737,22 @@ section('selection model: CVs, boxes and the guides');
   const area = { id: 'z', kind: 'zone', name: 'area1', points: [[0, 0, 0], [4, 0, 0], [4, 0, 4], [0, 0, 4]] };
   const list = [site, curve, area], original = JSON.stringify(list);
   const hidden = new Set<string>();
-  const wholeNull = tr.moveTargets(list, ['guide:n'], hidden)!;
-  const wholeCurve = tr.moveTargets(list, ['guide:c#1', 'guide:c'], hidden)!;
+  const wholeNull = tr.transformTargets(list, ['guide:n'], hidden)!;
+  const wholeCurve = tr.transformTargets(list, ['guide:c#1', 'guide:c'], hidden)!;
   const delta = [2, 1, -1], movedCurve = wholeCurve.move(delta);
   check(wholeNull.pivot.join() === '30,0,0' && wholeNull.guides === 1 && wholeNull.cvs === 0 && wholeNull.name === site.name
     && wholeNull.move(delta)[0].points[0].join() === '32,1,-1', 'a selected null moves as a whole');
   check(wholeCurve.pivot.join() === '2,0,2' && wholeCurve.guides === 1 && wholeCurve.cvs === 0
     && JSON.stringify(movedCurve[1].points) === '[[3,1,-1],[5,1,3]]', 'a whole curve moves every point even if a CV is also selected');
-  const corners = tr.moveTargets(list, ['guide:z#0', 'guide:z#2'], hidden)!;
+  const corners = tr.transformTargets(list, ['guide:z#0', 'guide:z#2'], hidden)!;
   const movedArea = corners.move(delta);
   check(corners.pivot.join() === '2,0,2' && corners.guides === 1 && corners.cvs === 2
     && JSON.stringify(movedArea[2].points) === '[[2,1,-1],[4,0,0],[6,1,3],[0,0,4]]',
     'two selected area CVs pivot about their mean and leave the other CVs where they are');
-  const mixed = tr.moveTargets(list, ['guide:c', 'guide:z#1', 'guide:z#2'], hidden)!;
+  const mixed = tr.transformTargets(list, ['guide:c', 'guide:z#1', 'guide:z#2'], hidden)!;
   check(mixed.guides === 2 && mixed.cvs === 2 && mixed.pivot.join() === '3.333,0,2',
     'a whole guide and two CVs count as two guides and three positions');
-  check(['guide:n', 'out#2', 'guide:unknown'].every((id) => tr.moveTargets(list, [id], new Set(['n'])) === null),
+  check(['guide:n', 'out#2', 'guide:unknown'].every((id) => tr.transformTargets(list, [id], new Set(['n'])) === null),
     'a hidden guide, result or unknown guide gives no move target');
   check(JSON.stringify(list) === original && movedCurve !== list && movedCurve[0] === site && movedCurve[2] === area,
     'moving leaves the original list alone and shares untouched guides');
@@ -795,9 +795,9 @@ section('selection model: CVs, boxes and the guides');
 
   check(tr.moveText('x', [2.5, 0, 0]) === 'move X 2.50 m'
     && tr.moveText('xz', [1.2, 0, -0.8]) === 'move X 1.20 m · Z -0.80 m', 'the hint shows only moved axes at two decimals');
-  check(tr.moveLabel(wholeCurve) === 'move curve1' && tr.moveLabel(corners) === 'move 2 CVs of area1'
-    && tr.moveLabel(tr.moveTargets(list, ['guide:z#0'], hidden)!) === 'move CV of area1'
-    && tr.moveLabel(mixed) === 'move 2 guides', 'undo names a guide, its CVs or the number of guides');
+  check(tr.transformLabel('move', wholeCurve) === 'move curve1' && tr.transformLabel('move', corners) === 'move 2 CVs of area1'
+    && tr.transformLabel('move', tr.transformTargets(list, ['guide:z#0'], hidden)!) === 'move CV of area1'
+    && tr.transformLabel('move', mixed) === 'move 2 guides', 'undo names a guide, its CVs or the number of guides');
   check(tr.typedValue('2.5', 3) === 2.5 && tr.typedValue('-1', 3) === -1 && tr.typedValue(',5', 3) === 0.5
     && tr.typedValue('+2', 3) === 5 && tr.typedValue('+-2', 3) === 1 && tr.typedValue('*0.5', 3) === 1.5
     && tr.typedValue('/2', 3) === 1.5 && ['/0', 'abc', ''].every((s) => tr.typedValue(s, 3) === null),
@@ -810,14 +810,13 @@ section('selection model: CVs, boxes and the guides');
     && km.matchDrag({ button: 0, altKey: true }) === 'tumble', 'modified presses use the underlying target or Alt navigation');
   check(km.matchKey({ key: 'w', code: 'KeyW' }) === 'moveMode'
     && km.ROWS.some((row) => row.label === 'move tool (handles on the selection)' && row.text === 'W')
-    && tb.TOOL_BUTTONS.map((button) => tb.buttonTitle(button)).join() === 'Select (Q),Move (W),Add a guide',
-    'W is the move tool and its button sits between Select and Add');
+    && tb.buttonTitle(tb.TOOL_BUTTONS[1]) === 'Move (W)', 'W is the move tool and its button follows Select');
 
   ctx.tool = 'move';
   ctx.selection.apply(['guide:n']);
   undo.length = 0;
   const ray = (x: number) => ctx.views.ray(0, x, 500).ray;
-  guides.gizmoStart('x', ray(850));
+  guides.gizmoStart({ id: 'x' }, ray(850), 90);
   guides.gizmoMove(ray(875));
   const hint = guides.hintState();
   check(JSON.stringify(hint) === '{"text":"move X 2.50 m","finish":null,"removeLast":null,"cancel":null,"note":""}'
@@ -825,11 +824,132 @@ section('selection model: CVs, boxes and the guides');
   guides.gizmoEnd();
   check(guides.byId('n').points[0][0] === 32.5 && undo.length === 1 && undo[0].label === `move ${site.name}`
     && guides.hintState() === null && ctx.selection.lead === 'guide:n', 'release keeps the move as one labelled undo step and keeps the selection');
-  guides.gizmoStart('x', ray(875));
+  guides.gizmoStart({ id: 'x' }, ray(875), 90);
   guides.gizmoMove(ray(900));
   guides.gizmoEnd(true);
   check(guides.byId('n').points[0][0] === 32.5 && undo.length === 1 && guides.hintState() === null,
     'cancelling restores the point and clears the hint with no new undo step');
+
+  section('the rotate and scale tools');
+  const ringSamples = {
+    x: [[0, 1, 0], [0, 0, 1], [0, -1, 0], [0, 0, -1]],
+    y: [[0, 0, 1], [1, 0, 0], [0, 0, -1], [-1, 0, 0]],
+    z: [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0]],
+  };
+  for (const [axis, expected] of Object.entries(ringSamples)) {
+    const points = tr.ringPoints(zero, axis, 1, 4);
+    check(points.length === 4 && points.every((p, k) => p.every((v, i) => Math.abs(v - expected[k][i]) < 1e-12)),
+      `the ${axis.toUpperCase()} ring runs in the direction of a positive turn`);
+  }
+
+  const pointsAre = (m: { points: number[][] }, points: number[][]) => JSON.stringify(m.points) === JSON.stringify(points);
+  const short = { ...curve, points: [[0, 0, 0], [2, 0, 0]] };
+  const n0 = { ...site, points: [[0, 0, 0]] }, n4 = { ...site, id: 'n4', points: [[4, 0, 0]] };
+  const volume = { id: 'v', kind: 'volume', name: 'volume1', points: [[0, 0, 0], [4, 0, 2]], height: 3 };
+  const turned = { ...volume, rotate: [0, 30, 0] };
+  const curveTarget = tr.transformTargets([short], ['guide:c'], hidden)!;
+  const cvTarget = tr.transformTargets([short], ['guide:c#0'], hidden)!;
+  const nullTarget = tr.transformTargets([n0], ['guide:n'], hidden)!;
+  const pairTarget = tr.transformTargets([n0, n4], ['guide:n', 'guide:n4'], hidden)!;
+  const volumeTarget = tr.transformTargets([volume], ['guide:v'], hidden)!;
+  const turnedTarget = tr.transformTargets([turned], ['guide:v'], hidden)!;
+  const volumeGroup = tr.transformTargets([turned, n0], ['guide:n', 'guide:v'], hidden)!;
+  check(pointsAre(curveTarget.rotate('y', 90)[0], [[1, 0, 1], [1, 0, -1]]), 'a curve turns about the midpoint of its CVs');
+  const turnedNull = nullTarget.rotate('y', 90)[0];
+  check(pointsAre(turnedNull, [[0, 0, 0]]) && turnedNull.rotate?.join() === '0,90,0', 'a null turns in place');
+  const turnedAgain = tr.transformTargets([turnedNull], ['guide:n'], hidden)!.rotate('x', 90)[0];
+  check(turnedAgain.rotate?.join() === '90,0,90', 'a second world turn composes with the null orientation');
+  const turnedVolume = volumeTarget.rotate('y', 30)[0];
+  check(pointsAre(turnedVolume, volume.points) && turnedVolume.rotate?.join() === '0,30,0', 'a volume turns at its own centre with its stored corners in place');
+  const turnedPair = pairTarget.rotate('y', 90);
+  check(pointsAre(turnedPair[0], [[2, 0, 2]]) && pointsAre(turnedPair[1], [[2, 0, -2]])
+    && turnedPair.every((m) => m.rotate?.join() === '0,90,0'), 'two nulls turn around their shared pivot and change orientation');
+  check(cvTarget.rings.length === 0 && nullTarget.rings.join() === 'x,y,z' && volumeGroup.rings.join() === 'y',
+    'a single CV has no rings, a null has three, and a selection with a volume has Y only');
+  check(cvTarget.scales === 'none' && nullTarget.scales === 'all' && pairTarget.scales === 'all'
+    && [curveTarget, corners, volumeTarget].every((t) => t.scales === 'axes'), 'scale offers no handles, the centre only, or all handles by selection');
+  check(turnedTarget.frame === 30 && [curveTarget, cvTarget, nullTarget, corners, volumeGroup].every((t) => t.frame === 0),
+    'a single volume supplies the local frame for scale');
+
+  check(pointsAre(curveTarget.scale([2, 1, 1])[0], [[-1, 0, 0], [3, 0, 0]]), 'a curve scales about its pivot on one axis');
+  check(nullTarget.scale([2, 2, 2])[0].radius === 10, 'scaling a null doubles its radius');
+  const wider = turnedTarget.scale([2, 1, 1])[0], higher = turnedTarget.scale([1, 2, 1])[0], smaller = turnedTarget.scale([0.5, 0.5, 0.5])[0];
+  check(pointsAre(wider, [[-2, 0, 0], [6, 0, 2]]) && wider.rotate?.join() === '0,30,0', 'a volume scales along local X about its centre');
+  check(higher.height === 6 && pointsAre(higher, volume.points), 'scaling the volume height keeps its floor');
+  check(smaller.height === 1.5 && pointsAre(smaller, [[1, 0, 0.5], [3, 0, 1.5]]), 'uniform scale changes all three of the volume dimensions');
+  const scaledPair = pairTarget.scale([2, 2, 2]);
+  check(pointsAre(scaledPair[0], [[-2, 0, 0]]) && pointsAre(scaledPair[1], [[6, 0, 0]])
+    && scaledPair.every((m) => m.radius === 10), 'scaling two nulls scales their radii and their distance from the pivot');
+
+  check(tr.ringTurn('y', zero, down(0, 1), down(1, 0)) === 90 && tr.ringTurn('y', zero, down(1, 0), down(0, 1)) === -90
+    && tr.ringTurn('y', zero, down(0, 1), down(0, -1)) === 180, 'a ring face gives a signed right-handed angle');
+  check(tr.ringTurn('y', zero, down(0, 1), parallel) === null, 'a parallel ray has no face turn');
+  check(tr.unwrapTurn(170, -170) === 190 && tr.unwrapTurn(-170, 170) === -190 && tr.unwrapTurn(10, 30) === 30, 'turns unwrap in either direction');
+  check(tr.tangentTurn({ x: 1, y: 0 }, 90, 0, 90) === 57.3 && tr.tangentTurn({ x: 1, y: 0 }, 0, 50, 90) === 0,
+    'an edge turn needs one radius of travel per radian along the tangent');
+
+  const rings = tr.rotateGizmo({
+    x: [{ x: -10, y: 0, depth: 5 }, { x: 10, y: 0, depth: 5 }, null],
+    z: [{ x: 0, y: -10, depth: 9 }, { x: 0, y: 10, depth: 9 }, null],
+  });
+  check(tr.hitRing(rings, 8, 0)?.k === 0 && tr.hitRing(rings, 8, 0)?.id === 'x'
+    && tr.hitRing(rings, 8, 5)?.id === 'x' && tr.hitRing(rings, 8, 10) === null, 'a ring segment can be hit on its line and up to six pixels away');
+  check(tr.hitRing(rings, 0, 0)?.id === 'x', 'the front ring wins at a crossing');
+
+  const scaleShapes = tr.scaleGizmo(center, axes, 90, 'axes');
+  const [stem] = scaleShapes, centre = scaleShapes.at(-1)!;
+  check(scaleShapes.map((s) => s.kind).join() === 'stem,stem,stem,centre'
+    && tr.scaleGizmo(center, axes, 90, 'all').map((s) => s.id).join() === 'all'
+    && tr.scaleGizmo(center, axes, 90, 'none').length === 0, 'the scale gizmo draws its offered stems and centre');
+  check(tr.hitScale(scaleShapes, 0, 0) === 'all' && tr.hitScale(scaleShapes, 50, 0) === 'x'
+    && tr.hitScale(scaleShapes, 100, 100) === null, 'the centre and stem of the scale gizmo take hits');
+  check(tr.scaleFactor(stem, 45, 0, 90) === 1.5 && tr.scaleFactor(stem, -90, 0, 90) === 0.01
+    && tr.scaleFactor(centre, 30, -60, 90) === 2, 'scale follows the stem or the diagonal and has a positive minimum');
+  check(tr.rotateText('y', 35) === 'rotate Y 35.0°' && tr.scaleText('x', 1.25) === 'scale X 1.250'
+    && tr.scaleText('all', 1.25) === 'scale 1.250', 'rotate and scale hints show the axis when used and the value at the tool precision');
+  check(tr.transformLabel('rotate', nullTarget) === `rotate ${site.name}` && tr.transformLabel('scale', corners) === 'scale 2 CVs of area1'
+    && tr.transformLabel('move', mixed) === 'move 2 guides', 'transform labels use the verb and selection name or count');
+
+  const yRing = tr.rotateGizmo({ y: [
+    { x: 825, y: 590, depth: 100 }, { x: 915, y: 500, depth: 100 },
+    { x: 825, y: 410, depth: 100 }, { x: 735, y: 500, depth: 100 },
+  ] })[0];
+  const pressRing = { id: 'y', shape: yRing, k: 0 };
+  const ringStart = ctx.views.ray(0, 825, 590).ray;
+  const hintIs = (text: string) => JSON.stringify(guides.hintState()) === JSON.stringify({ text, finish: null, removeLast: null, cancel: null, note: '' });
+  ctx.tool = 'rotate';
+  undo.length = 0;
+  guides.gizmoStart(pressRing, ringStart, 90);
+  guides.gizmoMove(ray(915), 90, -90);
+  check(guides.byId('n').rotate?.join() === '0,90,0' && hintIs('rotate Y 90.0°') && undo.length === 0,
+    'a ring drag turns the null live and shows a hint with no buttons');
+  guides.gizmoEnd();
+  check(undo.length === 1 && undo[0].label === `rotate ${site.name}`, 'one ring release records one named undo step');
+  guides.gizmoStart(pressRing, ringStart, 90);
+  guides.gizmoMove(ray(915), 90, -90);
+  guides.gizmoEnd(true);
+  check(guides.byId('n').rotate?.join() === '0,90,0' && undo.length === 1 && guides.hintState() === null,
+    'cancelling a ring drag restores the turn and records nothing');
+
+  ctx.tool = 'scale';
+  undo.length = 0;
+  const pressScale = { id: 'all', shape: centre };
+  guides.gizmoStart(pressScale, ray(825), 90);
+  guides.gizmoMove(ray(855), 30, -60);
+  check(guides.byId('n').radius === 10 && hintIs('scale 2.000') && undo.length === 0, 'a centre drag scales the null live and shows a hint with no buttons');
+  guides.gizmoEnd();
+  check(undo.length === 1 && undo[0].label === `scale ${site.name}`, 'one scale release records one named undo step');
+  guides.gizmoStart(pressScale, ray(825), 90);
+  guides.gizmoMove(ray(780), -45, 0);
+  guides.gizmoEnd(true);
+  check(guides.byId('n').radius === 10 && undo.length === 1 && guides.hintState() === null,
+    'cancelling a scale drag restores the radius and records nothing');
+
+  check(km.matchKey({ key: 'e', code: 'KeyE' }) === 'rotateMode' && km.matchKey({ key: 'r', code: 'KeyR' }) === 'scaleMode'
+    && km.ROWS.some((r) => r.label === 'rotate tool (rings on the selection)' && r.text === 'E')
+    && km.ROWS.some((r) => r.label === 'scale tool (handles on the selection)' && r.text === 'R'), 'E and R choose rotate and scale and are listed in the key table');
+  check(tb.TOOL_BUTTONS.map((button) => tb.buttonTitle(button)).join() === 'Select (Q),Move (W),Rotate (E),Scale (R),Add a guide',
+    'the tool strip lists Select, Move, Rotate, Scale and Add in order');
 }
 
 section('undo stack');

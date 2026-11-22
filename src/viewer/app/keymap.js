@@ -14,6 +14,8 @@ export const ROWS = [
   { label: 'wire / shaded / shaded + wire', text: '5 / 6 / 7', keys: { 5: 'displayWire', 6: 'displayShaded', 7: 'displayShadedWire' } },
   { label: 'select tool (leaves placing)', text: 'Q', keys: { Q: 'selectMode' } },
   { label: 'move tool (handles on the selection)', text: 'W', keys: { W: 'moveMode' } },
+  { label: 'rotate tool (rings on the selection)', text: 'E', keys: { E: 'rotateMode' } },
+  { label: 'scale tool (handles on the selection)', text: 'R', keys: { R: 'scaleMode' } },
   {
     label: 'make a null / curve / area / volume (also the + button and right click)', text: 'Shift+1 / 2 / 3 / 4',
     keys: { 'Shift+1': 'placeNull', 'Shift+2': 'placeCurve', 'Shift+3': 'placeArea', 'Shift+4': 'placeVolume' },
@@ -33,7 +35,7 @@ export const ROWS = [
 /** Every action a binding may name (main.js handles each). */
 export const ACTIONS = [
   'tumble', 'track', 'dolly', 'frameSelection', 'frameAll', 'quad', 'viewPersp', 'viewTop', 'viewFront', 'viewRight', 'ortho',
-  'selectMode', 'moveMode', 'displayWire', 'displayShaded', 'displayShadedWire',
+  'selectMode', 'moveMode', 'rotateMode', 'scaleMode', 'displayWire', 'displayShaded', 'displayShadedWire',
   'placeNull', 'placeCurve', 'placeArea', 'placeVolume', 'finish', 'removeLast', 'cancel',
   'delete', 'undo', 'redo', 'hide', 'showAll', 'overlay',
 ];
