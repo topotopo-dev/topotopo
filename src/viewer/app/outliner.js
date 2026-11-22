@@ -236,8 +236,8 @@ export function createOutliner(ctx, panes) {
           },
         };
       });
-      if (!L.list.length) note(s, 'No inputs yet: Add input, or drop meshes, curves, points, PNG, JPEG or WebP files anywhere on this page. The agent hears about new files and reads them as inputs/<name>.');
-      else note(s, 'your agent reads these as inputs/<name> and hears about new ones');
+      if (!L.list.length) note(s, 'No inputs yet: press Add input, or drop meshes, curves, points, PNG, JPEG or WebP files anywhere on this page. They are kept in inputs/, where the graphs read them.');
+      else note(s, 'files in inputs/, where the graphs read them');
     }
     tabCount('outputs', ctx.outputs?.count);
     // guides
@@ -263,7 +263,8 @@ export function createOutliner(ctx, panes) {
           },
         };
       });
-      if (!G.list.length) note(s, 'none yet — Shift+1 null, Shift+2 curve, Shift+3 area, Shift+4 volume; agents read them as inputs/markers.json');
+      // without a graph the welcome covers the view, so there is nowhere to place one yet
+      if (!G.list.length) note(s, ctx.graph.list.length ? 'None yet: add one with the + button or a right click in the view.' : 'None yet: they are placed in the view, which shows once there is a graph.');
     }
   }
   return { render, showTab, setTabShown };

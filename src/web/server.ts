@@ -798,11 +798,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     if (s && !s.ok && status(p, s) === 'failed') out.push({ kind: 'bake', at, what: `The preview of ${m.title} did not cook: ${firstLine(s.error) || 'no reason given'}`, todo: 'Open it in the editor to see why; it bakes again when the graph is saved, or press Re-bake' });
     if (m.name) {
       const versions = publishedVersions(p.dir, m.name), last = versions.at(-1);
-      if (!last) out.push({ kind: 'publish', at, what: `${m.name} publishes versions and has none yet`, todo: 'Publish the first: topotopo publish --note "…" in its folder, or ask your agent' });
+      if (!last) out.push({ kind: 'publish', at, what: `${m.name} publishes versions and has none yet`, todo: 'Publish the first: ask your AI agent, or run topotopo publish --note "…" in its folder' });
       else {
         let changed = false;
         try { changed = workingHash(p.dir) !== last.hash; } catch { /* unreadable files: topotopo check says why */ }
-        if (changed) out.push({ kind: 'publish', at, what: `${m.name} has changes that no version holds (the newest is ${last.version})`, todo: 'Publish them as a new version: topotopo publish --note "…" in its folder, or ask your agent' });
+        if (changed) out.push({ kind: 'publish', at, what: `${m.name} has changes that no version holds (the newest is ${last.version})`, todo: 'Publish them as a new version: ask your AI agent, or run topotopo publish --note "…" in its folder' });
         if (used) {
           const rows = outputsOf(m.name, last);
           const usedHere = (t: string) => [...(used.get(t) ?? [])].some((d) => d !== folderKey(p.dir));
@@ -818,7 +818,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         }
       }
     }
-    for (const e of stale) out.push({ kind: 'export', at, what: `exports/${e} was made from an older version of its graph`, todo: 'Export it again: the Export button in the editor, or ask your agent' });
+    for (const e of stale) out.push({ kind: 'export', at, what: `exports/${e} was made from an older version of its graph`, todo: 'Export it again with the Export button in the editor' });
     return out;
   };
   /** Whether an audit is of the tree as it is (made since its last change; TopoTopo's own library: recently). */

@@ -1190,11 +1190,27 @@ section('the tab\'s title, the welcome, and messages that clear themselves (sect
     'the tab is titled after the package (a graph file, a folder)');
   check(welcome.defaultGraph(proj, ['a', 'main']) === 'main' && welcome.defaultGraph(proj, ['a', 'b']) === 'a' && welcome.defaultGraph(loose, []) === null, 'the package\'s default graph is shown first');
   const wp = welcome.welcomeOf(proj), wf = welcome.welcomeOf(loose);
-  check(wp.kind === 'package' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.builtin.length === 1,
-    'a package without graphs: its name, ask your agent, TopoTopo\'s built-in packages');
-  check(wf.kind === 'folder' && /not a TopoTopo package/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no package says so and how to make it one');
+  check(wp.kind === 'package' && wp.title === 'Lantern' && wp.lead === 'This package has no graphs yet.' && wp.builtin.length === 1
+    && wp.steps.join('\n') === [
+      'A graph is built by an AI agent connected to TopoTopo, such as Claude Code. Ask it, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s built-in packages."',
+      'It shows here as soon as it is built, and so does every change after that.',
+    ].join('\n'), 'a package without graphs says how a graph gets built and lists TopoTopo\'s built-in packages');
+  check(wf.kind === 'folder' && wf.lead === 'This folder is not a TopoTopo package.' && wf.steps.join('\n') === [
+    'A package keeps its graphs, the packages they use and their exports together, and shows in the web app.',
+    'To make this folder a package, run: topotopo init "/home/me/stuff"',
+    'An AI agent connected to TopoTopo, such as Claude Code, can also build a graph here as it is: it shows here at once.',
+  ].join('\n'), 'a folder that is no package says how to make it one and how a graph gets built');
+  const connect = 'claude mcp add topotopo -- "node" "cli.js" mcp --package "C:/p"';
+  const cp = welcome.welcomeOf({ ...proj, connect }), cf = welcome.welcomeOf({ ...loose, connect });
+  const connectStep = 'No agent connected yet? For Claude Code, run: ' + connect;
+  check(cp.steps.at(-1) === connectStep, 'a package without graphs ends with its exact connection command');
+  check(cf.steps.at(-1) === connectStep, 'a folder without graphs ends with its exact connection command');
+  check([wp, wf].every(({ steps }) => steps.every((s: string) => !s.includes('No agent connected'))),
+    'with no connection command, neither welcome offers one');
+  check([wp, wf, cp, cf].every(({ steps }) => steps.every((s: string) => !/your agent|the agent/i.test(s))),
+    'neither welcome uses the old wording');
   const unread = [{ file: 'graphs/main.json', error: 'Unexpected token' }, { file: 'graphs/other.json', error: 'Unexpected end of JSON input' }];
-  const damaged = welcome.welcomeOf({ ...proj, unread });
+  const damaged = welcome.welcomeOf({ ...proj, unread, connect });
   check(damaged.lead === 'A graph file of this package cannot be read.' && damaged.steps.join('\n') === [
     'graphs/main.json: Unexpected token', 'graphs/other.json: Unexpected end of JSON input',
     'Fix the file (or put back an earlier copy of it) and it shows here at once.',

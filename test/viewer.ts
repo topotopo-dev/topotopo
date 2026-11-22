@@ -981,6 +981,8 @@ section('a package\'s graph files beside its manifest (examples/ keeps its graph
       check(info.package?.id === 'beside' && info.package.graph === 'tower' && info.folder === dir && Array.isArray(info.builtin),
         `GET /api/package: the package, its default graph and the folder (${JSON.stringify({ ...info, builtin: info.builtin?.length })})`);
       check(info.builtin.some((k: any) => k.name === 'topotopo/street' && /outputs: bench/.test(k.outputs)), 'and TopoTopo\'s built-in packages with their outputs');
+      check(typeof info.connect === 'string' && info.connect.startsWith('claude mcp add topotopo -- "')
+        && info.connect.endsWith(`mcp --package "${dir}"`), 'and the Claude Code command to connect to this package folder');
     } finally { v.close(); }
   } finally { a.unwatch(); b.unwatch(); }
 }

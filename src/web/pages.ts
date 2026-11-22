@@ -419,16 +419,16 @@ export function packageDetails(p: PackageData): string {
   const b = bakeOf(p);
   const example = p.package?.outputs.find((o) => !o.alias)?.type;
   const bakeLine = p.unread ?? (p.builtin
-    ? `One of TopoTopo's own packages: every package can use its outputs. Ask your agent to use one by its name${example ? `, such as ${example}` : ''}.`
+    ? `One of TopoTopo's own packages: every package can use its outputs by name${example ? `, such as ${example}` : ''}.`
     : p.status === 'empty'
-    ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
+    ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your AI agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Open in editor shows how one gets built; the preview appears here when it exists.')
     : p.status === 'baking' ? 'Baking its preview…'
     : !b ? 'Not baked yet.'
     : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${(b.points ?? 0).toLocaleString('en')} points, ${(b.prims ?? 0).toLocaleString('en')} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
     : `Bake failed ${when(b.at)}`);
   const graphs = p.graphs.length
     ? `<div class="graphs">${p.graphs.map((g) => g.error !== undefined ? `<div class="graph"><b>${esc(g.name)}</b>: cannot be read</div>` : `<details class="graph"><summary><b>${esc(g.name)}</b>${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes${g.vars.length ? ` · ${g.vars.length} vars` : ''}</span></summary>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</details>`).join('')}</div>`
-    : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its workspace tool opens the package); open the editor to watch it appear.</p>';
+    : '<p class="dim">No graphs yet.</p>';
   return `<section class="pkgdetails">
     <h2>Graphs <span class="count">${p.graphs.length}</span></h2>
     ${graphs}
