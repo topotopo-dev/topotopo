@@ -405,6 +405,7 @@ export function createGuides(ctx) {
     if (hit?.wait) G.down.wait = true;
     else if (hit) { G.draft = { kind: 'volume', y: hit.point.y, a: hit.point.clone(), b: hit.point.clone() }; G.drawDraft(); }
   };
+  G.pressCancel = () => { G.down = null; };
   G.pointerMove = (slot, x, y) => {
     if (!G.mode) return;
     if (G.draft?.kind === 'volume') {

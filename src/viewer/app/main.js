@@ -3,7 +3,7 @@
 // cooking, saving and placing never frame (the one exception is the very first view, when nothing is remembered).
 import * as THREE from 'three';
 import { api, coalesce } from './api.js';
-import { createViews, CAMERA_NAMES, SHADINGS, viewName } from './camera.js';
+import { createViews } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
@@ -15,8 +15,10 @@ import { createOutputPanel } from './outputs.js';
 import { createPackagesPanel } from './packages.js';
 import { createSelection, parseId } from './selection.js';
 import { createUndo } from './undo.js';
-import { EDITOR_NAMES } from './markers.js';
 import * as KM from './keymap.js';
+import { TOP_BUTTONS, TOOL_BUTTONS, VIEW_BUTTONS, buttonTitle, createItems, cameraItems, shadingItems } from './toolbar.js';
+import { icon } from './icons.js';
+import { openMenu } from './menu.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
 import { DISCONNECTED_LINE, RECONNECTED_LINE, messageLife } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
@@ -28,7 +30,7 @@ const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
 
 // ------------------------------------------------------------------------------------------- storage
-// per-viewer conveniences: the keymap and panel sizes per browser, cameras and shown layers per viewer address
+// per-viewer conveniences: panel sizes per browser, cameras and shown layers per viewer address
 const store = (prefix) => ({
   get(k, def) { try { const v = localStorage.getItem(prefix + k); return v === null ? def : JSON.parse(v); } catch { return def; } },
   set(k, v) { try { localStorage.setItem(prefix + k, JSON.stringify(v)); } catch { /* storage blocked */ } },
@@ -371,7 +373,7 @@ function frameAll() {
 }
 
 // ------------------------------------------------------------------------------------------- drawing
-const overlays = createOverlays($('views'), (slot, axis) => { setActive(slot); views.lookAlong(slot, axis); saveViews(); syncTop(); ctx.requestRender(); });
+const overlays = createOverlays($('views'), (slot, axis) => { setActive(slot); views.lookAlong(slot, axis); saveViews(); ctx.requestRender(); });
 const cursor = { slot: -1, x: 0, y: 0 };
 let queued = false, overlayQueued = false, lastSize = '', inDraw = false;
 ctx.requestRender = () => { if (!queued && !inDraw) { queued = true; requestAnimationFrame(draw); } };
@@ -414,6 +416,7 @@ function drawViews() {
 
 /** Readouts, the gizmo, labels and the pivot cross of every view (DOM, no WebGL). */
 function drawOverlays() {
+  const viewportWidth = viewport.clientWidth;
   const selBox = ctx.selection.size ? ctx.select.selectionBounds() : null;
   const selSize = selBox && !selBox.isEmpty() ? fmtSize(selBox.getSize(new THREE.Vector3()).toArray()) : '';
   const pivot = selBox && !selBox.isEmpty() ? selBox.getCenter(new THREE.Vector3()) : null;
@@ -429,7 +432,7 @@ function drawOverlays() {
       const p = cam.name === 'persp' ? ctx.select.planePoint(i, cursor.x, cursor.y, 0) : ctx.surfacePlane(i, cursor.x, cursor.y);
       cur = cursorText(cam, p, steps[i]);
     }
-    ov.update({ rect: s.rect, visible, quad: views.quad, active: i === views.active, cam, camera, step: steps[i], cursor: cur, selSize });
+    ov.update({ rect: s.rect, viewportWidth, visible, quad: views.quad, active: i === views.active, cam, camera, step: steps[i], cursor: cur, selSize });
     // labels of hovered / selected guides
     const seen = new Set();
     for (const l of labels) {
@@ -455,7 +458,7 @@ function drawOverlays() {
     ov.marks.innerHTML = q ? `<g stroke="#f0a030" stroke-width="1.5"><line x1="${q.x - s.rect.x - 6}" y1="${q.y - s.rect.y}" x2="${q.x - s.rect.x + 6}" y2="${q.y - s.rect.y}"/><line x1="${q.x - s.rect.x}" y1="${q.y - s.rect.y - 6}" x2="${q.x - s.rect.x}" y2="${q.y - s.rect.y + 6}"/></g>` : '';
   }
   const st = $('step');
-  const t = `grid ${fmtStep(steps[views.active])}`;
+  const t = fmtStep(steps[views.active]);
   if (st.textContent !== t) st.textContent = t;
 }
 /** The cursor on an axis view's construction plane. */
@@ -466,44 +469,70 @@ ctx.surfacePlane = (i, x, y) => {
 };
 new ResizeObserver(() => ctx.requestRender()).observe(viewport);
 
-// ------------------------------------------------------------------------------------------- top bar
-let preset = browser.get('keymap', KM.DEFAULT_PRESET);
-if (!KM.PRESETS.some((p) => p.id === preset)) preset = KM.DEFAULT_PRESET;
-$('preset').replaceChildren(...KM.PRESETS.map((p) => new Option(p.label, p.id)));
-$('preset').value = preset;
-$('preset').onchange = (e) => { preset = e.target.value; browser.set('keymap', preset); e.target.blur(); ctx.message(`keymap: ${KM.PRESETS.find((p) => p.id === preset).label} (? shows it)`); };
-$('view-cam').replaceChildren(...CAMERA_NAMES.map((n) => new Option(viewName(n), n)));
-$('view-cam').onchange = (e) => { views.setCam(views.active, e.target.value); saveViews(); e.target.blur(); syncTop(); ctx.requestRender(); };
-$('view-shading').replaceChildren(...SHADINGS.map(([v, t]) => new Option(t, v)));
-$('view-shading').onchange = (e) => { views.slots[views.active].shading = e.target.value; saveViews(); e.target.blur(); ctx.requestRender(); };
-$('quad').onclick = () => { toggleQuad(); $('quad').blur(); };
-// the edge check: an overlay, off until the person turns it on (remembered in this browser)
+// ------------------------------------------------------------------------------------------- top bar and viewport strips
+// The shading menu's edge overlay is off by default and remembered in this browser.
 MeshObject.edgeCheck = browser.get('edgeCheck', false);
-const syncEdgeCheck = () => { $('edge-check').classList.toggle('on', MeshObject.edgeCheck); $('edge-check').setAttribute('aria-pressed', String(MeshObject.edgeCheck)); };
-$('edge-check').onclick = () => {
-  $('edge-check').blur();
-  MeshObject.edgeCheck = !MeshObject.edgeCheck; browser.set('edgeCheck', MeshObject.edgeCheck); syncEdgeCheck();
+function toggleEdgeCheck() {
+  MeshObject.edgeCheck = !MeshObject.edgeCheck;
+  browser.set('edgeCheck', MeshObject.edgeCheck);
   for (const e of ctx.objects.values()) if (e.mesh) e.mesh.mode = null;
   ctx.emit('output'); ctx.requestRender();
-};
-syncEdgeCheck();
-$('help').onclick = () => { KM.toggleOverlay(document.body, preset); $('help').blur(); };
-function syncTop() {
-  const s = views.slots[views.active];
-  $('view-cam').value = s.cam;
-  $('view-shading').value = s.shading;
-  $('quad').classList.toggle('on', views.quad);
-  $('quad').textContent = views.quad ? 'single' : 'quad';
-  const mode = ctx.guides.mode;
-  $('mode').textContent = mode ? `placing ${EDITOR_NAMES[mode]}` : '';
-  for (const b of $('guide-tools').querySelectorAll('button')) b.classList.toggle('on', (PLACE_KINDS[b.dataset.tool] ?? null) === mode);
 }
-for (const b of $('guide-tools').querySelectorAll('button')) b.addEventListener('click', () => {
-  // the tools work on the guides, which the scene shows (a result shown alone hides them)
-  if (b.dataset.tool === 'selectMode' && ctx.outputs?.active) ctx.outputs.scene();
-  run(b.dataset.tool); b.blur();
-});
-function setActive(i) { if (i >= 0 && views.active !== i) { views.active = i; syncTop(); requestOverlays(); } }
+function setViewCamera(name) {
+  views.setCam(views.active, name); saveViews(); ctx.requestRender();
+}
+const menuItems = {
+  create: createItems,
+  camera: () => cameraItems({ cam: views.slots[views.active].cam, ortho: views.cam(views.active).ortho }),
+  shading: () => shadingItems({ shading: views.slots[views.active].shading, edgeCheck: MeshObject.edgeCheck }),
+};
+for (const [host, buttons] of [[null, TOP_BUTTONS], [$('tool-strip'), TOOL_BUTTONS], [$('view-strip'), VIEW_BUTTONS]]) {
+  for (const button of buttons) {
+    const el = host ? document.createElement(button.readout ? 'span' : 'button') : $(button.id);
+    if (host) {
+      el.id = button.id;
+      el.className = button.readout ? 'readout' : 'tbtn';
+      host.append(el);
+    }
+    el.title = buttonTitle(button);
+    if (button.readout) continue;
+    el.type = 'button';
+    el.innerHTML = icon(button.icon);
+    el.setAttribute('aria-label', el.title);
+    if (button.menu) {
+      el.setAttribute('aria-haspopup', 'menu');
+      el.setAttribute('aria-expanded', 'false');
+      el.onclick = () => openMenu(el, menuItems[button.menu](), {
+        place: button.menu === 'create' ? 'beside' : 'below',
+        onPick(item) {
+          if (item.cam) setViewCamera(item.cam);
+          else if (item.toggle === 'edgeCheck') toggleEdgeCheck();
+          else run(item.action);
+        },
+      });
+    } else {
+      el.onclick = () => {
+        if (button.action === 'selectMode' && ctx.outputs?.active) ctx.outputs.scene();
+        run(button.action); el.blur();
+      };
+    }
+  }
+}
+function syncUndo() {
+  $('undo').disabled = !ctx.undo.canUndo;
+  $('redo').disabled = !ctx.undo.canRedo;
+}
+ctx.undo.onChange(syncUndo);
+syncUndo();
+
+function syncTop() {
+  for (const [id, pressed] of [['tool-select', !ctx.guides.mode], ['tool-add', !!ctx.guides.mode], ['quad', views.quad]]) {
+    const el = $(id);
+    el.classList.toggle('on', pressed);
+    el.setAttribute('aria-pressed', String(pressed));
+  }
+}
+function setActive(i) { if (i >= 0 && views.active !== i) { views.active = i; requestOverlays(); } }
 function toggleQuad(at = cursor.slot) {
   if (views.quad && at >= 0) views.active = at;
   views.quad = !views.quad;
@@ -544,29 +573,26 @@ for (const g of document.querySelectorAll('.grip')) {
 const typing = (t) => t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable || !!t?.closest?.('button, summary, [role="button"], [role="menu"]');
 const selectedOf = (kind) => ctx.selection.items.filter((id) => ctx.objects.get(parseId(id).obj)?.kind === kind && parseId(id).piece === null);
 const hiddenByH = { layers: new Set() };
-const DISPLAY_CYCLE = ['shaded', 'wire', 'shadedWire'];
 function run(action) {
-  if (document.querySelector('dialog[open]') || document.getElementById('image-view')?.hidden === false) return;
+  if (document.querySelector('dialog[open]')) return;
   const slot = views.slots[views.active];
   switch (action) {
     case 'frameSelection': return frameSelection();
     case 'frameAll': return frameAll();
     case 'quad': return toggleQuad();
     case 'viewPersp': case 'viewTop': case 'viewFront': case 'viewRight':
-      views.setCam(views.active, action.slice(4).toLowerCase()); saveViews(); syncTop(); return ctx.requestRender();
-    case 'ortho': views.toggleOrtho(views.active); saveViews(); syncTop(); return ctx.requestRender();
+      return setViewCamera(action.slice(4).toLowerCase());
+    case 'ortho': views.toggleOrtho(views.active); saveViews(); return ctx.requestRender();
     case 'selectMode': ctx.guides.setMode(null); return syncTop();
     case 'displayWire': case 'displayShaded': case 'displayShadedWire':
       slot.shading = { displayWire: 'wire', displayShaded: 'shaded', displayShadedWire: 'shadedWire' }[action]; break;
-    case 'displayCycle': slot.shading = DISPLAY_CYCLE[(DISPLAY_CYCLE.indexOf(slot.shading) + 1) % 3]; break;
-    case 'wireToggle': slot.lastShading = slot.shading === 'wire' ? slot.lastShading : slot.shading; slot.shading = slot.shading === 'wire' ? slot.lastShading ?? 'shaded' : 'wire'; break;
     case 'placeNull': case 'placeCurve': case 'placeArea': case 'placeVolume':
       // guides are drawn in the scene, not over a result shown alone
       if (ctx.outputs?.active) ctx.outputs.scene();
       ctx.guides.setMode(PLACE_KINDS[action]); return syncTop();
     case 'finish': case 'removeLast': ctx.guides.key(action); return;
     case 'cancel': {
-      if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body, preset);
+      if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body);
       // Esc during a drag ends it where it began; during a press that is still a click, it clears as ever
       const d = drag, release = () => { try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } };
       if (d?.kind === 'box') { drag = null; ctx.select.cancel(); release(); return; }
@@ -586,7 +612,7 @@ function run(action) {
       const n = ctx.guides.remove(ids), c = cvs.size ? ctx.guides.removeCVs(cvs) : { removed: 0, kept: 0 };
       const done = [n ? `deleted ${n} guide${n === 1 ? '' : 's'}` : '', c.removed ? `removed ${c.removed} CV${c.removed === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
       const kept = c.kept ? `${c.kept} CV${c.kept === 1 ? '' : 's'} kept: a curve needs 2, an area 3` : '';
-      if (done) ctx.message(`${done}${kept ? ` · ${kept}` : ''} · ${undoKeys()} brings ${n + c.removed === 1 ? 'it' : 'them'} back`, '', 2000);
+      if (done) ctx.message(`${done}${kept ? ` · ${kept}` : ''} · ${KM.keyOf('undo')} brings ${n + c.removed === 1 ? 'it' : 'them'} back`, '', 2000);
       else if (kept) ctx.message(kept, '', 2000);
       else if (ctx.selection.size) ctx.message('Delete removes guides and CVs; the output and reference layers are files and stay (hide them with H)');
       return;
@@ -608,71 +634,75 @@ function run(action) {
       ctx.guides.showAll();
       return;
     }
-    case 'overlay': return KM.toggleOverlay(document.body, preset);
+    case 'overlay': return KM.toggleOverlay(document.body);
     default: return;
   }
-  saveViews(); syncTop(); ctx.requestRender();
+  saveViews(); ctx.requestRender();
 }
-const undoKeys = () => KM.overlayRows(preset).find((r) => r.label.startsWith('undo'))?.text.split(' / ')[0] ?? 'undo';
 
-// keys; Space is a tap (Maya) or a held modifier (Houdini)
-const space = { down: false, tap: false, t: 0 };
+// Space switches views on a quick release without an intervening key or pointer press.
+let spaceTap = null;
 addEventListener('keydown', (e) => {
+  const isSpace = e.code === 'Space' || e.key === ' ';
+  if (!isSpace) spaceTap = null;
   if (document.querySelector('dialog[open]')) return;
   if (typing(e.target)) return;
-  if (e.code === 'Space' || e.key === ' ') {
+  if (isSpace) {
     e.preventDefault();
-    if (!e.repeat && !space.down) { space.down = true; space.tap = true; space.t = performance.now(); }
+    if (!e.repeat) spaceTap = performance.now();
     return;
   }
-  if (space.down) space.tap = false;
   if (e.key === 'Alt') { e.preventDefault(); return; }
-  const action = KM.matchKey(preset, e, space.down && KM.spaceIsModifier(preset));
+  const action = KM.matchKey(e);
   if (!action) return;
   e.preventDefault();
-  run(action);
+  if ($('image-view')?.hidden !== false) run(action);
 });
 addEventListener('keyup', (e) => {
-  if (document.querySelector('dialog[open]')) { space.down = false; return; }
+  if (document.querySelector('dialog[open]')) { spaceTap = null; return; }
   if (e.code === 'Space' || e.key === ' ') {
-    const tap = space.down && space.tap && performance.now() - space.t < 400;
-    space.down = false;
-    if (tap && !typing(e.target)) { const a = KM.matchKey(preset, { key: ' ', code: 'Space' }); if (a) run(a); }
+    const tap = spaceTap !== null && performance.now() - spaceTap < 400;
+    spaceTap = null;
+    if (tap && !typing(e.target) && $('image-view')?.hidden !== false) { const a = KM.matchKey({ key: ' ', code: 'Space' }); if (a) run(a); }
     return;
   }
   if (e.key === 'Alt') e.preventDefault();
 });
-addEventListener('blur', () => { space.down = false; });
+addEventListener('blur', () => { spaceTap = null; });
+addEventListener('pointerdown', () => { spaceTap = null; }, true);
 
-// the mouse in the viewport: a preset's navigation chords first (keymap.js), then the left button by the selection
-// model (pointer.js): what is under the press and the modifier held decide what a click and a drag do
+// Navigation chords take priority in the viewport. The left button follows the placement or selection model.
 let drag = null;
 const at = (e) => { const r = viewport.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-/** A camera drag from (x, y) in a slot (tumble, track or dolly) with the preset's pivot rule (section 3). */
+/** Pick the surface pivot at the start of a camera drag. Orthographic orbits pan. */
 function navDrag(nav, slot, x, y, id) {
-  const surface = KM.surfacePivot(preset);
-  let pivot = null;
-  if (surface) pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
-  else { const sel = ctx.select.selectionBounds(); if (!sel.isEmpty()) pivot = sel.getCenter(new THREE.Vector3()); }
+  const pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
   viewport.classList.add('nav');
   // no hover while the camera moves: it is picked again where the drag ends
   ctx.select.hover(-1);
-  return { kind: 'nav', nav: surface && nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id, pivot, surface };
+  return { kind: 'nav', nav: nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id, pivot };
 }
 canvas.addEventListener('pointerdown', (e) => {
   layoutViews();
   const { x, y } = at(e), slot = views.slotAt(x, y);
   if (slot < 0 || drag) return;
-  setActive(slot);
-  space.tap = false;
-  // the keys go to the viewport again (preventDefault below keeps the browser from moving the focus itself)
-  if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
-  const nav = KM.matchDrag(preset, { button: e.button, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, space: space.down && KM.spaceIsModifier(preset) });
+  const nav = KM.matchDrag(e);
   try { canvas.setPointerCapture(e.pointerId); } catch { /* a pointer the browser does not track */ }
   e.preventDefault();
+  // a right press that does not travel is a click and leaves the view alone: navigation starts once it is a drag
+  if (e.button === 2) {
+    if (nav) drag = { kind: 'navPress', nav, slot, x, y, id: e.pointerId };
+    return;
+  }
+  setActive(slot);
+  if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
   if (nav) { drag = navDrag(nav, slot, x, y, e.pointerId); return; }
   if (e.button !== 0) return;
-  if (ctx.guides.mode) { drag = { kind: 'place', slot, id: e.pointerId }; ctx.guides.pointerDown(slot, x, y); return; }
+  if (ctx.guides.mode) {
+    drag = { kind: 'place', slot, x, y, id: e.pointerId, plan: PT.placePlan(ctx.guides.mode) };
+    ctx.guides.pointerDown(slot, x, y);
+    return;
+  }
   // nothing happens until the release (a click) or a few pixels of travel (a drag): pointermove decides which
   const hit = ctx.select.pick(slot, x, y);
   const plan = PT.pressPlan({ target: hit?.kind ?? 'empty', shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, movable: !!hit?.handle });
@@ -681,7 +711,12 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   const { x, y } = at(e);
   if (drag && e.pointerId === drag.id) {
-    if (drag.kind === 'press') {
+    if (drag.kind === 'navPress') {
+      if (!PT.isDrag(x - drag.x, y - drag.y)) return;
+      setActive(drag.slot);
+      if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
+      drag = navDrag(drag.nav, drag.slot, drag.x, drag.y, drag.id);
+    } else if (drag.kind === 'press') {
       // a press that travels becomes its plan's drag, from where it began
       if (!PT.isDrag(x - drag.x, y - drag.y)) return;
       const { slot, x: x0, y: y0, id, hit, plan } = drag;
@@ -692,12 +727,15 @@ canvas.addEventListener('pointermove', (e) => {
         ctx.guides.dragStart(slot, x0, y0, hit.handle);
       } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); }
       else drag = navDrag('tumble', slot, x0, y0, id);
+    } else if (drag.kind === 'place' && drag.plan.drag === 'tumble' && PT.isDrag(x - drag.x, y - drag.y)) {
+      ctx.guides.pressCancel();
+      drag = navDrag('tumble', drag.slot, drag.x, drag.y, drag.id);
     }
     if (drag.kind === 'nav') {
       const dx = x - drag.x, dy = y - drag.y;
       drag.x = x; drag.y = y;
       if (drag.nav === 'tumble') views.tumble(drag.slot, dx, dy, drag.pivot);
-      else if (drag.nav === 'track') views.track(drag.slot, dx, dy, drag.surface ? views.cam(drag.slot).pivot : undefined);
+      else if (drag.nav === 'track') views.track(drag.slot, dx, dy, views.cam(drag.slot).pivot);
       // right or up zooms in, left or down out
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
@@ -753,10 +791,8 @@ canvas.addEventListener('wheel', (e) => {
   if (slot < 0) return;
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
   const factor = Math.exp(Math.max(-1, Math.min(1, dy * 0.0015)));
-  if (KM.surfacePivot(preset)) {
-    const hit = ctx.select.navigationPoint(slot, x, y); if (hit) views.anchor(slot, hit);
-    views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
-  } else views.dolly(slot, factor, views.targetPlanePoint(slot, x, y));
+  const hit = ctx.select.navigationPoint(slot, x, y); if (hit) views.anchor(slot, hit);
+  views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
   clearTimeout(canvas.wheelTimer); canvas.wheelTimer = setTimeout(saveViews, 300);
   ctx.select.hover(slot, x, y);
   ctx.requestRender();
@@ -803,7 +839,7 @@ ctx.previewOutput = async (item, bytes, update) => {
   }
   firstFrame = false; ctx.emit('output'); ctx.requestRender(); syncTop();
 };
-ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); ctx.requestRender(); };
+ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); syncTop(); ctx.requestRender(); };
 ctx.frameOutput = frameAll;
 /** Show a node of a graph (the Packages tab's "used by"): that graph, the node's result, the Scene tab. */
 ctx.showNode = (graph, node) => {

@@ -30,14 +30,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); white-space: nowrap; }
 #top .tb { display: flex; align-items: center; gap: 4px; color: var(--dim); }
 #top .tb select { color: var(--text); max-width: 180px; }
-#top .readout { font: var(--mono); color: var(--dim); min-width: 84px; }
-#top .mode { color: var(--sel); }
-#top button.tb.on { border-color: var(--sel); color: var(--sel); }
-#top .tools { gap: 0; }
-#top .tools button { margin-left: -1px; border-radius: 0; }
-#top .tools button:first-of-type { margin-left: 4px; border-radius: 3px 0 0 3px; }
-#top .tools button:last-of-type { border-radius: 0 3px 3px 0; }
-#top .tools button.on { border-color: var(--sel); color: var(--sel); position: relative; }
+#top .tbtn { width: 24px; height: 24px; }
 .grow { flex: 1; }
 
 /* panels */
@@ -91,7 +84,24 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .rowerr { padding: 0 8px 4px 38px; color: var(--err); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* viewport */
-#viewport { grid-area: view; position: relative; overflow: hidden; background: var(--view); }
+#viewport { grid-area: view; position: relative; overflow: hidden; background: var(--view); container-type: inline-size; }
+.strip { position: absolute; z-index: 2; display: flex; gap: 2px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
+.strip.v { flex-direction: column; left: 8px; top: 8px; }
+.strip.h { right: 8px; top: 8px; align-items: center; max-width: calc(100% - 60px); flex-wrap: wrap; justify-content: flex-end; }
+.tbtn { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 3px; background: none; color: var(--text); cursor: pointer; }
+.tbtn:hover { background: var(--hover-bg); }
+.tbtn.on { background: var(--sel-bg); color: var(--sel); }
+.tbtn:disabled { opacity: .3; cursor: default; background: none; }
+.tbtn:focus-visible { outline: 1px solid var(--sel); outline-offset: -1px; }
+.strip .readout { font: var(--mono); color: var(--dim); padding: 0 6px; white-space: nowrap; }
+.menu { position: absolute; z-index: 6; left: 0; top: 0; min-width: 190px; max-width: 100%; max-height: 100%; overflow: auto; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+.menu-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 6px; border: 0; border-radius: 3px; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.menu-row:hover, .menu-row:focus-visible { background: var(--hover-bg); outline: none; }
+.menu-icon { flex: 0 0 18px; height: 18px; color: var(--dim); }
+.menu-icon.checked { color: var(--sel); }
+.menu-key { margin-left: auto; padding-left: 16px; font: var(--mono); color: var(--dim); }
+.menu-separator { height: 1px; margin: 4px 2px; background: var(--line); }
+#viewport:has(> #welcome:not([hidden]), > #image-view:not([hidden])) > :is(.strip, .menu) { display: none; }
 #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #views { position: absolute; inset: 0; pointer-events: none; }
 .vw { position: absolute; overflow: hidden; border: 1px solid transparent; }
@@ -100,6 +110,16 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .vw .vname { position: absolute; left: 8px; top: 6px; color: #c9ccd0; font: var(--font); text-shadow: 0 1px 1px #000a; }
 .vw .vname .dim { color: var(--dim); }
 .vw .vinfo { position: absolute; right: 8px; top: 6px; text-align: right; color: var(--dim); font: var(--mono); text-shadow: 0 1px 1px #000a; white-space: pre; }
+.vw.by-tools .vname { left: 50px; }
+.vw.by-view .vinfo { top: 46px; }
+/* Leave room for the view strip as it approaches the quad split and wraps. */
+@container (420px < width <= 640px) {
+  .vw.quad.by-view .vname { top: 46px; }
+}
+@container (max-width: 420px) {
+  .vw:is(.by-tools, .by-view) .vname { left: 8px; top: 76px; }
+  .vw:is(.by-tools, .by-view) .vinfo { top: 94px; }
+}
 .vw .vinfo .selsize { color: var(--sel); }
 .vw svg.gizmo { position: absolute; left: 6px; bottom: 6px; width: 64px; height: 64px; pointer-events: auto; overflow: visible; }
 .vw svg.gizmo .end { cursor: pointer; }
@@ -119,7 +139,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .welcome-lead { font-size: 14px; color: var(--sel); }
 .welcome-builtin { margin: 0; padding-left: 18px; }
 .welcome-builtin li { margin: 4px 0; }
-#boxsel { position: absolute; border: 1px dashed var(--sel); background: rgba(240, 160, 48, 0.06); pointer-events: none; }
+#boxsel { position: absolute; z-index: 3; border: 1px dashed var(--sel); background: rgba(240, 160, 48, 0.06); pointer-events: none; }
 #viewport.placing #gl { cursor: crosshair; }
 #viewport.nav #gl { cursor: move; }
 

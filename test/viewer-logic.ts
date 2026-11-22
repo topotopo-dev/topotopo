@@ -1,4 +1,4 @@
-// The viewer page's browser-free logic (src/viewer/app/*.js): the keymap presets,
+// The viewer page's browser-free logic (src/viewer/app/*.js): the keys and mouse bindings,
 // guide (marker) rules shared with the server, the grid step, selection set operations, the undo stack, mesh
 // topology (welding, pieces, the render tool's edge classes), the Controls rules, the status and cook state lines,
 // the output cards (kind line, heightfield layers, formats offered, download names), the Packages tab (a package's
@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { markersFromGeometry, markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
 import * as km from '../src/viewer/app/keymap.js';
+import * as tb from '../src/viewer/app/toolbar.js';
+import { ICONS, icon } from '../src/viewer/app/icons.js';
 import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
@@ -45,65 +47,119 @@ const check = (cond: any, msg: string) => {
 const section = (s: string) => console.log(`\n== ${s}`);
 const throws = (f: () => unknown) => { try { f(); return null; } catch (e: any) { return e; } };
 
-section('keymap presets (section 9)');
+section('keys and mouse (section 9)');
 {
-  check(km.PRESETS.map((p: any) => p.id).join() === 'houdini,topotopo,maya,blender' && km.DEFAULT_PRESET === 'houdini', 'four presets, Houdini the default (G-4)');
-  const ids = km.PRESETS.map((p: any) => p.id);
-  check(km.ROWS.length === 23 + pt.SELECTION_ROWS.length && km.ROWS.every((r: any) => ids.every((p: string) => typeof r[p]?.[0] === 'string' && r[p][0].length > 0)),
-    `every row of the table has binding text in every preset (${km.ROWS.length} rows)`);
-  const later = km.ROWS.filter((r: any) => r.phase === 2);
-  check(later.map((r: any) => r.label).join(' | ') === 'move / rotate / scale | snap to grid (held) | snap to surface or curve (held) | snap to point (held) | snapping on / off'
-    && later.every((r: any) => ids.every((p: string) => r[p].length === 1)), 'transform and snapping rows ship their text and no bindings (phase 2)');
-  // no chord means two things in one preset, and every bound action exists
+  check(km.ROWS.length === 17 + pt.SELECTION_ROWS.length
+    && km.ROWS.every((r: any) => typeof r.label === 'string' && r.label.length > 0 && typeof r.text === 'string' && r.text.length > 0),
+    'every row has a label and binding text');
+  const seen = new Set<string>();
   const clashes: string[] = [], unknown: string[] = [];
-  for (const p of ids) {
-    const seen = new Map<string, string>();
-    for (const r of km.ROWS as any[]) {
-      const b = r[p][1];
-      if (!b) continue;
-      for (const kind of ['keys', 'drag']) for (const [c, a] of Object.entries(b[kind] ?? {}) as [string, string][]) {
-        const k = `${kind}:${km.canonical(c)}`;
-        if (seen.has(k) && seen.get(k) !== a) clashes.push(`${p} ${k}: ${seen.get(k)} / ${a}`);
-        seen.set(k, a);
-        if (!km.ACTIONS.includes(a)) unknown.push(`${p} ${c} → ${a}`);
+  for (const row of km.ROWS) {
+    for (const [kind, chords] of [['key', row.keys], ['drag', row.drag]] as const) {
+      for (const [chord, action] of Object.entries(chords ?? {}) as [string, string][]) {
+        const id = `${kind}:${km.canonical(chord)}`;
+        if (seen.has(id)) clashes.push(id);
+        seen.add(id);
+        if (!km.ACTIONS.includes(action)) unknown.push(`${chord} → ${action}`);
       }
     }
   }
-  check(!clashes.length && !unknown.length, `no chord is bound twice in a preset, every action is known (${[...clashes, ...unknown].join('; ') || 'ok'})`);
+  check(!clashes.length && !unknown.length, `no chord is bound twice and every bound action exists (${[...clashes, ...unknown].join(', ') || 'ok'})`);
+  const { keys, drag } = km.bindings();
+  const keyActions = new Set(keys.values()), dragActions = new Set(drag.values());
+  const navigation = ['tumble', 'track', 'dolly'];
+  check(navigation.every((a) => km.ACTIONS.includes(a))
+    && km.ACTIONS.every((a: string) => navigation.includes(a) ? dragActions.has(a) && !keyActions.has(a) : keyActions.has(a) && !dragActions.has(a)),
+    'tumble, track and dolly are bound to drags, and every other action has a key');
+
   const ev = (key: string, code: string, mods: Record<string, boolean> = {}) => ({ key, code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
-  const m = (p: string, e: any, space = false) => km.matchKey(p, e, space);
-  check(m('maya', ev('f', 'KeyF')) === 'frameSelection' && m('maya', ev('a', 'KeyA')) === 'frameAll' && m('maya', ev(' ', 'Space')) === 'quad'
-    && m('maya', ev('2', 'Digit2', { altKey: true })) === 'viewTop' && m('maya', ev('o', 'KeyO')) === 'ortho' && m('maya', ev('q', 'KeyQ')) === 'selectMode',
-    'Maya: F, A, Space tap, Alt+2, O, Q');
-  check(m('maya', ev('4', 'Digit4')) === 'displayWire' && m('maya', ev('6', 'Digit6')) === 'displayShadedWire' && m('maya', ev('z', 'KeyZ')) === 'undo'
-    && m('maya', ev('Z', 'KeyZ', { shiftKey: true })) === 'redo' && m('maya', ev('y', 'KeyY', { ctrlKey: true })) === 'redo' && m('maya', ev('H', 'KeyH', { shiftKey: true })) === 'showAll',
-    'Maya: 4 / 6 display, Z / Shift+Z / Ctrl+Y undo and redo, Shift+H shows all');
-  check(m('maya', ev('w', 'KeyW')) === null && m('maya', ev('x', 'KeyX')) === null && m('houdini', ev('t', 'KeyT')) === null && m('blender', ev('g', 'KeyG')) === null,
-    'transform and snap keys stay unbound (W, X in Maya, T in Houdini, G in Blender)');
-  check(m('houdini', ev('g', 'KeyG'), true) === 'frameSelection' && m('houdini', ev('h', 'KeyH'), true) === 'frameAll' && m('houdini', ev('h', 'KeyH')) === 'hide'
-    && m('houdini', ev('b', 'KeyB'), true) === 'quad' && m('houdini', ev('3', 'Digit3'), true) === 'viewFront' && m('houdini', ev(' ', 'Space')) === null
-    && m('houdini', ev('s', 'KeyS')) === 'selectMode' && m('houdini', ev('w', 'KeyW')) === 'displayCycle',
-    'Houdini: Space+G / Space+H / Space+B / Space+3, H alone hides, a Space tap does nothing, S selects, W cycles display');
-  check(m('blender', ev('Delete', 'NumpadDecimal')) === 'frameSelection' && m('blender', ev('.', 'NumpadDecimal')) === 'frameSelection' && m('blender', ev('Home', 'Home')) === 'frameAll'
-    && m('blender', ev('Home', 'Numpad7')) === 'viewTop' && m('blender', ev('1', 'Numpad1')) === 'viewFront' && m('blender', ev('5', 'Numpad5')) === 'ortho'
-    && m('blender', ev('q', 'KeyQ', { ctrlKey: true, altKey: true })) === 'quad' && m('blender', ev('x', 'KeyX')) === 'delete' && m('blender', ev('h', 'KeyH', { altKey: true })) === 'showAll'
-    && m('blender', ev('z', 'KeyZ', { ctrlKey: true, shiftKey: true })) === 'redo' && m('blender', ev('Z', 'KeyZ', { shiftKey: true })) === 'wireToggle',
-    'Blender: numpad keys by position (NumLock on or off), Home, Ctrl+Alt+Q, X deletes, Alt+H, Ctrl+Shift+Z, Shift+Z');
-  const shift1 = ev('!', 'Digit1', { shiftKey: true }), shift4 = ev('$', 'Digit4', { shiftKey: true });
-  check(ids.every((p: string) => m(p, shift1) === 'placeNull' && m(p, shift4) === 'placeVolume' && m(p, ev('?', 'Slash', { shiftKey: true })) === 'overlay'
-    && m(p, ev('Enter', 'Enter')) === 'finish' && m(p, ev('Backspace', 'Backspace')) === 'removeLast' && m(p, ev('Escape', 'Escape')) === 'cancel'),
-    'every preset: Shift+1..4 place guides, ? opens the overlay, Enter / Backspace / Esc for curves');
-  check(m('maya', ev('й', 'KeyQ')) === 'selectMode' && m('maya', ev('F', 'KeyF', { shiftKey: true })) === null, 'letters fall back to the physical key on other alphabets; Shift+F is not F');
-  check(m('maya', ev('/', 'Slash', { shiftKey: true })) === 'overlay' && m('maya', ev('/', 'Slash')) === null, 'Shift with the "/" key opens the overlay even when the event names only the key');
-  const d = (p: string, o: any) => km.matchDrag(p, o);
-  check(d('maya', { button: 0, altKey: true }) === 'tumble' && d('maya', { button: 1, altKey: true }) === 'track' && d('maya', { button: 2, altKey: true }) === 'dolly' && d('maya', { button: 0 }) === null
-    && d('houdini', { button: 0, space: true }) === 'tumble' && d('houdini', { button: 0, altKey: true }) === null
-    && d('blender', { button: 1 }) === 'tumble' && d('blender', { button: 1, shiftKey: true }) === 'track' && d('blender', { button: 1, ctrlKey: true }) === 'dolly' && d('blender', { button: 0 }) === null,
-    'drags: Alt + L / M / R (Maya), Space + L (Houdini), M, Shift + M, Ctrl + M (Blender); a plain left drag navigates nowhere');
-  check(km.spaceIsModifier('houdini') && !km.spaceIsModifier('maya') && !km.spaceIsModifier('blender'), 'Space is a held modifier only in Houdini');
-  check(km.overlayRows('blender').length === km.ROWS.length && km.overlayRows('blender').find((r: any) => r.label === 'frame all')?.text === 'Home'
-    && km.overlayRows('maya').filter((r: any) => !r.built).length === 5, 'the overlay lists the active preset\'s whole table, the phase 2 rows marked');
-  check(km.canonical('shift+ctrl+z') === 'Ctrl+Shift+Z' && !!throws(() => km.canonical('Hyper+A')), 'chords have one spelling; unknown modifiers are refused');
+  const m = km.matchKey;
+  const shift = { shiftKey: true }, ctrl = { ctrlKey: true };
+  check(m(ev('f', 'KeyF')) === 'frameSelection' && m(ev('a', 'KeyA')) === 'frameAll' && m(ev(' ', 'Space')) === 'quad'
+    && m(ev('o', 'KeyO')) === 'ortho' && m(ev('q', 'KeyQ')) === 'selectMode',
+    'F frames the selection, A frames everything, Space switches views, O toggles ortho and Q selects the select tool');
+  check(m(ev('1', 'Digit1')) === 'viewPersp' && m(ev('2', 'Digit2')) === 'viewTop' && m(ev('3', 'Digit3')) === 'viewFront' && m(ev('4', 'Digit4')) === 'viewRight',
+    '1 / 2 / 3 / 4 choose the perspective, top, front and right views');
+  check(m(ev('5', 'Digit5')) === 'displayWire' && m(ev('6', 'Digit6')) === 'displayShaded' && m(ev('7', 'Digit7')) === 'displayShadedWire',
+    '5 / 6 / 7 choose wire, shaded and shaded with wire');
+  check(m(ev('!', 'Digit1', shift)) === 'placeNull' && m(ev('@', 'Digit2', shift)) === 'placeCurve'
+    && m(ev('#', 'Digit3', shift)) === 'placeArea' && m(ev('$', 'Digit4', shift)) === 'placeVolume',
+    'Shift+1 / 2 / 3 / 4 place a null, curve, area and volume');
+  check(m(ev('Enter', 'Enter')) === 'finish' && m(ev('Backspace', 'Backspace')) === 'removeLast' && m(ev('Escape', 'Escape')) === 'cancel',
+    'Enter finishes, Backspace removes the last point and Esc cancels');
+  check(m(ev('Delete', 'Delete')) === 'delete' && m(ev('h', 'KeyH')) === 'hide' && m(ev('H', 'KeyH', shift)) === 'showAll',
+    'Delete removes the selection, H hides it and Shift+H shows all');
+  check(m(ev('z', 'KeyZ', ctrl)) === 'undo' && m(ev('y', 'KeyY', ctrl)) === 'redo' && m(ev('Z', 'KeyZ', { ...ctrl, ...shift })) === 'redo',
+    'Ctrl+Z undoes and Ctrl+Y and Ctrl+Shift+Z redo');
+  check(m(ev('?', 'Slash', shift)) === 'overlay' && m(ev('/', 'Slash', shift)) === 'overlay' && m(ev('/', 'Slash')) === null,
+    'Shift with the slash key opens the overlay whether the event says "?" or "/"');
+  check(['W', 'E', 'R', 'X', 'C', 'V', 'Z'].every((k) => m(ev(k.toLowerCase(), 'Key' + k)) === null)
+    && m(ev('2', 'Digit2', { altKey: true })) === null,
+    'W, E, R, X, C, V, Z and Alt+2 are unbound');
+  check(Array.from({ length: 10 }, (_, n) => m(ev(String(n), 'Numpad' + n))).every((a) => a === null)
+    && m(ev('Home', 'Numpad7')) === null && m(ev('Delete', 'NumpadDecimal')) === null,
+    'numpad digits and decimal are unbound with NumLock on or off');
+  check(m(ev('й', 'KeyQ')) === 'selectMode' && m(ev('F', 'KeyF', shift)) === null,
+    'letters fall back to the physical key on other alphabets and Shift+F is unbound');
+
+  const d = km.matchDrag;
+  check(d({ button: 0 }) === null && d({ button: 1 }) === 'track' && d({ button: 2 }) === 'track',
+    'plain left goes to selection or placement, middle and right pan');
+  check(d({ button: 0, altKey: true }) === 'tumble' && d({ button: 1, altKey: true }) === 'track' && d({ button: 2, altKey: true }) === 'dolly',
+    'Alt with left, middle or right orbits, pans or zooms');
+  check(d({ button: 1, shiftKey: true }) === null && d({ button: 2, ctrlKey: true }) === null,
+    'Shift+middle and Ctrl+right are unbound');
+  check(JSON.stringify(km.overlayRows()) === JSON.stringify(km.ROWS.map(({ label, text }) => ({ label, text }))),
+    'the overlay lists every label and its binding text in table order');
+  check(km.canonical('shift+ctrl+z') === 'Ctrl+Shift+Z' && !!throws(() => km.canonical('Hyper+A')) && !!throws(() => km.canonical('Space+G')),
+    'chords have one spelling and unknown modifiers including Space are refused');
+  check(['PRESETS', 'DEFAULT_PRESET', 'surfacePivot', 'spaceIsModifier'].every((name) => !(name in km)),
+    'the keymap exports one table and its binding helpers');
+}
+
+section('toolbars and menus (section 2)');
+{
+  const buttons = [...tb.TOP_BUTTONS, ...tb.TOOL_BUTTONS, ...tb.VIEW_BUTTONS];
+  const create = tb.createItems();
+  const camera = tb.cameraItems({ cam: 'front', ortho: true });
+  const shading = tb.shadingItems({ shading: 'shadedWire', edgeCheck: false });
+  check(buttons.every((b) => !b.icon || Object.hasOwn(ICONS, b.icon)) && create.every((i) => Object.hasOwn(ICONS, i.icon)),
+    'the buttons and Create items use known icons');
+  check(icon('move').startsWith('<svg') && icon('move').includes('viewBox="0 0 24 24"') && !!throws(() => icon('nope')),
+    'icon renders an SVG and rejects unknown names');
+  check([...buttons, ...create, ...camera, ...shading].every((i) => !('action' in i) || i.action === undefined || km.ACTIONS.includes(i.action)),
+    'every toolbar and menu action is known to the keymap');
+  check(new Set(buttons.map((b) => b.id)).size === buttons.length, 'toolbar button ids are unique');
+
+  const keys = [['frameSelection', 'F'], ['placeNull', 'Shift+1'], ['undo', 'Ctrl+Z'], ['quad', 'Space'], ['overlay', '?'], ['tumble', ''], ['nope', '']];
+  check(keys.every(([action, key]) => km.keyOf(action) === key), 'keyOf returns the first chord or an empty string');
+  const titles = [
+    ['view-frame', 'Frame (F)'], ['undo', 'Undo (Ctrl+Z)'], ['quad', 'Single / quad view (Space)'],
+    ['tool-select', 'Select (Q)'], ['help', 'Keys and mouse (?)'], ['view-camera', 'Camera'], ['step', 'Grid step of the current view'],
+  ];
+  check(titles.every(([id, title]) => tb.buttonTitle(buttons.find((b) => b.id === id)!) === title),
+    'the toolbar titles include the key for actions with shortcuts');
+
+  check(create.length === 4 && create.map((i) => i.key).join() === 'Shift+1,Shift+2,Shift+3,Shift+4',
+    'Create lists the four guide shortcuts in order');
+  const checkedCameras = camera.filter((i) => i.radio && i.checked);
+  check(camera.length === 9 && camera[7].separator && checkedCameras.length === 1 && checkedCameras[0].cam === 'front',
+    'the Camera menu checks only the current camera in its radio group');
+  check(camera.slice(0, 4).map((i) => i.key).join() === '1,2,3,4' && camera.slice(4, 7).every((i) => i.key === ''),
+    'only the first four cameras have shortcuts');
+  check(camera[8].label === 'Orthographic' && camera[8].key === 'O' && camera[8].check && camera[8].checked
+    && !tb.cameraItems({ cam: 'persp', ortho: false })[8].checked,
+    'the Orthographic check follows the camera and shows its shortcut');
+  check(shading.length === 5 && shading[3].separator && shading[2].radio && shading[2].checked
+    && shading.filter((i) => i.radio && i.checked).length === 1 && shading[4].label === 'Edge check' && shading[4].check && !shading[4].checked,
+    'the Shading menu checks Shaded + wire and shows Edge check turned off');
+
+  const moves = [
+    [-1, 'ArrowDown', 0], [-1, 'ArrowUp', 8], [6, 'ArrowDown', 8], [8, 'ArrowUp', 6], [8, 'ArrowDown', 0],
+    [0, 'ArrowUp', 8], [4, 'Home', 0], [4, 'End', 8], [4, 'F', 4],
+  ] as const;
+  check(moves.every(([index, key, next]) => tb.menuStep(camera, index, key) === next),
+    'menu focus skips separators, wraps, and handles Home and End');
 }
 
 section('guides: dragging, adding and removing points');
@@ -394,23 +450,18 @@ section('selection model (section 5, G-4): what a left press does');
   check(!pt.isDrag(3, 2) && pt.isDrag(4, 3) && pt.DRAG_PX === 4, 'a press is a click until it travels more than 4 px');
   check(pt.dragSelects(['out'], 'guide:a') && !pt.dragSelects(['guide:a', 'out'], 'guide:a') && !pt.dragSelects(['guide:a'], 'guide:a#2') && pt.dragSelects(['guide:a#1'], 'guide:a#2'),
     'a drag selects what it moves, unless it is selected already or its guide is selected whole');
-  // the same in every preset: the left button without a navigation chord is the model's
-  const ids = km.PRESETS.map((p: any) => p.id);
-  check(ids.every((p: string) => km.matchDrag(p, { button: 0 }) === null && km.matchDrag(p, { button: 0, shiftKey: true }) === null && km.matchDrag(p, { button: 0, ctrlKey: true }) === null),
-    'every preset leaves plain, Shift and Ctrl left presses to the selection model');
-  const rows = (p: string) => km.overlayRows(p).filter((r: any) => pt.SELECTION_ROWS.some(([label]: string[]) => label === r.label)).map((r: any) => `${r.label}=${r.text}`).join('|');
-  check(rows('houdini').split('|').length === pt.SELECTION_ROWS.length && ids.every((p: string) => rows(p) === rows('houdini')), 'the keymap overlay prints the model\'s rows, the same in every preset');
+  check(km.matchDrag({ button: 0 }) === null && km.matchDrag({ button: 0, shiftKey: true }) === null && km.matchDrag({ button: 0, ctrlKey: true }) === null,
+    'plain, Shift and Ctrl left presses go to the selection model');
+  const rows = km.overlayRows();
+  check(pt.SELECTION_ROWS.every(([label, text]) => rows.some((r) => r.label === label && r.text === text)), 'the keymap overlay prints the selection model\'s rows');
+  check(pt.SELECTION_ROWS.some(([label, text]) => label === 'orbit with the left button' && text === 'L drag a result or empty space'),
+    'the selection model names the left drag on a result or empty space as orbit');
+  check(pt.placePlan('site').drag === 'tumble' && pt.placePlan('path').drag === 'tumble' && pt.placePlan('zone').drag === 'tumble'
+    && pt.placePlan('volume').drag === 'place', 'left drag orbits while placing nulls, curves and areas, and draws a rectangle while placing a volume');
 }
 
-section('selection model: Houdini navigation is the default');
+section('selection model: result info');
 {
-  check(km.DEFAULT_PRESET === 'houdini' && km.PRESETS[0].id === 'houdini', 'Houdini is the default preset (the first in the menu); saved choices stay (main.js reads them first)');
-  const d = (p: string, o: any) => km.matchDrag(p, o);
-  check(d('houdini', { button: 1 }) === 'track' && d('houdini', { button: 2 }) === 'dolly' && d('houdini', { button: 0, space: true }) === 'tumble'
-    && d('houdini', { button: 1, space: true }) === 'track' && d('houdini', { button: 2, space: true }) === 'dolly' && d('houdini', { button: 0 }) === null,
-    'Houdini: middle drag pans, right drag zooms, Space + L / M / R as before; a plain left drag tumbles through the model (on a result or empty space)');
-  check(km.surfacePivot('houdini') && km.surfacePivot('topotopo') && !km.surfacePivot('maya') && !km.surfacePivot('blender'),
-    'Houdini takes TopoTopo\'s pivot rules (surface under the cursor, zoom toward it, pan in orthographic views); Maya and Blender orbit the selection');
   check(info.resultName({ output: 'Rotor', node: 'rotor_final' }) === 'Rotor' && info.resultName({ node: 'house', part: 'roof' }) === 'house › roof'
     && info.resultName({ output: 'house', part: 'house' }) === 'house' && info.resultName({}) === 'result',
     'a hovered result shows its output\'s name, else its node\'s, and a part\'s own name after it');

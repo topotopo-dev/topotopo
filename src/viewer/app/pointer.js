@@ -1,6 +1,6 @@
 // The selection model of design/viewer.md section 5 (G-4): what a left press in the viewport does, decided by the
-// kind of target under it and the modifier held. The same in every keymap preset; a preset only adds its own
-// navigation chords (keymap.js), which win over these. Plain data and functions, tested in Node (test/viewer-logic.ts).
+// kind of target under it and the modifier held. Navigation chords (keymap.js) take priority. Plain data and
+// functions, tested in Node (test/viewer-logic.ts).
 //
 //   input        things you edit (guides, CVs, inputs)   results (cooked geometry)     empty space
 //   click        selects it                              selects nothing               clears the selection
@@ -33,6 +33,11 @@ export function pressPlan({ target = 'empty', shiftKey = false, ctrlKey = false,
   if (target === 'edit') return { click: 'replace', drag: movable ? 'move' : 'tumble' };
   if (target === 'result') return { click: 'none', drag: 'tumble' };
   return { click: 'clear', drag: 'tumble' };
+}
+
+/** A left drag draws a volume or orbits while placing points. */
+export function placePlan(mode) {
+  return { drag: mode === 'volume' ? 'place' : 'tumble' };
 }
 
 /** The selection change a click makes: {ids, op} for selection.apply, or null for none. */
@@ -71,11 +76,11 @@ export function dragSelects(items, id) {
   return !(piece !== null && items.includes(obj));
 }
 
-/** The rows the keymap overlay prints for the model, the same in every preset: [action, input]. */
+/** The selection rows the keymap overlay prints: [action, input]. */
 export const SELECTION_ROWS = [
   ['select a guide, a CV or an input', 'L click it'],
   ['move a guide or one of its points', 'L drag it'],
-  ['tumble with the left button', 'L drag a result or empty space'],
+  ['orbit with the left button', 'L drag a result or empty space'],
   ['read a result\'s info', 'Shift + L click it'],
   ['add to / take out of the selection', 'Shift + L click / Ctrl + L click'],
   ['box-select guides and CVs / take out', 'Shift + L drag / Ctrl + L drag'],
