@@ -7,7 +7,7 @@ import { createViews } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
-import { createGuides, PLACE_KINDS } from './guides.js';
+import { createGuides, guideId, hasCVs, PLACE_KINDS } from './guides.js';
 import { createSelect } from './select.js';
 import { createOutliner } from './outliner.js';
 import { createProps } from './props.js';
@@ -16,7 +16,7 @@ import { createPackagesPanel } from './packages.js';
 import { createSelection, parseId } from './selection.js';
 import { createUndo } from './undo.js';
 import * as KM from './keymap.js';
-import { TOP_BUTTONS, TOOL_BUTTONS, VIEW_BUTTONS, buttonTitle, createItems, cameraItems, shadingItems } from './toolbar.js';
+import { TOP_BUTTONS, TOOL_BUTTONS, VIEW_BUTTONS, buttonTitle, createItems, contextItems, cameraItems, shadingItems } from './toolbar.js';
 import { icon } from './icons.js';
 import { openMenu } from './menu.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
@@ -43,7 +43,7 @@ let version = 0;
 const ctx = {
   THREE, store: local, objects: new Map(), hover: null,
   on(type, f) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(f); },
-  emit(type) { if (type !== 'hover') version++; for (const f of listeners.get(type) ?? []) f(); for (const f of listeners.get('*') ?? []) f(type); },
+  emit(type) { if (type !== 'hover' && type !== 'hint') version++; for (const f of listeners.get(type) ?? []) f(); for (const f of listeners.get('*') ?? []) f(type); },
   version: () => version,
   coalesce,
 };
@@ -53,16 +53,19 @@ const ctx = {
 // status bar keeps the cook line and what is shown.
 const notesEl = $('notes'), msgEl = $('msg');
 let heldUntil = 0, noteTimer = 0;
-/** A message; `hold` ms keeps it over routine ones (an undo over the save that follows it); '' clears it. */
-ctx.message = (text, kind = '', hold = 0) => {
+/** A message; `hold` ms keeps it over routine ones, `duration` sets an exact lifetime, and '' clears it. */
+ctx.message = (text, kind = '', hold = 0, duration) => {
   const now = performance.now();
   if (text && !hold && kind !== 'err' && now < heldUntil) return;
   heldUntil = hold ? now + hold : 0;
   clearTimeout(noteTimer);
   msgEl.textContent = text; msgEl.title = text; notesEl.className = kind;
   notesEl.hidden = !text && $('ask').hidden;
-  const life = messageLife(text, kind, hold);
-  if (text && Number.isFinite(life)) noteTimer = setTimeout(() => { if (!notesEl.matches(':hover')) ctx.message(''); else noteTimer = setTimeout(() => ctx.message(''), 3000); }, life);
+  const life = duration ?? messageLife(text, kind, hold);
+  if (text && Number.isFinite(life)) noteTimer = setTimeout(() => {
+    if (duration !== undefined || !notesEl.matches(':hover')) ctx.message('');
+    else noteTimer = setTimeout(() => ctx.message(''), 3000);
+  }, life);
 };
 $('msg-close').onclick = () => { $('msg-close').blur(); ctx.message(''); };
 // ------------------------------------------------------------------------------------------- cook state
@@ -532,6 +535,36 @@ function syncUndo() {
 ctx.undo.onChange(syncUndo);
 syncUndo();
 
+const hintEl = $('hint'), hintText = document.createElement('span'), hintNote = document.createElement('span');
+const hintLabel = document.createTextNode('');
+hintText.className = 'hint-text';
+hintNote.className = 'hint-note';
+hintText.append(hintLabel, hintNote);
+hintEl.append(hintText);
+const hintButtons = new Map();
+for (const [action, label] of [['finish', 'Finish'], ['removeLast', 'Remove last'], ['cancel', 'Cancel']]) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.title = buttonTitle({ action, label });
+  button.onclick = () => { run(action); button.blur(); };
+  hintButtons.set(action, button);
+  hintEl.append(button);
+}
+function renderHint() {
+  const state = ctx.guides.hintState();
+  hintEl.hidden = !state;
+  if (!state) return;
+  hintLabel.data = state.text;
+  hintNote.textContent = state.note ? ` · ${state.note}` : '';
+  for (const action of ['finish', 'removeLast']) {
+    const button = hintButtons.get(action);
+    button.hidden = state[action] === null;
+    button.disabled = state[action] === false;
+  }
+}
+ctx.on('hint', renderHint);
+
 function syncTop() {
   for (const [id, pressed] of [['tool-select', !ctx.guides.mode], ['tool-add', !!ctx.guides.mode], ['quad', views.quad]]) {
     const el = $(id);
@@ -580,7 +613,7 @@ for (const g of document.querySelectorAll('.grip')) {
 const typing = (t) => t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable || !!t?.closest?.('button, summary, [role="button"], [role="menu"]');
 const selectedOf = (kind) => ctx.selection.items.filter((id) => ctx.objects.get(parseId(id).obj)?.kind === kind && parseId(id).piece === null);
 const hiddenByH = { layers: new Set() };
-function run(action) {
+function run(action, point = null) {
   if (document.querySelector('dialog[open]')) return;
   const slot = views.slots[views.active];
   switch (action) {
@@ -596,7 +629,7 @@ function run(action) {
     case 'placeNull': case 'placeCurve': case 'placeArea': case 'placeVolume':
       // guides are drawn in the scene, not over a result shown alone
       if (ctx.outputs?.active) ctx.outputs.scene();
-      ctx.guides.setMode(PLACE_KINDS[action]); return syncTop();
+      return ctx.guides.startAt(PLACE_KINDS[action], point);
     case 'finish': case 'removeLast': ctx.guides.key(action); return;
     case 'cancel': {
       if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body);
@@ -604,7 +637,7 @@ function run(action) {
       const d = drag, release = () => { try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } };
       if (d?.kind === 'box') { drag = null; ctx.select.cancel(); release(); return; }
       if (d?.kind === 'guide') { drag = null; ctx.guides.dragEnd(true); release(); return; }
-      if (d?.kind === 'press') { drag = null; release(); }
+      if (d?.kind === 'press' || d?.kind === 'place') { drag = null; release(); }
       if (ctx.guides.key('cancel')) return;
       ctx.guides.setMode(null); ctx.selection.clear(); return syncTop();
     }
@@ -653,7 +686,8 @@ addEventListener('keydown', (e) => {
   const isSpace = e.code === 'Space' || e.key === ' ';
   if (!isSpace) spaceTap = null;
   if (document.querySelector('dialog[open]')) return;
-  if (typing(e.target)) return;
+  const cancellingPlacement = e.key === 'Escape' && ctx.guides.mode;
+  if (typing(e.target) && !cancellingPlacement) return;
   if (isSpace) {
     e.preventDefault();
     if (!e.repeat) spaceTap = performance.now();
@@ -663,7 +697,7 @@ addEventListener('keydown', (e) => {
   const action = KM.matchKey(e);
   if (!action) return;
   e.preventDefault();
-  if ($('image-view')?.hidden !== false) run(action);
+  if (cancellingPlacement || $('image-view')?.hidden !== false) run(action);
 });
 addEventListener('keyup', (e) => {
   if (document.querySelector('dialog[open]')) { spaceTap = null; return; }
@@ -680,6 +714,7 @@ addEventListener('pointerdown', () => { spaceTap = null; }, true);
 
 // Navigation chords take priority in the viewport. The left button follows the placement or selection model.
 let drag = null;
+let placingPress = false, placingClick = false;
 const at = (e) => { const r = viewport.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 /** Pick the surface pivot at the start of a camera drag. Orthographic orbits pan. */
 function navDrag(nav, slot, x, y, id) {
@@ -696,17 +731,20 @@ canvas.addEventListener('pointerdown', (e) => {
   const nav = KM.matchDrag(e);
   try { canvas.setPointerCapture(e.pointerId); } catch { /* a pointer the browser does not track */ }
   e.preventDefault();
-  // a right press that does not travel is a click and leaves the view alone: navigation starts once it is a drag
+  // A plain right click opens the menu. Navigation starts once the right press travels.
   if (e.button === 2) {
-    if (nav) drag = { kind: 'navPress', nav, slot, x, y, id: e.pointerId };
+    const context = !ctx.guides.mode && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+    const handle = context ? ctx.guides.handleAt(slot, x, y) : null;
+    if (nav || context) drag = { kind: 'navPress', nav, context, handle, slot, x, y, id: e.pointerId };
     return;
   }
+  if (e.button === 0) placingPress = !!ctx.guides.mode;
   setActive(slot);
   if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
   if (nav) { drag = navDrag(nav, slot, x, y, e.pointerId); return; }
   if (e.button !== 0) return;
   if (ctx.guides.mode) {
-    drag = { kind: 'place', slot, x, y, id: e.pointerId, plan: PT.placePlan(ctx.guides.mode) };
+    drag = { kind: 'place', slot, x, y, id: e.pointerId };
     ctx.guides.pointerDown(slot, x, y);
     return;
   }
@@ -720,6 +758,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (drag && e.pointerId === drag.id) {
     if (drag.kind === 'navPress') {
       if (!PT.isDrag(x - drag.x, y - drag.y)) return;
+      if (!drag.nav) { drag = null; return; }
       setActive(drag.slot);
       if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
       drag = navDrag(drag.nav, drag.slot, drag.x, drag.y, drag.id);
@@ -734,7 +773,7 @@ canvas.addEventListener('pointermove', (e) => {
         ctx.guides.dragStart(slot, x0, y0, hit.handle);
       } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); }
       else drag = navDrag('tumble', slot, x0, y0, id);
-    } else if (drag.kind === 'place' && drag.plan.drag === 'tumble' && PT.isDrag(x - drag.x, y - drag.y)) {
+    } else if (drag.kind === 'place' && PT.isDrag(x - drag.x, y - drag.y)) {
       ctx.guides.pressCancel();
       drag = navDrag('tumble', drag.slot, drag.x, drag.y, drag.id);
     }
@@ -746,8 +785,7 @@ canvas.addEventListener('pointermove', (e) => {
       // right or up zooms in, left or down out
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
-    } else if (drag.kind === 'place') ctx.guides.pointerMove(drag.slot, x, y);
-    else if (drag.kind === 'guide') ctx.guides.dragMove(drag.slot, x, y);
+    } else if (drag.kind === 'guide') ctx.guides.dragMove(drag.slot, x, y);
     else if (drag.kind === 'box') ctx.select.move(x, y);
     return;
   }
@@ -763,6 +801,25 @@ canvas.addEventListener('pointermove', (e) => {
     canvas.style.cursor = h ? (h.part === 'body' ? 'move' : 'crosshair') : '';
   }
 });
+function showContextMenu({ handle, slot, x, y }, place) {
+  setActive(slot);
+  const point = ctx.surfacePoint(slot, x, y)?.point ?? null;
+  const marker = handle && ctx.guides.byId(handle.id);
+  let target = 'other';
+  if (marker) {
+    const id = guideId(marker.id);
+    if (!ctx.selection.has(id)) ctx.selection.apply([id]);
+    target = hasCVs(marker) ? (handle.part === 'point' ? 'cv' : 'line') : 'guide';
+  }
+  openMenu(null, contextItems(target), {
+    place,
+    onPick(item) {
+      if (item.create) run(item.action, point);
+      else if (item.does) ctx.guides.doubleClick(slot, x, y);
+      else run(item.action);
+    },
+  });
+}
 const endDrag = (e, cancel = false) => {
   if (!drag || e.pointerId !== drag.id) return;
   const d = drag;
@@ -771,7 +828,8 @@ const endDrag = (e, cancel = false) => {
   const { x, y } = at(e);
   // what is under the cursor now that the camera has moved
   if (d.kind === 'nav') { saveViews(); if (!cancel) ctx.select.hover(views.slotAt(x, y), x, y); }
-  else if (d.kind === 'place') { if (!cancel) ctx.guides.pointerUp(d.slot, x, y); }
+  else if (d.kind === 'navPress' && !cancel && e.button === 2 && d.context && !ctx.guides.mode && !PT.isDrag(x - d.x, y - d.y)) showContextMenu(d, { x, y });
+  else if (d.kind === 'place') { if (cancel) ctx.guides.pressCancel(); else ctx.guides.pointerUp(d.slot, x, y, e.timeStamp); }
   else if (d.kind === 'guide') ctx.guides.dragEnd(cancel);
   else if (d.kind === 'box') { if (cancel) ctx.select.cancel(); else ctx.select.up(x, y); }
   else if (d.kind === 'press' && !cancel) {
@@ -780,8 +838,10 @@ const endDrag = (e, cancel = false) => {
     if (c) ctx.selection.apply(c.ids, c.op);
   }
 };
+// A native double-click that includes a placement click must not edit the guide just placed.
+canvas.addEventListener('click', (e) => { placingClick = placingPress || (e.detail > 1 && placingClick); });
 canvas.addEventListener('dblclick', (e) => {
-  if (ctx.guides.mode || drag) return;
+  if (placingClick || ctx.guides.mode || drag) return;
   const { x, y } = at(e), slot = views.slotAt(x, y);
   if (slot >= 0) ctx.guides.doubleClick(slot, x, y);
 });
@@ -807,10 +867,11 @@ canvas.addEventListener('wheel', (e) => {
 
 // ------------------------------------------------------------------------------------------- refresh on changes
 ctx.on('*', (type) => {
+  if (type === 'hint') return;
   if (type === 'hover') { ctx.requestRender(); return; }
   outliner.render();
   props.render();
-  if (type === 'mode') { viewport.classList.toggle('placing', !!ctx.guides.mode); ctx.setHover(null); syncTop(); }
+  if (type === 'mode') { viewport.classList.toggle('placing', !!ctx.guides.mode); ctx.setHover(null); syncTop(); renderHint(); }
   if (type === 'output' || type === 'graphs') updateCook();
   ctx.requestRender();
 });

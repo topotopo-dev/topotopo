@@ -91,6 +91,7 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       check(page.status === 200 && /text\/html/.test(page.headers.get('content-type') ?? '') && /<script type="module" src="\/app\/main\.js">/.test(shell) && /href="\/app\/style\.css"/.test(shell),
         'GET / serves the shell, which loads /app/main.js and /app/style.css');
       check(!shell.includes('id="preset"'), 'the viewer shell has no keymap menu');
+      check(shell.includes('id="hint"'), 'the viewer shell has the placement hint line');
       check(['tool-strip', 'view-strip', 'undo', 'redo'].every((id) => shell.includes(`id="${id}"`))
         && ['guide-tools', 'view-cam', 'edge-check', 'mode'].every((id) => !shell.includes(`id="${id}"`)),
         'the viewer shell has the viewport strips and undo and redo buttons, and omits the removed controls');

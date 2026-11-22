@@ -35,9 +35,9 @@ export function pressPlan({ target = 'empty', shiftKey = false, ctrlKey = false,
   return { click: 'clear', drag: 'tumble' };
 }
 
-/** A left drag draws a volume or orbits while placing points. */
-export function placePlan(mode) {
-  return { drag: mode === 'volume' ? 'place' : 'tumble' };
+/** Whether a click follows the last point closely enough to finish the draft. */
+export function isDoubleClick(prev, now) {
+  return prev !== null && now.t >= prev.t && now.t - prev.t <= 400 && Math.hypot(now.x - prev.x, now.y - prev.y) <= 5;
 }
 
 /** The selection change a click makes: {ids, op} for selection.apply, or null for none. */
@@ -76,7 +76,7 @@ export function dragSelects(items, id) {
   return !(piece !== null && items.includes(obj));
 }
 
-/** The selection rows the keymap overlay prints: [action, input]. */
+/** The selection and context menu rows the keymap overlay prints: [action, input]. */
 export const SELECTION_ROWS = [
   ['select a guide, a CV or an input', 'L click it'],
   ['move a guide or one of its points', 'L drag it'],
@@ -85,4 +85,5 @@ export const SELECTION_ROWS = [
   ['add to / take out of the selection', 'Shift + L click / Ctrl + L click'],
   ['box-select guides and CVs / take out', 'Shift + L drag / Ctrl + L drag'],
   ['clear the selection', 'L click empty space, Esc'],
+  ['menu for what is under the pointer', 'Right click'],
 ];

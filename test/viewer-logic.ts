@@ -160,6 +160,30 @@ section('toolbars and menus (section 2)');
   ] as const;
   check(moves.every(([index, key, next]) => tb.menuStep(camera, index, key) === next),
     'menu focus skips separators, wraps, and handles Home and End');
+
+  const contextCreate = ['Create', 'Null', 'Curve', 'Area', 'Volume'];
+  const contextGuide = ['Frame', 'Hide', 'Delete', '|', ...contextCreate];
+  const contextRows = [
+    ['guide', contextGuide],
+    ['cv', ['Remove point', '|', ...contextGuide]],
+    ['line', ['Add point here', '|', ...contextGuide]],
+    ['other', [...contextCreate, '|', 'Frame all', 'Show all']],
+  ] as const;
+  const actionKeys = new Map([['frameSelection', 'F'], ['hide', 'H'], ['delete', 'Delete'], ['frameAll', 'A'], ['showAll', 'Shift+H']]);
+  for (const [target, expected] of contextRows) {
+    const items: any[] = tb.contextItems(target);
+    check(items.map((i) => i.heading ?? i.label ?? (i.separator ? '|' : '')).join() === expected.join(),
+      `the ${target} context menu lists the expected rows in order`);
+    check(items.filter((i) => i.create === true).map(({ create: _create, ...item }) => JSON.stringify(item)).join() === create.map((i) => JSON.stringify(i)).join()
+      && items.filter((i) => !i.create && i.label && !i.does).every((i) => actionKeys.get(i.action) === i.key),
+      `the ${target} context menu marks four Create rows and gives the action rows their shortcuts`);
+  }
+  check(tb.contextItems('cv')[0].does === 'removePoint' && tb.contextItems('line')[0].does === 'addPoint',
+    'the point and line context rows name the corresponding point edits');
+  check(tb.menuStep(tb.contextItems('guide'), 2, 'ArrowDown') === 5 && tb.menuStep(tb.contextItems('guide'), 5, 'ArrowUp') === 2
+    && tb.menuStep(tb.contextItems('other'), -1, 'Home') === 1, 'menu focus skips a heading and a separator in either direction');
+  check(contextRows.flatMap(([target]) => tb.contextItems(target)).every((i) => !('action' in i) || km.ACTIONS.includes(i.action)),
+    'every context menu action is known to the keymap');
 }
 
 section('guides: dragging, adding and removing points');
@@ -274,12 +298,11 @@ section('guides: placing while the scene loads');
   const originalSave = api.saveMarkers;
   api.saveMarkers = async () => ({ ok: true });
   try {
-    const said: string[] = [];
     let hit: any = { point: new THREE.Vector3(5, 0, 5), surface: false };
     const ctx: any = {
       store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
       selection: sel.createSelection(() => 0), undo: { push: () => {} }, requestRender: () => {},
-      message: (m: string) => said.push(m), emit: () => {}, pxWorld: () => 0.01, coalesce, surfacePoint: () => hit,
+      message: () => {}, emit: () => {}, pxWorld: () => 0.01, coalesce, surfacePoint: () => hit,
       output: { loading: true }, layers: { loading: () => false },
       views: { cam: () => ({ name: 'persp' }), ray: (_s: number, x: number, y: number) => new THREE.Raycaster(new THREE.Vector3(x, 10, y), new THREE.Vector3(0, -1, 0)) },
     };
@@ -287,10 +310,12 @@ section('guides: placing while the scene loads');
     const click = (x = 10, y = 10) => { guides.pointerDown(0, x, y); guides.pointerUp(0, x, y); };
     guides.setMode('site');
     click();
-    check(guides.list.length === 0 && /still loading/.test(said[said.length - 1] ?? ''), `a null clicked on no surface while the output loads is not placed; the hint says why (${said[said.length - 1]})`);
+    check(guides.list.length === 0 && guides.hintState()?.note === 'the scene is still loading: place it once it is drawn',
+      'a null clicked on no surface while the output loads stays unplaced and the placement hint says why');
     hit = { point: new THREE.Vector3(5, 7, 5), surface: true };
     click();
     check(guides.list.length === 1 && guides.list[0].points[0][1] === 7, 'on a surface already drawn it is placed while loading');
+    guides.setMode('site');
     ctx.output.loading = false; ctx.layers.loading = () => true;
     hit = { point: new THREE.Vector3(1, 0, 1), surface: false };
     click();
@@ -300,9 +325,123 @@ section('guides: placing while the scene loads');
     check(guides.list.length === 2 && guides.list[1].points[0][1] === 0, 'once the scene is drawn, a click on no surface places it on the grid as before');
     guides.setMode('volume');
     ctx.output.loading = true;
-    guides.pointerDown(0, 0, 0); guides.pointerUp(0, 40, 40);
-    check(guides.list.length === 2 && /still loading/.test(said[said.length - 1] ?? ''), 'a volume dragged on no surface while loading is not drawn either');
+    click();
+    check(guides.list.length === 2 && guides.draft === null && guides.hintState()?.note === 'the scene is still loading: place it once it is drawn',
+      'a click on no surface while loading does not start a volume and the placement hint says why');
   } finally { api.saveMarkers = originalSave; }
+}
+
+section('placing: one guide, then back (section 7)');
+{
+  const messages: [string, string, number, number][] = [];
+  const ctx: any = {
+    store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
+    selection: sel.createSelection(() => 0), undo: { push: () => {} }, requestRender: () => {},
+    message: (text: string, kind: string, hold: number, duration: number) => messages.push([text, kind, hold, duration]), emit: () => {}, pxWorld: () => 0.01,
+    coalesce: () => () => {},
+    surfacePoint: (_slot: number, x: number, y: number) => x < 0 ? null : { point: new THREE.Vector3(x / 10, 2, y / 10), surface: true },
+    planePoint: (_slot: number, x: number, y: number, level: number) => new THREE.Vector3(x / 10, level, y / 10),
+    views: { project: (_slot: number, p: THREE.Vector3) => ({ x: p.x * 10, y: p.z * 10 }) },
+  };
+  const guides = createGuides(ctx);
+  let t = 0;
+  const click = (x: number, y: number, delay = 500) => {
+    t += delay;
+    guides.pointerDown(0, x, y); guides.pointerUp(0, x, y, t);
+  };
+  const hint = (text: string, finish: boolean | null, removeLast: boolean | null, note = '') => {
+    const h = guides.hintState();
+    return h?.text === text && h.finish === finish && h.removeLast === removeLast && h.note === note;
+  };
+  const placed = (count: number, kind: string, points: number[][]) => {
+    const marker = guides.list.at(-1);
+    return guides.list.length === count && guides.mode === null && guides.draft === null && guides.hintState() === null
+      && marker?.kind === kind && JSON.stringify(marker.points) === JSON.stringify(points)
+      && ctx.selection.items.join() === `guide:${marker.id}`;
+  };
+
+  ctx.selection.apply(['out']);
+  guides.setMode('site');
+  check(hint('Null: click the ground or the geometry', null, null), 'the null hint has no Finish or Remove last button');
+  click(10, 10);
+  check(placed(1, 'site', [[1, 2, 1]]), 'one null click makes a null, ends placing and selects the null alone');
+  check(messages.length === 1 && messages[0].join() === `added ${guides.list[0].name},ok,1500,1500`,
+    'placing a null only sends its added message in the success style for 1.5 seconds');
+
+  guides.setMode('path');
+  check(hint('Curve: click to add a CV', false, false), 'a new curve has disabled Finish and Remove last buttons');
+  click(-10, 10);
+  check(hint('Curve: click to add a CV', false, false, 'nothing under the pointer'), 'a click on nothing gives a note in the hint');
+  click(10, 10);
+  check(hint('Curve: 1 CV · click to add one', false, true), 'the first curve CV clears the note and enables only Remove last');
+  click(30, 10); click(40, 30);
+  check(hint('Curve: 3 CVs · click to add one', true, true), 'a curve with enough CVs can be finished');
+  guides.key('finish');
+  check(placed(2, 'path', [[1, 2, 1], [3, 2, 1], [4, 2, 3]]), 'Finish makes the three-point curve, ends placing and selects the curve alone');
+
+  guides.setMode('zone');
+  check(hint('Area: click to add a corner', false, false), 'a new area has disabled Finish and Remove last buttons');
+  click(10, 10);
+  check(hint('Area: 1 corner · click to add one, or click the first corner to close it', false, true), 'the first area corner enables only Remove last');
+  click(30, 10); click(30, 30);
+  check(hint('Area: 3 corners · click to add one, or click the first corner to close it', true, true), 'an area with enough corners can be finished');
+  click(10, 10);
+  check(placed(3, 'zone', [[1, 2, 1], [3, 2, 1], [3, 2, 3]]), 'clicking the first corner closes the area, ends placing and selects the area alone');
+
+  guides.setMode('volume');
+  check(hint('Volume: click one corner', null, null), 'a new volume asks for its first corner and offers only Cancel');
+  click(10, 10);
+  check(hint('Volume: click the opposite corner · 0 × 0 m, 10.0 m high', null, null), 'the first volume click starts a box at one corner');
+  guides.pointerMove(0, 52, 41);
+  check(hint('Volume: click the opposite corner · 4.20 × 3.10 m, 10.0 m high', null, null), 'the volume follows the pointer with no button held and shows its dimensions');
+  click(60, 45);
+  check(placed(4, 'volume', [[1, 2, 1], [6, 2, 4.5]]) && guides.list.at(-1)?.height === mk.DEFAULT_HEIGHT,
+    'the second volume click makes the volume at the first corner level, ends placing and selects it alone');
+  guides.setMode('volume');
+  click(10, 10); click(10, 10);
+  check(guides.list.length === 4 && guides.mode === 'volume' && guides.hintState()?.note === 'the volume needs a size',
+    'the second click at the same corner makes no volume and the placement hint says why');
+
+  const first = { x: 10, y: 10, t: 100 };
+  check(!pt.isDoubleClick(null, first), 'a double-click needs a previous click');
+  check(pt.isDoubleClick(first, { x: 13, y: 10, t: 400 }), 'a click 300 ms and 3 px from the last one is a double-click');
+  check(!pt.isDoubleClick(first, { x: 13, y: 10, t: 600 }), 'a click 500 ms from the last one is too late');
+  check(!pt.isDoubleClick(first, { x: 18, y: 10, t: 400 }), 'a click 8 px from the last one is too far away');
+  guides.setMode('path');
+  click(10, 10); click(13, 10, 300);
+  check(hint('Curve: 1 CV · click to add one', false, true, 'a curve needs 2 points'), 'a double-click with too few CVs leaves the draft and shows why it cannot finish');
+  click(30, 10); click(33, 10, 300);
+  check(placed(5, 'path', [[1, 2, 1], [3, 2, 1]]), 'a double-click finishes the two-point curve without adding a third point');
+
+  guides.setMode('zone');
+  click(10, 10);
+  const selection = ctx.selection.items.join();
+  check(guides.key('cancel') && guides.mode === null && guides.draft === null && guides.hintState() === null
+    && ctx.selection.items.join() === selection, 'Esc with a draft ends placing in one step and keeps the selection');
+
+  const spot = new THREE.Vector3(4, 2, 5);
+  for (const kind of ['site', 'path', 'zone', 'volume']) {
+    guides.startAt(kind, null);
+    check(guides.mode === kind && guides.draft === null && guides.list.length === 5, `starting ${kind} without a spot enters an empty placement mode`);
+  }
+  guides.startAt('site', spot);
+  check(placed(6, 'site', [[4, 2, 5]]), 'starting a null at a spot places and selects it immediately');
+  for (const kind of ['path', 'zone']) {
+    guides.startAt(kind, spot);
+    check(guides.mode === kind && guides.draft?.kind === kind && JSON.stringify(guides.draft.points) === '[[4,2,5]]'
+      && guides.list.length === 6, `starting ${kind} at a spot sets the first draft point`);
+  }
+  guides.startAt('volume', spot);
+  check(guides.mode === 'volume' && guides.draft?.a.equals(spot) && guides.draft.b.equals(spot) && guides.list.length === 6,
+    'starting a volume at a spot sets its first corner');
+
+  let anyDragPlaced = false;
+  for (const kind of ['site', 'path', 'zone', 'volume']) {
+    guides.setMode(kind);
+    guides.pointerDown(0, 10, 10); guides.pointerUp(0, 30, 30);
+    if (guides.draft || guides.mode !== kind || guides.list.length !== 6) anyDragPlaced = true;
+  }
+  check(!anyDragPlaced, 'a travelling left press places nothing in any guide mode');
 }
 
 section('guides: a markers.json written as geometry reads back as guides');
@@ -458,8 +597,6 @@ section('selection model (section 5, G-4): what a left press does');
   check(pt.SELECTION_ROWS.every(([label, text]) => rows.some((r) => r.label === label && r.text === text)), 'the keymap overlay prints the selection model\'s rows');
   check(pt.SELECTION_ROWS.some(([label, text]) => label === 'orbit with the left button' && text === 'L drag a result or empty space'),
     'the selection model names the left drag on a result or empty space as orbit');
-  check(pt.placePlan('site').drag === 'tumble' && pt.placePlan('path').drag === 'tumble' && pt.placePlan('zone').drag === 'tumble'
-    && pt.placePlan('volume').drag === 'place', 'left drag orbits while placing nulls, curves and areas, and draws a rectangle while placing a volume');
 }
 
 section('selection model: result info');

@@ -35,6 +35,17 @@ export function createItems() {
   });
 }
 
+export function contextItems(target) {
+  const create = [{ heading: 'Create' }, ...createItems().map((item) => ({ ...item, create: true }))];
+  const separator = { separator: true };
+  const row = (label, action) => ({ label, key: keyOf(action), action });
+  if (target === 'other') return [...create, separator, row('Frame all', 'frameAll'), row('Show all', 'showAll')];
+  const guide = [row('Frame', 'frameSelection'), row('Hide', 'hide'), row('Delete', 'delete'), separator, ...create];
+  if (target === 'cv') return [{ label: 'Remove point', does: 'removePoint' }, separator, ...guide];
+  if (target === 'line') return [{ label: 'Add point here', does: 'addPoint' }, separator, ...guide];
+  return guide;
+}
+
 export function cameraItems({ cam, ortho }) {
   return [
     ...CAMERA_NAMES.map((name) => ({
@@ -59,7 +70,7 @@ export function shadingItems({ shading, edgeCheck }) {
 }
 
 export function menuStep(items, index, key) {
-  const rows = items.flatMap((item, i) => item.separator ? [] : [i]);
+  const rows = items.flatMap((item, i) => item.separator || item.heading ? [] : [i]);
   switch (key) {
     case 'ArrowDown': return rows.find((i) => i > index) ?? rows[0] ?? index;
     case 'ArrowUp': return rows.findLast((i) => i < index) ?? rows.at(-1) ?? index;
