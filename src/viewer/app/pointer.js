@@ -24,12 +24,13 @@ export function targetKind(id) {
 /**
  * What a left press means: {click, drag, box?}. `click` is 'replace' | 'add' | 'remove' | 'clear' | 'none' (what a
  * release without a drag does with the target); `drag` is 'move' (the target follows the pointer), 'tumble' (the
- * camera) or 'box' (a box with op `box`, 'add' or 'remove'). `movable`: the target can be dragged (a guide or a CV; an
+ * camera), 'gizmo' (a move tool handle) or 'box' (a box with op `box`, 'add' or 'remove'). `movable`: a guide or CV (an
  * input has no move until the gizmo, so a drag on it tumbles). Shift wins over Ctrl, as opOf does.
  */
 export function pressPlan({ target = 'empty', shiftKey = false, ctrlKey = false, metaKey = false, movable = false } = {}) {
   if (shiftKey) return { click: target === 'empty' ? 'none' : 'add', drag: 'box', box: 'add' };
   if (ctrlKey || metaKey) return { click: target === 'empty' ? 'none' : 'remove', drag: 'box', box: 'remove' };
+  if (target === 'gizmo') return { click: 'none', drag: 'gizmo' };
   if (target === 'edit') return { click: 'replace', drag: movable ? 'move' : 'tumble' };
   if (target === 'result') return { click: 'none', drag: 'tumble' };
   return { click: 'clear', drag: 'tumble' };

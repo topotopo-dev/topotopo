@@ -18,6 +18,7 @@ import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
 import * as pt from '../src/viewer/app/pointer.js';
+import * as tr from '../src/viewer/app/transform.js';
 import { createUndo } from '../src/viewer/app/undo.js';
 import { createGuides } from '../src/viewer/app/guides.js';
 import { api, coalesce } from '../src/viewer/app/api.js';
@@ -49,7 +50,7 @@ const throws = (f: () => unknown) => { try { f(); return null; } catch (e: any) 
 
 section('keys and mouse (section 9)');
 {
-  check(km.ROWS.length === 17 + pt.SELECTION_ROWS.length
+  check(km.ROWS.length === 18 + pt.SELECTION_ROWS.length
     && km.ROWS.every((r: any) => typeof r.label === 'string' && r.label.length > 0 && typeof r.text === 'string' && r.text.length > 0),
     'every row has a label and binding text');
   const seen = new Set<string>();
@@ -93,9 +94,9 @@ section('keys and mouse (section 9)');
     'Ctrl+Z undoes and Ctrl+Y and Ctrl+Shift+Z redo');
   check(m(ev('?', 'Slash', shift)) === 'overlay' && m(ev('/', 'Slash', shift)) === 'overlay' && m(ev('/', 'Slash')) === null,
     'Shift with the slash key opens the overlay whether the event says "?" or "/"');
-  check(['W', 'E', 'R', 'X', 'C', 'V', 'Z'].every((k) => m(ev(k.toLowerCase(), 'Key' + k)) === null)
+  check(['E', 'R', 'X', 'C', 'V', 'Z'].every((k) => m(ev(k.toLowerCase(), 'Key' + k)) === null)
     && m(ev('2', 'Digit2', { altKey: true })) === null,
-    'W, E, R, X, C, V, Z and Alt+2 are unbound');
+    'E, R, X, C, V, Z and Alt+2 are unbound');
   check(Array.from({ length: 10 }, (_, n) => m(ev(String(n), 'Numpad' + n))).every((a) => a === null)
     && m(ev('Home', 'Numpad7')) === null && m(ev('Delete', 'NumpadDecimal')) === null,
     'numpad digits and decimal are unbound with NumLock on or off');
@@ -652,6 +653,106 @@ section('selection model: CVs, boxes and the guides');
   check(ctx.selection.items.join() === 'guide:z#0', 'the CVs of a changed curve leave the selection (they renumber); those of an unchanged area stay');
   guides.remove(['z']);
   check(ctx.selection.size === 0 && !guides.byId('z'), 'the CVs of a deleted guide leave the selection');
+
+  section('the move tool');
+  const site = guides.byId('n');
+  const curve = { id: 'c', kind: 'path', name: 'curve1', points: [[1, 0, 0], [3, 0, 4]] };
+  const area = { id: 'z', kind: 'zone', name: 'area1', points: [[0, 0, 0], [4, 0, 0], [4, 0, 4], [0, 0, 4]] };
+  const list = [site, curve, area], original = JSON.stringify(list);
+  const hidden = new Set<string>();
+  const wholeNull = tr.moveTargets(list, ['guide:n'], hidden)!;
+  const wholeCurve = tr.moveTargets(list, ['guide:c#1', 'guide:c'], hidden)!;
+  const delta = [2, 1, -1], movedCurve = wholeCurve.move(delta);
+  check(wholeNull.pivot.join() === '30,0,0' && wholeNull.guides === 1 && wholeNull.cvs === 0 && wholeNull.name === site.name
+    && wholeNull.move(delta)[0].points[0].join() === '32,1,-1', 'a selected null moves as a whole');
+  check(wholeCurve.pivot.join() === '2,0,2' && wholeCurve.guides === 1 && wholeCurve.cvs === 0
+    && JSON.stringify(movedCurve[1].points) === '[[3,1,-1],[5,1,3]]', 'a whole curve moves every point even if a CV is also selected');
+  const corners = tr.moveTargets(list, ['guide:z#0', 'guide:z#2'], hidden)!;
+  const movedArea = corners.move(delta);
+  check(corners.pivot.join() === '2,0,2' && corners.guides === 1 && corners.cvs === 2
+    && JSON.stringify(movedArea[2].points) === '[[2,1,-1],[4,0,0],[6,1,3],[0,0,4]]',
+    'two selected area CVs pivot about their mean and leave the other CVs where they are');
+  const mixed = tr.moveTargets(list, ['guide:c', 'guide:z#1', 'guide:z#2'], hidden)!;
+  check(mixed.guides === 2 && mixed.cvs === 2 && mixed.pivot.join() === '3.333,0,2',
+    'a whole guide and two CVs count as two guides and three positions');
+  check(['guide:n', 'out#2', 'guide:unknown'].every((id) => tr.moveTargets(list, [id], new Set(['n'])) === null),
+    'a hidden guide, result or unknown guide gives no move target');
+  check(JSON.stringify(list) === original && movedCurve !== list && movedCurve[0] === site && movedCurve[2] === area,
+    'moving leaves the original list alone and shares untouched guides');
+
+  const center = { x: 0, y: 0 };
+  const axes = { x: { x: 90, y: 0 }, y: { x: 0, y: -90 }, z: { x: -54, y: 72 } };
+  const shapes = tr.moveGizmo(center, axes, 90);
+  const arrows = shapes.filter((shape) => shape.kind === 'arrow');
+  check(arrows.length === 3 && arrows.every(({ to }) => Math.hypot(to!.x, to!.y) === 90)
+    && shapes.filter((shape) => shape.kind === 'square').length === 3, 'three projected 90 px axes give three arrows and three squares');
+  check(tr.moveGizmo(center, { ...axes, z: { x: -3, y: 4 } }, 90).map((shape) => shape.id).join() === 'x,y,xy',
+    'an axis pointing towards the camera loses its arrow and its two squares');
+  check(JSON.stringify(shapes.find((shape) => shape.id === 'xy')?.corners) === '[{"x":27,"y":-27},{"x":45,"y":-27},{"x":45,"y":-45},{"x":27,"y":-45}]',
+    'plane square corners are at 0.3 and 0.5 along each axis');
+  check(tr.hitGizmo(shapes, 50, 0) === 'x' && tr.hitGizmo(shapes, 50, 3) === 'x' && tr.hitGizmo(shapes, 10, 0) === null,
+    'an arrow takes hits on and beside it while the pivot stays free');
+  check(tr.hitGizmo(shapes, 36, -36) === 'xy' && tr.hitGizmo(shapes, 100, 100) === null,
+    'a square takes a hit inside it and distant points hit nothing');
+  const closeArrows = tr.moveGizmo(center, { ...axes, y: { x: 90, y: 9 } }, 90);
+  check(tr.hitGizmo(closeArrows, 50, 4) === 'y', 'the nearer of two arrows wins');
+  const stacked = (x: number, y: number) => tr.moveGizmo(center, { x: { x: 90, y: 0, depth: x }, y: { x: 90, y: 9, depth: y }, z: { ...axes.z, depth: 7 } }, 90);
+  check(stacked(5, 9).filter((shape) => shape.kind === 'arrow').map((shape) => shape.id).join() === 'y,z,x'
+    && stacked(9, 5).filter((shape) => shape.kind === 'arrow').map((shape) => shape.id).join() === 'x,z,y',
+    'arrows are listed far to near, so the nearest one is drawn last');
+  check(tr.hitGizmo(stacked(5, 9), 50, 3) === 'x' && tr.hitGizmo(stacked(9, 5), 50, 3) === 'y' && tr.hitGizmo(stacked(5, 9), 50, 5) === 'y',
+    'of two arrows under the pointer the one in front wins, and beside both the nearer one');
+
+  const down = (x: number, z: number) => ({ origin: [x, 10, z], direction: [0, -1, 0] });
+  const zero = [0, 0, 0], xAxis = [1, 0, 0], yAxis = [0, 1, 0];
+  const parallel = { origin: [0, 10, 0], direction: xAxis };
+  check(tr.axisMove(down(2.5, 0), zero, xAxis) === 2.5 && tr.axisMove(parallel, zero, xAxis) === null,
+    'the closest point to a down ray on X is at 2.5 m, a parallel ray has no move');
+  check(tr.planeMove(down(1, 1), zero, yAxis)?.join() === '1,0,1'
+    && tr.planeMove(parallel, zero, yAxis) === null
+    && tr.planeMove({ ...down(1, 1), direction: yAxis }, zero, yAxis) === null, 'plane intersection needs a forward hit');
+  check(tr.moveDelta('xz', down(1, 1), down(3, 2), zero)?.join() === '2,0,1'
+    && tr.moveDelta('x', down(1, 1), down(3, 2), zero)?.join() === '2,0,0', 'a down ray moves in XZ or along X as constrained');
+  check(tr.moveDelta('xz', down(1, 1), down(1.1236, 0.9996), zero)?.join() === '0.124,0,0'
+    && tr.moveDelta('x', down(1, 1), down(3.1234, 2), zero)?.join() === '2.123,0,0', 'drag deltas round to the millimetre');
+
+  check(tr.moveText('x', [2.5, 0, 0]) === 'move X 2.50 m'
+    && tr.moveText('xz', [1.2, 0, -0.8]) === 'move X 1.20 m · Z -0.80 m', 'the hint shows only moved axes at two decimals');
+  check(tr.moveLabel(wholeCurve) === 'move curve1' && tr.moveLabel(corners) === 'move 2 CVs of area1'
+    && tr.moveLabel(tr.moveTargets(list, ['guide:z#0'], hidden)!) === 'move CV of area1'
+    && tr.moveLabel(mixed) === 'move 2 guides', 'undo names a guide, its CVs or the number of guides');
+  check(tr.typedValue('2.5', 3) === 2.5 && tr.typedValue('-1', 3) === -1 && tr.typedValue(',5', 3) === 0.5
+    && tr.typedValue('+2', 3) === 5 && tr.typedValue('+-2', 3) === 1 && tr.typedValue('*0.5', 3) === 1.5
+    && tr.typedValue('/2', 3) === 1.5 && ['/0', 'abc', ''].every((s) => tr.typedValue(s, 3) === null),
+    'typed values accept signed numbers, a comma decimal and relative operations, and refuse invalid input');
+
+  const plan = pt.pressPlan({ target: 'gizmo' });
+  check(plan.click === 'none' && plan.drag === 'gizmo', 'a plain press on a handle reserves the drag and does nothing on a click');
+  check(pt.pressPlan({ target: 'edit', shiftKey: true }).box === 'add'
+    && pt.pressPlan({ target: 'edit', ctrlKey: true }).box === 'remove'
+    && km.matchDrag({ button: 0, altKey: true }) === 'tumble', 'modified presses use the underlying target or Alt navigation');
+  check(km.matchKey({ key: 'w', code: 'KeyW' }) === 'moveMode'
+    && km.ROWS.some((row) => row.label === 'move tool (handles on the selection)' && row.text === 'W')
+    && tb.TOOL_BUTTONS.map((button) => tb.buttonTitle(button)).join() === 'Select (Q),Move (W),Add a guide',
+    'W is the move tool and its button sits between Select and Add');
+
+  ctx.tool = 'move';
+  ctx.selection.apply(['guide:n']);
+  undo.length = 0;
+  const ray = (x: number) => ctx.views.ray(0, x, 500).ray;
+  guides.gizmoStart('x', ray(850));
+  guides.gizmoMove(ray(875));
+  const hint = guides.hintState();
+  check(JSON.stringify(hint) === '{"text":"move X 2.50 m","finish":null,"removeLast":null,"cancel":null,"note":""}'
+    && guides.byId('n').points[0][0] === 32.5 && undo.length === 0, 'the live drag moves the null and shows a hint with no buttons');
+  guides.gizmoEnd();
+  check(guides.byId('n').points[0][0] === 32.5 && undo.length === 1 && undo[0].label === `move ${site.name}`
+    && guides.hintState() === null && ctx.selection.lead === 'guide:n', 'release keeps the move as one labelled undo step and keeps the selection');
+  guides.gizmoStart('x', ray(875));
+  guides.gizmoMove(ray(900));
+  guides.gizmoEnd(true);
+  check(guides.byId('n').points[0][0] === 32.5 && undo.length === 1 && guides.hintState() === null,
+    'cancelling restores the point and clears the hint with no new undo step');
 }
 
 section('undo stack');
