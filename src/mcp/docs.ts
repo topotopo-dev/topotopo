@@ -6,6 +6,7 @@ import { GODOT_COMMANDS } from '../host/godot-commands.ts';
 import { UNREAL_COMMANDS } from '../host/unreal-commands.ts';
 import { graphLines } from './graphlines.ts';
 import { examplesIndexText } from './examples.ts';
+import { recipesText } from './recipes.ts';
 
 export const INSTRUCTIONS = `TopoTopo: a procedural geometry engine (Houdini-SOP style) you drive with JSON node graphs.
 
@@ -1882,74 +1883,7 @@ CHECK: inspect stats (substeps, contacts; inflate: volume_ratio); render views "
 LIMITS: collision is per point plus sharp corners (a sharp collider edge can pass between the points of a coarse cloth: refine it),
  colliders are static, contacts are found once per step, no tearing, plasticity or cloth-on-cloth friction.`,
 
-  recipes: `RECIPES (copy, then adapt)
-1) Rocks on terrain:
- {"nodes":{"t":{"type":"terrain","params":{"size":[30,30],"height":4}},
-  "pts":{"type":"scatter","in":["t"],"params":{"count":150,"seed":2}},
-  "keep":{"type":"delete","in":["pts"],"params":{"class":"point","group":"@N.y<0.85"}},
-  "sc":{"type":"attrib_randomize","in":["keep"],"params":{"name":"pscale","min":0.2,"max":0.7}},
-  "rock":{"type":"sphere","params":{"type":"ico","level":2}},
-  "rk":{"type":"noise_displace","in":["rock"],"params":{"amplitude":0.3,"frequency":1.5}},
-  "rocks":{"type":"copy_to_points","in":["rk","sc"]},
-  "out":{"type":"merge","in":["t","rocks"]}}}
-2) Tree: lsystem → polywire (uses width) + leaves: copy a small grid to group "leaves" points via delete keep.
- {"nodes":{"ls":{"type":"lsystem","params":{"axiom":"A","rules":{"A":"F[&+A!J][&-A!J][^A!J]"},"generations":6,"tropism_strength":0.1}},
-  "trunk":{"type":"polywire","in":["ls"],"params":{"divisions":6}},
-  "lp":{"type":"delete","in":["ls"],"params":{"class":"point","group":"leaves","keep":true}},
-  "leaf":{"type":"grid","params":{"size":[0.2,0.3],"divisions":[1,1],"plane":"xy"}},
-  "leaves":{"type":"copy_to_points","in":["leaf","lp"]},
-  "out":{"type":"merge","in":["trunk","leaves"]}}}
-3) Building floors with foreach count: body transforms a floor slab by "=iteration*3".
-4) Carved block: box → boolean subtract with sphere/tube → smooth_solid for rounded edges.
-5) Shatter: sphere → voronoi_fracture count 20 gap 0.02 → render color_by:"class".
-6) Sign: text {text:"HELLO", depth:0.2} + box backing, merge.
-7) Organic blob: sdf_expr with smin of spheres + noise → sdf_to_mesh.
-8) Pipes: curve (smooth) → sweep (circle radius 0.05) or polywire.
-9) Panel greebles: grid → poly_extrude individual with group "@P.x>0" random → color by group via group/color nodes.
-10) Deformers: bend with a cage: geo → bound {divisions:[1,6,1]} → bend → lattice(geo, bent cage, divisions [1,6,1]); wrap along a curve: geo laid along +Z → path_deform(geo, curve) {stretch:true}; pull a spot: soft_transform {group, translate, radius}; drive a mesh by a coarse proxy: point_deform(geo, rest pts, deformed pts). Add rest before deforming so noise_displace/attrib_noise patterns stick.
-11) Hard-surface block-out: box → polysplit {edge:"length>1.2", count:2} (loop cuts; new points in point group "split")
- → group_promote {group:"split", from:"point", to:"prim", include:"all", new_name:"band", delete_source:false}
- → poly_extrude {group:"band", distance:0.1, inset:0.03} → bevel the rims (polybevel) or subdivide with creases. knife splits along a
- plane with the cut in edge group "cut"; polybridge {source:"border:a", target:"border:b", delete_inner_faces:true} tunnels
- between two face groups; polyfill {mode:"grid"} caps holes with quads; dissolve {group:"split"} removes loops again.
-12) Rounded / chamfered hard-surface edges: box → poly_bevel {group:"angle>80", offset:0.05, divisions:3} (divisions 0 =
- chamfer; shape 1 = squarer, -0.5 = flat, -1 = cove). Only the rim of a slab: extrude → poly_bevel {group:"border:top"}.
-13) Clean asset pipeline: imported/broken mesh → mesh_repair (fuse, winding, small holes; report in detail repair_report)
- → remesh_isotropic {target_length, feature_angle:40} (even triangles before uv_unwrap or simulation; target_attrib for
- adaptive size) → uv_unwrap → lod {levels:4, ratios:[1,0.5,0.25,0.1]} (prim lod + name {name}_lod0… from name_format,
- export split_by_name; group "@name=magazine" for one part; mode switch + level for one level, named the same way) or
- decimate {ratio, attributes:"uv N"} for one level. A level that stops short warns with what holds it (uv seams, hard
- normals, group / prim attribute borders): reduce before unwrapping and compute vertex normals after lod. remesh_quad {target_faces:2000, feature_angle:45} produces field-aligned
- quad-dominant polygons with point/vertex/prim attributes; mode:"quads_only" conformingly subdivides all faces and can
- exceed target_faces, especially along hard curves. crease_group aligns explicit edges; group keeps its border fixed.
- Inspect detail quad_fraction and singularities, and the wireframe. remesh (voxel) only when the input is beyond repair
- (it drops attributes). A whole cleanup, scan to LODs: help {examples:["asset_cleanup"]}.
-14) Street from TopoTopo's own packages (help topic packages): topotopo/street/road_strip on a line →
- topotopo/street/lamp_post packed onto points_along_curve {side_offset, both_sides}; a house = four
- topotopo/architecture/wall_segment walls (the street-facing one rotated 180°, sides ±90°, door:true on the front) +
- topotopo/architecture/roof_gable or roof_hip translated to the wall top; topotopo/street/fence and bench,
- topotopo/props/crate and topotopo/nature/tree_lowpoly placed with transform or copy_to_points;
- topotopo/nature/forest_patch on a grid for a park. Whole graph: help {examples:["market_street"]}.
-15) Instance a placement list (a position, yaw, scale and piece name per row, from a file) into one instanced GLB:
- placements  file {path:"inputs/placements.json"}: a JSON list of rows [{"P":[2,0,0], "yaw":45, "pscale":1.2,
-             "name":"barrel"}, …], or a CSV with the columns P.x,P.y,P.z,yaw,pscale,name; every key or column is a
-             point attribute (orient.x…w or N and up in place of yaw, scale for a per-axis scale; yaw in degrees,
-             counter-clockwise seen from above, so a list from Unreal, clockwise, needs its sign flipped).
- pieces      one file node per piece (pieces/crate.glb, or a package output in its place) + attrib_create
-             {name:"name", class:"prim", value:"crate"}, merged; or a folder, file {path:"pieces"}, whose files
-             are named after their stems ("<stem>/<part>" for a file with several named parts: wrangle
-             {run_over:"prims", code:"s@name = @name.split('/')[0];"} makes each file one piece again).
- instance    copy_to_points {pack:true, variants:"name", variant_attrib:"name", rotate_attrib:"yaw"} (in: pieces,
-             placements); rows naming no piece get no copy and a warning that lists them.
- export      glb: one mesh per piece with EXT_mesh_gpu_instancing (help topic "instancing").
- {"nodes":{"crate":{"type":"file","params":{"path":"pieces/crate.glb"}},
-  "crate_n":{"type":"attrib_create","in":["crate"],"params":{"name":"name","class":"prim","value":"crate"}},
-  "barrel":{"type":"file","params":{"path":"pieces/barrel.glb"}},
-  "barrel_n":{"type":"attrib_create","in":["barrel"],"params":{"name":"name","class":"prim","value":"barrel"}},
-  "pieces":{"type":"merge","in":["crate_n","barrel_n"]},
-  "spots":{"type":"file","params":{"path":"inputs/placements.json"}},
-  "layout":{"type":"copy_to_points","in":["pieces","spots"],"params":{"pack":true,"variants":"name","variant_attrib":"name","rotate_attrib":"yaw"}}},
-  "output":"layout"}`,
+  recipes: recipesText(),
 };
 
 /** The help topics: "examples" (generated from the example cards, src/mcp/examples.ts) and the written ones. */
