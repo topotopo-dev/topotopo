@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type http from 'node:http';
-import { MANIFEST_EXT } from '../session.ts';
+import { MANIFEST_EXT, readGraphFile } from '../session.ts';
 import { engineAbove, engineTypeOf, godotProjectOf } from '../engines.ts';
 import type { EngineType } from '../engines.ts';
 import { canonicalJSON } from '../io/source.ts';
@@ -523,8 +523,8 @@ export function exportStale(graphFile: string, m: ExportMade): boolean | null {
   let g: any;
   let h = graphHashes.get(graphFile);
   if (h?.key !== key) {
-    let ok = true;
-    try { g = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { ok = false; }
+    const read = readGraphFile(graphFile), ok = 'graph' in read;
+    if (ok) g = read.graph;
     h = { key, plain: ok ? graphSha(canonicalJSON(g)) : null, vars: ok && hasVars(g), withVars: new Map() };
     // with its own vars, a graph's hash is its canonical hash (the same text)
     if (h.vars) h.withVars.set(canonicalJSON(g.vars), h.plain!);
@@ -537,7 +537,11 @@ export function exportStale(graphFile: string, m: ExportMade): boolean | null {
   const varsKey = canonicalJSON(m.vars);
   let withVars = h.withVars.get(varsKey);
   if (withVars === undefined) {
-    if (g === undefined) { try { g = JSON.parse(fs.readFileSync(graphFile, 'utf8')); } catch { return null; } }
+    if (g === undefined) {
+      const read = readGraphFile(graphFile);
+      if ('error' in read) return null;
+      g = read.graph;
+    }
     withVars = graphSha(canonicalJSON({ ...g, vars: m.vars }));
     if (h.withVars.size >= MAX_VARS_SETS) h.withVars.clear();
     h.withVars.set(varsKey, withVars);
@@ -948,7 +952,7 @@ function noteHrefs(file: string, cache?: NoteLinks): string[] {
  * ("owner/name/output" when it uses a package), its count of nodes and its vars with their descriptions and ranges from
  * its params (none of them when it cannot be read).
  */
-export interface GraphSummary { types: string[]; nodes: number; vars: VarRow[] }
+export interface GraphSummary { types: string[]; nodes: number; vars: VarRow[]; error?: string }
 const summaries = new Map<string, { key: string; value: GraphSummary }>();
 
 /** A graph file's summary, kept while the file is unchanged (its size and time): read once per change. */
@@ -958,11 +962,11 @@ export const graphSummary = (file: string): GraphSummary => keptWhileUnchanged(s
 export const graphTypes = (file: string): string[] => graphSummary(file).types;
 
 function readGraphSummary(file: string): GraphSummary {
-  let g: any;
-  try { g = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return { types: [], nodes: 0, vars: [] }; }
-  const o = g ?? {}, meta = o.params ?? {};
-  const vars: VarRow[] = Object.entries<unknown>(o.vars ?? {}).map(([k, v]) => ({ name: k, value: v, desc: meta[k]?.desc ?? meta[k]?.label, min: meta[k]?.min, max: meta[k]?.max }));
-  return { types: nodeTypes(g), nodes: Object.keys(o.nodes ?? {}).length, vars };
+  const read = readGraphFile(file);
+  if ('error' in read) return { types: [], nodes: 0, vars: [], error: read.error.message };
+  const g = read.graph, meta = g?.params ?? {};
+  const vars: VarRow[] = Object.entries<unknown>(g?.vars ?? {}).map(([k, v]) => ({ name: k, value: v, desc: meta[k]?.desc ?? meta[k]?.label, min: meta[k]?.min, max: meta[k]?.max }));
+  return { types: nodeTypes(g), nodes: Object.keys(g?.nodes ?? {}).length, vars };
 }
 
 function nodeTypes(g: any): string[] {

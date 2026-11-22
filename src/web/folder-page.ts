@@ -6,7 +6,7 @@
 // preview baked, the flags as one line that opens, a package's board snippets and where it is. A pure function of its
 // data (src/web/server.ts gathers it, src/web/folders.ts reads the folder) and a URL builder.
 import { count, esc, flagBadge, mosaic, packageAttachments, packageBlock, packageDetails, packageEnd, packageOutputs, packageRelations, shell, size, usesSection, when } from './pages.ts';
-import type { PackageData, Urls } from './pages.ts';
+import type { CardData, PackageData, Urls } from './pages.ts';
 import type { FileKind, Flag } from './folders.ts';
 
 /** A subfolder as a card. */
@@ -27,7 +27,7 @@ export interface FolderCard {
   /** a package's full name and newest version */
   pkg?: { name: string; version: string | null };
   /** a package's preview status ('failed' …) */
-  status?: string;
+  status?: CardData['status'];
   /** a plain folder with nothing in it: listed in one line, not as a card */
   empty?: boolean;
 }
@@ -161,7 +161,7 @@ function folderCard(c: FolderCard) {
       ${c.title !== c.name ? `<span class="fname">${esc(c.name)}/</span>` : ''}
       <span class="fsub">${esc(c.sub)}</span>
       ${c.pkg ? `<span class="pkg">${esc(c.pkg.name)}${c.pkg.version ? ` ${esc(c.pkg.version)}` : ''}</span>` : ''}
-      <span class="fmarks">${c.kind === 'package' ? '<span class="kindmark">package</span>' : c.packages ? `<span class="kindmark">${esc(count(c.packages, 'package'))}</span>` : ''}${c.status === 'failed' ? '<span class="status s-failed">bake failed</span>' : ''}${flagBadge(c.flags)}</span>
+      <span class="fmarks">${c.kind === 'package' ? '<span class="kindmark">package</span>' : c.packages ? `<span class="kindmark">${esc(count(c.packages, 'package'))}</span>` : ''}${c.status === 'unread' ? '<span class="status s-unread">graph file cannot be read</span>' : c.status === 'failed' ? '<span class="status s-failed">bake failed</span>' : ''}${flagBadge(c.flags)}</span>
     </span>
   </a>`;
 }

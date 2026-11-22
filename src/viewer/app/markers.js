@@ -66,6 +66,9 @@ export function parseMarkers(body) {
 export const markersBody = (list) => JSON.stringify({ markers: list.map(({ id, kind, name, points, radius, height }) =>
   ({ id, kind, name, points, ...(kind === 'site' ? { radius } : {}), ...(kind === 'volume' ? { height } : {}) })) });
 
+/** Whether it is safe to take the guides from disk. */
+export const shouldReloadGuides = (saving, editing) => !saving && !editing;
+
 /** A deep copy of a list (undo snapshots). */
 export const cloneMarkers = (list) => list.map((m) => ({ ...m, points: m.points.map((p) => [p[0], p[1], p[2]]) }));
 

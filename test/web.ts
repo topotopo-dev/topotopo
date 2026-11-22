@@ -330,6 +330,32 @@ try {
     check(await until(() => fs.existsSync(path.join(beside.dir, '.web', 'thumb.png')), 60000), 'and is baked');
   }
 
+  section('a graph file that cannot be read');
+  {
+    const p = createPackage(lib, 'props/unreadable', { title: 'Unreadable' });
+    const file = path.join(p.dir, 'graphs', 'main.json'), bake = path.join(p.dir, '.web', 'bake.json');
+    write(file, '}');
+    write(path.join(p.dir, 'graphs', 'other.json'), '}');
+    g.rescan();
+    const at = '/p/game/unreadable';
+    const status = async () => JSON.parse((await req('/api/packages')).body.toString()).packages.find((x: any) => x.id === p.id)?.status;
+    check(await status() === 'unread', 'the package has unread status');
+    const rejected = await req(at + '/bake', { method: 'POST' });
+    const error = JSON.parse(rejected.body.toString()).error;
+    check(rejected.status === 400 && /^Its graph file graphs\/main\.json cannot be read: .+/.test(error), 'a re-bake request answers 400 with the unreadable file and parser error');
+    const pg = (await page(at)).body.toString();
+    check(pg.includes(`id="bake">${esc(error)}</p>`) && !pg.includes('Re-bake') && pg.includes('Open in editor') && !pg.includes('No default graph yet'),
+      'the package page explains the unreadable graph and offers Open in editor');
+    check(pg.includes('<b>other</b>: cannot be read') && !pg.includes('0 nodes'), 'a non-default unreadable graph is listed with the error');
+    const mark = '<span class="status s-unread">graph file cannot be read</span>';
+    check((await req('/')).body.includes(mark) && (await page('/l/game/props/')).body.includes(mark), 'the front and folder cards mark the package unread');
+    const preview = await req(at + '/preview.glb');
+    check(preview.status === 404 && JSON.parse(preview.body.toString()).error === error, 'the preview request explains the unreadable graph');
+    check(!await until(() => fs.existsSync(bake), 3000), 'the unreadable default graph is not baked');
+    write(file, BOX);
+    check(await until(async () => fs.existsSync(bake) && await status() === 'ok', 60000), 'repairing the default graph bakes it and gives ok status');
+  }
+
   section('packages: a package\'s versions and outputs, the packages a package uses, the cards mark packages');
   {
     // a package with two published versions and a package that uses the first, their records as publishing and use

@@ -24,8 +24,10 @@ import { encodePNG } from '../src/render/png.ts';
 import { summarize } from '../src/inspect.ts';
 import { Session, graphFiles, varDeclaration } from '../src/session.ts';
 import type { EditOp } from '../src/session.ts';
-import { inputFileName, startViewer } from '../src/viewer/server.ts';
+import { openPackage } from '../src/open.ts';
+import { inputFileName, markersFromGeometry, startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
+import { shouldReloadGuides } from '../src/viewer/app/markers.js';
 import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
 import { packedFromMatrices } from '../src/core/packed.ts';
 import { previewGLB, heightfieldRes, HEIGHTFIELD_PREVIEW_RES } from '../src/render/preview.ts';
@@ -868,6 +870,19 @@ section('markers: POST /api/markers writes inputs/markers.json, read back throug
     fs.writeFileSync(path.join(ws.inputDir, 'by-hand.obj'), TRI_OBJ);
     check(remade.status === 200 && fs.existsSync(geoFile) && await until(() => announced() > seen, 5000),
       'a markers write that makes inputs/ again watches it: a file copied in by hand is announced');
+
+    const readList = async () => (await api('GET')).j.markers;
+    let first = await readList();
+    const second = [...await readList(), { ...markers[1], radius: 5 }];
+    const beforeSave = announced();
+    const savedBySecond = await api('POST', { markers: second });
+    const heardSecond = await until(() => announced() > beforeSave, 5000);
+    if (heardSecond && shouldReloadGuides(false, false)) first = await readList();
+    const savedByFirst = await api('POST', { markers: [...first, { ...markers[0], id: 'f', name: 'camp' }] });
+    const readBack = (await readList()).map((m: any) => m.name).join(', ');
+    const disk = markersFromGeometry(await importGeometryAsync(fs.readFileSync(geoFile), 'json')).map((m: any) => m.name).join(', ');
+    check(savedBySecond.status === 200 && heardSecond && savedByFirst.status === 200 && readBack === 'village, well, camp' && disk === readBack,
+      `the first page keeps the second page's guide when it saves after an inputs event (API: ${readBack}, file: ${disk})`);
   } finally {
     ac.abort();
     await stream;
@@ -942,6 +957,25 @@ section('a package\'s graph files beside its manifest (examples/ keeps its graph
       check(info.builtin.some((k: any) => k.name === 'topotopo/street' && /outputs: bench/.test(k.outputs)), 'and TopoTopo\'s built-in packages with their outputs');
     } finally { v.close(); }
   } finally { a.unwatch(); b.unwatch(); }
+}
+
+section('the editor on a package with an unreadable graph file');
+{
+  const dir = path.join(tmp, 'unreadable');
+  fs.mkdirSync(path.join(dir, 'graphs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'unreadable.topo'), JSON.stringify({ title: 'Unreadable', graph: 'main' }));
+  fs.writeFileSync(path.join(dir, 'graphs', 'main.json'), '}');
+  const engine = new Engine(createNodeHost({ baseDir: dir }));
+  await engine.init();
+  const { session, loaded } = openPackage(engine, dir, { watch: true });
+  const v = await startViewer(session, 0);
+  try {
+    const r = await fetch(v.url + 'api/package'), info = await r.json() as any;
+    const unread = info.unread?.[0];
+    check(r.ok && info.unread?.length === 1 && unread?.file === 'graphs/main.json' && !!unread.error
+      && loaded.graphErrors[0] === `${unread.file}: ${unread.error}` && !session.graphs.size,
+      'GET /api/package carries the unreadable graph path and parser error');
+  } finally { v.close(); session.unwatch(); }
 }
 
 section('viewer setSession');

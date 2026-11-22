@@ -169,6 +169,8 @@ section('guides: perspective insertion and drag cancellation');
 
 section('guides: cancellation while a prior save is queued');
 {
+  check(mk.shouldReloadGuides(false, false) && !mk.shouldReloadGuides(true, false) && !mk.shouldReloadGuides(false, true) && !mk.shouldReloadGuides(true, true),
+    'an inputs event reloads guides only with no save pending and no edit under way');
   const originalSave = api.saveMarkers, pending: ((r: any) => void)[] = [], bodies: any[] = [];
   let persisted: any = null;
   api.saveMarkers = (body: string) => {
@@ -705,6 +707,18 @@ section('the tab\'s title, the welcome, and messages that clear themselves (sect
   check(wp.kind === 'package' && wp.title === 'Lantern' && /no graphs yet/.test(wp.lead) && wp.steps.some((s: string) => /Ask your agent/.test(s)) && wp.builtin.length === 1,
     'a package without graphs: its name, ask your agent, TopoTopo\'s built-in packages');
   check(wf.kind === 'folder' && /not a TopoTopo package/.test(wf.lead) && wf.steps.some((s: string) => s.includes('topotopo init "/home/me/stuff"')), 'a folder that is no package says so and how to make it one');
+  const unread = [{ file: 'graphs/main.json', error: 'Unexpected token' }, { file: 'graphs/other.json', error: 'Unexpected end of JSON input' }];
+  const damaged = welcome.welcomeOf({ ...proj, unread });
+  check(damaged.lead === 'A graph file of this package cannot be read.' && damaged.steps.join('\n') === [
+    'graphs/main.json: Unexpected token', 'graphs/other.json: Unexpected end of JSON input',
+    'Fix the file (or put back an earlier copy of it) and it shows here at once.',
+  ].join('\n'), 'the welcome lists unreadable graph files and how to make them show');
+  const line = 'graphs/main.json cannot be read (Unexpected token): the editor shows the last version it could read';
+  check(welcome.unreadMessage([]) === '' && welcome.unreadMessage(unread.slice(0, 1), ['main']) === line && welcome.unreadMessage(unread, ['main', 'town']) === `${line} · and 1 more`,
+    'with a graph to show, the message names the unreadable file and counts the rest');
+  check(welcome.unreadMessage(unread.slice(0, 1), ['town']) === 'graphs/main.json cannot be read (Unexpected token): it shows here when the file is fixed'
+    && welcome.welcomeOf({ package: null, folder: '/home/me/stuff', builtin: [], unread }).lead === 'A graph file of this folder cannot be read.',
+    'a file that was never read is not called a last version, and a folder is not called a package');
   check(status.messageLife('saved 2 values', 'ok') === 6000 && status.messageLife('no such node', 'err') === 12000 && status.messageLife('undid move', '', 2000) === 6000 && status.messageLife('x', '', 9000) === 9000,
     'a message clears itself: 6 s, an error 12 s, longer when held');
   check(status.messageLife('exporting crate…', 'busy') === Infinity && status.messageLife(status.DISCONNECTED_LINE, 'err') === Infinity && status.messageLife('', 'err') === 0,

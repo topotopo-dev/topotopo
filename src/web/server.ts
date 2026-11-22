@@ -315,12 +315,18 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
    * A package's graphs (graphs/, and graph files beside its manifest; a built-in package's where it is read from), and
    * whether it has the one its manifest shows.
    */
-  const graphsOf = (p: Package) => graphFiles(builtinAt.get(p.dir)?.from ?? p.dir);
-  const hasDefault = (p: Package) => graphsOf(p).has(p.manifest.bake.graph ?? p.manifest.graph);
+  const graphsAt = (p: Package) => builtinAt.get(p.dir)?.from ?? p.dir;
+  const graphsOf = (p: Package) => graphFiles(graphsAt(p));
+  const defaultFile = (p: Package) => graphsOf(p).get(p.manifest.bake.graph ?? p.manifest.graph);
+  const unreadDefault = (p: Package, file: string | undefined) => {
+    if (!file) return;
+    const { error } = graphSummary(file);
+    if (error !== undefined) return `Its graph file ${path.relative(graphsAt(p), file).split(path.sep).join('/')} cannot be read: ${error}`;
+  };
   const bakeIfStale = (p: Package) => {
-    // nothing to bake before the package has its default graph: its card says so ("no default graph yet"); TopoTopo's
-    // own packages are never baked here
-    if (!bakeOn || isBuiltin(p) || queue.pending(p.dir) || !hasDefault(p)) return;
+    if (!bakeOn || isBuiltin(p) || queue.pending(p.dir)) return;
+    const file = defaultFile(p);
+    if (!file || unreadDefault(p, file)) return;
     try { if (isStale(p) && queue.add(p.dir)) broadcast({ package: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
   };
   // the audits: each tree's walk and flags, made when a page asks and made again soon after something in that tree
@@ -635,7 +641,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       .map((p) => ({ lib: p.lib, id: p.id, title: p.manifest.title, version: p.manifest.uses[name], url: pageOf(p) })),
     ...games.filter((g) => g.m?.uses[name]).map((g) => ({ lib: 'workspace', id: g.name, title: `workspace ${g.name}`, version: g.m!.uses[name], url: urls.folder('w', g.name, '') })),
   ].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
-  const status = (p: Package, s: BakeState | null) => (isBuiltin(p) ? 'ok' : !hasDefault(p) ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed');
+  const status = (p: Package, s: BakeState | null): CardData['status'] => {
+    const file = defaultFile(p);
+    return unreadDefault(p, file) ? 'unread' : isBuiltin(p) ? 'ok' : !file ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed';
+  };
   const cardOf = (p: Package): CardData => {
     const s = readBakeState(p.dir);
     const m = p.manifest;
@@ -689,8 +698,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   /** A package's page data; its exports older than their graphs as the audit shown says (none before the first audit). */
   const packageData = (p: Package, audit: Audit | null): PackageData => {
     const builtin = isBuiltin(p), s = builtin ? null : readBakeState(p.dir);
-    // unreadable: listed without nodes
-    const graphs = [...graphsOf(p)].map(([name, file]) => { const s = graphSummary(file); return { name, nodes: s.nodes, vars: s.vars }; });
+    const graphs = [...graphsOf(p)].map(([name, file]) => { const { nodes, vars, error } = graphSummary(file); return { name, nodes, vars, error }; });
+    const unread = unreadDefault(p, defaultFile(p));
     const abs = (u: string) => base + u;
     const m = p.manifest, homes = packageHomes(), r = rootOf(p);
     const versions = m.name ? publishedVersions(p.dir, m.name) : [];
@@ -703,7 +712,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const model = (sub: string, f: string) => (/\.(glb|gltf)$/i.test(f) ? { model: urls.model(r.kind, r.name, `${p.rel}/${sub}/${f}`) } : {});
     const stale = builtin ? new Set<string>() : audit?.stale.get(folderKey(p.dir)) ?? new Set<string>();
     return {
-      ...cardOf(p), builtin, rel: p.rel, place: games.some((g) => g.scan.packages.includes(p)) ? `in the workspace "${p.lib}"` : builtin ? 'in TopoTopo\'s built-in library' : `in library "${p.lib}"`, links: m.links, graph: m.bake.graph ?? m.graph, graphs, created: m.created,
+      ...cardOf(p), builtin, rel: p.rel, place: games.some((g) => g.scan.packages.includes(p)) ? `in the workspace "${p.lib}"` : builtin ? 'in TopoTopo\'s built-in library' : `in library "${p.lib}"`, links: m.links, graph: m.bake.graph ?? m.graph, graphs, unread, created: m.created,
       attachments: builtin ? [] : listFiles(path.join(p.dir, 'attachments')).map((f) => ({ ...f, url: at('attachments', f.path), ...model('attachments', f.path) })),
       exports: builtin ? [] : listFiles(path.join(p.dir, 'exports')).filter((f) => !/\.json$/i.test(f.path) || !/(^|\/)(source|landscape)\.json$|\.(source|meshes)\.json$/i.test(f.path)).map((f) => ({ ...f, url: at('exports', f.path), ...model('exports', f.path), ...(stale.has(f.path) ? { stale: true } : {}) })),
       glb: !builtin && fs.existsSync(path.join(webDir(p.dir), 'preview.glb')), thumb: !!previewOf(p), bake: s,
@@ -738,7 +747,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const packageFlags = (p: Package, used: Map<string, Set<string>> | null, stale: Set<string>): Flag[] => {
     const out: Flag[] = [], at = p.rel, m = p.manifest;
     const s = readBakeState(p.dir);
-    if (s && !s.ok && hasDefault(p) && !queue.pending(p.dir)) out.push({ kind: 'bake', at, what: `The preview of ${m.title} did not cook: ${firstLine(s.error) || 'no reason given'}`, todo: 'Open it in the editor to see why; it bakes again when the graph is saved, or press Re-bake' });
+    if (s && !s.ok && status(p, s) === 'failed') out.push({ kind: 'bake', at, what: `The preview of ${m.title} did not cook: ${firstLine(s.error) || 'no reason given'}`, todo: 'Open it in the editor to see why; it bakes again when the graph is saved, or press Re-bake' });
     if (m.name) {
       const versions = publishedVersions(p.dir, m.name), last = versions.at(-1);
       if (!last) out.push({ kind: 'publish', at, what: `${m.name} publishes versions and has none yet`, todo: 'Publish the first: topotopo publish --note "…" in its folder, or ask your agent' });
@@ -1235,7 +1244,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           if (!fs.existsSync(file)) {
             bakeIfStale(p);
             if (rest[0] === 'thumb.png') return send(200, placeholderPNG(), 'image/png');
-            return json(404, { error: s?.ok === false ? `the bake failed: ${s.error}` : 'not baked yet' });
+            return json(404, { error: unreadDefault(p, defaultFile(p)) ?? (s?.ok === false ? `the bake failed: ${s.error}` : 'not baked yet') });
           }
           const etag = `"${s?.key ?? 'x'}-${s?.at ?? 0}"`;
           if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag }); return res.end(); }
@@ -1245,7 +1254,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         if (rest[0] === 'bake') {
           if (isBuiltin(p)) throw new HttpError(400, 'TopoTopo\'s built-in packages are not edited or baked here: TopoTopo\'s repository publishes them');
           if (req.method !== 'POST') throw new HttpError(405, 'POST to bake again');
-          if (!hasDefault(p)) throw new HttpError(400, `no default graph yet: ${p.manifest.title} has no graph "${p.manifest.bake.graph ?? p.manifest.graph}" to bake`);
+          const file = defaultFile(p);
+          if (!file) throw new HttpError(400, `no default graph yet: ${p.manifest.title} has no graph "${p.manifest.bake.graph ?? p.manifest.graph}" to bake`);
+          const unread = unreadDefault(p, file);
+          if (unread) throw new HttpError(400, unread);
           const queued = queue.add(p.dir);
           if (queued) broadcast({ package: keyOf(p), baking: true });
           return json(200, { ok: true, queued });

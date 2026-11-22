@@ -202,8 +202,12 @@ section('bake');
   fs.writeFileSync(path.join(p.dir, 'graphs', 'other.json'), JSON.stringify(BOX));
   const p2 = scanLibrary(lib).packages.find((x) => x.id === 'lantern')!;
   check(isStale(p2) && (await bakePackage(p2.dir)).ok, 'the manifest\'s graph choice is part of the key, and is what bakes');
-  const none = await bakePackage(scanLibrary(lib).packages.find((x) => x.id === 'crate-big')!.dir);
+  const noGraph = scanLibrary(lib).packages.find((x) => x.id === 'crate-big')!.dir;
+  const none = await bakePackage(noGraph);
   check(!none.ok && /no graph "main"/.test(none.error ?? ''), 'a package without its graph says so');
+  fs.writeFileSync(path.join(noGraph, 'graphs', 'main.json'), '}');
+  const unread = await bakePackage(noGraph);
+  check(!unread.ok && /^the graph file graphs\/main\.json cannot be read: .+/.test(unread.error ?? ''), 'a bake of an unreadable graph gives its file and the parser error');
 }
 
 section('bake queue (child processes)');
