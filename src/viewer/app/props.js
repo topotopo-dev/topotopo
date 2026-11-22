@@ -3,9 +3,10 @@
 // display mode; a result's output, node, counts and material; a piece's size; a CV's point), and below it the
 // Controls: the graph's exposed vars as sliders, fields, checkboxes, menus and colour pickers, under a collapsible
 // heading per param "group". Drags post at most every 100 ms; each control resets to its default; undeclared vars are
-// listed under "other vars" (closed when the graph declares params). Transform fields are read-only until phase 2.
+// listed under "other vars" (closed when the graph declares params).
 import { api } from './api.js';
 import * as M from './markers.js';
+import { typedValue } from './transform.js';
 import { parseId } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
@@ -18,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 
 export function createProps(ctx) {
   const body = $('props-body');
-  let shownKey = null, dirty = false;
+  let shownKey = null, dirty = false, applyingTranslate = false;
 
   // ------------------------------------------------------------------ building blocks
   const group = (title, ...extra) => { const g = el('div', 'pgroup'), h = el('h3'); h.append(el('span', '', title), el('span', 'grow'), ...extra); g.append(h); return g; };
@@ -41,6 +42,40 @@ export function createProps(ctx) {
     f.onkeydown = (e) => { if (e.key === 'Enter' || e.key === 'Escape') f.blur(); };
     return f;
   };
+  const translateFields = (m, pivot) => {
+    const box = el('div', 'xyz');
+    pivot.forEach((value, axis) => {
+      const f = el('input');
+      let shown = fmt(value);
+      f.type = 'text'; f.value = shown; f.spellcheck = false;
+      f.title = `Translate ${'XYZ'[axis]} (m)`; f.setAttribute('aria-label', f.title);
+      f.oninput = () => f.classList.remove('bad');
+      f.onkeydown = (e) => {
+        if (e.key !== 'Enter' && e.key !== 'Escape') return;
+        e.preventDefault(); e.stopPropagation();
+        if (e.key === 'Escape') { f.value = shown; f.classList.remove('bad'); }
+        f.blur();
+      };
+      f.onblur = () => {
+        const entered = f.value, guide = ctx.guides.byId(m.id);
+        if (!guide) return;
+        const current = M.pivotOf(guide)[axis];
+        const next = entered === shown ? current : typedValue(entered, current);
+        f.value = shown = fmt(next ?? current);
+        if (next === null) {
+          f.classList.add('bad');
+          setTimeout(() => f.classList.remove('bad'), 1500);
+        } else if (next !== current) {
+          // Keep the fields in place while focus moves to the next one.
+          applyingTranslate = true;
+          try { ctx.guides.setTranslate(m.id, axis, next); }
+          finally { applyingTranslate = false; }
+        }
+      };
+      box.append(f);
+    });
+    return box;
+  };
   const bboxRows = (g, b) => {
     if (!b || b.isEmpty()) return;
     const size = b.getSize(new ctx.THREE.Vector3()), c = b.getCenter(new ctx.THREE.Vector3());
@@ -56,7 +91,7 @@ export function createProps(ctx) {
   };
 
   // ------------------------------------------------------------------ one object
-  function guide(m) {
+  function guide(m, canTranslate = false) {
     const out = [];
     const id = m.id, kind = M.EDITOR_NAMES[m.kind];
     const del = el('button', 'danger', 'Delete');
@@ -73,7 +108,7 @@ export function createProps(ctx) {
     };
     g.append(row('name', name), row('kind', `${kind} · role "${m.kind}"`));
     const piv = M.pivotOf(m);
-    g.append(row('translate', xyz(piv)), row('rotate', xyz([0, 0, 0])), row('scale', xyz([1, 1, 1])));
+    g.append(row('translate', canTranslate ? translateFields(m, piv) : xyz(piv)), row('rotate', xyz([0, 0, 0])), row('scale', xyz([1, 1, 1])));
     out.push(g);
     const k = group('shape');
     if (m.kind === 'site') k.append(row('radius (m)', numberField(m.radius, (v) => ctx.guides.setSize(id, 'radius', v), 'pscale in inputs/markers.json')));
@@ -201,13 +236,13 @@ export function createProps(ctx) {
     const lead = ctx.selection.lead;
     const key = JSON.stringify([ids, ctx.version()]);
     if (!force && key === shownKey) return;
-    if (body.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) { dirty = true; return; }
+    if (applyingTranslate || (body.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName))) { dirty = true; return; }
     shownKey = key; dirty = false;
     // one selected: what it is; more: how many, then the lead (the last one added) in full
     const one = (id) => {
       const { obj, piece: p } = parseId(id), e = ctx.objects.get(obj);
       if (!e) return [group('gone')];
-      if (e.kind === 'guide') return p !== null ? cv(e.marker, p) : guide(e.marker);
+      if (e.kind === 'guide') return p !== null ? cv(e.marker, p) : guide(e.marker, ids.length === 1);
       if (p !== null) return piece(e, p);
       return e.kind === 'layer' ? layer(e) : output();
     };

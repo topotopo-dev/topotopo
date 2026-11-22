@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { api, coalesce } from './api.js';
 import { createViews } from './camera.js';
-import { createGrid, createOverlays, cursorText } from './grid.js';
+import { createGrid, createOverlays, cursorText, AXIS_COLORS } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
 import { createGuides, guideId, hasCVs, PLACE_KINDS } from './guides.js';
@@ -25,6 +25,7 @@ import { compareLine, cookLine, isRunning } from './cooking.js';
 import { pageTitle, defaultGraph, renderWelcome, unreadMessage } from './welcome.js';
 import { kindLine, resultName } from './output-info.js';
 import * as PT from './pointer.js';
+import { moveGizmo, hitGizmo } from './transform.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -41,7 +42,7 @@ const local = store(`topotopo.viewer.${location.host}.`), browser = store('topot
 const listeners = new Map();
 let version = 0;
 const ctx = {
-  THREE, store: local, objects: new Map(), hover: null,
+  THREE, store: local, objects: new Map(), hover: null, tool: 'move',
   on(type, f) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(f); },
   emit(type) { if (type !== 'hover' && type !== 'hint') version++; for (const f of listeners.get(type) ?? []) f(); for (const f of listeners.get('*') ?? []) f(type); },
   version: () => version,
@@ -424,12 +425,48 @@ function drawViews() {
   }
 }
 
-/** Readouts, the gizmo, labels and the pivot cross of every view (DOM, no WebGL). */
+const GIZMO_PX = 90;
+function gizmoShapes(slot, target, camera = views.camera(slot)) {
+  const at = new THREE.Vector3(...target.pivot);
+  const pivot = views.project(slot, at, camera);
+  if (!pivot) return [];
+  let unit = views.worldPerPixel(slot) * GIZMO_PX;
+  // Perspective metres per pixel grow with the pivot's depth, relative to the camera target's depth.
+  if (camera.isPerspectiveCamera) unit *= -at.clone().applyMatrix4(camera.matrixWorldInverse).z / views.cam(slot).dist;
+  const axes = {};
+  ['x', 'y', 'z'].forEach((axis, i) => {
+    const end = at.clone().setComponent(i, at.getComponent(i) + unit);
+    const to = views.project(slot, end, camera);
+    // how far the arrow's end is from the camera: the nearer arrow is drawn, and picked, on top
+    axes[axis] = to && { ...to, depth: -end.applyMatrix4(camera.matrixWorldInverse).z };
+  });
+  return moveGizmo(pivot, axes, GIZMO_PX);
+}
+function gizmoAt(slot, x, y) {
+  const target = ctx.guides.gizmoTarget();
+  return target ? hitGizmo(gizmoShapes(slot, target), x, y) : null;
+}
+function gizmoMark(shape, highlight) {
+  const axis = shape.kind === 'arrow' ? shape.id : Object.keys(AXIS_COLORS).find((a) => !shape.id.includes(a));
+  const color = highlight ? '#ffd24a' : AXIS_COLORS[axis];
+  if (shape.kind === 'square') {
+    return `<polygon points="${shape.corners.map(({ x, y }) => `${x},${y}`).join(' ')}" fill="${color}" fill-opacity=".35" stroke="${color}" stroke-width="1"/>`;
+  }
+  const { from, to } = shape;
+  const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy);
+  const ux = dx / length, uy = dy / length, bx = to.x - 9 * ux, by = to.y - 9 * uy;
+  return `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}" stroke-width="2.5"/><polygon points="${to.x},${to.y} ${bx - 4 * uy},${by + 4 * ux} ${bx + 4 * uy},${by - 4 * ux}" fill="${color}"/>`;
+}
+
+/** Readouts, the move tool handles, labels and the pivot cross of every view (DOM, no WebGL). */
 function drawOverlays() {
   const viewportWidth = viewport.clientWidth;
   const selBox = ctx.selection.size ? ctx.select.selectionBounds() : null;
   const selSize = selBox && !selBox.isEmpty() ? fmtSize(selBox.getSize(new THREE.Vector3()).toArray()) : '';
-  const pivot = selBox && !selBox.isEmpty() ? selBox.getCenter(new THREE.Vector3()) : null;
+  const target = drag?.kind === 'box' ? null : ctx.guides.gizmoTarget();
+  const activeGizmo = ctx.guides.gizmoDrag?.id;
+  const pivot = target ? new THREE.Vector3(...target.pivot) : selBox && !selBox.isEmpty() ? selBox.getCenter(new THREE.Vector3()) : null;
+  let gizmoHover = null;
   const labels = ctx.guides.labels();
   // the name of the result under the cursor, beside it (only in the view the cursor is in)
   const spot = ctx.select.hoverSpot, hoverName = spot && PT.targetKind(ctx.hover) === 'result' ? resultName(ctx.resultInfo(ctx.hover)) : '';
@@ -465,7 +502,18 @@ function drawOverlays() {
     for (const e of [...ov.labels.children]) if (!seen.has(e.dataset.k)) e.remove();
     // the pivot of the selection: a small cross
     const q = pivot && views.project(i, pivot, camera);
-    ov.marks.innerHTML = q ? `<g stroke="#f0a030" stroke-width="1.5"><line x1="${q.x - s.rect.x - 6}" y1="${q.y - s.rect.y}" x2="${q.x - s.rect.x + 6}" y2="${q.y - s.rect.y}"/><line x1="${q.x - s.rect.x}" y1="${q.y - s.rect.y - 6}" x2="${q.x - s.rect.x}" y2="${q.y - s.rect.y + 6}"/></g>` : '';
+    const cross = q ? `<g stroke="#f0a030" stroke-width="1.5"><line x1="${q.x - 6}" y1="${q.y}" x2="${q.x + 6}" y2="${q.y}"/><line x1="${q.x}" y1="${q.y - 6}" x2="${q.x}" y2="${q.y + 6}"/></g>` : '';
+    const shapes = target ? gizmoShapes(i, target, camera) : [];
+    const hover = cursor.slot === i && (!drag || drag.kind === 'press') ? hitGizmo(shapes, cursor.x, cursor.y) : null;
+    if (hover) gizmoHover = hover;
+    const handles = shapes.filter((shape) => !activeGizmo || shape.id === activeGizmo)
+      .map((shape) => gizmoMark(shape, shape.id === (activeGizmo ?? hover))).join('');
+    ov.marks.innerHTML = cross || handles ? `<g transform="translate(${-s.rect.x} ${-s.rect.y})">${handles}${cross}</g>` : '';
+  }
+  if (activeGizmo || gizmoHover) canvas.style.cursor = 'move';
+  else if (!drag) {
+    const h = cursor.slot >= 0 && !ctx.guides.mode ? ctx.guides.handleAt(cursor.slot, cursor.x, cursor.y) : null;
+    canvas.style.cursor = h ? (h.part === 'body' ? 'move' : 'crosshair') : '';
   }
   const st = $('step');
   const t = fmtStep(steps[views.active]);
@@ -557,8 +605,7 @@ function renderHint() {
   if (!state) return;
   hintLabel.data = state.text;
   hintNote.textContent = state.note ? ` · ${state.note}` : '';
-  for (const action of ['finish', 'removeLast']) {
-    const button = hintButtons.get(action);
+  for (const [action, button] of hintButtons) {
     button.hidden = state[action] === null;
     button.disabled = state[action] === false;
   }
@@ -566,7 +613,8 @@ function renderHint() {
 ctx.on('hint', renderHint);
 
 function syncTop() {
-  for (const [id, pressed] of [['tool-select', !ctx.guides.mode], ['tool-add', !!ctx.guides.mode], ['quad', views.quad]]) {
+  const tool = ctx.guides.mode ? 'add' : ctx.tool;
+  for (const [id, pressed] of [['tool-select', tool === 'select'], ['tool-move', tool === 'move'], ['tool-add', tool === 'add'], ['quad', views.quad]]) {
     const el = $(id);
     el.classList.toggle('on', pressed);
     el.setAttribute('aria-pressed', String(pressed));
@@ -623,7 +671,9 @@ function run(action, point = null) {
     case 'viewPersp': case 'viewTop': case 'viewFront': case 'viewRight':
       return setViewCamera(action.slice(4).toLowerCase());
     case 'ortho': views.toggleOrtho(views.active); saveViews(); return ctx.requestRender();
-    case 'selectMode': ctx.guides.setMode(null); return syncTop();
+    case 'selectMode': case 'moveMode':
+      ctx.tool = action === 'moveMode' ? 'move' : 'select';
+      return ctx.guides.setMode(null);
     case 'displayWire': case 'displayShaded': case 'displayShadedWire':
       slot.shading = { displayWire: 'wire', displayShaded: 'shaded', displayShadedWire: 'shadedWire' }[action]; break;
     case 'placeNull': case 'placeCurve': case 'placeArea': case 'placeVolume':
@@ -635,8 +685,9 @@ function run(action, point = null) {
       if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body);
       // Esc during a drag ends it where it began; during a press that is still a click, it clears as ever
       const d = drag, release = () => { try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } };
-      if (d?.kind === 'box') { drag = null; ctx.select.cancel(); release(); return; }
-      if (d?.kind === 'guide') { drag = null; ctx.guides.dragEnd(true); release(); return; }
+      if (d?.kind === 'box') { drag = null; ctx.select.cancel(); release(); requestOverlays(); return; }
+      if (d?.kind === 'guide') { drag = null; ctx.guides.dragEnd(true); release(); requestOverlays(); return; }
+      if (d?.kind === 'gizmo') { drag = null; ctx.guides.gizmoEnd(true); release(); return; }
       if (d?.kind === 'press' || d?.kind === 'place') { drag = null; release(); }
       if (ctx.guides.key('cancel')) return;
       ctx.guides.setMode(null); ctx.selection.clear(); return syncTop();
@@ -714,8 +765,9 @@ addEventListener('pointerdown', () => { spaceTap = null; }, true);
 
 // Navigation chords take priority in the viewport. The left button follows the placement or selection model.
 let drag = null;
-let placingPress = false, placingClick = false;
+let suppressDoublePress = false, suppressDoubleClick = false;
 const at = (e) => { const r = viewport.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+const trackCursor = (x, y) => { cursor.slot = views.slotAt(x, y); cursor.x = x; cursor.y = y; return cursor.slot; };
 /** Pick the surface pivot at the start of a camera drag. Orthographic orbits pan. */
 function navDrag(nav, slot, x, y, id) {
   const pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
@@ -738,7 +790,7 @@ canvas.addEventListener('pointerdown', (e) => {
     if (nav || context) drag = { kind: 'navPress', nav, context, handle, slot, x, y, id: e.pointerId };
     return;
   }
-  if (e.button === 0) placingPress = !!ctx.guides.mode;
+  if (e.button === 0) suppressDoublePress = !!ctx.guides.mode;
   setActive(slot);
   if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
   if (nav) { drag = navDrag(nav, slot, x, y, e.pointerId); return; }
@@ -749,13 +801,16 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   // nothing happens until the release (a click) or a few pixels of travel (a drag): pointermove decides which
-  const hit = ctx.select.pick(slot, x, y);
+  const shape = !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey ? gizmoAt(slot, x, y) : null;
+  if (shape) suppressDoublePress = true;
+  const hit = shape ? { kind: 'gizmo', shape, ray: views.ray(slot, x, y).ray } : ctx.select.pick(slot, x, y);
   const plan = PT.pressPlan({ target: hit?.kind ?? 'empty', shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, movable: !!hit?.handle });
   drag = { kind: 'press', slot, x, y, id: e.pointerId, hit, plan };
 });
 canvas.addEventListener('pointermove', (e) => {
   const { x, y } = at(e);
   if (drag && e.pointerId === drag.id) {
+    trackCursor(x, y);
     if (drag.kind === 'navPress') {
       if (!PT.isDrag(x - drag.x, y - drag.y)) return;
       if (!drag.nav) { drag = null; return; }
@@ -767,11 +822,15 @@ canvas.addEventListener('pointermove', (e) => {
       if (!PT.isDrag(x - drag.x, y - drag.y)) return;
       const { slot, x: x0, y: y0, id, hit, plan } = drag;
       if (plan.drag === 'move') {
-        // what you drag is what you have selected (the gizmo builds on this)
+        // what you drag is what you have selected
         if (PT.dragSelects(ctx.selection.items, hit.id)) ctx.selection.apply([hit.id]);
         drag = { kind: 'guide', slot, id, h: hit.handle };
         ctx.guides.dragStart(slot, x0, y0, hit.handle);
-      } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); }
+        requestOverlays();
+      } else if (plan.drag === 'gizmo') {
+        drag = { kind: 'gizmo', slot, id };
+        ctx.guides.gizmoStart(hit.shape, hit.ray);
+      } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); requestOverlays(); }
       else drag = navDrag('tumble', slot, x0, y0, id);
     } else if (drag.kind === 'place' && PT.isDrag(x - drag.x, y - drag.y)) {
       ctx.guides.pressCancel();
@@ -786,20 +845,17 @@ canvas.addEventListener('pointermove', (e) => {
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
     } else if (drag.kind === 'guide') ctx.guides.dragMove(drag.slot, x, y);
+    else if (drag.kind === 'gizmo') ctx.guides.gizmoMove(views.ray(drag.slot, x, y).ray);
     else if (drag.kind === 'box') ctx.select.move(x, y);
     return;
   }
   layoutViews();
-  const slot = views.slotAt(x, y);
-  cursor.slot = slot; cursor.x = x; cursor.y = y;
-  if (slot >= 0 && views.cam(slot).ortho) requestOverlays();
+  const slot = trackCursor(x, y);
+  requestOverlays();
   if (ctx.guides.mode) { if (slot >= 0) ctx.guides.pointerMove(slot, x, y); }
-  else {
-    ctx.select.hover(slot, x, y);
-    // what a press would grab: a point (CV, null, corner) or a whole guide
-    const h = slot >= 0 ? ctx.guides.handleAt(slot, x, y) : null;
-    canvas.style.cursor = h ? (h.part === 'body' ? 'move' : 'crosshair') : '';
-  }
+  // a move handle is in front of what lies under it, so nothing behind it lights up
+  else if (slot >= 0 && !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && gizmoAt(slot, x, y)) ctx.select.hover(-1);
+  else ctx.select.hover(slot, x, y);
 });
 function showContextMenu({ handle, slot, x, y }, place) {
   setActive(slot);
@@ -826,22 +882,25 @@ const endDrag = (e, cancel = false) => {
   drag = null;
   viewport.classList.remove('nav');
   const { x, y } = at(e);
+  if (!cancel) trackCursor(x, y);
   // what is under the cursor now that the camera has moved
   if (d.kind === 'nav') { saveViews(); if (!cancel) ctx.select.hover(views.slotAt(x, y), x, y); }
   else if (d.kind === 'navPress' && !cancel && e.button === 2 && d.context && !ctx.guides.mode && !PT.isDrag(x - d.x, y - d.y)) showContextMenu(d, { x, y });
   else if (d.kind === 'place') { if (cancel) ctx.guides.pressCancel(); else ctx.guides.pointerUp(d.slot, x, y, e.timeStamp); }
   else if (d.kind === 'guide') ctx.guides.dragEnd(cancel);
+  else if (d.kind === 'gizmo') ctx.guides.gizmoEnd(cancel);
   else if (d.kind === 'box') { if (cancel) ctx.select.cancel(); else ctx.select.up(x, y); }
   else if (d.kind === 'press' && !cancel) {
     // a press that did not travel is a click: the model says what it does with what was under it
     const c = PT.clickChange(d.plan.click, d.hit?.id);
     if (c) ctx.selection.apply(c.ids, c.op);
   }
+  requestOverlays();
 };
-// A native double-click that includes a placement click must not edit the guide just placed.
-canvas.addEventListener('click', (e) => { placingClick = placingPress || (e.detail > 1 && placingClick); });
+// A placement or a move handle click does not double-click the guide underneath.
+canvas.addEventListener('click', (e) => { suppressDoubleClick = suppressDoublePress || (e.detail > 1 && suppressDoubleClick); });
 canvas.addEventListener('dblclick', (e) => {
-  if (placingClick || ctx.guides.mode || drag) return;
+  if (suppressDoubleClick || ctx.guides.mode || drag) return;
   const { x, y } = at(e), slot = views.slotAt(x, y);
   if (slot >= 0) ctx.guides.doubleClick(slot, x, y);
 });

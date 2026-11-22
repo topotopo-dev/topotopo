@@ -10,6 +10,7 @@ export const TOP_BUTTONS = [
 
 export const TOOL_BUTTONS = [
   { id: 'tool-select', icon: 'select', label: 'Select', action: 'selectMode' },
+  { id: 'tool-move', icon: 'move', label: 'Move', action: 'moveMode' },
   { id: 'tool-add', icon: 'add', label: 'Add a guide', menu: 'create' },
 ];
 

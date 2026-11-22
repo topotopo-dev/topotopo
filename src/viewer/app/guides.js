@@ -15,6 +15,7 @@ import { fmtLen } from './units.js';
 import { AXIS_VIEWS } from './camera.js';
 import { parseId, pieceId } from './selection.js';
 import { isDoubleClick, isDrag } from './pointer.js';
+import { moveTargets, moveDelta, moveText, moveLabel } from './transform.js';
 
 export const guideId = (id) => `guide:${id}`;
 /** Whether a guide's CVs are selected one by one (curves and areas); a null and a volume select whole. */
@@ -199,7 +200,7 @@ export function createGuides(ctx) {
   // ------------------------------------------------------------------ saving: the whole list, the latest wins
   let saving = false, added = null;
   const save = ctx.coalesce(async () => {
-    const body = M.markersBody(G.list);
+    const body = M.markersBody(G.gizmoDrag?.start ?? G.list);
     if (body === G.saved) return;
     const announce = !added;
     saving = true;
@@ -214,8 +215,9 @@ export function createGuides(ctx) {
     ctx.emit('guides');
   });
   G.saving = () => saving || (G.saved === null ? G.list.length > 0 : M.markersBody(G.list) !== G.saved);
-  const canLoad = () => M.shouldReloadGuides(G.saving(), !!(G.draft || G.down || G.dragging));
+  const canLoad = () => M.shouldReloadGuides(G.saving(), !!(G.draft || G.down || G.dragging || G.gizmoDrag));
   const setList = (list) => {
+    G.gizmoEnd(true);
     // A placement already has its own confirmation, even if its save waits behind another edit.
     if (list.at(-1) !== added) added = null;
     G.list = M.cloneMarkers(list);
@@ -225,6 +227,7 @@ export function createGuides(ctx) {
   };
   /** One undoable change of the list: `edit(list)` changes a copy in place. */
   G.change = (label, edit, key) => {
+    G.gizmoEnd(true);
     const before = M.cloneMarkers(G.list), next = M.cloneMarkers(G.list);
     if (edit(next) === false) return false;
     setList(next);
@@ -308,7 +311,18 @@ export function createGuides(ctx) {
     if (!m || !(key in m) || m[key] === v) return false;
     return G.change(`${key} of ${m.name}`, (list) => { list.find((o) => o.id === id)[key] = v; }, `${key}:${id}`);
   };
+  /** Move a whole guide so that its pivot's coordinate on `axis` becomes the typed value; its points stay whole millimetres. */
+  G.setTranslate = (id, axis, value) => {
+    G.gizmoEnd(true);
+    const m = byId(id);
+    if (!m || !Number.isFinite(value)) return false;
+    const d = [0, 0, 0];
+    d[axis] = M.mm(value - M.pivotOf(m)[axis]);
+    if (!d[axis]) return false;
+    return G.change(`move ${m.name}`, (list) => { const i = list.findIndex((o) => o.id === id); list[i] = M.translateMarker(list[i], d); });
+  };
   G.setHidden = (ids, hide) => {
+    G.gizmoEnd(true);
     for (const id of ids) if (hide) G.hidden.add(id); else G.hidden.delete(id);
     rememberHidden(); entries(); G.draw(); ctx.emit('guides');
   };
@@ -371,12 +385,15 @@ export function createGuides(ctx) {
     },
   };
   G.hintState = () => {
+    const d = G.gizmoDrag;
+    if (d) return { text: moveText(d.id, d.delta), finish: null, removeLast: null, cancel: null, note: '' };
     if (!G.mode) return null;
     const n = G.draft?.points?.length ?? 0, hasPoints = hasCVs({ kind: G.mode });
     return { text: HINT[G.mode](n), finish: hasPoints ? n >= M.minPoints(G.mode) : null, removeLast: hasPoints ? n > 0 : null, note };
   };
   const hint = (text = '') => { note = text; ctx.emit('hint'); };
   G.setMode = (kind) => {
+    G.gizmoEnd(true);
     G.draft = null; G.cursor = null; G.down = null;
     lastPointClick = null; note = '';
     G.mode = kind;
@@ -574,6 +591,41 @@ export function createGuides(ctx) {
     const label = d.h.part === 'body' || live.kind === 'site' ? `move ${live.name}` : d.h.part === 'corner' ? `resize ${live.name}` : `move CV ${d.h.k} of ${live.name}`;
     G.change(label, (list) => { const j = list.findIndex((o) => o.id === live.id); if (j < 0) return false; list[j] = live; });
     ctx.message(`${label} · ${M.EDITOR_NAMES[live.kind]} saved to inputs/markers.json`, 'ok', 1500);
+    return true;
+  };
+  G.gizmoTarget = () => ctx.tool === 'move' && !G.mode && !ctx.isolated && !G.dragging
+    ? moveTargets(G.list, ctx.selection.items, G.hidden) : null;
+  const rayCoords = (ray) => ({ origin: ray.origin.toArray(), direction: ray.direction.toArray() });
+  G.gizmoStart = (id, ray) => {
+    const target = G.gizmoTarget();
+    if (!target || G.gizmoDrag) return;
+    G.gizmoDrag = { id, target, ray: rayCoords(ray), start: G.list, delta: [0, 0, 0] };
+    ctx.emit('hint'); ctx.requestRender();
+  };
+  G.gizmoMove = (ray) => {
+    const d = G.gizmoDrag;
+    if (!d) return;
+    const delta = moveDelta(d.id, d.ray, rayCoords(ray), d.target.pivot);
+    if (!delta || delta.every((v, i) => v === d.delta[i])) return;
+    d.delta = delta;
+    G.list = delta.some((v) => v !== 0) ? d.target.move(delta) : d.start;
+    entries(); G.draw(); ctx.emit('guides'); ctx.emit('hint');
+  };
+  G.gizmoEnd = (cancel = false) => {
+    const d = G.gizmoDrag;
+    if (!d) return false;
+    const live = G.list;
+    G.gizmoDrag = null;
+    G.list = d.start;
+    ctx.emit('hint'); ctx.requestRender();
+    if (live === d.start) return false;
+    if (cancel || M.markersBody(live) === M.markersBody(d.start)) {
+      entries(); G.draw(); ctx.emit('guides');
+      return false;
+    }
+    const label = moveLabel(d.target);
+    G.change(label, (list) => { list.splice(0, list.length, ...live); });
+    ctx.message(`${label} · saved to inputs/markers.json`, 'ok', 1500, 1500);
     return true;
   };
   /** Double-click in select mode: on a CV removes it, on a line of a curve or an area adds a CV there. */
