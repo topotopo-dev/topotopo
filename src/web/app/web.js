@@ -129,17 +129,7 @@ if (page === 'folder') {
   dlg.addEventListener('close', () => body.replaceChildren());
   dlg.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') step(-1); if (e.key === 'ArrowRight') step(1); });
 
-  // copy boxes and actions
-  for (const b of $$('[data-copy]')) {
-    b.addEventListener('click', async () => {
-      const input = b.previousElementSibling;
-      input.select();
-      try { await navigator.clipboard.writeText(input.value); } catch { document.execCommand('copy'); }
-      b.textContent = 'Copied';
-      b.classList.add('done');
-      setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1500);
-    });
-  }
+  // actions
   for (const b of $$('[data-post]')) {
     b.addEventListener('click', async () => {
       b.disabled = true;
@@ -150,6 +140,128 @@ if (page === 'folder') {
       } finally { setTimeout(() => { b.disabled = false; }, 800); }
     });
   }
+}
+
+for (const b of $$('[data-copy]')) {
+  b.addEventListener('click', async () => {
+    const target = b.previousElementSibling;
+    if (target.matches('input')) target.select();
+    else {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    try { await navigator.clipboard.writeText(target.value ?? target.textContent); } catch { document.execCommand('copy'); }
+    b.textContent = 'Copied';
+    b.classList.add('done');
+    setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1500);
+  });
+}
+
+if (page === 'storage') {
+  const rows = new Map($$('[data-storage]').map((row) => [row.dataset.storage, row]));
+  const clears = $$('[data-storage-clear]');
+  const size = (bytes) => bytes < 1024 ? `${bytes} B`
+    : bytes < 2 ** 20 ? `${(bytes / 1024).toFixed(0)} KB`
+    : bytes < 2 ** 30 ? `${Number((bytes / 2 ** 20).toFixed(1))} MB`
+    : `${Number((bytes / 2 ** 30).toFixed(2))} GB`;
+  const count = (n, unit) => `${n.toLocaleString('en')} ${unit}${n === 1 ? '' : 's'}`;
+  const enableClears = () => {
+    for (const b of clears) b.disabled = !Number(b.closest('[data-storage]').dataset.bytes);
+  };
+  const measure = async () => {
+    try {
+      const res = await fetch('/api/storage');
+      if (!res.ok) throw new Error();
+      const { ok, items } = await res.json();
+      if (!ok) throw new Error();
+      for (const item of items) {
+        const row = rows.get(item.id);
+        row.dataset.bytes = item.bytes;
+        row.querySelector('[data-storage-size]').textContent = item.clear
+          ? `${size(item.bytes)} of ${size(item.limit)} · ${count(item.files, 'file')}`
+          : `${size(item.bytes)} in ${count(item.packages, 'package')}`;
+      }
+    } catch {
+      for (const row of rows.values()) {
+        delete row.dataset.bytes;
+        row.querySelector('[data-storage-size]').textContent = 'could not be measured';
+      }
+    }
+    enableClears();
+  };
+  const post = async (action, what) => {
+    const res = await fetch(`/api/storage/${action}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-topotopo-open': '1' },
+      body: JSON.stringify({ what }),
+    });
+    const result = await res.json();
+    if (!res.ok || !result.ok) throw new Error(result.error ?? `the web app answered ${res.status}`);
+    return result;
+  };
+  let armed = null;
+  const cancelClear = () => {
+    if (!armed) return;
+    armed.textContent = 'Clear';
+    armed.nextElementSibling.hidden = true;
+    armed = null;
+  };
+  document.addEventListener('click', (e) => { if (armed && !armed.contains(e.target)) cancelClear(); });
+  for (const clear of clears) {
+    const row = clear.closest('[data-storage]'), what = row.dataset.storage;
+    const message = row.querySelector('[data-storage-message]');
+    const cancel = row.querySelector('[data-storage-cancel]');
+    cancel.addEventListener('click', () => { cancelClear(); clear.focus(); });
+    clear.addEventListener('click', async () => {
+      if (armed !== clear) {
+        cancelClear();
+        armed = clear;
+        clear.textContent = `Clear ${size(Number(row.dataset.bytes))}?`;
+        cancel.hidden = false;
+        return;
+      }
+      cancelClear();
+      for (const b of clears) b.disabled = true;
+      message.textContent = '';
+      try {
+        const { freed } = await post('clear', what);
+        await measure();
+        message.textContent = `Cleared ${size(freed)}.`;
+      } catch (e) {
+        message.textContent = `Could not clear: ${e.message}`;
+        enableClears();
+      }
+    });
+    row.querySelector('[data-storage-reveal]').addEventListener('click', async () => {
+      try { await post('reveal', what); } catch (e) { message.textContent = `Could not show the folder: ${e.message}`; }
+    });
+  }
+  void measure();
+
+  const check = document.getElementById('check-version');
+  const note = document.getElementById('version-note');
+  const command = document.getElementById('version-command');
+  check.addEventListener('click', async () => {
+    check.disabled = true;
+    check.textContent = 'Checking…';
+    command.hidden = true;
+    try {
+      const res = await fetch('/api/version/latest');
+      if (!res.ok) throw new Error(`the web app answered ${res.status}`);
+      const { ok, current, latest, newer, error } = await res.json();
+      note.textContent = !ok ? error : newer
+        ? `${latest} is out. To update, run this in a terminal and open TopoTopo again:`
+        : `${current} is the newest version.`;
+      command.hidden = !ok || !newer;
+    } catch (e) {
+      note.textContent = `npmjs.com could not be reached: ${e.message}`;
+    } finally {
+      check.textContent = 'Check for a newer version';
+      check.disabled = false;
+    }
+  });
 }
 
 for (const b of $$('[data-reveal]')) b.addEventListener('click', () => fetch(data.reveal, { method: 'POST' }).catch(() => {}));

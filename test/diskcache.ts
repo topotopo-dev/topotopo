@@ -20,7 +20,7 @@ import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import type { FileDep, NodeStore, StoredNode } from '../src/host/types.ts';
-import { NODE_CACHE_MAX_BYTES, NODE_CACHE_MIN_MS, nodeCacheFolder, nodeCacheOff, openNodeCache } from '../src/host/diskcache.ts';
+import { NODE_CACHE_MAX_BYTES, NODE_CACHE_MIN_MS, clearNodeCache, nodeCacheFolder, nodeCacheOff, nodeCacheUsage, openNodeCache } from '../src/host/diskcache.ts';
 import { Attribute, Geometry } from '../src/core/geometry.ts';
 import type { Volume } from '../src/core/geometry.ts';
 import { EdgeSet } from '../src/core/edges.ts';
@@ -59,6 +59,24 @@ try {
     check(openNodeCache({ env: { TOPOTOPO_NODE_CACHE: 'off' } }) === null && openNodeCache({ dir: folder() }) !== null, 'a switched-off cache is no store');
     check(NODE_CACHE_MIN_MS === 500 && NODE_CACHE_MAX_BYTES === 4 * 2 ** 30, 'results of 0.5 s or more, 4 GB');
     check(createNodeHost({}).persist === undefined && createNodeHost({ nodeCache: { dir: folder() } }).persist !== undefined && createNodeHost({ nodeCache: { env: { TOPOTOPO_NODE_CACHE: 'off' } } }).persist === undefined, 'a host keeps nothing unless asked, and the switch wins');
+  }
+
+  {
+    const dir = folder();
+    fs.mkdirSync(path.join(dir, 'other'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'one.ttnode'), 'node');
+    fs.writeFileSync(path.join(dir, 'two.ttnode'), 'result');
+    fs.writeFileSync(path.join(dir, 'one.123.abcd.tmp'), 'tmp');
+    fs.writeFileSync(path.join(dir, 'engine.json'), '{}');
+    fs.writeFileSync(path.join(dir, 'keep.txt'), 'keep');
+    fs.writeFileSync(path.join(dir, 'other', 'three.ttnode'), 'keep');
+    const usage = await nodeCacheUsage(dir);
+    check(usage.bytes === 15 && usage.files === 4, 'node cache usage counts results, temporary files and the engine memo');
+    check(await clearNodeCache(dir) === 15, 'clearing the node cache reports the bytes removed');
+    check(fs.readdirSync(dir).sort().join(',') === 'keep.txt,other' && fs.existsSync(path.join(dir, 'other', 'three.ttnode')),
+      'clearing only removes cache files at the top of the node cache folder');
+    const missing = folder(), empty = await nodeCacheUsage(missing);
+    check(empty.bytes === 0 && empty.files === 0 && await clearNodeCache(missing) === 0, 'a missing node cache is empty');
   }
 
   // ------------------------------------------------------------ a result, bit for bit

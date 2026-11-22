@@ -32,6 +32,9 @@ import { markdownLinks, renderMarkdown } from '../src/web/markdown.ts';
 import { exportSources, exportStale, imageSize, linkText, listFolder, PathError, resolveIn, resolveLink, videoPlayer, walkTree } from '../src/web/folders.ts';
 import { canonicalJSON } from '../src/io/source.ts';
 import { sha256Hex } from '../src/core/sha256.ts';
+import { CACHE_MAX_BYTES } from '../src/host/cook.ts';
+import { NODE_CACHE_MAX_BYTES } from '../src/host/diskcache.ts';
+import { TOPOTOPO_VERSION, isNewerVersion } from '../src/host/version.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-web-'));
 // a config of its own: the libraries registered on this machine play no part
@@ -106,6 +109,101 @@ try {
       'the running text uses singular for one editor and one preview');
     check(small.stopped === 'TopoTopo has stopped. Open a file to start it again.', 'the stopped text says to open a file again');
     check(small.lost === 'TopoTopo is not running any more. Open a file to start it again.', 'the lost-contact text says the web app is gone');
+  }
+
+  section('storage and version');
+  {
+    const storage = { nodes: path.join(tmp, 'storage-nodes'), cooks: path.join(tmp, 'storage-cooks') };
+    for (const dir of Object.values(storage)) fs.mkdirSync(dir);
+    const scratch = fs.realpathSync(tmp);
+    const safe = Object.values(storage).every((dir) => {
+      const rel = path.relative(scratch, fs.realpathSync(dir));
+      return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+    });
+    check(safe, 'both cache folders are inside this test’s temporary folder');
+    if (!safe) throw new Error('refusing to clear a cache outside the temporary folder');
+
+    write(path.join(storage.nodes, 'one.ttnode'), 'node');
+    write(path.join(storage.nodes, 'two.ttnode'), 'result');
+    write(path.join(storage.nodes, 'one.123.abcd.tmp'), 'tmp');
+    write(path.join(storage.nodes, 'engine.json'), '{}');
+    write(path.join(storage.nodes, 'keep.txt'), 'keep');
+    write(path.join(storage.nodes, 'other', 'three.ttnode'), 'keep');
+    const entry = 'a'.repeat(64);
+    write(path.join(storage.cooks, 'blobs', 'b'.repeat(64)), 'blob');
+    write(path.join(storage.cooks, 'blobs', 'c'.repeat(64)), 'blobs');
+    write(path.join(storage.cooks, entry, 'manifest.json'), '{}');
+    write(path.join(storage.cooks, 'keep.txt'), 'keep');
+    write(path.join(storage.cooks, 'other', 'keep.txt'), 'keep');
+    const library = { name: 'storage', path: path.join(tmp, 'storage-library') };
+    const p = createPackage(library, 'sample', { graph: BOX });
+    write(path.join(p.dir, '.web', 'preview.glb'), 'preview');
+    write(path.join(p.dir, 'versions', '1.0.0', 'sample.topo'), 'version');
+    write(path.join(p.dir, 'packages', 'example', 'sample', '1.0.0', 'sample.topo'), 'copy');
+    const options = { config: { ...cfg, libraries: [library] }, port: 0, bake: false, storage };
+    let latestCalls = 0;
+    const web = await startWeb({ ...options, latestVersion: async () => { latestCalls++; return '99.0.0'; } });
+    try {
+      const home = await reqAt(web.port, '/'), stored = await reqAt(web.port, '/storage');
+      const bar = (r: Res) => r.body.toString().match(/<footer class="running"[^>]*>[\s\S]*?<\/footer>/)?.[0] ?? '';
+      const versionText = `version ${TOPOTOPO_VERSION}`;
+      check(home.status === 200 && stored.status === 200, 'home and Storage answer');
+      check(bar(home).includes(`${versionText} · <a href="/storage">Storage</a>`)
+        && bar(stored).includes(`${versionText} · Storage`) && !bar(stored).includes('href="/storage"'),
+        'both running bars give the version and only the home bar links to Storage');
+      check(stored.body.includes('<h1>Storage</h1>') && ['Results of slow nodes', 'Cooked files for game engines', 'Previews', 'Published versions']
+        .every((name) => stored.body.includes(`<h2>${name}</h2>`)), 'Storage names all four rows');
+      check(latestCalls === 0, 'opening the pages does not look up the latest version');
+
+      const getStorage = () => reqAt(web.port, '/api/storage');
+      const initial = await getStorage();
+      const own = [{ id: 'previews', bytes: 7, packages: 1, clear: false }, { id: 'versions', bytes: 11, packages: 1, clear: false }];
+      const cacheItems = [
+        { id: 'nodes', bytes: 15, files: 4, limit: NODE_CACHE_MAX_BYTES, dir: storage.nodes, clear: true },
+        { id: 'cooks', bytes: 11, files: 3, limit: CACHE_MAX_BYTES, dir: storage.cooks, clear: true },
+      ];
+      check(initial.status === 200 && canonicalJSON(JSON.parse(initial.body.toString())) === canonicalJSON({ ok: true, items: [...cacheItems, ...own] }),
+        'Storage gives the exact cache totals and paths and measures only the listed package’s previews and versions');
+      const clear = (what: string, guarded = true) => fetch(new URL('/api/storage/clear', web.url), {
+        method: 'POST', headers: { 'content-type': 'application/json', ...(guarded ? { 'x-topotopo-open': '1' } : {}) },
+        body: JSON.stringify({ what }),
+      });
+      check((await reqAt(web.port, '/api/storage/clear')).status === 405, 'clearing storage needs POST');
+      check((await clear('nodes', false)).status === 403, 'clearing storage needs the page’s header');
+      check((await clear('home')).status === 400, 'only the two caches can be cleared');
+      for (const item of cacheItems) {
+        const res = await clear(item.id), body = await res.json();
+        check(res.status === 200 && canonicalJSON(body) === canonicalJSON({ ok: true, freed: item.bytes }), `clearing ${item.id} reports the bytes freed`);
+        check(fs.readdirSync(item.dir).sort().join(',') === 'keep.txt,other', `clearing ${item.id} leaves the other file and folder`);
+        const after = await getStorage();
+        check(after.status === 200 && JSON.parse(after.body.toString()).items.some((x: { id: string; bytes: number; files: number }) =>
+          x.id === item.id && x.bytes === 0 && x.files === 0), `Storage measures ${item.id} as empty after clearing`);
+      }
+      const res = await reqAt(web.port, '/api/version/latest');
+      check(res.status === 200 && canonicalJSON(JSON.parse(res.body.toString())) === canonicalJSON({
+        ok: true, current: TOPOTOPO_VERSION, latest: '99.0.0', newer: true,
+      }) && latestCalls === 1, 'a newer version is reported when asked');
+    } finally { await web.close(); }
+
+    const current = await startWeb({ ...options, latestVersion: async () => TOPOTOPO_VERSION });
+    try {
+      const res = await reqAt(current.port, '/api/version/latest');
+      check(res.status === 200 && canonicalJSON(JSON.parse(res.body.toString())) === canonicalJSON({
+        ok: true, current: TOPOTOPO_VERSION, latest: TOPOTOPO_VERSION, newer: false,
+      }), 'the installed version can already be the newest');
+    } finally { await current.close(); }
+    const offline = await startWeb({ ...options, latestVersion: async () => { throw new Error('offline'); } });
+    try {
+      const res = await reqAt(offline.port, '/api/version/latest');
+      check(res.status === 200 && canonicalJSON(JSON.parse(res.body.toString())) === canonicalJSON({
+        ok: false, error: 'npmjs.com could not be reached: offline',
+      }), 'a failed version check says why');
+    } finally { await offline.close(); }
+
+    check([['0.6.0', '0.5.3'], ['0.5.10', '0.5.9'], ['1.0.0', '0.99.99']].every(([a, b]) => isNewerVersion(a, b)),
+      'major, minor and patch number increases each count as newer');
+    check([['0.5.3', '0.5.3'], ['0.5.2', '0.5.3'], ['0.6.0-beta.1', '0.6.0'], ['latest', '0.5.3'], ['', '0.5.3']]
+      .every(([a, b]) => !isNewerVersion(a, b)), 'equal, older and invalid versions are never newer, and suffixes are ignored');
   }
 
   section('an editor starts behind a page');
