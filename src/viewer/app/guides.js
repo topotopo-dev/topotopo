@@ -15,7 +15,7 @@ import { fmtLen } from './units.js';
 import { AXIS_VIEWS } from './camera.js';
 import { parseId, pieceId } from './selection.js';
 import { isDoubleClick, isDrag } from './pointer.js';
-import { moveTargets, moveDelta, moveText, moveLabel } from './transform.js';
+import { transformTargets, transformLabel, moveDelta, moveText, ringFromFace, ringTurn, unwrapTurn, tangentTurn, rotateText, scaleFactor, scaleText } from './transform.js';
 
 export const guideId = (id) => `guide:${id}`;
 /** Whether a guide's CVs are selected one by one (curves and areas); a null and a volume select whole. */
@@ -402,7 +402,7 @@ export function createGuides(ctx) {
   };
   G.hintState = () => {
     const d = G.gizmoDrag;
-    if (d) return { text: moveText(d.id, d.delta), finish: null, removeLast: null, cancel: null, note: '' };
+    if (d) return { text: d.text, finish: null, removeLast: null, cancel: null, note: '' };
     if (!G.mode) return null;
     const n = G.draft?.points?.length ?? 0, hasPoints = hasCVs({ kind: G.mode });
     return { text: HINT[G.mode](n), finish: hasPoints ? n >= M.minPoints(G.mode) : null, removeLast: hasPoints ? n > 0 : null, note };
@@ -609,22 +609,58 @@ export function createGuides(ctx) {
     ctx.message(`${label} · ${M.EDITOR_NAMES[live.kind]} saved to inputs/markers.json`, 'ok', 1500);
     return true;
   };
-  G.gizmoTarget = () => ctx.tool === 'move' && !G.mode && !ctx.isolated && !G.dragging
-    ? moveTargets(G.list, ctx.selection.items, G.hidden) : null;
+  G.gizmoTarget = () => ['move', 'rotate', 'scale'].includes(ctx.tool) && !G.mode && !ctx.isolated && !G.dragging
+    ? transformTargets(G.list, ctx.selection.items, G.hidden) : null;
   const rayCoords = (ray) => ({ origin: ray.origin.toArray(), direction: ray.direction.toArray() });
-  G.gizmoStart = (id, ray) => {
+  G.gizmoStart = ({ id, shape, k }, ray, size) => {
     const target = G.gizmoTarget();
     if (!target || G.gizmoDrag) return;
-    G.gizmoDrag = { id, target, ray: rayCoords(ray), start: G.list, delta: [0, 0, 0] };
+    const tool = ctx.tool;
+    const d = { id, tool, target, shape, size, ray: rayCoords(ray), start: G.list };
+    if (tool === 'move') {
+      d.delta = [0, 0, 0];
+      d.text = moveText(id, d.delta);
+    } else if (tool === 'rotate') {
+      if (!ringFromFace(id, d.ray)) {
+        const a = shape.points[k], b = shape.points[(k + 1) % shape.points.length];
+        const x = b.x - a.x, y = b.y - a.y, length = Math.hypot(x, y);
+        d.tangent = { x: x / length, y: y / length };
+      }
+      d.value = 0;
+      d.text = rotateText(id, d.value);
+    } else {
+      d.value = 1;
+      d.text = scaleText(id, d.value);
+    }
+    G.gizmoDrag = d;
     ctx.emit('hint'); ctx.requestRender();
   };
-  G.gizmoMove = (ray) => {
+  G.gizmoMove = (ray, dx, dy) => {
     const d = G.gizmoDrag;
     if (!d) return;
-    const delta = moveDelta(d.id, d.ray, rayCoords(ray), d.target.pivot);
-    if (!delta || delta.every((v, i) => v === d.delta[i])) return;
-    d.delta = delta;
-    G.list = delta.some((v) => v !== 0) ? d.target.move(delta) : d.start;
+    const { id, target } = d;
+    if (d.tool === 'move') {
+      const delta = moveDelta(id, d.ray, rayCoords(ray), target.pivot);
+      if (!delta || delta.every((v, i) => v === d.delta[i])) return;
+      d.delta = delta;
+      d.text = moveText(id, delta);
+      G.list = delta.some((v) => v !== 0) ? target.move(delta) : d.start;
+    } else if (d.tool === 'rotate') {
+      const angle = d.tangent ? tangentTurn(d.tangent, dx, dy, d.size) : ringTurn(id, target.pivot, d.ray, rayCoords(ray));
+      if (angle === null) return;
+      const turn = d.tangent ? angle : unwrapTurn(d.value, angle);
+      if (turn === d.value) return;
+      d.value = turn;
+      d.text = rotateText(id, turn);
+      G.list = turn ? target.rotate(id, turn) : d.start;
+    } else {
+      const factor = scaleFactor(d.shape, dx, dy, d.size);
+      if (factor === d.value) return;
+      d.value = factor;
+      d.text = scaleText(id, factor);
+      const factors = ['x', 'y', 'z'].map((axis) => id === 'all' || id === axis ? factor : 1);
+      G.list = factor === 1 ? d.start : target.scale(factors);
+    }
     entries(); G.draw(); ctx.emit('guides'); ctx.emit('hint');
   };
   G.gizmoEnd = (cancel = false) => {
@@ -639,7 +675,7 @@ export function createGuides(ctx) {
       entries(); G.draw(); ctx.emit('guides');
       return false;
     }
-    const label = moveLabel(d.target);
+    const label = transformLabel(d.tool, d.target);
     G.change(label, (list) => { list.splice(0, list.length, ...live); });
     ctx.message(`${label} · saved to inputs/markers.json`, 'ok', 1500, 1500);
     return true;
