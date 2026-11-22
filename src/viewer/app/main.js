@@ -22,7 +22,7 @@ import { openMenu } from './menu.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
 import { DISCONNECTED_LINE, RECONNECTED_LINE, messageLife } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
-import { pageTitle, defaultGraph, renderWelcome } from './welcome.js';
+import { pageTitle, defaultGraph, renderWelcome, unreadMessage } from './welcome.js';
 import { kindLine, resultName } from './output-info.js';
 import * as PT from './pointer.js';
 
@@ -239,18 +239,25 @@ const refreshGraphs = ctx.coalesce(async () => {
   for (const x of list) if (x.cook && !((cooks.get(x.name)?.at ?? -1) > issued)) cooks.set(x.name, { state: x.cook, at: performance.now() });
   renderCook();
   props.controls.render(g, issued);
-  renderWelcome($('welcome'), ctx.package, !list.length);
+  renderPackageNotice();
   ctx.emit('graphs');
 });
 // the package shown: the tab's title, the graph shown first, the welcome while there is no graph
 ctx.package = null;
-const refreshPackage = async () => {
+function renderPackageNotice() {
+  const hasGraphs = ctx.graph.list.length > 0;
+  renderWelcome($('welcome'), ctx.package, !hasGraphs);
+  const note = $('unread-note'), text = hasGraphs ? unreadMessage(ctx.package?.unread, ctx.graph.list.map((g) => g.name)) : '';
+  if (note.textContent !== text) note.textContent = note.title = text;
+  note.hidden = !text;
+}
+const refreshPackage = ctx.coalesce(async () => {
   const info = await api.package();
   if (!info) return;
   ctx.package = info;
   document.title = pageTitle(info);
-  renderWelcome($('welcome'), info, !ctx.graph.list.length);
-};
+  renderPackageNotice();
+});
 $('graph').onchange = (e) => {
   if (ctx.outputs?.active) ctx.outputs.scene();
   ctx.graph.name = e.target.value; ctx.graph.node = null;
@@ -867,9 +874,10 @@ const es = api.events({
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
     // the scene's result too: a graph that reads inputs/ (the guides in markers.json) cooks again; one that does not
     // answers from its cache
-    if (ev.inputs !== undefined) { ctx.layers.refresh(); ctx.outputs.refresh(); if (!ctx.isolated) loadGeo(); return; }
+    if (ev.inputs !== undefined) { ctx.guides.load(); ctx.layers.refresh(); ctx.outputs.refresh(); if (!ctx.isolated) loadGeo(); return; }
     if (ev.compare !== undefined) { await ctx.packages.onCompare(ev.compare); renderCook(); return; }
     if (ev.packages !== undefined) { ctx.packages.onEvent(ev); return; }
+    await refreshPackage();
     await refreshGraphs();
     // after a stop the geometry in view stays: fetching it would cook what was just stopped
     if (ev.graph === ctx.graph.name && !ev.stopped) loadGeo();

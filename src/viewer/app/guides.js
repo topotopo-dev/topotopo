@@ -196,10 +196,12 @@ export function createGuides(ctx) {
   };
 
   // ------------------------------------------------------------------ saving: the whole list, the latest wins
+  let saving = false;
   const save = ctx.coalesce(async () => {
     const body = M.markersBody(G.list);
     if (body === G.saved) return;
-    const r = await api.saveMarkers(body);
+    saving = true;
+    const r = await api.saveMarkers(body).finally(() => { saving = false; });
     if (r.ok) {
       G.saved = body;
       const file = `inputs/markers.json${ctx.layers.where ? ' ' + ctx.layers.where : ''}`;
@@ -209,7 +211,8 @@ export function createGuides(ctx) {
     } else ctx.message(`guides not saved — ${r.error}`, 'err');
     ctx.emit('guides');
   });
-  G.saving = () => M.markersBody(G.list) !== G.saved;
+  G.saving = () => saving || (G.saved === null ? G.list.length > 0 : M.markersBody(G.list) !== G.saved);
+  const canLoad = () => M.shouldReloadGuides(G.saving(), !!(G.draft || G.down || G.dragging));
   const setList = (list) => {
     G.list = M.cloneMarkers(list);
     entries();
@@ -225,19 +228,28 @@ export function createGuides(ctx) {
     ctx.undo.push({ label, key, undo: () => setList(before), redo: () => setList(after) });
     return true;
   };
-  G.load = async () => {
+  G.load = ctx.coalesce(async () => {
+    if (!canLoad()) return;
+    const list = G.list;
     const j = await api.markers();
+    if (G.list !== list || !canLoad()) return;
     if (!j.markers) { if (j.error) ctx.message(`guides: ${j.error}`, 'err'); return; }
+    const body = M.markersBody(j.markers), changed = body !== M.markersBody(G.list);
+    if (changed && G.saved !== null) {
+      ctx.undo.clear();
+      const note = 'the guides changed outside this page: showing the new ones';
+      ctx.message(j.error ? `${note}\n${j.error}` : note, j.error ? 'err' : '', 2000);
+    } else if (j.error) ctx.message(j.error, 'err');
+    G.saved = body;
+    if (!changed) return;
     G.list = j.markers;
-    G.saved = M.markersBody(G.list);
     for (const k of ['radius', 'height']) { const last = G.list.findLast((m) => m[k] > 0); if (last) G.defaults[k] = last[k]; }
     for (const id of [...G.hidden]) if (!byId(id)) G.hidden.delete(id);
     rememberHidden();
-    if (j.error) ctx.message(j.error, 'err');
     entries();
     ctx.selection.prune(alive);
     G.draw(); ctx.emit('guides');
-  };
+  });
 
   // ------------------------------------------------------------------ edits from the panels and the keymap
   G.add = (m) => {

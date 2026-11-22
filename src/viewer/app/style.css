@@ -235,9 +235,12 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #status { grid-area: status; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; color: var(--dim); }
 #cook { overflow: hidden; text-overflow: ellipsis; min-width: 0; font: var(--mono); }
 #cook .err { color: var(--err); }
-/* messages: over the view's lower left, clearing themselves (status.js) */
-#notes { position: absolute; left: 8px; bottom: 8px; z-index: 5; display: flex; align-items: flex-start; gap: 6px; max-width: min(640px, calc(100% - 96px)); padding: 5px 4px 5px 10px; background: rgba(38, 40, 44, 0.94); border: 1px solid var(--line); border-radius: 3px; color: var(--text); }
-#msg { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 6.5em; overflow: hidden; }
+/* Messages over the view's lower left. */
+#messages { position: absolute; left: 8px; bottom: 8px; z-index: 5; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: min(640px, calc(100% - 96px)); }
+#notes, #unread-note { padding: 5px 4px 5px 10px; background: rgba(38, 40, 44, 0.94); border: 1px solid var(--line); border-radius: 3px; color: var(--text); }
+#notes { display: flex; align-items: flex-start; gap: 6px; }
+#msg, #unread-note { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 6.5em; overflow: hidden; }
+#unread-note { padding-right: 10px; border-color: var(--err); color: var(--err); }
 #notes.err { border-color: var(--err); } #notes.err #msg { color: var(--err); }
 #notes.ok #msg { color: var(--ok); }
 #notes.busy #msg { color: var(--sel); }

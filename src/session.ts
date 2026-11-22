@@ -205,9 +205,19 @@ export function graphFiles(dir: string): Map<string, string> {
   for (const f of json(dir)) {
     const name = f.slice(0, -'.json'.length), file = path.join(dir, f);
     if (out.has(name) || !NAME_RE.test(name)) continue;
-    try { if (fs.statSync(file).isFile() && holdsGraph(JSON.parse(fs.readFileSync(file, 'utf8')))) out.set(name, file); } catch { /* not a graph */ }
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+      const read = readGraphFile(file);
+      if ('graph' in read && holdsGraph(read.graph)) out.set(name, file);
+    } catch { /* not a graph */ }
   }
   return out;
+}
+
+/** A graph file as JSON, or the error from reading it. */
+export function readGraphFile(file: string): { graph: GraphSpec } | { error: Error } {
+  try { return { graph: JSON.parse(fs.readFileSync(file, 'utf8')) }; }
+  catch (e) { return { error: e instanceof Error ? e : new Error(String(e)) }; }
 }
 
 /**
@@ -287,6 +297,12 @@ export class Session {
   private lastYield = 0;
   /** graphs kept in a package's own folder (graphFiles): their file, where they are saved; the others go in graphs/ */
   private besidePackage = new Map<string, string>();
+  /** graph files that could not be read: their path from the folder, and the parser's error */
+  private unreadFiles = new Map<string, string>();
+  /** The graph files that cannot be read now (load() and watch() keep it); a graph read before stays in use. */
+  get unread(): readonly Readonly<{ file: string; error: string }>[] {
+    return [...this.unreadFiles].map(([file, error]) => ({ file, error }));
+  }
   /** the inputs folder given to the constructor (SessionOptions.inputs), if any */
   private inputsAt: string | undefined;
   private exportsAt: string | undefined;
@@ -316,13 +332,20 @@ export class Session {
     // Hide package working folders from Godot, including folders first created after addon setup.
     godotIgnore(this.dir, this.inputsAt ? [] : ['inputs']);
     // as a package version reads them (registerAssets): an asset that uses one registered later is tried again
-    const assetErrors: string[] = [], graphErrors: string[] = [];
+    const assetErrors: string[] = [], unread = new Map<string, string>();
     registerAssets(this.engine, this.engine.root, this.dir, assetErrors);
     for (const [name, file] of graphFiles(this.dir)) {
-      try { this.graphs.set(name, JSON.parse(fs.readFileSync(file, 'utf8'))); }
-      catch (e: any) { graphErrors.push(`${path.relative(this.dir, file).split(path.sep).join('/')}: ${e.message}`); continue; }
+      const read = readGraphFile(file);
+      if ('error' in read) { unread.set(path.relative(this.dir, file).split(path.sep).join('/'), read.error.message); continue; }
+      this.graphs.set(name, read.graph);
       if (path.dirname(file) === this.dir) this.besidePackage.set(name, file);
     }
+    const previous = this.unreadFiles;
+    this.unreadFiles = unread;
+    if (this.listeners.size) for (const file of new Set([...previous.keys(), ...unread.keys()])) {
+      if (previous.get(file) !== unread.get(file)) this.bump(path.posix.basename(file, '.json'));
+    }
+    const graphErrors = this.unread.map(({ file, error }) => `${file}: ${error}`);
     return { graphs: this.graphs.size, assets: this.engine.assetsIn().length, assetErrors, graphErrors };
   }
 
@@ -770,10 +793,10 @@ export class Session {
       this.watchTimers.set(key, setTimeout(() => { this.watchTimers.delete(key); if (this.watching) fn(); }, ms).unref());
     };
     // persist() is not atomic: let the writer finish, and read again if the JSON is still half written
-    const settle = (dir: string, name: string, apply: (name: string, file: string) => void) => {
+    const settle = (dir: string, name: string, apply: (name: string, file: string, last: boolean) => void) => {
       let tries = 0;
       const run = () => {
-        try { apply(name, path.join(dir, name + '.json')); }
+        try { apply(name, path.join(dir, name + '.json'), tries === 4); }
         catch (e) { if (e instanceof SyntaxError && ++tries < 5) later(dir + '|' + name, 100, run); }
       };
       later(dir + '|' + name, 150, run);
@@ -806,7 +829,7 @@ export class Session {
       this.watchers.set(dir, w);
     };
     // graphs/ or assets/: follow its files; when it goes or comes back, follow the folder now there and read it again
-    const child = (dir: string, apply: (name: string, file: string) => void, known: () => string[]) => {
+    const child = (dir: string, apply: (name: string, file: string, last: boolean) => void, known: () => string[]) => {
       const reopen = () => {
         attach(dir, (name) => settle(dir, name, apply), () => later(dir, 150, reopen));
         let files: string[] = [];
@@ -816,24 +839,42 @@ export class Session {
       attach(dir, (name) => settle(dir, name, apply), () => later(dir, 150, reopen));
       return () => later(dir, 150, reopen);
     };
-    const graphChanged = (name: string, file: string) => {
-      if (!NAME_RE.test(name) || this.graphFile(name) !== file) return;
+    const graphChanged = (name: string, file: string, last: boolean) => {
+      const beside = path.dirname(file) === this.dir, known = this.graphFile(name) === file;
+      if (!NAME_RE.test(name) || (!known && (!beside || this.graphs.has(name)))) return;
+      const rel = path.relative(this.dir, file).split(path.sep).join('/');
       if (!fs.existsSync(file)) {
+        if (!known) return;
         this.besidePackage.delete(name);
-        if (this.graphs.delete(name)) { this.lastReport.delete(name); this.bump(name); }
+        const removed = this.graphs.delete(name);
+        if (removed) this.lastReport.delete(name);
+        if (this.unreadFiles.delete(rel) || removed) this.bump(name);
         return;
       }
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (!holdsGraph(j)) return;
-      const spec = j;
+      const read = readGraphFile(file);
+      if ('error' in read) {
+        if (!last && read.error instanceof SyntaxError) throw read.error;
+        if (!known || this.unreadFiles.get(rel) === read.error.message) return;
+        this.unreadFiles.set(rel, read.error.message);
+        this.bump(name);
+        return;
+      }
+      const wasUnread = this.unreadFiles.delete(rel), spec = read.graph;
       const cur = this.graphs.get(name);
-      if (cur && JSON.stringify(cur) === JSON.stringify(spec)) return;
+      if (!holdsGraph(spec) || (cur && JSON.stringify(cur) === JSON.stringify(spec))) {
+        if (wasUnread) this.bump(name);
+        return;
+      }
+      if (beside) this.besidePackage.set(name, file);
       this.graphs.set(name, spec);
       this.settleSession(name);
       this.lastReport.delete(name);
       this.bump(name);
     };
-    const graphsBack = child(this.graphDir, graphChanged, () => [...this.graphs.keys()].filter((n) => this.graphFile(n) === path.join(this.graphDir, n + '.json')));
+    const graphsBack = child(this.graphDir, graphChanged, () => [
+      ...[...this.graphs.keys()].filter((n) => this.graphFile(n) === path.join(this.graphDir, n + '.json')),
+      ...[...this.unreadFiles.keys()].filter((f) => f.startsWith('graphs/')).map((f) => path.posix.basename(f, '.json')),
+    ]);
     const assetsBack = child(this.assetDir, (name, file) => {
       if (!fs.existsSync(file)) return;
       const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -844,10 +885,9 @@ export class Session {
     }, () => []);
     // the package folder: graphs/ and assets/ removed or made again, and a package's graph files beside its manifest,
     // when graphs/ has no graph of that name
-    const beside = (name: string, file: string) => {
+    const beside = (name: string, file: string, last: boolean) => {
       if (fs.existsSync(path.join(this.graphDir, name + '.json'))) return;
-      if (!this.graphs.has(name) && fs.existsSync(file)) this.besidePackage.set(name, file);
-      graphChanged(name, file);
+      graphChanged(name, file, last);
     };
     const isPackage = topoFiles(this.dir).length > 0;
     const top = path.basename(this.graphDir), assets = path.basename(this.assetDir);

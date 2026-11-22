@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { ID_RE } from '../graph/scope.ts';
-import { graphFiles } from '../session.ts';
+import { graphFiles, readGraphFile } from '../session.ts';
 import { loadConfig } from '../config.ts';
 import type { WebConfig, LibraryRef } from '../config.ts';
 import type { PackageLink, PackageManifest } from '../package.ts';
@@ -173,7 +173,8 @@ export const graphNames = (dir: string) => [...graphFiles(dir).keys()];
 
 /** A package's graph file, parsed (null when missing or unreadable). */
 export function readGraph(dir: string, name: string): any {
-  try { return JSON.parse(fs.readFileSync(path.join(dir, 'graphs', name + '.json'), 'utf8')); } catch { return null; }
+  const read = readGraphFile(path.join(dir, 'graphs', name + '.json'));
+  return 'graph' in read ? read.graph : null;
 }
 
 // ------------------------------------------------------------------------------------------------------------ bake

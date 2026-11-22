@@ -122,7 +122,7 @@ h3 { font-size: 13px; margin: 18px 0 8px; color: var(--dim); font-weight: 500; }
 .out { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; font-size: 11px; color: var(--dim); }
 .out code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .upd { align-self: flex-start; font-size: 11px; color: var(--accent); }
-.s-failed { color: var(--err); }
+.s-failed, .s-unread { color: var(--err); }
 .s-empty { color: var(--dim); font-style: italic; }
 .s-baking { color: var(--accent); }
 

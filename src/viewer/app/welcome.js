@@ -16,11 +16,27 @@ export function pageTitle(info) {
 export const defaultGraph = (info, names) => (info?.package && names.includes(info.package.graph) ? info.package.graph : names[0] ?? null);
 
 /**
+ * The message that stays in view while a graph file cannot be read. names: the graphs the editor shows; a file read
+ * before stays as its last version, one that was never read shows once it is fixed.
+ */
+export function unreadMessage(unread = [], names = []) {
+  if (!unread.length) return '';
+  const [{ file, error }] = unread;
+  const shown = names.includes(file.slice(file.lastIndexOf('/') + 1).replace(/\.json$/, ''));
+  const then = shown ? 'the editor shows the last version it could read' : 'it shows here when the file is fixed';
+  return `${file} cannot be read (${error}): ${then}${unread.length > 1 ? ` · and ${unread.length - 1} more` : ''}`;
+}
+
+/**
  * The welcome while there is no graph: {kind, title, sub, lead, steps, builtin}. kind "package" (a package without graphs)
  * or "folder" (a folder that is no package).
  */
 export function welcomeOf(info) {
   const builtin = info?.builtin ?? [];
+  const unread = info?.unread?.length ? {
+    lead: `A graph file of this ${info.package ? 'package' : 'folder'} cannot be read.`,
+    steps: [...info.unread.map(({ file, error }) => `${file}: ${error}`), 'Fix the file (or put back an earlier copy of it) and it shows here at once.'],
+  } : null;
   if (info?.package) {
     const p = info.package;
     return {
@@ -30,6 +46,7 @@ export function welcomeOf(info) {
         'Ask your agent to build one here, for example: "Build a street with two houses, lamp posts and trees from TopoTopo\'s built-in packages."',
         'It shows here as soon as your agent builds it, and so does every change after that.',
       ],
+      ...unread,
     };
   }
   const folder = info?.folder ?? '';
@@ -41,6 +58,7 @@ export function welcomeOf(info) {
       `Ask your agent to make this folder a package, or run: topotopo init "${folder}"`,
       'Your agent can also build a graph here as it is: it shows here at once.',
     ],
+    ...unread,
   };
 }
 

@@ -8,10 +8,10 @@ import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Session } from '../src/session.ts';
 
-let failed = 0;
+let passed = 0, failed = 0;
 const check = (cond: any, msg: string) => {
   console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`);
-  if (!cond) failed++;
+  if (cond) passed++; else failed++;
 };
 const section = (s: string) => console.log(`\n== ${s}`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -46,6 +46,22 @@ for (const pkg of [false, true]) {
     fs.writeFileSync(path.join(graphs, 'main.json'), box(2));
     check(await until(() => size(w, 'main') === 2, 5000) && heard.includes('main'), 'a file edit is followed and heard');
 
+    const main = path.join(graphs, 'main.json');
+    heard.length = 0;
+    fs.writeFileSync(main, box(2) + '}');
+    check(await until(() => w.unread.length === 1, 5000) && w.unread[0].file === 'graphs/main.json' && !!w.unread[0].error
+      && size(w, 'main') === 2 && heard.includes('main'), 'a damaged graph is reported and the last graph stays in use');
+    heard.length = 0;
+    fs.writeFileSync(main, box(2));
+    check(await until(() => w.unread.length === 0, 5000) && heard.includes('main'), 'putting back the same graph clears the error and is heard');
+
+    const damaged = path.join(graphs, 'damaged.json');
+    fs.writeFileSync(damaged, '}');
+    check(await until(() => w.unread.some((x) => x.file === 'graphs/damaged.json'), 5000) && !w.graphs.has('damaged'), 'a new unreadable file is reported without loading a graph');
+    heard.length = 0;
+    fs.unlinkSync(damaged);
+    check(await until(() => w.unread.length === 0, 5000) && heard.includes('damaged'), 'removing the unreadable file clears the error and is heard');
+
     fs.rmSync(graphs, { recursive: true, force: true });
     check(await until(() => !w.graphs.has('main'), 5000), 'graphs/ removed: its graphs go');
     fs.mkdirSync(graphs);
@@ -76,5 +92,5 @@ for (const pkg of [false, true]) {
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
-if (failed) { console.error(`\n${failed} failed`); process.exit(1); }
-console.log('\nsession-watch: all passed');
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exitCode = failed ? 1 : 0;

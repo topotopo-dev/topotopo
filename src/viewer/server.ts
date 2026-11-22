@@ -286,14 +286,14 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   let builtin: { name: string; title: string; description: string; version: string | null; outputs: string }[] | null = null;
   /**
    * GET /api/package: the package the viewer shows (null for a folder that is in no package), the folder, the graph
-   * file of `topotopo view`, and TopoTopo's built-in packages.
+   * file of `topotopo view`, TopoTopo's built-in packages and the graph files that could not be read.
    */
   const packageInfo = () => {
     builtin ??= builtinLibrary().map((b) => {
       const v = b.versions.at(-1);
       return { name: b.name, title: b.manifest.title, description: b.manifest.description, version: v?.version ?? null, outputs: v ? outputsLine(v) : '0 outputs' };
     });
-    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin };
+    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin, unread: ws.unread };
   };
   // the package's default graph cooks its cards first
   const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => packageOf()?.graph });

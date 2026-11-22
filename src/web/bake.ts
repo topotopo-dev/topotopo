@@ -47,6 +47,9 @@ export async function bakePackage(dir: string): Promise<BakeState> {
     // the packages it uses, from its copies (a bake adds none), its graphs and its assets
     const ws = openPackage(engine, dir).session;
     const name = m.bake.graph ?? m.graph;
+    const file = path.relative(ws.dir, ws.graphFile(name)).split(path.sep).join('/');
+    const unread = ws.unread.find((x) => x.file === file);
+    if (unread) return finish({ ok: false, error: `the graph file ${unread.file} cannot be read: ${unread.error}` });
     const g = ws.graphs.get(name);
     if (!g) return finish({ ok: false, error: `no default graph yet: the package has no graph "${name}" (its manifest's "graph")` });
     const r = await engine.cook(g, { target: m.bake.node, frame: m.bake.frame });

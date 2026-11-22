@@ -29,8 +29,7 @@ export interface Urls {
 
 export interface CardData {
   lib: string; id: string; title: string; collection: string; tags: string[]; description: string; updated: number;
-  /** 'ok' | 'failed' | 'baking' | 'new', or 'empty': the package has not the graph its manifest shows (nothing to bake yet) */
-  status: string; version: string;
+  status: 'ok' | 'failed' | 'baking' | 'new' | 'empty' | 'unread'; version: string;
   /** its folder page */
   url?: string;
   /** a package: its full name and newest version (null before the first is published) */
@@ -63,7 +62,9 @@ export interface PackageData extends CardData {
   place: string;
   links: { label: string; url: string }[];
   graph: string;
-  graphs: { name: string; nodes: number; vars: VarRow[] }[];
+  graphs: { name: string; nodes: number; vars: VarRow[]; error?: string }[];
+  /** Why the default graph file cannot be read, when it is unreadable. */
+  unread?: string;
   /** its attachments/ files: images and the rest, each with its URL (a model's 3D view as `model`) */
   attachments: (FileRow & { url: string; model?: string })[];
   /** its exports/ files, each with its URL (a model's 3D view as `model`) and, when its graph changed since, `stale` */
@@ -116,7 +117,7 @@ export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
 export const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(0)} KB` : n < 1 << 30 ? `${(n / 2 ** 20).toFixed(1)} MB` : `${(n / 2 ** 30).toFixed(2)} GB`);
 export const when = (ms: number) => (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '');
 export const count = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
-const STATUS: Record<string, string> = { ok: '', failed: 'bake failed', baking: 'baking…', new: 'not baked yet', empty: 'no default graph yet' };
+const STATUS: Record<CardData['status'], string> = { ok: '', failed: 'bake failed', baking: 'baking…', new: 'not baked yet', empty: 'no default graph yet', unread: 'graph file cannot be read' };
 
 export function runningWords(memory = '{memory}', editors = '{count}', previews = '{count}') {
   return {
@@ -319,8 +320,8 @@ export function usesSection(uses: PackageData['uses']): string {
     <table class="vars uses"><tbody>${uses.map((x) => `<tr><th>${x.url ? `<a href="${esc(x.url)}">${esc(x.name)}</a>` : esc(x.name)}</th><td>${esc(x.version)}</td><td class="unotes"><span class="urow">${x.newest ? `<span class="newer">${esc(x.newest)} is out</span>` : ''}${x.published ? `<span class="udate">${esc(day(x.published))}</span>` : ''}${x.note ? `<span class="unote" title="${esc(x.note)}">${esc(x.note)}</span>` : ''}</span></td></tr>`).join('')}</tbody></table>`;
 }
 
-/** A package's bake as its page shows it: none for a built-in package or one without its default graph. */
-const bakeOf = (p: PackageData) => (p.status === 'empty' || p.builtin ? null : p.bake);
+/** A package's bake as its page shows it, when its default graph is readable. */
+const bakeOf = (p: PackageData) => (p.status === 'empty' || p.status === 'unread' || p.builtin ? null : p.bake);
 
 /**
  * A package on its folder page, the top part: its 3D view (the baked preview) beside what it is, its tags and links,
@@ -331,7 +332,7 @@ export function packageBlock(p: PackageData, u: Urls): string {
   const edit = u.edit(p.lib, p.id);
   const b = bakeOf(p);
   // the 3D view; else the preview picture at its own size; else a short word that there is none yet, and why
-  const none = p.status === 'empty' ? 'No preview yet: this package has no graph to bake' : p.status === 'baking' ? 'No preview yet: baking it…' : b && !b.ok ? 'No preview: its graph did not cook' : 'No preview yet';
+  const none = p.status === 'unread' ? 'No preview yet: its graph file cannot be read' : p.status === 'empty' ? 'No preview yet: this package has no graph to bake' : p.status === 'baking' ? 'No preview yet: baking it…' : b && !b.ok ? 'No preview: its graph did not cook' : 'No preview yet';
   const view = p.glb
     ? `<iframe class="view" src="${esc(u.embed(p.lib, p.id))}" title="${esc(p.title)} in 3D" allow="fullscreen"></iframe>`
     : p.thumb ? `<img class="view pic" src="${esc(u.thumb(p.lib, p.id, p.version))}" alt="${esc(p.title)}" width="512" height="512">`
@@ -347,7 +348,7 @@ export function packageBlock(p: PackageData, u: Urls): string {
     ${p.links.length ? `<ul class="links">${p.links.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a></li>`).join('')}</ul>` : ''}
     <div class="actions">
       ${edit ? `<a class="btn primary" href="${esc(edit)}" target="_blank" rel="noopener">Open in editor</a>` : ''}
-      ${p.builtin || p.status === 'empty' ? '' : `<button class="btn" type="button" data-post="${esc(`${u.package(p.lib, p.id)}/bake`)}">Re-bake</button>`}
+      ${p.builtin || p.status === 'empty' || p.status === 'unread' ? '' : `<button class="btn" type="button" data-post="${esc(`${u.package(p.lib, p.id)}/bake`)}">Re-bake</button>`}
       <span class="bakenow" id="bakenow" aria-live="polite">${p.status === 'baking' ? 'Baking…' : ''}</span>
     </div>
   </aside>
@@ -378,21 +379,21 @@ export function packageRelations(p: PackageData): string {
 export function packageDetails(p: PackageData): string {
   const b = bakeOf(p);
   const example = p.package?.outputs.find((o) => !o.alias)?.type;
-  const bakeLine = p.builtin
+  const bakeLine = p.unread ?? (p.builtin
     ? `One of TopoTopo's own packages: every package can use its outputs. Ask your agent to use one by its name${example ? `, such as ${example}` : ''}.`
     : p.status === 'empty'
     ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Ask your agent to build one; the preview appears here when it exists.')
     : p.status === 'baking' ? 'Baking its preview…'
     : !b ? 'Not baked yet.'
     : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${(b.points ?? 0).toLocaleString('en')} points, ${(b.prims ?? 0).toLocaleString('en')} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
-    : `Bake failed ${when(b.at)}`;
+    : `Bake failed ${when(b.at)}`);
   const graphs = p.graphs.length
-    ? `<div class="graphs">${p.graphs.map((g) => `<details class="graph"><summary><b>${esc(g.name)}</b>${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes${g.vars.length ? ` · ${g.vars.length} vars` : ''}</span></summary>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</details>`).join('')}</div>`
+    ? `<div class="graphs">${p.graphs.map((g) => g.error !== undefined ? `<div class="graph"><b>${esc(g.name)}</b>: cannot be read</div>` : `<details class="graph"><summary><b>${esc(g.name)}</b>${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes${g.vars.length ? ` · ${g.vars.length} vars` : ''}</span></summary>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</details>`).join('')}</div>`
     : '<p class="dim">No graphs yet. Ask your agent to build one in this package (its workspace tool opens the package); open the editor to watch it appear.</p>';
   return `<section class="pkgdetails">
     <h2>Graphs <span class="count">${p.graphs.length}</span></h2>
     ${graphs}
-    <p class="bake ${b && !b.ok ? 'err' : ''}${p.status === 'empty' ? ' empty' : ''}" id="bake">${esc(bakeLine)}</p>
+    <p class="bake ${p.unread || (b && !b.ok) ? 'err' : ''}${p.status === 'empty' ? ' empty' : ''}" id="bake">${esc(bakeLine)}</p>
     ${b && !b.ok && b.error ? `<pre class="error">${esc(b.error)}</pre>` : ''}
     ${b?.warnings?.length ? `<details class="warn"><summary>${b.warnings.length} warning${b.warnings.length > 1 ? 's' : ''}</summary><pre>${esc(b.warnings.join('\n'))}</pre></details>` : ''}
   </section>`;
