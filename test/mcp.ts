@@ -323,21 +323,25 @@ if (url) {
   const ac = new AbortController();
   const res = await fetch(url + 'api/events', { signal: ac.signal });
   const reader = res.body!.getReader();
+  // (events about the outputs or the cooking may come first: the one looked for names the graph)
+  const seen: string[] = [];
   const got = (async () => {
     const dec = new TextDecoder();
     let buf = '';
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) return '';
+      if (done) return false;
       buf += dec.decode(value);
-      const m = /data: (.*)\n\n/.exec(buf);
-      if (m) return m[1];
+      for (let m; (m = /data: (.*)\n\n/.exec(buf)); buf = buf.slice(m.index + m[0].length)) {
+        seen.push(m[1]);
+        if (m[1].includes('"graph":"main"')) return true;
+      }
     }
   })();
   await call('edit', { ops: [{ op: 'set', node: 'pts', params: { seed: 9 } }] });
-  const ev = await Promise.race([got, new Promise<string>((r) => setTimeout(() => r(''), 5000))]);
+  const pushed = await Promise.race([got, new Promise<boolean>((r) => setTimeout(() => r(false), 5000))]);
   ac.abort();
-  check(ev.includes('"graph":"main"'), `viewer SSE update event: ${ev}`);
+  check(pushed, `viewer SSE update event: ${seen.join(' ') || 'none'}`);
 }
 
 // libraries: create opens the new package; build lands in it; the viewer follows
