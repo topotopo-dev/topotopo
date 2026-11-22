@@ -61,13 +61,13 @@ function screenSized(obj, at, px, wpp) {
   obj.onBeforeRender = (r, s, camera) => { obj.scale.setScalar(wpp(camera, obj.position) * px); obj.updateMatrixWorld(); };
   return obj;
 }
-function boxEdges(lo, hi) {
-  const out = [];
+function boxEdges(m) {
+  const corners = M.boxPoints(m).map(V3), out = [];
   for (let ax = 0; ax < 3; ax++) for (let s = 0; s < 4; s++) {
     const a = [0, 0, 0], u = (ax + 1) % 3, v = (ax + 2) % 3;
     a[u] = s & 1; a[v] = s >> 1;
     const b = a.slice(); b[ax] = 1;
-    out.push([a, b].map(([i, j, k]) => new THREE.Vector3(i ? hi[0] : lo[0], j ? hi[1] : lo[1], k ? hi[2] : lo[2])));
+    out.push([a, b].map(([i, j, k]) => corners[4 * i + 2 * j + k]));
   }
   return out;
 }
@@ -86,13 +86,12 @@ function guideObject(m, state, wpp, cvs = []) {
   g.name = `guide ${m.name}`;
   if (m.kind === 'site') {
     const c = P[0];
-    const cross = pairs([[new THREE.Vector3(-1, 0, 0), new THREE.Vector3(1, 0, 0)], [new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1, 0)], [new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, 1)]], st);
-    // oriented by orient: the markers file writes identity (src/viewer/server.ts markersGeometry)
+    const cross = pairs([[new THREE.Vector3(-1, 0, 0), new THREE.Vector3(1, 0, 0)], [new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1, 0)], [new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, 2)]], st);
+    cross.quaternion.set(...M.quatOfRotate(M.rotateOf(m)));
     g.add(screenSized(cross, c, CROSS_PX, wpp));
     if (state !== 'normal') g.add(fatLine(circle(c, m.radius ?? M.DEFAULT_RADIUS), { ...st, width: 1 }, true));
   } else if (m.kind === 'volume') {
-    const { lo, hi } = M.boxOf(m);
-    g.add(pairs(boxEdges(lo, hi), st));
+    g.add(pairs(boxEdges(m), st));
   } else {
     const zone = m.kind === 'zone';
     g.add(fatLine(P, st, zone));
@@ -166,7 +165,7 @@ export function createGuides(ctx) {
       const id = guideId(m.id), visible = !G.hidden.has(m.id);
       const state = ctx.selection.has(id) ? 'sel' : hovered === id ? 'hover' : 'normal';
       const cvs = state === 'sel' ? [] : selectedCVs(id);
-      const sig = JSON.stringify([m.kind, m.points, m.radius, m.height, state, cvs]);
+      const sig = JSON.stringify([m.kind, m.points, m.rotate, m.radius, m.height, state, cvs]);
       seen.add(m.id);
       let d = G.drawn.get(m.id);
       if (!d || d.sig !== sig) {
@@ -187,7 +186,7 @@ export function createGuides(ctx) {
     if (d?.kind === 'volume') {
       const m = { points: [[d.a.x, d.y, d.a.z], [d.b.x, d.y, d.b.z]], height: G.defaults.height };
       const { lo, hi } = M.boxOf(m);
-      if (hi[0] > lo[0] && hi[2] > lo[2]) G.draftRoot.add(pairs(boxEdges(lo, hi), STYLE.draft));
+      if (hi[0] > lo[0] && hi[2] > lo[2]) G.draftRoot.add(pairs(boxEdges(m), STYLE.draft));
     } else if (d?.points?.length) {
       const P = d.points.map(V3), live = G.cursor ? [...P, G.cursor] : P;
       if (live.length >= 2) G.draftRoot.add(fatLine(live, STYLE.draft));
@@ -321,6 +320,21 @@ export function createGuides(ctx) {
     if (!d[axis]) return false;
     return G.change(`move ${m.name}`, (list) => { const i = list.findIndex((o) => o.id === id); list[i] = M.translateMarker(list[i], d); });
   };
+  G.setRotate = (id, axis, value) => {
+    G.gizmoEnd(true);
+    const m = byId(id), next = m && M.setRotate(m, axis, value);
+    if (!next || M.rotateOf(m)[axis] === M.rotateOf(next)[axis]) return false;
+    return G.change(`rotate ${m.name}`, (list) => { list[list.findIndex((o) => o.id === id)] = next; });
+  };
+  G.setVolumeSize = (id, axis, value) => {
+    G.gizmoEnd(true);
+    const m = byId(id), next = m && M.setVolumeSize(m, axis, value);
+    if (!next) return false;
+    if (axis === 1) G.defaults.height = next.height;
+    const size = M.volumeSize(m)[axis];
+    if (value === size || M.volumeSize(next)[axis] === size) return false;
+    return G.change(`size of ${m.name}`, (list) => { list[list.findIndex((o) => o.id === id)] = next; });
+  };
   G.setHidden = (ids, hide) => {
     G.gizmoEnd(true);
     for (const id of ids) if (hide) G.hidden.add(id); else G.hidden.delete(id);
@@ -335,7 +349,7 @@ export function createGuides(ctx) {
     return Math.hypot(a.x + t * dx - px, a.y + t * dy - py);
   };
   /** The points that must lie inside a box for a guide to be box-selected. */
-  G.points = (m) => (m.kind === 'volume' ? boxEdges(M.boxOf(m).lo, M.boxOf(m).hi).flat() : m.points.map(V3));
+  G.points = (m) => (m.kind === 'volume' ? M.boxPoints(m) : m.points).map(V3);
   /**
    * The ids a box takes: a guide wholly inside it whole; of a curve or an area partly inside, the CVs inside it.
    * `inside(points)` tests world points.
@@ -364,10 +378,12 @@ export function createGuides(ctx) {
       const id = guideId(m.id), sel = ctx.selection.has(id);
       if (!sel && !ctx.selection.touches(id) && (ctx.hover ? parseId(ctx.hover).obj : null) !== id) continue;
       const at = m.kind === 'site' ? V3(m.points[0]) : m.kind === 'zone' ? V3(M.centroid(m.points)) : m.kind === 'path' ? V3(M.halfway(m.points)) : (() => { const { lo, hi } = M.boxOf(m); return new THREE.Vector3((lo[0] + hi[0]) / 2, hi[1], (lo[2] + hi[2]) / 2); })();
-      out.push({ key: `n:${m.id}`, at, text: m.name, cls: sel ? 'lbl sel' : 'lbl' });
+      // a null's name stands up and to the right of its cross, clear of the arms
+      out.push({ key: `n:${m.id}`, at, text: m.name, cls: `lbl${m.kind === 'site' ? ' null' : ''}${sel ? ' sel' : ''}` });
       if (sel && m.kind === 'volume') {
-        const { lo, hi } = M.boxOf(m);
-        out.push({ key: `s:${m.id}`, at: new THREE.Vector3((lo[0] + hi[0]) / 2, lo[1], hi[2]), text: `${fmtLen(hi[0] - lo[0])} × ${fmtLen(hi[1] - lo[1])} × ${fmtLen(hi[2] - lo[2])} m`, cls: 'lbl dimen' });
+        const [, , a, b] = M.volumeCorners(m);
+        const [x, y, z] = M.volumeSize(m);
+        out.push({ key: `s:${m.id}`, at: V3(a).lerp(V3(b), 0.5), text: `${fmtLen(x)} × ${fmtLen(y)} × ${fmtLen(z)} m`, cls: 'lbl dimen' });
       }
     }
     return out;
@@ -519,7 +535,7 @@ export function createGuides(ctx) {
       if (m.kind === 'volume') {
         M.volumeCorners(m).forEach((p, k) => { const c = proj(p); if (c) offer(Math.hypot(c.x - x, c.y - y) - 2, { id, part: 'corner', k, at: p }, CV_PX + 2); });
         const { lo, hi } = M.boxOf(m);
-        for (const [a, b] of boxEdges(lo, hi)) {
+        for (const [a, b] of boxEdges(m)) {
           const A = ctx.views.project(slot, a, cam), B = ctx.views.project(slot, b, cam);
           if (A && B) offer(segDist(x, y, A, B) + 1, { id, part: 'body', at: [a.x, lo[1], a.z] }, PICK_PX);
         }

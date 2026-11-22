@@ -20,7 +20,7 @@ export class MarkerError extends Error {}
  */
 export function parseMarkers(body) {
   const list = body?.markers;
-  if (!Array.isArray(list)) throw new MarkerError('the body must be {"markers": [{id, kind, name, points, radius?, height?}, ...]}');
+  if (!Array.isArray(list)) throw new MarkerError('the body must be {"markers": [{id, kind, name, points, rotate?, radius?, height?}, ...]}');
   const bad = (i, msg) => new MarkerError(`markers[${i}]: ${msg}`);
   const names = new Map(), ids = new Set();
   const out = list.map((m, i) => {
@@ -50,6 +50,13 @@ export function parseMarkers(body) {
       return v;
     };
     const r = { id: m.id, kind, name, points };
+    if ((kind === 'site' || kind === 'volume') && m.rotate !== undefined) {
+      if (!Array.isArray(m.rotate) || m.rotate.length !== 3 || ![...m.rotate].every(Number.isFinite))
+        throw bad(i, 'rotate must be [rx, ry, rz] in degrees (got ' + JSON.stringify(m.rotate) + ')');
+      if (kind === 'volume' && (m.rotate[0] !== 0 || m.rotate[2] !== 0)) throw bad(i, 'a volume turns about Y only: rotate must be [0, ry, 0]');
+      const rotate = m.rotate.map(roundAngle);
+      if (rotate.some((v) => v !== 0)) r.rotate = rotate;
+    }
     if (kind === 'site') r.radius = size(m.radius, 'radius', DEFAULT_RADIUS);
     if (kind === 'volume') {
       r.height = size(m.height, 'height', DEFAULT_HEIGHT);
@@ -63,14 +70,14 @@ export function parseMarkers(body) {
 }
 
 /** The list as POST /api/markers takes it, in the key order the server stores. */
-export const markersBody = (list) => JSON.stringify({ markers: list.map(({ id, kind, name, points, radius, height }) =>
-  ({ id, kind, name, points, ...(kind === 'site' ? { radius } : {}), ...(kind === 'volume' ? { height } : {}) })) });
+export const markersBody = (list) => JSON.stringify({ markers: list.map(({ id, kind, name, points, rotate, radius, height }) =>
+  ({ id, kind, name, points, rotate, ...(kind === 'site' ? { radius } : {}), ...(kind === 'volume' ? { height } : {}) })) });
 
 /** Whether it is safe to take the guides from disk. */
 export const shouldReloadGuides = (saving, editing) => !saving && !editing;
 
 /** A deep copy of a list (undo snapshots). */
-export const cloneMarkers = (list) => list.map((m) => ({ ...m, points: m.points.map((p) => [p[0], p[1], p[2]]) }));
+export const cloneMarkers = (list) => list.map((m) => ({ ...m, points: m.points.map((p) => [p[0], p[1], p[2]]), ...(m.rotate ? { rotate: m.rotate.slice() } : {}) }));
 
 /** The next free default name for a kind, as Houdini names new objects: null1, curve2, area1, volume3. */
 export function nextName(list, kind) {
@@ -98,12 +105,65 @@ export const mm = (x) => Math.round(x * 1000) / 1000;
 /** How many points a finished guide of this kind needs. */
 export const minPoints = (kind) => MARKER_POINTS[kind]?.[0] ?? 1;
 
+export const rotateOf = (m) => m.rotate ?? [0, 0, 0];
+const RAD = Math.PI / 180;
+// At this magnitude consecutive numbers are already farther apart than 0.001 degrees.
+const roundAngle = (x) => Math.abs(x) < 2 ** 43 ? mm(x) || 0 : x;
+
+/** A unit quaternion [x, y, z, w], applying X, then Y, then Z. */
+export function quatOfRotate(r) {
+  if (r.every((v) => v === 0)) return [0, 0, 0, 1];
+  const half = r.map((v) => (v % 360) * RAD / 2);
+  const [sx, sy, sz] = half.map(Math.sin), [cx, cy, cz] = half.map(Math.cos);
+  const q = [sx * cy * cz - cx * sy * sz, cx * sy * cz + sx * cy * sz, cx * cy * sz - sx * sy * cz, cx * cy * cz + sx * sy * sz];
+  return q.map((v) => (q[3] < 0 ? -v : v) || 0);
+}
+
+/** The XYZ angles of a quaternion, with the combined X/Z turn on X at either pole. */
+export function rotateOfQuat(q) {
+  const scale = Math.max(...q.map(Math.abs));
+  if (!(scale > 0) || !Number.isFinite(scale)) return [0, 0, 0];
+  const unit = q.map((v) => v / scale);
+  const len = Math.hypot(...unit);
+  const [x, y, z, w] = unit.map((v) => v / len);
+  const r00 = 1 - 2 * (y * y + z * z), r10 = 2 * (x * y + w * z);
+  const ry = roundAngle(Math.atan2(2 * (w * y - x * z), Math.hypot(r00, r10)) / RAD);
+  if (Math.abs(ry) === 90) return [roundAngle(Math.atan2(2 * (w * x - y * z), 1 - 2 * (x * x + z * z)) / RAD), ry, 0];
+  return [
+    roundAngle(Math.atan2(2 * (y * z + w * x), 1 - 2 * (x * x + y * y)) / RAD),
+    ry,
+    roundAngle(Math.atan2(r10, r00) / RAD),
+  ];
+}
+
+/** Turn a point about the vertical line through c. */
+export function turnY(p, c, deg) {
+  if (deg === 0) return p;
+  const a = (deg % 360) * RAD, cos = Math.cos(a), sin = Math.sin(a);
+  const x = p[0] - c[0], z = p[2] - c[2];
+  return [c[0] + cos * x + sin * z, p[1], c[2] - sin * x + cos * z];
+}
+
 /** A volume's box as the server builds it: the lower corner's y, up by height. */
 export function boxOf(m) {
   const [a, c] = m.points;
   const lo = [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.min(a[2], c[2])];
   return { lo, hi: [Math.max(a[0], c[0]), lo[1] + (m.height ?? DEFAULT_HEIGHT), Math.max(a[2], c[2])] };
 }
+/** A volume's eight world corners, indexed by 4i + 2j + k for the local sides of x, y, z. */
+export function boxPoints(m) {
+  const { lo, hi } = boxOf(m), turn = rotateOf(m)[1];
+  const c = lo.map((v, a) => (v + hi[a]) / 2), out = [];
+  for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) out.push(turnY([x, y, z], c, turn));
+  return out;
+}
+
+/** A volume's local dimensions in x, y, z. */
+export function volumeSize(m) {
+  const { lo, hi } = boxOf(m);
+  return [hi[0] - lo[0], m.height ?? DEFAULT_HEIGHT, hi[2] - lo[2]];
+}
+
 export const pathLength = (pts) => pts.slice(1).reduce((s, p, k) => s + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1], p[2] - pts[k][2]), 0);
 /** The area of a polygon seen from above (x, z), m². */
 export const topArea = (pts) => Math.abs(pts.reduce((s, p, k) => { const q = pts[(k + 1) % pts.length]; return s + p[0] * q[2] - q[0] * p[2]; }, 0)) / 2;
@@ -137,13 +197,17 @@ export function pivotOf(m) {
 
 /** The bounds framing a guide shows: a null with its radius, the CVs, the box. */
 export function boundsOf(m) {
-  if (m.kind === 'volume') return boxOf(m);
+  if (m.kind === 'volume') return pointBounds(boxPoints(m));
   if (m.kind === 'site') {
     const [x, y, z] = m.points[0], r = m.radius ?? DEFAULT_RADIUS;
     return { lo: [x - r, y - r * 0.1, z - r], hi: [x + r, y + r * 0.1, z + r] };
   }
+  return pointBounds(m.points);
+}
+
+export function pointBounds(points) {
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  for (const p of m.points) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[a]); hi[a] = Math.max(hi[a], p[a]); }
+  for (const p of points) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[a]); hi[a] = Math.max(hi[a], p[a]); }
   return { lo, hi };
 }
 
@@ -157,7 +221,7 @@ export function markerAttributes(m) {
       { cls: 'point', name: 'name', type: 'string', value: m.name },
       { cls: 'point', name: 'role', type: 'string', value: 'site' },
       { cls: 'point', name: 'pscale', type: 'float', value: m.radius ?? DEFAULT_RADIUS },
-      { cls: 'point', name: 'orient', type: 'float4', value: [0, 0, 0, 1] },
+      { cls: 'point', name: 'orient', type: 'float4', value: quatOfRotate(rotateOf(m)).map((v) => Math.round(v * 10000) / 10000 || 0) },
     ];
   }
   return [
@@ -214,6 +278,29 @@ export function hatchSegments(pts, spacing) {
 const mm3 = (p) => [mm(p[0]), mm(p[1]), mm(p[2])];
 const withPoints = (m, points) => ({ ...m, points });
 
+/** Set an angle on a null, or a volume's turn about Y. */
+export function setRotate(m, axis, value) {
+  if (!Number.isInteger(axis) || axis < 0 || axis > 2 || !Number.isFinite(value)) return null;
+  if (m.kind !== 'site' && !(m.kind === 'volume' && axis === 1)) return null;
+  const { rotate, ...next } = m, angles = rotateOf(m).slice();
+  angles[axis] = roundAngle(value);
+  if (angles.some((v) => v !== 0)) next.rotate = angles;
+  return next;
+}
+
+/** Change a volume's local size, about its centre in X/Z and up from its floor in Y. */
+export function setVolumeSize(m, axis, v) {
+  if (m.kind !== 'volume' || !(v > 0) || !Number.isFinite(v)) return null;
+  if (axis === 1) return { ...m, height: v };
+  if (axis !== 0 && axis !== 2) return null;
+  const [a, b] = m.points, c = (a[axis] + b[axis]) / 2;
+  const half = (a[axis] < b[axis] ? v : -v) / 2;
+  const points = [a.slice(), b.slice()];
+  points[0][axis] = mm(c - half); points[1][axis] = mm(c + half);
+  if (!points.every((p) => Number.isFinite(p[axis])) || points[0][axis] === points[1][axis]) return null;
+  return withPoints(m, points);
+}
+
 /** Point `k` (a null's point, a CV, a volume's ground corner as stored) moved to `p`. */
 export function movePoint(m, k, p) {
   if (!(k >= 0 && k < m.points.length)) return null;
@@ -256,14 +343,15 @@ export function removePoint(m, k) {
 
 /** A volume's four ground corners [x, lo y, z], walked around the box: (lo x, lo z), (hi x, lo z), (hi x, hi z), (lo x, hi z). */
 export function volumeCorners(m) {
-  const { lo, hi } = boxOf(m);
-  return [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], lo[1], hi[2]], [lo[0], lo[1], hi[2]]];
+  const p = boxPoints(m);
+  return [p[0], p[4], p[5], p[1]];
 }
 
 /** A volume with ground corner `k` (volumeCorners' order) dragged to `p` in x and z; the opposite corner stays. */
 export function resizeVolume(m, k, p) {
-  const c = volumeCorners(m), fixed = c[(k + 2) % 4], y = c[0][1];
-  const a = mm3([fixed[0], y, fixed[2]]), b = mm3([p[0], y, p[2]]);
+  const fixed = volumeCorners(m)[(k + 2) % 4], target = [p[0], fixed[1], p[2]];
+  const c = fixed.map((v, i) => (v + target[i]) / 2), turn = rotateOf(m)[1];
+  const a = mm3(turnY(fixed, c, -turn)), b = mm3(turnY(target, c, -turn));
   if (a[0] === b[0] || a[2] === b[2]) return null;
   return withPoints(m, [a, b]);
 }

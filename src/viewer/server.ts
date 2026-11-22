@@ -47,7 +47,7 @@ import { SIDECAR_NAMES, SIDECAR_TEXT } from '../io/sidecars.ts';
 import { outputKind } from '../io/kinds.ts';
 import { sidecarFile } from '../host/sidecars.ts';
 // the page's guide rules, shared so the page and this server check a marker list the same way
-import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList } from './app/markers.js';
+import { MARKER_KINDS as KINDS, MarkerError, parseMarkers as parseMarkerList, boxPoints, mm, pointBounds, quatOfRotate, rotateOf, rotateOfQuat, turnY } from './app/markers.js';
 
 // index.html and app/ sit next to this module (the build copies them to dist/viewer/)
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -119,8 +119,10 @@ export interface Marker {
   id: string;
   kind: MarkerKind;
   name: string;
-  /** site: its point; path: an open polyline; zone: a closed one; volume: two ground corners of an axis-aligned box */
+  /** site: its point; path: an open polyline; zone: a closed one; volume: two ground corners before its turn */
   points: [number, number, number][];
+  /** XYZ in degrees for a site; Y only for a volume */
+  rotate?: [number, number, number];
   /** site: radius (pscale), default 5 */
   radius?: number;
   /** volume: extent upward from the lower corner's y, default 10 */
@@ -136,7 +138,7 @@ export function parseMarkers(body: unknown): Marker[] {
 }
 
 /**
- * The geometry of inputs/markers.json. Sites are points with name, role "site", pscale = radius and orient (identity);
+ * The geometry of inputs/markers.json. Sites are points with name, role "site", pscale = radius and orient;
  * paths are open polylines, zones closed ones facing up, volumes closed boxes of 6 quads facing out; those carry prim
  * name and role.
  */
@@ -149,17 +151,14 @@ export function markersGeometry(list: Marker[]): Geometry {
       b.attrib('point', 'name', 1, 'string').set(p, m.name);
       b.attrib('point', 'role', 1, 'string').set(p, 'site');
       b.attrib('point', 'pscale').set(p, m.radius ?? 5);
-      b.attrib('point', 'orient', 4).set(p, [0, 0, 0, 1]);
+      b.attrib('point', 'orient', 4).set(p, quatOfRotate(rotateOf(m)));
       continue;
     }
     const prims: number[] = [];
     if (m.kind === 'volume') {
-      const [a, c] = m.points;
-      const lo = [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.min(a[2], c[2])];
-      const hi = [Math.max(a[0], c[0]), lo[1] + (m.height ?? 10), Math.max(a[2], c[2])];
       // corner (i, j, k) is point base + 4i + 2j + k, at the low (0) or high (1) side of x, y, z
       const base = b.numPoints;
-      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) b.addPoint(i ? hi[0] : lo[0], j ? hi[1] : lo[1], k ? hi[2] : lo[2]);
+      for (const [x, y, z] of boxPoints(m)) b.addPoint(x, y, z);
       // the box node's winding: counter-clockwise seen from outside
       for (let ax = 0; ax < 3; ax++) for (const s of [0, 1]) {
         const u = (ax + 1) % 3, v = (ax + 2) % 3;
@@ -185,6 +184,44 @@ export function markersGeometry(list: Marker[]): Geometry {
   return b.build();
 }
 
+/** Recover the yaw from a ground edge of an upright box. Other shapes keep their world bounds. */
+function volumeFromFaces(faces: Marker['points'][]): Pick<Marker, 'points' | 'height' | 'rotate'> {
+  const world = faces.flat(), { lo, hi } = pointBounds(world);
+  const height = hi[1] - lo[1], floor = lo[1];
+  const volume: Pick<Marker, 'points' | 'height' | 'rotate'> = {
+    points: [[lo[0], floor, lo[2]], [hi[0], floor, hi[2]]],
+    ...(height > 0 ? { height } : {}),
+  };
+  const eps = 1e-8 + 32 * Number.EPSILON * Math.max(...lo.map(Math.abs), ...hi.map(Math.abs));
+  let turn = 0, longest = 0;
+  for (const face of faces) for (let i = 0; i < face.length; i++) {
+    const a = face[i], b = face[(i + 1) % face.length];
+    if (Math.abs(a[1] - floor) > eps || Math.abs(b[1] - floor) > eps) continue;
+    const dx = b[0] - a[0], dz = b[2] - a[2], length = Math.hypot(dx, dz);
+    if (length <= longest) continue;
+    longest = length;
+    turn = Math.atan2(-dz, dx) * 180 / Math.PI;
+  }
+  // Either horizontal axis, in either direction, gives the same turn modulo a quarter turn.
+  turn -= 90 * Math.ceil((turn - 45) / 90);
+  if (Math.abs(turn) < 1e-10) return volume;
+  if (mm(turn) === -45) turn += 90;
+
+  const centre = lo.map((v: number, axis: number) => (v + hi[axis]) / 2);
+  const local = world.map((p) => turnY(p, centre, -turn));
+  const box = pointBounds(local);
+  const corners = boxPoints({ points: [box.lo, box.hi], height });
+  const near = (a: number[], b: number[]) => a.every((v, axis) => Math.abs(v - b[axis]) <= eps);
+  if (!local.every((p) => corners.some((q: number[]) => near(p, q))) || !corners.every((q: number[]) => local.some((p) => near(p, q)))) return volume;
+
+  const [x0, y, z0] = box.lo.map(mm), [x1, , z1] = box.hi.map(mm);
+  if (x0 === x1 || z0 === z1) return volume;
+  volume.points = [[x0, y, z0], [x1, y, z1]];
+  const angle = mm(turn);
+  if (angle) volume.rotate = [0, angle, 0];
+  return volume;
+}
+
 /**
  * The guides an inputs/markers.json holds, read back from its geometry (markersGeometry's conventions): points with
  * role "site", prims with role "path" (open), "zone" (closed) and "volume" (its quads, by name: the box's lower corners
@@ -192,7 +229,7 @@ export function markersGeometry(list: Marker[]): Geometry {
  */
 export function markersFromGeometry(g: Geometry): Marker[] {
   const str = (cls: 'point' | 'prim', n: string, i: number) => { const a = cls === 'point' ? g.points.get(n) : g.prims.get(n); return a && a.type === 'string' ? String(a.get(i) ?? '') : ''; };
-  const ps = g.points.get('pscale');
+  const ps = g.points.get('pscale'), orient = g.points.get('orient');
   const P = (i: number): [number, number, number] => [g.P[i * 3], g.P[i * 3 + 1], g.P[i * 3 + 2]];
   const out: Marker[] = [];
   const used = new Uint8Array(g.numPoints);
@@ -200,25 +237,20 @@ export function markersFromGeometry(g: Geometry): Marker[] {
   for (let i = 0; i < g.numPoints; i++) {
     if (used[i] || str('point', 'role', i) !== 'site') continue;
     const r = ps ? Number(ps.get(i)) : NaN;
-    out.push({ id: `m${out.length + 1}`, kind: 'site', name: str('point', 'name', i), points: [P(i)], ...(r > 0 ? { radius: r } : {}) });
+    const q = orient?.get(i);
+    const rotate: Marker['rotate'] = Array.isArray(q) && q.length === 4 ? rotateOfQuat(q) : undefined;
+    out.push({ id: `m${out.length + 1}`, kind: 'site', name: str('point', 'name', i), points: [P(i)],
+      ...(rotate?.some((v) => v !== 0) ? { rotate } : {}), ...(r > 0 ? { radius: r } : {}) });
   }
-  const boxes = new Map<string, number[]>();
+  const boxes = new Map<string, Marker['points'][]>();
   for (let p = 0; p < g.numPrims; p++) {
     const role = str('prim', 'role', p), name = str('prim', 'name', p);
     const pts = Array.from(g.vertexPoint.subarray(g.primStart[p], g.primStart[p + 1]), P);
     if (role === 'path' && !g.primClosed[p]) out.push({ id: `m${out.length + 1}`, kind: 'path', name, points: pts });
     else if (role === 'zone' && g.primClosed[p]) out.push({ id: `m${out.length + 1}`, kind: 'zone', name, points: pts });
-    else if (role === 'volume') { let l = boxes.get(name); if (!l) boxes.set(name, (l = [])); l.push(p); }
+    else if (role === 'volume') { let l = boxes.get(name); if (!l) boxes.set(name, (l = [])); l.push(pts); }
   }
-  for (const [name, prims] of boxes) {
-    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-    for (const p of prims) for (let v = g.primStart[p]; v < g.primStart[p + 1]; v++) {
-      const q = P(g.vertexPoint[v]);
-      for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], q[a]); hi[a] = Math.max(hi[a], q[a]); }
-    }
-    const height = hi[1] - lo[1];
-    out.push({ id: `m${out.length + 1}`, kind: 'volume', name, points: [[lo[0], lo[1], lo[2]], [hi[0], lo[1], hi[2]]], ...(height > 0 ? { height } : {}) });
-  }
+  for (const [name, faces] of boxes) out.push({ id: `m${out.length + 1}`, kind: 'volume', name, ...volumeFromFaces(faces) });
   return out;
 }
 
