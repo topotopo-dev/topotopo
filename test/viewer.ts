@@ -27,7 +27,7 @@ import type { EditOp } from '../src/session.ts';
 import { openPackage } from '../src/open.ts';
 import { inputFileName, markersFromGeometry, startViewer } from '../src/viewer/server.ts';
 import { viewGraphFile } from '../src/viewer/graph-file.ts';
-import { shouldReloadGuides } from '../src/viewer/app/markers.js';
+import { boxPoints, shouldReloadGuides } from '../src/viewer/app/markers.js';
 import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
 import { packedFromMatrices } from '../src/core/packed.ts';
 import { previewGLB, heightfieldRes, HEIGHTFIELD_PREVIEW_RES } from '../src/render/preview.ts';
@@ -888,6 +888,27 @@ section('markers: POST /api/markers writes inputs/markers.json, read back throug
     const disk = markersFromGeometry(await importGeometryAsync(fs.readFileSync(geoFile), 'json')).map((m: any) => m.name).join(', ');
     check(savedBySecond.status === 200 && heardSecond && savedByFirst.status === 200 && readBack === 'village, well, camp' && disk === readBack,
       `the first page keeps the second page's guide when it saves after an inputs event (API: ${readBack}, file: ${disk})`);
+
+    const site = { ...markers[0], rotate: [0, 90, 0] };
+    const box = { ...markers[4], points: [[0, 0, 0], [4, 0, 2]], height: 3, rotate: [0, 30, 0] };
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    const turned = await api('POST', { markers: [site, box] });
+    check(turned.status === 200 && turned.j.ok, 'POST /api/markers accepts a turned null and volume');
+    const stored = await readList();
+    check(same(stored.map((m: any) => m.rotate), [site.rotate, box.rotate]), 'GET /api/markers returns both rotations');
+    const geometry = await importGeometryAsync(fs.readFileSync(geoFile), 'json');
+    const orient = geometry.points.get('orient')?.get(0), quat = [0, 0.7071068, 0, 0.7071068];
+    check(Array.isArray(orient) && orient.length === 4 && orient.every((v, i) => Math.abs(Number(v) - quat[i]) <= 1e-6),
+      'the turned null is written with its quaternion');
+    const points = geometry.P.subarray(3), expectedPoints = boxPoints(box).flat();
+    check(points.length === 24 && points.every((v, i) => Math.abs(v - expectedPoints[i]) <= 1e-9), 'the turned volume is written with its eight world corners');
+    const [siteBack, boxBack] = markersFromGeometry(geometry);
+    check(same(siteBack?.rotate, site.rotate) && same(boxBack?.rotate, box.rotate) && same(boxBack?.points, box.points),
+      'both rotations and the local volume corners read back from the geometry');
+    const badSite = await api('POST', { markers: [{ ...site, rotate: [1, 2] }] });
+    const badBox = await api('POST', { markers: [{ ...box, rotate: [10, 0, 0] }] });
+    check(badSite.status === 400 && /rotate must be \[rx, ry, rz\]/.test(badSite.j.error), 'POST /api/markers rejects a malformed null rotation');
+    check(badBox.status === 400 && /turns about Y only/.test(badBox.j.error), 'POST /api/markers rejects a volume rotation about X');
   } finally {
     ac.abort();
     await stream;

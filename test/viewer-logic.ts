@@ -35,7 +35,8 @@ import { HEIGHTFIELD_PREVIEW_RES, previewGLB } from '../src/render/preview.ts';
 import { MeshObject, parseGLB } from '../src/viewer/app/scene.js';
 import { Geometry, GeoBuilder } from '../src/core/geometry.ts';
 import { packedFromMatrices } from '../src/core/packed.ts';
-import { m4translate } from '../src/core/math.ts';
+import { m4euler, m4fromQuat, m4translate } from '../src/core/math.ts';
+import type { Vec3 } from '../src/core/math.ts';
 import { applyJSONEdits, editJSONText } from '../src/viewer/json-edit.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -514,6 +515,82 @@ section('guides: the marker rules the server uses');
   check(mk.hatchSegments(concave, 0.5).every(([a, b]: number[][]) => mk.insideTop((a[0] + b[0]) / 2, (a[2] + b[2]) / 2, concave)), 'a concave area\'s hatch stays inside it');
   check(mk.markersBody([{ id: 'a', kind: 'site', name: 'x', points: [[0, 0, 0]], radius: 2, height: 9 }] as any) === '{"markers":[{"id":"a","kind":"site","name":"x","points":[[0,0,0]],"radius":2}]}',
     'the POST body keeps the stored key order and only the kind\'s own fields');
+}
+
+section('stored rotation');
+{
+  const near = (a: ArrayLike<number>, b: ArrayLike<number>, eps: number) =>
+    a.length === b.length && Array.from(a).every((v, i) => Math.abs(v - b[i]) <= eps);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const samples: [Vec3, number[]][] = [
+    [[0, 90, 0], [0, 0.7071068, 0, 0.7071068]],
+    [[90, 0, 0], [0.7071068, 0, 0, 0.7071068]],
+    [[90, 90, 0], [0.5, 0.5, -0.5, 0.5]],
+  ];
+  for (const [r, q] of samples) check(near(mk.quatOfRotate(r), q, 1e-6), 'quaternion for ' + r.join(', '));
+  const rotations: Vec3[] = [[10, 20, 30], [-170, 45, 90], [0, 90, 0], [90, 90, 0]];
+  for (const r of rotations) {
+    check(near(m4fromQuat(mk.quatOfRotate(r)), m4euler(r, 'xyz'), 1e-12), 'quaternion follows the engine matrix for ' + r.join(', '));
+  }
+  for (const r of [...rotations.slice(0, 3), [30, 90, 0]]) {
+    const q = mk.quatOfRotate(r);
+    check(same(mk.rotateOfQuat(q), r) && same(mk.rotateOfQuat(q.map((v: number) => -3 * v)), r), 'normalised quaternion reads back ' + r.join(', '));
+  }
+  const beyondPole: Vec3 = [0, 100, 0];
+  const canonical: Vec3 = mk.rotateOfQuat(mk.quatOfRotate(beyondPole));
+  check(Math.abs(canonical[1]) <= 90 && near(m4euler(canonical, 'xyz'), m4euler(beyondPole, 'xyz'), 1e-9), 'pitch over 90 degrees reads back as an equivalent rotation');
+
+  const site = { id: 's', kind: 'site', name: 'null1', points: [[0, 0, 0]], radius: 5 };
+  const box = { id: 'v', kind: 'volume', name: 'volume1', points: [[0, 0, 0], [4, 0, 2]], height: 3 };
+  const curve = { id: 'c', kind: 'path', name: 'curve1', points: [[0, 0, 0], [2, 0, 0]] };
+  const parse = (m: unknown) => mk.parseMarkers({ markers: [m] })[0];
+  const turnedSite = parse({ ...site, rotate: [0, 90, 0] });
+  check(same(turnedSite.rotate, [0, 90, 0]) && same(parse({ ...site, rotate: [0, 90.0004, 0] }).rotate, [0, 90, 0]), 'the list keeps rotation to 0.001 degrees');
+  check(!('rotate' in parse(site)) && !('rotate' in parse({ ...site, rotate: [0, 0, 0] })), 'missing and zero rotation are omitted');
+  for (const rotate of [[1, 2], [0, 'a', 0]]) {
+    check(/rotate must be \[rx, ry, rz\] in degrees/.test(throws(() => parse({ ...site, rotate }))?.message ?? ''), 'invalid rotation is refused: ' + JSON.stringify(rotate));
+  }
+  check(/a volume turns about Y only/.test(throws(() => parse({ ...box, rotate: [10, 0, 0] }))?.message ?? ''), 'volume rotation is limited to Y');
+  check(!('rotate' in parse({ ...curve, rotate: [0, 90, 0] })), 'a curve drops rotation');
+  const body = JSON.parse(mk.markersBody([turnedSite, box])).markers;
+  check(Object.keys(body[0]).join() === 'id,kind,name,points,rotate,radius' && Object.keys(body[1]).join() === 'id,kind,name,points,height',
+    'the POST body writes rotation just after points when present');
+  const [copy] = mk.cloneMarkers([turnedSite]);
+  check(same(copy.rotate, turnedSite.rotate) && copy.rotate !== turnedSite.rotate, 'undo snapshots copy the rotation array');
+
+  const turned = { ...box, rotate: [0, 90, 0] };
+  const corners = [[1, 0, 3], [1, 0, -1], [3, 0, -1], [3, 0, 3]];
+  check(near(mk.volumeCorners(turned).flat(), corners.flat(), 1e-9), 'the ground corners turn about the box centre');
+  const bounds = mk.boundsOf(turned);
+  check(near(bounds.lo, [1, 0, -1], 1e-9) && near(bounds.hi, [3, 3, 3], 1e-9) && near(mk.pivotOf(turned), [2, 1.5, 1], 1e-9), 'world bounds turn and the pivot stays');
+  check(same(mk.volumeCorners(box), [[0, 0, 0], [4, 0, 0], [4, 0, 2], [0, 0, 2]])
+    && same(mk.boundsOf(box), { lo: [0, 0, 0], hi: [4, 3, 2] }) && same(mk.pivotOf(box), [2, 1.5, 1]), 'the unturned volume keeps its corners, bounds and pivot');
+  const resized = mk.resizeVolume(turned, 2, [5, 0, -3]);
+  check(resized && same(resized.points, [[0, 0, -2], [6, 0, 2]]) && same(resized.rotate, turned.rotate), 'resizing stores the inverse-turned corners and keeps the turn');
+  const moved = mk.volumeCorners(resized);
+  check(near(moved[0], [1, 0, 3], 1e-9) && near(moved[2], [5, 0, -3], 1e-9), 'the dragged world corner follows the pointer and the opposite one stays');
+
+  const rotated = mk.setRotate(site, 1, 45);
+  check(rotated && same(rotated.rotate, [0, 45, 0]) && !('rotate' in mk.setRotate(rotated, 1, 0)!), 'setting a null rotation and clearing it');
+  check(mk.setRotate(curve, 1, 45) === null && mk.setRotate(box, 0, 45) === null, 'setting an unsupported angle is refused');
+  const yawed = { ...box, rotate: [0, 30, 0] };
+  check(same(mk.setVolumeSize(yawed, 0, 6)?.points, [[-1, 0, 0], [5, 0, 2]]) && same(mk.setVolumeSize(yawed, 2, 4)?.points, [[0, 0, -1], [4, 0, 3]]),
+    'typed X and Z sizes resize the volume in its own axes about the centre');
+  const taller = mk.setVolumeSize(yawed, 1, 7);
+  check(taller?.height === 7 && same(taller.points, box.points) && same(taller.rotate, yawed.rotate) && mk.setVolumeSize(yawed, 1, 0) === null, 'typed height keeps the floor and turn and refuses zero');
+  check(same(mk.markerAttributes(turnedSite).find((a: any) => a.name === 'orient').value, [0, 0.7071, 0, 0.7071]), 'Properties shows the rounded null quaternion');
+
+  const undo = createUndo();
+  const guides = createGuides({
+    store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} },
+    objects: new Map(), guidesRoot: new THREE.Group(), selection: sel.createSelection(() => 1),
+    pxWorld: () => 0.01, requestRender: () => {}, message: () => {}, coalesce: () => () => {}, emit: () => {}, undo,
+  });
+  guides.list = [site, box];
+  check(guides.setRotate('s', 1, 45) && same(guides.byId('s').rotate, [0, 45, 0]) && !guides.setRotate('s', 1, 45)
+    && undo.size === 1 && undo.undo() === 'rotate null1' && !('rotate' in guides.byId('s')), 'a typed rotation has one named undo step');
+  check(guides.setVolumeSize('v', 1, 7) && guides.byId('v').height === 7 && guides.defaults.height === 7 && !guides.setVolumeSize('v', 1, 7)
+    && undo.size === 1 && undo.undo() === 'size of volume1' && guides.byId('v').height === 3, 'a typed size has one named undo step and remembers the new height');
 }
 
 section('grid step and readouts (section 4)');

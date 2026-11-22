@@ -1,5 +1,5 @@
 // The properties column: what the selection is (a guide's name, kind,
-// translate / rotate / scale, radius or height and the attributes the LLM reads; a layer's file, counts, bbox and
+// translate, rotation, radius or size and the guide's attributes; a layer's file, counts, bbox and
 // display mode; a result's output, node, counts and material; a piece's size; a CV's point), and below it the
 // Controls: the graph's exposed vars as sliders, fields, checkboxes, menus and colour pickers, under a collapsible
 // heading per param "group". Drags post at most every 100 ms; each control resets to its default; undeclared vars are
@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 
 export function createProps(ctx) {
   const body = $('props-body');
-  let shownKey = null, dirty = false, applyingTranslate = false;
+  let shownKey = null, shownSelection = null, dirty = false, applyingTransform = false;
 
   // ------------------------------------------------------------------ building blocks
   const group = (title, ...extra) => { const g = el('div', 'pgroup'), h = el('h3'); h.append(el('span', '', title), el('span', 'grow'), ...extra); g.append(h); return g; };
@@ -42,37 +42,46 @@ export function createProps(ctx) {
     f.onkeydown = (e) => { if (e.key === 'Enter' || e.key === 'Escape') f.blur(); };
     return f;
   };
-  const translateFields = (m, pivot) => {
+  const transformFields = (m, label, unit, read, set, { onlyY = false, positive = false } = {}) => {
     const box = el('div', 'xyz');
-    pivot.forEach((value, axis) => {
+    read(m).forEach((value, axis) => {
       const f = el('input');
-      let shown = fmt(value);
+      let shown = fmt(value), badTimer;
       f.type = 'text'; f.value = shown; f.spellcheck = false;
-      f.title = `Translate ${'XYZ'[axis]} (m)`; f.setAttribute('aria-label', f.title);
-      f.oninput = () => f.classList.remove('bad');
+      const title = `${label} ${'XYZ'[axis]} (${unit})`;
+      f.disabled = onlyY && axis !== 1;
+      f.title = f.disabled ? 'a volume turns about Y only' : title;
+      f.setAttribute('aria-label', title);
+      box.append(f);
+      if (f.disabled) return;
+      const clearBad = () => { clearTimeout(badTimer); f.classList.remove('bad'); };
+      f.oninput = clearBad;
       f.onkeydown = (e) => {
         if (e.key !== 'Enter' && e.key !== 'Escape') return;
         e.preventDefault(); e.stopPropagation();
-        if (e.key === 'Escape') { f.value = shown; f.classList.remove('bad'); }
+        if (e.key === 'Escape') { f.value = shown; clearBad(); }
         f.blur();
       };
       f.onblur = () => {
         const entered = f.value, guide = ctx.guides.byId(m.id);
         if (!guide) return;
-        const current = M.pivotOf(guide)[axis];
+        const current = read(guide)[axis];
         const next = entered === shown ? current : typedValue(entered, current);
-        f.value = shown = fmt(next ?? current);
-        if (next === null) {
+        if (next === null || (positive && next <= 0)) {
+          clearBad();
           f.classList.add('bad');
-          setTimeout(() => f.classList.remove('bad'), 1500);
+          badTimer = setTimeout(() => {
+            clearBad();
+            if (f.isConnected && dirty && !body.contains(document.activeElement)) render(true);
+          }, 1500);
         } else if (next !== current) {
           // Keep the fields in place while focus moves to the next one.
-          applyingTranslate = true;
-          try { ctx.guides.setTranslate(m.id, axis, next); }
-          finally { applyingTranslate = false; }
+          applyingTransform = true;
+          try { set(m.id, axis, next); }
+          finally { applyingTransform = false; }
         }
+        f.value = shown = fmt(read(ctx.guides.byId(m.id) ?? guide)[axis]);
       };
-      box.append(f);
     });
     return box;
   };
@@ -107,15 +116,14 @@ export function createProps(ctx) {
       else name.value = r.name;
     };
     g.append(row('name', name), row('kind', `${kind} · role "${m.kind}"`));
-    const piv = M.pivotOf(m);
-    g.append(row('translate', canTranslate ? translateFields(m, piv) : xyz(piv)), row('rotate', xyz([0, 0, 0])), row('scale', xyz([1, 1, 1])));
+    g.append(row('translate', canTranslate ? transformFields(m, 'Translate', 'm', M.pivotOf, ctx.guides.setTranslate) : xyz(M.pivotOf(m))));
+    if (m.kind === 'site' || m.kind === 'volume')
+      g.append(row('rotate', transformFields(m, 'Rotate', 'degrees', M.rotateOf, ctx.guides.setRotate, { onlyY: m.kind === 'volume' })));
     out.push(g);
     const k = group('shape');
     if (m.kind === 'site') k.append(row('radius (m)', numberField(m.radius, (v) => ctx.guides.setSize(id, 'radius', v), 'pscale in inputs/markers.json')));
-    if (m.kind === 'volume') {
-      const { lo, hi } = M.boxOf(m);
-      k.append(row('height (m)', numberField(m.height, (v) => ctx.guides.setSize(id, 'height', v), 'how far the box rises above its lower corner')), row('size', fmtSize([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]])));
-    }
+    if (m.kind === 'volume')
+      k.append(row('size (m)', transformFields(m, 'Size', 'm', M.volumeSize, ctx.guides.setVolumeSize, { positive: true })));
     if (m.kind === 'path') k.append(row('length', `${fmtLen(M.pathLength(m.points))} m`));
     if (m.kind === 'zone') k.append(row('area', `${fmtNum(M.topArea(m.points), 1)} m² from above`));
     if (m.kind !== 'site') {
@@ -235,9 +243,11 @@ export function createProps(ctx) {
     const ids = ctx.selection.items;
     const lead = ctx.selection.lead;
     const key = JSON.stringify([ids, ctx.version()]);
+    const selection = JSON.stringify(ids);
     if (!force && key === shownKey) return;
-    if (applyingTranslate || (body.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName))) { dirty = true; return; }
-    shownKey = key; dirty = false;
+    if (applyingTransform || (body.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName))
+      || (selection === shownSelection && body.querySelector('.xyz input.bad'))) { dirty = true; return; }
+    shownKey = key; shownSelection = selection; dirty = false;
     // one selected: what it is; more: how many, then the lead (the last one added) in full
     const one = (id) => {
       const { obj, piece: p } = parseId(id), e = ctx.objects.get(obj);

@@ -175,8 +175,8 @@ bar also says what the view shows and its size; other messages appear over the v
 places a null, draws a curve or an area and sets a volume's two corners, on your reference layers or the ground. Drag a
 guide to move it and a point (a CV, a null, a volume's corner) to move that point; the move tool (W) puts arrows and
 squares on the selection that move it along one axis or in one plane, and Properties takes a typed position (`+2`
-adds two metres); double-click a curve's line to add
-a CV and a CV to remove it; every change is one undo step. Guides are saved as `inputs/markers.json`, curves and areas
+adds two metres), a null's rotation (the long arm of its cross is its front, and a graph reads it as `orient`) and a
+volume's size and its turn about Y; double-click a curve's line to add a CV and a CV to remove it; every change is one undo step. Guides are saved as `inputs/markers.json`, curves and areas
 as polylines and nulls as points, each with its `name` and `role`, and a graph reads them like any input
 (`{"type": "file", "params": {"path": "inputs/markers.json", "missing": "empty"}}`, which cooks before the first guide
 exists). The scene cooks again after a guide edit, and an agent reads the same file. Try it on the example village:
