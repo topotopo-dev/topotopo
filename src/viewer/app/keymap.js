@@ -59,6 +59,14 @@ export function bindings() {
 }
 const bound = bindings();
 
+/** The first key for an action, with its spelling in the table. */
+export function keyOf(action) {
+  for (const row of ROWS) {
+    for (const [key, boundAction] of Object.entries(row.keys ?? {})) if (boundAction === action) return key;
+  }
+  return '';
+}
+
 /**
  * The key part of a chord for a keyboard event: letters by the character typed (falling back to the physical key on
  * other alphabets), digits and the numpad by the physical key, "?" whatever it takes to type it.

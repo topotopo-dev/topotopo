@@ -169,10 +169,10 @@ what the selection is. Above the controls, and in the status bar, the cook in pr
 so far, then the last cook's time, or the failing node and its message. **Stop** in the status bar ends a cook at the
 next node (long nodes such as erosion stop between their iterations; others finish first, and the line says so); the
 view keeps the last finished result. Changing a value while a cook runs starts over with the newest value. The status
-bar also says what the view shows and its size; other messages appear over the view and clear themselves. **edge
-check** in the top bar draws open, non-manifold and flipped edges as the render tool does.
-**Guides** lay a scene out by hand where sliders are not enough: the **guides** tools in the top bar (or Shift+1–4)
-place nulls, draw curves and areas and drag volumes, on your reference layers or the ground. In select mode, drag a
+bar also says what the view shows and its size; other messages appear over the view and clear themselves.
+**Edge check** in the viewport's shading menu draws open, non-manifold and flipped edges as the render tool does.
+**Guides** lay a scene out by hand where sliders are not enough: the **+** button in the viewport (or Shift+1–4)
+places nulls, draws curves and areas and drags volumes, on your reference layers or the ground. In select mode, drag a
 guide to move it and a point (a CV, a null, a volume's corner) to move that point; double-click a curve's line to add
 a CV and a CV to remove it; every change is one undo step. Guides are saved as `inputs/markers.json`, curves and areas
 as polylines and nulls as points, each with its `name` and `role`, and a graph reads them like any input

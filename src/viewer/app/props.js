@@ -164,7 +164,7 @@ export function createProps(ctx) {
     }
     if (o.report?.cooked) g.append(row('cook', `${fmtNum(o.report.ms, 0)} ms${o.report.ok ? '' : ' · failed'}`));
     const ec = o.mesh?.edgeCounts();
-    if (ec) g.append(row('edges', `${fmtCount(ec.open)} open · ${fmtCount(ec.nonManifold)} non-manifold · ${fmtCount(ec.flipped)} flipped`, 'the edge check in the top bar draws them: pink open, yellow non-manifold, violet winding flips'));
+    if (ec) g.append(row('edges', `${fmtCount(ec.open)} open · ${fmtCount(ec.nonManifold)} non-manifold · ${fmtCount(ec.flipped)} flipped`, 'the edge check in the viewport\'s shading menu draws them: pink open, yellow non-manifold, violet winding flips'));
     // the whole summary, folded: the line above says what it is
     if (o.summary) { const f = el('details', 'fold'); f.append(el('summary', '', 'Geometry details'), summaryBlock(o.summary)); g.append(f); }
     else g.append(el('div', 'hint', o.error ?? '…'));

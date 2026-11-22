@@ -3,7 +3,7 @@
 // cooking, saving and placing never frame (the one exception is the very first view, when nothing is remembered).
 import * as THREE from 'three';
 import { api, coalesce } from './api.js';
-import { createViews, CAMERA_NAMES, SHADINGS, viewName } from './camera.js';
+import { createViews } from './camera.js';
 import { createGrid, createOverlays, cursorText } from './grid.js';
 import { MeshObject, parseGLB, createLights, LINE_MATERIALS, recede } from './scene.js';
 import { createLayers } from './layers.js';
@@ -15,8 +15,10 @@ import { createOutputPanel } from './outputs.js';
 import { createPackagesPanel } from './packages.js';
 import { createSelection, parseId } from './selection.js';
 import { createUndo } from './undo.js';
-import { EDITOR_NAMES } from './markers.js';
 import * as KM from './keymap.js';
+import { TOP_BUTTONS, TOOL_BUTTONS, VIEW_BUTTONS, buttonTitle, createItems, cameraItems, shadingItems } from './toolbar.js';
+import { icon } from './icons.js';
+import { openMenu } from './menu.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
 import { DISCONNECTED_LINE, RECONNECTED_LINE, messageLife } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
@@ -371,7 +373,7 @@ function frameAll() {
 }
 
 // ------------------------------------------------------------------------------------------- drawing
-const overlays = createOverlays($('views'), (slot, axis) => { setActive(slot); views.lookAlong(slot, axis); saveViews(); syncTop(); ctx.requestRender(); });
+const overlays = createOverlays($('views'), (slot, axis) => { setActive(slot); views.lookAlong(slot, axis); saveViews(); ctx.requestRender(); });
 const cursor = { slot: -1, x: 0, y: 0 };
 let queued = false, overlayQueued = false, lastSize = '', inDraw = false;
 ctx.requestRender = () => { if (!queued && !inDraw) { queued = true; requestAnimationFrame(draw); } };
@@ -414,6 +416,7 @@ function drawViews() {
 
 /** Readouts, the gizmo, labels and the pivot cross of every view (DOM, no WebGL). */
 function drawOverlays() {
+  const viewportWidth = viewport.clientWidth;
   const selBox = ctx.selection.size ? ctx.select.selectionBounds() : null;
   const selSize = selBox && !selBox.isEmpty() ? fmtSize(selBox.getSize(new THREE.Vector3()).toArray()) : '';
   const pivot = selBox && !selBox.isEmpty() ? selBox.getCenter(new THREE.Vector3()) : null;
@@ -429,7 +432,7 @@ function drawOverlays() {
       const p = cam.name === 'persp' ? ctx.select.planePoint(i, cursor.x, cursor.y, 0) : ctx.surfacePlane(i, cursor.x, cursor.y);
       cur = cursorText(cam, p, steps[i]);
     }
-    ov.update({ rect: s.rect, visible, quad: views.quad, active: i === views.active, cam, camera, step: steps[i], cursor: cur, selSize });
+    ov.update({ rect: s.rect, viewportWidth, visible, quad: views.quad, active: i === views.active, cam, camera, step: steps[i], cursor: cur, selSize });
     // labels of hovered / selected guides
     const seen = new Set();
     for (const l of labels) {
@@ -455,7 +458,7 @@ function drawOverlays() {
     ov.marks.innerHTML = q ? `<g stroke="#f0a030" stroke-width="1.5"><line x1="${q.x - s.rect.x - 6}" y1="${q.y - s.rect.y}" x2="${q.x - s.rect.x + 6}" y2="${q.y - s.rect.y}"/><line x1="${q.x - s.rect.x}" y1="${q.y - s.rect.y - 6}" x2="${q.x - s.rect.x}" y2="${q.y - s.rect.y + 6}"/></g>` : '';
   }
   const st = $('step');
-  const t = `grid ${fmtStep(steps[views.active])}`;
+  const t = fmtStep(steps[views.active]);
   if (st.textContent !== t) st.textContent = t;
 }
 /** The cursor on an axis view's construction plane. */
@@ -466,39 +469,70 @@ ctx.surfacePlane = (i, x, y) => {
 };
 new ResizeObserver(() => ctx.requestRender()).observe(viewport);
 
-// ------------------------------------------------------------------------------------------- top bar
-$('view-cam').replaceChildren(...CAMERA_NAMES.map((n) => new Option(viewName(n), n)));
-$('view-cam').onchange = (e) => { views.setCam(views.active, e.target.value); saveViews(); e.target.blur(); syncTop(); ctx.requestRender(); };
-$('view-shading').replaceChildren(...SHADINGS.map(([v, t]) => new Option(t, v)));
-$('view-shading').onchange = (e) => { views.slots[views.active].shading = e.target.value; saveViews(); e.target.blur(); ctx.requestRender(); };
-$('quad').onclick = () => { toggleQuad(); $('quad').blur(); };
-// the edge check: an overlay, off until the person turns it on (remembered in this browser)
+// ------------------------------------------------------------------------------------------- top bar and viewport strips
+// The shading menu's edge overlay is off by default and remembered in this browser.
 MeshObject.edgeCheck = browser.get('edgeCheck', false);
-const syncEdgeCheck = () => { $('edge-check').classList.toggle('on', MeshObject.edgeCheck); $('edge-check').setAttribute('aria-pressed', String(MeshObject.edgeCheck)); };
-$('edge-check').onclick = () => {
-  $('edge-check').blur();
-  MeshObject.edgeCheck = !MeshObject.edgeCheck; browser.set('edgeCheck', MeshObject.edgeCheck); syncEdgeCheck();
+function toggleEdgeCheck() {
+  MeshObject.edgeCheck = !MeshObject.edgeCheck;
+  browser.set('edgeCheck', MeshObject.edgeCheck);
   for (const e of ctx.objects.values()) if (e.mesh) e.mesh.mode = null;
   ctx.emit('output'); ctx.requestRender();
-};
-syncEdgeCheck();
-$('help').onclick = () => { KM.toggleOverlay(document.body); $('help').blur(); };
-function syncTop() {
-  const s = views.slots[views.active];
-  $('view-cam').value = s.cam;
-  $('view-shading').value = s.shading;
-  $('quad').classList.toggle('on', views.quad);
-  $('quad').textContent = views.quad ? 'single' : 'quad';
-  const mode = ctx.guides.mode;
-  $('mode').textContent = mode ? `placing ${EDITOR_NAMES[mode]}` : '';
-  for (const b of $('guide-tools').querySelectorAll('button')) b.classList.toggle('on', (PLACE_KINDS[b.dataset.tool] ?? null) === mode);
 }
-for (const b of $('guide-tools').querySelectorAll('button')) b.addEventListener('click', () => {
-  // the tools work on the guides, which the scene shows (a result shown alone hides them)
-  if (b.dataset.tool === 'selectMode' && ctx.outputs?.active) ctx.outputs.scene();
-  run(b.dataset.tool); b.blur();
-});
-function setActive(i) { if (i >= 0 && views.active !== i) { views.active = i; syncTop(); requestOverlays(); } }
+function setViewCamera(name) {
+  views.setCam(views.active, name); saveViews(); ctx.requestRender();
+}
+const menuItems = {
+  create: createItems,
+  camera: () => cameraItems({ cam: views.slots[views.active].cam, ortho: views.cam(views.active).ortho }),
+  shading: () => shadingItems({ shading: views.slots[views.active].shading, edgeCheck: MeshObject.edgeCheck }),
+};
+for (const [host, buttons] of [[null, TOP_BUTTONS], [$('tool-strip'), TOOL_BUTTONS], [$('view-strip'), VIEW_BUTTONS]]) {
+  for (const button of buttons) {
+    const el = host ? document.createElement(button.readout ? 'span' : 'button') : $(button.id);
+    if (host) {
+      el.id = button.id;
+      el.className = button.readout ? 'readout' : 'tbtn';
+      host.append(el);
+    }
+    el.title = buttonTitle(button);
+    if (button.readout) continue;
+    el.type = 'button';
+    el.innerHTML = icon(button.icon);
+    el.setAttribute('aria-label', el.title);
+    if (button.menu) {
+      el.setAttribute('aria-haspopup', 'menu');
+      el.setAttribute('aria-expanded', 'false');
+      el.onclick = () => openMenu(el, menuItems[button.menu](), {
+        place: button.menu === 'create' ? 'beside' : 'below',
+        onPick(item) {
+          if (item.cam) setViewCamera(item.cam);
+          else if (item.toggle === 'edgeCheck') toggleEdgeCheck();
+          else run(item.action);
+        },
+      });
+    } else {
+      el.onclick = () => {
+        if (button.action === 'selectMode' && ctx.outputs?.active) ctx.outputs.scene();
+        run(button.action); el.blur();
+      };
+    }
+  }
+}
+function syncUndo() {
+  $('undo').disabled = !ctx.undo.canUndo;
+  $('redo').disabled = !ctx.undo.canRedo;
+}
+ctx.undo.onChange(syncUndo);
+syncUndo();
+
+function syncTop() {
+  for (const [id, pressed] of [['tool-select', !ctx.guides.mode], ['tool-add', !!ctx.guides.mode], ['quad', views.quad]]) {
+    const el = $(id);
+    el.classList.toggle('on', pressed);
+    el.setAttribute('aria-pressed', String(pressed));
+  }
+}
+function setActive(i) { if (i >= 0 && views.active !== i) { views.active = i; requestOverlays(); } }
 function toggleQuad(at = cursor.slot) {
   if (views.quad && at >= 0) views.active = at;
   views.quad = !views.quad;
@@ -540,15 +574,15 @@ const typing = (t) => t instanceof HTMLInputElement || t instanceof HTMLSelectEl
 const selectedOf = (kind) => ctx.selection.items.filter((id) => ctx.objects.get(parseId(id).obj)?.kind === kind && parseId(id).piece === null);
 const hiddenByH = { layers: new Set() };
 function run(action) {
-  if (document.querySelector('dialog[open]') || document.getElementById('image-view')?.hidden === false) return;
+  if (document.querySelector('dialog[open]')) return;
   const slot = views.slots[views.active];
   switch (action) {
     case 'frameSelection': return frameSelection();
     case 'frameAll': return frameAll();
     case 'quad': return toggleQuad();
     case 'viewPersp': case 'viewTop': case 'viewFront': case 'viewRight':
-      views.setCam(views.active, action.slice(4).toLowerCase()); saveViews(); syncTop(); return ctx.requestRender();
-    case 'ortho': views.toggleOrtho(views.active); saveViews(); syncTop(); return ctx.requestRender();
+      return setViewCamera(action.slice(4).toLowerCase());
+    case 'ortho': views.toggleOrtho(views.active); saveViews(); return ctx.requestRender();
     case 'selectMode': ctx.guides.setMode(null); return syncTop();
     case 'displayWire': case 'displayShaded': case 'displayShadedWire':
       slot.shading = { displayWire: 'wire', displayShaded: 'shaded', displayShadedWire: 'shadedWire' }[action]; break;
@@ -578,7 +612,7 @@ function run(action) {
       const n = ctx.guides.remove(ids), c = cvs.size ? ctx.guides.removeCVs(cvs) : { removed: 0, kept: 0 };
       const done = [n ? `deleted ${n} guide${n === 1 ? '' : 's'}` : '', c.removed ? `removed ${c.removed} CV${c.removed === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
       const kept = c.kept ? `${c.kept} CV${c.kept === 1 ? '' : 's'} kept: a curve needs 2, an area 3` : '';
-      if (done) ctx.message(`${done}${kept ? ` · ${kept}` : ''} · ${undoKeys()} brings ${n + c.removed === 1 ? 'it' : 'them'} back`, '', 2000);
+      if (done) ctx.message(`${done}${kept ? ` · ${kept}` : ''} · ${KM.keyOf('undo')} brings ${n + c.removed === 1 ? 'it' : 'them'} back`, '', 2000);
       else if (kept) ctx.message(kept, '', 2000);
       else if (ctx.selection.size) ctx.message('Delete removes guides and CVs; the output and reference layers are files and stay (hide them with H)');
       return;
@@ -603,9 +637,8 @@ function run(action) {
     case 'overlay': return KM.toggleOverlay(document.body);
     default: return;
   }
-  saveViews(); syncTop(); ctx.requestRender();
+  saveViews(); ctx.requestRender();
 }
-const undoKeys = () => KM.overlayRows().find((r) => r.label.startsWith('undo'))?.text.split(' / ')[0] ?? 'undo';
 
 // Space switches views on a quick release without an intervening key or pointer press.
 let spaceTap = null;
@@ -623,14 +656,14 @@ addEventListener('keydown', (e) => {
   const action = KM.matchKey(e);
   if (!action) return;
   e.preventDefault();
-  run(action);
+  if ($('image-view')?.hidden !== false) run(action);
 });
 addEventListener('keyup', (e) => {
   if (document.querySelector('dialog[open]')) { spaceTap = null; return; }
   if (e.code === 'Space' || e.key === ' ') {
     const tap = spaceTap !== null && performance.now() - spaceTap < 400;
     spaceTap = null;
-    if (tap && !typing(e.target)) { const a = KM.matchKey({ key: ' ', code: 'Space' }); if (a) run(a); }
+    if (tap && !typing(e.target) && $('image-view')?.hidden !== false) { const a = KM.matchKey({ key: ' ', code: 'Space' }); if (a) run(a); }
     return;
   }
   if (e.key === 'Alt') e.preventDefault();
@@ -806,7 +839,7 @@ ctx.previewOutput = async (item, bytes, update) => {
   }
   firstFrame = false; ctx.emit('output'); ctx.requestRender(); syncTop();
 };
-ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); ctx.requestRender(); };
+ctx.restoreScene = () => { previewSerial++; ctx.previewEmpty = false; if (sceneView) views.load(sceneView); else firstFrame = true; if (sceneGraph) { ctx.graph.name = sceneGraph.name; ctx.graph.node = sceneGraph.node; $('graph').value = ctx.graph.name; ctx.graph.renderControls(); } loadGeo(); syncTop(); ctx.requestRender(); };
 ctx.frameOutput = frameAll;
 /** Show a node of a graph (the Packages tab's "used by"): that graph, the node's result, the Scene tab. */
 ctx.showNode = (graph, node) => {

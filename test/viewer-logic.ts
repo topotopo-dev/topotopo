@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import '../src/nodes/index.ts';
 import { markersFromGeometry, markersGeometry, MARKER_KINDS as SERVER_KINDS } from '../src/viewer/server.ts';
 import * as km from '../src/viewer/app/keymap.js';
+import * as tb from '../src/viewer/app/toolbar.js';
+import { ICONS, icon } from '../src/viewer/app/icons.js';
 import * as mk from '../src/viewer/app/markers.js';
 import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
@@ -113,6 +115,51 @@ section('keys and mouse (section 9)');
     'chords have one spelling and unknown modifiers including Space are refused');
   check(['PRESETS', 'DEFAULT_PRESET', 'surfacePivot', 'spaceIsModifier'].every((name) => !(name in km)),
     'the keymap exports one table and its binding helpers');
+}
+
+section('toolbars and menus (section 2)');
+{
+  const buttons = [...tb.TOP_BUTTONS, ...tb.TOOL_BUTTONS, ...tb.VIEW_BUTTONS];
+  const create = tb.createItems();
+  const camera = tb.cameraItems({ cam: 'front', ortho: true });
+  const shading = tb.shadingItems({ shading: 'shadedWire', edgeCheck: false });
+  check(buttons.every((b) => !b.icon || Object.hasOwn(ICONS, b.icon)) && create.every((i) => Object.hasOwn(ICONS, i.icon)),
+    'the buttons and Create items use known icons');
+  check(icon('move').startsWith('<svg') && icon('move').includes('viewBox="0 0 24 24"') && !!throws(() => icon('nope')),
+    'icon renders an SVG and rejects unknown names');
+  check([...buttons, ...create, ...camera, ...shading].every((i) => !('action' in i) || i.action === undefined || km.ACTIONS.includes(i.action)),
+    'every toolbar and menu action is known to the keymap');
+  check(new Set(buttons.map((b) => b.id)).size === buttons.length, 'toolbar button ids are unique');
+
+  const keys = [['frameSelection', 'F'], ['placeNull', 'Shift+1'], ['undo', 'Ctrl+Z'], ['quad', 'Space'], ['overlay', '?'], ['tumble', ''], ['nope', '']];
+  check(keys.every(([action, key]) => km.keyOf(action) === key), 'keyOf returns the first chord or an empty string');
+  const titles = [
+    ['view-frame', 'Frame (F)'], ['undo', 'Undo (Ctrl+Z)'], ['quad', 'Single / quad view (Space)'],
+    ['tool-select', 'Select (Q)'], ['help', 'Keys and mouse (?)'], ['view-camera', 'Camera'], ['step', 'Grid step of the current view'],
+  ];
+  check(titles.every(([id, title]) => tb.buttonTitle(buttons.find((b) => b.id === id)!) === title),
+    'the toolbar titles include the key for actions with shortcuts');
+
+  check(create.length === 4 && create.map((i) => i.key).join() === 'Shift+1,Shift+2,Shift+3,Shift+4',
+    'Create lists the four guide shortcuts in order');
+  const checkedCameras = camera.filter((i) => i.radio && i.checked);
+  check(camera.length === 9 && camera[7].separator && checkedCameras.length === 1 && checkedCameras[0].cam === 'front',
+    'the Camera menu checks only the current camera in its radio group');
+  check(camera.slice(0, 4).map((i) => i.key).join() === '1,2,3,4' && camera.slice(4, 7).every((i) => i.key === ''),
+    'only the first four cameras have shortcuts');
+  check(camera[8].label === 'Orthographic' && camera[8].key === 'O' && camera[8].check && camera[8].checked
+    && !tb.cameraItems({ cam: 'persp', ortho: false })[8].checked,
+    'the Orthographic check follows the camera and shows its shortcut');
+  check(shading.length === 5 && shading[3].separator && shading[2].radio && shading[2].checked
+    && shading.filter((i) => i.radio && i.checked).length === 1 && shading[4].label === 'Edge check' && shading[4].check && !shading[4].checked,
+    'the Shading menu checks Shaded + wire and shows Edge check turned off');
+
+  const moves = [
+    [-1, 'ArrowDown', 0], [-1, 'ArrowUp', 8], [6, 'ArrowDown', 8], [8, 'ArrowUp', 6], [8, 'ArrowDown', 0],
+    [0, 'ArrowUp', 8], [4, 'Home', 0], [4, 'End', 8], [4, 'F', 4],
+  ] as const;
+  check(moves.every(([index, key, next]) => tb.menuStep(camera, index, key) === next),
+    'menu focus skips separators, wraps, and handles Home and End');
 }
 
 section('guides: dragging, adding and removing points');

@@ -172,12 +172,14 @@ export function createOverlays(host, onAxis) {
     return {
       box, name, info, marks, labels, giz, ends,
       /** Place and fill for this frame. */
-      update({ rect, visible, quad, active, cam, camera, step, cursor, selSize }) {
+      update({ rect, viewportWidth, visible, quad, active, cam, camera, step, cursor, selSize }) {
         box.hidden = !visible;
         if (!visible) return;
         Object.assign(box.style, { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` });
         box.classList.toggle('quad', quad);
         box.classList.toggle('active', active);
+        box.classList.toggle('by-tools', rect.x === 0 && rect.y === 0);
+        box.classList.toggle('by-view', rect.x + rect.w === viewportWidth && rect.y === 0);
         const label = viewLabel(cam);
         if (name.dataset.t !== label) { name.dataset.t = label; name.textContent = label; }
         const lines = [`grid ${fmtStep(step)}`];
