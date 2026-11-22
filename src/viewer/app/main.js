@@ -28,7 +28,7 @@ const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
 
 // ------------------------------------------------------------------------------------------- storage
-// per-viewer conveniences: the keymap and panel sizes per browser, cameras and shown layers per viewer address
+// per-viewer conveniences: panel sizes per browser, cameras and shown layers per viewer address
 const store = (prefix) => ({
   get(k, def) { try { const v = localStorage.getItem(prefix + k); return v === null ? def : JSON.parse(v); } catch { return def; } },
   set(k, v) { try { localStorage.setItem(prefix + k, JSON.stringify(v)); } catch { /* storage blocked */ } },
@@ -467,11 +467,6 @@ ctx.surfacePlane = (i, x, y) => {
 new ResizeObserver(() => ctx.requestRender()).observe(viewport);
 
 // ------------------------------------------------------------------------------------------- top bar
-let preset = browser.get('keymap', KM.DEFAULT_PRESET);
-if (!KM.PRESETS.some((p) => p.id === preset)) preset = KM.DEFAULT_PRESET;
-$('preset').replaceChildren(...KM.PRESETS.map((p) => new Option(p.label, p.id)));
-$('preset').value = preset;
-$('preset').onchange = (e) => { preset = e.target.value; browser.set('keymap', preset); e.target.blur(); ctx.message(`keymap: ${KM.PRESETS.find((p) => p.id === preset).label} (? shows it)`); };
 $('view-cam').replaceChildren(...CAMERA_NAMES.map((n) => new Option(viewName(n), n)));
 $('view-cam').onchange = (e) => { views.setCam(views.active, e.target.value); saveViews(); e.target.blur(); syncTop(); ctx.requestRender(); };
 $('view-shading').replaceChildren(...SHADINGS.map(([v, t]) => new Option(t, v)));
@@ -487,7 +482,7 @@ $('edge-check').onclick = () => {
   ctx.emit('output'); ctx.requestRender();
 };
 syncEdgeCheck();
-$('help').onclick = () => { KM.toggleOverlay(document.body, preset); $('help').blur(); };
+$('help').onclick = () => { KM.toggleOverlay(document.body); $('help').blur(); };
 function syncTop() {
   const s = views.slots[views.active];
   $('view-cam').value = s.cam;
@@ -544,7 +539,6 @@ for (const g of document.querySelectorAll('.grip')) {
 const typing = (t) => t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || !!t?.isContentEditable || !!t?.closest?.('button, summary, [role="button"], [role="menu"]');
 const selectedOf = (kind) => ctx.selection.items.filter((id) => ctx.objects.get(parseId(id).obj)?.kind === kind && parseId(id).piece === null);
 const hiddenByH = { layers: new Set() };
-const DISPLAY_CYCLE = ['shaded', 'wire', 'shadedWire'];
 function run(action) {
   if (document.querySelector('dialog[open]') || document.getElementById('image-view')?.hidden === false) return;
   const slot = views.slots[views.active];
@@ -558,15 +552,13 @@ function run(action) {
     case 'selectMode': ctx.guides.setMode(null); return syncTop();
     case 'displayWire': case 'displayShaded': case 'displayShadedWire':
       slot.shading = { displayWire: 'wire', displayShaded: 'shaded', displayShadedWire: 'shadedWire' }[action]; break;
-    case 'displayCycle': slot.shading = DISPLAY_CYCLE[(DISPLAY_CYCLE.indexOf(slot.shading) + 1) % 3]; break;
-    case 'wireToggle': slot.lastShading = slot.shading === 'wire' ? slot.lastShading : slot.shading; slot.shading = slot.shading === 'wire' ? slot.lastShading ?? 'shaded' : 'wire'; break;
     case 'placeNull': case 'placeCurve': case 'placeArea': case 'placeVolume':
       // guides are drawn in the scene, not over a result shown alone
       if (ctx.outputs?.active) ctx.outputs.scene();
       ctx.guides.setMode(PLACE_KINDS[action]); return syncTop();
     case 'finish': case 'removeLast': ctx.guides.key(action); return;
     case 'cancel': {
-      if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body, preset);
+      if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body);
       // Esc during a drag ends it where it began; during a press that is still a click, it clears as ever
       const d = drag, release = () => { try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } };
       if (d?.kind === 'box') { drag = null; ctx.select.cancel(); release(); return; }
@@ -608,71 +600,76 @@ function run(action) {
       ctx.guides.showAll();
       return;
     }
-    case 'overlay': return KM.toggleOverlay(document.body, preset);
+    case 'overlay': return KM.toggleOverlay(document.body);
     default: return;
   }
   saveViews(); syncTop(); ctx.requestRender();
 }
-const undoKeys = () => KM.overlayRows(preset).find((r) => r.label.startsWith('undo'))?.text.split(' / ')[0] ?? 'undo';
+const undoKeys = () => KM.overlayRows().find((r) => r.label.startsWith('undo'))?.text.split(' / ')[0] ?? 'undo';
 
-// keys; Space is a tap (Maya) or a held modifier (Houdini)
-const space = { down: false, tap: false, t: 0 };
+// Space switches views on a quick release without an intervening key or pointer press.
+let spaceTap = null;
 addEventListener('keydown', (e) => {
+  const isSpace = e.code === 'Space' || e.key === ' ';
+  if (!isSpace) spaceTap = null;
   if (document.querySelector('dialog[open]')) return;
   if (typing(e.target)) return;
-  if (e.code === 'Space' || e.key === ' ') {
+  if (isSpace) {
     e.preventDefault();
-    if (!e.repeat && !space.down) { space.down = true; space.tap = true; space.t = performance.now(); }
+    if (!e.repeat) spaceTap = performance.now();
     return;
   }
-  if (space.down) space.tap = false;
   if (e.key === 'Alt') { e.preventDefault(); return; }
-  const action = KM.matchKey(preset, e, space.down && KM.spaceIsModifier(preset));
+  const action = KM.matchKey(e);
   if (!action) return;
   e.preventDefault();
   run(action);
 });
 addEventListener('keyup', (e) => {
-  if (document.querySelector('dialog[open]')) { space.down = false; return; }
+  if (document.querySelector('dialog[open]')) { spaceTap = null; return; }
   if (e.code === 'Space' || e.key === ' ') {
-    const tap = space.down && space.tap && performance.now() - space.t < 400;
-    space.down = false;
-    if (tap && !typing(e.target)) { const a = KM.matchKey(preset, { key: ' ', code: 'Space' }); if (a) run(a); }
+    const tap = spaceTap !== null && performance.now() - spaceTap < 400;
+    spaceTap = null;
+    if (tap && !typing(e.target)) { const a = KM.matchKey({ key: ' ', code: 'Space' }); if (a) run(a); }
     return;
   }
   if (e.key === 'Alt') e.preventDefault();
 });
-addEventListener('blur', () => { space.down = false; });
+addEventListener('blur', () => { spaceTap = null; });
+addEventListener('pointerdown', () => { spaceTap = null; }, true);
 
-// the mouse in the viewport: a preset's navigation chords first (keymap.js), then the left button by the selection
-// model (pointer.js): what is under the press and the modifier held decide what a click and a drag do
+// Navigation chords take priority in the viewport. The left button follows the placement or selection model.
 let drag = null;
 const at = (e) => { const r = viewport.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-/** A camera drag from (x, y) in a slot (tumble, track or dolly) with the preset's pivot rule (section 3). */
+/** Pick the surface pivot at the start of a camera drag. Orthographic orbits pan. */
 function navDrag(nav, slot, x, y, id) {
-  const surface = KM.surfacePivot(preset);
-  let pivot = null;
-  if (surface) pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
-  else { const sel = ctx.select.selectionBounds(); if (!sel.isEmpty()) pivot = sel.getCenter(new THREE.Vector3()); }
+  const pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
   viewport.classList.add('nav');
   // no hover while the camera moves: it is picked again where the drag ends
   ctx.select.hover(-1);
-  return { kind: 'nav', nav: surface && nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id, pivot, surface };
+  return { kind: 'nav', nav: nav === 'tumble' && views.cam(slot).ortho ? 'track' : nav, slot, x, y, id, pivot };
 }
 canvas.addEventListener('pointerdown', (e) => {
   layoutViews();
   const { x, y } = at(e), slot = views.slotAt(x, y);
   if (slot < 0 || drag) return;
-  setActive(slot);
-  space.tap = false;
-  // the keys go to the viewport again (preventDefault below keeps the browser from moving the focus itself)
-  if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
-  const nav = KM.matchDrag(preset, { button: e.button, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, space: space.down && KM.spaceIsModifier(preset) });
+  const nav = KM.matchDrag(e);
   try { canvas.setPointerCapture(e.pointerId); } catch { /* a pointer the browser does not track */ }
   e.preventDefault();
+  // a right press that does not travel is a click and leaves the view alone: navigation starts once it is a drag
+  if (e.button === 2) {
+    if (nav) drag = { kind: 'navPress', nav, slot, x, y, id: e.pointerId };
+    return;
+  }
+  setActive(slot);
+  if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
   if (nav) { drag = navDrag(nav, slot, x, y, e.pointerId); return; }
   if (e.button !== 0) return;
-  if (ctx.guides.mode) { drag = { kind: 'place', slot, id: e.pointerId }; ctx.guides.pointerDown(slot, x, y); return; }
+  if (ctx.guides.mode) {
+    drag = { kind: 'place', slot, x, y, id: e.pointerId, plan: PT.placePlan(ctx.guides.mode) };
+    ctx.guides.pointerDown(slot, x, y);
+    return;
+  }
   // nothing happens until the release (a click) or a few pixels of travel (a drag): pointermove decides which
   const hit = ctx.select.pick(slot, x, y);
   const plan = PT.pressPlan({ target: hit?.kind ?? 'empty', shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, movable: !!hit?.handle });
@@ -681,7 +678,12 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   const { x, y } = at(e);
   if (drag && e.pointerId === drag.id) {
-    if (drag.kind === 'press') {
+    if (drag.kind === 'navPress') {
+      if (!PT.isDrag(x - drag.x, y - drag.y)) return;
+      setActive(drag.slot);
+      if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
+      drag = navDrag(drag.nav, drag.slot, drag.x, drag.y, drag.id);
+    } else if (drag.kind === 'press') {
       // a press that travels becomes its plan's drag, from where it began
       if (!PT.isDrag(x - drag.x, y - drag.y)) return;
       const { slot, x: x0, y: y0, id, hit, plan } = drag;
@@ -692,12 +694,15 @@ canvas.addEventListener('pointermove', (e) => {
         ctx.guides.dragStart(slot, x0, y0, hit.handle);
       } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); }
       else drag = navDrag('tumble', slot, x0, y0, id);
+    } else if (drag.kind === 'place' && drag.plan.drag === 'tumble' && PT.isDrag(x - drag.x, y - drag.y)) {
+      ctx.guides.pressCancel();
+      drag = navDrag('tumble', drag.slot, drag.x, drag.y, drag.id);
     }
     if (drag.kind === 'nav') {
       const dx = x - drag.x, dy = y - drag.y;
       drag.x = x; drag.y = y;
       if (drag.nav === 'tumble') views.tumble(drag.slot, dx, dy, drag.pivot);
-      else if (drag.nav === 'track') views.track(drag.slot, dx, dy, drag.surface ? views.cam(drag.slot).pivot : undefined);
+      else if (drag.nav === 'track') views.track(drag.slot, dx, dy, views.cam(drag.slot).pivot);
       // right or up zooms in, left or down out
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
@@ -753,10 +758,8 @@ canvas.addEventListener('wheel', (e) => {
   if (slot < 0) return;
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
   const factor = Math.exp(Math.max(-1, Math.min(1, dy * 0.0015)));
-  if (KM.surfacePivot(preset)) {
-    const hit = ctx.select.navigationPoint(slot, x, y); if (hit) views.anchor(slot, hit);
-    views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
-  } else views.dolly(slot, factor, views.targetPlanePoint(slot, x, y));
+  const hit = ctx.select.navigationPoint(slot, x, y); if (hit) views.anchor(slot, hit);
+  views.zoomAt(slot, factor, hit ?? views.targetPlanePoint(slot, x, y, views.cam(slot).pivot));
   clearTimeout(canvas.wheelTimer); canvas.wheelTimer = setTimeout(saveViews, 300);
   ctx.select.hover(slot, x, y);
   ctx.requestRender();

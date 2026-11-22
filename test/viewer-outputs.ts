@@ -398,8 +398,8 @@ check(front.name === 'front' && frontOrtho === 'front (+Z)' && frontPersp === 'f
 check(CAMERA_NAMES.map(viewName).join(', ') === 'persp, top (+Y), front (+Z), right (+X), bottom (−Y), back (−Z), left (−X)', `the view menu: ${CAMERA_NAMES.map(viewName).join(', ')}`);
 const reload = createViews(() => ({ center: new THREE.Vector3(), radius: 1 })); reload.load(v.toJSON());
 check(reload.cam(1).pivot.distanceTo(c.pivot) === 0, 'camera pivot survives stored view reload');
-check(km.matchDrag('topotopo', { button: 2 }) === 'tumble' && km.matchDrag('topotopo', { button: 1 }) === 'track' && km.matchDrag('topotopo', { button: 0 }) === null, 'TopoTopo mouse binds preserve selection');
-check(km.matchKey('topotopo', { key: '4', code: 'Digit4' }) === 'viewRight', 'TopoTopo views need no modifiers');
+check(km.matchDrag({ button: 2 }) === 'track' && km.matchDrag({ button: 1 }) === 'track' && km.matchDrag({ button: 0 }) === null, 'middle and right pan, left leaves selection to the viewport');
+check(km.matchKey({ key: '4', code: 'Digit4' }) === 'viewRight', 'views need no modifiers');
 check(channelPixels(Uint8ClampedArray.from([10, 20, 30, 40]), 'A').join() === '40,40,40,255', 'image alpha mode');
 const z = zoomImage({ x: 20, y: 30, scale: 1 }, 70, 90, 2); check(z.x === -30 && z.y === -30 && z.scale === 2, '2D zoom preserves cursor pixel');
 // The CLI keeps receipts in exports/ beside the graph only for files it writes there.

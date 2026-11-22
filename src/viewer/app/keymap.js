@@ -1,100 +1,46 @@
-// The keymap: one table of actions, four presets (Houdini, the default;
-// TopoTopo, Maya, Blender). Each row carries the text the overlay prints per preset and the built actions' bindings:
-// chord → action. Transform and snapping rows (phase 2) ship their text but no bindings, so a preset never changes
-// shape later. The left button without a navigation chord is the selection model's in every preset (pointer.js:
-// click selects, a drag moves what you edit or tumbles); its rows are the same text everywhere. Plain data and
-// functions: the overlay is the only DOM code, and it runs only when called.
+// The keymap's table of actions supplies both the bindings and the overlay text.
 import { SELECTION_ROWS } from './pointer.js';
 
-export const PRESETS = [
-  { id: 'houdini', label: 'Houdini' },
-  { id: 'topotopo', label: 'TopoTopo' },
-  { id: 'maya', label: 'Maya' },
-  { id: 'blender', label: 'Blender' },
-];
-export const DEFAULT_PRESET = 'houdini';
-/**
- * The presets whose camera turns about the surface under the cursor (design/viewer.md section 3): the pivot is picked
- * on press and held for the drag, a miss keeps the last one, wheel zoom anchors to the hit, and tumble pans in
- * orthographic views. The others orbit the selection.
- */
-export const surfacePivot = (presetId) => presetId === 'topotopo' || presetId === 'houdini';
-
-const place = { 'Shift+1': 'placeNull', 'Shift+2': 'placeCurve', 'Shift+3': 'placeArea', 'Shift+4': 'placeVolume' };
-const curve = { Enter: 'finish', Backspace: 'removeLast', Esc: 'cancel' };
-
-/**
- * The rows of section 9 in order. `keys` binds key chords, `drag` mouse drags (L / M / R with modifiers); a row
- * without bindings for a preset is not built yet (phase 2) or has none in that application.
- */
+/** In overlay order. `keys` binds key chords and `drag` binds mouse drags (L / M / R with modifiers). */
 export const ROWS = [
-  // Houdini: L drag tumbles through the selection model (on a result or empty space); Space + L tumbles over anything
-  { label: 'tumble', maya: ['Alt + L drag', { drag: { 'Alt+L': 'tumble' } }], houdini: ['L drag, Space + L drag', { drag: { 'Space+L': 'tumble' } }], blender: ['M drag', { drag: { M: 'tumble' } }] },
-  { label: 'track', maya: ['Alt + M drag', { drag: { 'Alt+M': 'track' } }], houdini: ['M drag, Space + M drag', { drag: { M: 'track', 'Space+M': 'track' } }], blender: ['Shift + M drag', { drag: { 'Shift+M': 'track' } }] },
-  { label: 'dolly', maya: ['Alt + R drag, wheel', { drag: { 'Alt+R': 'dolly' } }], houdini: ['R drag (up or right zooms in), wheel, Space + R drag', { drag: { R: 'dolly', 'Space+R': 'dolly' } }], blender: ['Ctrl + M drag, wheel', { drag: { 'Ctrl+M': 'dolly' } }] },
-  { label: 'frame selection', maya: ['F', { keys: { F: 'frameSelection' } }], houdini: ['Space+G', { keys: { 'Space+G': 'frameSelection' } }], blender: ['Numpad .', { keys: { 'Numpad.': 'frameSelection' } }] },
-  { label: 'frame all', maya: ['A', { keys: { A: 'frameAll' } }], houdini: ['Space+H', { keys: { 'Space+H': 'frameAll' } }], blender: ['Home', { keys: { Home: 'frameAll' } }] },
-  { label: 'single / quad view', maya: ['Space (tap)', { keys: { Space: 'quad' } }], houdini: ['Space+B', { keys: { 'Space+B': 'quad' } }], blender: ['Ctrl+Alt+Q', { keys: { 'Ctrl+Alt+Q': 'quad' } }] },
-  { label: 'perspective', maya: ['Alt+1', { keys: { 'Alt+1': 'viewPersp' } }], houdini: ['Space+1', { keys: { 'Space+1': 'viewPersp' } }], blender: ['Numpad 5 (toggles with ortho)', { keys: { Numpad5: 'ortho' } }] },
+  { label: 'orbit', text: 'Left drag on a result or empty space · Alt + left drag', drag: { 'Alt+L': 'tumble' } },
+  { label: 'pan', text: 'Middle drag · right drag · Alt + middle drag', drag: { M: 'track', R: 'track', 'Alt+M': 'track' } },
+  { label: 'zoom', text: 'Wheel, toward the cursor · Alt + right drag', drag: { 'Alt+R': 'dolly' } },
+  { label: 'frame the selection (everything when nothing is selected)', text: 'F', keys: { F: 'frameSelection' } },
+  { label: 'frame everything', text: 'A', keys: { A: 'frameAll' } },
+  { label: 'single / quad view', text: 'Space', keys: { Space: 'quad' } },
+  { label: 'perspective / top / front / right', text: '1 / 2 / 3 / 4', keys: { 1: 'viewPersp', 2: 'viewTop', 3: 'viewFront', 4: 'viewRight' } },
+  { label: 'orthographic on / off', text: 'O', keys: { O: 'ortho' } },
+  { label: 'wire / shaded / shaded + wire', text: '5 / 6 / 7', keys: { 5: 'displayWire', 6: 'displayShaded', 7: 'displayShadedWire' } },
+  { label: 'select tool (leaves placing)', text: 'Q', keys: { Q: 'selectMode' } },
   {
-    label: 'top / front / right',
-    maya: ['Alt+2 / Alt+3 / Alt+4', { keys: { 'Alt+2': 'viewTop', 'Alt+3': 'viewFront', 'Alt+4': 'viewRight' } }],
-    houdini: ['Space+2 / Space+3 / Space+4', { keys: { 'Space+2': 'viewTop', 'Space+3': 'viewFront', 'Space+4': 'viewRight' } }],
-    blender: ['Numpad 7 / 1 / 3', { keys: { Numpad7: 'viewTop', Numpad1: 'viewFront', Numpad3: 'viewRight' } }],
+    label: 'make a null / curve / area / volume', text: 'Shift+1 / 2 / 3 / 4',
+    keys: { 'Shift+1': 'placeNull', 'Shift+2': 'placeCurve', 'Shift+3': 'placeArea', 'Shift+4': 'placeVolume' },
   },
-  { label: 'orthographic toggle', maya: ['O', { keys: { O: 'ortho' } }], houdini: ['O', { keys: { O: 'ortho' } }], blender: ['Numpad 5', { keys: { Numpad5: 'ortho' } }] },
-  { label: 'select mode', maya: ['Q', { keys: { Q: 'selectMode' } }], houdini: ['S', { keys: { S: 'selectMode' } }], blender: ['W', { keys: { W: 'selectMode' } }] },
-  { label: 'move / rotate / scale', phase: 2, maya: ['W / E / R'], houdini: ['T / R / E'], blender: ['G / R / S'] },
-  { label: 'snap to grid (held)', phase: 2, maya: ['X'], houdini: ['X'], blender: ['Ctrl (held, with the snap target set to grid)'] },
-  { label: 'snap to surface or curve (held)', phase: 2, maya: ['C'], houdini: ['C'], blender: ['Ctrl (target: surface)'] },
-  { label: 'snap to point (held)', phase: 2, maya: ['V'], houdini: ['V'], blender: ['Ctrl (target: point)'] },
-  { label: 'snapping on / off', phase: 2, maya: ['toolbar'], houdini: ['toolbar'], blender: ['Shift+Tab'] },
+  { label: 'finish / remove the last point / cancel, while placing', text: 'Enter / Backspace / Esc', keys: { Enter: 'finish', Backspace: 'removeLast', Esc: 'cancel' } },
+  ...SELECTION_ROWS.map(([label, text]) => ({ label, text })),
+  { label: 'add a CV to a curve or an area / remove one', text: 'double-click its line / the CV' },
+  { label: 'delete the selection', text: 'Delete', keys: { Delete: 'delete' } },
   {
-    label: 'wire / shaded / shaded + wire',
-    maya: ['4 / 5 / 6', { keys: { 4: 'displayWire', 5: 'displayShaded', 6: 'displayShadedWire' } }],
-    houdini: ['W (cycles)', { keys: { W: 'displayCycle' } }],
-    blender: ['Shift+Z (wire toggle), Z (cycles)', { keys: { 'Shift+Z': 'wireToggle', Z: 'displayCycle' } }],
+    label: 'undo / redo (guides and vars)', text: 'Ctrl+Z / Ctrl+Y, Ctrl+Shift+Z',
+    keys: { 'Ctrl+Z': 'undo', 'Ctrl+Y': 'redo', 'Ctrl+Shift+Z': 'redo' },
   },
-  { label: 'place a null / curve / area / volume', maya: ['Shift+1 / 2 / 3 / 4', { keys: place }], houdini: ['Shift+1 / 2 / 3 / 4', { keys: place }], blender: ['Shift+1 / 2 / 3 / 4', { keys: place }] },
-  { label: 'finish a curve / remove its last point / cancel', maya: ['Enter / Backspace / Esc', { keys: curve }], houdini: ['Enter / Backspace / Esc', { keys: curve }], blender: ['Enter / Backspace / Esc', { keys: curve }] },
-  // the selection model (pointer.js), the same in every preset: main.js handles the left button, no chords to bind
-  ...SELECTION_ROWS.map(([label, text]) => ({ label, model: true, maya: [text], houdini: [text], blender: [text] })),
-  { label: 'add a CV to a curve or area / remove one', maya: ['double-click its line / the CV'], houdini: ['double-click its line / the CV'], blender: ['double-click its line / the CV'] },
-  { label: 'delete the selection', maya: ['Delete', { keys: { Delete: 'delete' } }], houdini: ['Delete', { keys: { Delete: 'delete' } }], blender: ['X, Delete', { keys: { X: 'delete', Delete: 'delete' } }] },
-  {
-    label: 'undo / redo (guides and vars)',
-    maya: ['Ctrl+Z / Ctrl+Y (also Z / Shift+Z)', { keys: { 'Ctrl+Z': 'undo', 'Ctrl+Y': 'redo', Z: 'undo', 'Shift+Z': 'redo' } }],
-    houdini: ['Ctrl+Z / Ctrl+Y', { keys: { 'Ctrl+Z': 'undo', 'Ctrl+Y': 'redo' } }],
-    blender: ['Ctrl+Z / Ctrl+Shift+Z', { keys: { 'Ctrl+Z': 'undo', 'Ctrl+Shift+Z': 'redo' } }],
-  },
-  { label: 'hide the selection / show all', maya: ['H / Shift+H', { keys: { H: 'hide', 'Shift+H': 'showAll' } }], houdini: ['H / Shift+H', { keys: { H: 'hide', 'Shift+H': 'showAll' } }], blender: ['H / Alt+H', { keys: { H: 'hide', 'Alt+H': 'showAll' } }] },
-  { label: 'keymap overlay', maya: ['?', { keys: { '?': 'overlay' } }], houdini: ['?', { keys: { '?': 'overlay' } }], blender: ['?', { keys: { '?': 'overlay' } }] },
+  { label: 'hide the selection / show all', text: 'H / Shift+H', keys: { H: 'hide', 'Shift+H': 'showAll' } },
+  { label: 'keys and mouse', text: '?', keys: { '?': 'overlay' } },
 ];
-
-// Editing shortcuts follow Maya; navigation is available without held modifiers.
-const topo = {
-  tumble: ['Right drag (pan in orthographic)', { drag: { R: 'tumble' } }],
-  track: ['Middle drag', { drag: { M: 'track' } }],
-  dolly: ['Wheel toward cursor'],
-  perspective: ['1', { keys: { 1: 'viewPersp' } }],
-  'top / front / right': ['2 / 3 / 4', { keys: { 2: 'viewTop', 3: 'viewFront', 4: 'viewRight' } }],
-  'wire / shaded / shaded + wire': ['5 / 6 / 7', { keys: { 5: 'displayWire', 6: 'displayShaded', 7: 'displayShadedWire' } }],
-};
-for (const row of ROWS) row.topotopo = topo[row.label] ?? row.maya;
 
 /** Every action a binding may name (main.js handles each). */
 export const ACTIONS = [
   'tumble', 'track', 'dolly', 'frameSelection', 'frameAll', 'quad', 'viewPersp', 'viewTop', 'viewFront', 'viewRight', 'ortho',
-  'selectMode', 'displayWire', 'displayShaded', 'displayShadedWire', 'displayCycle', 'wireToggle',
+  'selectMode', 'displayWire', 'displayShaded', 'displayShadedWire',
   'placeNull', 'placeCurve', 'placeArea', 'placeVolume', 'finish', 'removeLast', 'cancel',
   'delete', 'undo', 'redo', 'hide', 'showAll', 'overlay',
 ];
 
-const MODS = ['Ctrl', 'Alt', 'Shift', 'Space'];
-/** A chord written as in ROWS ("ctrl+alt+q", "Space+G") in one spelling: modifiers in MODS order, then the key. */
+const MODS = ['Ctrl', 'Alt', 'Shift'];
+/** A chord in one spelling: modifiers in MODS order, then the key. */
 export function canonical(chord) {
   const parts = String(chord).split('+').map((s) => s.trim()).filter(Boolean);
-  // "Space" alone is the key (a tap); before another part it is the held modifier
   const key = parts.pop() ?? '';
   const mods = new Set(parts.map((p) => MODS.find((m) => m.toLowerCase() === p.toLowerCase()) ?? p));
   for (const m of mods) if (!MODS.includes(m)) throw new Error(`unknown modifier "${m}" in "${chord}"`);
@@ -102,19 +48,16 @@ export function canonical(chord) {
   return [...MODS.filter((m) => mods.has(m)), k].join('+');
 }
 
-/** The bindings of one preset: chord → action for keys and for drags. */
-export function bindings(presetId) {
+/** The table's bindings: chord → action for keys and for drags. */
+export function bindings() {
   const keys = new Map(), drag = new Map();
   for (const row of ROWS) {
-    const b = row[presetId]?.[1];
-    if (!b) continue;
-    for (const [c, a] of Object.entries(b.keys ?? {})) keys.set(canonical(c), a);
-    for (const [c, a] of Object.entries(b.drag ?? {})) drag.set(canonical(c), a);
+    for (const [c, a] of Object.entries(row.keys ?? {})) keys.set(canonical(c), a);
+    for (const [c, a] of Object.entries(row.drag ?? {})) drag.set(canonical(c), a);
   }
   return { keys, drag };
 }
-const cache = new Map();
-const bound = (presetId) => { if (!cache.has(presetId)) cache.set(presetId, bindings(presetId)); return cache.get(presetId); };
+const bound = bindings();
 
 /**
  * The key part of a chord for a keyboard event: letters by the character typed (falling back to the physical key on
@@ -140,8 +83,8 @@ export function keyToken(e) {
   return null;
 }
 
-/** The canonical chord of a keyboard event; `space` is true while Space is held (Houdini's modifier). */
-export function chordOf(e, space = false) {
+/** The canonical chord of a keyboard event. */
+export function chordOf(e) {
   const k = keyToken(e);
   if (!k) return null;
   const mods = [];
@@ -149,38 +92,32 @@ export function chordOf(e, space = false) {
   if (e.altKey) mods.push('Alt');
   // typing "?" takes Shift on most layouts: the chord is "?" alone
   if (e.shiftKey && k !== '?') mods.push('Shift');
-  if (space && k !== 'Space') mods.push('Space');
   return [...mods, k].join('+');
 }
 
-/** The action a key press means in a preset, or null. */
-export function matchKey(presetId, e, space = false) {
-  const c = chordOf(e, space);
-  return c ? bound(presetId).keys.get(c) ?? null : null;
+/** The action a key press means, or null. */
+export function matchKey(e) {
+  return bound.keys.get(chordOf(e)) ?? null;
 }
 
-/** The navigation a mouse drag starts in a preset (tumble, track, dolly), or null. `button` 0 / 1 / 2 = L / M / R. */
-export function matchDrag(presetId, { button, altKey = false, ctrlKey = false, metaKey = false, shiftKey = false, space = false }) {
+/** The navigation a mouse drag starts (tumble, track, dolly), or null. `button` 0 / 1 / 2 = L / M / R. */
+export function matchDrag({ button, altKey = false, ctrlKey = false, metaKey = false, shiftKey = false }) {
   const b = ['L', 'M', 'R'][button];
   if (!b) return null;
   const mods = [];
   if (ctrlKey || metaKey) mods.push('Ctrl');
   if (altKey) mods.push('Alt');
   if (shiftKey) mods.push('Shift');
-  if (space) mods.push('Space');
-  return bound(presetId).drag.get([...mods, b].join('+')) ?? null;
+  return bound.drag.get([...mods, b].join('+')) ?? null;
 }
 
-/** True when Space acts as a held modifier in the preset (Houdini) rather than as a key of its own. */
-export const spaceIsModifier = (presetId) => [...bound(presetId).keys.keys(), ...bound(presetId).drag.keys()].some((c) => c.startsWith('Space+') || c.includes('+Space+'));
-
-/** The overlay's table for a preset: [action label, binding text, built] per row of section 9. */
-export function overlayRows(presetId) {
-  return ROWS.map((r) => ({ label: r.label, text: r[presetId]?.[0] ?? '', built: !r.phase }));
+/** The overlay's table: a label and its binding text for every row. */
+export function overlayRows() {
+  return ROWS.map(({ label, text }) => ({ label, text }));
 }
 
-/** Show (or hide, when shown) the keymap overlay for a preset over `host`. Returns the overlay element or null. */
-export function toggleOverlay(host, presetId) {
+/** Toggle the keys and mouse overlay over `host`. Returns the overlay element or null. */
+export function toggleOverlay(host) {
   const old = host.querySelector('.keymap-overlay');
   if (old) { old.remove(); return null; }
   const doc = host.ownerDocument;
@@ -190,10 +127,9 @@ export function toggleOverlay(host, presetId) {
   panel.className = 'km-panel';
   const head = doc.createElement('div');
   head.className = 'km-head';
-  head.textContent = `Keymap — ${PRESETS.find((p) => p.id === presetId)?.label ?? presetId}`;
+  head.textContent = 'Keys and mouse';
   const table = doc.createElement('table');
-  // the actions the viewer has (the table holds the later ones too, so a preset never changes shape)
-  for (const r of overlayRows(presetId).filter((x) => x.built)) {
+  for (const r of overlayRows()) {
     const tr = doc.createElement('tr');
     const a = doc.createElement('td'), b = doc.createElement('td');
     a.textContent = r.label;

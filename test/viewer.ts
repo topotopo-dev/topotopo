@@ -88,6 +88,7 @@ section('topotopo view: exposed vars, POST /api/vars, inputs');
       const shell = await page.text();
       check(page.status === 200 && /text\/html/.test(page.headers.get('content-type') ?? '') && /<script type="module" src="\/app\/main\.js">/.test(shell) && /href="\/app\/style\.css"/.test(shell),
         'GET / serves the shell, which loads /app/main.js and /app/style.css');
+      check(!shell.includes('id="preset"'), 'the viewer shell has no keymap menu');
       const appFiles = fs.readdirSync(path.join(root, 'src', 'viewer', 'app'));
       const served = await Promise.all(appFiles.map(async (f) => { const r = await fetch(`${url}/app/${f}`); return { f, status: r.status, type: r.headers.get('content-type') ?? '', len: (await r.arrayBuffer()).byteLength }; }));
       const wrong = served.filter((x) => x.status !== 200 || !x.len || !(x.f.endsWith('.js') ? /^text\/javascript/ : x.f.endsWith('.css') ? /^text\/css/ : /./).test(x.type));

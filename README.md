@@ -196,11 +196,11 @@ person changed (while they still fit the new ranges and options), their control 
 Each refresh records the values it took from the generator in `meta.generated_vars`, so a value nobody touched follows
 the generator. It prints what it kept, reset and dropped.
 
-The default **Houdini** keymap tumbles with a left drag around the surface beneath the cursor, pans with a middle
-drag and zooms with a right drag or the wheel, toward the cursor. A click selects only what you edit (guides, their
-CVs, inputs) and a drag on one moves it at once; cooked results never select on a plain click: hover names them and
-Shift-click selects one to read its output, node, counts and material. Shift-drag box-selects guides and CVs, Ctrl
-takes out, Esc clears. The same selection rules hold in the TopoTopo, Maya and Blender presets; saved choices stay.
+A left drag on a result or on empty space orbits around the surface beneath the cursor, a middle or a right drag
+pans and the wheel zooms toward the cursor; Alt with the left, middle or right button orbits, pans and zooms over
+anything. A click selects only what you edit (guides, their CVs, inputs) and a drag on one moves it at once; cooked
+results never select on a plain click: hover names them and Shift-click selects one to read its output, node, counts
+and material. Shift-drag box-selects guides and CVs, Ctrl takes out, Esc clears. `?` lists every key.
 
 **Threads.** Heavy per-element work (noise displacement, attribute noise, occlusion rays, point wrangles) runs in
 chunks on a pool of worker threads, and independent graph branches cook concurrently. The output is the same bit for

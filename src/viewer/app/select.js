@@ -59,7 +59,7 @@ export function createSelect(ctx) {
     const p = rc.ray.intersectPlane(planeOf(slot), new THREE.Vector3());
     return p ? { point: p, surface: false } : null;
   };
-  /** Navigation hits actual visible surfaces, never the infinite construction plane or selection bounds. */
+  /** The visible surface under the cursor for the camera's navigation pivot and wheel zoom. */
   S.navigationPoint = (slot, x, y) => {
     const rc = ctx.views.ray(slot, x, y);
     let best = null;
