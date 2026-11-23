@@ -4,6 +4,7 @@
 // `stack` calls it), hung the process when the error was read after the guarded call had returned. runUserCode reads
 // whatever is thrown inside the same limit and hands back plain strings.
 import type { Host } from '../host/types.ts';
+import { CHANNEL_FUNCTIONS, REALM_CONTROL } from './snippet-lib.ts';
 
 /** What user code threw, read as strings. */
 export interface Thrown {
@@ -112,18 +113,25 @@ export const JS_GLOBALS: ReadonlySet<string> = new Set([
 // an identifier not preceded by ".", "@" (wrangle attributes), "#" (private names) or a backslash
 const CODE_NAME = /(?<![\w$.@#\\])[A-Za-z_$][\w$]*/g;
 const BINDABLE = /^[A-Za-z_$][\w$]*$/;
+const CHANNEL_NAME = new RegExp(`(?<![\\w$])(?:${CHANNEL_FUNCTIONS.join('|')})(?![\\w$])`, 'g');
+const CHANNEL_LITERAL = /^\s*\(\s*(['"`])([A-Za-z_$][\w$]*)\1\s*\)/;
+const bindable = (n: string) => BINDABLE.test(n) && !RESERVED_WORDS.has(n) && n !== 'vars' && !n.startsWith('__');
 
 /**
- * The graph vars `code` reads by their bare name: the names of `vars` that appear in it as identifiers (anywhere, also
- * in strings and comments: a superset of what it can read), sorted. Names no binding can carry (keywords, `vars`,
- * names starting with "__") are left out: code cannot read them.
+ * The graph vars `code` can read, sorted. Identifiers are scanned even in strings and comments, so a literal
+ * channel name counts the same as a bare name. A computed channel name or an indirect call can read any var.
  */
 export function codeVarNames(code: string, vars: Record<string, any> | undefined): string[] {
   if (!vars || typeof code !== 'string' || !code) return [];
+  for (const m of code.matchAll(CHANNEL_NAME)) {
+    const literal = CHANNEL_LITERAL.exec(code.slice(m.index + m[0].length));
+    // A missing name also depends on the available vars, which the channel error lists.
+    if (!literal || !Object.hasOwn(vars, literal[2])) return Object.keys(vars).filter(bindable).sort();
+  }
   const out = new Set<string>();
   for (const m of code.matchAll(CODE_NAME)) {
     const n = m[0];
-    if (Object.hasOwn(vars, n) && BINDABLE.test(n) && !RESERVED_WORDS.has(n) && n !== 'vars' && !n.startsWith('__')) out.add(n);
+    if (Object.hasOwn(vars, n) && bindable(n)) out.add(n);
   }
   return [...out].sort();
 }
@@ -148,7 +156,7 @@ export function deepFreeze<T>(v: T): T {
  * code does reaches the graph's own values or the next node).
  */
 export function codeVarValues(vars: Record<string, any>, names: string[]): Record<string, any> {
-  const out: Record<string, any> = {};
+  const out: Record<string, any> = { __names: Object.freeze(Object.keys(vars).sort()) };
   for (const n of names) {
     try { out[n] = deepFreeze(structuredClone(vars[n])); } catch (e: any) { throw new Error(`var "${n}" cannot be read by code: ${e?.message ?? e}`); }
   }
@@ -156,9 +164,9 @@ export function codeVarValues(vars: Record<string, any>, names: string[]): Recor
 }
 
 /**
- * The declarations that bind the vars `names` from the object `values` and `vars` to the guard `guard` (source text
- * for the function around the code): `const vars = __varsGuard, height = __vars["height"];`.
+ * Source text for the scope around the code. Bind the selected graph vars and their channel helpers, and give
+ * the old `vars` object its guard.
  */
 export function codeVarDecl(names: string[], values = '__vars', guard = '__varsGuard'): string {
-  return `const vars = ${guard}${names.map((n) => `, ${n} = ${values}[${JSON.stringify(n)}]`).join('')};`;
+  return `const vars = ${guard}, { ${CHANNEL_FUNCTIONS.join(', ')} } = ${REALM_CONTROL}.channels(${values})${names.map((n) => `, ${n} = ${values}[${JSON.stringify(n)}]`).join('')};`;
 }

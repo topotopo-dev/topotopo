@@ -263,8 +263,9 @@ export function coerce(name: string, pd: ParamDef, v: any, note?: (msg: string, 
       if (typeof v === 'object') throw bad('a string');
       return String(v);
     case 'code':
-      if (Array.isArray(v)) return v.join('\n'); // allow code as array of lines
+      if (Array.isArray(v)) v = v.join('\n'); // allow code as array of lines
       if (typeof v !== 'string') throw bad('a code string');
+      if (v.trimStart().startsWith('=')) throw new ParamError(`param "${name}" is code, not an "=" expression: drop the leading "=" (code reads graph vars by bare name, e.g. lift, or with ch("lift") in a wrangle)`);
       return v;
     case 'enum': {
       // options are strings or numbers; the value is the option itself, so numeric options give numbers

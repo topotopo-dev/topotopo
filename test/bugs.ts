@@ -672,5 +672,22 @@ for (const name of ['fill', 'offset_curve', 'boolean2d']) {
   check(pr.ok && pr.geo!.numPoints === 81, `ray node keeps all 81 points above a grid's vertices, seams and border (${pr.geo?.numPoints})`, errs(pr));
 }
 
+// ------------------------------------------------------------------ code params do not take a leading equals sign
+
+{
+  const nodes: Record<string, NodeSpec> = {
+    box: { type: 'box' },
+    terrain: { type: 'heightfield', params: { samples: [2, 2] } },
+    w: { type: 'wrangle', in: ['box'], params: { code: '=@P.y += 1;' } },
+    a: { type: 'assert', in: ['box'], params: { expr: '=nprims > 0' } },
+    h: { type: 'heightfield_layer', in: ['terrain'], params: { operation: 'expression', expression: '=height + 1' } },
+  };
+  for (const [output, param] of [['w', 'code'], ['a', 'expr'], ['h', 'expression']]) {
+    const r = await engine.cook({ nodes, output });
+    check(!r.ok && r.errors.some((e) => e.node === output && e.message.includes(`param "${param}" is code, not an "=" expression: drop the leading "="`) && e.message.includes('ch("lift")')),
+      `${nodes[output].type}: a leading equals sign in ${param} says to drop it`, errs(r));
+  }
+}
+
 console.log(`bugs: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -83,7 +83,7 @@
     "pipes_named": { "type": "attrib_create", "in": ["pipe_runs"], "params": { "name": "name", "class": "prim", "value": "pipe" } },
     "pipes_copper": { "type": "material", "in": ["pipes_named"], "params": { "name": "copper", "base_color": [0.93, 0.6, 0.47], "metallic": 1, "roughness": 0.28 } },
     "pipes_tidy": { "type": "attrib_delete", "in": ["pipes_copper"], "params": { "names": "turn bend", "groups": "*" } },
-    "pipes_closed": { "type": "assert", "in": ["pipes_tidy"], "note": "Workaround for F-126: assert watertight fails on empty geometry (\"no polygons\"), so with pipes 0 this checks closed through expr instead; use watertight once an empty mesh passes it.", "params": { "label": "closed", "no_flipped": true, "expr": "pipes == 0 ? nprims == 0 : closed && open_pieces == 0 && pieces == pipes" } },
+    "pipes_closed": { "type": "assert", "in": ["pipes_tidy"], "params": { "label": "closed", "watertight": true, "no_flipped": true, "expr": "pipes == 0 ? nprims == 0 : pieces == pipes" } },
 
     "look": { "type": "merge", "in": ["railing", "pipes_closed"] }
   },

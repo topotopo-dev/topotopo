@@ -16,6 +16,7 @@ import type { AttribClass, AttribType } from './geometry.ts';
 import { primCentroid, primNormals, pointNeighbors, pointPrims } from './topology.ts';
 import { primIntrinsic } from './intrinsics.ts';
 import { KDTree, TriBVH } from './spatial.ts';
+import { newNearest, SurfaceQuery } from './analysis.ts';
 import { GEOMETRY_FUNCTIONS, REALM_CONTROL, scriptVarsGuard } from './snippet-lib.ts';
 import type { TypedArray } from './kernels.ts';
 import type { Host } from '../host/types.ts';
@@ -492,6 +493,8 @@ export class WrangleAPI {
   logs: string[];
   private kd = new Map<number, KDTree>();
   private bvh = new Map<number, TriBVH>();
+  private surfaces = new Map<number, SurfaceQuery>();
+  private nearest = newNearest();
   private nbr = new Map<number, ReturnType<typeof pointNeighbors>>();
   private pp = new Map<number, ReturnType<typeof pointPrims>>();
   newPts: number[][] = [];
@@ -559,8 +562,12 @@ export class WrangleAPI {
     return maxd === Infinity ? this.kdOf(i).knn(pos[0], pos[1], pos[2], Math.min(maxn, this.geo(i).numPoints)) : this.kdOf(i).within(pos[0], pos[1], pos[2], maxd, maxn);
   }
   closest(i: number, pos: number[]) {
-    const r = this.bvhOf(i).closest(pos[0], pos[1], pos[2]);
-    return r ? { dist: r.dist, pos: r.pos, prim: r.prim } : { dist: Infinity, pos: [pos[0], pos[1], pos[2]], prim: -1 };
+    let q = this.surfaces.get(i);
+    if (!q) { q = new SurfaceQuery(this.geo(i)); this.surfaces.set(i, q); }
+    const r = this.nearest;
+    return q.nearest(pos[0], pos[1], pos[2], Infinity, r)
+      ? { dist: r.dist, pos: [r.x, r.y, r.z], prim: r.prim, uv: [r.u, r.v] }
+      : { dist: Infinity, pos: [pos[0], pos[1], pos[2]], prim: -1, uv: [0, 0] };
   }
   intersect(i: number, o: number[], d: number[]) {
     const r = this.bvhOf(i).raycast(o[0], o[1], o[2], d[0], d[1], d[2]);
