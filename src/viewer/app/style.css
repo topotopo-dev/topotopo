@@ -128,6 +128,7 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 .vw svg.gizmo .end { cursor: pointer; }
 .vw svg.gizmo text { font: 600 10px system-ui, sans-serif; fill: #1b1c1f; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
 .vw svg.marks { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.vw .snap-mark { fill: none; stroke: #ffd24a; stroke-width: 2; }
 .vw .lbl { position: absolute; transform: translate(8px, -50%); padding: 0 4px; font: var(--font); color: var(--text); background: rgba(31, 33, 36, 0.78); border-radius: 2px; white-space: nowrap; }
 .vw .lbl.null { transform: translate(10px, -135%); }
 .vw .lbl.sel { color: var(--sel); }

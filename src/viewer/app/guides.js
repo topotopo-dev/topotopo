@@ -16,6 +16,7 @@ import { AXIS_VIEWS } from './camera.js';
 import { parseId, pieceId } from './selection.js';
 import { isDoubleClick, isDrag } from './pointer.js';
 import { transformTargets, transformLabel, moveDelta, moveText, ringFromFace, ringTurn, unwrapTurn, tangentTurn, rotateText, scaleFactor, scaleText } from './transform.js';
+import { gridMove, gridPoint, landMove, snapScale, snapTurn } from './snap.js';
 
 export const guideId = (id) => `guide:${id}`;
 /** Whether a guide's CVs are selected one by one (curves and areas); a null and a volume select whole. */
@@ -350,6 +351,15 @@ export function createGuides(ctx) {
   };
   /** The points that must lie inside a box for a guide to be box-selected. */
   G.points = (m) => (m.kind === 'volume' ? M.boxPoints(m) : m.points).map(V3);
+  G.snapPoints = (exclude = []) => {
+    const out = [];
+    if (ctx.isolated) return out;
+    for (const m of G.list) {
+      if (G.hidden.has(m.id) || exclude.includes(m.id)) continue;
+      for (const point of m.kind === 'volume' ? M.volumeCorners(m) : m.points) out.push({ point });
+    }
+    return out;
+  };
   /**
    * The ids a box takes: a guide wholly inside it whole; of a curve or an area partly inside, the CVs inside it.
    * `inside(points)` tests world points.
@@ -390,7 +400,7 @@ export function createGuides(ctx) {
   };
 
   // ------------------------------------------------------------------ placement modes
-  let note = '', lastPointClick = null;
+  let note = '', lastPointClick = null, placementSlot;
   const HINT = {
     site: () => 'Null: click the ground or the geometry',
     path: (n) => n ? `Curve: ${n} CV${n === 1 ? '' : 's'} · click to add one` : 'Curve: click to add a CV',
@@ -401,17 +411,20 @@ export function createGuides(ctx) {
     },
   };
   G.hintState = () => {
-    const d = G.gizmoDrag;
-    if (d) return { text: d.text, finish: null, removeLast: null, cancel: null, note: '' };
+    const mode = ctx.snap?.mode(), d = G.gizmoDrag ?? (mode ? G.dragging : null);
+    const snapNote = mode ? ctx.snap.text(d ? d.slot : placementSlot) : '';
+    if (d) return { text: d.text, finish: null, removeLast: null, cancel: null, note: snapNote };
     if (!G.mode) return null;
     const n = G.draft?.points?.length ?? 0, hasPoints = hasCVs({ kind: G.mode });
-    return { text: HINT[G.mode](n), finish: hasPoints ? n >= M.minPoints(G.mode) : null, removeLast: hasPoints ? n > 0 : null, note };
+    return { text: HINT[G.mode](n), finish: hasPoints ? n >= M.minPoints(G.mode) : null, removeLast: hasPoints ? n > 0 : null,
+      note: [note, snapNote].filter(Boolean).join(' · ') };
   };
   const hint = (text = '') => { note = text; ctx.emit('hint'); };
   G.setMode = (kind) => {
     G.gizmoEnd(true);
     G.draft = null; G.cursor = null; G.down = null;
-    lastPointClick = null; note = '';
+    lastPointClick = null; note = ''; placementSlot = undefined;
+    ctx.snap?.mark(null, null);
     G.mode = kind;
     G.drawDraft();
     ctx.emit('mode');
@@ -463,18 +476,41 @@ export function createGuides(ctx) {
   /** The scene is still being drawn: the output's cook and GLB in flight, or a shown reference layer loading. */
   const sceneLoading = () => !!ctx.output?.loading || !!ctx.layers?.loading?.();
   /** A left press in a placement mode (x, y in viewport pixels). */
-  G.pointerDown = (_slot, x, y) => { G.down = { x, y }; };
-  G.pressCancel = () => { G.down = null; };
+  G.pointerDown = (slot, x, y) => { G.down = { x, y }; if (ctx.snap?.mode()) G.pointerMove(slot, x, y); };
+  G.pressCancel = () => { G.down = null; ctx.snap?.mark(null, null); };
+  /** Use the same landing point for the rubber band, a placement click and context-menu creation. */
+  G.placementPoint = (slot, x, y, draft) => {
+    const mode = ctx.snap?.mode(), volume = draft?.kind === 'volume';
+    const target = mode === 'point' || (mode === 'surface' && !volume) ? ctx.snap.at(slot, x, y, mode) : null;
+    let hit;
+    if (target) {
+      const [x, y, z] = target.point;
+      hit = { point: new THREE.Vector3(x, volume ? draft.y : y, z), snapped: true };
+    } else if (volume) {
+      const point = ctx.planePoint(slot, x, y, draft.y);
+      if (point) hit = { point: mode === 'grid' ? V3(gridPoint(point.toArray(), ctx.snap.step(slot), 'xz')) : point };
+    } else if (mode === 'grid') {
+      const plane = ctx.surfacePoint(slot, x, y, { planeOnly: true });
+      if (plane) hit = { point: V3(gridPoint(plane.point.toArray(), ctx.snap.step(slot), plane.axes)), snapped: true };
+    } else hit = ctx.surfacePoint(slot, x, y);
+    ctx.snap?.mark(slot, target?.point ?? (mode === 'surface' && hit?.surface ? hit.point.toArray() : null));
+    return hit ?? null;
+  };
   G.pointerMove = (slot, x, y) => {
     if (!G.mode) return;
-    if (G.draft?.kind === 'volume') {
-      const p = ctx.planePoint(slot, x, y, G.draft.y);
-      if (p) { G.draft.b = p; G.drawDraft(); ctx.emit('hint'); }
-    } else if (G.draft?.points?.length) {
-      const hit = ctx.surfacePoint(slot, x, y);
-      G.cursor = hit ? hit.point : null;
+    const d = G.draft, mode = ctx.snap?.mode();
+    const movedView = placementSlot !== slot;
+    placementSlot = slot;
+    if (!d && !mode) return;
+    const hit = G.placementPoint(slot, x, y, d);
+    const volumePreview = d?.kind === 'volume' && hit;
+    if (volumePreview) {
+      d.b = hit.point; G.drawDraft();
+    } else if (d?.points?.length) {
+      G.cursor = hit?.point ?? null;
       G.drawDraft();
     }
+    if (volumePreview || (movedView && mode)) ctx.emit('hint');
   };
   /** A placement click adds a point or finishes the guide. */
   G.pointerUp = (slot, x, y, t = performance.now()) => {
@@ -483,7 +519,7 @@ export function createGuides(ctx) {
     if (!G.mode || !down || isDrag(x - down.x, y - down.y)) return;
     const d = G.draft;
     if (d?.kind === 'volume') {
-      const p = ctx.planePoint(slot, x, y, d.y);
+      const p = G.placementPoint(slot, x, y, d)?.point;
       if (!p) return hint('nothing under the pointer');
       d.b = p;
       if (Math.abs(p.x - d.a.x) < 0.01 || Math.abs(p.z - d.a.z) < 0.01) {
@@ -498,13 +534,13 @@ export function createGuides(ctx) {
     }
     const click = { x, y, t };
     if (isDoubleClick(lastPointClick, click)) return finish();
-    const hit = ctx.surfacePoint(slot, x, y);
+    const hit = G.placementPoint(slot, x, y, d);
     if (!hit) return hint('nothing under the pointer');
-    if (!hit.surface && sceneLoading()) return hint('the scene is still loading: place it once it is drawn');
+    if (!hit.surface && !hit.snapped && sceneLoading()) return hint('the scene is still loading: place it once it is drawn');
     if (G.mode === 'path' || G.mode === 'zone') lastPointClick = click;
     addPoint(hit.point);
   };
-  G.leave = () => { if (G.cursor) { G.cursor = null; G.drawDraft(); } };
+  G.leave = () => { ctx.snap?.mark(null, null); if (G.cursor) { G.cursor = null; G.drawDraft(); } };
 
   // ------------------------------------------------------------------ dragging (select mode)
   // A plain left drag on a guide (pointer.js) moves what is under it: a null's point, a CV of a curve or an area or a volume's
@@ -560,40 +596,62 @@ export function createGuides(ctx) {
   G.dragStart = (slot, x, y, h) => {
     const m = byId(h.id);
     if (!m) return;
-    G.dragging = { slot, x, y, h, start: M.cloneMarkers([m])[0], plane: dragPlane(slot, V3(h.at)), from: null, moved: false, live: null };
+    const what = h.part === 'body' || m.kind === 'site' ? m.name : h.part === 'corner' ? `a corner of ${m.name}` : `CV ${h.k} of ${m.name}`;
+    G.dragging = { slot, x, y, h, start: M.cloneMarkers([m])[0], plane: dragPlane(slot, V3(h.at)), from: null, moved: false, live: null, text: `moving ${what}` };
     G.dragging.from = onPlane(slot, x, y, G.dragging.plane);
+    if (ctx.snap?.mode()) ctx.emit('hint');
   };
   /** The guide under the drag, moved for the pointer at (x, y). */
-  G.dragMove = (slot, x, y) => {
+  G.dragMove = (_slot, x, y) => {
     const d = G.dragging;
     if (!d) return;
     if (!d.moved && Math.hypot(x - d.x, y - d.y) <= 4) return;
     d.moved = true;
-    let next = null;
+    const { slot, plane } = d, mode = ctx.snap?.mode();
+    const target = mode === 'point' || mode === 'surface' ? ctx.snap.at(slot, x, y, mode, [d.h.id]) : null;
+    const axes = plane.normal.x ? 'yz' : plane.normal.y ? 'xz' : 'xy';
+    let next;
     if (d.h.part === 'body') {
-      const p = onPlane(d.slot, x, y, d.plane);
-      if (!p || !d.from) return;
-      next = M.translateMarker(d.start, [p.x - d.from.x, p.y - d.from.y, p.z - d.from.z]);
+      const pivot = M.pivotOf(d.start);
+      let delta;
+      if (target) delta = target.point.map((v, i) => v - pivot[i]);
+      else {
+        const p = onPlane(slot, x, y, plane);
+        if (!p || !d.from) { ctx.snap?.mark(slot, null); return; }
+        delta = p.sub(d.from).toArray();
+        if (mode === 'grid') {
+          const point = gridPoint(pivot.map((v, i) => v + delta[i]), ctx.snap.step(slot), axes);
+          delta = point.map((v, i) => v - pivot[i]);
+        }
+      }
+      next = M.translateMarker(d.start, delta);
     } else {
-      // onto a reference layer under the pointer (an imported terrain or blockout), else in the plane through the
-      // point: never onto the output, which the graph builds from these guides (a CV would climb the house it makes)
-      const hit = ctx.surfacePoint(d.slot, x, y, { layersOnly: true });
-      const p = hit?.surface ? hit.point : onPlane(d.slot, x, y, d.plane);
-      if (!p) return;
-      next = d.h.part === 'corner' ? M.resizeVolume(d.start, d.h.k, [p.x, p.y, p.z]) : M.movePoint(d.start, d.h.k, [p.x, p.y, p.z]);
+      let point = target?.point;
+      if (!point) {
+        const hit = mode === 'grid' ? null : ctx.surfacePoint(slot, x, y, { layersOnly: true });
+        const p = hit?.surface ? hit.point : onPlane(slot, x, y, plane);
+        if (!p) { ctx.snap?.mark(slot, null); return; }
+        point = p.toArray();
+        if (mode === 'grid') point = gridPoint(point, ctx.snap.step(slot), axes);
+      }
+      next = d.h.part === 'corner' ? M.resizeVolume(d.start, d.h.k, point) : M.movePoint(d.start, d.h.k, point);
     }
+    ctx.snap?.mark(slot, next ? target?.point ?? null : null);
     if (!next) return;
     d.live = next;
     const i = G.list.findIndex((o) => o.id === d.h.id);
     if (i >= 0) G.list[i] = next;
     entries(); G.draw(); ctx.emit('guides');
-    const what = d.h.part === 'body' ? next.name : d.h.part === 'corner' ? `a corner of ${next.name}` : next.kind === 'site' ? next.name : `CV ${d.h.k} of ${next.name}`;
-    ctx.message(`moving ${what}`, 'busy');
+    ctx.message(d.text, 'busy');
   };
   /** The release: one undo step and one save for the whole drag; false when nothing moved (the press was a click). */
   G.dragEnd = (cancel = false) => {
     const d = G.dragging;
     G.dragging = null;
+    if (d) {
+      ctx.snap?.mark(d.slot, null);
+      if (ctx.snap?.mode()) ctx.emit('hint');
+    }
     if (!d || !d.moved || !d.live) return false;
     const i = G.list.findIndex((o) => o.id === d.h.id);
     if (i < 0) return true;
@@ -612,11 +670,11 @@ export function createGuides(ctx) {
   G.gizmoTarget = () => ['move', 'rotate', 'scale'].includes(ctx.tool) && !G.mode && !ctx.isolated && !G.dragging
     ? transformTargets(G.list, ctx.selection.items, G.hidden) : null;
   const rayCoords = (ray) => ({ origin: ray.origin.toArray(), direction: ray.direction.toArray() });
-  G.gizmoStart = ({ id, shape, k }, ray, size) => {
+  G.gizmoStart = ({ id, shape, k }, ray, size, slot) => {
     const target = G.gizmoTarget();
     if (!target || G.gizmoDrag) return;
     const tool = ctx.tool;
-    const d = { id, tool, target, shape, size, ray: rayCoords(ray), start: G.list };
+    const d = { id, tool, target, shape, size, slot, ray: rayCoords(ray), start: G.list };
     if (tool === 'move') {
       d.delta = [0, 0, 0];
       d.text = moveText(id, d.delta);
@@ -626,6 +684,7 @@ export function createGuides(ctx) {
         const x = b.x - a.x, y = b.y - a.y, length = Math.hypot(x, y);
         d.tangent = { x: x / length, y: y / length };
       }
+      d.turn = 0;
       d.value = 0;
       d.text = rotateText(id, d.value);
     } else {
@@ -635,12 +694,15 @@ export function createGuides(ctx) {
     G.gizmoDrag = d;
     ctx.emit('hint'); ctx.requestRender();
   };
-  G.gizmoMove = (ray, dx, dy) => {
+  G.gizmoMove = (ray, dx, dy, x, y) => {
     const d = G.gizmoDrag;
     if (!d) return;
-    const { id, target } = d;
+    const { id, target, slot } = d, mode = ctx.snap?.mode();
     if (d.tool === 'move') {
-      const delta = moveDelta(id, d.ray, rayCoords(ray), target.pivot);
+      const hit = mode === 'point' || mode === 'surface' ? ctx.snap.at(slot, x, y, mode, target.ids) : null;
+      ctx.snap?.mark(slot, hit?.point ?? null);
+      let delta = hit ? landMove(id, target.pivot, hit.point) : moveDelta(id, d.ray, rayCoords(ray), target.pivot);
+      if (delta && mode === 'grid') delta = gridMove(id, target.pivot, delta, ctx.snap.step(slot));
       if (!delta || delta.every((v, i) => v === d.delta[i])) return;
       d.delta = delta;
       d.text = moveText(id, delta);
@@ -648,13 +710,15 @@ export function createGuides(ctx) {
     } else if (d.tool === 'rotate') {
       const angle = d.tangent ? tangentTurn(d.tangent, dx, dy, d.size) : ringTurn(id, target.pivot, d.ray, rayCoords(ray));
       if (angle === null) return;
-      const turn = d.tangent ? angle : unwrapTurn(d.value, angle);
+      d.turn = d.tangent ? angle : unwrapTurn(d.turn, angle);
+      const turn = mode === 'grid' ? snapTurn(d.turn) : d.turn;
       if (turn === d.value) return;
       d.value = turn;
       d.text = rotateText(id, turn);
       G.list = turn ? target.rotate(id, turn) : d.start;
     } else {
-      const factor = scaleFactor(d.shape, dx, dy, d.size);
+      const free = scaleFactor(d.shape, dx, dy, d.size);
+      const factor = mode === 'grid' ? snapScale(free) : free;
       if (factor === d.value) return;
       d.value = factor;
       d.text = scaleText(id, factor);
@@ -668,6 +732,7 @@ export function createGuides(ctx) {
     if (!d) return false;
     const live = G.list;
     G.gizmoDrag = null;
+    ctx.snap?.mark(d.slot, null);
     G.list = d.start;
     ctx.emit('hint'); ctx.requestRender();
     if (live === d.start) return false;

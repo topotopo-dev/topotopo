@@ -16,6 +16,7 @@ export const ROWS = [
   { label: 'move tool (handles on the selection)', text: 'W', keys: { W: 'moveMode' } },
   { label: 'rotate tool (rings on the selection)', text: 'E', keys: { E: 'rotateMode' } },
   { label: 'scale tool (handles on the selection)', text: 'R', keys: { R: 'scaleMode' } },
+  { label: 'snap to grid / surface or curve / point, while held', text: 'X / C / V', held: { X: 'grid', C: 'surface', V: 'point' } },
   {
     label: 'make a null / curve / area / volume (also the + button and right click)', text: 'Shift+1 / 2 / 3 / 4',
     keys: { 'Shift+1': 'placeNull', 'Shift+2': 'placeCurve', 'Shift+3': 'placeArea', 'Shift+4': 'placeVolume' },
@@ -61,6 +62,7 @@ export function bindings() {
   return { keys, drag };
 }
 const bound = bindings();
+const held = ROWS.find((row) => row.held).held;
 
 /** The first key for an action, with its spelling in the table. */
 export function keyOf(action) {
@@ -105,6 +107,10 @@ export function chordOf(e) {
   if (e.shiftKey && k !== '?') mods.push('Shift');
   return [...mods, k].join('+');
 }
+
+/** The snap target of a bare key press. */
+export const heldTarget = (e) => held[chordOf(e)] ?? null;
+export const heldKey = (target) => Object.keys(held).find((key) => held[key] === target);
 
 /** The action a key press means, or null. */
 export function matchKey(e) {

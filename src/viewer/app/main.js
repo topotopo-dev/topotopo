@@ -16,7 +16,7 @@ import { createPackagesPanel } from './packages.js';
 import { createSelection, parseId } from './selection.js';
 import { createUndo } from './undo.js';
 import * as KM from './keymap.js';
-import { TOP_BUTTONS, TOOL_BUTTONS, VIEW_BUTTONS, buttonTitle, createItems, contextItems, cameraItems, shadingItems } from './toolbar.js';
+import { TOP_BUTTONS, TOOL_BUTTONS, VIEW_BUTTONS, buttonTitle, createItems, contextItems, cameraItems, shadingItems, snapItems } from './toolbar.js';
 import { icon } from './icons.js';
 import { openMenu } from './menu.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
@@ -27,6 +27,7 @@ import { kindLine, resultName } from './output-info.js';
 import * as PT from './pointer.js';
 import { moveGizmo, hitGizmo, ringPoints, rotateGizmo, hitRing, scaleGizmo, hitScale } from './transform.js';
 import { turnY } from './markers.js';
+import { snapMode, snapText } from './snap.js';
 
 const $ = (id) => document.getElementById(id);
 const BG = new THREE.Color('#2b2d31');
@@ -393,6 +394,20 @@ const requestOverlays = () => { if (!overlayQueued && !queued) { overlayQueued =
 ctx.requestOverlays = requestOverlays;
 const modeOf = (display, shading) => (display === 'view' ? shading : display);
 const steps = [1, 1, 1, 1];
+let snapMark = null;
+ctx.snap = {
+  ...local.get('snap', { on: false, target: 'grid' }),
+  held: null,
+  mode: () => snapMode(ctx.snap),
+  step: (slot = views.active) => steps[slot],
+  text: (slot) => snapText(ctx.snap.mode(), ctx.snap.step(slot)),
+  at: ctx.select.snapAt,
+  mark(slot, point) {
+    if (!point && !snapMark) return;
+    snapMark = point ? { slot, point: new THREE.Vector3(...point) } : null;
+    requestOverlays();
+  },
+};
 
 function draw() {
   queued = false;
@@ -544,7 +559,9 @@ function drawOverlays() {
     if (hover) gizmoHover = hover;
     const marks = shapes.filter((shape) => !activeGizmo || shape.id === activeGizmo)
       .map((shape) => gizmoMark(shape, shape.id === (activeGizmo ?? hover))).join('');
-    ov.marks.innerHTML = cross || marks ? `<g transform="translate(${-s.rect.x} ${-s.rect.y})">${marks}${cross}</g>` : '';
+    const snap = snapMark?.slot === i && views.project(i, snapMark.point, camera);
+    const ring = snap ? `<circle class="snap-mark" cx="${snap.x}" cy="${snap.y}" r="5"/>` : '';
+    ov.marks.innerHTML = cross || marks || ring ? `<g transform="translate(${-s.rect.x} ${-s.rect.y})">${marks}${cross}${ring}</g>` : '';
   }
   if (activeGizmo || gizmoHover) canvas.style.cursor = 'move';
   else if (!drag) {
@@ -579,6 +596,7 @@ const menuItems = {
   create: createItems,
   camera: () => cameraItems({ cam: views.slots[views.active].cam, ortho: views.cam(views.active).ortho }),
   shading: () => shadingItems({ shading: views.slots[views.active].shading, edgeCheck: MeshObject.edgeCheck }),
+  snap: () => snapItems(ctx.snap),
 };
 for (const [host, buttons] of [[null, TOP_BUTTONS], [$('tool-strip'), TOOL_BUTTONS], [$('view-strip'), VIEW_BUTTONS]]) {
   for (const button of buttons) {
@@ -601,7 +619,13 @@ for (const [host, buttons] of [[null, TOP_BUTTONS], [$('tool-strip'), TOOL_BUTTO
         onPick(item) {
           if (item.cam) setViewCamera(item.cam);
           else if (item.toggle === 'edgeCheck') toggleEdgeCheck();
-          else run(item.action);
+          else if (item.toggle === 'snap' || item.snapTarget) {
+            if (item.snapTarget) ctx.snap.target = item.snapTarget;
+            else ctx.snap.on = !ctx.snap.on;
+            const { on, target } = ctx.snap;
+            local.set('snap', { on, target });
+            syncTop(); snapChanged();
+          } else run(item.action);
         },
       });
     } else {
@@ -650,7 +674,7 @@ ctx.on('hint', renderHint);
 
 function syncTop() {
   const tool = ctx.guides.mode ? 'add' : ctx.tool;
-  for (const [id, pressed] of [...TOOL_BUTTONS.map(({ id }) => [id, id === `tool-${tool}`]), ['quad', views.quad]]) {
+  for (const [id, pressed] of [...TOOL_BUTTONS.map(({ id }) => [id, id === `tool-${tool}`]), ['view-snap', ctx.snap.on], ['quad', views.quad]]) {
     const el = $(id);
     el.classList.toggle('on', pressed);
     el.setAttribute('aria-pressed', String(pressed));
@@ -718,6 +742,7 @@ function run(action, point = null) {
       return ctx.guides.startAt(PLACE_KINDS[action], point);
     case 'finish': case 'removeLast': ctx.guides.key(action); return;
     case 'cancel': {
+      ctx.snap.mark(null, null);
       if (document.querySelector('.keymap-overlay')) return KM.toggleOverlay(document.body);
       // Esc during a drag ends it where it began; during a press that is still a click, it clears as ever
       const d = drag, release = () => { try { canvas.releasePointerCapture(d.id); } catch { /* gone */ } };
@@ -769,12 +794,32 @@ function run(action, point = null) {
 
 // Space switches views on a quick release without an intervening key or pointer press.
 let spaceTap = null;
+const openDialog = () => document.querySelector('dialog[open], [role="dialog"]:not([hidden])');
+const snapDialog = new MutationObserver(() => { if (openDialog()) setHeld(null); });
+// Snap keys still down, the last one pressed wins: releasing it hands over to the one still held.
+let heldDown = [];
+function setHeld(target) {
+  if (!target) heldDown = [];
+  if (ctx.snap.held === target) return;
+  ctx.snap.held = target;
+  if (target) snapDialog.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'role', 'hidden'] });
+  else snapDialog.disconnect();
+  snapChanged();
+}
 addEventListener('keydown', (e) => {
   const isSpace = e.code === 'Space' || e.key === ' ';
   if (!isSpace) spaceTap = null;
   if (document.querySelector('dialog[open]')) return;
   const cancellingPlacement = e.key === 'Escape' && ctx.guides.mode;
   if (typing(e.target) && !cancellingPlacement) return;
+  const held = KM.heldTarget(e);
+  if (held) {
+    if (!openDialog()) {
+      e.preventDefault();
+      if (!e.repeat) { heldDown = heldDown.filter((t) => t !== held).concat(held); setHeld(held); }
+    }
+    return;
+  }
   if (isSpace) {
     e.preventDefault();
     if (!e.repeat) spaceTap = performance.now();
@@ -787,6 +832,8 @@ addEventListener('keydown', (e) => {
   if (cancellingPlacement || $('image-view')?.hidden !== false) run(action);
 });
 addEventListener('keyup', (e) => {
+  const up = heldDown.find((t) => KM.keyToken(e) === KM.heldKey(t));
+  if (up) { heldDown = heldDown.filter((t) => t !== up); setHeld(heldDown.at(-1) ?? null); }
   if (document.querySelector('dialog[open]')) { spaceTap = null; return; }
   if (e.code === 'Space' || e.key === ' ') {
     const tap = spaceTap !== null && performance.now() - spaceTap < 400;
@@ -796,7 +843,6 @@ addEventListener('keyup', (e) => {
   }
   if (e.key === 'Alt') e.preventDefault();
 });
-addEventListener('blur', () => { spaceTap = null; });
 addEventListener('pointerdown', () => { spaceTap = null; }, true);
 
 // Navigation chords take priority in the viewport. The left button follows the placement or selection model.
@@ -804,9 +850,21 @@ let drag = null;
 let suppressDoublePress = false, suppressDoubleClick = false;
 const at = (e) => { const r = viewport.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 const trackCursor = (x, y) => { cursor.slot = views.slotAt(x, y); cursor.x = x; cursor.y = y; return cursor.slot; };
+function moveSnapDrag(d, x, y) {
+  if (d.kind === 'guide') ctx.guides.dragMove(d.slot, x, y);
+  else if (d.kind === 'gizmo') ctx.guides.gizmoMove(views.ray(d.slot, x, y).ray, x - d.x, y - d.y, x, y);
+  else if (d.kind === 'place') ctx.guides.pointerMove(d.slot, x, y);
+}
+function snapChanged() {
+  if (drag && ['gizmo', 'guide', 'place'].includes(drag.kind)) moveSnapDrag(drag, cursor.x, cursor.y);
+  else ctx.snap.mark(null, null);
+  ctx.emit('hint');
+  requestOverlays();
+}
 /** Pick the surface pivot at the start of a camera drag. Orthographic orbits pan. */
 function navDrag(nav, slot, x, y, id) {
   const pivot = views.anchor(slot, ctx.select.navigationPoint(slot, x, y));
+  ctx.snap.mark(null, null);
   viewport.classList.add('nav');
   // no hover while the camera moves: it is picked again where the drag ends
   ctx.select.hover(-1);
@@ -816,6 +874,7 @@ canvas.addEventListener('pointerdown', (e) => {
   layoutViews();
   const { x, y } = at(e), slot = views.slotAt(x, y);
   if (slot < 0 || drag) return;
+  trackCursor(x, y);
   const nav = KM.matchDrag(e);
   try { canvas.setPointerCapture(e.pointerId); } catch { /* a pointer the browser does not track */ }
   e.preventDefault();
@@ -865,7 +924,7 @@ canvas.addEventListener('pointermove', (e) => {
         requestOverlays();
       } else if (plan.drag === 'gizmo') {
         drag = { kind: 'gizmo', slot, id, x: x0, y: y0 };
-        if (hit.tool === ctx.tool) ctx.guides.gizmoStart(hit.shape, hit.ray, GIZMO_PX);
+        if (hit.tool === ctx.tool) ctx.guides.gizmoStart(hit.shape, hit.ray, GIZMO_PX, slot);
       } else if (plan.drag === 'box') { drag = { kind: 'box', slot, id }; ctx.select.boxStart(slot, x0, y0, plan.box); requestOverlays(); }
       else drag = navDrag('tumble', slot, x0, y0, id);
     } else if (drag.kind === 'place' && PT.isDrag(x - drag.x, y - drag.y)) {
@@ -880,9 +939,8 @@ canvas.addEventListener('pointermove', (e) => {
       // right or up zooms in, left or down out
       else views.dolly(drag.slot, Math.exp(-(dx - dy) * 0.006));
       ctx.requestRender();
-    } else if (drag.kind === 'guide') ctx.guides.dragMove(drag.slot, x, y);
-    else if (drag.kind === 'gizmo') ctx.guides.gizmoMove(views.ray(drag.slot, x, y).ray, x - drag.x, y - drag.y);
-    else if (drag.kind === 'box') ctx.select.move(x, y);
+    } else if (drag.kind === 'box') ctx.select.move(x, y);
+    else if (drag.kind !== 'place' || ctx.snap.mode()) moveSnapDrag(drag, x, y);
     return;
   }
   layoutViews();
@@ -893,7 +951,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 function showContextMenu({ handle, slot, x, y }, place) {
   setActive(slot);
-  const point = ctx.surfacePoint(slot, x, y)?.point ?? null;
+  const point = ctx.guides.placementPoint(slot, x, y)?.point ?? null;
   const marker = handle && ctx.guides.byId(handle.id);
   let target = 'other';
   if (marker) {
@@ -929,6 +987,7 @@ const endDrag = (e, cancel = false) => {
     const c = PT.clickChange(d.plan.click, d.hit?.id);
     if (c) ctx.selection.apply(c.ids, c.op);
   }
+  ctx.snap.mark(null, null);
   requestOverlays();
 };
 // A placement or a gizmo click does not double-click the guide underneath.
@@ -941,7 +1000,12 @@ canvas.addEventListener('dblclick', (e) => {
 canvas.addEventListener('pointerup', (e) => endDrag(e));
 canvas.addEventListener('pointercancel', (e) => endDrag(e, true));
 canvas.addEventListener('lostpointercapture', (e) => endDrag(e, true));
-addEventListener('blur', () => { if (drag) endDrag({ pointerId: drag.id, clientX: 0, clientY: 0 }, true); });
+addEventListener('blur', () => {
+  spaceTap = null;
+  if (drag) endDrag({ pointerId: drag.id, clientX: 0, clientY: 0 }, true);
+  setHeld(null);
+  ctx.snap.mark(null, null);
+});
 canvas.addEventListener('pointerleave', () => { if (!drag) { cursor.slot = -1; ctx.select.hover(-1); ctx.guides.leave(); requestOverlays(); } });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
