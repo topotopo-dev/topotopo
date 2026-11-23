@@ -582,7 +582,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     return /[.!?]$/.test(text) ? text : `${text}.`;
   };
   const editorFor = (p: Package) => {
-    const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(process.execPath, [cli, 'edit', p.dir, '--json'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+      env: { ...process.env, TOPOTOPO_EDITOR_REOPEN: new URL(urls.edit(p.lib, p.id)!, base).href } });
     const editor = { child, package: p.manifest.title, url: null as string | null, memory: null as number | null };
     editors.set(p.dir, editor);
     child.stdin!.on('error', () => {});

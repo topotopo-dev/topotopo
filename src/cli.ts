@@ -156,6 +156,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           A result is used when the node\'s signature (type, params, inputs), the engine\'s code and every file it was made from (the node\'s own and those of the nodes below it, side files and fonts too, by modification time and size: a tool that keeps both is not noticed) are as they were.',
     '           Never stored: a node that cooks a graph inside itself (foreach, graph_ref, assets, package outputs, solver; the nodes inside are), a result with an SDF volume, and anything made from a URL, a .blend converted by Blender, a node type a scope defines used inside another graph, a solver, or a script that runs nodes with lib.run)',
     '         time limits (environment, milliseconds; also for the MCP server and the viewer): TOPOTOPO_SCRIPT_TIMEOUT_MS (user code: expressions, wrangles, a whole script; default 30000), TOPOTOPO_SIM_TIMEOUT_MS (one cook of a simulation node; default 600000)',
+    '         TOPOTOPO_EDITOR_IDLE_MS (how long an editor started with --json waits after its last tab closes; default 600000 ms)',
     '         memory for cooked results: TOPOTOPO_CACHE_MB (megabytes; default a quarter of the memory of the machine)',
     '         relative paths in the graph (file nodes, maps) read from its package folder: the nearest folder with a .topo file at or',
     '           above the graph file, else the graph file\'s folder; --render/--export/--underlay paths are relative to the current folder',

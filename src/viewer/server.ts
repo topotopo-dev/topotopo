@@ -15,6 +15,7 @@
 // with TopoTopo's built-in packages for the welcome.
 // Bound to 127.0.0.1 only; requests must name this server as their Host, and writes must come from its own page.
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -287,6 +288,8 @@ export interface Viewer {
   clients: () => number;
   /** resolves when no export is under way (an editor that is asked to end waits for it) */
   idle: () => Promise<void>;
+  /** work still in progress, and when the last page disconnected */
+  idleState: () => { busy: boolean; lastPageClosed: number };
   /**
    * Show another package (the MCP workspace tool's open): the routes serve it from now on and every open page
    * reconnects and reloads, so the URL stays the same.
@@ -298,7 +301,9 @@ export interface Viewer {
 }
 
 export async function startViewer(ws: Session, port = Number(process.env.TOPOTOPO_PORT ?? 7341), opts: ViewerOptions = {}): Promise<Viewer> {
+  const instanceId = randomUUID(), reopen = process.env.TOPOTOPO_EDITOR_REOPEN || null;
   const clients = new Set<http.ServerResponse>();
+  let lastPageClosed = 0, activeRequests = 0;
   const broadcast = (ev: object) => {
     const msg = `data: ${JSON.stringify(ev)}\n\n`;
     for (const c of clients) c.write(msg);
@@ -328,7 +333,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
       return { name: b.name, title: b.manifest.title, description: b.manifest.description, version: v?.version ?? null, outputs: v ? outputsLine(v) : '0 outputs' };
     });
     const connect = `claude mcp add topotopo -- "${process.execPath}" "${CLI_PATH}" mcp --package "${ws.dir}"`;
-    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin, unread: ws.unread, connect };
+    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin, unread: ws.unread, connect, instanceId, reopen };
   };
   // the package's default graph cooks its cards first
   const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => packageOf()?.graph });
@@ -621,6 +626,8 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     };
     const json = (code: number, body: unknown) => send(code, JSON.stringify(body), MIME['.json']);
     let route = '';
+    // Count work through the end of its request, including an export's writes after the cook.
+    activeRequests++;
     try {
       // DNS rebinding: only requests addressed to this server; cross-site writes: only from this server's own page
       const host = String(req.headers.host ?? '');
@@ -648,7 +655,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
         res.write(': hello\n\n');
         clients.add(res);
-        req.on('close', () => clients.delete(res));
+        req.on('close', () => { if (clients.delete(res) && !clients.size) lastPageClosed = Date.now(); });
         return;
       }
       if (u.pathname === '/api/package') return json(200, packageInfo());
@@ -789,6 +796,8 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
       const msg = String(e?.message ?? e);
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...(status === 413 ? { connection: 'close' } : {}) });
       res.end(JSON.stringify(route === '/api/vars' ? { ok: false, ms: 0, errors: [msg] } : { ok: false, error: msg, ...(e instanceof PreviewError ? { preview: true } : {}) }));
+    } finally {
+      activeRequests--;
     }
   });
 
@@ -807,6 +816,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     url: `http://127.0.0.1:${actual}/`,
     clients: () => clients.size,
     idle: () => outputs.idle(),
+    idleState: () => ({ busy: activeRequests > 0 || [...ws.graphs.keys()].some((g) => ws.activity(g)), lastPageClosed }),
     pokePackages: (pkg, rel) => packages.poke(pkg, rel),
     setSession: (next: Session) => {
       if (next === ws || closed) return;

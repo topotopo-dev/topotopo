@@ -245,10 +245,24 @@ export async function libraryCommand(argv: string[], prog: string, io: Io = cons
 /** How long an editor that is asked to end lets an export under way finish (the web app gives it a few seconds more before it is ended). */
 const EDITOR_GRACE_MS = 15_000;
 
+/** How long an editor started with --json stays open after the last page disconnects. */
+const EDITOR_IDLE_MS = 10 * 60_000;
+
+export function editorIdleTick({ clients, busy, idleSince, now, lastTick, interval, limit }: {
+  clients: number; busy: boolean; idleSince: number; now: number; lastTick: number; interval: number; limit: number;
+}) {
+  // Give the pages time to reconnect after a sleep or a long stall.
+  if (clients || now - lastTick > 3 * interval) return { idleSince: now, stop: false };
+  return { idleSince, stop: !busy && now - idleSince >= limit };
+}
+
 /** `edit [folder]`: the live viewer on a package, following changes other processes make to it. */
 export async function editCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number | void> {
   return run(io, async () => {
     const a = args(argv, ['--port'], ['--json'], `usage: ${prog} edit [folder] [--port 7341] [--json]`);
+    const rawIdle = process.env.TOPOTOPO_EDITOR_IDLE_MS;
+    const idleMs = rawIdle === undefined ? EDITOR_IDLE_MS : Number(rawIdle);
+    if (!Number.isFinite(idleMs) || idleMs <= 0) fail(`TOPOTOPO_EDITOR_IDLE_MS must be a positive number of milliseconds, got "${rawIdle}"`);
     const dir = packageOf(a.rest[0], prog);
     const topo = manifestFile(dir), real = fs.realpathSync.native(dir);
     const copy = isPublishedCopy(topo) ? dir : isPublishedCopy(path.join(real, path.basename(topo))) ? real : null;
@@ -278,12 +292,16 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
         void Promise.race([v.idle(), grace]).finally(() => { v.close(); process.exit(0); });
       });
       process.stdin.resume();
-      let idleSince = Date.now();
+      const interval = Math.max(1, Math.floor(Math.min(30_000, idleMs / 4)));
+      let idleSince = Date.now(), lastTick = idleSince;
       setInterval(() => {
+        const now = Date.now(), { busy, lastPageClosed } = v.idleState();
         reportMemory();
-        if (v.clients() > 0) idleSince = Date.now();
-        else if (Date.now() - idleSince > 10 * 60_000) { v.close(); process.exit(0); }
-      }, 30_000).unref();
+        const tick = editorIdleTick({ clients: v.clients(), busy, idleSince: Math.max(idleSince, lastPageClosed), now, lastTick, interval, limit: idleMs });
+        idleSince = tick.idleSince;
+        lastTick = now;
+        if (tick.stop) { v.close(); process.exit(0); }
+      }, interval).unref();
     } else io.out(`edit: ${v.url}  (${dir}; Ctrl+C to stop)`);
   });
 }

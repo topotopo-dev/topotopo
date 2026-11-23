@@ -1043,12 +1043,17 @@ section('viewer setSession');
   const ac = new AbortController();
   try {
     const names = async () => ((await (await fetch(v.url + 'api/graphs')).json()) as any[]).map((g: any) => g.name).join();
+    const packageInfo = async () => await (await fetch(v.url + 'api/package')).json() as any;
     check(await names() === 'first', 'serves the first package');
+    const first = await packageInfo();
     let ended = false;
     const stream = fetch(v.url + 'api/events', { signal: ac.signal }).then(async (r) => { for await (const _ of r.body as any) { /* read */ } ended = true; }).catch(() => {});
     check(await until(() => v.clients() === 1, 3000), 'clients() counts the open page');
     v.setSession(two);
     check(await names() === 'second', 'after setSession the routes serve the new package at the same URL');
+    const second = await packageInfo();
+    check(first.folder === one.dir && second.folder === two.dir && !!first.instanceId && first.instanceId === second.instanceId
+      && first.reopen === null && second.reopen === null, 'the same viewer instance reports the new folder after setSession, with no web app link');
     check(await until(() => ended, 3000) && v.clients() === 0, 'open pages are disconnected so they reconnect and reload');
     await two.edit('second', [{ op: 'set', node: 's', params: { radius: 2 } }]);
     check(two.listeners.size === 2 && one.listeners.size === 0, 'the viewer (events and outputs) listens to the new package only');

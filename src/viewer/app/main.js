@@ -20,7 +20,7 @@ import { TOP_BUTTONS, TOOL_BUTTONS, VIEW_BUTTONS, buttonTitle, createItems, cont
 import { icon } from './icons.js';
 import { openMenu } from './menu.js';
 import { fmtStep, fmtSize, fmtNum } from './units.js';
-import { DISCONNECTED_LINE, RECONNECTED_LINE, messageLife } from './status.js';
+import { disconnectedNotice, otherPackageNotice, RECONNECTED_LINE, messageLife } from './status.js';
 import { compareLine, cookLine, isRunning } from './cooking.js';
 import { pageTitle, defaultGraph, renderWelcome, unreadMessage } from './welcome.js';
 import { kindLine, resultName } from './output-info.js';
@@ -55,9 +55,10 @@ const ctx = {
 // What something the person did came to, over the view's lower left; it clears itself (status.js messageLife). The
 // status bar keeps the cook line and what is shown.
 const notesEl = $('notes'), msgEl = $('msg');
-let heldUntil = 0, noteTimer = 0;
+let heldUntil = 0, noteTimer = 0, connectionNotice = false;
 /** A message; `hold` ms keeps it over routine ones, `duration` sets an exact lifetime, and '' clears it. */
 ctx.message = (text, kind = '', hold = 0, duration) => {
+  if (connectionNotice) return;
   const now = performance.now();
   if (text && !hold && kind !== 'err' && now < heldUntil) return;
   heldUntil = hold ? now + hold : 0;
@@ -70,7 +71,7 @@ ctx.message = (text, kind = '', hold = 0, duration) => {
     else noteTimer = setTimeout(() => ctx.message(''), 3000);
   }, life);
 };
-$('msg-close').onclick = () => { $('msg-close').blur(); ctx.message(''); };
+$('msg-close').onclick = () => { $('msg-close').blur(); connectionNotice = false; ctx.message(''); };
 // ------------------------------------------------------------------------------------------- cook state
 // What is cooking for each graph (the server's {cook} events, and /api/graphs), shown in the status bar and above the
 // Controls: the node, the time (counted on here between events), how the last cook ended. Stop stops it. While the
@@ -257,12 +258,14 @@ function renderPackageNotice() {
   if (note.textContent !== text) note.textContent = note.title = text;
   note.hidden = !text;
 }
-const refreshPackage = ctx.coalesce(async () => {
-  const info = await api.package();
-  if (!info) return;
+function showPackage(info) {
   ctx.package = info;
   document.title = pageTitle(info);
   renderPackageNotice();
+}
+const refreshPackage = ctx.coalesce(async () => {
+  const info = await api.package();
+  if (info) showPackage(info);
 });
 $('graph').onchange = (e) => {
   if (ctx.outputs?.active) ctx.outputs.scene();
@@ -1077,16 +1080,52 @@ ctx.showNode = (graph, node) => {
 ctx.outputs = createOutputPanel(ctx);
 ctx.packages = createPackagesPanel(ctx, $('packages'));
 
+function showConnectionNotice({ text, links }) {
+  connectionNotice = false;
+  ctx.message(text, 'err', 0, Infinity);
+  connectionNotice = true;
+  for (const { text, href } of links) {
+    const link = document.createElement('a');
+    link.textContent = text;
+    link.href = href ?? location.href;
+    link.style.color = 'inherit';
+    if (href === null) link.onclick = (ev) => { ev.preventDefault(); location.reload(); };
+    msgEl.append(' ', link);
+  }
+}
+let receiveEvent, connection = 0;
 const es = api.events({
-  open() {
-    // after a reconnect the server may have restarted: fetch everything again
-    if (es.opened) {
-      if (msgEl.textContent === DISCONNECTED_LINE) ctx.message(RECONNECTED_LINE, 'ok');
-      refreshPackage().then(refreshGraphs).then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
+  async open() {
+    if (!es.opened) { es.opened = true; return; }
+    const attempt = ++connection, previous = ctx.package;
+    // Wait for the package before letting the new stream change anything on the page.
+    let info;
+    while (attempt === connection) {
+      info = await api.package();
+      if (info) break;
+      if (attempt === connection) await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    es.opened = true;
+    if (attempt !== connection || !info) return;
+    if (previous && previous.instanceId !== info.instanceId
+        && (previous.package?.dir ?? previous.folder) !== (info.package?.dir ?? info.folder)) {
+      es.close();
+      const title = (p) => p.package?.title || p.package?.id || pageTitle(p);
+      showConnectionNotice(otherPackageNotice(title(previous), title(info), previous.reopen));
+      return;
+    }
+    showPackage(info);
+    es.onmessage = receiveEvent;
+    connectionNotice = false;
+    ctx.message(RECONNECTED_LINE, 'ok');
+    refreshGraphs().then(loadGeo); ctx.outputs.refresh(); ctx.packages.refresh(); ctx.layers.refresh(); ctx.layers.loadWhere(); ctx.guides.load();
   },
-  error() { ctx.message(DISCONNECTED_LINE, 'err'); },
+  error() {
+    connection++;
+    es.opened = true;
+    receiveEvent ??= es.onmessage;
+    es.onmessage = null;
+    showConnectionNotice(disconnectedNotice(ctx.package?.reopen));
+  },
   async message(ev) {
     if (ev.cook !== undefined) { setCook(ev.cook.graph, ev.cook); if (ev.cook.graph === ctx.graph.name) updateCook(); return; }
     if (ev.outputs !== undefined) { ctx.outputs.refresh(); return; }
