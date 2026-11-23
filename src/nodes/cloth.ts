@@ -140,11 +140,47 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
   if (mode === 'inflate') { opts.pressure = p.pressure; opts.pressureStiffness = p.pressure_stiffness; opts.pressureRamp = Math.ceil(p.steps / 2); }
   const sim = new XpbdCloth(model, opts, x0, v0, pinned);
 
+  const colliderGeo = ctx.hasInput(1) ? ctx.input(1) : null;
   let collider: Collider | null = null;
-  if (ctx.hasInput(1)) {
-    collider = buildCollider(ctx.input(1));
+  if (colliderGeo) {
+    collider = buildCollider(colliderGeo);
     if (!collider) warn('the collider has no polygons: only the floor collides');
   }
+
+  // Allow ten times the starting scene span and contact clearance, plus ten times the distance gravity, wind and
+  // initial velocity could carry a point by this step. Include snapped pins and a floor that can lift the cloth.
+  const { min, max } = src.bbox();
+  const lo = [...min], hi = [...max];
+  if (collider && colliderGeo) {
+    const bounds = colliderGeo.bbox();
+    for (let c = 0; c < 3; c++) {
+      lo[c] = Math.min(lo[c], bounds.min[c]);
+      hi[c] = Math.max(hi[c], bounds.max[c]);
+    }
+  }
+  if (opts.floor) hi[1] = Math.max(hi[1], opts.floorHeight);
+  let speed = opts.drag > 0 ? Math.hypot(...opts.wind) : 0;
+  for (let i = 0; i < x0.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      lo[c] = Math.min(lo[c], x0[i + c]);
+      hi[c] = Math.max(hi[c], x0[i + c]);
+    }
+    if (v0) speed = Math.max(speed, Math.hypot(v0[i], v0[i + 1], v0[i + 2]));
+  }
+  const span = Math.max(1e-3, Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])) + 2 * opts.thickness;
+  const gravity = Math.hypot(...opts.gravity);
+  const blewUp = (step: number, reason: string) => new NodeError(`${mode}: the simulation blew up at step ${step} (${reason})`,
+    `Adjust stretch_stiffness, shear_stiffness or bend_stiffness, or try more substeps or a higher fps. Check wind and rest_scale${mode === 'inflate' ? ', and check pressure and pressure_stiffness' : ''}.`);
+  const checkState = (step: number) => {
+    if (!sim.finite()) throw blewUp(step, 'non-finite positions or velocities');
+    const t = step * opts.dt, margin = 10 * (span + speed * t + 0.5 * gravity * t * (t + opts.dt));
+    const x = sim.x;
+    for (let i = 0; i < x.length; i += 3) {
+      if (x[i] < lo[0] - margin || x[i] > hi[0] + margin || x[i + 1] < lo[1] - margin || x[i + 1] > hi[1] + margin ||
+          x[i + 2] < lo[2] - margin || x[i + 2] > hi[2] + margin)
+        throw blewUp(step, 'the cloth left the simulation bounds');
+    }
+  };
   const R = new Float64Array(n);
   const shared = collider ? colliderArrays(collider) : null;
   // the collider is the same every step: hash it once, so the pool reuses its shared copy
@@ -160,6 +196,7 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
   // the wall-clock limit of long-running nodes, checked every step (steps × substeps × iterations can reach 10^9 sweeps)
   const budget = simBudget(ctx, 'fewer steps, substeps or iterations, or a coarser cloth (decimate / remesh); or raise the limit');
   sim.settleFloor();
+  checkState(0);
   for (let s = 0; s < p.steps; s++) {
     budget.check();
     // a stopped cook stops between steps
@@ -173,9 +210,8 @@ async function simulate(ctx: CookContext, mode: 'drape' | 'inflate'): Promise<Ge
     }
     if (opts.selfCollision) sim.findSelfPairs();
     sim.step();
+    checkState(s + 1);
   }
-  if (!sim.finite())
-    throw new NodeError(`${mode}: the simulation diverged (non-finite positions)`, 'lower the stiffnesses or the wind, or raise substeps');
 
   // outputs
   g.P.set(sim.x);

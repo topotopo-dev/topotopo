@@ -176,8 +176,9 @@ defineNode({
     'orientation); holes with at most max_hole_edges edges ear-clipped (no new points, attributes from the ' +
     'neighbouring faces, prim group "filled"); closed pieces turned outward (signed volume); optional ' +
     'self-intersection test (BVH, triangle pairs that cross; report → prim group "self_intersecting", ' +
-    'remove_faces → delete them and fill the holes); points no prim uses removed. Detail string "repair_report" ' +
-    'holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed ' +
+    'remove_faces → delete them and fill the holes); points no prim uses removed. ' +
+    'When max_hole_edges is 0, repair revisits open edges. It also revisits non-manifold edges in split and remove mode. ' +
+    'Detail string "repair_report" holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed ' +
     'or found something (warn off: only the detail string). Polylines pass through. For a quick tidy without ' +
     'topology changes use clean; for meshes beyond repair, remesh (voxel) rebuilds a watertight surface.',
   aliases: ['repair', 'polydoctor', 'mesh_doctor', 'fix_mesh'],
@@ -242,7 +243,8 @@ defineNode({
     'the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its ' +
     'target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open ' +
     'borders, with point counts (or the max_error limit), or the parts where a plain reduction folds the uv (keep_uv, ' +
-    'as in decimate: a level never folds a clean uv atlas). Detail "lod" is a JSON list of {level, ratio | screen_size, ' +
+    'as in decimate: a level never folds a clean uv atlas). A level that would have more triangles than the previous ' +
+    'level copies that mesh and gets its own name, lod tag and spacing. Detail "lod" is a JSON list of {level, ratio | screen_size, ' +
     'triangles, error}; detail int[] "lod_tris" the triangle counts.',
   aliases: ['lod_tree', 'polyreduce_lod', 'lod_create', 'lods'],
   inputs: [{ name: 'geo', desc: 'polygon mesh' }],
@@ -277,10 +279,11 @@ defineNode({
       const r = Number(p.ratios[k]);
       ratios.push(Number.isFinite(r) && r >= 0 ? Math.min(1, r) : k ? ratios[k - 1] / 2 : 1);
     }
-    const levels = p.mode === 'switch' ? [Math.min(n - 1, Math.max(0, Math.floor(p.level)))] : Array.from({ length: n }, (_, k) => k);
+    const first = p.mode === 'switch' ? Math.min(n - 1, Math.max(0, Math.floor(p.level))) : 0;
+    const last = p.mode === 'switch' ? first : n - 1;
     const fmt = String(p.name_format ?? '').trim();
     if (!fmt) throw new NodeError('lod: name_format is empty', 'e.g. "{name}_lod{level}" (gun_lod0) or "{name}" in switch mode to keep the names');
-    if (levels.length > 1 && !fmt.includes('{level}')) throw new NodeError(`lod: name_format "${fmt}" has no {level}, so every level would get the same name`, 'e.g. "{name}_lod{level}"; switch mode can keep the names with "{name}"');
+    if (last > first && !fmt.includes('{level}')) throw new NodeError(`lod: name_format "${fmt}" has no {level}, so every level would get the same name`, 'e.g. "{name}_lod{level}"; switch mode can keep the names with "{name}"');
     // group: only those prims get levels; the rest passes through once
     const sel = mask(all, 'prim', p.group);
     let g = all, rest: Geometry | null = null;
@@ -293,7 +296,11 @@ defineNode({
     const nameAttr = g.prims.get('name');
     const baseNames = nameAttr && nameAttr.type === 'string' ? (nameAttr.data as string[]) : null;
     let locks: ReturnType<typeof reductionLocks> | null = null;
-    for (const k of levels) {
+    let previous: ReturnType<typeof decimateKeepUV> | null = null;
+    const reused: string[] = [];
+    let uvLimited = false;
+    // Switch mode walks the same reductions so its level matches the merged version.
+    for (let k = 0; k <= last; k++) {
       const bySize = sizes.length > 0;
       const opts: DecimateOptions = {
         ratio: bySize ? (k === 0 && sizes[0] >= 1 ? 1 : 0) : ratios[k], targetCount: 0,
@@ -301,12 +308,21 @@ defineNode({
         lockBorder: p.lock_border, prune: p.prune && !(bySize ? false : ratios[k] >= 1), sparse: false, regularize: false, sloppy: false,
         attributes: steer, group: null, lockPoints: null,
       };
-      const r = guard(() => decimateKeepUV(g, opts, !!p.keep_uv));
-      const lg = r.geo;
-      const uvHeld = uvKeptText(r);
+      const candidate = guard(() => decimateKeepUV(g, opts, !!p.keep_uv));
+      const fallback = previous && candidate.trisOut > previous.trisOut ? previous : null;
+      const r: ReturnType<typeof decimateKeepUV> = fallback ?? candidate;
+      previous = r;
+      if (k < first) continue;
+      const lg = r.geo.clone();
+      const uvHeld = fallback ? '' : uvKeptText(r);
       // a ratio level well short of its target: say what held it
       const want = Math.round(ratios[k] * r.trisIn), short = (x: number) => x > want * 1.1 + 2;
-      if (!bySize && ratios[k] < 1 && short(r.trisOut)) {
+      if (fallback) {
+        const held = !!candidate.uv.plainFolds && candidate.trisOut > candidate.uv.plainTris;
+        uvLimited ||= held;
+        const why = held ? 'keep_uv limited the reduction to preserve uv seams and avoid folds' : `its reduction left ${candidate.trisOut} triangles instead of ${r.trisOut} or fewer`;
+        reused.push(`level ${k} (${why})`);
+      } else if (!bySize && ratios[k] < 1 && short(r.trisOut)) {
         const pct = (x: number) => `${Math.round((100 * x) / Math.max(1, r.trisIn))} %`;
         let why: string;
         if (uvHeld && !short(r.uv.plainTris)) why = uvHeld;
@@ -338,12 +354,13 @@ defineNode({
       tris.push(r.trisOut);
       geos.push(lg);
     }
+    if (reused.length) warn(`lod: ${reused.join(', ')} reused the previous level.${uvLimited ? ' Reduce before uv_unwrap to reduce further.' : ''}`);
     if (rest && (rest.numPrims || rest.numPoints)) geos.unshift(rest);
     const out = geos.length === 1 ? geos[0] : Geometry.merge(geos);
     for (const a of ['error', 'error_abs']) out.detail.delete(a);
     (out.detail.add('lod', 'string', 1).data as string[])[0] = JSON.stringify(info);
     out.detail.set('lod_tris', Attribute.fromArrays('int[]', [tris]));
-    stat('levels', levels.length);
+    stat('levels', last - first + 1);
     return out;
   },
 });

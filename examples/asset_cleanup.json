@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "A made-up broken scan cleaned into a game-ready asset. The scan is a faceted rock or a fluted, cracked column (revolved from a profile), roughened with scan noise and then damaged: patches of missing faces, an open underside, flipped and duplicate faces, a crumpled self-intersecting patch and floating debris. Two mesh_repair passes weld it, drop the duplicates, fix the winding and fill every hole; the largest piece is kept (the debris goes); a voxel remesh rebuilds one watertight surface, which removes the tangles; taubin smoothing (more passes for longer edges) and an isotropic remesh make even triangles of edge_length. The asset sits on the ground at the origin, named after its source, in a plain stone material, with smooth normals and uv unwrapped into the 0..1 square for a texture whose size (detail int texture_size, a power of two) gives about texel_density pixels per metre. lod makes the levels of detail from it, each keeping lod_ratio of the triangles of the one before. Asserts guard one closed outward piece without self-intersections, no edge shorter than a fifth of edge_length, and every uv inside 0..1.",
+  "description": "A made-up broken scan cleaned into a game-ready asset. The scan is a faceted rock or a fluted, cracked column (revolved from a profile), roughened with scan noise and then damaged: patches of missing faces, an open underside, flipped and duplicate faces, a crumpled self-intersecting patch and floating debris. One mesh_repair pass welds it, drops the duplicates, fixes the winding and fills every hole; the largest piece is kept (the debris goes); a voxel remesh rebuilds one watertight surface, which removes the tangles; taubin smoothing (more passes for longer edges) and an isotropic remesh make even triangles of edge_length. The asset sits on the ground at the origin, named after its source, in a plain stone material, with smooth normals and uv unwrapped into the 0..1 square for a texture whose size (detail int texture_size, a power of two) gives about texel_density pixels per metre. lod makes the levels of detail from it, each keeping lod_ratio of the triangles of the one before. Asserts guard one closed outward piece without self-intersections, no edge shorter than a fifth of edge_length, and every uv inside 0..1.",
   "params": {
     "source": {"type": "enum", "options": ["rock", "column"], "default": "rock", "label": "source", "desc": "the made-up scan to clean: a lumpy rock or a cracked column"},
     "edge_length": {"type": "float", "default": 0.05, "min": 0.02, "max": 0.2, "step": 0.005, "label": "edge length", "desc": "edge length of the cleaned mesh (m)"},
@@ -90,13 +90,7 @@
     "debris": {"type": "copy_to_points", "in": ["chip", "debris_lift"]},
     "broken": {"type": "merge", "in": ["crumpled", "twins", "debris"]},
     "repaired": {"type": "mesh_repair", "in": ["broken"], "params": {"max_hole_edges": 0, "warn": false}},
-    "sealed": {
-      "type": "mesh_repair",
-      "in": ["repaired"],
-      "params": {"max_hole_edges": 0, "warn": false},
-      "note": "Workaround for F-127: mesh_repair (max_hole_edges 0) sometimes leaves a small hole (3 open edges) or a non-manifold edge after one pass on this damage; a second pass closes it. Drop it once one pass is enough."
-    },
-    "piece_volume": {"type": "measure", "in": ["sealed"], "params": {"measure": "volume", "name": "piece_volume"}},
+    "piece_volume": {"type": "measure", "in": ["repaired"], "params": {"measure": "volume", "name": "piece_volume"}},
     "one_piece": {
       "type": "wrangle",
       "in": ["piece_volume"],

@@ -2,6 +2,7 @@
 //   node test/cloth.ts
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
+import { getNodeDef } from '../src/graph/registry.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { TriBVH } from '../src/core/spatial.ts';
 import { buildCloth, colourConstraints, dihedralAngle, fastAtan2, meshVolume, stretchChains } from '../src/core/xpbd.ts';
@@ -117,6 +118,27 @@ const drapeNodes = (extra: Record<string, any> = {}): Record<string, NodeSpec> =
   table: { type: 'box', params: { size: [1, 0.8, 1], center: [0, 0.4, 0] } },
   out: { type: 'drape', in: ['g', 'table'], params: { steps: 90, thickness: T, ...extra } },
 });
+{
+  const example: Record<string, NodeSpec> = getNodeDef('drape')!.example.nodes;
+  const cloth = await geo(example, 'cloth');
+  const g = await geo({ ...example, out: { ...example.out, params: { ...example.out.params, shear_stiffness: 0 } } });
+  const area = (mesh: Geometry) => buildCloth(mesh, { density: 1, stretch: 0, shear: 0, bend: 0, restScale: 1 }).area;
+  const ratio = area(g) / area(cloth), { min, max } = g.bbox();
+  check(finite(g.P) && min.every((x) => x > -3) && max.every((x) => x < 3) && min[1] >= 0.03 && min[1] < 0.5 && max[1] > 1 && ratio > 0.8 && ratio < 1.2,
+    `drape with shear_stiffness 0: cloth hangs over the collider (${min[1].toFixed(3)} m minimum y, ${(ratio * 100).toFixed(1)}% of its starting area, expected 80–120%)`);
+
+  const blowup = async (mode: 'drape' | 'inflate', params: Record<string, number>) => {
+    const nodes: Record<string, NodeSpec> = getNodeDef(mode)!.example.nodes;
+    const r = await cook({ ...nodes, out: { ...nodes.out, params: { ...nodes.out.params, ...params, steps: 1 } } });
+    const error = r.errors[0];
+    const extent = r.geo?.bbox().max.map((x, i) => (x - r.geo!.bbox().min[i]).toFixed(0)).join(' × ');
+    check(!r.ok && error?.message.includes(`${mode}: the simulation blew up at step 1`) && !!error.hint?.includes('substeps'),
+      `${mode} rejects a blow-up at step 1 (${error?.message ?? `returned a ${extent} m mesh`})`);
+  };
+  await blowup('drape', { stretch_stiffness: 0, rest_scale: 1e6 });
+  await blowup('inflate', { pressure: 1e6 });
+  await blowup('inflate', { pressure: 1e300 });
+}
 {
   const g = await geo(drapeNodes());
   const table = await geo(drapeNodes(), 'table');
