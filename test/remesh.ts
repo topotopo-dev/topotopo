@@ -1,5 +1,6 @@
 // Remeshing, decimation, repair and LOD tests: remesh_isotropic, decimate, mesh_repair, lod; naming pieces (attrib_string).
 //   node test/remesh.ts
+import { readFileSync } from 'node:fs';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
@@ -8,7 +9,7 @@ import { halfEdges } from '../src/core/halfedge.ts';
 import { primNewell, signedVolume, topologyReport, triangulate } from '../src/core/topology.ts';
 import { ClosestBVH } from '../src/core/remesh.ts';
 import { repairMesh } from '../src/core/repair.ts';
-import type { NodeSpec } from '../src/graph/types.ts';
+import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 
 const engine = new Engine(createNodeHost());
 await engine.init();
@@ -343,6 +344,22 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   const rm = await cook({ ...cross, r: { type: 'mesh_repair', in: ['m'], params: { self_intersections: 'remove_faces' } } }, 'r');
   check(report(rm).self_intersecting_removed === nsi && rm.numPrims !== rep2.numPrims, `repair remove_faces: ${nsi} faces removed, holes filled (${report(rm).holes_filled})`);
 }
+{
+  const asset: GraphSpec = JSON.parse(readFileSync(new URL('../examples/asset_cleanup.json', import.meta.url), 'utf8'));
+  for (const [source, seed] of [['rock', 8], ['column', 14]] as const) {
+    const r = await engine.cook({ ...asset, output: 'repaired', vars: { ...asset.vars, source, seed } });
+    const t = r.geo && topologyReport(r.geo);
+    check(t?.closed && watertight(r.geo!), `repair one pass: ${source} seed ${seed} (${t?.boundaryEdges} open edges, ${t?.nonManifoldEdges} non-manifold edges)`);
+  }
+  // The gaps in the north-pole fan leave a triangle joined to the rest of the sphere only at the pole.
+  const pole = await cook({
+    s: { type: 'sphere', params: { rows: 8, cols: 16 } },
+    d: { type: 'delete', in: ['s'], params: { group: '0 16 24' } },
+    r: { type: 'mesh_repair', in: ['d'], params: { max_hole_edges: 0 } },
+  }, 'r');
+  const t = topologyReport(pole);
+  check(watertight(pole) && t.pieces === 1, `repair one pass: opened pole fan (${t.boundaryEdges} open edges, ${t.nonManifoldEdges} non-manifold edges)`);
+}
 
 // ---------------------------------------------------------------- lod
 {
@@ -394,6 +411,28 @@ const report = (g: Geometry) => JSON.parse((g.detail.get('repair_report')!.data 
   let farPts = 0;
   for (let pr = 0; pr < bolt.numPrims; pr++) if (lv[pr] === 1) for (const pt of bolt.primPoints(pr)) if (bolt.P[pt * 3] > 1.2) farPts++;
   check(farPts === 0, 'lod prune: a 4 mm bolt is gone from the coarse level of a hard-normal mesh');
+}
+{
+  const src: Record<string, NodeSpec> = {
+    s: { type: 'sphere', params: { rows: 6, cols: 12, scale: [1, 0.35, 0.7] } },
+    uv: { type: 'uv_unwrap', in: ['s'], params: { chart_smoothing: 0, resolution: 128 } },
+    named: { type: 'attrib_create', in: ['uv'], params: { name: 'name', class: 'prim', value: 'rock' } },
+  };
+  const l: NodeSpec = { type: 'lod', in: ['named'], params: { levels: 3, ratios: [1, 0.0171, 0.0152], prune: false, spacing: [2, 0, 0] } };
+  const merged = await cookR({ ...src, l }, 'l'), g = merged.geo!;
+  const counts = [0, 0, 0], tags = g.prims.get('lod')!.data as Int32Array, names = g.prims.get('name')!.data as string[];
+  for (const tag of tags) counts[tag]++;
+  const lt = g.detail.get('lod_tris')!.getArray(0);
+  check(counts[0] >= counts[1] && counts[1] === counts[2] && lt.join() === counts.join(), `lod keep_uv: the coarser level cannot grow (${counts.join(', ')} triangles)`);
+  const before = g.subsetPrims(Uint8Array.from(tags, (k) => +(k === 1)));
+  const sw = await cook({ ...src, l: { ...l, params: { ...l.params, mode: 'switch', level: 2 } } }, 'l');
+  const info = JSON.parse((g.detail.get('lod')!.data as string[])[0]);
+  const swInfo = JSON.parse((sw.detail.get('lod')!.data as string[])[0]);
+  check(sw.numPrims === before.numPrims && sw.P.length === before.P.length && sw.P.every((v, i) => Math.abs(v - before.P[i] - (i % 3 === 0 ? 2 : 0)) < 1e-12) &&
+    swInfo[0].error === info[1].error && (sw.prims.get('lod')!.data as Int32Array).every((k) => k === 2) && (sw.prims.get('name')!.data as string[]).every((s) => s === 'rock_lod2') &&
+    names.every((s, i) => s === `rock_lod${tags[i]}`), 'lod keep_uv: switch copies the finer mesh with its error, and applies the coarser name, tag and offset');
+  const reused = merged.warnings.filter((w) => w.message.includes('reused the previous level'));
+  check(reused.length === 1 && /level 2.*uv seams/.test(reused[0].message), 'lod keep_uv: one warning names the reused level and its UV seams');
 }
 
 // ---------------------------------------------------------------- naming pieces: attrib_string

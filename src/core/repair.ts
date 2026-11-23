@@ -64,6 +64,7 @@ export interface RepairReport {
   self_intersecting_faces: number;
   self_intersecting_removed: number;
   isolated_points: number;
+  round_limit?: number;
 }
 
 export interface TopoSummary { points: number; prims: number; boundary_edges: number; non_manifold_edges: number; degenerate: number; pieces: number; closed: boolean }
@@ -632,15 +633,16 @@ class Repair {
 
   // ------------------------------------------------------------ output
 
-  build(isolated: boolean, intersecting: Set<number> | null): Geometry {
+  build(isolated: boolean, intersecting: Set<number> | null, keepFilled: boolean): Geometry {
     const g = this.g, b = new GeoBuilder(g);
     for (let i = 0; i < this.ptSrc.length; i++) b.copyPoint(this.ptSrc[i]);
     const filled = b.group('prim', 'filled');
+    const previousCaps = keepFilled ? g.primGroups.get('filled') : null;
     const self = intersecting ? b.group('prim', 'self_intersecting') : null;
     this.polys.forEach((q, f) => {
       if (q.dead) return;
       const id = b.addPrim(q.pts, q.closed, q.prim, q.vtx);
-      if (q.filled) filled.add(id);
+      if (q.filled || previousCaps?.[q.prim]) filled.add(id);
       if (self && intersecting!.has(f)) self.add(id);
     });
     let out = b.build();
@@ -700,8 +702,7 @@ function segTri(T: Float64Array, a: number, b: number, o: number): [number, numb
   return [ox + dx * t, oy + dy * t, oz + dz * t];
 }
 
-/** Run the repair steps on g (see the header). */
-export function repairMesh(g: Geometry, o: RepairOptions): { geo: Geometry; report: RepairReport } {
+function repairRound(g: Geometry, o: RepairOptions, keepFilled: boolean): { geo: Geometry; report: RepairReport } {
   const r = new Repair(g);
   if (o.minArea && o.minArea > r.areaEps) r.areaEps = o.minArea;
   if (o.fuse !== 'off') r.fuse(Math.max(0, o.tolerance), o.fuse);
@@ -710,7 +711,6 @@ export function repairMesh(g: Geometry, o: RepairOptions): { geo: Geometry; repo
   r.nonManifold(o.nonManifold);
   if (o.winding) r.winding();
   if (o.fillHoles) r.fillHoles(Math.max(0, o.maxHoleEdges), null);
-  if (o.winding && o.outward) r.outward();
   let inter: Set<number> | null = null;
   if (o.selfIntersections !== 'off') {
     inter = r.selfIntersections();
@@ -723,9 +723,35 @@ export function repairMesh(g: Geometry, o: RepairOptions): { geo: Geometry; repo
       inter = null;
     }
   }
-  const geo = r.build(o.isolated, o.selfIntersections === 'report' ? inter : null);
+  // Ear clipping a nonplanar loop can leave cap triangles with inconsistent winding.
+  if (o.winding && r.rep.holes_filled) r.winding();
+  if (o.winding && o.outward) r.outward();
+  const geo = r.build(o.isolated, o.selfIntersections === 'report' ? inter : null, keepFilled);
   r.rep.output = summary(geo);
   return { geo, report: r.rep };
+}
+
+/** Run the repair steps on g, revisiting unresolved edges after caps and fan splits. */
+export function repairMesh(g: Geometry, o: RepairOptions): { geo: Geometry; report: RepairReport } {
+  let { geo, report } = repairRound(g, o, false);
+  const needsRound = () => (o.fillHoles && o.maxHoleEdges === 0 && report.output.boundary_edges > 0) ||
+    (o.nonManifold !== 'keep' && report.output.non_manifold_edges > 0);
+  const maxRounds = 4;
+  // A cap can meet an existing face or edge. Splitting a fan can also leave a crack that only the next weld sees.
+  for (let round = 1; round < maxRounds && needsRound(); round++) {
+    const next = repairRound(geo, o, true);
+    const { input, output, holes_left, round_limit, non_manifold_edges, self_intersecting_faces, ...changes } = next.report;
+    const keys = Object.keys(changes) as (keyof typeof changes)[];
+    if (!keys.some((key) => changes[key] > 0)) return { geo, report };
+    geo = next.geo;
+    report.output = output;
+    report.holes_left = holes_left;
+    report.non_manifold_edges += non_manifold_edges;
+    report.self_intersecting_faces = o.selfIntersections === 'report' ? self_intersecting_faces : report.self_intersecting_faces + self_intersecting_faces;
+    for (const key of keys) report[key] += changes[key];
+  }
+  if (needsRound()) report.round_limit = maxRounds;
+  return { geo, report };
 }
 
 /** One line naming what repairMesh changed or found ('' when the mesh was clean). */
@@ -747,5 +773,6 @@ export function repairSummary(rep: RepairReport): string {
   add(rep.self_intersecting_faces, 'self-intersecting face{s}');
   add(rep.self_intersecting_removed, 'self-intersecting face{s} removed');
   add(rep.isolated_points, 'isolated point{s} removed');
+  if (rep.round_limit) parts.push(`stopped after ${rep.round_limit} repair rounds with ${rep.output.boundary_edges} open edges and ${rep.output.non_manifold_edges} non-manifold edges remaining`);
   return parts.join(', ');
 }
