@@ -328,7 +328,7 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
       return { name: b.name, title: b.manifest.title, description: b.manifest.description, version: v?.version ?? null, outputs: v ? outputsLine(v) : '0 outputs' };
     });
     const connect = `claude mcp add topotopo -- "${process.execPath}" "${CLI_PATH}" mcp --package "${ws.dir}"`;
-    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin, unread: ws.unread, connect };
+    return { package: packageOf(true), folder: ws.dir, file: opts.source?.label ?? null, builtin, unread: [...ws.unread, ...(opts.source?.unread ? [opts.source.unread] : [])], connect };
   };
   // the package's default graph cooks its cards first
   const makeOutputs = () => createOutputs(ws, () => broadcast({ outputs: true }), { source: opts.source, first: () => packageOf()?.graph });

@@ -17,7 +17,7 @@ const text = (tag, value, cls) => { const e = document.createElement(tag); e.tex
 const post = async (route, body) => {
   const r = await fetch('/api/output/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({ error: `${route} failed (${r.status})` }));
-  if (!r.ok || !j.ok) throw new Error(j.error ?? `${route} failed (${r.status})`);
+  if (!r.ok || !j.ok) throw Object.assign(new Error(j.error ?? `${route} failed (${r.status})`), { changed: r.status === 409 ? j.changed : undefined });
   return j;
 };
 /** The browser saves `href` (a route, or a blob's URL) as `name`. */
@@ -147,6 +147,22 @@ export function createOutputPanel(ctx) {
   const targetLine = (item) => !item.target ? 'no export target'
     : `${item.target.path}${item.saved ? ` · saved ${ago(item.saved.at)} · ${fmtBytes(item.saved.size)}` : ' · not exported yet'}`;
 
+  async function exportWithConfirmation(route, body) {
+    try { return await post(route, body); }
+    catch (e) {
+      if (!e.changed?.length) throw e;
+      const lines = e.changed.slice(0, 5).map((p) => {
+        const why = e.message.includes(`${p} was not written by TopoTopo\n`) ? 'was not written by TopoTopo' : 'changed after TopoTopo wrote it';
+        return `${p} ${why}. Replace it with this export? The changed file is lost.`;
+      });
+      if (e.changed.length > 5) lines.push(`and ${e.changed.length - 5} more`);
+      document.getElementById('ask-text')?.style.setProperty('white-space', 'pre-line');
+      if (await ctx.ask(lines.join('\n'), 'Replace', 'Keep')) return post(route, { ...body, overwrite: true });
+      ctx.message(`Not exported: ${e.changed[0]} was kept`);
+      return null;
+    }
+  }
+
   async function exportItem(item, button, change = false) {
     if (busy) return;
     let choice = null;
@@ -157,7 +173,8 @@ export function createOutputPanel(ctx) {
     busy = true; render();
     ctx.message(`exporting ${item.label}…`, 'busy');
     try {
-      const j = await post('export', { id: item.id, ...(choice ? { export: targetSpec(item, choice, formats) } : {}) });
+      const j = await exportWithConfirmation('export', { id: item.id, ...(choice ? { export: targetSpec(item, choice, formats) } : {}) });
+      if (!j) return;
       ctx.message(`exported ${item.label} → ${j.file ?? 'exports/' + j.path}${j.files > 1 ? ` (${j.files} files)` : ''}${j.warnings?.length ? ' · ' + j.warnings.join('; ') : ''}`, j.warnings?.length ? 'err' : 'ok', 7000);
     } catch (e) { ctx.message(e.message, 'err', 10000); }
     finally { busy = false; await P.refresh(); render(); }
@@ -190,7 +207,8 @@ export function createOutputPanel(ctx) {
     if (busy) return;
     busy = true; render(); ctx.message('exporting all outputs with a target…', 'busy');
     try {
-      const j = await post('export-all', {});
+      const j = await exportWithConfirmation('export-all', {});
+      if (!j) return;
       const warnings = j.written.flatMap((w) => w.warnings ?? []);
       ctx.message(`exported ${j.written.length} output${j.written.length === 1 ? '' : 's'} into ${directory}${j.skipped.length ? ` · ${j.skipped.length} without a target (their Export button sets one)` : ''}${warnings.length ? ' · ' + warnings.join('; ') : ''}`, warnings.length ? 'err' : 'ok', 8000);
     } catch (e) { ctx.message(e.message, 'err', 10000); }
@@ -265,7 +283,7 @@ export function createOutputPanel(ctx) {
         cooking.textContent = waiting ? 'waiting' : 'cooking…';
         row.setAttribute('aria-label', `${item.label} — ${what || item.view}`); row.setAttribute('aria-pressed', String(item.id === selected));
         go.hidden = target.hidden = !item.exportable; go.disabled = busy || !!wait;
-        go.title = wait || (item.target ? `write ${targetFile(item)} again (overwrites it)` : `choose a format and a file in ${directory || 'exports/'}, then export`);
+        go.title = wait || (item.target ? `export to ${targetFile(item)}` : `choose a format and a file in ${directory || 'exports/'}, then export`);
         go.setAttribute('aria-label', `Export ${item.label}`);
         // Download: every card that has something to give (a published output, a texture, saved files)
         down.hidden = !(item.exportable || (item.generated && item.view === 'image') || item.download);

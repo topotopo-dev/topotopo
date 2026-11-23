@@ -95,7 +95,7 @@ import { isGraph } from './graph/types.ts';
 import type { GraphSpec } from './graph/types.ts';
 import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
-import { exportsFolderFor, filesShaFor, prepareTarget, serializeExport, unchangedTarget, writeExportFiles, writeTargets } from './host/export-targets.ts';
+import { checkExportFiles, ExportConflict, exportsFolderFor, filesShaFor, prepareTarget, serializeExport, unchangedTarget, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
 import { engineSha256 } from './host/engine-code.ts';
@@ -150,6 +150,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           kind, time and size. In a package, an output whose last export would be made the same (its nodes, vars, packages, the',
     '           package\'s other graphs, assets/ and inputs/, options and the engine code, all its files in place) is skipped)',
     '         [--force] (--export-all: export every output, the unchanged ones too)',
+    '         [--overwrite] (--export / --export-all: replace files that were changed or were not written by TopoTopo)',
     '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
     '         [--no-cache] (leave the disk cache alone: a node that cooked for 0.5 s or more is otherwise stored, compressed, up to 4 GB (the least recently used go first), and the next run that cooks it the same loads it; the report says which nodes were loaded.',
     '           Where: topotopo/nodes in the OS cache folder (Windows %LOCALAPPDATA%, macOS ~/Library/Caches, else $XDG_CACHE_HOME or ~/.cache); deleting that folder clears the cache. Environment, also for the MCP server: TOPOTOPO_NODE_CACHE_DIR=<folder> moves it, TOPOTOPO_NODE_CACHE=off switches the cache off.',
@@ -321,7 +322,10 @@ if (argv[0] === 'view') {
   // arguments from process.argv and runs until the client closes stdin
   process.argv.splice(2, 1);
   await import('./mcp/server.ts');
-} else await cook();
+} else {
+  try { await cook(); }
+  catch (e) { if (e instanceof ExportConflict) fail(e.message); throw e; }
+}
 
 /** Cook a graph file, then render / export / inspect it. */
 async function cook() {
@@ -541,17 +545,37 @@ async function cook() {
   }
   const rendersByUnit = new Map(units.map((u) => [u, rendersOf(u)]));
 
-  async function writeOutputs(r: CookReport, u: Unit, frame?: number) {
+  const exportsDir = exportsFolderFor(file);
+  const exportWrite = { packageDir: path.dirname(exportsDir), hint: 'pass --overwrite to replace it, or export to another path' };
+
+  async function prepareExport(r: CookReport, u: Unit, frame?: number) {
+    const ex = uopt(u, '--export');
+    if (!ex) return;
+    const p = frame === undefined ? ex : framePath(ex, frame);
+    const raw = (uopt(u, '--format') ?? exportFormatFromPath(ex)).toLowerCase();
+    const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
+    if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
+    // the export tool's options (the MCP export tool and export targets use the same names and code)
+    const a = exportArgs(u);
+    const x = await forExport(r);
+    const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file), version: TOPOTOPO_VERSION, engine: engineSha256() });
+    return { fmt, res: await serializeExport(x.geo!, fmt, p, a, engine.host, source) };
+  }
+
+  async function writeOutputs(r: CookReport, u: Unit, frame?: number, prepared?: Awaited<ReturnType<typeof prepareExport>>) {
     const geo = r.geo!;
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
+    const ex = prepared ?? await prepareExport(r, u, frame);
+    const options = { ...exportWrite, overwrite: uhas(u, '--overwrite') };
+    const renders = rendersByUnit.get(u)!;
+    if (ex && renders.length) checkExportFiles([ex.res], options);
     // Receipts for the viewer's saved files, only for files inside the package's exports/ (exportsFolderFor): a run whose
     // output goes elsewhere leaves no exports/ folder behind (the viewer lists that folder's files without receipts too).
-    const exportsDir = exportsFolderFor(file);
     const record = (paths: string[], format: string) => {
       const inside = paths.every((p) => { const rel = path.relative(exportsDir, path.resolve(p)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); });
       if (inside) new ArtifactStore(exportsDir).record(paths, { graph: graphName(file), node: r.target, format });
     };
-    for (const { out, get, has } of rendersByUnit.get(u)!) {
+    for (const { out, get, has } of renders) {
       const ro = renderFlags(get, has);
       const v = get('--views');
       let views = v === undefined || v === 'quad' ? undefined : parseViews(v);
@@ -565,19 +589,10 @@ async function cook() {
       record([p], 'png');
       console.log(`rendered ${p} (${img.width}x${img.height})${img.notes.length ? ' — ' + img.notes.join('; ') : ''}`);
     }
-    const ex = uopt(u, '--export');
     if (ex) {
-      const p = at(ex);
-      const raw = (uopt(u, '--format') ?? exportFormatFromPath(ex)).toLowerCase();
-      const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
-      if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
-      // the export tool's options (the MCP export tool and export targets use the same names and code)
-      const a = exportArgs(u);
-      const x = await forExport(r);
-      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file), version: TOPOTOPO_VERSION, engine: engineSha256() });
-      const res = await serializeExport(x.geo!, fmt, p, a, engine.host, source);
+      const { fmt, res } = ex;
       for (const w of res.warnings) console.warn(`warning: ${w}`);
-      writeExportFiles(res.files);
+      writeExportFiles(res, options);
       if (res.files.length) record(res.files.map((f) => f.path), fmt);
       const files = res.files.filter((f) => f.path !== res.sourceManifest);
       console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${res.summary}` : ''}${res.sourceFile ? `; source: ${res.sourceFile}` : ''}`);
@@ -595,15 +610,21 @@ async function cook() {
   }
 
   if (framesArg) {
-    const range = parseFrames(framesArg);
+    const range = parseFrames(framesArg), unit = units[0];
+    // A later frame can add files of its own. Check the serialized files of every frame before writing the first.
+    const preflight = uopt(unit, '--export') && !uhas(unit, '--overwrite');
+    const pending: { report: CookReport; frame: number; prepared: NonNullable<Awaited<ReturnType<typeof prepareExport>>> }[] = [];
     const res = await engine.cookFrames(graph, range, async (r, f) => {
       report(r);
       if (!r.ok || !r.geo) return;
       const cooked = [...r.results.values()].filter((n) => !n.cached && !n.error).length;
       console.log(`frame ${f}: ${r.target} in ${r.ms.toFixed(0)} ms (${cooked} node(s) cooked) — ${r.geo.numPoints} points, ${r.geo.numPrims} prims`);
       if (inspectOf(units[0])) console.log(await inspectText(r, units[0]));
-      await writeOutputs(r, units[0], f);
+      if (preflight) pending.push({ report: r, frame: f, prepared: (await prepareExport(r, unit, f))! });
+      else await writeOutputs(r, unit, f);
     }, { target: units[0].target, fps });
+    checkExportFiles(pending.map((p) => p.prepared.res), exportWrite);
+    for (const p of pending) await writeOutputs(p.report, unit, p.frame, p.prepared);
     console.log(`cooked ${file} frames ${range.start}-${range.end}${range.step !== 1 ? `:${range.step}` : ''}: ${res.frames - res.failed.length}/${res.frames} ok`);
     if (res.failed.length) fail(`failed frames: ${res.failed.join(', ')}`);
   } else {
@@ -663,7 +684,7 @@ async function cook() {
       const kb = x.files.reduce((n, f) => n + f.bytes.byteLength, 0) / 1024;
       console.log(`${at}, ${outputKind(r.geo!).published ?? 'nothing'}: ${((performance.now() - t) / 1000).toFixed(1)} s, ${kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`} → ${dest} — ${x.summary}${x.sourceFile ? `; source: ${rel(x.sourceFile)}` : ''}`);
     }
-    writeTargets(prepared, exportsDir);
+    writeTargets(prepared, exportsDir, { ...exportWrite, overwrite: argv.includes('--overwrite') });
     console.log(`exported ${prepared.length} of ${targets.length} output${targets.length === 1 ? '' : 's'} into ${rel(exportsDir)} in ${((performance.now() - t0) / 1000).toFixed(1)} s`
       + `${unchanged.length ? `; ${unchanged.length} unchanged since their last export, kept (--force exports them too)` : ''}`);
     const skipped = published.filter((p) => !p.target).map((p) => p.label);

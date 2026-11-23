@@ -10,9 +10,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import type { Geometry } from '../core/geometry.ts';
+import { sha256Hex } from '../core/sha256.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
-import type { ExportFile } from '../io/files.ts';
+import type { ExportFile, ExportFiles } from '../io/files.ts';
 import { exportSource, sameSource, withExportOptions } from '../io/source.ts';
 import { prefixGone, resolvedExportOptions } from '../io/targets.ts';
 import type { ExportSource } from '../io/source.ts';
@@ -101,11 +102,59 @@ export function insideRoot(root: string, p: string): string {
   return abs;
 }
 
-/**
- * Write files, each through a .part renamed into place; with `root`, each must stay inside it. A shared map (named by
- * its content) already there with its size is left as it is. Returns the count.
- */
-export function writeExportFiles(files: ExportFile[], root?: string): number {
+type RecordedExport = Pick<ExportFiles, 'files' | 'sourceFile'>;
+interface ExportRecord { source: ExportSource; files?: unknown; sha256?: Record<string, unknown> }
+interface WriteOptions { overwrite?: boolean; packageDir?: string; hint?: string }
+
+function readExportRecord(file: string | undefined): ExportRecord | null {
+  if (!file) return null;
+  try {
+    const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return typeof record?.source?.graph_sha256 === 'string' ? record : null;
+  } catch { return null; }
+}
+
+function matchesHash(file: string, hash: unknown): boolean {
+  if (typeof hash !== 'string') return false;
+  try { return sha256Hex(fs.readFileSync(file)) === hash; } catch { return false; }
+}
+
+export class ExportConflict extends Error {
+  readonly status = 409;
+  readonly changed: string[];
+
+  constructor(conflicts: Map<string, string>, hint: string) {
+    super([...conflicts.values(), hint].join('\n'));
+    this.changed = [...conflicts.keys()];
+  }
+}
+
+/** Refuse every occupied path whose record cannot vouch for it, before writing any of the exports. */
+export function checkExportFiles(exports: RecordedExport[], { overwrite, packageDir, hint = 'Choose another export path or allow this export to replace the file.' }: WriteOptions = {}): void {
+  if (overwrite) return;
+  const conflicts = new Map<string, string>();
+  for (const { files, sourceFile } of exports) {
+    const at = sourceFile && path.resolve(sourceFile);
+    const record = readExportRecord(at);
+    for (const f of files) {
+      const abs = path.resolve(f.path);
+      if (f.shared || abs === at || !fs.lstatSync(abs, { throwIfNoEntry: false })) continue;
+      const name = at ? path.relative(path.dirname(at), abs).split(path.sep).join('/') : '';
+      const listed = record?.sha256 && Object.hasOwn(record.sha256, name);
+      if (listed && matchesHash(abs, record!.sha256![name])) continue;
+      // a record written before records held hashes: its file list vouches for the files it names, and a format's own
+      // sidecar, which lists none, for every file of its export
+      if (record && !('sha256' in record) && (!Array.isArray(record.files) || record.files.includes(name))) continue;
+      const rel = packageDir ? path.relative(packageDir, abs) : '';
+      const display = rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : abs;
+      conflicts.set(display, `${display} ${listed ? 'was changed after TopoTopo wrote it' : 'was not written by TopoTopo'}`);
+    }
+  }
+  if (conflicts.size) throw new ExportConflict(conflicts, hint);
+}
+
+/** Write through .part files. A shared map already there with its size is left as it is. */
+function writeFiles(files: ExportFile[], root?: string): number {
   let written = 0;
   try {
     for (const f of files) {
@@ -118,6 +167,11 @@ export function writeExportFiles(files: ExportFile[], root?: string): number {
     }
   } catch (e) { throw new Error(`export stopped after writing ${written} of ${files.length} files: ${(e as Error).message}`); }
   return written;
+}
+
+export function writeExportFiles(output: RecordedExport, options: WriteOptions = {}): number {
+  checkExportFiles([output], options);
+  return writeFiles(output.files);
 }
 
 /** A published output serialized to its target, ready to write. */
@@ -182,10 +236,10 @@ export function unchangedTarget(graph: string, p: PublishedOutput & { target: Re
   // the record: the file among them that holds a source block (<file>.source.json or the format's sidecar)
   for (const f of last.files) {
     if (!/\.json$/i.test(f)) continue;
-    try {
-      const prev = JSON.parse(fs.readFileSync(f, 'utf8'))?.source;
-      if (prev && typeof prev.graph_sha256 === 'string') return sameSource(prev, now);
-    } catch { /* not a record */ }
+    const record = readExportRecord(f);
+    if (!record) continue;
+    return sameSource(record.source, now) && (!('sha256' in record) || !!record.sha256 && typeof record.sha256 === 'object' && !Array.isArray(record.sha256)
+      && Object.entries(record.sha256).every(([name, hash]) => matchesHash(path.resolve(path.dirname(f), name), hash)));
   }
   return false;
 }
@@ -194,7 +248,7 @@ export function unchangedTarget(graph: string, p: PublishedOutput & { target: Re
  * Write prepared targets and record the receipts of those inside `exportsDir` (the viewer lists that folder); two
  * targets writing one file are refused before any write.
  */
-export function writeTargets(prepared: PreparedTarget[], exportsDir: string): number {
+export function writeTargets(prepared: PreparedTarget[], exportsDir: string, options: WriteOptions = {}): number {
   const owner = new Map<string, PreparedTarget>(), shared = new Set<string>();
   for (const p of prepared) for (const f of p.files) {
     const key = path.resolve(f.path).toLowerCase(), other = owner.get(key);
@@ -204,11 +258,12 @@ export function writeTargets(prepared: PreparedTarget[], exportsDir: string): nu
     if (other && other !== p) throw Object.assign(new Error(`"${other.label}" (${other.graph}) and "${p.label}" (${p.graph}) both write ${path.relative(p.root, f.path)}: give one a different export path`), { status: 409 });
     owner.set(key, p);
   }
+  checkExportFiles(prepared, { packageDir: path.dirname(exportsDir), ...options });
   const store = new ArtifactStore(exportsDir);
   let written = 0;
   for (const p of prepared) {
     const files = p.files.filter((f) => { if (!f.shared) return true; const key = path.resolve(f.path).toLowerCase(); if (shared.has(key)) return false; shared.add(key); return true; });
-    written += writeExportFiles(files, p.root);
+    written += writeFiles(files, p.root);
     if (path.resolve(p.root) !== path.resolve(exportsDir)) continue;
     store.record(p.files.map((f) => f.path), { label: p.target.path, graph: p.graph, node: p.node, format: p.target.format, output: p.output ?? '' });
   }

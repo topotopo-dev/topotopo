@@ -223,21 +223,18 @@ export function replayArgs(s: ExportSource, exportPath: string, flags: (o: Recor
   ];
 }
 
-/**
- * A standalone source manifest: the files of the export (relative to the manifest's folder, "/" separated) and the
- * source block.
- */
-export function sourceManifestBytes(source: ExportSource, manifestPath: string, files: string[]): Uint8Array {
-  const dir = dirOf(manifestPath).replace(/\\/g, '/');
-  // a file beside or below the manifest by its path from there; one elsewhere (a shared maps folder) climbs with ".."
-  const rel = (p: string) => {
-    const q = p.replace(/\\/g, '/');
-    if (!dir) return q;
-    if (q.startsWith(dir + '/')) return q.slice(dir.length + 1);
-    const a = dir.split('/'), b = q.split('/');
-    let i = 0;
-    while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
-    return i ? [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/') : b[b.length - 1];
-  };
-  return new TextEncoder().encode(JSON.stringify({ format: 'topotopo-export-source', version: 1, files: files.map(rel), source }, null, 2) + '\n');
+/** A file's name in the export record, relative to the record with "/" separators. Shared maps may climb with "..". */
+export function exportRecordName(recordPath: string, file: string): string {
+  const dir = dirOf(recordPath).replace(/\\/g, '/'), p = file.replace(/\\/g, '/');
+  if (!dir) return p;
+  if (p.startsWith(dir + '/')) return p.slice(dir.length + 1);
+  const a = dir.split('/'), b = p.split('/');
+  let i = 0;
+  while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+  return i ? [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/') : b[b.length - 1];
+}
+
+/** A standalone source manifest: the files, their hashes by relative name, and the source block. */
+export function sourceManifestBytes(source: ExportSource, manifestPath: string, files: string[], sha256: Record<string, string>): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({ format: 'topotopo-export-source', version: 1, files: files.map((f) => exportRecordName(manifestPath, f)), source, sha256 }, null, 2) + '\n');
 }

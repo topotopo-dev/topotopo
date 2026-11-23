@@ -851,6 +851,12 @@ section('CLI --frames');
   check(/frame 3: out/.test(p.stdout) && /3\/3 ok/.test(p.stdout), 'per-frame log lines');
   const q = run('--frames', '2-4:2', '--export', path.join(out, 'step_{frame}.json'));
   check(q.status === 0 && fs.existsSync(path.join(out, 'step_2.json')) && fs.existsSync(path.join(out, 'step_4.json')) && !fs.existsSync(path.join(out, 'step_3.json')), '{frame} pattern with a step');
+  const occupied = path.join(out, 'blocked_2.obj');
+  fs.writeFileSync(occupied, 'saved by hand');
+  const blocked = run('--frames', '1-2', '--export', path.join(out, 'blocked_{frame}.obj'));
+  check(blocked.status === 1 && blocked.stderr.includes(`${occupied} was not written by TopoTopo`) && blocked.stderr.includes('--overwrite')
+    && fs.readFileSync(occupied, 'utf8') === 'saved by hand' && !fs.existsSync(path.join(out, 'blocked_1.obj'))
+    && !fs.existsSync(occupied + '.source.json'), 'an occupied later frame refuses the export before the first frame is written');
   const single = run('--frame', '5');
   check(single.status === 0 && /at frame 5/.test(single.stdout), '--frame N');
   const badRange = run('--frames', '5-1');
@@ -928,6 +934,14 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   check(again.status === 0 && sha(path.join(dir, 'b', 'land.glb')) === sha(path.join(dir, 'a', 'land.glb'))
     && fs.readFileSync(path.join(dir, 'b', 'land.glb.source.json'), 'utf8') === fs.readFileSync(manifestFile, 'utf8'),
     `replaying the manifest (${replay.join(' ')}) writes the same GLB and a byte-identical manifest`);
+  const dest = path.join(dir, 'a', 'land.glb'), samePath = replayArgs(s, dest, exportOptionFlags);
+  const lastManifest = fs.readFileSync(manifestFile);
+  check(cli(g, ...samePath).status === 0 && fs.readFileSync(dest).equals(glb), '--export can write its unchanged file again');
+  fs.writeFileSync(dest, 'edited by hand');
+  const refused = cli(g, ...samePath);
+  check(refused.status === 1 && refused.stderr.includes('a/land.glb was changed after TopoTopo wrote it') && refused.stderr.includes('pass --overwrite')
+    && fs.readFileSync(dest, 'utf8') === 'edited by hand' && fs.readFileSync(manifestFile).equals(lastManifest), '--export refuses an edited file without touching it or the manifest');
+  check(cli(g, ...samePath, '--overwrite').status === 0 && fs.readFileSync(dest).equals(glb), '--overwrite replaces the edited file');
   const plain = cli(g, '--output', 'mesh', '--export', path.join(dir, 'c', 'land.glb'));
   const plainSource = JSON.parse(fs.readFileSync(path.join(dir, 'c', 'land.glb.source.json'), 'utf8')).source;
   check(plain.status === 0 && sha(path.join(dir, 'c', 'land.glb')) !== sha(path.join(dir, 'a', 'land.glb')) && plainSource.graph_sha256 !== s.graph_sha256 && plainSource.vars.relief === 2,
