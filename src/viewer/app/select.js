@@ -6,6 +6,9 @@ import * as THREE from 'three';
 import { parseId, pieceId } from './selection.js';
 import { AXIS_VIEWS } from './camera.js';
 import { pickWinner, boxTakes, targetKind } from './pointer.js';
+import { nearestOnScreen, SNAP_PX } from './snap.js';
+
+const V3 = (p) => new THREE.Vector3(...p);
 
 export function createSelect(ctx) {
   const S = { press: null, boxEl: document.getElementById('boxsel'), hoverAt: null, hoverQueued: false };
@@ -42,22 +45,49 @@ export function createSelect(ctx) {
     const c = ctx.views.cam(slot), f = c.name === 'persp' ? [0, -1, 0] : AXIS_VIEWS[c.name].f;
     return new THREE.Plane(new THREE.Vector3(Math.abs(f[0]), Math.abs(f[1]), Math.abs(f[2])), 0);
   };
-  /**
-   * Where a guide lands under a viewport point: the surface of the output or of a reference layer (not pictures,
-   * not the markers file), else the slot's construction plane. {point, surface} or null. `layersOnly`: the reference
-   * layers alone (a dragged guide must not land on what the graph builds from it).
-   */
-  S.surfacePoint = (slot, x, y, { layersOnly = false } = {}) => {
-    const rc = ctx.views.ray(slot, x, y);
+  const surfaceHit = (rc, linePx, layersOnly = false) => {
     let best = null;
     for (const e of meshEntries()) {
       if (e.surface === false || e.mesh.bboxMode || (layersOnly && e.kind !== 'layer')) continue;
-      const h = e.mesh.pick(rc, 0);
+      const h = e.mesh.pick(rc, linePx, false);
       if (h && h.dist < (best?.dist ?? Infinity)) best = h;
     }
+    return best;
+  };
+  /**
+   * Where a guide lands under a viewport point: the surface of the output or of a reference layer (not pictures,
+   * not the markers file), else the slot's construction plane. {point, surface} or null. `layersOnly`: the reference
+   * layers alone. `planeOnly`: the construction plane alone, with its two axes.
+   */
+  S.surfacePoint = (slot, x, y, { layersOnly = false, planeOnly = false } = {}) => {
+    const rc = ctx.views.ray(slot, x, y);
+    if (planeOnly) {
+      const plane = planeOf(slot), p = rc.ray.intersectPlane(plane, new THREE.Vector3());
+      const axes = plane.normal.x ? 'yz' : plane.normal.y ? 'xz' : 'xy';
+      return p ? { point: p, surface: false, axes } : null;
+    }
+    const best = surfaceHit(rc, 0, layersOnly);
     if (best) return { point: best.point, surface: true };
     const p = rc.ray.intersectPlane(planeOf(slot), new THREE.Vector3());
     return p ? { point: p, surface: false } : null;
+  };
+  S.snapAt = (slot, x, y, mode, exclude) => {
+    if (mode !== 'point' && mode !== 'surface') return null;
+    const rc = ctx.views.ray(slot, x, y), scale = ctx.views.worldPerPixel(slot);
+    if (mode === 'point') {
+      const cam = ctx.views.cam(slot);
+      const pixel = cam.ortho ? () => scale : (depth) => scale * depth / cam.dist;
+      const guide = nearestOnScreen(ctx.guides.snapPoints(exclude), (p) => ctx.views.project(slot, V3(p), rc.camera), x, y);
+      let point = guide?.point ?? null, distance = guide?.d ?? SNAP_PX;
+      for (const e of meshEntries()) {
+        if (e.surface === false) continue;
+        const hit = e.mesh.nearestVertex(rc, pixel, distance);
+        if (hit && (!point || hit.away < distance)) { point = hit.point; distance = hit.away; }
+      }
+      return point ? { point } : null;
+    }
+    const hit = surfaceHit(rc, scale * 6);
+    return hit ? { point: hit.point.toArray() } : null;
   };
   /** The visible surface under the cursor for the camera's navigation pivot and wheel zoom. */
   S.navigationPoint = (slot, x, y) => {

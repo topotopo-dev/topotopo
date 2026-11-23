@@ -19,6 +19,7 @@ import * as units from '../src/viewer/app/units.js';
 import * as sel from '../src/viewer/app/selection.js';
 import * as pt from '../src/viewer/app/pointer.js';
 import * as tr from '../src/viewer/app/transform.js';
+import * as snap from '../src/viewer/app/snap.js';
 import { createUndo } from '../src/viewer/app/undo.js';
 import { createGuides } from '../src/viewer/app/guides.js';
 import { api, coalesce } from '../src/viewer/app/api.js';
@@ -51,7 +52,7 @@ const throws = (f: () => unknown) => { try { f(); return null; } catch (e: any) 
 
 section('keys and mouse (section 9)');
 {
-  check(km.ROWS.length === 20 + pt.SELECTION_ROWS.length
+  check(km.ROWS.length === 21 + pt.SELECTION_ROWS.length
     && km.ROWS.every((r: any) => typeof r.label === 'string' && r.label.length > 0 && typeof r.text === 'string' && r.text.length > 0),
     'every row has a label and binding text');
   const seen = new Set<string>();
@@ -950,6 +951,138 @@ section('selection model: CVs, boxes and the guides');
     && km.ROWS.some((r) => r.label === 'scale tool (handles on the selection)' && r.text === 'R'), 'E and R choose rotate and scale and are listed in the key table');
   check(tb.TOOL_BUTTONS.map((button) => tb.buttonTitle(button)).join() === 'Select (Q),Move (W),Rotate (E),Scale (R),Add a guide',
     'the tool strip lists Select, Move, Rotate, Scale and Add in order');
+
+  section('snapping');
+  check(snap.snapMode({ on: false, target: 'grid', held: 'point' }) === 'point'
+    && snap.snapMode({ on: true, target: 'surface', held: null }) === 'surface'
+    && snap.snapMode({ on: false, target: 'grid', held: null }) === null, 'the held key takes priority over the saved snap state');
+  check(snap.snapTo(1.26, 0.5) === 1.5 && Object.is(snap.snapTo(-0.2, 0.5), 0)
+    && snap.snapTo(0.123, 0.01) === 0.12, 'grid steps round to millimetres and zero stays positive');
+  check(snap.gridPoint([1.26, 0.7, -2.6], 0.5, 'xz').join() === '1.5,0.7,-2.5', 'grid points snap only in the named axes');
+  check(snap.gridMove('x', [0.3, 1, 2], [1.1, 0, 0], 0.5).join() === '1.2,0,0'
+    && snap.gridMove('xz', [0.3, 1, 2.3], [1.1, 0, -0.95], 0.5).join() === '1.2,0,-0.8',
+    'one- and two-axis grid moves land the pivot on grid lines');
+  check(snap.landMove('xy', [0, 0, 0], [3, 4, 5]).join() === '3,4,0'
+    && snap.landMove('z', [1, 1, 1], [9, 9, 4]).join() === '0,0,3', 'target moves use only the handle axes');
+  check(snap.snapTurn(52) === 45 && Object.is(snap.snapTurn(-7), 0) && snap.snapTurn(188) === 195
+    && snap.snapTurn(-100) === -105 && snap.snapTurn(7.5) === 15, 'turns snap to 15 degrees without wrapping');
+  check(snap.snapScale(1.26) === 1.3 && snap.snapScale(0.02) === 0.1 && snap.snapScale(2.04) === 2,
+    'scale snaps in tenths with a minimum of one tenth');
+
+  const candidates = [8, -5, 12].map((x) => ({ point: [x, 0, 0] }));
+  const screen = ([x, y, z]: number[]) => z < 0 ? null : { x, y };
+  const nearest = snap.nearestOnScreen(candidates, screen, 0, 0);
+  check(nearest?.point === candidates[1].point && nearest.d === 5
+    && snap.nearestOnScreen(candidates, screen, 0, 13) === null, 'the nearest point must be inside the pixel radius');
+  const tied = snap.nearestOnScreen([{ point: [0, 0, -1] }, ...candidates], screen, 10, 0);
+  check(tied?.point === candidates[0].point && tied.d === 2, 'a missing projection is skipped and the first point wins a tie');
+  check(snap.snapText('grid', 0.1) === 'snap to grid 0.1 m' && snap.snapText('point', 1) === 'snap to point'
+    && snap.snapText('surface', 1) === 'snap to surface' && snap.snapText(null, 1) === '', 'the snap hint names the active target');
+
+  const vertexRay = { origin: [0, 0, 0], direction: [0, 0, 1] }, pixel = () => 0.01;
+  const vertices = [0.2, 0, 5, 0.08, 0, 5, 1.08, 0, 5, 1.08, 1, 5, 0.08, 1, 5];
+  const vertex = snap.nearestVertexOnRay(vertices, null, vertexRay, pixel);
+  check(vertex?.point.join() === '0.08,0,5' && vertex.depth === 5 && vertex.away === 8
+    && snap.nearestVertexOnRay([0.13, 0, 5], null, vertexRay, pixel) === null,
+    'a vertex must be inside the pixel radius and the nearest wins');
+  const raised = vertices.map((v, i) => i % 3 === 2 ? v + 5 : v);
+  const matrix = new THREE.Matrix4().makeTranslation(0, 0, -5).elements;
+  check(JSON.stringify(snap.nearestVertexOnRay(raised, matrix, vertexRay, pixel)) === JSON.stringify(vertex)
+    && snap.nearestVertexOnRay([0, 0, -5], null, vertexRay, pixel) === null,
+    'vertex snapping uses world coordinates and skips points behind the ray origin');
+
+  const snapEvents = ['x', 'c', 'v'].map((key) => ({ key, code: `Key${key.toUpperCase()}` }));
+  check(snapEvents.map(km.heldTarget).join() === 'grid,surface,point' && km.heldKey('point') === 'V'
+    && snapEvents.every((e) => km.matchKey(e) === null), 'the three held keys are separate from key actions');
+  check(snapEvents.every((e) => ['ctrlKey', 'altKey', 'shiftKey', 'metaKey'].every((key) => km.heldTarget({ ...e, [key]: true }) === null))
+    && km.overlayRows().some((r) => r.label === 'snap to grid / surface or curve / point, while held' && r.text === 'X / C / V'),
+    'only bare keys hold a target and the overlay explains them');
+  check(tb.VIEW_BUTTONS.map(({ id }) => id).join() === 'view-camera,view-shading,step,view-snap,view-frame,quad',
+    'the snap button follows the grid step in the view strip');
+  const [snapToggle, separator, ...snapRadios] = tb.snapItems({ on: true, target: 'point' });
+  check(snapToggle.label === 'Snapping' && snapToggle.toggle === 'snap' && snapToggle.check && snapToggle.checked && separator.separator
+    && snapRadios.every((item) => item.radio) && snapRadios.filter((item) => item.checked).map((item) => item.label).join() === 'Point'
+    && snapRadios.map(({ label, key }) => `${label} ${key}`).join() === 'Grid X,Point V,Surface or curve C',
+    'the snap menu has a toggle and three exclusive targets with their held keys');
+
+  let mode = 'grid', target: number[] | null = null, marked: number[] | null = null, excluded: string[] = [];
+  ctx.snap = {
+    mode: () => mode, step: () => 0.5, text: () => snap.snapText(mode, 0.5),
+    at: (_slot: number, _x: number, _y: number, _mode: string, ids = []) => { excluded = ids; return target && { point: target }; },
+    mark: (_slot: number, point: number[] | null) => { marked = point; },
+  };
+  ctx.tool = 'move';
+  guides.gizmoStart({ id: 'x' }, ray(825), 90, 0);
+  guides.gizmoMove(ray(841), 16, 0, 841, 500);
+  check(guides.byId('n').points[0].join() === '34,0,0' && guides.hintState().note === 'snap to grid 0.5 m',
+    'the X handle snaps the null to the grid and shows the grid step');
+  guides.gizmoEnd(true);
+
+  ctx.tool = 'rotate';
+  guides.gizmoStart(pressRing, ringStart, 90, 0);
+  guides.gizmoMove(ctx.views.ray(0, 895, 550).ray, 70, -40, 895, 550);
+  check(guides.gizmoDrag.value === 60 && guides.hintState().note === 'snap to grid 0.5 m', 'the ring drag uses a 15 degree step');
+  guides.gizmoEnd(true);
+  ctx.tool = 'scale';
+  guides.gizmoStart(pressScale, ray(825), 90, 0);
+  guides.gizmoMove(ray(848), 23, -23, 848, 477);
+  check(guides.gizmoDrag.value === 1.5 && guides.byId('n').radius === 15, 'the centre handle uses a scale step of one tenth');
+  guides.gizmoEnd(true);
+
+  ctx.tool = 'move';
+  mode = 'point';
+  target = [4, 0, 0];
+  guides.gizmoStart({ id: 'x' }, ray(825), 90, 0);
+  guides.gizmoMove(ray(841), 16, 0, 841, 500);
+  check(guides.byId('n').points[0].join() === '4,0,0' && excluded.join() === 'n' && marked === target,
+    'the X handle lands on and marks a point from outside the moved guides');
+  guides.gizmoEnd(true);
+  target = [4, 9, 6];
+  guides.gizmoStart({ id: 'xz' }, ray(825), 90, 0);
+  guides.gizmoMove(ray(841), 16, 0, 841, 500);
+  check(guides.byId('n').points[0].join() === '4,0,6', 'the plane square lands on the point along its two axes');
+  guides.gizmoEnd(true);
+  target = null;
+  guides.gizmoStart({ id: 'x' }, ray(825), 90, 0);
+  guides.gizmoMove(ray(841), 16, 0, 841, 500);
+  check(guides.byId('n').points[0].join() === '34.1,0,0' && marked === null, 'without a point target, the handle follows the free ray');
+  guides.gizmoEnd(true);
+
+  ctx.views.cam = () => ({ name: 'top' });
+  ctx.surfacePoint = (_slot: number, x: number, y: number, { planeOnly = false } = {}) => {
+    const p = new THREE.Vector3((x - 500) / 10, planeOnly ? 0 : 9, (y - 500) / 10);
+    return planeOnly ? { point: p, surface: false, axes: 'xz' } : { point: p, surface: true };
+  };
+  const elevated = { ...curve, points: [[1, 1.25, 0], [3, 1.25, 4]] };
+  guides.list = [guides.byId('n'), elevated];
+  mode = 'grid';
+  guides.dragStart(0, 510, 500, { id: 'c', part: 'point', k: 0, at: elevated.points[0] });
+  guides.dragMove(0, 512.6, 515.1);
+  check(guides.byId('c').points[0].join() === '1.5,1.25,1.5' && guides.hintState().note === 'snap to grid 0.5 m',
+    'a top-view CV drag snaps X and Z in its own plane despite a reference layer under the pointer');
+  guides.dragEnd(true);
+
+  mode = 'point';
+  target = [4, 2, 6];
+  guides.dragStart(0, 825, 500, { id: 'n', part: 'point', k: 0, at: guides.byId('n').points[0] });
+  guides.dragMove(0, 840, 500);
+  check(guides.byId('n').points[0].join() === target.join() && excluded.join() === 'n', 'a free null drag takes all three axes from the snap target');
+  guides.dragEnd(true);
+
+  mode = 'grid';
+  const click = (x: number, y: number) => { guides.pointerDown(0, x, y); guides.pointerUp(0, x, y); };
+  guides.startAt('site', null);
+  click(512.6, 515.1);
+  check(guides.list.at(-1).kind === 'site' && guides.list.at(-1).points[0].join() === '1.5,0,1.5',
+    'placing a null with grid snap uses the construction plane through a surface hit');
+  guides.startAt('path', null);
+  click(512.6, 515.1);
+  guides.pointerMove(0, 525.1, 532.6);
+  check(guides.cursor?.toArray().join() === '2.5,0,3.5' && guides.hintState().note === 'snap to grid 0.5 m',
+    'a curve shows the snapped rubber-band point before the click');
+  click(525.1, 532.6);
+  check(guides.draft?.points[1].join() === '2.5,0,3.5', 'the placement click lands at the rubber-band point');
+  guides.key('cancel');
 }
 
 section('undo stack');

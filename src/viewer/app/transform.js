@@ -98,7 +98,7 @@ export function transformTargets(list, items, hidden) {
   const apply = (edit) => list.map((m) => touched.has(m) ? edit(m, touched.get(m)) : m);
   const pointsOf = (m, pieces, edit) => m.points.map((p, k) => !pieces || pieces.has(k) ? edit(p) : p);
   return {
-    pivot, guides, cvs, name: lone?.name ?? null, rings, scales,
+    pivot, guides, cvs, name: lone?.name ?? null, rings, scales, ids: [...touched.keys()].map((m) => m.id),
     frame: lone?.kind === 'volume' ? rotateOf(lone)[1] : 0,
     move: (d) => apply((m, pieces) => pieces === null ? translateMarker(m, d)
       : { ...m, points: pointsOf(m, pieces, (p) => p.map((v, i) => rounded(v + d[i]))) }),

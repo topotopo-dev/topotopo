@@ -10,6 +10,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { weld, pieces, pieceBounds, edgeClasses, subsetIndex, edgePairs, EDGE_COLORS } from './mesh.js';
 import { partName } from './output-info.js';
+import { nearestVertexOnRay } from './snap.js';
 
 export const COLORS = { sel: '#f0a030', wire: '#a9aeb5', wireOver: '#101113', box: '#a9aeb5', points: '#c9cdd2', line: '#c9cdd2', guide: '#7fb4c1' };
 export const DISPLAY_MODES = [
@@ -262,7 +263,7 @@ export class MeshObject {
   }
 
   /** The nearest piece the world ray `rc` (a Raycaster) hits: {piece, dist, point} or null. */
-  pick(rc, linePx = 0) {
+  pick(rc, linePx = 0, includePoints = true) {
     if (!this.root.visible) return null;
     this.analyse();
     this.root.updateMatrixWorld(true);
@@ -307,7 +308,7 @@ export class MeshObject {
           }
           if (near < Infinity) { const p = local.at(near, new THREE.Vector3()).applyMatrix4(m); consider(part.offset + k, p.distanceTo(rc.ray.origin), p); }
         }
-      } else if (linePx > 0 && o.visible) {
+      } else if (linePx > 0 && o.visible && (includePoints || part.type !== 'points')) {
         rc.params.Line.threshold = linePx; rc.params.Points.threshold = linePx;
         const hits = rc.intersectObject(o, false);
         if (!hits.length) continue;
@@ -315,6 +316,28 @@ export class MeshObject {
         const local = part.type === 'points' ? 0 : Math.max(0, part.a.pc.vert[vi] ?? 0);
         consider(part.offset + local, h.distance, h.point.clone());
       }
+    }
+    return best;
+  }
+
+  nearestVertex(rc, pixel, px) {
+    if (!this.root.visible || this.bboxMode) return null;
+    this.analyse();
+    this.root.updateMatrixWorld(true);
+    const ray = { origin: rc.ray.origin.toArray(), direction: rc.ray.direction.toArray() };
+    let best = null;
+    const sphere = new THREE.Sphere();
+    for (const part of this.parts) {
+      if (part.type === 'inst') continue;
+      // skip a part the ray passes too far from to hold a vertex within reach
+      const g = part.obj.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      sphere.copy(g.boundingSphere).applyMatrix4(part.obj.matrixWorld);
+      const back = sphere.center.clone().sub(rc.ray.origin).dot(rc.ray.direction) + sphere.radius;
+      if (!(back > 0) || rc.ray.distanceToPoint(sphere.center) > sphere.radius + (best?.away ?? px) * pixel(back)) continue;
+      const { P } = part.a ??= { P: positionsOf(g) };
+      const hit = nearestVertexOnRay(P, part.obj.matrixWorld.elements, ray, pixel, best?.away ?? px);
+      if (hit && (!best || hit.away < best.away)) best = hit;
     }
     return best;
   }

@@ -1,6 +1,7 @@
 // The editor's buttons and menu items, with shortcuts from the keymap.
 import { CAMERA_NAMES, SHADINGS } from './camera.js';
-import { keyOf } from './keymap.js';
+import { heldKey, keyOf } from './keymap.js';
+import { SNAP_TARGETS } from './snap.js';
 
 export const TOP_BUTTONS = [
   { id: 'undo', icon: 'undo', label: 'Undo', action: 'undo' },
@@ -20,6 +21,7 @@ export const VIEW_BUTTONS = [
   { id: 'view-camera', icon: 'camera', label: 'Camera', menu: 'camera' },
   { id: 'view-shading', icon: 'shading', label: 'Shading', menu: 'shading' },
   { id: 'step', readout: true, label: 'Grid step of the current view' },
+  { id: 'view-snap', icon: 'snap', label: 'Snap', menu: 'snap' },
   { id: 'view-frame', icon: 'frame', label: 'Frame', action: 'frameSelection' },
   { id: 'quad', icon: 'quad', label: 'Single / quad view', action: 'quad' },
 ];
@@ -69,6 +71,17 @@ export function shadingItems({ shading, edgeCheck }) {
     }),
     { separator: true },
     { label: 'Edge check', check: true, checked: edgeCheck, toggle: 'edgeCheck' },
+  ];
+}
+
+export function snapItems({ on, target }) {
+  const labels = { grid: 'Grid', point: 'Point', surface: 'Surface or curve' };
+  return [
+    { label: 'Snapping', toggle: 'snap', check: true, checked: on },
+    { separator: true },
+    ...SNAP_TARGETS.map((snapTarget) => ({
+      label: labels[snapTarget], snapTarget, radio: true, checked: target === snapTarget, key: heldKey(snapTarget),
+    })),
   ];
 }
 
