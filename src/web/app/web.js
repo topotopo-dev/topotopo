@@ -136,7 +136,10 @@ if (page === 'folder') {
       try {
         const res = await fetch(b.dataset.post, { method: 'POST' });
         const j = await res.json().catch(() => ({}));
-        if (/\/bake$/.test(b.dataset.post)) bakeWord(j.ok ? 'Baking…' : `Could not bake: ${j.error ?? res.status}`);
+        if (/\/bake$/.test(b.dataset.post) && !j.ok) {
+          const el = document.getElementById('bakenow');
+          el.textContent = `Could not bake: ${j.error ?? res.status}`;
+        }
       } finally { setTimeout(() => { b.disabled = false; }, 800); }
     });
   }
@@ -290,9 +293,61 @@ if (page === 'editor' && data.starting) {
   setTimeout(waitForEditor, 500);
 }
 
-// a package's bake in a word: beside its Re-bake button, and in its bake line below the divider
-function bakeWord(text) {
-  for (const id of ['bakenow', 'bake']) { const el = document.getElementById(id); if (el) el.textContent = text; }
+const previews = page === 'previews' ? document.querySelector('.previews') : null;
+const previewRows = document.getElementById('preview-rows');
+const previewSummary = document.getElementById('preview-summary');
+const previewPause = document.getElementById('preview-pause');
+let previewRequest = false;
+const previewClock = () => {
+  const el = previewRows.querySelector('[data-started]');
+  if (!el) return;
+  const seconds = Math.max(0, Math.floor((Date.now() - Number(el.dataset.started)) / 1000));
+  const text = data.words.making.replace('{seconds}', seconds);
+  if (el.textContent !== text) el.textContent = text;
+};
+if (previews) {
+  setInterval(previewClock, 250);
+  previews.addEventListener('click', async (e) => {
+    const button = e.target.closest('button[data-action]');
+    if (!button || previewRequest) return;
+    const error = document.getElementById('preview-error');
+    error.hidden = true;
+    button.disabled = previewRequest = true;
+    try {
+      const res = await fetch('/api/bakes', {
+        method: 'POST', headers: { 'x-topotopo-open': '1', 'content-type': 'application/json' },
+        body: JSON.stringify({ action: button.dataset.action, package: button.dataset.package }),
+      });
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({}));
+        throw new Error(result.error ?? data.words.actionFailed);
+      }
+    } catch (e) {
+      error.textContent = e instanceof TypeError ? data.words.actionFailed : e.message || data.words.actionFailed;
+      error.hidden = false;
+    } finally { button.disabled = previewRequest = false; }
+  });
+}
+
+function updateCard(card) {
+  if (page === 'front') {
+    const el = document.querySelector(`.card[data-key="${CSS.escape(card.package)}"]`);
+    if (!el) return;
+    const mark = el.querySelector('.status');
+    mark.className = `status s-${card.status}`;
+    mark.textContent = data.statusWords[card.status];
+    const img = el.querySelector('img');
+    const src = img.getAttribute('src');
+    const versioned = src.replace(/(\?v=[^&]*)?$/, `?v=${card.version}`);
+    if (versioned !== src) img.src = versioned;
+  } else if (page === 'folder' && card.package === data.package && !['unread', 'empty'].includes(card.status)) {
+    document.getElementById('bakenow').textContent = card.active;
+    const line = document.getElementById('bake');
+    line.textContent = card.line;
+    line.classList.toggle('err', card.status === 'failed');
+    const placeholder = document.querySelector('.pkgblock .view.none p');
+    if (placeholder) placeholder.textContent = card.placeholder;
+  }
 }
 
 // live updates: the front page reloads when packages come or go; a folder page reloads when its package's bake
@@ -324,22 +379,32 @@ const offerReload = () => {
   document.body.append(banner);
 };
 const es = new EventSource('/api/events');
+let bakeRevision = 0;
 es.onmessage = (m) => {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
   if (ev.audits) { for (const [root, n] of Object.entries(ev.audits)) audited(root, n); return; }
   if (ev.audited) { audited(ev.audited, ev.n); return; }
+  if (ev.bakes) {
+    bakeRevision++;
+    showPreviewBar(ev.previewBar);
+    for (const card of ev.cards) updateCard(card);
+    if (previews) {
+      previewSummary.textContent = ev.previews.summary;
+      previewPause.dataset.action = ev.bakes.paused ? 'resume' : 'pause';
+      previewPause.textContent = data.words[previewPause.dataset.action];
+      const active = document.activeElement?.dataset.package;
+      previewRows.innerHTML = ev.previews.rows;
+      if (active) previewRows.querySelector(`button[data-package="${CSS.escape(active)}"]`)?.focus();
+      previewClock();
+    }
+    return;
+  }
   if (page === 'front') {
     if (ev.list) location.reload();
-    else if (ev.package && !ev.baking) {
-      const card = document.querySelector(`.card[data-key="${CSS.escape(ev.package)}"]`);
-      const img = card?.querySelector('img');
-      if (img) img.src = img.src.replace(/(\?v=[^&]*)?$/, `?v=${ev.version}`);
-    }
   } else if (page === 'folder') {
     if (data.package && ev.package === data.package) {
-      if (ev.baking) bakeWord('Baking…');
-      else if (playing()) offerReload(); else location.reload();
+      if (playing()) offerReload(); else location.reload();
       return;
     }
     const here = data.rel ? `${data.root}/${data.rel}` : data.root;
@@ -348,33 +413,39 @@ es.onmessage = (m) => {
 };
 
 function runningBarWords(words, status) {
-  if (status === 'stopped' || status === 'lost') return [words[status], '', '', ''];
+  if (status === 'stopped' || status === 'lost') return [words[status], '', ''];
   const mb = status.memory / 2 ** 20;
   const memory = mb < 1024 ? `${mb.toFixed(0)} MB` : `${(mb / 1024).toFixed(1)} GB`;
-  const editors = status.editors.length, baking = status.baking;
+  const editors = status.editors.length;
   return [words.running,
     editors === 0 ? '' : editors === 1 ? words.editor : words.editors.replace('{count}', editors),
-    words.memory.replace('{memory}', memory),
-    baking === 0 ? '' : baking === 1 ? words.preview : words.previews.replace('{count}', baking)];
+    words.memory.replace('{memory}', memory)];
 }
 
 const running = document.getElementById('running');
 const words = JSON.parse(running.dataset.words);
-const runningParts = ['running-state', 'running-editors', 'running-memory', 'running-previews'].map((id) => document.getElementById(id));
+const runningParts = ['running-state', 'running-editors', 'running-memory'].map((id) => document.getElementById(id));
+const runningPreviews = document.getElementById('running-previews');
+function showPreviewBar(text) {
+  if (runningPreviews.textContent !== text) runningPreviews.textContent = text;
+  runningPreviews.hidden = !text;
+}
 const stopButton = running.querySelector('button');
 const showStatus = (status) => {
   const parts = runningBarWords(words, status);
   runningParts.forEach((el, i) => { if (el.textContent !== parts[i]) el.textContent = parts[i]; });
   running.classList.toggle('warning', status === 'lost');
   stopButton.hidden = !status.stoppable;
+  if (typeof status === 'string') showPreviewBar('');
 };
 
 let statusPending = false, statusFailures = 0, stopping = false, stopped = false;
 const refreshStatus = async () => {
   if (statusPending || stopping || stopped) return;
   statusPending = true;
+  const revision = bakeRevision;
   try {
-    const res = await fetch('/api/status', { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(previews ? '/api/status?previews=1' : '/api/status', { signal: AbortSignal.timeout(5000) });
     if (!res.ok) throw new Error();
     const status = await res.json();
     if (!status.ok) throw new Error();
@@ -382,6 +453,10 @@ const refreshStatus = async () => {
     if (statusFailures >= 2) return location.reload();
     statusFailures = 0;
     showStatus(status);
+    if (revision === bakeRevision) {
+      showPreviewBar(status.previewBar);
+      if (previews && previewSummary.textContent !== status.previewLine) previewSummary.textContent = status.previewLine;
+    }
   } catch {
     if (!stopping && !stopped && ++statusFailures >= 2) showStatus('lost');
   } finally { statusPending = false; }

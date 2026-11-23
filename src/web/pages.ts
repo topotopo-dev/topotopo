@@ -4,6 +4,7 @@
 // URL builder. Styles and the small page script are files: app/web.css and app/web.js here, app/embed.js in the viewer.
 
 import { TOPOTOPO_VERSION } from '../host/version.ts';
+import type { BakeItem, BakeSnapshot } from './bake.ts';
 
 export interface Urls {
   home: string;
@@ -31,7 +32,7 @@ export interface Urls {
 
 export interface CardData {
   lib: string; id: string; title: string; collection: string; tags: string[]; description: string; updated: number;
-  status: 'ok' | 'failed' | 'baking' | 'new' | 'empty' | 'unread'; version: string;
+  status: 'ok' | 'failed' | 'waiting' | 'baking' | 'new' | 'empty' | 'unread'; version: string;
   /** its folder page */
   url?: string;
   /** a package: its full name and newest version (null before the first is published) */
@@ -119,13 +120,16 @@ export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
 export const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(0)} KB` : n < 1 << 30 ? `${(n / 2 ** 20).toFixed(1)} MB` : `${(n / 2 ** 30).toFixed(2)} GB`);
 export const when = (ms: number) => (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '');
 export const count = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
-const STATUS: Record<CardData['status'], string> = { ok: '', failed: 'bake failed', baking: 'baking…', new: 'not baked yet', empty: 'no default graph yet', unread: 'graph file cannot be read' };
+export const STATUS: Record<CardData['status'], string> = { ok: '', failed: 'bake failed', waiting: 'waiting to bake', baking: 'baking…', new: 'not baked yet', empty: 'no default graph yet', unread: 'graph file cannot be read' };
 
-export function runningWords(memory = '{memory}', editors = '{count}', previews = '{count}') {
+export function runningWords(memory = '{memory}', editors = '{count}', bakes?: { done: number; total: number; active: number; waiting: boolean; paused: boolean }) {
+  const previews = !bakes?.active ? '' : bakes.paused && bakes.waiting
+    ? ' · previews paused'
+    : ` · making previews: ${bakes.done} of ${bakes.total}`;
   return {
     running: 'TopoTopo is running', memory: ` · ${memory}`,
     editor: ' · 1 editor open', editors: ` · ${editors} editors open`,
-    preview: ' · making 1 preview', previews: ` · making ${previews} previews`,
+    previews,
     stopped: 'TopoTopo has stopped. Open a file to start it again.',
     lost: 'TopoTopo is not running any more. Open a file to start it again.',
   };
@@ -145,13 +149,86 @@ export function shell(title: string, u: Urls, body: string, opts: { page: string
 <body data-page="${opts.page}"${opts.data ? ` data-json="${esc(JSON.stringify(opts.data))}"` : ''}>
 ${body}
 <footer class="running" id="running" data-words="${esc(JSON.stringify(runningWords()))}">
-  <span role="status"><span id="running-state">TopoTopo is running</span><span id="running-editors" title="An editor stops by itself 10 minutes after its last tab is closed."></span><span id="running-memory"></span><span id="running-previews"></span></span>
+  <span role="status"><span id="running-state">TopoTopo is running</span><span id="running-editors" title="An editor stops by itself 10 minutes after its last tab is closed."></span><span id="running-memory"></span><a id="running-previews" href="/previews" hidden></a></span>
   <button class="btn" type="button" data-stop-topotopo title="Stops TopoTopo and its editors. Open a file to start it again." hidden>Stop TopoTopo</button>
   <span class="running-version">version ${esc(TOPOTOPO_VERSION)} · ${opts.page === 'storage' ? 'Storage' : '<a href="/storage">Storage</a>'}</span>
 </footer>
 </body>
 </html>
 `;
+}
+
+export type PreviewItem = Omit<BakeItem, 'dir'> & { package: string; title: string; url: string };
+export type PreviewsData = Omit<BakeSnapshot, 'items'> & { items: PreviewItem[] };
+
+const PREVIEW_WORDS = {
+  pause: 'Pause', resume: 'Resume', skip: 'Skip', actionFailed: 'Could not change the previews.',
+  making: 'making its preview · {seconds} s',
+};
+
+function previewDuration(ms: number) {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+}
+
+export function previewRowWords(item: PreviewItem, before: number, now = Date.now()) {
+  switch (item.state) {
+    case 'waiting': return before ? `waiting · ${before + 1} before it` : 'waiting · next';
+    case 'baking': return PREVIEW_WORDS.making.replace('{seconds}', String(Math.max(0, Math.floor((now - (item.startedAt ?? now)) / 1000))));
+    case 'done': return `made in ${previewDuration(item.ms ?? 0)}`;
+    case 'failed': return `could not make its preview: ${item.error || 'no reason given'}`;
+    case 'skipped': return 'skipped: it keeps its old preview, and is made again when it changes or on Re-bake';
+  }
+}
+
+export function previewSummary(bakes: PreviewsData, finishedAt?: number) {
+  if (!bakes.total) return "No previews to make. TopoTopo makes a package's preview by itself when the package changes.";
+  const { done, failed, total, skipped, leftMs, paused, items } = bakes;
+  const active = total > done + failed + skipped;
+  const current = items.find((item) => item.state === 'baking');
+  const made = `${count(done, 'preview')} made`;
+  let text = active ? `${done} of ${total} previews made` : made;
+  if (!active && finishedAt !== undefined) text += ` at ${new Date(finishedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+  if (active && paused) text += ' · paused: the preview being made finishes, the others wait';
+  else if (active) {
+    if (current) text += ` · making ${current.title}`;
+    if (leftMs !== undefined) text += ` · about ${leftMs < 60000 ? `${Math.ceil(leftMs / 1000)} s` : `${Math.ceil(leftMs / 60000)} min`} left`;
+  }
+  return failed ? `${text} · ${failed} failed` : text;
+}
+
+export function previewView(bakes: PreviewsData, finishedAt?: number) {
+  let waiting = 0;
+  const rows = bakes.items.map((item) => {
+    const { state, startedAt } = item;
+    const line = previewRowWords(item, waiting);
+    if (state === 'waiting') waiting++;
+    const skip = state === 'waiting' || state === 'baking';
+    return `<li class="preview-row">
+      <div><a href="${esc(item.url)}">${esc(item.title)}</a>
+      <p class="dim s-${state}"${state === 'baking' ? ` data-started="${startedAt}"` : ''}>${esc(line)}</p></div>
+      ${skip ? `<button class="btn" type="button" data-action="skip" data-package="${esc(item.package)}">${PREVIEW_WORDS.skip}</button>` : ''}
+    </li>`;
+  }).join('\n');
+  return { summary: previewSummary(bakes, finishedAt), rows };
+}
+
+export function previewsPage(u: Urls, bakes: PreviewsData, finishedAt?: number) {
+  const { summary, rows } = previewView(bakes, finishedAt);
+  return shell('Previews · TopoTopo', u, `<header class="bar"><a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a></header>
+<main class="wrap folder previews">
+  <div class="head">
+    <h1>Previews</h1>
+    <div class="preview-controls">
+      <p id="preview-summary" role="status">${esc(summary)}</p>
+      <button class="btn" id="preview-pause" type="button" data-action="${bakes.paused ? 'resume' : 'pause'}">${bakes.paused ? PREVIEW_WORDS.resume : PREVIEW_WORDS.pause}</button>
+    </div>
+    <p id="preview-error" class="s-failed" role="alert" hidden></p>
+  </div>
+  <ul id="preview-rows" class="preview-rows">${rows}</ul>
+</main>`, { page: 'previews', data: { words: PREVIEW_WORDS } });
 }
 
 /** The storage page: each cache with its folder and its size cap (bytes); the sizes are filled in by the page's script. */
@@ -293,6 +370,7 @@ export function frontPage(d: WebData, u: Urls): string {
   <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
   <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ' and their outputs' : ''}">
   <button id="clear" class="btn" type="button" hidden title="clear the search">Clear</button>
+  <a href="/previews">Previews</a>
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
 </header>
 <main class="wrap front">
@@ -310,7 +388,7 @@ export function frontPage(d: WebData, u: Urls): string {
   <p class="empty" id="nomatch" hidden>Nothing matches. <button class="btn" type="button" data-clear>Clear the search</button></p>
 </section>
 ${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''}</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
-</main>`, { page: 'front' });
+</main>`, { page: 'front', data: { statusWords: STATUS } });
 }
 
 /** The outputs a package's newest version publishes, with their thumbnails, kinds and tags ('' before its first version). */
@@ -367,11 +445,29 @@ const bakeOf = (p: PackageData) => (p.status === 'empty' || p.status === 'unread
  * its actions (Open in editor, Re-bake) and a word while it bakes. How its preview cooked is below the divider
  * (packageDetails).
  */
+const FOLDER_BAKE: Partial<Record<CardData['status'], string>> = { waiting: 'Waiting to bake…', baking: 'Baking…' };
+
+export function previewPlaceholder(status: CardData['status'], b: PackageData['bake']) {
+  if (status === 'unread') return 'No preview yet: its graph file cannot be read';
+  if (status === 'empty') return 'No preview yet: this package has no graph to bake';
+  if (status === 'waiting') return 'No preview yet';
+  if (status === 'baking') return 'No preview yet: baking it…';
+  return b && !b.ok ? 'No preview: its graph did not cook' : 'No preview yet';
+}
+
+export function folderBakeWords(status: CardData['status'], b: PackageData['bake']) {
+  const active = FOLDER_BAKE[status] ?? '';
+  const line = active || (!b ? 'Not baked yet.' : b.ok
+    ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${(b.points ?? 0).toLocaleString('en')} points, ${(b.prims ?? 0).toLocaleString('en')} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
+    : `Bake failed ${when(b.at)}`);
+  return { active, line };
+}
+
 export function packageBlock(p: PackageData, u: Urls): string {
   const edit = u.edit(p.lib, p.id);
   const b = bakeOf(p);
   // the 3D view; else the preview picture at its own size; else a short word that there is none yet, and why
-  const none = p.status === 'unread' ? 'No preview yet: its graph file cannot be read' : p.status === 'empty' ? 'No preview yet: this package has no graph to bake' : p.status === 'baking' ? 'No preview yet: baking it…' : b && !b.ok ? 'No preview: its graph did not cook' : 'No preview yet';
+  const none = previewPlaceholder(p.status, b);
   const view = p.glb
     ? `<iframe class="view" src="${esc(u.embed(p.lib, p.id))}" title="${esc(p.title)} in 3D" allow="fullscreen"></iframe>`
     : p.thumb ? `<img class="view pic" src="${esc(u.thumb(p.lib, p.id, p.version))}" alt="${esc(p.title)}" width="512" height="512">`
@@ -388,7 +484,7 @@ export function packageBlock(p: PackageData, u: Urls): string {
     <div class="actions">
       ${edit ? `<a class="btn primary" href="${esc(edit)}" target="_blank" rel="noopener">Open in editor</a>` : ''}
       ${p.builtin || p.status === 'empty' || p.status === 'unread' ? '' : `<button class="btn" type="button" data-post="${esc(`${u.package(p.lib, p.id)}/bake`)}">Re-bake</button>`}
-      <span class="bakenow" id="bakenow" aria-live="polite">${p.status === 'baking' ? 'Baking…' : ''}</span>
+      <span class="bakenow" id="bakenow" aria-live="polite">${FOLDER_BAKE[p.status] ?? ''}</span>
     </div>
   </aside>
 </section>`;
@@ -422,17 +518,14 @@ export function packageDetails(p: PackageData): string {
     ? `One of TopoTopo's own packages: every package can use its outputs by name${example ? `, such as ${example}` : ''}.`
     : p.status === 'empty'
     ? (p.graphs.length ? `No default graph yet: its manifest shows "${p.graph}", which this package does not have. Ask your AI agent to build it, or to show one of its graphs.` : 'No default graph yet: this package has no graphs. Open in editor shows how one gets built; the preview appears here when it exists.')
-    : p.status === 'baking' ? 'Baking its preview…'
-    : !b ? 'Not baked yet.'
-    : b.ok ? `Baked ${when(b.at)} in ${((b.ms ?? 0) / 1000).toFixed(1)} s · ${(b.points ?? 0).toLocaleString('en')} points, ${(b.prims ?? 0).toLocaleString('en')} prims${b.glb ? '' : ' · no 3D preview (too large)'}`
-    : `Bake failed ${when(b.at)}`);
+    : folderBakeWords(p.status, b).line);
   const graphs = p.graphs.length
     ? `<div class="graphs">${p.graphs.map((g) => g.error !== undefined ? `<div class="graph"><b>${esc(g.name)}</b>: cannot be read</div>` : `<details class="graph"><summary><b>${esc(g.name)}</b>${g.name === p.graph ? ' <span class="tag">default</span>' : ''} <span class="count">${g.nodes} nodes${g.vars.length ? ` · ${g.vars.length} vars` : ''}</span></summary>${g.vars.length ? `<table class="vars"><tbody>${g.vars.map((v) => `<tr><th>${esc(v.name)}</th><td>${esc(JSON.stringify(v.value))}</td><td class="dim">${esc(v.desc ?? '')}${v.min !== undefined || v.max !== undefined ? ` <span class="range">${esc(v.min ?? '')}…${esc(v.max ?? '')}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}</details>`).join('')}</div>`
     : '<p class="dim">No graphs yet.</p>';
   return `<section class="pkgdetails">
     <h2>Graphs <span class="count">${p.graphs.length}</span></h2>
     ${graphs}
-    <p class="bake ${p.unread || (b && !b.ok) ? 'err' : ''}${p.status === 'empty' ? ' empty' : ''}" id="bake">${esc(bakeLine)}</p>
+    <p class="bake ${p.unread || p.status === 'failed' ? 'err' : ''}${p.status === 'empty' ? ' empty' : ''}" id="bake">${esc(bakeLine)}</p>
     ${b && !b.ok && b.error ? `<pre class="error">${esc(b.error)}</pre>` : ''}
     ${b?.warnings?.length ? `<details class="warn"><summary>${b.warnings.length} warning${b.warnings.length > 1 ? 's' : ''}</summary><pre>${esc(b.warnings.join('\n'))}</pre></details>` : ''}
   </section>`;

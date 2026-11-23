@@ -20,7 +20,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { encodePNG } from '../render/png.ts';
 import { MIME, appDir, threeDir } from '../viewer/server.ts';
-import { webDir, isStale, listFiles, placeNamed, readBakeState, scanAll, scanLibrary } from './library.ts';
+import { bakeKey, webDir, listFiles, placeNamed, readBakeState, scanAll, scanLibrary } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { readWorkspace, engineFile } from '../workspace.ts';
 import { VERSION_RE, WORKSPACE_PACKAGES, locate, manifestAt, packageDirOf, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
@@ -38,8 +38,8 @@ import { CACHE_MAX_BYTES, cacheClear, cacheRoot, cacheUsage } from '../host/cook
 import { NODE_CACHE_MAX_BYTES, clearNodeCache, nodeCacheFolder, nodeCacheUsage } from '../host/diskcache.ts';
 import { TOPOTOPO_VERSION, fetchLatestVersion, isNewerVersion } from '../host/version.ts';
 import { BakeQueue } from './bake.ts';
-import { editorPage, embedPage, esc, frontPage, importMap, modelPage, shell, count, storagePage } from './pages.ts';
-import type { CardData, OutputRow, PackageData, RootCardData, Urls, UserRow } from './pages.ts';
+import { editorPage, embedPage, esc, folderBakeWords, frontPage, importMap, modelPage, previewPlaceholder, previewsPage, previewSummary, previewView, runningWords, shell, count, storagePage } from './pages.ts';
+import type { CardData, OutputRow, PackageData, PreviewItem, PreviewsData, RootCardData, Urls, UserRow } from './pages.ts';
 import { PICTURE_STRIP, folderPage } from './folder-page.ts';
 import type { FileItem, FolderCard, FolderPageData, NoteBox } from './folder-page.ts';
 import { PathError, byName, engineTitle, exportSources, exportStale, graphSummary, graphTypes, headingPrefix, kindOf, listFolder, noteHtml, noteId, plumbing, realBelow, resolveIn, rootKey, sendFile, walkTree } from './folders.ts';
@@ -351,14 +351,55 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   // ---------------------------------------------------------------- events (SSE) and bakes
   const clients = new Set<http.ServerResponse>();
   const broadcast = (ev: object) => { const m = `data: ${JSON.stringify(ev)}\n\n`; for (const c of clients) c.write(m); };
+  type BakeLocation = Pick<PreviewItem, 'package' | 'title' | 'url'>;
+  let bakeLocations = new Map<string, BakeLocation>();
   const queue = new BakeQueue({
     log,
+    onChange: (dir) => {
+      if (dir) {
+        const p = byDir.get(folderKey(dir));
+        if (p) bakeLocations.set(dir, bakeLocation(p));
+      }
+      if (clients.size) broadcast(bakeEvent(dir));
+    },
     onDone: (dir, state) => {
       const p = byDir.get(folderKey(dir));
       if (p) { forget(rootKey(rootOf(p))); rewarm(); }
       if (p) broadcast({ package: keyOf(p), ok: state?.ok ?? false, version: state?.at ?? 0 });
     },
   });
+  const bakeLocation = (p: Package): BakeLocation => ({ package: keyOf(p), title: p.manifest.title, url: pageOf(p) });
+  const bakeData = (snapshot = queue.snapshot()): PreviewsData => {
+    const locations = new Map<string, BakeLocation>();
+    const items = snapshot.items.flatMap(({ dir, ...item }) => {
+      const p = byDir.get(folderKey(dir));
+      const place = p ? bakeLocation(p) : bakeLocations.get(dir);
+      if (!place) return [];
+      locations.set(dir, place);
+      return [{ ...item, ...place }];
+    });
+    bakeLocations = locations;
+    return { ...snapshot, items };
+  };
+  const bakeProgress = (bakes: PreviewsData) => {
+    const current = bakes.items.find((row) => row.state === 'baking');
+    const { done, total, paused } = bakes;
+    return { done, total, paused, ...(current ? { current: { title: current.title, ms: Math.max(0, Date.now() - current.startedAt!) } } : {}) };
+  };
+  const previewBar = (bakes: ReturnType<typeof bakeProgress>) =>
+    runningWords(undefined, undefined, { ...bakes, active: queue.size, waiting: queue.size > Number(!!bakes.current) }).previews;
+  const bakeEvent = (dir?: string, initial = false) => {
+    const snapshot = queue.snapshot();
+    const bakes = bakeData(snapshot);
+    const cards = (initial ? snapshot.items.map((item) => item.dir) : dir ? [dir] : []).flatMap((d) => {
+      const p = byDir.get(folderKey(d));
+      if (!p) return [];
+      const state = readBakeState(p.dir);
+      const mark = status(p, state);
+      return [{ package: keyOf(p), status: mark, version: state?.at ?? 0, ...folderBakeWords(mark, state), placeholder: previewPlaceholder(mark, state) }];
+    });
+    return { bakes, previewBar: previewBar(bakeProgress(bakes)), previews: previewView(bakes, queue.finishedAt), cards };
+  };
   /**
    * A package's graphs (graphs/, and graph files beside its manifest; a built-in package's where it is read from), and
    * whether it has the one its manifest shows.
@@ -375,7 +416,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     if (!bakeOn || isBuiltin(p) || queue.pending(p.dir)) return;
     const file = defaultFile(p);
     if (!file || unreadDefault(p, file)) return;
-    try { if (isStale(p) && queue.add(p.dir)) broadcast({ package: keyOf(p), baking: true }); } catch { /* removed meanwhile */ }
+    try {
+      const key = bakeKey(p.dir, p.manifest);
+      if (!queue.wasSkipped(p.dir, key) && readBakeState(p.dir)?.key !== key) queue.add(p.dir);
+    } catch { /* removed meanwhile */ }
   };
   // the audits: each tree's walk and flags, made when a page asks and made again soon after something in that tree
   // changes (rewarm). A page waits a moment for the audit of the tree as it is, then shows the one before: a page never
@@ -410,7 +454,6 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   };
   const rescan = () => { rescanPackages(); forgetAll(); };
   rescan();
-  for (const p of packages.values()) bakeIfStale(p);
 
   // A change below a library: a manifest, graphs/, assets/ and inputs/ may need a bake; anything else may be a
   // package made, moved or removed, or attachments: read that tree's packages again, forget its audit unless the change
@@ -692,7 +735,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   ].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
   const status = (p: Package, s: BakeState | null): CardData['status'] => {
     const file = defaultFile(p);
-    return unreadDefault(p, file) ? 'unread' : isBuiltin(p) ? 'ok' : !file ? 'empty' : queue.pending(p.dir) ? 'baking' : !s ? 'new' : s.ok ? 'ok' : 'failed';
+    const state = queue.state(p.dir);
+    return unreadDefault(p, file) ? 'unread' : isBuiltin(p) ? 'ok' : !file ? 'empty' : state === 'waiting' || state === 'baking' ? state : !s ? 'new' : s.ok ? 'ok' : 'failed';
   };
   const cardOf = (p: Package): CardData => {
     const s = readBakeState(p.dir);
@@ -1137,6 +1181,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         if (write) throw new HttpError(405, 'GET');
         return html(storagePage(urls, { nodes: { dir: storage.nodes, limit: NODE_CACHE_MAX_BYTES }, cooks: { dir: storage.cooks, limit: CACHE_MAX_BYTES } }));
       }
+      if (u.pathname === '/previews') {
+        if (write) throw new HttpError(405, 'GET');
+        return html(previewsPage(urls, bakeData(), queue.finishedAt));
+      }
       if (seg[0] === 'static') { const p = readStatic(assetDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'app') { const p = readStatic(appDir, seg.slice(1).join('/')); return p ? send(200, fs.readFileSync(p), MIME[path.extname(p)] ?? 'application/octet-stream') : send(404, 'not found'); }
       if (seg[0] === 'vendor' && seg[1] === 'three') {
@@ -1151,7 +1199,10 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         if (write) throw new HttpError(405, 'GET');
         const running = [...editors.values()].filter(({ child }) => editorAlive(child)).map(({ package: title, memory }) => ({ package: title, memory }));
         const memory = running.reduce((sum, editor) => sum + (editor.memory ?? 0), process.memoryUsage().rss);
-        return json(200, { ok: true, stoppable: !!o.onStop, baking: queue.size, memory, editors: running });
+        const data = bakeData();
+        const bakes = bakeProgress(data);
+        return json(200, { ok: true, stoppable: !!o.onStop, baking: queue.size, bakes, previewBar: previewBar(bakes), memory, editors: running,
+          ...(u.searchParams.has('previews') ? { previewLine: previewSummary(data, queue.finishedAt) } : {}) });
       }
       if (u.pathname === '/api/storage') {
         if (req.method !== 'GET') throw new HttpError(405, 'GET');
@@ -1176,13 +1227,27 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         }
       }
       const storageAction = u.pathname === '/api/storage/clear' || u.pathname === '/api/storage/reveal';
-      if (u.pathname === '/api/open' || u.pathname === '/api/stop' || storageAction) {
+      const bakeAction = u.pathname === '/api/bakes';
+      if (bakeAction && !write) return json(200, bakeData());
+      if (u.pathname === '/api/open' || u.pathname === '/api/stop' || storageAction || bakeAction) {
         // what only the program that starts the web app (and the page's own button) asks: a POST with a header that a page
         // of another origin cannot send without a preflight, which is refused (the Host and Origin checks above apply too)
         if (req.method !== 'POST') throw new HttpError(405, 'POST');
         if (req.headers['x-topotopo-open'] !== '1') throw new HttpError(403, 'only topotopo open and this page may ask for this');
         let text = '';
         for await (const c of req) { text += c; if (text.length > 100_000) throw new HttpError(413, 'too long'); }
+        if (bakeAction) {
+          let ask: { action?: unknown; package?: unknown } | null = null;
+          try { ask = JSON.parse(text); } catch { /* a JSON body is required */ }
+          const action = ask?.action;
+          if (action !== 'pause' && action !== 'resume' && action !== 'skip') throw new HttpError(400, 'Choose Pause, Resume, or Skip.');
+          const p = typeof ask?.package === 'string' ? packages.get(ask.package) : undefined;
+          if ((action === 'skip' || ask?.package !== undefined) && !p) throw new HttpError(400, 'That package was not found.');
+          if (action === 'pause') queue.pause();
+          else if (action === 'resume') queue.resume();
+          else if (!queue.skip(p!.dir)) throw new HttpError(400, 'That preview is no longer waiting or being made.');
+          return json(200, bakeData());
+        }
         if (storageAction) {
           let what: unknown;
           try { what = JSON.parse(text)?.what; } catch { /* a JSON body is required */ }
@@ -1219,6 +1284,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         res.write(': hello\n\n');
         // first, the trees whose audit is ready: a page made before it, which connects only after, still hears of it
         res.write(`data: ${JSON.stringify({ audits: auditsReady() })}\n\n`);
+        res.write(`data: ${JSON.stringify(bakeEvent(undefined, true))}\n\n`);
         clients.add(res);
         req.on('close', () => clients.delete(res));
         return;
@@ -1347,8 +1413,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           if (!file) throw new HttpError(400, `no default graph yet: ${p.manifest.title} has no graph "${p.manifest.bake.graph ?? p.manifest.graph}" to bake`);
           const unread = unreadDefault(p, file);
           if (unread) throw new HttpError(400, unread);
-          const queued = queue.add(p.dir);
-          if (queued) broadcast({ package: keyOf(p), baking: true });
+          const queued = queue.add(p.dir, { first: true });
           return json(200, { ok: true, queued });
         }
         if (rest[0] === 'reveal') {
@@ -1365,6 +1430,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     }
   });
 
+  for (const p of packages.values()) bakeIfStale(p);
   const port = o.port ?? cfg.web.port;
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

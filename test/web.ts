@@ -27,7 +27,8 @@ import { startWeb, runningWeb } from '../src/web/server.ts';
 import type { WebServer } from '../src/web/server.ts';
 import type { BakeState } from '../src/web/library.ts';
 import { builtinLibrary, workingHash } from '../src/packages/registry.ts';
-import { esc, frontPage, runningWords } from '../src/web/pages.ts';
+import { esc, frontPage, previewRowWords, previewSummary, runningWords } from '../src/web/pages.ts';
+import type { PreviewItem, PreviewsData } from '../src/web/pages.ts';
 import { folderPage } from '../src/web/folder-page.ts';
 import { markdownLinks, renderMarkdown } from '../src/web/markdown.ts';
 import { exportSources, exportStale, imageSize, linkText, listFolder, PathError, resolveIn, resolveLink, videoPlayer, walkTree } from '../src/web/folders.ts';
@@ -107,14 +108,134 @@ try {
     check(pages.every((r) => (r.body.toString().match(/<footer class="running"/g) ?? []).length === 1
       && r.body.includes('An editor stops by itself 10 minutes after its last tab is closed.')
       && r.body.includes('Stops TopoTopo and its editors. Open a file to start it again.')), 'every shell page carries one running bar with the editor and stop tooltips');
-    const small = runningWords('120 MB'), large = runningWords('1.3 GB', '2', '3');
+    const small = runningWords('120 MB'), large = runningWords('1.3 GB', '2');
     check(small.running + small.memory === 'TopoTopo is running · 120 MB', 'the running text gives the memory without an editor count');
     check(large.running + large.editors + large.memory === 'TopoTopo is running · 2 editors open · 1.3 GB',
       'the running text gives the editor count and memory');
-    check(large.previews === ' · making 3 previews' && small.preview === ' · making 1 preview' && small.editor === ' · 1 editor open',
-      'the running text uses singular for one editor and one preview');
+    check(small.editor === ' · 1 editor open', 'the running text uses singular for one editor');
     check(small.stopped === 'TopoTopo has stopped. Open a file to start it again.', 'the stopped text says to open a file again');
     check(small.lost === 'TopoTopo is not running any more. Open a file to start it again.', 'the lost-contact text says the web app is gone');
+  }
+
+  section('preview words');
+  {
+    const item: PreviewItem = { package: 'props/harbour', title: 'Harbour', url: '/l/props/harbour/', state: 'waiting' };
+    check(previewRowWords(item, 0) === 'waiting · next' && previewRowWords(item, 1) === 'waiting · 2 before it', 'waiting previews show their place in line');
+    const current: PreviewItem = { ...item, state: 'baking', startedAt: 1000 };
+    check(previewRowWords(current, 0, 13_000) === 'making its preview · 12 s'
+        && previewRowWords(current, 0, 14_000) === 'making its preview · 13 s', 'the current preview shows elapsed time');
+    check(previewRowWords({ ...item, state: 'done', ms: 8400 }, 0) === 'made in 8.4 s'
+        && previewRowWords({ ...item, state: 'done', ms: 125_000 }, 0) === 'made in 2 min 05 s', 'a finished preview shows how long it took');
+    check(previewRowWords({ ...item, state: 'failed', error: 'no geometry' }, 0) === 'could not make its preview: no geometry', 'a failed preview says why');
+    check(previewRowWords({ ...item, state: 'skipped' }, 0) === 'skipped: it keeps its old preview, and is made again when it changes or on Re-bake',
+      'a skipped preview says what happens to it');
+    const empty: PreviewsData = { items: [], paused: false, done: 0, total: 0, failed: 0, skipped: 0 };
+    const active = { ...empty, items: [current], done: 3, total: 7, leftMs: 90_000 };
+    check(previewSummary(empty) === "No previews to make. TopoTopo makes a package's preview by itself when the package changes.", 'the page explains why it is empty');
+    check(previewSummary(active) === '3 of 7 previews made · making Harbour · about 2 min left'
+      && previewSummary({ ...active, leftMs: 1200, failed: 1 }) === '3 of 7 previews made · making Harbour · about 2 s left · 1 failed',
+      'the progress line has the count, current preview, estimate and failures');
+    check(previewSummary({ ...active, paused: true }) === '3 of 7 previews made · paused: the preview being made finishes, the others wait',
+      'the paused line says what happens to the previews');
+    const finishedAt = new Date(2020, 0, 1, 14, 2).getTime();
+    check(previewSummary({ ...empty, total: 8, done: 7, failed: 1 }, finishedAt) === '7 previews made at 14:02 · 1 failed',
+      'the finished line gives the time and failed count');
+    const bar = { done: 3, total: 7, active: 4, waiting: true, paused: false };
+    check(runningWords(undefined, undefined, bar).previews === ' · making previews: 3 of 7'
+      && runningWords(undefined, undefined, { ...bar, paused: true }).previews === ' · previews paused'
+      && runningWords(undefined, undefined, { ...bar, active: 1, waiting: false, paused: true }).previews === ' · making previews: 3 of 7'
+      && runningWords(undefined, undefined, { ...bar, active: 0, waiting: false }).previews === '',
+      'the bar shows progress, says paused only while something waits, and clears the finished round');
+  }
+
+  section('preview pages and actions');
+  {
+    const library = { name: 'previews', path: path.join(tmp, 'preview-pages') };
+    const first = createPackage(library, 'first', { title: 'First', graph: BOX });
+    const second = createPackage(library, 'second', { title: 'Second <&>', graph: BOX });
+    const web = await startWeb({ config: { ...cfg, libraries: [library] }, port: 0, bake: false });
+    const get = (url: string) => reqAt(web.port, url);
+    const json = async (url: string) => JSON.parse((await get(url)).body.toString());
+    const post = (action: string, pkg?: string, guarded = true, origin?: string) => fetch(new URL('/api/bakes', web.url), {
+      method: 'POST', headers: { ...(guarded ? { 'x-topotopo-open': '1' } : {}), ...(origin ? { origin } : {}) },
+      body: JSON.stringify({ action, package: pkg }),
+    });
+    const got = { text: '' };
+    const stream = http.get(new URL('/api/events', web.url), (res) => res.on('data', (c) => { got.text += c; }));
+    stream.on('error', () => {});
+    const events = () => got.text.split('\n\n').slice(0, -1).filter((s) => s.startsWith('data: ')).map((s) => JSON.parse(s.slice(6)));
+    try {
+      const initial = await get('/api/bakes');
+      check(initial.status === 200 && JSON.parse(initial.body.toString()).total === 0, 'GET /api/bakes reports an empty list');
+      const empty = await get('/previews');
+      check(empty.status === 200 && empty.body.toString().includes('No previews to make. TopoTopo makes a package&#39;s preview by itself when the package changes.')
+        && empty.body.includes('id="running-previews" href="/previews"'), 'the Previews page starts with the empty words and the bar links to it');
+      check((await post('pause', undefined, false)).status === 403
+        && (await post('pause', undefined, true, 'http://other.example')).status === 403
+        && (await reqAt(web.port, '/api/bakes', { headers: { host: 'other.example' } })).status === 403
+        && (await reqAt(web.port, '/api/bakes', { method: 'PUT', headers: { 'x-topotopo-open': '1' } })).status === 405,
+        'preview actions require the page header, a local Host and Origin, and POST');
+      await until(() => events().some((e) => e.bakes && !e.bakes.paused), 10_000);
+      const pause = await post('pause');
+      check(pause.status === 200 && ((await pause.json()) as PreviewsData).paused && await until(() => events().some((e) => e.bakes?.paused), 10_000),
+        'Pause responds with the new state and sends it on the event stream');
+      check(web.queue.add(first.dir) && web.queue.add(second.dir), 'packages can be added while paused');
+      const reBake = await reqAt(web.port, '/p/previews/second/bake', { method: 'POST' });
+      const waiting = await json('/api/bakes');
+      check(reBake.status === 200 && JSON.parse(reBake.body.toString()).queued && waiting.items.map((x: PreviewItem) => x.package).join() === 'previews/second,previews/first'
+        && waiting.items.every((x: PreviewItem) => x.state === 'waiting' && !('dir' in x)), 'Re-bake puts a waiting preview first and the API uses package names and links');
+      const list = await get('/previews');
+      check(list.status === 200 && list.body.includes('href="/l/previews/second/">Second &lt;&amp;&gt;</a>') && list.body.includes('waiting · next')
+        && list.body.includes('waiting · 2 before it') && list.body.includes('>Resume</button>') && list.body.includes('>Skip</button>'), 'the Previews page links each waiting package and offers Resume and Skip');
+      const home = await get('/');
+      const folder = await page('/p/previews/first', web.port);
+      const status = await json('/api/status');
+      check(home.body.includes('>waiting to bake</span>') && folder.body.includes('Waiting to bake…')
+        && status.baking === 2 && status.bakes.total === 2 && status.bakes.done === 0 && status.bakes.paused && !status.bakes.current,
+        'cards, folder pages and status distinguish waiting previews from the one being made');
+      const unknown = await post('skip', 'previews/missing');
+      const badAction = await post('other');
+      check(unknown.status === 400 && ((await unknown.json()) as { error: string }).error === 'That package was not found.'
+        && badAction.status === 400 && ((await badAction.json()) as { error: string }).error === 'Choose Pause, Resume, or Skip.', 'unknown packages and actions get plain errors');
+      const skipped = await post('skip', 'previews/first');
+      check(skipped.status === 200 && ((await skipped.json()) as PreviewsData).skipped === 1
+        && await until(() => events().some((e) => e.bakes?.skipped === 1 && e.cards.some((c: { status: string }) => c.status === 'new')), 10_000),
+        'Skip removes a waiting preview and the event stream restores its card status');
+      const resumed = await post('resume');
+      check(resumed.status === 200 && !((await resumed.json()) as PreviewsData).paused && await until(() => events().some((e) => !e.bakes?.paused
+        && e.bakes?.items.some((i: PreviewItem) => i.state === 'baking') && e.cards.some((c: { status: string; line: string }) => c.status === 'baking' && c.line === 'Baking…')), 10_000),
+        'Resume starts the next preview and the event stream says it is baking');
+      const running = await json('/api/status');
+      check(running.bakes.total === 2 && (running.baking ? running.bakes.current.title === second.manifest.title && running.bakes.current.ms >= 0
+        : running.bakes.done === 1), 'status gives the title and elapsed time of the current preview');
+      if (web.queue.pending(second.dir)) await post('skip', 'previews/second');
+      await web.queue.idle();
+    } finally { stream.destroy(); web.close(); }
+  }
+
+  section('skipped previews and file changes');
+  {
+    const library = { name: 'previews', path: path.join(tmp, 'preview-changes') };
+    const p = createPackage(library, 'crate');
+    const web = await startWeb({ config: { ...cfg, libraries: [library] }, port: 0 });
+    const graph = path.join(p.dir, 'graphs', 'main.json');
+    const packageUrl = '/p/previews/crate';
+    const skip = () => fetch(new URL('/api/bakes', web.url), {
+      method: 'POST', headers: { 'x-topotopo-open': '1' }, body: JSON.stringify({ action: 'skip', package: 'previews/crate' }),
+    });
+    try {
+      web.queue.pause();
+      write(graph, BOX);
+      check(await until(() => web.queue.state(p.dir) === 'waiting', 20_000) && (await skip()).status === 200, 'an automatically requested preview can be skipped');
+      check((await reqAt(web.port, `${packageUrl}/thumb.png`)).status === 200
+        && (await reqAt(web.port, `${packageUrl}/preview.glb`)).status === 404
+        && web.queue.state(p.dir) === 'skipped' && !bakeState(p.dir), 'requests for missing previews do not ask for the skipped package again');
+      write(graph, { nodes: { b: { type: 'sphere' } }, output: 'b' });
+      check(await until(() => web.queue.state(p.dir) === 'waiting', 20_000), 'changing a skipped package asks for its preview again');
+      const skippedAgain = await skip();
+      const manual = await reqAt(web.port, `${packageUrl}/bake`, { method: 'POST' });
+      check(skippedAgain.status === 200 && manual.status === 200 && web.queue.state(p.dir) === 'waiting', 'Re-bake also asks for a skipped preview again');
+    } finally { web.close(); }
   }
 
   section('storage and version');

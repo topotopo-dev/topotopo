@@ -440,3 +440,12 @@ pre.txt { margin: 0.6em 0; white-space: pre-wrap; font: var(--mono); font-size: 
 .storage-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .storage-path { overflow-wrap: anywhere; }
 .storage-actions .done { color: var(--ok); border-color: var(--ok); }
+
+.previews { max-width: 920px; }
+.preview-controls, .preview-row { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.preview-controls { align-items: center; }
+.preview-rows { list-style: none; padding: 0; }
+.preview-row { padding: 12px 0; border-top: 1px solid var(--line); }
+.preview-row div { min-width: 0; overflow-wrap: anywhere; }
+.preview-row p { margin: 4px 0 0; white-space: pre-line; }
+.preview-row a { font-weight: 600; }

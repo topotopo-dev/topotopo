@@ -213,19 +213,68 @@ section('bake');
 section('bake queue (child processes)');
 {
   const p = scanLibrary(lib).packages.find((x) => x.id === 'lantern')!;
+  const previews = { name: 'previews', path: path.join(tmp, 'preview-packages') };
+  const second = createPackage(previews, 'second', { graph: BOX });
+  const third = createPackage(previews, 'third', { graph: BOX });
+  fs.mkdirSync(path.join(second.dir, '.web'));
+  fs.writeFileSync(path.join(second.dir, '.web', 'bake.json'), JSON.stringify({ key: 'previous', ok: true, at: 1, ms: 20_000 }));
   fs.writeFileSync(path.join(p.dir, 'graphs', 'other.json'), JSON.stringify({ nodes: { b: { type: 'sphere' } }, output: 'b' }));
   const done: string[] = [];
-  const q = new BakeQueue({ onDone: (dir, st) => done.push(`${dir}:${st?.ok}`) });
-  check(q.add(p.dir) && !q.add(p.dir), 'a package is queued once');
-  await q.idle();
+  const changes: string[] = [];
+  const q = new BakeQueue({
+    onDone: (dir, st) => done.push(`${dir}:${st?.ok}`),
+    onChange: (dir) => changes.push(dir ? q.state(dir)! : q.snapshot().paused ? 'pause' : 'resume'),
+  });
+  const states = () => q.snapshot().items.map((x) => x.state).join();
+  check(q.add(p.dir) && !q.add(p.dir) && q.add(second.dir) && states() === 'baking,waiting', 'one at a time, with no duplicate package');
+  const started = q.snapshot().items[0].startedAt!;
+  const priorMs = readBakeState(p.dir)!.ms!;
+  check(q.snapshot(started).leftMs === priorMs + 20_000 && q.snapshot(started + priorMs + 100).leftMs === 20_000,
+    'time left adds the last durations and subtracts the time spent on the current preview');
+  q.add(third.dir);
+  check(q.snapshot().leftMs === undefined, 'time left is absent when a waiting preview has no estimate');
+  check(q.add(third.dir, { first: true }) && q.snapshot().items.map((x) => x.dir).join() === [p.dir, third.dir, second.dir].join(),
+    'a waiting package can move to the front');
+  q.pause();
+  while (q.state(p.dir) === 'baking') await new Promise((r) => setTimeout(r, 50));
   const st = readBakeState(p.dir)!;
-  check(done.length === 1 && st.ok && st.points! > 8 && !isStale(p), `the child baked it (${done[0]})`);
-  const slow = new BakeQueue({ timeoutMs: 1 });
+  const paused = q.snapshot();
+  check(done.length === 1 && st.ok && st.points! > 8 && !isStale(p) && paused.paused && paused.done === 1 && states() === 'done,waiting,waiting',
+    'Pause lets the real bake finish and leaves both waiting');
+  check(paused.leftMs === st.ms! + 20_000, 'a waiting preview without a previous duration uses the average of finished bakes');
+  check(q.skip(third.dir) && states() === 'done,skipped,waiting' && !readBakeState(third.dir)
+      && q.wasSkipped(third.dir, bakeKey(third.dir, third.manifest)), 'skipping a waiting package leaves no bake result and remembers which version was skipped');
+  check(q.add(third.dir) && states() === 'done,waiting,waiting' && q.snapshot().total === 3
+      && !q.wasSkipped(third.dir, bakeKey(third.dir, third.manifest)), 'asking for a skipped package adds it once at the back of the same round');
+  q.skip(third.dir);
+  q.resume();
+  check(q.state(second.dir) === 'baking' && !q.snapshot().paused, 'Resume starts the next package');
+  await q.idle();
+  const finished = q.snapshot();
+  check(states() === 'done,done,skipped' && finished.done === 2 && finished.failed === 0 && finished.skipped === 1
+      && finished.total === 3 && finished.items[1].ms !== undefined && q.finishedAt !== undefined,
+    'a finished round keeps its items, times and counts in order');
+  check(['waiting', 'baking', 'done', 'skipped', 'pause', 'resume'].every((change) => changes.includes(change)),
+    'changes are reported for every phase, Pause, Resume and Skip');
+
+  const files = ['bake.json', 'thumb.png', 'preview.glb'].map((f) => path.join(p.dir, '.web', f));
+  const old = files.map((f) => fs.readFileSync(f));
   fs.writeFileSync(path.join(p.dir, 'graphs', 'other.json'), JSON.stringify(BOX));
+  q.add(p.dir);
+  check(q.snapshot().total === 1 && states() === 'baking', 'a new round replaces the last finished one');
+  check(q.skip(p.dir) && states() === 'skipped' && q.snapshot().items[0].ms !== undefined, 'the running preview can be skipped');
+  await q.idle();
+  check(done.length === 2 && files.every((f, i) => fs.readFileSync(f).equals(old[i]))
+      && !fs.readdirSync(path.join(p.dir, '.web')).some((f) => f.startsWith('.bake-')),
+    'the skipped child has ended, leaving the old preview and bake result untouched');
+
+  const slow = new BakeQueue({ timeoutMs: 1 });
   slow.add(p.dir);
   await slow.idle();
   const late = readBakeState(p.dir)!;
-  check(!late.ok && /time limit/.test(late.error ?? ''), `a bake over the time limit is stopped and recorded (${late.error})`);
+  const failed = slow.snapshot();
+  check(!late.ok && /time limit/.test(late.error ?? '') && failed.failed === 1 && failed.items[0].state === 'failed' && failed.items[0].error === late.error,
+    `a bake over the time limit is stopped and recorded (${late.error})`);
 }
 
 section('the scan: what it skips, what it enters, how deep');
