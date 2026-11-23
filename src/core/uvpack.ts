@@ -21,6 +21,9 @@
 import { convexHull2D, minAreaRectAngle } from './uv.ts';
 import { rng } from './random.ts';
 
+/** Meshes whose packed uv has already passed a full overlap check. */
+export const disjointPackedUV = new WeakSet<object>();
+
 export interface PackIsland {
   /** distinct vertices (corners) of the island; their uv is rewritten */
   verts: ArrayLike<number>;
@@ -212,11 +215,13 @@ class Atlas {
   take(c: number, s: number, e: number): void {
     if (c < 0 || c >= this.G) return;
     const S = this.starts[c], E = this.ends[c], g = this.mergeGap;
+    if (!E.length || E[E.length - 1] < s - g - 1) { S.push(s); E.push(e); return; }
     let a = 0, b = E.length;
     while (a < b) { const m = (a + b) >> 1; if (E[m] < s - g - 1) a = m + 1; else b = m; }
     let z = a;
     while (z < S.length && S[z] <= e + g + 1) z++;
     if (z > a) { if (S[a] < s) s = S[a]; if (E[z - 1] > e) e = E[z - 1]; }
+    if (z === a + 1) { S[a] = s; E[a] = e; return; }
     S.splice(a, z - a, s);
     E.splice(a, z - a, e);
   }
@@ -254,7 +259,10 @@ class Atlas {
       if (y >= 0 && (y < by || (y === by && x < bx))) { by = y; bx = x; }
     };
     const st = Math.max(1, Math.floor(T.w / 4), Math.floor(this.G / 256));
-    for (let x = 0; x <= maxX; x += st) tryX(x);
+    for (let x = 0; x <= maxX; x += st) {
+      tryX(x);
+      if (bx === 0 && by === 0) return { x: 0, y: 0 };
+    }
     tryX(maxX);
     if (bx < 0) return null;
     for (let step = st >> 1; step >= 1; step >>= 1) { const c = bx; tryX(c - step); tryX(c + step); }
@@ -326,7 +334,7 @@ export function packCharts(uv: Float64Array, islands: PackIsland[], o: PackOptio
           const p = atlases[ti].place(T, limit - T.top);
           if (!p) continue;
           const top = p.y + T.top;
-          if (!best || ti < best.ti || (ti === best.ti && top < best.top)) best = { ti, x: p.x, y: p.y, top, turn, S: dilate(R, a, gap) };
+          if (!best || ti < best.ti || (ti === best.ti && top < best.top)) best = { ti, x: p.x, y: p.y, top, turn, S: a === b ? T : dilate(R, a, gap) };
           break;
         }
       }

@@ -26,6 +26,7 @@ import { getLoadedKernels } from '../wasm/kernels.ts';
 import { TriBVH } from './spatial.ts';
 import { bakeDistanceRange, bakeNoiseRange, edgeWearRange, surfaceBuriedRange, surfaceCurvatureRange, surfaceInterpRange, surfaceRaysRange, surfaceSpreadRange } from './surface.ts';
 import { stackNormalRange, stackRange } from './layers.ts';
+import { rasterRunsRange } from './runs.ts';
 import type { StackJobArgs } from './layers.ts';
 import type { CurvatureCloudArgs, EdgeWearArgs, InterpArgs, NoiseArgs, SpreadArgs, SurfaceRayArgs } from './surface.ts';
 
@@ -354,6 +355,15 @@ const layerNormal: Kernel = {
   run(a, A, start, end) { stackNormalRange(a, A, start, end); },
 };
 
+/** bake_flow: rasterise traced runs over a range of covered samples. */
+const rasterRuns: Kernel = {
+  minElements: 65536,
+  chunksPerWorker: 4,
+  run(a, A, start, end) {
+    rasterRunsRange(a, A as Parameters<typeof rasterRunsRange>[1], { C: A.C, along: A.along, head: A.head, strength: A.outStrength, id: A.id }, start, end);
+  },
+};
+
 /** a worker handles this one itself by exiting (crash recovery); on the cooking thread it only throws */
 const selftestCrash: Kernel = {
   minElements: 1 << 30,
@@ -378,6 +388,7 @@ export const KERNELS: Record<string, Kernel> = {
   layer_normal: layerNormal,
   bake_noise: bakeNoiseK,
   bake_distance: bakeDistanceK,
+  raster_runs: rasterRuns,
   kd_build: kdBuild,
   scatter_candidates: scatterCandidates,
   scatter_elim_neighbours: scatterElimNeighbours,

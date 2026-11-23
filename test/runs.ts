@@ -302,6 +302,23 @@ function sheet(cut: boolean): Geometry {
 store.set('uncut', sheet(false));
 const eq = (x: Geometry, y: Geometry) => { const u = findImage(x, 'f')!, v = findImage(y, 'f')!; return [...u.layers.keys()].every((k) => v.layers.has(k) && u.layers.get(k)!.every((q, i) => q === v.layers.get(k)![i])); };
 {
+  const serial = new Engine(createNodeHost({ workers: 0 }));
+  const pooled = new Engine(createNodeHost({ workers: 2, pool: { minElements: 1 } }));
+  const graph = { nodes: flow('uncut', { sources: '@name=bolt', resolution: 128, breakup: 0.5, stain: 4, density: 100 }), output: 'f' };
+  try {
+    const a = await serial.cook(graph), b = await pooled.cook(graph);
+    const left = a.geo && findImage(a.geo, 'f'), right = b.geo && findImage(b.geo, 'f');
+    const bytes = (v: Float32Array) => Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+    const same = left && right && left.layers.size === right.layers.size && [...left.layers].every(([name, values]) => {
+      const other = right.layer(name);
+      return other && bytes(values).equals(bytes(other));
+    });
+    check(a.ok && b.ok && pooled.poolStats.parallel === 1 && same, 'the run raster matches the serial image byte for byte');
+  } finally {
+    await pooled.host.pool?.close();
+  }
+}
+{
   const P = { sources: '@name=bolt', resolution: R, density: 200, wobble: 0.2, breakup: 0.5, seed: 3, padding: 0, length: [0.1, 0.2] };
   const A = await cookOn(engines.pool, flow('uncut', P), 'f');
   check(A.ok, `the wall cooks${A.errors.join('; ')}`);

@@ -2123,9 +2123,8 @@ export function facetSizes(g: Geometry, tris: Uint32Array, triPrim: Uint32Array,
 }
 
 /** 3D noise 0..1 at every texel sample. */
-export function runNoise(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, VP: Float64Array, args: NoiseArgs): Float32Array | Promise<Float32Array> {
-  const V = new Float32Array(s.n);
-  return afterRun(run('bake_noise', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared: { tris, VP } }) as any, () => V);
+export function runNoise(run: RunKernel, s: { n: number; tri: Int32Array; b1: Float32Array; b2: Float32Array }, tris: Uint32Array, VP: Float64Array, args: NoiseArgs, V: Float32Array): unknown {
+  return run('bake_noise', { count: s.n, args, inputs: { tri: s.tri, b1: s.b1, b2: s.b2 }, results: { V }, shared: { tris, VP } });
 }
 
 /** Distance (metres) from every texel sample to the target's surface; Infinity beyond maxD. */
