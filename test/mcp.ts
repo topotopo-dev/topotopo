@@ -148,6 +148,15 @@ for (const fmt of ['glb', 'gltf', 'obj', 'usda', 'ply', 'stl', 'json', 'geo', 'c
   }
 }
 {
+  const at = 'exports/scene.glb', file = path.join(wsDir, at);
+  const original = fs.readFileSync(file);
+  fs.writeFileSync(file, 'edited by hand');
+  const refused = await call('export', { path: at });
+  check(refused.isError && refused.txt.includes(`${at} was changed after TopoTopo wrote it`) && refused.txt.includes('overwrite: true')
+    && fs.readFileSync(file, 'utf8') === 'edited by hand', 'export explains how to replace an edited file and keeps its bytes');
+  check(!(await call('export', { path: at, overwrite: true })).isError && fs.readFileSync(file).equals(original), 'export with overwrite replaces the edited file');
+}
+{
   const x = await call('export', { path: 'exports/scene_z.obj', up_axis: 'z', scale: 100, frame: 3 });
   const s = JSON.parse(fs.readFileSync(path.join(wsDir, 'exports', 'scene_z.obj.source.json'), 'utf8')).source;
   check(!x.isError && s.frame === 3 && JSON.stringify(s.export) === '{"format":"obj","options":{"instancing":"packed","materials":true,"scale":100,"split_by_name":true,"up_axis":"z"}}', `the source records the frame, the export options given and the defaults of the rest (${JSON.stringify(s.export)})`);

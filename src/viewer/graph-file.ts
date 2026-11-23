@@ -19,12 +19,15 @@ import type { Viewer } from './server.ts';
 import { applyJSONEdits, editJSONText } from './json-edit.ts';
 import type { JSONEdit } from './json-edit.ts';
 
+interface UnreadGraph { file: string; error: string; graph: string }
+
 /** Where a graph's source lives when it is not the package's graphs/ folder (ViewerOptions.source). */
 export interface GraphSource {
   /** the package graph it holds */
   graph: string;
   /** its file name, for the page ("boxes.json") */
   label: string;
+  readonly unread?: UnreadGraph | null;
   /**
    * Write these changes into the source, then store the graph as the source now has it (Session.setGraph, which
    * also lets session values the graph now holds go). Throws when it cannot write.
@@ -38,6 +41,7 @@ export class GraphFile implements GraphSource {
   readonly graph: string;
   readonly label: string;
   readonly file: string;
+  unread: UnreadGraph | null = null;
   private ws: Session;
   private log: (line: string) => void;
   /** the file's text as last read or written: a change event that finds it again is the viewer's own write */
@@ -69,19 +73,30 @@ export class GraphFile implements GraphSource {
     return this.loading;
   }
 
+  private setUnread(error: string | null) {
+    if ((this.unread?.error ?? null) === error) return;
+    this.unread = error === null ? null : { file: this.label, error, graph: this.graph };
+    this.ws.bump(this.graph);
+  }
+
   private async loadOnce() {
-    let text: string;
-    try { text = fs.readFileSync(this.file, 'utf8'); } catch (e) { this.log(`${this.file}: ${errorText(e)} (keeping the last good version)`); return; }
-    if (text === this.text && this.ws.graphs.has(this.graph)) return;
-    let spec;
-    try { spec = JSON.parse(text.replace(/^﻿/, '')); } catch (e) { this.log(`${this.file}: ${errorText(e)} (keeping the last good version)`); return; }
-    this.text = text;
-    const cur = this.ws.graphs.get(this.graph);
     try {
-      if (cur && JSON.stringify(spec) === JSON.stringify(cur)) return;
+      const text = fs.readFileSync(this.file, 'utf8');
+      const cur = this.ws.graphs.get(this.graph);
+      if (text === this.text && cur) { this.setUnread(null); return; }
+      const spec = JSON.parse(text.replace(/^﻿/, ''));
+      if (!spec?.nodes || typeof spec.nodes !== 'object' || Array.isArray(spec.nodes)) throw new Error('expected a graph with a "nodes" object');
+      if (cur && JSON.stringify(spec) === JSON.stringify(cur)) { this.text = text; this.setUnread(null); return; }
       for (const n of this.ws.packages?.addFor(spec) ?? []) this.log(n);
       this.ws.setGraph(this.graph, spec);
-    } catch (e) { this.log(`${this.file}: ${errorText(e)} (keeping the last good version)`); return; }
+      this.text = text;
+    } catch (e) {
+      const error = errorText(e);
+      this.log(`${this.file}: ${error} (keeping the last good version)`);
+      this.setUnread(error);
+      return;
+    }
+    this.setUnread(null);
     await this.cook();
   }
 
@@ -110,6 +125,7 @@ export class GraphFile implements GraphSource {
     const spec = JSON.parse(text.replace(/^﻿/, ''));
     const cur = this.ws.graphs.get(this.graph);
     if (!cur || JSON.stringify(spec) !== JSON.stringify(cur)) this.ws.setGraph(this.graph, spec);
+    this.setUnread(null);
   }
 
   /** Follow saves of the file: its folder is watched, so editors that save by replacing the file are followed too. */

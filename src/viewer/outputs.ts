@@ -14,7 +14,7 @@ import type http from 'node:http';
 import { zipSync } from 'fflate';
 import { ArtifactStore, artifactId } from '../host/artifacts.ts';
 import type { Artifact } from '../host/artifacts.ts';
-import { filesShaFor, prepareTarget, writeTargets } from '../host/export-targets.ts';
+import { checkExportFiles, ExportConflict, filesShaFor, prepareTarget, writeTargets } from '../host/export-targets.ts';
 import type { PreparedTarget } from '../host/export-targets.ts';
 import { sidecarFile } from '../host/sidecars.ts';
 import type { Session } from '../session.ts';
@@ -49,6 +49,7 @@ const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg'
 const mime = (p: string) => MIME[path.extname(p).toLowerCase()] ?? 'application/octet-stream';
 const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
 const stamp = (p: string) => { const s = fs.statSync(p, { throwIfNoEntry: false }); return s ? `${s.size}:${s.mtimeMs}` : 'missing'; };
+const overwriteHint = 'Choose Replace to write the export, or Keep to keep the file.';
 function err(status: number, message: string): never { throw Object.assign(new Error(message), { status }); }
 const idFor = (...parts: string[]) => digest(JSON.stringify(parts)).slice(0, 24);
 const inside = (dir: string, p: string) => { const rel = path.relative(dir, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
@@ -374,8 +375,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
   const get = (id: string | null) => items.get(id ?? '') ?? err(404, 'output no longer exists');
   const geometry = async (item: Item) => { if (item.owner) item = item.owner; if (!item.geo || item.pending) await cook(item); return item.geo ?? err(422, item.entry.error ?? 'no geometry'); };
   /** The published output behind a card, as the graph now has it. */
-  const published = (entry: OutputEntry): PublishedOutput => {
-    const spec = ws.getGraph(entry.graph!);
+  const published = (entry: OutputEntry, spec = ws.getGraph(entry.graph!)): PublishedOutput => {
     return publishedOutputs(entry.graph!, spec, ws.engine.findOutput(spec).name).find((p) => p.output === entry.output) ?? err(404, 'output no longer exists');
   };
   /**
@@ -458,10 +458,22 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
           if (!item.entry.exportable) err(400, 'only a published output (a card with an Export button) exports');
           return await exclusive(async () => {
             const graph = item.entry.graph!;
+            const options = { overwrite: body.overwrite === true, packageDir: path.dirname(ws.exportDir), hint: overwriteHint };
+            let prepared: PreparedTarget | undefined;
+            let planned: PublishedOutput['spec'] | undefined;
             if (body.export !== undefined) {
               // a target that is invalid, or written with the prefix that is gone, is refused before it is set or saved
               if (body.export !== null) { const why = targetError(body.export) ?? targetRefusal(body.export); if (why) err(400, why); }
-              try { await ws.edit(graph, [{ op: 'export', ...(item.entry.output === null ? {} : { output: item.entry.output! }), export: body.export }]); }
+              const edits = [{ op: 'export' as const, ...(item.entry.output === null ? {} : { output: item.entry.output! }), export: body.export }];
+              if (body.export !== null && !options.overwrite) {
+                // Check the proposed target before saving it to the graph.
+                const p = published(item.entry, ws.applyEdits(graph, edits).graph);
+                if (!p.target) err(400, 'no export target yet: choose a format');
+                planned = p.spec;
+                prepared = await prepare(graph, { ...p, target: p.target });
+                checkExportFiles([prepared], options);
+              }
+              try { await ws.edit(graph, edits); }
               catch (e) { err(400, (e as Error).message); }
               // a graph from a file: the target goes into the file (only that key changes), the session values stay
               if (opts.source?.graph === graph) {
@@ -473,8 +485,8 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
             }
             const p = published(item.entry);
             if (!p.target) err(400, 'no export target yet: choose a format');
-            const prepared = await prepare(graph, p as PublishedOutput & { target: ResolvedTarget });
-            writeTargets([prepared], ws.exportDir);
+            if (!prepared || JSON.stringify(planned) !== JSON.stringify(p.spec)) prepared = await prepare(graph, { ...p, target: p.target });
+            writeTargets([prepared], ws.exportDir, options);
             rescan(); changed();
             json({ ok: true, path: targetPathText(p.target), file: path.join(prepared.root, ...p.target.path.split('/')), files: prepared.files.length, summary: prepared.summary, warnings: prepared.warnings });
             return true;
@@ -498,6 +510,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
           return true;
         }
         if (u.pathname === '/api/output/export-all') {
+          const body = await readJSON(req);
           return await exclusive(async () => {
             const targets: { graph: string; p: PublishedOutput & { target: ResolvedTarget } }[] = [], skipped: { graph: string; label: string }[] = [];
             for (const [graph, spec] of ws.graphs) for (const p of publishedOutputs(graph, spec, ws.engine.findOutput(spec).name))
@@ -506,7 +519,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
             // every target cooks and serializes before any file is written
             const prepared: PreparedTarget[] = [];
             for (const t of targets) prepared.push(await prepare(t.graph, t.p));
-            writeTargets(prepared, ws.exportDir);
+            writeTargets(prepared, ws.exportDir, { overwrite: body?.overwrite === true, hint: overwriteHint });
             rescan(); changed();
             json({ ok: true, written: prepared.map((x) => ({ graph: x.graph, label: x.label, path: x.target.path, warnings: x.warnings })), skipped });
             return true;
@@ -575,7 +588,7 @@ export function createOutputs(ws: Session, changed: () => void, opts: OutputsOpt
         err(404, 'unknown output route');
       } catch (error: any) {
         if (error?.name === 'EditRejected') error.status = 400;
-        res.writeHead(error.status ?? 500, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ ok: false, error: String(error.message) }));
+        res.writeHead(error.status ?? 500, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ ok: false, error: String(error.message), ...(error instanceof ExportConflict ? { changed: error.changed } : {}) }));
       }
       return true;
     },

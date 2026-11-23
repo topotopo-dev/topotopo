@@ -28,7 +28,7 @@ import { canonicalJSON, exportSource, graphSha256, nodesRead, nodesSha256, sameS
 import { publishedOutputs } from '../src/io/targets.ts';
 import { parseVarArg, parseVarValue, withVars } from '../src/graph/vars.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { prepareTarget, writeTargets } from '../src/host/export-targets.ts';
+import { ExportConflict, prepareTarget, unchangedTarget, writeTargets } from '../src/host/export-targets.ts';
 import { ArtifactStore } from '../src/host/artifacts.ts';
 import { TOPOTOPO_VERSION } from '../src/host/version.ts';
 import { engineCodeHash } from '../src/host/engine-code.ts';
@@ -323,6 +323,7 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   check(glbA.files.map((f) => f.path).join() === 'out/b.glb,out/b.glb.source.json' && glbA.sourceFile === 'out/b.glb.source.json' && glbA.sourceManifest === glbA.sourceFile
     && manifest.format === 'topotopo-export-source' && manifest.version === 1 && JSON.stringify(manifest.files) === '["b.glb"]' && JSON.stringify(manifest.source) === JSON.stringify(s('glb')),
     'glb: <file>.source.json next to it names the file and holds the source block');
+  check(JSON.stringify(manifest.sha256) === JSON.stringify({ 'b.glb': sha256Hex(glbA.files[0].bytes) }), 'glb: the manifest hashes the GLB bytes only');
   check(glbA.files.length === glbB.files.length && glbA.files.every((f, i) => same(f.bytes, glbB.files[i].bytes)), 'the same export with the same source is byte-identical, manifest included');
   const asset = glbJSON(glbA.files[0].bytes).asset;
   const validation = await createRequire(import.meta.url)('gltf-validator').validateBytes(glbA.files[0].bytes, { maxIssues: 20, writeTimestamp: false });
@@ -337,6 +338,7 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   check(hm.files.map((f) => f.path).join() === 'out/h.png,out/h.json' && hm.sourceFile === 'out/h.json' && hm.sourceManifest === undefined
     && JSON.stringify(json(hm.files[1].bytes).source) === JSON.stringify(s('png16')) && !('source' in json(hmPlain.files[1].bytes)) && same(hm.files[0].bytes, hmPlain.files[0].bytes),
     'png16: the .json sidecar records the source, no extra manifest; the heightmap itself is unchanged');
+  check(JSON.stringify(json(hm.files[1].bytes).sha256) === JSON.stringify({ 'h.png': sha256Hex(hm.files[0].bytes) }), 'png16: the sidecar hashes the heightmap bytes only');
   const rows = await exportFilesAsync(scene, 'csv', 'out/i.csv', { pcg: true, source: s('csv'), warn: () => {} });
   check(rows.sourceFile === 'out/i.meshes.json' && !rows.files.some((f) => f.path.endsWith('.source.json')) && json(rows.files.find((f) => f.path === 'out/i.meshes.json')!.bytes).source.export.format === 'csv',
     'csv instance rows: <name>.meshes.json records the source');
@@ -357,14 +359,34 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-io-targets-'));
   try {
     const gs: GraphSpec = { nodes: { b: { type: 'box' } }, vars: { k: 1 }, outputs: { part: { node: 'b', export: { format: 'obj', path: 'parts/b.obj', up_axis: 'z' } } } };
-    const part = publishedOutputs('g', gs, 'b').find((p) => p.output === 'part')!;
-    const prepared = await prepareTarget(g, 'g', part as typeof part & { target: NonNullable<typeof part.target> }, dir, engine.host, { frame: 5 });
+    const published = publishedOutputs('g', gs, 'b').find((p) => p.output === 'part')!;
+    const part = { ...published, target: published.target! }, time = { frame: 5, files: 'inputs-hash' };
+    const prepared = await prepareTarget(g, 'g', part, dir, engine.host, time);
     const man = json(prepared.files.find((f) => f.path === prepared.sourceManifest)!.bytes).source;
     check(prepared.sourceManifest === path.join(dir, 'parts', 'b.obj.source.json') && man.graph === 'g' && man.output === 'part' && man.node === 'b' && man.frame === 5 && man.fps === 24
       && JSON.stringify(man.export) === '{"format":"obj","options":{"instancing":"packed","materials":true,"scale":1,"split_by_name":true,"up_axis":"z"}}' && JSON.stringify(man.vars) === '{"k":1}' && man.topotopo === TOPOTOPO_VERSION && man.graph_sha256 === graphSha256(gs),
       `an export target records its source from the graph it is published from, every option the format reads with its default (${JSON.stringify(man.export)})`);
+    const obj = prepared.files[0], sidecar = prepared.sourceFile!, edited = 'edited by hand';
+    const refusal = () => { try { writeTargets([prepared], dir); } catch (e) { if (e instanceof ExportConflict) return e; throw e; } };
+    fs.mkdirSync(path.dirname(obj.path), { recursive: true });
+    fs.writeFileSync(obj.path, edited);
+    const unowned = refusal();
+    check(unowned?.status === 409 && unowned.message.includes('parts/b.obj was not written by TopoTopo')
+      && fs.readFileSync(obj.path, 'utf8') === edited && !fs.existsSync(sidecar), 'writeTargets refuses a file with no export record and writes nothing');
+    fs.unlinkSync(obj.path);
     writeTargets([prepared], dir);
     check(fs.existsSync(path.join(dir, 'parts', 'b.obj.source.json')) && new ArtifactStore(dir).records()[0].files.length === 2, 'writeTargets writes the manifest with the export and records both');
+    check(writeTargets([prepared], dir) === 2 && unchangedTarget('g', part, dir, time), 'writeTargets can write the same files again and recognizes their hashes');
+    const previous = fs.readFileSync(sidecar), legacy = json(previous);
+    delete legacy.sha256;
+    fs.writeFileSync(sidecar, JSON.stringify(legacy));
+    check(writeTargets([prepared], dir) === 2 && fs.readFileSync(sidecar).equals(previous), 'a legacy record can claim a file by name and gains a hash when exported again');
+    fs.writeFileSync(obj.path, edited);
+    check(!unchangedTarget('g', part, dir, time), 'an edited output is no longer unchanged');
+    const changed = refusal();
+    check(changed?.status === 409 && changed.message.includes('parts/b.obj was changed after TopoTopo wrote it')
+      && fs.readFileSync(obj.path, 'utf8') === edited && fs.readFileSync(sidecar).equals(previous), 'writeTargets refuses an edited export without touching either file');
+    check(writeTargets([prepared], dir, { overwrite: true }) === 2 && fs.readFileSync(obj.path).equals(obj.bytes), 'writeTargets can explicitly replace the edited file');
     // the receipts and the record name files by their paths in the package: nothing of this machine; a file outside the
     // package is named by its absolute path, not by a path that climbs out of it
     const exportsDir = path.join(dir, 'exports'), inside = path.join(exportsDir, 'a.glb'), outside = path.join(path.dirname(dir), `${path.basename(dir)}-elsewhere.glb`);

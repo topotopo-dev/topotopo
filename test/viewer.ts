@@ -254,6 +254,7 @@ section('viewGraphFile: the viewer\'s writes change only what they change');
   const v = await viewGraphFile(gfile, { name: 'minimal', port: 0, log: (l) => lines.push(l) });
   const post = async (p: string, body: unknown) => { const r = await fetch(v.url + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, j: await r.json() as any }; };
   const graph = async () => ((await (await fetch(v.url + 'api/graphs')).json()) as any[])[0];
+  const unread = async () => ((await (await fetch(v.url + 'api/package')).json()) as any).unread;
   try {
     check(/^cooked minimal in \d+ ms$/.test(lines[0] ?? '') && /^view: http:\/\/127\.0\.0\.1:\d+\/ {2}\(watching /.test(lines[1] ?? ''), `it prints what topotopo view prints (${lines.join(' | ')})`);
     await post('api/vars?graph=minimal', { vars: { s: 5 } });
@@ -276,12 +277,21 @@ section('viewGraphFile: the viewer\'s writes change only what they change');
     check(unknown.status === 400 && /has no var "nope"/.test(unknown.j.errors.join()), `only the graph's own vars are set (${unknown.j.errors})`);
     // a hand edit that breaks the JSON keeps the last good graph; saving into it is refused rather than guessed
     await post('api/vars?graph=minimal', { vars: { s: 6 } });
+    const lastGood = fs.readFileSync(gfile);
     fs.writeFileSync(gfile, '{ "nodes": ');
     await until(() => lines.some((l) => /keeping the last good version/.test(l)), 5000);
+    const errors = await unread();
+    check(errors.length === 1 && errors[0].file === 'minimal.json' && errors[0].graph === 'minimal' && /JSON/.test(errors[0].error), 'GET /api/package names the unreadable file, the error and its graph');
     const g3 = await graph();
     const refused = await post('api/vars/save?graph=minimal', {});
     check(g3.vars.s === 6 && refused.status === 500 && /not valid JSON now/.test(refused.j.error) && fs.readFileSync(gfile, 'utf8') === '{ "nodes": ',
       `a file that is not JSON: the last good graph stays and Save says why it cannot write (${refused.j.error})`);
+    fs.unlinkSync(gfile);
+    await until(() => !!v.source.unread?.error.includes('ENOENT'), 5000);
+    check((await unread())[0]?.error.includes('ENOENT'), 'the notice also reports a removed file');
+    fs.writeFileSync(gfile, lastGood);
+    await until(() => v.source.unread === null, 5000);
+    check((await unread()).length === 0, 'restoring the exact last good text clears the unread notice');
   } finally { v.close(); }
 }
 

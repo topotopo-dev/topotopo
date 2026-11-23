@@ -25,7 +25,7 @@ import type { ExportOptions } from './common.ts';
 import { unrealLandscapeBundle } from './unreal.ts';
 import { textureFilesBeside, texturesExport } from './textures.ts';
 import { exportOBJFiles } from './export.ts';
-import { SOURCE_SUFFIX, sourceManifestBytes } from './source.ts';
+import { exportRecordName, SOURCE_SUFFIX, sourceManifestBytes } from './source.ts';
 import { sha256Hex } from '../core/sha256.ts';
 
 export interface ExportFile {
@@ -111,9 +111,16 @@ export function formatWrites(format: ExportFormat, o: { instances?: boolean; ima
 export async function exportFilesAsync(g: Geometry, format: ExportFormat | 'unreal_landscape', path: string, o: FileExportOptions = {}): Promise<ExportFiles> {
   const res = await formatFiles(g, format, path, o);
   if (!o.source) return { files: res.files, summary: res.summary };
-  if (res.sourceFile) return res;
-  const at = sourceManifestPath(format, path);
-  return { files: [...res.files, { path: at, bytes: sourceManifestBytes(o.source, at, res.files.map((f) => f.path)) }], summary: res.summary, sourceFile: at, sourceManifest: at };
+  const at = res.sourceFile ?? sourceManifestPath(format, path);
+  const sha256 = Object.fromEntries(res.files.filter((f) => !f.shared && f.path !== at)
+    .map((f) => [exportRecordName(at, f.path), sha256Hex(f.bytes)]));
+  if (res.sourceFile) {
+    const record = res.files.find((f) => f.path === at)!;
+    const info = JSON.parse(new TextDecoder().decode(record.bytes));
+    record.bytes = new TextEncoder().encode(JSON.stringify({ ...info, sha256 }, null, 2) + '\n');
+    return res;
+  }
+  return { files: [...res.files, { path: at, bytes: sourceManifestBytes(o.source, at, res.files.map((f) => f.path), sha256) }], summary: res.summary, sourceFile: at, sourceManifest: at };
 }
 
 /** The files of the format; sourceFile names the sidecar that took options.source, if one did. */

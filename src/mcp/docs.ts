@@ -1639,6 +1639,8 @@ CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pie
   export: `EXPORT
 export {output:"crate"} / export {} (the default output) / export {all:true}: the graph's export targets (help topic
   "graph": "export" on the graph or an output), written inside exports/, the same files the viewer's Export buttons write.
+  An export refuses to replace files changed after TopoTopo wrote them or files TopoTopo did not write.
+  To replace them, pass overwrite: true to export, pass --overwrite on the CLI, or choose Replace in the editor.
 PATHS: one rule for the CLI, the MCP server and the viewer: relative paths inside a graph (file nodes, material maps,
   image files) read from its package folder, the nearest folder with a .topo file at or above the graph file, else
   the graph file's folder (MCP: the server's folder); exports/ is that package's (a graph in <package>/graphs/ exports into

@@ -99,12 +99,14 @@ async function pngContent(g: Geometry, o: RenderOptions, host: Host): Promise<{ 
  * Textures are read through the host; USD texture paths are written relative to the output file. Returns the report
  * text.
  */
-export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host, record?: (files: string[]) => void, source?: ExportSource): Promise<string> {
+export async function writeExport(geo: Geometry, format: ExportFormat, p: string, a: any, host: Host, record?: (files: string[]) => void, source?: ExportSource, packageDir?: string): Promise<string> {
   const res = await serializeExport(geo, format, p, a, host, source);
-  writeExportFiles(res.files);
+  writeExportFiles(res, { overwrite: a.overwrite === true, packageDir, hint: exportOverwriteHint });
   if (res.files.length) record?.(res.files.map((f) => f.path));
   return exportReport(res.files, res.outDir, format, res.summary, res.warnings, res.sourceFile, res.sourceManifest);
 }
+
+const exportOverwriteHint = 'pass overwrite: true to replace it, or another path';
 
 /**
  * "wrote <file or N files in dir> (format, KB): summary", where the export's source is recorded, then any warnings. A
@@ -291,7 +293,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
       if (!r.ok || !r.geo) return text(reportText(name, r, engine.scriptTimeoutMs), true);
       prepared.push(await prepareTarget(r.geo, name, p as typeof p & { target: NonNullable<typeof p.target> }, ws.exportDir, engine.host, { frame: r.frame, fps: r.fps, packages: packagesUsed(engine, spec, ws.packages?.published?.(follow) ?? engine.root), files: filesShaFor(ws.graphFile(name)) }));
     }
-    writeTargets(prepared, ws.exportDir);
+    writeTargets(prepared, ws.exportDir, { overwrite: a.overwrite === true, hint: exportOverwriteHint });
     const skipped = chosen.filter((p) => !p.target).map((p) => p.label);
     return text(prepared.map((p) => exportReport(p.files, p.root, p.target.format, `${p.label}: ${p.summary}`, p.warnings, p.sourceFile, p.sourceManifest)).join('\n')
       + (skipped.length ? `\nno export target (skipped): ${skipped.join(', ')}` : '') + publishedLine(spec, follow));
@@ -482,6 +484,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           path: { type: 'string', description: 'e.g. "exports/rock.glb", "exports/trees.csv", "exports/pts.points.json", "exports/terrain.png" (heightmap), "exports/level" (unreal_landscape: a directory), "exports/maps" (textures: a directory). Without path: the graph\'s export targets (output / all), written inside exports/' },
           output: { type: 'string', description: 'without path: export this named output (graph.outputs) to its target; omitted = the default output (graph.export)' },
           all: { type: 'boolean', description: 'without path: export every output of the graph that has an export target' },
+          overwrite: { type: 'boolean', default: false, description: 'Replace files that were changed after TopoTopo wrote them or were not written by TopoTopo.' },
           format: { type: 'string', enum: EXPORT_FORMATS, description: 'default: from the extension (.points.json = pointsjson)' },
           layer: { type: 'string', description: 'heightmaps: layer to write (png16/r16 default "height", mask_png default "mask")' },
           layers: { type: 'array', items: { type: 'string' }, description: 'mask_png: layers to write, one PNG each (name_<layer>.png); textures: extra image layers to write as <image>_<layer>.png ("*" = all)' },
@@ -521,7 +524,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           graph: name, spec: ws.getGraph(name), node: r.target, frame: r.frame, fps: r.fps,
           format: ext, options: exportToolOptions(a), packages: packagesUsed(engine, ws.getGraph(name), scope ?? engine.root), files: filesShaFor(ws.graphFile(name)), version: TOPOTOPO_VERSION, engine: engineSha256(),
         });
-        const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source);
+        const report = await writeExport(geo, ext, p, a, engine.host, (files) => new ArtifactStore(ws.exportDir).record(files, { graph: name, node: r.target, format: ext }), source, ws.dir);
         return text(`${report}\n(from ${name}/${r.target}${atFrame(r)}: ${geo.numPoints} points, ${geo.numPrims} prims)${publishedLine(ws.getGraph(name), follow)}`);
       },
     },

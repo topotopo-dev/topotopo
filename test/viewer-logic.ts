@@ -1354,6 +1354,12 @@ section('the tab\'s title, the welcome, and messages that clear themselves (sect
   check(welcome.unreadMessage(unread.slice(0, 1), ['town']) === 'graphs/main.json cannot be read (Unexpected token): it shows here when the file is fixed'
     && welcome.welcomeOf({ package: null, folder: '/home/me/stuff', builtin: [], unread }).lead === 'A graph file of this folder cannot be read.',
     'a file that was never read is not called a last version, and a folder is not called a package');
+  const fileUnread = [{ file: 'my rock.json', error: 'Unexpected token', graph: 'my_rock' }];
+  check(welcome.unreadMessage(fileUnread, ['my_rock']) === 'my rock.json cannot be read (Unexpected token): the editor shows the last version it could read',
+    'the file viewer uses the graph name supplied with the notice');
+  const fileWelcome = welcome.welcomeOf({ ...loose, file: 'my rock.json', unread: fileUnread, connect });
+  check(fileWelcome.title === 'my rock.json' && fileWelcome.lead === 'This graph file cannot be read.' && fileWelcome.steps.some((s: string) => s.includes('Unexpected token'))
+    && fileWelcome.steps.every((s: string) => !s.includes('topotopo init')), 'the file viewer explains the unreadable file without offering to make a package');
   check(status.messageLife('saved 2 values', 'ok') === 6000 && status.messageLife('no such node', 'err') === 12000 && status.messageLife('undid move', '', 2000) === 6000 && status.messageLife('x', '', 9000) === 9000,
     'a message clears itself: 6 s, an error 12 s, longer when held');
   check(status.messageLife('exporting crate…', 'busy') === Infinity && status.messageLife(status.DISCONNECTED_LINE, 'err') === Infinity && status.messageLife('', 'err') === 0,

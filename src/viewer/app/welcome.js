@@ -21,24 +21,25 @@ export const defaultGraph = (info, names) => (info?.package && names.includes(in
  */
 export function unreadMessage(unread = [], names = []) {
   if (!unread.length) return '';
-  const [{ file, error }] = unread;
-  const shown = names.includes(file.slice(file.lastIndexOf('/') + 1).replace(/\.json$/, ''));
+  const [{ file, error, graph }] = unread;
+  const shown = names.includes(graph ?? file.slice(file.lastIndexOf('/') + 1).replace(/\.json$/, ''));
   const then = shown ? 'the editor shows the last version it could read' : 'it shows here when the file is fixed';
   return `${file} cannot be read (${error}): ${then}${unread.length > 1 ? ` · and ${unread.length - 1} more` : ''}`;
 }
 
 /**
  * The welcome while there is no graph: {kind, title, sub, lead, steps, builtin}. kind "package" (a package without graphs)
- * or "folder" (a folder that is no package).
+ * or "folder" (a folder that is no package), or "file" (a single graph file).
  */
 export function welcomeOf(info) {
   const builtin = info?.builtin ?? [];
   const connect = typeof info?.connect === 'string' && info.connect
     ? ['No agent connected yet? For Claude Code, run: ' + info.connect] : [];
   const unread = info?.unread?.length ? {
-    lead: `A graph file of this ${info.package ? 'package' : 'folder'} cannot be read.`,
+    lead: info.file ? 'This graph file cannot be read.' : `A graph file of this ${info.package ? 'package' : 'folder'} cannot be read.`,
     steps: [...info.unread.map(({ file, error }) => `${file}: ${error}`), 'Fix the file (or put back an earlier copy of it) and it shows here at once.'],
   } : null;
+  if (info?.file) return { kind: 'file', title: info.file, sub: '', builtin, lead: 'Waiting for the graph file.', steps: [], ...unread };
   if (info?.package) {
     const p = info.package;
     return {

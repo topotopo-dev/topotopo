@@ -127,6 +127,12 @@ try {
   check(again.status === 200 && !fs.readdirSync(ws.exportDir).some((f) => /^asset_\d+\.glb$/.test(f)) && mainReceipts.length === 1, 'exporting again overwrites the same file and receipt');
   // an editor that is asked to end waits for the export under way (viewer.idle): it resolves only once the files are written whole
   const glb = path.join(ws.exportDir, 'asset.glb');
+  const originalGLB = fs.readFileSync(glb);
+  fs.writeFileSync(glb, 'edited by hand');
+  const edited = await post({ id: model.id });
+  check(edited.status === 409 && edited.data.ok === false && JSON.stringify(edited.data.changed) === '["exports/asset.glb"]'
+    && edited.data.error.includes('exports/asset.glb was changed after TopoTopo wrote it') && fs.readFileSync(glb, 'utf8') === 'edited by hand', 'Export names the changed file and keeps its bytes');
+  check((await post({ id: model.id, overwrite: true })).status === 200 && fs.readFileSync(glb).equals(originalGLB), 'Export with overwrite replaces the changed file');
   fs.rmSync(glb, { force: true });
   const underWay = post({ id: model.id }); // not awaited
   await new Promise((r) => setTimeout(r, 20)); // the request has arrived
@@ -280,6 +286,14 @@ try {
   // Export all: every target, the outputs without one listed
   const everything = await command('export-all', {});
   check(everything.status === 200 && everything.data.written.length === 3 && everything.data.skipped.some((s: any) => s.graph === 'another'), 'Export all writes every target and lists the outputs without one');
+  const nacelle = path.join(ws.exportDir, 'parts', 'nacelle.obj');
+  const originalOther = fs.readFileSync(nacelle), originalAsset = fs.readFileSync(glb);
+  fs.writeFileSync(glb, 'first edit');
+  fs.writeFileSync(nacelle, 'second edit');
+  const editedAll = await command('export-all', {});
+  check(editedAll.status === 409 && editedAll.data.changed?.sort().join() === 'exports/asset.glb,exports/parts/nacelle.obj'
+    && fs.readFileSync(glb, 'utf8') === 'first edit' && fs.readFileSync(nacelle, 'utf8') === 'second edit', 'Export all names every changed file and keeps their bytes');
+  check((await command('export-all', { overwrite: true })).status === 200 && fs.readFileSync(glb).equals(originalAsset) && fs.readFileSync(nacelle).equals(originalOther), 'Export all with overwrite replaces both files');
   ws.setGraph('twin', { nodes: { b: { type: 'box' } }, export: { format: 'glb', path: 'asset.glb' } }); ws.bump('twin');
   const assetBytes = fs.readFileSync(path.join(ws.exportDir, 'asset.glb'));
   const conflict = await command('export-all', {});
