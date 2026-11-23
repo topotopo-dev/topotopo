@@ -45,7 +45,8 @@ const SHARED = (): Record<string, ParamDef> => ({
   sun: { type: 'vec3', default: [0, 1, 0], desc: 'where the sun comes from (fade, chalk, greying): straight up by default, a model does not know where south is' },
   padding: { type: 'int', default: 4, min: 0, max: 64, desc: 'texels the islands are padded by', aliases: ['dilation'] },
   samples: { type: 'int', default: 32, min: 4, max: 256, desc: 'rays per cloud point of the occlusion, cavity, shelter and visibility bake' },
-  leak_density: { type: 'float', default: 120, min: 0, max: 500, desc: 'run starts per metre of ledge, sill, coping or overhang edge, and per metre where a rusting part meets the surface (0 = no runs): most runs are faint, a few strong, and under a long edge they merge into a wash', aliases: ['runs_per_metre'] },
+  leak_density: { type: 'float', default: 120, min: 0, max: 500, desc: 'run starts per metre of ledge, sill, coping or overhang edge, and per metre where a rusting part meets the surface (0 = no runs): most runs are faint, a few strong, and under a long edge they merge into a wash. 120 is fast, while 250 to 500 gives a denser, finer streaking for a final look and takes longer to bake (about 3 times as long at 500)', aliases: ['runs_per_metre'] },
+  leak_wander: { type: 'float', default: 0, min: 0, max: 1, desc: 'how much the leak runs spread sideways and meander (0 = straight down, as on a flat face in still air, 1 = fanned out and winding, like wind-blown rain on a rough wall)', aliases: ['run_wander'] },
 });
 
 // ---------------------------------------------------------------- preparation
@@ -358,7 +359,8 @@ async function cookWeather(ctx: CookContext): Promise<Geometry> {
     mode: 'maps', resolution: Number(p.resolution), padding: Number(p.padding), layout, uv: 'uv', mapUV: 'uv_maps',
     kinds: prep.kinds, kindsPresent: prep.present, exposure: p.exposure as Exposure, handled: String(p.handled ?? '').trim(),
     sun: p.sun, seed: Number(p.seed) || 0, scale: prep.scale, samples: Number(p.samples), env: !!env, leaks: nLeaks > 0,
-    images: false, joints: false, rustSources: prep.rustSources, galvSources: prep.galvSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
+    images: false, joints: false, rustSources: prep.rustSources, galvSources: prep.galvSources,
+    runDensity: Number(p.leak_density) || 0, leakWander: Number(p.leak_wander) || 0, mountWall: p.mount === 'wall', replaced: over.names,
     photos, overrides: ov, match: null, material,
   };
   const vars = weatherVars({ wear: p.wear, dirt: p.dirt, rust: p.rust, age: p.age, seed: Number(p.seed) || 0, exposure: p.exposure, mount: p.mount });
@@ -660,7 +662,8 @@ async function cookMasks(ctx: CookContext): Promise<Geometry> {
         mode: 'masks', resolution: Number(p.resolution), padding: Number(p.padding), layout: 'keep', uv, mapUV: 'uv',
         kinds: prep.kinds, kindsPresent: present, exposure: p.exposure as Exposure, handled,
         sun: p.sun, seed, scale: gr.scale, samples: Number(p.samples), env, leaks: !!leakGeo && leakGeo.numPoints > 0,
-        images: !!over.image, joints: hasJoints, rustSources, galvSources, runDensity: Number(p.leak_density) || 0, mountWall: p.mount === 'wall', replaced: over.names,
+        images: !!over.image, joints: hasJoints, rustSources, galvSources,
+        runDensity: Number(p.leak_density) || 0, leakWander: Number(p.leak_wander) || 0, mountWall: p.mount === 'wall', replaced: over.names,
         photos: [], overrides: {}, match: null, material: name,
       };
       const graph = weatherGraph(opts);
@@ -751,7 +754,7 @@ function defaultGraph(mode: 'maps' | 'masks'): string {
   const g = weatherGraph({
     mode, resolution: mode === 'maps' ? 1024 : 2048, padding: 4, layout: mode === 'maps' ? 'visible' : 'keep', uv: mode === 'maps' ? 'uv' : 'uv2', mapUV: mode === 'maps' ? 'uv_maps' : 'uv',
     kinds: { paint: 'painted_metal' }, kindsPresent: ['painted_metal'], exposure: 'outdoor', handled: '', sun: [0, 1, 0], seed: 0,
-    scale: weatherScale(1.2, 1, 0.001), samples: 32, env: true, leaks: true, images: false, joints: false, rustSources: false, runDensity: 120,
+    scale: weatherScale(1.2, 1, 0.001), samples: 32, env: true, leaks: true, images: false, joints: false, rustSources: false, runDensity: 120, leakWander: 0,
     mountWall: false, replaced: [], photos: [], overrides: {}, match: null, material: mode === 'maps' ? 'weathered' : 'weather',
   });
   return JSON.stringify(g);
@@ -759,7 +762,7 @@ function defaultGraph(mode: 'maps' | 'masks'): string {
 
 const KIND_DOC = 'Kinds (the material node\'s kind, or kinds here; never guessed from names): painted ones lose their coat (painted_metal: chips to primer, bare steel, rust in the chip cores; cast_metal: larger chips, pitting, iron, heavier rust; painted_concrete: chips to concrete; painted_plaster: peels in larger sheets, water marks; painted_wood: flakes to wood that greys; decal: fades and scratches), bare ones stain, darken or grey through the whole surface and only wear lighter at edges (concrete: damp, stains, efflorescence below runs, worn arrises, moss; bare_steel: mill scale, flash and heavy rust, and it sources rust runs onto what is below; galvanised: dulls, white bloom, red rust on edges above rust 0.6; stainless: smudges where handled, tea stain; plastic: chalks in the sun, scuffs; rubber: greys; bare_wood: greys in the sun, damp low down; asphalt: fades, stains pool on flats; ceramic: chips to bisque); keep leaves a part as it is. Shared over every kind: film (sheltered paint duller), grime, dust, splash (mount ground), dirt runs, rust runs, moss on growing kinds outdoors, and blotch and grain on roughness.';
 
-const LEAK_DOC = 'Dirt runs start where the shape sheds water, measured, not named: the outer edge of every face turned up that meets a steep face below at a convex edge (copings, parapets, sills, ledges, plate and canopy tops) and the wall under a face turned down that meets it at a concave edge (under a balcony slab or canopy), or, when the wall is a separate piece, the wall that short level rays from just below the lip of an overhang reach (under a coping or sill that is its own box), one point every 1 / leak_density metres, kept with the chance of the rain that reaches its ledge (rays up against the model and its surroundings; indoors a fixed chance, as water below windows). Named parts add to them: handled parts wear, rust sources (bare_steel, and galvanised above rust 0.6) run rust onto what is below. mount and exposure scale them.';
+const LEAK_DOC = 'Dirt runs start where the shape sheds water, measured, not named: the outer edge of every face turned up that meets a steep face below at a convex edge (copings, parapets, sills, ledges, plate and canopy tops) and the wall under a face turned down that meets it at a concave edge (under a balcony slab or canopy), or, when the wall is a separate piece, the wall that short level rays from just below the lip of an overhang reach (under a coping or sill that is its own box), one point every 1 / leak_density metres, kept with the chance of the rain that reaches its ledge (rays up against the model and its surroundings; indoors a fixed chance, as water below windows). Named parts add to them: handled parts wear, rust sources (bare_steel, and galvanised above rust 0.6) run rust onto what is below. mount and exposure scale them. Raise leak_wander to make the runs fan out and wind like rain on a rough wall.';
 
 defineNode({
   type: T_W,
