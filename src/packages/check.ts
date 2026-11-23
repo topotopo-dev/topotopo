@@ -1,9 +1,10 @@
 // topotopo check: cook what a game relies on and say what broke and why, changing nothing but the .gdignore files that
 // keep Godot's importer out of TopoTopo's working folders; after a TopoTopo update above all, when a renamed param or a
 // changed node can break a package version published before it. In a workspace: its own packages as the scan finds
-// them (the newest published version of each package that publishes, each output cooked as a package that uses it
-// cooks it, in the version's own folder with the copies it holds; every graph of the others, with the versions they
-// use) and the newest version of every package in the shared libraries it lists. Outside one: the package around the
+// them. For a package with a published version, it cooks the newest version's outputs as a package that uses it
+// cooks them, in the version's own folder with the copies it holds. For a package without a published version, it
+// cooks every graph with the versions it uses. It also cooks the newest version of every package in the shared
+// libraries the workspace lists. Outside a workspace: the package around the
 // folder (its graphs) and the library it is in; in no package, the registered libraries. There are no param
 // migrations: a version that no longer cooks says why (the error and its hint) and its author publishes a fixed one,
 // which packages take with an update.
@@ -112,9 +113,11 @@ export async function checkAll(start: string, o: { progress?: (what: string) => 
     if (m) {
       const scan = scanWorkspace(workspace, m);
       problems.push(...scan.problems.map((p) => `the workspace "${m!.name}": ${p}`));
-      // its own packages: the versions of those that publish, the graphs of the others
-      versions = scan.packages.filter((p) => p.manifest.name);
-      graphs = scan.packages.filter((p) => !p.manifest.name).map((p) => ({ dir: p.dir, name: p.rel }));
+      // its own packages: published versions and the graphs of unpublished packages
+      for (const p of scan.packages) {
+        if (p.manifest.name && publishedVersions(p.dir, p.manifest.name).length > 0) versions.push(p);
+        else graphs.push({ dir: p.dir, name: p.rel });
+      }
       for (const p of scan.packages) fixed.push(...godotIgnore(p.dir));
       const listed = resolveListed(workspace, m.libraries);
       problems.push(...listed.problems);

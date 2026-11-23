@@ -2306,6 +2306,67 @@ section('a material read by name from a merge of package material outputs leaves
     `a name no output holds cooks all, so the error lists every material (${errorOf(typo).slice(0, 140)})`);
 }
 
+section('workspace-root commands and unpublished packages');
+{
+  const root = path.join(tmp, 'workspace-commands'), lib = path.join(root, 'lib');
+  const boxes = path.join(lib, 'boxes'), scene = path.join(root, 'scenes', 'scene'), pkg = 'ws/boxes';
+  const box = (h: number): GraphSpec => ({
+    nodes: { b: { type: 'box', params: { size: [1, h, 1] } } }, output: 'b',
+    outputs: { box: { node: 'b', description: 'A rectangular box', tags: ['box'] } },
+  });
+  addLibrary('workspace-commands-parts', lib);
+  writePackage(boxes, { name: pkg }, { main: box(1) });
+  await publish(boxes, 'first');
+  setGraph(boxes, 'main', box(2));
+  await publish(boxes, 'taller');
+  writePackage(scene, {}, { main: { nodes: { s: { type: pkg } }, output: 's' } });
+  (await open(scene)).pk.use(pkg, { version: '1.0' });
+  initWorkspace(root, { engine: 'none' });
+
+  const preview = await run('update', [pkg, root]);
+  const folder = /[\s"]/.test(root) ? JSON.stringify(root) : root;
+  check(preview.code === 0 && preview.out.startsWith('before/after: ws/boxes 1.0 → 1.1') && preview.out.includes('1 of the 1 compared changed')
+    && preview.out.split('\n--render <folder>')[0].endsWith(`topotopo update ${pkg} ${folder} --from 1.0 --to 1.1 --apply`)
+    && readWorkspace(root).uses[pkg] === '1.0',
+    `update at a workspace root compares both versions and says how to apply (${preview.out.split('\n')[0] || preview.err})`);
+  const outdated = await run('outdated', [root]);
+  check(outdated.code === 0 && outdated.out.includes('1 out of date') && outdated.out.includes('ws/boxes 1.0: 1.1 is out'),
+    `outdated at a workspace root lists the newer version (${outdated.out.split('\n')[0] || outdated.err})`);
+  const applied = await run('update', [pkg, root, '--from', '1.0', '--to', '1.1', '--apply']);
+  check(applied.code === 0 && readWorkspace(root).uses[pkg] === '1.1',
+    `update --apply at a workspace root writes the workspace pin (${applied.out.split('\n')[0] || applied.err})`);
+
+  const privateRoot = path.join(tmp, 'private-copies');
+  writePackage(path.join(privateRoot, 'boxes'), { name: pkg }, { main: box(1) });
+  initWorkspace(privateRoot, { engine: 'none' });
+  const privateUpdate = await run('update', [pkg, privateRoot]), privateOutdated = await run('outdated', [privateRoot]);
+  check([privateUpdate, privateOutdated].every((r) => r.code === 1
+    && r.err === 'No package in this workspace shares its copies, so nothing uses its pins.'),
+    `update and outdated explain when no package shares the workspace copies (${privateUpdate.err})`);
+  const plain = path.join(tmp, 'plain-folder');
+  fs.mkdirSync(plain);
+  const plainUpdate = await run('update', [pkg, plain]), plainOutdated = await run('outdated', [plain]);
+  check([plainUpdate, plainOutdated].every((r) => r.code === 1 && r.err.includes('is in no package')),
+    'update and outdated still need a package outside a workspace');
+
+  const kit = path.join(lib, 'kit');
+  writePackage(kit, { name: 'ws/kit' }, { main: { nodes: { k: { type: 'ws/nothing/there' } }, output: 'k' } });
+  const broken = await checkAll(root), report = checkText(broken);
+  const brokenKit = broken.items.find((i) => i.what === 'package' && i.name === 'lib/kit');
+  check(brokenKit?.failures.length === 1 && report.includes('BROKEN  package lib/kit: 1 failure'),
+    `check reports the failed cook in a named unpublished package (${brokenKit ? report.split('\n')[1] : 'no item for lib/kit'})`);
+  const cli = spawnCli(['check', root]);
+  check(cli.code === 1 && cli.out.includes('BROKEN  package lib/kit: 1 failure'),
+    `the CLI exits 1 for a broken unpublished package (exit ${cli.code})`);
+  setGraph(kit, 'main', box(1));
+  const fine = await checkAll(root);
+  const fineKit = fine.items.find((i) => i.what === 'package' && i.name === 'lib/kit');
+  check(fineKit && !fineKit.failures.length && fineKit.cooked > 0,
+    `check cooks a valid graph in a named unpublished package (${fineKit?.cooked ?? 'no item'})`);
+  const { removeLibrary } = await import('../src/config.ts');
+  removeLibrary('workspace-commands-parts');
+}
+
 await engines[0]?.host.pool?.close();
 console.log(`\n${passes} passed, ${failures} failed — temp ${tmp}`);
 process.exit(failures ? 1 : 0);

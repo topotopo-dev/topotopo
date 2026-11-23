@@ -11,12 +11,12 @@ import { spawnSync } from 'node:child_process';
 import '../src/nodes/index.ts';
 import { Engine, geoBytes, resolveTime, STOPPED } from '../src/graph/engine.ts';
 import type { CookOptions, CookReport } from '../src/graph/engine.ts';
-import { allNodeDefs, defineNode } from '../src/graph/registry.ts';
+import { allNodeDefs, defineNode, getNodeDef } from '../src/graph/registry.ts';
 import { createNodeHost, packageBaseDir } from '../src/host/node.ts';
 import { replayArgs } from '../src/io/source.ts';
 import { exportOptionFlags } from '../src/io/targets.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
-import { scanExpr } from '../src/graph/params.ts';
+import { resolveParamName, scanExpr } from '../src/graph/params.ts';
 import { EXPR_HELPERS, REF_FUNCS, evalExpr, isSimpleExpr } from '../src/graph/expr.ts';
 import type { Host } from '../src/host/types.ts';
 import { rand } from '../src/core/random.ts';
@@ -766,6 +766,19 @@ section('deprecation');
   const again = await engine.cook({ nodes: { old: { type: 'test_old_box', params: { size: 2 } } } });
   check(res(again, 'old').cached && again.warnings.some((w) => /deprecated/.test(w.message)), 'the warning repeats on cache hits');
   check(engine.dryRun({ nodes: { old: { type: 'test_old_box' } } }).notes.some((n) => /deprecated/.test(n)), 'dryRun notes deprecated nodes');
+}
+
+section('renamed params');
+{
+  const current = allNodeDefs().flatMap((def) => Object.keys(def.renamed ?? {})
+    .filter((key) => resolveParamName(def, key) !== null).map((key) => def.type + ' ' + key));
+  check(!current.length, `renamed lists contain no current param names or aliases (${current.length}: ${current.slice(0, 5).join(', ')})`);
+  const renamed = getNodeDef('tex_noise')?.renamed ?? {};
+  const old = engine.validate({ nodes: { n: { type: 'tex_noise', params: { size: 2 } } } });
+  const valid = engine.validate({ nodes: { n: { type: 'tex_noise', params: { texture_size: 2 } } } });
+  check(!Object.hasOwn(renamed, 'texture_size') && Object.hasOwn(renamed, 'size') && !valid.errors.length
+    && old.errors.some((e) => e.message.includes('the metres the image width covers are texture_size on the node that makes the image')),
+    'tex_noise accepts texture_size and still gives the hint for size');
 }
 
 section('param ranges');

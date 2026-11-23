@@ -32,9 +32,10 @@ import { KINDS } from '../graph/outputs.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig, removeLibrary } from '../config.ts';
 import { createPackage, isStale, placeNamed, readBakeState, scanAll, workspaceRef } from '../web/library.ts';
-import { VERSION_RE, initPackage, locate, manifestAt, manifestFile, oldManifestAbove, packageDirOf, slugify, workspaceFlag } from '../package.ts';
+import { VERSION_RE, copiesFor, initPackage, locate, manifestAt, manifestFile, oldManifestAbove, packageDirOf, slugify, workspaceFlag } from '../package.ts';
 import { isPublishedCopy } from '../host/godot.ts';
 import { forgetScans } from '../scan.ts';
+import { scanWorkspace } from '../workspace.ts';
 import type { WebConfig } from '../config.ts';
 
 /**
@@ -104,6 +105,23 @@ function packageOf(folder: string | undefined, prog: string): string {
   const abs = path.resolve(folder ?? '.');
   if (folder !== undefined && !isDir(abs)) fail(`no folder ${abs}`);
   return packageDirOf(abs) ?? fail(`${abs} is in no package: ${prog} init${folder === undefined ? '' : ` ${quoted(folder)}`} makes the folder a package (<id>.topo)${oldManifestAbove(abs)}`);
+}
+
+/**
+ * The package whose uses `update` and `outdated` read: the package around the folder, or at a workspace root a package
+ * that shares the workspace's copies, so the workspace's own pins are updated through it.
+ */
+function sharingPackageOf(folder: string | undefined, prog: string): string {
+  const abs = path.resolve(folder ?? '.');
+  if (isDir(abs) && !packageDirOf(abs)) {
+    const ws = locate(abs).workspace;
+    if (ws) {
+      const root = path.resolve(ws);
+      const sharing = scanWorkspace(ws).packages.find((p) => copiesFor(p.dir).workspace === root);
+      return sharing?.dir ?? fail('No package in this workspace shares its copies, so nothing uses its pins.');
+    }
+  }
+  return packageOf(folder, prog);
 }
 
 const isDir = (abs: string) => !!fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory();
@@ -374,7 +392,7 @@ export async function outdatedCommand(argv: string[], prog: string, io: Io = con
   return (await run(io, async () => {
     const folder = args(argv, [], [], `usage: ${prog} outdated [folder]`).rest[0];
     const { outdatedText } = await import('./update.ts');
-    const { pk, close } = await usesOfPackage(packageOf(folder, prog));
+    const { pk, close } = await usesOfPackage(sharingPackageOf(folder, prog));
     try { io.out(outdatedText(pk, false, folder)); return 0; } finally { await close(); }
   })) ?? 0;
 }
@@ -412,7 +430,7 @@ export async function updateCommand(argv: string[], prog: string, io: Io = conso
     versionGiven(folder, `a version is named with --to, ${prog} update ${pkg} --to ${/^\d+$/.test(folder ?? '') ? `${folder}.0` : folder}`);
     const { applyUpdate, beforeAfter, beforeAfterText, overlayRenders } = await import('./update.ts');
     const { NothingToUpdate, loadPackage } = await import('./registry.ts');
-    const packageDir = packageOf(folder, prog);
+    const packageDir = sharingPackageOf(folder, prog);
     const { engine, pk, close } = await usesOfPackage(packageDir);
     try {
       if (a.has('--apply')) {
