@@ -24,9 +24,9 @@
       "min": [-65.1276, -0.6261, -64.8576]
     },
     "counts": {
-      "points": 64828,
-      "prims": 64180,
-      "vertices": 255115,
+      "points": 66390,
+      "prims": 65731,
+      "vertices": 261319,
       "volumes": 0
     },
     "groups": {
@@ -36,37 +36,37 @@
       "vertex": []
     },
     "hashes": {
-      "P": "1942ba4584746373",
+      "P": "560df27f931bf789",
       "attributes": {
         "detail.materials": "0395a3589848bda6",
-        "group.prim.caps": "ac92dc836921b2a9",
-        "group.prim.sides": "bce58337a4a5339d",
-        "point.Cd": "50372776c0a28efc",
-        "point.N": "79ca33c9faa1f0fb",
-        "point.curveu": "da37422142ed9a4b",
-        "point.height": "0d84159f369cead9",
-        "point.hitdist": "2858760dbacac1e7",
-        "point.hitprim": "69591d5d1259b567",
-        "point.id": "4df631fa65e257b4",
-        "point.mask": "20b87fa8d646a89e",
-        "point.slope": "ac35367c7c2cb016",
-        "point.tint": "e66612be8b265024",
-        "prim.copynum": "0bbec51ade5acb30",
-        "prim.material": "4de6b4c7eac014e1",
-        "prim.name": "96903e1c54de3b86",
-        "vertex.uv": "f2f618f1d4a109b3"
+        "group.prim.caps": "ec916fbfe8904155",
+        "group.prim.sides": "fb8e7147b5a9464d",
+        "point.Cd": "c3beaef6b1c89ebc",
+        "point.N": "e146e9895dab8efb",
+        "point.curveu": "d77fed6215dfe50c",
+        "point.height": "46e50fdfa24bafd9",
+        "point.hitdist": "cb3087274c782759",
+        "point.hitprim": "9cb9e33eb3de7150",
+        "point.id": "1661673ad1911cb4",
+        "point.mask": "8968e46841f56d9e",
+        "point.slope": "a4363ebce7db7516",
+        "point.tint": "2c1b93fef6d51524",
+        "prim.copynum": "a2d9813a09e529b0",
+        "prim.material": "9dfa28aade7c811c",
+        "prim.name": "4c0e986a81cf355c",
+        "vertex.uv": "7ac6edc954bb5adb"
       },
-      "topology": "c991eafcff7f586e"
+      "topology": "43afc3cf194b17f5"
     },
     "packed": {
-      "hash": "5250c06185820d03",
+      "hash": "1532289983bfb16b",
       "instances": 535,
       "sources": [
-        "720252836879278d",
-        "16d2c1db26db7ab1",
-        "00107554dc30cfa6",
-        "e34e0fc7543098b5",
-        "607222f6c2813110"
+        "8733a085efd554cb",
+        "59aa8dedbac4a07b",
+        "9dab28f293d4b870",
+        "1f370091d0ee0247",
+        "288239603e16adfe"
       ]
     }
   },

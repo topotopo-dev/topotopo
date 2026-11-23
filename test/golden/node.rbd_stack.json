@@ -35,9 +35,9 @@
       "topology": "f19c4ec446d56e9e"
     },
     "packed": {
-      "hash": "457b6fdb5ca12159",
+      "hash": "8c3f9ba33e7c1849",
       "instances": 6,
-      "sources": ["55967a4b015515b1"]
+      "sources": ["2f1eb02f946cef09"]
     }
   },
   "name": "node.rbd_stack",

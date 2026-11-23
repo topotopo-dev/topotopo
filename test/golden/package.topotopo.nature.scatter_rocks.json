@@ -34,9 +34,9 @@
       "topology": "c4d9ab3a395bf900"
     },
     "packed": {
-      "hash": "21e5c34f2985daa9",
+      "hash": "cd26bfe446f128fe",
       "instances": 111,
-      "sources": ["704bf2dc06eb4e32", "ebfa9ee108c5c0df", "e0e5dcf94876deff"]
+      "sources": ["43e1b0de1cc207f0", "f69060903b6c4aaa", "65dbdb234d31382d"]
     }
   },
   "name": "package.topotopo.nature.scatter_rocks",

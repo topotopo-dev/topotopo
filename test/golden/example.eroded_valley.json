@@ -9,7 +9,7 @@
     },
     "bbox": {
       "max": [200, 146.5148, 200],
-      "min": [-200, 0.0792, -200]
+      "min": [-200, 0, -200]
     },
     "counts": {
       "points": 66049,
@@ -24,11 +24,11 @@
       "vertex": []
     },
     "hashes": {
-      "P": "4930f34f222113d5",
+      "P": "b99786763af109a8",
       "attributes": {
         "detail.materials": "fdd4c405ab2f5c6b",
-        "point.N": "0cbe271f4aab09c1",
-        "point.uv": "69336c8d4baabc07",
+        "point.N": "a4c82961def2f093",
+        "point.uv": "8cd54a35ccd3f78f",
         "prim.material": "b0b69dc592265d1f",
         "prim.name": "a0089dc561b45d1f"
       },
@@ -47,7 +47,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "bd2dec40c9f7dfb6"
+          "C": "d2172cc47b6a9e0a"
         },
         "name": "valley_colour"
       }

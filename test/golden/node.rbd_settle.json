@@ -35,9 +35,9 @@
       "topology": "60979e868344657c"
     },
     "packed": {
-      "hash": "05354180e604f6e2",
+      "hash": "ed4ced6f0f5195d1",
       "instances": 25,
-      "sources": ["6e4060660388115c"]
+      "sources": ["acbaede560d58c0f"]
     }
   },
   "name": "node.rbd_settle",

@@ -34,9 +34,9 @@
       "topology": "83c889068829d23c"
     },
     "packed": {
-      "hash": "1acac3307e6150aa",
+      "hash": "e85f85b03fd992a2",
       "instances": 21,
-      "sources": ["8fac219f637ff8f1", "b783edd4daf2a33e", "598494b97a25066b", "45caff5b8fb08071"]
+      "sources": ["9ca67e72b4b1ce70", "0f630be1117f0763", "0b03b94bbb27ca15", "544517cb3619b251"]
     }
   },
   "name": "package.topotopo.nature.forest_patch",

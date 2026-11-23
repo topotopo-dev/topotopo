@@ -34,9 +34,9 @@
       "topology": "0de0ba942e161b8e"
     },
     "packed": {
-      "hash": "9b036ff4901d9806",
+      "hash": "ff486437327caa75",
       "instances": 2230,
-      "sources": ["c68b61d4e1fa321e", "1ed0a3bce4b8447e"]
+      "sources": ["ba09a7e7af28388d", "47a73528d4033c36"]
     }
   },
   "name": "package.topotopo.nature.grass_clumps",

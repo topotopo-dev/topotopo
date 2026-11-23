@@ -1034,7 +1034,7 @@ category: `curve` · aliases: `linear_extrude`, `extrude2d`
 
 Extrude flat closed shapes into solids (holes supported). Quad sides + n-gon caps; groups top/bottom/side.
 
-A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids. Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.
+A shape that lies inside another shape of the same input is a hole, and a shape inside a hole is an island again; which way each outline winds does not matter. So a plate with round openings needs no boolean: merge a shape2d rect and circles placed inside it (all in one plane) and extrude the merge in one node, and the circles come out as holes through the solid. Shapes extruded in separate nodes and merged afterwards stay separate solids. Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries the same attributes and groups, except vertex uv. The apex point copies the first point of its source outline.
 
 **Inputs**
 
@@ -1361,7 +1361,7 @@ category: `curve` · aliases: `polyexpand2d`, `offset2d`, `inset2d`, `strap`, `s
 
 2D offset (grow/shrink) of closed shapes, like PolyExpand2D. Negative distance = inset. Open paths become straps.
 
-Closed shapes grow by distance (shrink when negative). An open path (a polyline whose ends do not meet) becomes a strap: a closed outline at |distance| on both sides, with its ends cut square at the end points (cap butt), rounded, or extended by the distance; extrude it for a 3D strap or band. Shapes and straps in one input are joined.
+Closed shapes grow by distance (shrink when negative). An open path (a polyline whose ends do not meet) becomes a strap: a closed outline at |distance| on both sides, with its ends cut square at the end points (cap butt), rounded, or extended by the distance; extrude it for a 3D strap or band. Shapes and straps in one input are joined. Each output outline or strap keeps its source prim attributes and groups. When shapes merge, the lowest source prim number wins. Each output point copies the attributes of the nearest point on its source prim and keeps its new position.
 
 **Inputs**
 
@@ -1976,7 +1976,7 @@ category: `curve`
 
 Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).
 
-The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. The end caps lie in the profile plane, perpendicular to the curve at its last point: where the last segment is tilted, the cap is tilted with it and its rim pokes above or below a horizontal plane the tube was meant to end on (a ground or snap plane). End the path with a short horizontal run, or cut the result with clip. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
+The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The built-in ribbon faces the frame's +Y, which is up on a level path with the default up. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. The end caps lie in the profile plane, perpendicular to the curve at its last point: where the last segment is tilted, the cap is tilted with it and its rim pokes above or below a horizontal plane the tube was meant to end on (a ground or snap plane). End the path with a short horizontal run, or cut the result with clip. uv: u runs around the profile, v along the curve; caps take the profile's flat layout.
 
 **Inputs**
 
@@ -1993,7 +1993,7 @@ The profile is drawn in the XY plane around the origin, looking along the curve:
 | `shape` | enum | `"circle"` |  | `circle`, `square`, `rect`, `ribbon`, `half_circle` |  | built-in profile when no profile input; rect is size wide (X) and high (Y), for straps and bars |
 | `radius` | float | `0.1` |  |  | `width`, `rad` | built-in profile radius / half width |
 | `size` | vec2 | `[0.2,0.05]` |  |  |  | rect profile: width along the profile X (sideways) and height along Y (up) |
-| `divisions` | int | `12` | 2..1024 |  | `sides`, `cols` | built-in profile segments |
+| `divisions` | int | `12` | 1..1024 |  | `sides`, `cols` | built-in profile segments (equal strips across a ribbon); minimum 1 for ribbon, 2 for other shapes; square and rect use four sides |
 | `caps` | bool | `true` |  |  |  | cap open ends (closed profiles only) |
 | `twist` | float | `0` |  |  |  | total twist in degrees along each curve |
 | `scale_ramp` | ramp | `[[0,1],[1,1]]` |  |  |  | profile scale along the curve (u 0..1); point pscale also multiplies |
@@ -3813,7 +3813,7 @@ Every check is off by default; enable the ones that express what the graph must 
 |---|---|---|---|---|---|---|
 | `on_fail` | enum | `"error"` |  | `error`, `warn`, `mark` | `onfail`, `action` | error = fail the node; warn = pass through with a warning; mark = pass through and write assert_failed / assert_report / group assert_fail |
 | `label` | string | `""` |  |  | `message`, `msg` | what this assert guards, prefixed to the message |
-| `watertight` | bool | `false` |  |  | `closed` | closed surface: only polygons, every edge shared by exactly two of them |
+| `watertight` | bool | `false` |  |  | `closed` | closed surface: only polygons, every edge shared by exactly two of them. Geometry with no primitives passes. |
 | `manifold` | bool | `false` |  |  |  | no edge shared by 3+ polygons and no bowtie points (fans touching at a point) |
 | `no_flipped` | bool | `false` |  |  | `outward`, `consistent_winding` | neighbouring polygons wound consistently, and closed pieces face outward (positive volume; the walls of a cavity inside a hollow solid may face inward) |
 | `min_points` | int | `-1` | -1..2147483647 |  |  | at least this many points (-1 = off) |
@@ -4931,22 +4931,22 @@ Weld points closer than a distance; collapsed prims are removed.
 
 category: `topology` · aliases: `divide_quads`, `facade_split`, `quad_split`, `split_faces`
 
-Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded. Only quads are split: cut first, then split.
+Split selected quads into a grid of cells by target size or division counts. Shared edges stay welded.
 
-Only 4-sided polygons are divided; triangles and n-gons pass through unsplit. After a boolean the faces around the cut are often n-gons, so they stay whole: run grid_split on the quads BEFORE the cut (or triangulate the n-gons first), not after it.
+Selected quads divide into cells. Neighbours agree on their shared edges, and faces next to split quads gain points along those edges. Opposite edges of a split quad have the same count. In size mode the longest edge in each connected set sets the count. In count mode the largest requested count wins. Run grid_split before a boolean to divide faces that the cut would turn into n-gons.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `geo` | no | no | polygon mesh (quads are split; triangles and n-gons pass through unsplit) |
+| 0 | `geo` | no | no | polygon mesh (selected quads form grids; adjacent faces gain shared edge points) |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `group` | group (prim) | `""` |  |  |  | quads to split ("" = all) |
-| `mode` | enum | `"size"` |  | `size`, `count` |  | size = divide each edge by length / target size; count = fixed divisions |
+| `mode` | enum | `"size"` |  | `size`, `count` |  | size = round the longest linked edge length / its target size; count = use the largest requested divisions along linked edges |
 | `size` | vec2 | `[1,1]` |  |  |  | target cell size [horizontal, vertical]: edges mostly along Y use the 2nd value |
 | `divisions` | ivec2 | `[2,2]` | 1..256 |  |  | count mode: cells along the quad's first and second edge |
 
@@ -5037,7 +5037,7 @@ category: `topology` · aliases: `lod_tree`, `polyreduce_lod`, `lod_create`, `lo
 
 Levels of detail in one go: decimated copies tagged with prim lod and named {name}_lod0, {name}_lod1 … (merged), or one level (switch); optionally of one group only.
 
-Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. Every level's prims get prim int "lod" and prim "name" = name_format with {name} = the prim's input name (or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open borders, with point counts (or the max_error limit), or the parts where a plain reduction folds the uv (keep_uv, as in decimate: a level never folds a clean uv atlas). Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
+Houdini: PolyReduce per level + a name per level (LOD Create). Each level is decimated from the input with the decimate kernel (attribute steering, uv seams kept, optional lock_border, prune small pieces); level 0 with ratio 1 is the triangulated input. Levels come from ratios (fractions of the triangle count; missing entries keep halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height allows. Every level's prims get prim int "lod" and prim "name" = name_format with {name} = the prim's input name (or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its target warns with what held it: uv seams, hard normals (vertex N), prim attribute or group borders and open borders, with point counts (or the max_error limit), or the parts where a plain reduction folds the uv (keep_uv, as in decimate: a level never folds a clean uv atlas). A level that would have more triangles than the previous level copies that mesh and gets its own name, lod tag and spacing. Detail "lod" is a JSON list of {level, ratio | screen_size, triangles, error}; detail int[] "lod_tris" the triangle counts.
 
 **Inputs**
 
@@ -5096,7 +5096,7 @@ category: `topology` · aliases: `repair`, `polydoctor`, `mesh_doctor`, `fix_mes
 
 Diagnose and fix meshes: fuse duplicates, degenerate/duplicate faces, non-manifold edges, winding, small holes, self-intersections.
 
-Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switched off: fuse points within tolerance (by default only where one of the two lies on an open border: cracks and polygon soups close, solids that merely touch, like fracture pieces, keep their own points); drop repeated points and faces with < 3 distinct points, zero-area triangles hand their middle point to the neighbour across their long side (no slit is left); duplicate faces (compared by position: a copy with the same winding goes, an opposite-winding pair on the same points, i.e. an internal wall, goes entirely); non-manifold edges (3+ faces): keep, remove the extra faces, or split (faces around the edge are paired by angle and orientation, then every point whose corners form several fans (also bowtie points) is duplicated so each fan is manifold); winding made consistent across manifold edges (each piece keeps its majority orientation); holes with at most max_hole_edges edges ear-clipped (no new points, attributes from the neighbouring faces, prim group "filled"); closed pieces turned outward (signed volume); optional self-intersection test (BVH, triangle pairs that cross; report → prim group "self_intersecting", remove_faces → delete them and fill the holes); points no prim uses removed. Detail string "repair_report" holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed or found something (warn off: only the detail string). Polylines pass through. For a quick tidy without topology changes use clean; for meshes beyond repair, remesh (voxel) rebuilds a watertight surface.
+Houdini: PolyDoctor SOP (plus Clean). Steps run in this order, each can be switched off: fuse points within tolerance (by default only where one of the two lies on an open border: cracks and polygon soups close, solids that merely touch, like fracture pieces, keep their own points); drop repeated points and faces with < 3 distinct points, zero-area triangles hand their middle point to the neighbour across their long side (no slit is left); duplicate faces (compared by position: a copy with the same winding goes, an opposite-winding pair on the same points, i.e. an internal wall, goes entirely); non-manifold edges (3+ faces): keep, remove the extra faces, or split (faces around the edge are paired by angle and orientation, then every point whose corners form several fans (also bowtie points) is duplicated so each fan is manifold); winding made consistent across manifold edges (each piece keeps its majority orientation); holes with at most max_hole_edges edges ear-clipped (no new points, attributes from the neighbouring faces, prim group "filled"); closed pieces turned outward (signed volume); optional self-intersection test (BVH, triangle pairs that cross; report → prim group "self_intersecting", remove_faces → delete them and fill the holes); points no prim uses removed. When max_hole_edges is 0, repair revisits open edges. It also revisits non-manifold edges in split and remove mode. Detail string "repair_report" holds the counts as JSON (with input/output topology summaries); the node warns with a summary when it changed or found something (warn off: only the detail string). Polylines pass through. For a quick tidy without topology changes use clean; for meshes beyond repair, remesh (voxel) rebuilds a watertight surface.
 
 **Inputs**
 
@@ -7496,7 +7496,7 @@ category: `heightfield` · aliases: `hf_erode`, `erosion`, `heightfield_erosion`
 
 Droplet or virtual-pipe hydraulic erosion with thermal talus relaxation and optional stream-power incision.
 
-Houdini: HeightField Erode. method droplet (the default; backend js, or kernel for the same model in WASM): seeded droplets erode below their carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Droplet settings are in metres, so the same params erode the same terrain alike at any spacing (an 8 m preview like the 2 m map, finer detail aside): rain_density counts droplets per m² per iteration, max_distance and erosion_radius are metres, and erosion_rate, deposition_rate, evaporation, inertia, gravity and thermal_rate act per droplet step of a third of erosion_radius, with sediment_capacity a volume in those steps cubed; the node converts them to the field's cells (a cell of a third of the radius takes them as given: the defaults at 0.1 m). For a terrain λ times larger keep the rest and multiply erosion_radius and max_distance by λ and divide rain_density by λ² (a 4 km map at 2 m: erosion_radius 6, max_distance 60, rain_density 0.005). Erosion is not local: droplets and water cross tile borders and start at seeded positions over the whole field, so a tile with a margin erodes like the same area of the map only statistically. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded; their rates are per second, and their iterations are time steps that the cell size limits (CFL), so finer fields simulate less time per iteration unless time_step is below the limit of every spacing. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1, normalised over the field: droplet on a log scale against its mean and 99th percentile, pipe by its maximum). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. An existing lake layer supplies initial standing water to pipe/stream_power; lake is updated to the same final depth within its original footprint, while water includes every wet sample. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.
+Houdini: HeightField Erode. method droplet (the default; backend js, or kernel for the same model in WASM): seeded droplets erode below their carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Droplet settings are in metres, so the same params erode the same terrain alike at any spacing (an 8 m preview like the 2 m map, finer detail aside): rain_density counts droplets per m² per iteration, max_distance and erosion_radius are metres, and erosion_rate, deposition_rate, evaporation, inertia, gravity and thermal_rate act per droplet step of a third of erosion_radius, with sediment_capacity a volume in those steps cubed; the node converts them to the field's cells (a cell of a third of the radius takes them as given: the defaults at 0.1 m). For a terrain λ times larger keep the rest and multiply erosion_radius and max_distance by λ and divide rain_density by λ² (a 4 km map at 2 m: erosion_radius 6, max_distance 60, rain_density 0.005). Erosion is not local: droplets and water cross tile borders and start at seeded positions over the whole field, so a tile with a margin erodes like the same area of the map only statistically. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded; their rates are per second, and their iterations are time steps that the cell size limits (CFL), so finer fields simulate less time per iteration unless time_step is below the limit of every spacing. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Every method writes height. Thermal relaxation adds to debris. Droplets write flow and water and add to sediment when rain produces droplets. Droplet flow is normalised to 0..1 on a log scale, and water is a normalised resting-water mask. Pipe and stream_power write flow and water and add to sediment when rainfall or an existing lake supplies water. They normalise flow to 0..1 by its maximum and write water depth in metres. They also update an existing lake with the final depth inside its original footprint. A thermal-only pass preserves flow, water, sediment and lake. Kernel backends add wear (eroded depth) from both hydraulic and thermal erosion. Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.
 
 **Inputs**
 
@@ -7536,7 +7536,7 @@ Houdini: HeightField Erode. method droplet (the default; backend js, or kernel f
 | `fill_sinks` | bool | `false` |  |  |  | stream_power only: route incision over a depression-filled surface each iteration without raising the ground; fully hard/frozen cells stay protected |
 | `boundary` | enum | `"closed"` |  | `closed`, `open` |  | closed: water remains inside (material conserved); open: water exits, carrying sediment for droplet, while pipe retains sediment |
 
-**Writes:** layers height, flow, sediment, debris, water; kernel backends also write wear
+**Writes:** height, plus layers used by the active processes: flow, sediment, water and lake for hydraulic erosion, debris for thermal relaxation, and wear with the kernel backend
 
 **Example**
 
@@ -7840,7 +7840,7 @@ Houdini: HeightField Layer / Copy Layer / Layer Clear, plus a volume wrangle for
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `operation` | enum | `"expression"` |  | `expression`, `copy`, `rename`, `delete`, `fill` | `op`, `mode` | expression: layer = expression; copy/rename: layer ← source; delete: remove layer; fill: layer = value |
-| `layer` | string | `"height"` |  |  |  | target layer (created if missing) |
+| `layer` | string | `"height"` |  |  |  | target layer (created if missing). For delete, use names or patterns separated by spaces or commas. * matches any number of characters and ? matches one. |
 | `expression` | code | `"height"` |  |  | `expr`, `code` | JS expression per sample (or a body with return) |
 | `source` | string | `"mask"` |  |  |  | source layer for copy/rename |
 | `value` | float | `0` |  |  |  | fill value |
@@ -8376,7 +8376,7 @@ category: `heightfield` · aliases: `hf_project`, `heightfield_stamp`
 
 Stamp meshes or curves onto a heightfield: replace, raise (max), lower (min), add or subtract, blended over a radius.
 
-Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample; open curves stamp their own height within width/2 of the curve. Outside the stamp the effect fades over radius metres towards the terrain (the nearest stamped height is used). level mean sets each connected polygon piece to the average terrain height under it instead of its own Y: building pads, plazas and car parks sit where cut and fill balance, so slopes get the smallest embankments. mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).
+Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample. Outside a polygon the effect fades over radius metres from its outline, using the height at the nearest point on that outline. Open curves stamp their own height within width/2 of the curve, and the falloff uses the nearest stamped sample. level mean sets each connected polygon piece to the average terrain height under it instead of its own Y: building pads, plazas and car parks sit where cut and fill balance, so slopes get the smallest embankments. mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).
 
 **Inputs**
 
@@ -8737,7 +8737,7 @@ Houdini: HeightField Convert to polygons. Points are row-major like the layers (
 | `step` | int | `1` | 1..64 |  | `decimate`, `lod` | use every Nth sample (2 = a quarter of the quads) |
 | `layers` | bool | `true` |  |  |  | copy every layer to a point float attribute |
 | `normals` | bool | `true` |  |  |  | point N from the field gradient |
-| `uv` | bool | `true` |  |  |  | point uv 0..1 over the field (over its own extent: a tile gets its own 0..1) |
+| `uv` | bool | `true` |  |  |  | point uv 0..1 over the field (each tile uses its own extent); v = 1 at the −Z edge, at the top of a heightfield_to_tex image |
 | `color` | enum | `"none"` |  | `none`, `mask`, `height`, `terrain` |  | point Cd from the layers |
 | `keep_heightfield` | bool | `false` |  |  |  | keep the heightfield volume alongside the mesh |
 
@@ -9731,7 +9731,7 @@ category: `code` · aliases: `attribwrangle`, `pointwrangle`, `primwrangle`, `ve
 
 Run a JS snippet per point / prim / vertex (or once) with VEX-style @attributes. The universal escape hatch.
 
-Code runs once per element with @attr bound to the current element. Read/write any attribute: @P, @N, @Cd, @pscale, @orient... New attributes are created on write (type from prefix f@ i@ v@ p@ u@ s@, a known name, or the first assigned value). Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). Graph vars by their bare name, read-only, as in "=expr" params: @P.y += height * 0.5 (iteration, value … inside a foreach). Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.
+Code runs once per element with @attr bound to the current element. Read/write any attribute: @P, @N, @Cd, @pscale, @orient... New attributes are created on write (type from prefix f@ i@ v@ p@ u@ s@, a known name, or the first assigned value). Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). Read graph vars by bare name or with ch("lift"). Graph vars are read-only. Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.
 
 **Inputs**
 
@@ -9746,7 +9746,7 @@ Code runs once per element with @attr bound to the current element. Read/write a
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `code` | code | `""` |  |  | `snippet`, `vexpression`, `vex` | JS snippet (statements). Example: "@P.y += noise(@P) * 0.2; @Cd = [@P.y, 0.5, 1];" |
+| `code` | code | `""` |  |  | `snippet`, `vexpression`, `vex` | JS statements. Start directly with the code, for example "@P.y += noise(@P) * 0.2; @Cd = [@P.y, 0.5, 1];" |
 | `run_over` | enum | `"points"` |  | `points`, `prims`, `vertices`, `detail` | `class`, `runover` | element class to iterate |
 | `group` | group | `""` |  |  |  | only run on elements in this group (point, prim or vertex pattern, matching run_over) |
 

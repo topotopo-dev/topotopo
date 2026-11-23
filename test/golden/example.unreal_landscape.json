@@ -12,9 +12,9 @@
       "min": [-125.509, 0.2543, -125.867]
     },
     "counts": {
-      "points": 1924,
-      "prims": 1670,
-      "vertices": 2426,
+      "points": 2683,
+      "prims": 2426,
+      "vertices": 5450,
       "volumes": 1
     },
     "groups": {
@@ -24,29 +24,29 @@
       "vertex": []
     },
     "hashes": {
-      "P": "dc0e4b1226594dc8",
+      "P": "447d26605361d9c2",
       "attributes": {
         "detail.materials": "6db9822e88c6b554",
-        "group.prim.caps": "6a6f50858d8aa2ff",
-        "group.prim.sides": "e8fb1fc51ebfa91f",
-        "point.slope": "96454a3d16e4b5a7",
-        "prim.copynum": "ee09c801a5ae2c0b",
-        "prim.material": "076db6c9e244600b",
-        "prim.name": "3e3fd0e987811cab",
-        "vertex.uv": "8cb2caadef297c5f"
+        "group.prim.caps": "9498f1ccd4f6c7da",
+        "group.prim.sides": "cb9c778c5e8cad3a",
+        "point.slope": "7eaeb95d1ae60527",
+        "prim.copynum": "40bf18812a06d60b",
+        "prim.material": "791534e11b627f33",
+        "prim.name": "ef9221a15880d333",
+        "vertex.uv": "a9347b791832563b"
       },
-      "topology": "0dd3d8282da9580a"
+      "topology": "2ccf7748b1c4bd12"
     },
     "packed": {
-      "hash": "fc71127b481bc3a9",
+      "hash": "2de68880b993d36a",
       "instances": 1418,
       "sources": [
-        "74e0f5f5563d1e8b",
-        "d9e83c6e2e9134c8",
-        "9863aa96fc0ed4ec",
-        "12925b5049083922",
-        "c00ab949ae78b7f7",
-        "4a952d2da5ef5efb"
+        "0f754ea26cc073c4",
+        "edece4853b51c19f",
+        "69230dd2df3948c4",
+        "df8cd7b34e994465",
+        "90dcfdbbdcfc46c1",
+        "a9ca2b6c9ce6c8f6"
       ]
     },
     "volumes": [

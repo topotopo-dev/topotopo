@@ -29,9 +29,9 @@
       "topology": "bc6eab629b43a7f8"
     },
     "packed": {
-      "hash": "dce32b23c7e88775",
+      "hash": "cf84f6b6ca7931cc",
       "instances": 3,
-      "sources": ["26fea5ae68dd7708"]
+      "sources": ["d2a0d41403d39fae"]
     }
   },
   "name": "node.pack",
