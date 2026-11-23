@@ -26,6 +26,7 @@ import { triangulate } from '../src/core/topology.ts';
 import { WEATHER_MASKS, leakSources } from '../src/core/weather.ts';
 import { topicText } from '../src/mcp/docs.ts';
 import type { GraphSpec, NodeSpec, ParamDef } from '../src/graph/types.ts';
+import { limits } from '../src/core/runs.ts';
 
 let fail = 0, pass = 0;
 const check = (ok: unknown, msg: string) => {
@@ -451,7 +452,11 @@ section('leak sources: the cap thins every edge alike and says so');
   check(l.found > 20000 && l.points.numPoints === 20000 && Math.min(...per) >= 0.9 * Math.max(...per), `${l.found} found, 20000 kept, every box keeps its share (${Math.min(...per)} to ${Math.max(...per)} per box)`);
   const all: Nodes = { ...boxes, m: { type: 'material', in: ['all'], params: { name: 'c', base_color: '#9c978c', kind: 'concrete' } }, uv: { type: 'uv_unwrap', in: ['m'], params: { resolution: 256, padding: 2 } } };
   // the weather node warns of the cap, and these runs are too many to trace: it says what to lower in its own params
-  const r = await serial.cook({ nodes: { ...all, w: { type: 'weather', in: ['uv'], params: { ...FAST, leak_density: 500 } } }, output: 'w' });
+  // the 3 mm walk keeps these 40 boxes under the real limit (about 165,000 segments): a lower one shows the refusal
+  const was = limits.maxSegments;
+  limits.maxSegments = 100000;
+  let r;
+  try { r = await serial.cook({ nodes: { ...all, w: { type: 'weather', in: ['uv'], params: { ...FAST, leak_density: 500 } } }, output: 'w' }); } finally { limits.maxSegments = was; }
   const msg = r.warnings.map((x) => x.message).find((x) => x.includes('leak points capped')) ?? '';
   check(/capped at 20000: \d{5,} found/.test(msg) && msg.includes('leak_density'), `the weather node says so: ${msg.slice(0, 160)}`);
   const e = r.errors[0];

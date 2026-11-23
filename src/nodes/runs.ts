@@ -74,7 +74,8 @@ function cook(ctx: CookContext): Geometry {
   // trace
   const prm: FlowParams = {
     density: Math.max(0, Number(p.density)), direction: [dir[0], dir[1], dir[2]], length: [Number(p.length[0]), Number(p.length[1])], width: [Number(p.width[0]), Number(p.width[1])],
-    wobble: Number(p.wobble), breakup: Number(p.breakup), ledge: Number(p.ledge), pool: Number(p.pool), drip: !!p.drip, step: Number(p.step), spill: Number(p.spill), seed: Number(p.seed),
+    wobble: Number(p.wobble), spread: Number(p.spread), meander: Number(p.meander), meanderLength: Number(p.meander_length),
+    breakup: Number(p.breakup), ledge: Number(p.ledge), pool: Number(p.pool), drip: !!p.drip, step: Number(p.step), spill: Number(p.spill), seed: Number(p.seed),
   };
   const budget = simBudget(ctx, 'fewer runs (a lower density), shorter lengths or a larger step; or raise the limit');
   const { kw } = scales(prm);
@@ -191,14 +192,16 @@ defineNode({
   description:
     'Runs start at the source parts (sources: a prim group of input 0, e.g. "@name=bolt* @name=hinge*"; or points or a mesh on input 1) where they touch another surface within 1 cm, ' +
     'one every 1 / density metres along each part (at least one per part), and walk down the receiving surface (every prim that is not a source): gravity projected onto the surface, bent sideways by 3D noise (wobble), ' +
-    'snapped back onto the mesh, over edges and across uv seams, around bosses and over the underside of a lip. A surface whose normal is within ledge degrees of up stops the run, where it pools; ' +
+    'snapped back onto the mesh, over edges and across uv seams, around bosses and over the underside of a lip. ' +
+    'Spread gives each run its own sideways lean, and meander adds a side-to-side wave whose wavelength in metres is set by meander_length. ' +
+    'A surface whose normal is within ledge degrees of up stops the run, where it pools; ' +
     'a pool whose ledge has an edge within the spill reach (metres) spills over the edge nearest to it and the run goes on below with less strength; a source standing on a ledge starts a pool and does the same; ' +
     'at an overhang (a face turned down) it drips along gravity onto the surface below and goes on. A run is drawn from where it comes out from under its source part. ' +
     'Each run has its own length (length range; a random strength 0..1 makes the stronger ones the longer), width (width range: a little wider at the head, tapering to 30 % at the tail) and a strength that dies away along it so the end is soft (unless the run ends in a pool), gaps (breakup) and wander. ' +
     'Image layers: C = the run mask 0..1 (box-filtered over the texel, so thin runs stay thin at any resolution); along = 0 at the source to 1 at the tail; head = strong near the source (stain heads: (1 - along / 0.35)² × C); ' +
     'strength = the run\'s random 0..1 (a threshold picks how many runs show, without tracing again); id = a number that names the run (a hash of where it starts, so it stays when other parts are added or reordered; 0 = none); stain (with stain above 0) = a broad faint stain around the runs, a mean like C; mask = coverage; with supersample along, strength and id are those of the run that covers the texel most, never a mean. The source parts themselves bake 0. ' +
     'Water goes down the geometry, not down authored normals: the flow direction comes from face normals, smoothed only between faces that meet within 40°, so a face wound the wrong way reads as turned down and lets water through. The bottom of a groove whose sides are steeper than ledge pools, and runs on along it when it slopes. ' +
-    'The metre constants of a run (gaps, wander, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. ' +
+    'The metre constants of a run (gaps, wobble, the swell at its head) follow the width and length ranges, so a run looks the same at any scale. ' +
     'Everything is measured in 3D at the texel, so no uv seam shows; the same seed gives the same runs, and another seed moves them. Input 0 needs non-overlapping uv in 0..1 (uv_unwrap).',
   aliases: ['flow_bake', 'bake_runs', 'bake_drips', 'bake_streaks', 'bake_rust_runs'],
   inputs: [
@@ -218,7 +221,10 @@ defineNode({
     direction: { type: 'vec3', default: [0, -1, 0], desc: 'gravity: the way the runs flow', aliases: ['gravity', 'dir'] },
     length: { type: 'vec2', default: [0.05, 0.25], min: 0, max: 100, desc: 'range of the drawn length per run in metres, from where it comes out from under its source (the longer runs are the stronger)', aliases: ['run_length', 'length_range'] },
     width: { type: 'vec2', default: [0.003, 0.01], min: 0, max: 5, desc: 'range of the run width at the head in metres; runs taper to 30 % at the tail', aliases: ['run_width', 'width_range'] },
-    wobble: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'sideways wander of a run (3D noise on its walking direction); 0 = ruler-straight', aliases: ['meander', 'wander', 'spread'] },
+    wobble: { type: 'float', default: 0.3, min: 0, max: 1, desc: 'sideways wander of a run from 3D noise (0 = no noise)', aliases: ['wander'] },
+    spread: { type: 'float', default: 0, min: 0, max: 2, desc: 'maximum random sideways slope per run (0 adds no lean, 0.5 is about 27°). Use with meander for rain running down a rough wall' },
+    meander: { type: 'float', default: 0, min: 0, max: 2, desc: 'how much each run curves side to side, as a slope (1 is about 45° at its steepest, 0 turns the wave off)' },
+    meander_length: { type: 'float', default: 0.06, min: 0.005, max: 5, desc: 'wavelength of the meander in metres, independent of run size' },
     breakup: { type: 'float', default: 0.4, min: 0, max: 1, desc: 'gaps along a run and a wandering width (3D noise); the gaps grow toward the tail; 0 = unbroken', aliases: ['break_up', 'gaps', 'raggedness'] },
     ledge: { type: 'float', default: 30, min: 0, max: 90, desc: 'a surface whose normal is within this many degrees of up stops the run, which pools there (a 30° slope still sheds water)', aliases: ['ledge_angle', 'stop_angle'] },
     pool: { type: 'float', default: 1.5, min: 1, max: 10, desc: 'width multiplier of the pool where a run stops on a ledge', aliases: ['pool_width', 'puddle'] },

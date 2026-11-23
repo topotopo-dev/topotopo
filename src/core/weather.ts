@@ -532,6 +532,7 @@ export interface GraphOptions {
   samples: number;
   /** run starts per metre of a rusting part's contact (rust runs) */
   runDensity: number;
+  leakWander: number;
   /** inputs of the nested graph present: 1 surroundings, 2 leak points, 3 images (overrides, photos, match), 4 joint planes */
   env: boolean;
   leaks: boolean;
@@ -633,10 +634,14 @@ export function weatherGraph(o: GraphOptions): GraphSpec {
   };
   nodes.parts = { type: 'bake_mask', in: [atlas], params: { ...bake, attrib: 'wpart', name: 'part' } };
   const masks = ['measure', 'noise', 'wear', 'parts'];
-  // water on a flat face goes straight down (it wanders only where the shape turns it): little wobble, many runs whose
+  // water on a flat face goes straight down by default: little wobble, many runs whose
   // lengths vary a lot (most short, a few long), each a narrow core in a broad soft stain; the stains add up, so under a
   // long edge they merge into a wash that breaks into streaks lower down, and most are faint (stain_skew), a few strong
-  const run = { resolution: res, padding: pad, uv_attrib: o.uv, seed: o.seed, length: [f(0.03 * s), f(0.4 * s)], width: [f(0.002 * s), f(0.008 * s)], wobble: 0.05, breakup: 0.3, stain: 5, stain_skew: 1.5 };
+  const run = {
+    resolution: res, padding: pad, uv_attrib: o.uv, seed: o.seed, length: [f(0.03 * s), f(0.4 * s)], width: [f(0.002 * s), f(0.008 * s)],
+    wobble: 0.05, breakup: 0.3, stain: 5, stain_skew: 1.5, step: f(0.003 * s),
+    ...(o.leakWander > 0 ? { spread: f(0.35 * o.leakWander), meander: f(0.7 * o.leakWander), meander_length: f(0.06 * s) } : {}),
+  };
   if (o.rustSources && o.runDensity > 0) { nodes.rust_runs = { type: 'bake_flow', in: [atlas], params: { ...run, sources: '@wrust=1', density: f(o.runDensity), name: 'rr' } }; masks.push('rust_runs'); }
   if (o.galvSources && o.runDensity > 0) { nodes.galv_runs = { type: 'bake_flow', in: [atlas], params: { ...run, sources: '@wrust=2', density: f(o.runDensity), name: 'rg' } }; masks.push('galv_runs'); }
   if (o.leaks) { nodes.dirt_runs = { type: 'bake_flow', in: [atlas, 'leak_sources'], params: { ...run, length: [f(0.03 * s), f(1.0 * s)], width: [f(0.0015 * s), f(0.005 * s)], wobble: 0.04, stain: 6, stain_skew: 2, name: 'rd' } }; masks.push('dirt_runs'); }

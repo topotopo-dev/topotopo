@@ -80,6 +80,9 @@ export interface FlowParams {
   /** width range at the head (metres); runs taper to 30 % at the tail */
   width: [number, number];
   wobble: number;
+  spread?: number;
+  meander?: number;
+  meanderLength?: number;
   breakup: number;
   /** degrees: a surface whose normal is within this of up is a ledge */
   ledge: number;
@@ -315,6 +318,7 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
   const { kw, kl } = scales(prm);
   const unit = REF_WIDTH * 1e-3 * kw;
   const wobbleFreq = 12 / kl;
+  const { spread = 0, meander = 0, meanderLength = 0.06 } = prm;
   const srcBvh = src && triangulate(src).tris.length ? new TriBVH(src) : null;
   const gl = Math.hypot(prm.direction[0], prm.direction[1], prm.direction[2]);
   const G: [number, number, number] = [prm.direction[0] / gl, prm.direction[1] / gl, prm.direction[2] / gl];
@@ -460,6 +464,7 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
     let ledgeFrom = 0, hwBase = hw0, sBase = 0, Lseg = L, sEnd = L, sBulb = 0, ampCur = 1, spills = 0;
     const hwAt = (sv: number) => hwBase * (1 - 0.7 * Math.min(1, Math.max(0, sv - sBase) / Lseg)) * (1 + 0.3 * Math.max(0, 1 - (sv - sBulb) / (0.03 * kl)));
     const bias = (r01(st.h, 4) - 0.5) * 0.5;
+    const lean = spread ? (r01(st.h, 9) - 0.5) * 2 * spread : 0;
     const ox = r01(st.h, 6) * 97, oy = r01(st.h, 7) * 97, oz = r01(st.h, 8) * 97;
     const exitR = Math.max(0.0015 * kw, 1.2 * hw0);
     const maxHidden = Math.max(0.3 * kl, 2 * lmax);
@@ -559,7 +564,9 @@ export function traceRuns(recv: Geometry, src: Geometry | null, cands: Candidate
       }
       tx[0] = n[1] * d[2] - n[2] * d[1]; tx[1] = n[2] * d[0] - n[0] * d[2]; tx[2] = n[0] * d[1] - n[1] * d[0];
       norm3(tx);
-      const lat = (noiseAt(x[0], x[1], x[2], ox, oy, oz) * 1.2 + bias) * prm.wobble;
+      let lat = (noiseAt(x[0], x[1], x[2], ox, oy, oz) * 1.2 + bias) * prm.wobble;
+      if (lean) lat += lean;
+      if (meander) lat += meander * 1.6 * noise((s + hidden) / meanderLength + ox, oy, 0.5);
       dir[0] = d[0] + tx[0] * lat; dir[1] = d[1] + tx[1] * lat; dir[2] = d[2] + tx[2] * lat;
       norm3(dir);
       // a surface that rises across the step (a shelf, a boss, a part sunk into the wall: the wall's own face goes on
@@ -803,6 +810,12 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     }
   }
   const all = opts.brute ? Int32Array.from({ length: ns }, (_, k) => k) : null;
+  // Clip only the first drawn segment of each run to give the head a flat edge.
+  const startS = new Float32Array(rs.runLen.length).fill(Infinity);
+  for (let k = 0; k < ns; k++) {
+    const id = rs.ID[k];
+    if (rs.POOL[k] !== 1 && rs.AMP[k] > 0) startS[id] = Math.min(startS[id], rs.SS[k * 2]);
+  }
 
   for (let i = 0; i < n; i++) {
     if ((i & 4095) === 0) check?.();
@@ -821,22 +834,23 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     let best = 0, bk = -1, bAlong = 0;
     for (let m = s0; m < s1; m++) {
       const k = all ? m : list[m], o = k * 6;
+      const id = rs.ID[k], pool = rs.POOL[k] === 1;
       const ax = A[o], ay = A[o + 1], az = A[o + 2];
       const ex = A[o + 3] - ax, ey = A[o + 4] - ay, ez = A[o + 5] - az;
       const l2 = ex * ex + ey * ey + ez * ez;
       let t = l2 > 0 ? ((px - ax) * ex + (py - ay) * ey + (pz - az) * ez) / l2 : 0;
+      if (t < 0 && !pool && rs.SS[k * 2] <= startS[id]) continue;
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const cx = ax + ex * t - px, cy = ay + ey * t - py, cz = az + ez * t - pz;
       const d2 = cx * cx + cy * cy + cz * cz;
       let hw = rs.HW[k * 2] + (rs.HW[k * 2 + 1] - rs.HW[k * 2]) * t;
-      const pool = rs.POOL[k] === 1;
       const reach = reachOf(hw, pool, tau);
       if (d2 > reach * reach) continue; // beyond the widest the run gets plus the filter
       const dist = Math.sqrt(d2);
       // the texel lies on the same surface: its normal agrees with the run's there
       const mx = rs.NRM[o] + (rs.NRM[o + 3] - rs.NRM[o]) * t, my = rs.NRM[o + 1] + (rs.NRM[o + 4] - rs.NRM[o + 1]) * t, mz = rs.NRM[o + 2] + (rs.NRM[o + 5] - rs.NRM[o + 2]) * t;
       if (nx * mx + ny * my + nz * mz < 0.5 * Math.sqrt(mx * mx + my * my + mz * mz)) continue;
-      const id = rs.ID[k], rk = rs.key[id] % 1021;
+      const rk = rs.key[id] % 1021;
       const sAbs = rs.SS[k * 2] + (rs.SS[k * 2 + 1] - rs.SS[k * 2]) * t;
       const along = Math.min(1, sAbs / rs.runLen[id]);
       let gate = 1;

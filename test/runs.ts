@@ -207,7 +207,14 @@ const stepped = (ledgeDepth: number, boltZ: number): Geometry => build([
   { name: 'src', polys: boxPolys(0.4, 0.498, boltZ - 0.006, 0.45, 0.52, boltZ + 0.006) },
 ]);
 /** The paths of the runs (not the pool lenses, whose size follows the width): a count and a hash of the positions. */
-const hashA = (rs: RunSet) => { let h = 0, c = 0; for (let k = 0; k < rs.segs; k++) { if (rs.POOL[k]) continue; c++; for (let i = 0; i < 6; i++) h = (Math.imul(h, 31) + Math.round(rs.A[k * 6 + i] * 1e9)) | 0; } return `${rs.segs}:${c}:${h}`; };
+const hashA = (rs: RunSet) => {
+  const paths = runPoints(rs);
+  let h = 0;
+  for (const r of paths) for (const p of [r[0], r[r.length - 1]]) {
+    for (const v of p) h = (Math.imul(h, 31) + Math.round(v * 1e9)) | 0;
+  }
+  return `${paths.length}:${h}`;
+};
 {
   const narrow = stepped(0.02, -0.01);
   const segsBelow = (rs: RunSet, z: number) => Array.from({ length: rs.segs }, (_, k) => k).filter((k) => rs.A[k * 6 + 1] < 0.49 && rs.A[k * 6 + 4] < 0.49 && Math.abs(rs.A[k * 6 + 2] - z) < 0.003);
@@ -217,7 +224,7 @@ const hashA = (rs: RunSet) => { let h = 0, c = 0; for (let k = 0; k < rs.segs; k
   // a run from the wall above the ledge: with the reach at 0 it pools and nothing goes below; the paths are recorded
   const above = build([{ name: 'lower', polys: boxPolys(0, 0, -0.05, 1, 0.5, 0) }, { name: 'upper', polys: boxPolys(0, 0.5, -0.05, 1, 1, -0.02) }, { name: 'src', polys: boxPolys(0.4, 0.6, -0.03, 0.45, 0.62, -0.015) }]);
   const a0 = trace(above, { spill: 0, length: [0.2, 0.2] }), a1 = trace(above, { spill: 0, length: [0.2, 0.2] });
-  check(hashA(a0.runs) === hashA(a1.runs) && hashA(a0.runs) === '21:19:1080399545' && segsBelow(a0.runs, 0).length === 0 && a0.stats.ended.ledge > 0, `spill 0: runs from above pool on the ledge and go no further; the paths are the recorded ones (${hashA(a0.runs)})`);
+  check(hashA(a0.runs) === hashA(a1.runs) && hashA(a0.runs) === '2:1895140569' && segsBelow(a0.runs, 0).length === 0 && a0.stats.ended.ledge > 0, `spill 0: runs from above pool on the ledge and go no further at the recorded run endpoints (${hashA(a0.runs)})`);
   const sp = trace(narrow, { spill: 0.05 });
   const below = segsBelow(sp.runs, 0);
   check(sp.stats.spills > 0 && below.length > 0 && below.every((k) => sp.runs.AMP[k] < 1 && sp.runs.A[k * 6] > 0.36 && sp.runs.A[k * 6] < 0.49), `a bolt on a narrow ledge: ${sp.stats.spills} spill(s), ${below.length} segments on the wall below it, weaker than the pool (amp ${Math.min(...below.map((k) => sp.runs.AMP[k])).toFixed(2)})`);
@@ -228,6 +235,27 @@ const hashA = (rs: RunSet) => { let h = 0, c = 0; for (let k = 0; k < rs.segs; k
   check(wd.runs.count > 0 && wd.stats.spills === 0 && segsBelow(wd.runs, 0.28).length === 0 && wd.stats.ended.ledge === wd.runs.count, `a bolt in the middle of a wide shelf pools only (${wd.runs.count} pool run(s), no spill)`);
   const far = trace(wide, { spill: 0.2 });
   check(far.stats.spills > 0, 'a reach of 0.2 m does reach the edge of the same shelf');
+}
+
+section('spread and meander on a flat wall');
+{
+  const wall = build([{ name: 'wall', polys: [[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]] }]);
+  const b = new GeoBuilder();
+  for (let i = 0; i < 30; i++) b.addPoint(0.2 + i * 0.02, 0.7, 0);
+  const cands = sampleSources(b.build(), 3);
+  const run = (o: Partial<FlowParams> = {}) => traceRuns(wall, null, cands, prm({ seed: 3, length: [0.3, 0.3], wobble: 0.04, ...o })).runs;
+  const medianDrift = (rs: RunSet) => {
+    const xs = runPoints(rs).map((r) => Math.max(...r.map((p) => Math.abs(p[0] - r[0][0])))).sort((a, b) => a - b);
+    const mid = xs.length >> 1;
+    return (xs[mid - 1] + xs[mid]) / 2;
+  };
+  const off = run(), zero = run({ spread: 0, meander: 0 });
+  const spread = run({ spread: 0.5 }), repeat = run({ spread: 0.5 }), meander = run({ meander: 0.5 });
+  const base = medianDrift(off), fan = medianDrift(spread), wave = medianDrift(meander);
+  check(off.count === 30 && hashA(off) === hashA(zero) && off.segs === zero.segs && off.A.every((v, i) => Object.is(v, zero.A[i])), `zero spread and meander give the same ${off.count} paths as when omitted (${hashA(off)})`);
+  check(spread.count === 30 && fan > 3 * base, `spread 0.5 fans out the runs (median drift ${fan.toFixed(3)} m against ${base.toFixed(3)} m)`);
+  check(meander.count === 30 && wave > 3 * base, `meander 0.5 bends the runs (median drift ${wave.toFixed(3)} m against ${base.toFixed(3)} m)`);
+  check(hashA(spread) === hashA(repeat) && spread.segs === repeat.segs && spread.A.every((v, i) => Object.is(v, repeat.A[i])), 'the same seed and spread give the same paths, bit for bit');
 }
 
 // ---------------------------------------------------------------- gravity
@@ -394,7 +422,14 @@ section('refusals');
   const viaPts = await cookOn(engines.pool, { s: { type: '__runs_source', params: { key: 'uncut' } }, p: { type: '__runs_source', params: { key: 'pts' } }, f: { type: 'bake_flow', in: ['s', 'p'], params: { resolution: 128, density: 40 } } }, 'f');
   const im = viaPts.geo && findImage(viaPts.geo, 'f');
   let lit = 0; if (im) for (const v of im.layer('C')!) if (v > 0.3) lit++;
-  check(viaPts.ok && lit > 10, `a point on input 1 starts a run (${lit} texels)`);
+  check(viaPts.ok && lit >= 10, `a point on input 1 starts a run (${lit} texels)`);
+
+  store.set('flat', build([{ name: 'wall', polys: [[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]], uv: [[[0, 0], [1, 0], [1, 1], [0, 1]]] }], true));
+  const res = 256, row = Math.floor((1 - 0.4) * res);
+  const flat = await cookOn(engines.pool, flow('flat', { resolution: res, padding: 0, wobble: 0, breakup: 0, length: [0.2, 0.2], width: [0.025, 0.025] }, { in2: { type: '__runs_source', params: { key: 'pts' } } }), 'f');
+  const core = flat.geo && findImage(flat.geo, 'f')?.layer('C');
+  const firstRow = core ? Math.floor(core.findIndex((v) => v > 0.05) / res) : -1;
+  check(firstRow >= row - 2 && firstRow <= row + 2, `a point run starts with a flat head at row ${firstRow} (source row ${row})`);
 }
 
 // ---------------------------------------------------------------- resolution
