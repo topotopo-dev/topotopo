@@ -190,6 +190,85 @@ for (const over of OVERS) {
   check(r.ok && r.same && near(read(r.geo!, over, 'a'), [-1 + 0.25 + 2, 0, 0]), `${over}: scalar maths on components and string building still work`);
 }
 
+// ------------------------------------------------------------------ closest positions on each kind of input
+
+{
+  const probe = async (source: string, pos: number[]) => {
+    const r = await off.cook({ nodes: {
+      box: { type: 'box' },
+      line: { type: 'points', params: { positions: [[0, 0, 0], [2, 0, 0], [4, 0, 1]], polyline: 'open' } },
+      mixed: { type: 'merge', in: ['box', 'line'] },
+      triangle: { type: 'points', params: { positions: [[0, 0, 0], [1, 0, 0], [0, 0, 1]], polyline: 'closed' } },
+      loose: { type: 'points', params: { positions: [[2, 0, 0], [4, 0, 1]] } },
+      empty: { type: 'points', params: { positions: [] } },
+      w: { type: 'wrangle', in: [source], params: { run_over: 'detail', code: `
+        const q = ${JSON.stringify(pos)}, hit = closest(0, q);
+        s@result = JSON.stringify([hit.dist, hit.prim, hit.pos, xyzdist(0, q), minpos(0, q), hit.uv]);
+      ` } },
+    }, output: 'w' });
+    return String(r.geo?.detail.get('result')?.get(0) ?? r.errors[0]?.message);
+  };
+  const line = await probe('line', [1, 1, 0]);
+  check(line === '[1,0,[1,0,0],1,[1,0,0],[0.25,0]]', `closest, xyzdist and minpos on an open polyline: ${line}`);
+  const mixedLine = await probe('mixed', [3, 1, 0.5]);
+  const mixedBox = await probe('mixed', [0, 1, 0]);
+  check(mixedLine === '[1,6,[3,0,0.5],1,[3,0,0.5],[0.75,0]]' && mixedBox.startsWith('[0.5,') && mixedBox.includes('[0,0.5,0],0.5,[0,0.5,0]'),
+    `closest chooses the nearer of a box and a curve: ${mixedLine} / ${mixedBox}`);
+  const triangle = await probe('triangle', [0.25, 1, 0.25]);
+  check(triangle.startsWith('[1,0,[0.25,0,0.25],1,[0.25,0,0.25],'), `polygon-only distance, prim and position stay exact: ${triangle}`);
+  const loose = await probe('loose', [2, 1, 0]);
+  check(loose === '[1,-1,[2,0,0],1,[2,0,0],[0,0]]', `closest uses loose points on a point-only input: ${loose}`);
+  const empty = await probe('empty', [1, 1, 0]);
+  check(empty.startsWith('[null,-1,[1,1,0],null,[1,1,0],'), `an empty input keeps infinite distance, prim -1 and the query position: ${empty}`);
+}
+
+// ------------------------------------------------------------------ graph channels
+
+{
+  const graph: GraphSpec = { vars: { lift: 0.5, unused: 0 }, nodes: {
+    b: { type: 'box' }, w: { type: 'wrangle', in: ['b'], params: { code: '@P.y += ch("lift");' } },
+  }, output: 'w' };
+  const base = await on.cook({ nodes: { b: graph.nodes.b }, output: 'b' });
+  const first = await on.cook(graph);
+  const unused = await on.cook({ ...graph, vars: { lift: 0.5, unused: 1 } });
+  const changed = await on.cook({ ...graph, vars: { lift: 1.5, unused: 1 } });
+  check(first.ok && first.geo?.P[1] === base.geo!.P[1] + 0.5, `ch("lift") moves a box up 0.5: ${first.errors[0]?.message ?? first.geo?.P[1]}`);
+  check(unused.results.get('w')?.cached && changed.ok && !changed.results.get('w')?.cached && changed.geo?.P[1] === base.geo!.P[1] + 1.5,
+    `ch("lift") re-cooks for lift changes and stays cached for unrelated changes: ${changed.errors[0]?.message ?? changed.geo?.P[1]}`);
+
+  const missing = await run('f@a = ch("nope");', 'points', { lift: 0.5, unused: 1 });
+  const msg = missing.errors[0]?.message ?? '';
+  check(!missing.ok && missing.same && msg.includes('unknown graph var "nope"') && msg.includes('lift, unused') && msg.includes('bare name'),
+    `ch reports the missing name, available vars and bare-name syntax: ${msg}`);
+
+  off.registerAsset('read_channels', { ...graph, vars: { lift: 0.5, offset: [1, 2, 3] }, params: { lift: { type: 'float', desc: 'lift' } }, nodes: {
+    ...graph.nodes, w: { type: 'wrangle', in: ['b'], params: { run_over: 'detail', code: `
+      const v = chv('offset');
+      s@result = JSON.stringify([typeof chf('lift'), chf('lift') === lift, chi('lift'), chs('lift'), Array.isArray(v), v, v.y]);
+    ` } },
+  } });
+  const typed = await off.cook({ nodes: { a: { type: 'read_channels', params: { lift: 1.6 } } }, output: 'a' });
+  const types = typed.geo?.detail.get('result')?.get(0);
+  check(types === '["number",true,2,"1.6",true,[1,2,3],2]', `chf, chi, chs and chv return typed vars and an overridden graph param: ${typed.errors[0]?.message ?? types}`);
+
+  const shared: GraphSpec = { vars: { lift: 0.25 }, nodes: {
+    b: { type: 'box' },
+    g: { type: 'group', in: ['b'], params: { class: 'point', name: 'up', expr: '@P.y > ch("lift")' } },
+    f: { type: 'heightfield', params: { samples: [2, 2] } },
+    h: { type: 'heightfield_layer', in: ['f'], params: { expression: 'height + chf("lift")' } },
+    mesh: { type: 'heightfield_to_mesh', in: ['h'] },
+    c: { type: 'parametric_curve', params: { expr: '[t, ch("li" + "ft"), 0]', count: 2 } },
+    s: { type: 'parametric_surface', params: { expr: '[u, ch("lift"), v]', divisions: [2, 2] } },
+  } };
+  const grouped = await off.cook({ ...shared, output: 'g' });
+  check(grouped.ok && grouped.geo?.pointGroups.get('up')?.filter(Boolean).length === 4,
+    `group expressions read graph channels: ${grouped.errors[0]?.message ?? 'ok'}`);
+  for (const output of ['mesh', 'c', 's']) {
+    const r = await off.cook({ ...shared, output });
+    check(r.ok && r.geo?.P[1] === 0.25, `${output === 'mesh' ? 'heightfield_layer' : shared.nodes[output].type} expressions read graph channels: ${r.errors[0]?.message ?? r.geo?.P[1]}`);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await on.host.pool?.close();
 process.exit(fail ? 1 : 0);

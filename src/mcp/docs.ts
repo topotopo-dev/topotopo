@@ -424,7 +424,10 @@ COLOUR: hsv2rgb(h,s,v) rgb2hsv(rgb) ramp([[0,[0,0,1]],[1,[1,0,0]]], t)
 GEOMETRY QUERIES (input 0 = incoming geometry, 1..3 = other inputs):
   npoints(i) nprims(i) nvertices(i) point(i,"name",pt) prim(i,"name",pr) vertex(i,"name",v) detail(i,"name")
   primpoints(i,pr) pointprims(i,pt) neighbours(i,pt) neighbourcount primvertexcount haspointattrib hasprimattrib
-  nearpoint(i,pos[,maxdist]) nearpoints(i,pos,maxdist,maxcount) xyzdist(i,pos) minpos(i,pos) closest(i,pos)→{dist,pos,prim}
+  nearpoint(i,pos[,maxdist]) nearpoints(i,pos,maxdist,maxcount) xyzdist(i,pos) minpos(i,pos) closest(i,pos)→{dist,pos,prim,uv}
+  These three closest-position queries search polygons and polyline segments, or points on inputs with no primitives.
+  uv is [u,v] on the primitive; on a polyline u runs from 0 to 1 by vertex. A point hit has prim -1 and uv [0,0].
+  With nothing to measure against, the distance is Infinity, prim is -1, pos is the query position and uv is [0,0].
   intersect(i,orig,dir)→{prim,pos,dist} (prim -1 = miss)  inpointgroup(i,"grp",pt) inprimgroup(i,"grp",pr)
   invertexgroup(i,"grp",v) inedgegroup(i,"grp",pt0,pt1)
   primintrinsic(i,"name",pr): read-only values computed per prim: "bounds" [xmin,xmax,ymin,ymax,zmin,zmax], "typename"
@@ -435,9 +438,11 @@ EDITS (applied after the loop, geohandle 0 optional):
   setpointattrib(0,"name",pt,v) setprimattrib setvertexattrib setdetailattrib(0,"name",v) setpointgroup(0,"g",pt,1) setprimgroup
   setvertexgroup(0,"g",v,1) setedgegroup(0,"g",pt0,pt1,1)  (0 removes)
 DEBUG: print(...) (shows as warnings), error("msg") aborts. Use 'return' to skip the rest for the current element.
-VARS: graph vars by their bare name, as in "=expr" params: @P.y += height * 0.5; rand(@ptnum, seed). Read-only (writing
-  one is an error); a local of the same name comes first. Inside foreach also iteration numiterations value attr, inside
-  solver iteration substep frame time timeInc. A wrangle re-cooks when a var it names changes, not for other vars.
+VARS: read graph vars and graph params by bare name or with ch("lift"): @P.y += ch("lift");
+  chf gives a number, chi rounds to an integer, chv gives a three-component array and chs gives a string.
+  Graph vars are read-only; a local of the same name comes first for bare reads. Inside foreach also iteration
+  numiterations value attr, inside solver iteration substep frame time timeInc. A wrangle re-cooks when a var it
+  names changes. A computed channel name can depend on any graph var. Start code directly, without a leading "=".
 SPEED: a point wrangle over 64k+ points that calls no geometry query/edit/print function runs in parallel on worker threads (same result).
 SDF helpers are also available (see topic sdf).`,
 

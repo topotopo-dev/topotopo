@@ -30,6 +30,17 @@ const range = (v: number[]) => [Math.min(...v), Math.max(...v)];
 const mean = (v: number[]) => v.reduce((s, x) => s + x, 0) / v.length;
 const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x.toFixed(4));
 
+// ---------------------------------------------------------------- empty and curve-only geometry in assert
+{
+  const assertClosed: NodeSpec = { type: 'assert', in: ['src'], params: { watertight: true, no_flipped: true } };
+  const empty = await cook({ src: { type: 'points', params: { positions: [] } }, a: assertClosed });
+  check(empty.ok && empty.results.get('a')?.stats?.checks === 2 && empty.geo?.numPrims === 0,
+    `assert watertight and no_flipped pass on empty geometry: ${empty.errors[0]?.message ?? 'ok'}`);
+  const line = await cook({ src: { type: 'line', params: { points: 2 } }, a: assertClosed });
+  check(!line.ok && /watertight: no polygons \(2 points, 1 polylines\)/.test(line.errors[0]?.message ?? ''),
+    `assert watertight still rejects a lone polyline: ${line.errors[0]?.message}`);
+}
+
 // ---------------------------------------------------------------- curvature
 {
   const sphere = { s: { type: 'sphere', params: { type: 'ico', level: 3 } } };

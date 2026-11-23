@@ -23,6 +23,9 @@ export const GEOMETRY_FUNCTIONS = [
   'setpointgroup', 'setprimgroup', 'setvertexgroup', 'setedgegroup', 'print', 'printf', 'warning',
 ];
 
+/** Code binds these helpers to the graph vars in its own scope. */
+export const CHANNEL_FUNCTIONS = ['ch', 'chf', 'chi', 'chv', 'chs'] as const;
+
 /**
  * Install the library as globals of the realm `g` and return the setter of the current wrangle's geometry API. The
  * API is a variable of this closure, not a property of the global object: user code in the realm can redefine any
@@ -280,7 +283,7 @@ export function installSnippetLib(g: any, host: any): (api: any) => void {
   L.nearpoints = (i: number, pos: number[], maxd = Infinity, maxn = 1e9) => toArr(C().nearpoints(i, pos, maxd, maxn));
   L.xyzdist = (i: number, pos: number[]) => C().closest(i, pos).dist;
   L.minpos = (i: number, pos: number[]) => toArr(C().closest(i, pos).pos);
-  L.closest = (i: number, pos: number[]) => { const r = C().closest(i, pos); return { dist: r.dist, pos: toArr(r.pos), prim: r.prim }; };
+  L.closest = (i: number, pos: number[]) => { const r = C().closest(i, pos); return { dist: r.dist, pos: toArr(r.pos), prim: r.prim, uv: toArr(r.uv) }; };
   L.intersect = (i: number, orig: number[], dir: number[]) => {
     const r = C().intersect(i, orig, dir);
     return r ? { prim: r.prim, pos: toArr(r.pos), dist: r.dist } : { prim: -1, pos: toArr(orig), dist: -1 };
@@ -404,12 +407,36 @@ export function installSnippetLib(g: any, host: any): (api: any) => void {
   return (api: any) => { cur = api; };
 }
 
-/** The names the snippet library installs (the helpers of the scripting realm), read off a stand-in global object. */
+/** The scripting helpers, including the channels bound to each snippet's scope. */
 export const SNIPPET_LIB_NAMES: readonly string[] = (() => {
   const g: any = { Array: { prototype: {} } };
   installSnippetLib(g, {});
-  return Object.freeze(g.__snippetLibNames.slice() as string[]);
+  return Object.freeze([...g.__snippetLibNames, ...CHANNEL_FUNCTIONS]);
 })();
+
+/** Make the channel helpers in the scripting realm, bound to one snippet's frozen graph vars. */
+function makeChannels(values: Record<string, any>) {
+  const ch = (key: string) => {
+    const name = String(key);
+    if (name !== '__names' && Object.hasOwn(values, name)) return values[name];
+    const names: string[] = values.__names;
+    if (names.includes(name)) throw new ReferenceError(`graph var ${JSON.stringify(name)} is shadowed in this code`);
+    throw new ReferenceError(`unknown graph var ${JSON.stringify(name)}. Graph vars: ${names.join(', ') || '(none)'}. Code can also use a graph var by its bare name.`);
+  };
+  return {
+    ch,
+    chf: (name: string) => Number(ch(name)),
+    chi: (name: string) => Math.round(Number(ch(name))),
+    chv: (name: string) => {
+      const v = ch(name);
+      const components: ArrayLike<unknown> = v;
+      if ((!Array.isArray(v) && !ArrayBuffer.isView(v)) || components.length !== 3)
+        throw new TypeError(`chv(${JSON.stringify(name)}) needs a graph var with three components`);
+      return [Number(components[0]), Number(components[1]), Number(components[2])];
+    },
+    chs: (name: string) => String(ch(name)),
+  };
+}
 
 /**
  * What code that still reads graph vars as `vars.height` gets for `vars`: an object whose every use fails with what to
@@ -450,6 +477,7 @@ export function scriptVarsGuard(host: Host): object {
  *   setJob(f)    sets the current job
  *   setCur(api)  sets the current wrangle's geometry API (wrangle.ts; null after the run)
  *   varsGuard    what code gets for `vars` (makeVarsGuard)
+ *   channels(v) makes channel helpers for the supplied graph vars
  * The host keeps the object and calls setJob/setCur directly, outside the time limit, so they must not run user code:
  * the job and the API are closure variables, the object is frozen (own data properties only) and a global `const`
  * can be neither reassigned nor redefined by later code (user code never runs at the realm's top level, and a
@@ -460,6 +488,7 @@ export const SCRIPT_REALM_SETUP = `const ${REALM_CONTROL} = (() => {
   let job;
   const setCur = (${installSnippetLib.toString()})(globalThis, __hostApi);
   const varsGuard = (${makeVarsGuard.toString()})();
-  return Object.freeze({ run: () => job(), setJob: (f) => { job = f; }, setCur, varsGuard });
+  const channels = (${makeChannels.toString()});
+  return Object.freeze({ run: () => job(), setJob: (f) => { job = f; }, setCur, varsGuard, channels });
 })();
 delete globalThis.__hostApi;`;

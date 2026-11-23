@@ -39,7 +39,7 @@ defineNode({
     'Vectors are arrays with .x/.y/.z accessors; use add/sub/mul/div/dot/cross/normalize/length/lerp/fit (no operator overloading). ' +
     'Element numbers: @ptnum @primnum @vtxnum @numpt @numprim @elemnum. Groups: @group_name = 1. ' +
     'Time: @Frame @Time @TimeInc (the wrangle re-cooks per frame only when the code uses them). ' +
-    'Graph vars by their bare name, read-only, as in "=expr" params: @P.y += height * 0.5 (iteration, value … inside a foreach). ' +
+    'Read graph vars by bare name or with ch("lift"). Graph vars are read-only. ' +
     'Inputs 1-3 are readable with point(1, "P", i), nearpoint(1, pos), xyzdist(1, pos)… ' +
     'Create/delete with addpoint, addprim, removepoint, removeprim (applied after the run). See help topic "wrangle" for the full function list.',
   inputs: [
@@ -49,7 +49,7 @@ defineNode({
     { name: 'input3', desc: 'extra input readable as 3', optional: true },
   ],
   params: {
-    code: { type: 'code', default: '', desc: 'JS snippet (statements). Example: "@P.y += noise(@P) * 0.2; @Cd = [@P.y, 0.5, 1];"', aliases: ['snippet', 'vexpression', 'vex'] },
+    code: { type: 'code', default: '', desc: 'JS statements. Start directly with the code, for example "@P.y += noise(@P) * 0.2; @Cd = [@P.y, 0.5, 1];"', aliases: ['snippet', 'vexpression', 'vex'] },
     run_over: { type: 'enum', options: ['points', 'prims', 'vertices', 'detail'], default: 'points', desc: 'element class to iterate', aliases: ['class', 'runover'] },
     group: { type: 'group', default: '', desc: 'only run on elements in this group (point, prim or vertex pattern, matching run_over)' },
   },

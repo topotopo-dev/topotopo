@@ -465,7 +465,7 @@ defineNode({
   params: {
     on_fail: { type: 'enum', options: ['error', 'warn', 'mark'], default: 'error', desc: 'error = fail the node; warn = pass through with a warning; mark = pass through and write assert_failed / assert_report / group assert_fail', aliases: ['onfail', 'action'] },
     label: { type: 'string', default: '', desc: 'what this assert guards, prefixed to the message', aliases: ['message', 'msg'] },
-    watertight: { type: 'bool', default: false, desc: 'closed surface: only polygons, every edge shared by exactly two of them', aliases: ['closed'] },
+    watertight: { type: 'bool', default: false, desc: 'closed surface: only polygons, every edge shared by exactly two of them. Geometry with no primitives passes.', aliases: ['closed'] },
     manifold: { type: 'bool', default: false, desc: 'no edge shared by 3+ polygons and no bowtie points (fans touching at a point)' },
     no_flipped: { type: 'bool', default: false, desc: 'neighbouring polygons wound consistently, and closed pieces face outward (positive volume; the walls of a cavity inside a hollow solid may face inward)', aliases: ['outward', 'consistent_winding'] },
     min_points: { type: 'int', default: -1, min: -1, max: 2147483647, desc: 'at least this many points (-1 = off)' },
@@ -533,7 +533,7 @@ defineNode({
       const polys = pr.pieces.reduce((s, x) => s + x.polys, 0), lines = pr.pieces.reduce((s, x) => s + x.lines, 0);
       const be = pr.pieces.reduce((s, x) => s + x.boundaryEdges, 0), nme = pr.pieces.reduce((s, x) => s + x.nonManifoldEdges, 0);
       const loops = pr.pieces.reduce((s, x) => s + x.boundaryLoops, 0);
-      if (!polys) fail('watertight', `no polygons (${g.numPoints} points, ${lines} polylines)`);
+      if (g.numPrims && !polys) fail('watertight', `no polygons (${g.numPoints} points, ${lines} polylines)`);
       else if (be || nme || lines) {
         const open = pr.pieces.filter((x) => !x.closed).length;
         const bits: string[] = [];
