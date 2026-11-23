@@ -567,7 +567,10 @@ file the address is written to instead of opening a browser (scripts and tests).
   its published outputs and exports; its pictures (attachments, and the images in its folders such as `previews/`);
   its versions, the packages that use it and those it uses; its folders and files. Below the divider: its notes, its
   graphs (each folded to a line), how its preview baked, its flags and the snippets for a board. Previews bake by
-  themselves when graphs change; after a failed bake the last good preview stays, marked.
+  themselves when a package changes. Open **Previews** to see what's being made, what's waiting and what failed.
+  **Pause** lets the current preview finish and holds the rest. **Skip** keeps the previous preview until the
+  package changes or you press **Re-bake**, which moves its preview to the front of the line. After a failed bake
+  the last good preview stays, marked.
 - **Flags**, one line below a page's divider that opens to the list, and counted on the cards of the folders above
   it: a link in a note to a missing file, a preview that did not cook (with why), a package that publishes versions
   and has none or has changes no version holds, an export older than its graph (its recorded source no longer matches
