@@ -92,7 +92,7 @@
       "in": [
         "field"
       ],
-      "note": "the bends come from a golden angle per seed, not rand(): rand() in a heightfield_layer expression costs about a microsecond a call (F-124)",
+      "note": "the bends come from a golden angle per seed, not rand(): rand() in a heightfield_layer expression costs about a microsecond a call",
       "params": {
         "layer": "mask",
         "expression": "// 0 on the valley floor, rising to 1 up the walls on both sides; the valley winds along X\nconst a = 3 + 2.39996 * seed, b = 0.88 + 3.88322 * seed; // the bends' phases, a golden angle further per seed\nconst zc = size * (0.06 * sin(TAU * 0.85 * x / size + a) + 0.025 * sin(TAU * 1.9 * x / size + b));\nreturn smoothstep(0.07, 0.34, abs(z - zc) / size);"
@@ -311,51 +311,10 @@
         "mask_layer": "river"
       }
     },
-    "bank_zone": {
-      "type": "heightfield_layer",
-      "in": [
-        "carved"
-      ],
-      "params": {
-        "layer": "bank",
-        "expression": "// the channel and its banks, a little wider\nriver"
-      }
-    },
-    "bank_spread": {
-      "type": "heightfield_mask_blur",
-      "in": [
-        "bank_zone"
-      ],
-      "params": {
-        "layer": "bank",
-        "radius": "=size / 256 * 3"
-      }
-    },
-    "bank_edge": {
-      "type": "heightfield_layer",
-      "in": [
-        "bank_spread"
-      ],
-      "params": {
-        "layer": "bank",
-        "expression": "smoothstep(0, 0.15, bank)"
-      }
-    },
-    "banks": {
-      "type": "heightfield_blur",
-      "in": [
-        "bank_edge"
-      ],
-      "note": "workaround for F-133: heightfield_project blends its radius from the cells a polygon stamp covers, which leaves cell-sized steps along the banks; this blur smooths them (the bed mid-channel stays as stamped), and can be removed once F-133 lands",
-      "params": {
-        "radius": "=size / 256 * 2.5",
-        "mask_layer": "bank"
-      }
-    },
     "river_soft": {
       "type": "heightfield_mask_blur",
       "in": [
-        "banks"
+        "carved"
       ],
       "params": {
         "layer": "river",
@@ -391,81 +350,20 @@
         "expression": "// sediment (m): the fans, and what the rain carried and settled\nsediment + debris + erosion * 5 * cell * fan"
       }
     },
-    "no_debris": {
+    "clean_layers": {
       "type": "heightfield_layer",
       "in": [
         "settled"
       ],
-      "note": "one node per layer: heightfield_layer delete takes a single layer name, and a list silently deletes nothing (F-119)",
       "params": {
         "operation": "delete",
-        "layer": "debris"
-      }
-    },
-    "no_water": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_debris"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "water"
-      }
-    },
-    "no_mask": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_water"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "mask"
-      }
-    },
-    "no_drainage": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_mask"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "drainage"
-      }
-    },
-    "no_direction": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_drainage"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "direction"
-      }
-    },
-    "no_fan": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_direction"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "fan"
-      }
-    },
-    "no_bank": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_fan"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "bank"
+        "layer": "debris water mask drainage direction fan"
       }
     },
     "fit": {
       "type": "heightfield_remap",
       "in": [
-        "no_bank"
+        "clean_layers"
       ],
       "params": {
         "input_min": "=bbox('carved').min.y",
@@ -506,21 +404,10 @@
         "freeze_layer": "still"
       }
     },
-    "peaks": {
-      "type": "heightfield_layer",
-      "in": [
-        "fit",
-        "weathered"
-      ],
-      "note": "workaround for F-136: a thermal-only heightfield_erode still rewrites the flow and water layers, so only its heights are taken back here; once F-136 lands, terrain_out can read weathered directly",
-      "params": {
-        "expression": "// the weathered heights (input 1); the other layers stay as fitted, since the erode rewrites flow and water\nb_height"
-      }
-    },
     "terrain_out": {
       "type": "assert",
       "in": [
-        "peaks"
+        "weathered"
       ],
       "params": {
         "label": "height",
@@ -653,7 +540,7 @@
       "in": [
         "deep_soft"
       ],
-      "note": "the colours are painted as layers and written with heightfield_to_tex: bake_vertex_color with a paint wrangle took about 550 ms (F-124)",
+      "note": "the colours are painted as layers and written with heightfield_to_tex: bake_vertex_color with a paint wrangle took about 550 ms",
       "params": {
         "layer": "red",
         "expression": "// red of the colour map: grass (fresher where water gathers), rock on the slopes, darker gullies, pale fans, and the\n// river in its channel: wet gravel on the banks, water on the bottom, darker mid-channel\nlet c = mix(0.38, 0.25, smoothstep(0.05, 0.3, flow));\nc = mix(c, 0.46, rock);\nc *= 1 - 0.38 * smoothstep(0.3, 0.5, flow) * steep;\nc = mix(c, 0.78, sand);\nc = mix(c, 0.45, smoothstep(0.02, 0.25, river));\nreturn mix(c, mix(0.2, 0.05, smoothstep(0.6, 0.95, deep)), smoothstep(0.7, 0.9, river));"
@@ -717,20 +604,6 @@
         "blue_map"
       ],
       "params": {
-        "name": "colour_pack"
-      }
-    },
-    "colour_map": {
-      "type": "tex_transform",
-      "in": [
-        "colour_pack"
-      ],
-      "note": "heightfield_to_tex puts the -Z row at the top of the image while heightfield_to_mesh gives -Z the uv v = 0 (the bottom), so the map is mirrored in v here to land on its own samples (F-122): remove this node when F-122 lands and name colour_pack valley_colour",
-      "params": {
-        "scale": [
-          1,
-          -1
-        ],
         "name": "valley_colour"
       }
     },
@@ -747,7 +620,7 @@
       "type": "merge",
       "in": [
         "preview_mesh",
-        "colour_map"
+        "colour_pack"
       ]
     },
     "ground": {

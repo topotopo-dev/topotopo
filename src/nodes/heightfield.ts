@@ -19,7 +19,7 @@ import { NodeError } from '../graph/types.ts';
 import type { CookContext, ParamDef } from '../graph/types.ts';
 import { evalRamp } from '../graph/params.ts';
 import { sampleEliminate } from './copy.ts';
-import { connectivity } from '../core/topology.ts';
+import { connectivity, triangulate } from '../core/topology.ts';
 import { minDistanceSelect } from '../core/pcg.ts';
 import { P, simBudget } from './util.ts';
 import { wasmCallUnderBudget } from './wasmcall.ts';
@@ -195,15 +195,17 @@ function noiseValues(hf: Heightfield, p: any): Float32Array {
   const A = p.warp_amplitude > 0 ? p.warp_amplitude : 0;
   const warp = A ? makeWarp(p.warp_seed, p.warp_octaves) : null;
   const fw = p.warp_frequency > 0 ? p.warp_frequency : 1 / Math.max(1e-6, p.warp_element_size);
-  const qy = oy * fw;
+  const { origin: [x0, z0], offset: [i0, j0] } = hf.noiseGrid();
+  const cell = hf.cellSize, qy = oy * fw;
   for (let j = 0; j < hf.height; j++) {
-    const zw = hf.z(j) + oz, z = zw * f, qz = zw * fw;
+    const zw = (z0 + (j0 + j) * cell) + oz, z = zw * f, qz = zw * fw;
     for (let i = 0; i < hf.width; i++) {
+      const x = (x0 + (i0 + i) * cell) + ox;
       let v: number;
       if (warp) {
-        const x = hf.x(i) + ox, qx = x * fw;
+        const qx = x * fw;
         v = n((x + A * warp.x(qx, qy, qz)) * f, oy * f, (zw + A * warp.z(qx, qy, qz)) * f);
-      } else v = n((hf.x(i) + ox) * f, oy * f, z);
+      } else v = n(x * f, oy * f, z);
       if (worley) v = v * 2 - 1;
       if (positive) v = v * 0.5 + 0.5;
       out[j * hf.width + i] = v * p.amplitude;
@@ -418,7 +420,7 @@ defineNode({
     step: { type: 'int', default: 1, min: 1, max: 64, desc: 'use every Nth sample (2 = a quarter of the quads)', aliases: ['decimate', 'lod'] },
     layers: { type: 'bool', default: true, desc: 'copy every layer to a point float attribute' },
     normals: { type: 'bool', default: true, desc: 'point N from the field gradient' },
-    uv: { type: 'bool', default: true, desc: 'point uv 0..1 over the field (over its own extent: a tile gets its own 0..1)' },
+    uv: { type: 'bool', default: true, desc: 'point uv 0..1 over the field (each tile uses its own extent); v = 1 at the −Z edge, at the top of a heightfield_to_tex image' },
     color: { type: 'enum', options: ['none', 'mask', 'height', 'terrain'], default: 'none', desc: 'point Cd from the layers' },
     keep_heightfield: { type: 'bool', default: false, desc: 'keep the heightfield volume alongside the mesh' },
   },
@@ -685,6 +687,43 @@ defineNode({
   },
 });
 
+/** Keep executable text for the shadowing warning, including substitutions inside templates. */
+function expressionCode(source: string): string {
+  const code = /\/\/[^\r\n\u2028\u2029]*|\/\*[\s\S]*?\*\/|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*"|[\x60{}]/g;
+  const text = /\\[\s\S]|\$\{|[\x60]/g;
+  const substitutions: number[] = [];
+  let result = '', depth = 0, inTemplate = false, i = 0;
+  while (i < source.length) {
+    const pattern = inTemplate ? text : code;
+    pattern.lastIndex = i;
+    const match = pattern.exec(source);
+    if (!match) return inTemplate ? result : result + source.slice(i);
+    const token = match[0];
+    if (!inTemplate) result += source.slice(i, match.index);
+    i = pattern.lastIndex;
+    if (token === '`') {
+      inTemplate = !inTemplate;
+      result += ' ';
+    } else if (inTemplate) {
+      if (token === '${') {
+        substitutions.push(depth);
+        depth++;
+        inTemplate = false;
+        result += ' ';
+      }
+    } else if (token === '{') {
+      depth++;
+      result += token;
+    } else if (token === '}') {
+      depth--;
+      inTemplate = substitutions.at(-1) === depth;
+      if (inTemplate) substitutions.pop();
+      result += token;
+    } else result += ' ';
+  }
+  return result;
+}
+
 defineNode({
   type: 'heightfield_layer',
   category: 'heightfield',
@@ -694,7 +733,7 @@ defineNode({
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }, { name: 'other', desc: 'optional second heightfield: its layers as b_<name>', optional: true }],
   params: {
     operation: { type: 'enum', options: ['expression', 'copy', 'rename', 'delete', 'fill'], default: 'expression', desc: 'expression: layer = expression; copy/rename: layer ← source; delete: remove layer; fill: layer = value', aliases: ['op', 'mode'] },
-    layer: layerParam('height', 'target layer (created if missing)'),
+    layer: layerParam('height', 'target layer (created if missing). For delete, use names or patterns separated by spaces or commas. * matches any number of characters and ? matches one.'),
     expression: { type: 'code', default: 'height', desc: 'JS expression per sample (or a body with return)', aliases: ['expr', 'code'] },
     source: { type: 'string', default: 'mask', desc: 'source layer for copy/rename' },
     value: { type: 'float', default: 0, desc: 'fill value' },
@@ -708,14 +747,23 @@ defineNode({
     checkName(p.layer, ctx.type);
     const other = hasInput(1) ? heightfieldsOf(input(1))[0] ?? null : null;
     if (hasInput(1) && !other) throw new NodeError(`${ctx.type}: input 1 has no heightfield`, NO_FIELD);
+    const code = String(p.expression ?? '');
+    const codeVars = p.operation === 'expression' ? codeVarNames(code, vars) : [];
+    const warningVars = new Set(codeVars.length ? codeVarNames(expressionCode(code), vars) : []);
     const hiddenVars = new Set<string>();
     const out = eachField(ctx, (hf) => {
       const mask = maskOf(hf, p.mask_layer, ctx.type);
       switch (p.operation) {
-        case 'delete':
-          if (p.layer === 'height') throw new NodeError(`${ctx.type}: the height layer cannot be deleted (fill it instead)`);
-          hf.layers.delete(p.layer);
+        case 'delete': {
+          for (const token of p.layer.split(/[\s,]+/).filter(Boolean)) {
+            const pattern = new RegExp('^' + token.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
+            const names = [...hf.layers.keys()], matches = names.filter((name) => pattern.test(name));
+            if (token === 'height' || matches.includes('height')) throw new NodeError(`${ctx.type}: the height layer cannot be deleted (fill it instead)`);
+            if (!matches.length) ctx.warn(`layer "${token}" matches no layer on "${hf.name}". Available layers: ${names.join(', ') || 'none'}.`);
+            for (const name of matches) hf.layers.delete(name);
+          }
           return;
+        }
         case 'fill':
           writeLayer(hf, p.layer, mask, () => p.value);
           return;
@@ -729,7 +777,6 @@ defineNode({
           return;
         }
       }
-      const code = String(p.expression ?? '');
       if (!code.trim()) throw new NodeError(`${ctx.type}: expression is empty`);
       const ident = /^[A-Za-z_$][\w$]*$/;
       const used = (name: string) => new RegExp(`(^|[^\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(code);
@@ -745,9 +792,9 @@ defineNode({
       // variable of the same name comes first (and the cook says so)
       const own = new Set([...reserved, ...Object.keys(L), ...Object.keys(B).map((n) => 'b_' + n)]);
       const varNames: string[] = [];
-      for (const n of codeVarNames(code, vars)) {
-        if (own.has(n)) hiddenVars.add(n);
-        else varNames.push(n);
+      for (const n of codeVars) {
+        if (!own.has(n)) varNames.push(n);
+        else if (warningVars.has(n)) hiddenVars.add(n);
       }
       // run like a wrangle: the body is parsed on its own first (a complete function body cannot close the wrapper
       // it is pasted into, so nothing runs while compiling), and the whole layer is computed under the host's time
@@ -1040,7 +1087,7 @@ defineNode({
   type: 'heightfield_erode',
   category: 'heightfield',
   summary: 'Droplet or virtual-pipe hydraulic erosion with thermal talus relaxation and optional stream-power incision.',
-  description: 'Houdini: HeightField Erode. method droplet (the default; backend js, or kernel for the same model in WASM): seeded droplets erode below their carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Droplet settings are in metres, so the same params erode the same terrain alike at any spacing (an 8 m preview like the 2 m map, finer detail aside): rain_density counts droplets per m² per iteration, max_distance and erosion_radius are metres, and erosion_rate, deposition_rate, evaporation, inertia, gravity and thermal_rate act per droplet step of a third of erosion_radius, with sediment_capacity a volume in those steps cubed; the node converts them to the field\'s cells (a cell of a third of the radius takes them as given: the defaults at 0.1 m). For a terrain λ times larger keep the rest and multiply erosion_radius and max_distance by λ and divide rain_density by λ² (a 4 km map at 2 m: erosion_radius 6, max_distance 60, rain_density 0.005). Erosion is not local: droplets and water cross tile borders and start at seeded positions over the whole field, so a tile with a margin erodes like the same area of the map only statistically. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded; their rates are per second, and their iterations are time steps that the cell size limits (CFL), so finer fields simulate less time per iteration unless time_step is below the limit of every spacing. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Layers: height, nonnegative deposited sediment and thermal debris (added to existing layers), flow (0..1, normalised over the field: droplet on a log scale against its mean and 99th percentile, pipe by its maximum). Droplet water is a normalised resting-water mask; pipe water is remaining depth in metres. An existing lake layer supplies initial standing water to pipe/stream_power; lake is updated to the same final depth within its original footprint, while water includes every wet sample. Kernel backends also write cumulative wear (eroded depth). Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.',
+  description: 'Houdini: HeightField Erode. method droplet (the default; backend js, or kernel for the same model in WASM): seeded droplets erode below their carrying capacity and deposit as they slow or dry; each iteration also relaxes slopes above thermal_talus_angle. Droplet settings are in metres, so the same params erode the same terrain alike at any spacing (an 8 m preview like the 2 m map, finer detail aside): rain_density counts droplets per m² per iteration, max_distance and erosion_radius are metres, and erosion_rate, deposition_rate, evaporation, inertia, gravity and thermal_rate act per droplet step of a third of erosion_radius, with sediment_capacity a volume in those steps cubed; the node converts them to the field\'s cells (a cell of a third of the radius takes them as given: the defaults at 0.1 m). For a terrain λ times larger keep the rest and multiply erosion_radius and max_distance by λ and divide rain_density by λ² (a 4 km map at 2 m: erosion_radius 6, max_distance 60, rain_density 0.005). Erosion is not local: droplets and water cross tile borders and start at seeded positions over the whole field, so a tile with a margin erodes like the same area of the map only statistically. Pipe uses four-direction shallow-water flux, velocity-based carrying capacity, sediment transport, rainfall and evaporation, with a CFL-limited timestep; stream_power adds K × drainage^m × slope^n incision. Pipe methods require backend kernel, or auto after the kernels have been loaded; their rates are per second, and their iterations are time steps that the cell size limits (CFL), so finer fields simulate less time per iteration unless time_step is below the limit of every spacing. Closed boundaries conserve terrain material. Open boundaries let water leave; droplet also loses carried sediment, while pipe retains sediment and settles it on return. Every method writes height. Thermal relaxation adds to debris. Droplets write flow and water and add to sediment when rain produces droplets. Droplet flow is normalised to 0..1 on a log scale, and water is a normalised resting-water mask. Pipe and stream_power write flow and water and add to sediment when rainfall or an existing lake supplies water. They normalise flow to 0..1 by its maximum and write water depth in metres. They also update an existing lake with the final depth inside its original footprint. A thermal-only pass preserves flow, water, sediment and lake. Kernel backends add wear (eroded depth) from both hydraulic and thermal erosion. Pipe rainfall is uniform and deterministic; its seed is reserved for API consistency. Use flow/sediment/debris with heightfield_mask_by_feature or heightfield_to_mesh color terrain.',
   aliases: ['hf_erode', 'erosion', 'heightfield_erosion', 'heightfield_hydro_erode'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }],
   params: {
@@ -1072,7 +1119,7 @@ defineNode({
     fill_sinks: { type: 'bool', default: false, desc: 'stream_power only: route incision over a depression-filled surface each iteration without raising the ground; fully hard/frozen cells stay protected' },
     boundary: { type: 'enum', options: ['closed', 'open'], default: 'closed', desc: 'closed: water remains inside (material conserved); open: water exits, carrying sediment for droplet, while pipe retains sediment' },
   },
-  outputs: 'layers height, flow, sediment, debris, water; kernel backends also write wear',
+  outputs: 'height, plus layers used by the active processes: flow, sediment, water and lake for hydraulic erosion, debris for thermal relaxation, and wear with the kernel backend',
   // Loading kernels changes auto's selected algorithm, so invalidate an earlier cached JS fallback.
   signatureExtra: p => p.backend === 'auto' ? (getLoadedKernels() ? 'kernel' : 'js') : '',
   example: { nodes: { hf: { type: 'heightfield', params: { size: [20, 20], resolution: 0.1 } }, n: { type: 'heightfield_noise', in: ['hf'], params: { fractal: 'ridged', amplitude: 4, element_size: 8, range: 'positive' } }, e: { type: 'heightfield_erode', in: ['n'], params: { iterations: 60 } } }, output: 'e' },
@@ -1101,7 +1148,25 @@ defineNode({
       const H = layerOf(hf, 'height', ctx.type);
       const hard = maskOf(hf, p.hardness_layer, ctx.type), frz = maskOf(hf, p.freeze_layer, ctx.type);
       const { params, limited } = dropletParams(settings, hf.cellSize);
-      if (p.method === 'droplet') {
+      const droplet = p.method === 'droplet';
+      const rain = droplet ? null : maskOf(hf, p.rain_layer, ctx.type), lake = droplet ? undefined : hf.layer('lake');
+      const count = droplet ? Math.round(params.rainDensity * hf.count) : 0;
+      const hydraulic = droplet ? count > 0 && p.rain_amount > 0
+        : (p.rain_amount > 0 && (!rain || rain.some((v) => v > 0))) || !!lake?.some((v) => v > 0);
+      const thermal = p.thermal_rate > 0;
+      const accumulate = (name: string, delta: Float32Array | Float64Array) => {
+        const prev = hf.layer(name);
+        if (prev && !p.iterations) return;
+        const out = new Float32Array(hf.count);
+        for (let k = 0; k < out.length; k++) out[k] = Math.max(0, (prev ? prev[k] : 0) + delta[k]);
+        hf.layers.set(name, out);
+      };
+      const writeHydraulic = (flow: Float32Array, water: Float32Array, sediment: Float32Array | Float64Array) => {
+        accumulate('sediment', sediment);
+        if (p.iterations || !hf.layers.has('flow')) hf.layers.set('flow', flow);
+        if (p.iterations || !hf.layers.has('water')) hf.layers.set('water', water);
+      };
+      if (droplet) {
         const c = hf.cellSize, on = `on "${hf.name}" (${m(c)} m cells)`;
         if (limited.radius) ctx.warn(`erosion_radius ${m(p.erosion_radius)} m is more than 64 samples ${on}: the brush uses 64 samples (${m(64 * c)} m)`);
         if (limited.steps) ctx.warn(`max_distance ${m(p.max_distance)} m is more than 4096 steps ${on}: droplets stop after ${m(4096 * c)} m`);
@@ -1111,7 +1176,7 @@ defineNode({
       }
       if (kernels) {
         const grid = { w: hf.width, h: hf.height, cell: hf.cellSize, seed: p.seed };
-        const result: ErosionResult = await wasmCallUnderBudget(ctx, kernels, p.method === 'droplet'
+        const result: ErosionResult = await wasmCallUnderBudget(ctx, kernels, droplet
           ? { fn: 'erode_droplet', ...grid, params: { ...params, talusAngle: p.thermal_talus_angle * Math.PI / 180, iterations: p.iterations } }
           : {
             fn: 'erode_pipe', ...grid, params: {
@@ -1122,37 +1187,28 @@ defineNode({
               streamPowerM: p.stream_power_m, streamPowerN: p.stream_power_n, fillSinks: p.method === 'stream_power' && p.fill_sinks,
             },
           },
-        { height: H, hardness: hard, freeze: frz, rain: p.method === 'droplet' ? null : maskOf(hf, p.rain_layer, ctx.type), initialWater: p.method === 'droplet' ? null : hf.layer('lake') },
+        { height: H, hardness: hard, freeze: frz, rain, initialWater: lake },
         hf.count * Math.max(1, p.iterations), WORKER_SAMPLE_ITERATIONS, budget);
         hf.layers.set('height', result.height);
-        for (const name of ['sediment', 'debris', 'wear'] as const) {
-          const prev = hf.layer(name), delta = result[name], out = new Float32Array(hf.count);
-          for (let k = 0; k < out.length; k++) out[k] = Math.max(0, (prev ? prev[k] : 0) + delta[k]);
-          hf.layers.set(name, out);
+        if (hydraulic) writeHydraulic(droplet ? normalizeAccum(result.flow) : result.flow, droplet ? normalizeAccum(result.water) : result.water, result.sediment);
+        if (thermal) accumulate('debris', result.debris);
+        if (hydraulic || thermal) accumulate('wear', result.wear);
+        if (hydraulic && lake && p.iterations) {
+          const depth = new Float32Array(hf.count);
+          for (let k = 0; k < depth.length; k++) if (lake[k] > 0) depth[k] = result.water[k];
+          hf.layers.set('lake', depth);
         }
-        hf.layers.set('flow', p.method === 'droplet' ? normalizeAccum(result.flow) : result.flow);
-        hf.layers.set('water', p.method === 'droplet' ? normalizeAccum(result.water) : result.water);
-        if (p.method !== 'droplet' && hf.layer('lake')) {
-          const previous = hf.layer('lake')!, lake = new Float32Array(hf.count);
-          for (let k = 0; k < lake.length; k++) if (previous[k] > 0) lake[k] = result.water[k];
-          hf.layers.set('lake', lake);
-        }
-        if (p.method === 'droplet') droplets += Math.round(params.rainDensity * hf.count) * p.iterations;
+        if (droplet) droplets += count * p.iterations;
         return;
       }
       const field = makeErosionField(hf.width, hf.height, hf.cellSize, H, hard, frz);
       const r = rng(p.seed);
       // a stopped cook stops between iterations
       for (let it = 0; it < p.iterations; it++) { budget.check(); await ctx.checkpoint(); erodeStep(field, params, r); }
-      droplets += Math.round(params.rainDensity * hf.count) * p.iterations;
+      droplets += count * p.iterations;
       hf.layers.set('height', Float32Array.from(field.h));
-      for (const [name, delta] of [['sediment', field.sediment], ['debris', field.debris]] as const) {
-        const prev = hf.layer(name), o = new Float32Array(hf.count);
-        for (let k = 0; k < o.length; k++) o[k] = Math.max(0, (prev ? prev[k] : 0) + delta[k]);
-        hf.layers.set(name, o);
-      }
-      hf.layers.set('flow', normalizeAccum(field.flow));
-      hf.layers.set('water', normalizeAccum(field.water));
+      if (hydraulic) writeHydraulic(normalizeAccum(field.flow), normalizeAccum(field.water), field.sediment);
+      if (thermal) accumulate('debris', field.debris);
     });
     ctx.stat('droplets', droplets);
     return out;
@@ -1234,7 +1290,7 @@ defineNode({
   type: 'heightfield_project',
   category: 'heightfield',
   summary: 'Stamp meshes or curves onto a heightfield: replace, raise (max), lower (min), add or subtract, blended over a radius.',
-  description: 'Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample; open curves stamp their own height within width/2 of the curve. Outside the stamp the effect fades over radius metres towards the terrain (the nearest stamped height is used). level mean sets each connected polygon piece to the average terrain height under it instead of its own Y: building pads, plazas and car parks sit where cut and fill balance, so slopes get the smallest embankments. mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).',
+  description: 'Houdini: HeightField Project. Polygons stamp the Y of their surface straight above/below each sample. Outside a polygon the effect fades over radius metres from its outline, using the height at the nearest point on that outline. Open curves stamp their own height within width/2 of the curve, and the falloff uses the nearest stamped sample. level mean sets each connected polygon piece to the average terrain height under it instead of its own Y: building pads, plazas and car parks sit where cut and fill balance, so slopes get the smallest embankments. mask_layer stores the blend weight (e.g. to freeze it during erosion or to texture it).',
   aliases: ['hf_project', 'heightfield_stamp'],
   inputs: [{ name: 'heightfield', desc: 'geometry with a heightfield' }, { name: 'stamp', desc: 'polygons (plateaus, platforms, rocks) and/or curves (ridges, dykes)' }],
   params: {
@@ -1256,42 +1312,72 @@ defineNode({
     let closed = 0;
     for (let k = 0; k < st.numPrims; k++) closed += st.primClosed[k];
     if (!st.numPrims) throw new NodeError(`${ctx.type}: the stamp input has no polygons or curves`);
+    const outline = closed && p.radius > 0 ? triangulate(st) : null;
     return eachField(ctx, (hf) => {
       const n = hf.count, up = p.direction === 'up';
       const SH = new Float64Array(n).fill(NaN), sites = new Uint8Array(n);
       const levelMean = p.level === 'mean' && closed > 0;
       const primPiece = levelMean ? connectivity(st).primClass : null, pieceOf = levelMean ? new Int32Array(n).fill(-1) : null;
+      const means = new Map<number, number>();
       if (closed) rasterizeMesh(hf, st, (k, y, prim) => {
         if (!sites[k] || (up ? y < SH[k] : y > SH[k])) { SH[k] = y; if (pieceOf) pieceOf[k] = primPiece![prim]; }
         sites[k] = 1;
       });
       if (pieceOf) {
         // each piece at the mean of the terrain it covers (the layer before this stamp)
-        const cur = hf.read(p.layer), sum = new Map<number, number>(), cnt = new Map<number, number>();
-        for (let k = 0; k < n; k++) { const c = pieceOf[k]; if (c >= 0) { sum.set(c, (sum.get(c) ?? 0) + cur[k]); cnt.set(c, (cnt.get(c) ?? 0) + 1); } }
-        for (let k = 0; k < n; k++) { const c = pieceOf[k]; if (c >= 0) SH[k] = sum.get(c)! / cnt.get(c)!; }
+        const cur = hf.read(p.layer), counts = new Map<number, number>();
+        for (let k = 0; k < n; k++) { const c = pieceOf[k]; if (c >= 0) { means.set(c, (means.get(c) ?? 0) + cur[k]); counts.set(c, (counts.get(c) ?? 0) + 1); } }
+        for (const [c, sum] of means) means.set(c, sum / counts.get(c)!);
+        for (let k = 0; k < n; k++) { const c = pieceOf[k]; if (c >= 0) SH[k] = means.get(c)!; }
       }
       const best = new Float64Array(n).fill(Infinity);
+      let hasCurves = false;
       for (const c of curvesOf(st)) {
         if (c.closed) continue;
         for (let s = 0; s + 1 < c.pts.length; s++) {
           const a = c.pts[s], b = c.pts[s + 1];
           splatSegment(hf, a[0], a[2], b[0], b[2], p.width / 2, (k, d, t) => {
             if (sites[k] === 1 && best[k] === Infinity) return; // polygons win
-            if (d < best[k]) { best[k] = d; SH[k] = a[1] + (b[1] - a[1]) * t; sites[k] = 2; }
+            if (d < best[k]) { best[k] = d; SH[k] = a[1] + (b[1] - a[1]) * t; sites[k] = 2; hasCurves = true; }
           });
         }
       }
-      let any = 0;
-      for (let k = 0; k < n; k++) if (sites[k]) { any = 1; break; }
-      if (!any) { ctx.warn(`stamp does not overlap heightfield "${hf.name}"`); return; }
-      const { dist, nearest } = distancesTo(sites, hf);
-      const W = new Float32Array(n), T = new Float64Array(n);
-      for (let k = 0; k < n; k++) {
-        const d = dist[k];
-        W[k] = d === 0 ? 1 : p.radius > 0 ? 1 - smoothstep(0, p.radius, d) : 0;
-        T[k] = (nearest[k] >= 0 ? SH[nearest[k]] : 0) + p.offset;
+      best.fill(Infinity);
+      if (outline) {
+        const { tris, triPrim } = outline, P = st.P;
+        const epsilon = 1e-9 * hf.cellSize;
+        // From outside the projected triangles, the closest edge is on the outline of their union.
+        for (let t = 0; t < triPrim.length; t++) {
+          const points = [0, 1, 2].map((e) => st.vertexPoint[tris[3 * t + e]] * 3);
+          const [a, b, c] = points;
+          const area = (P[b] - P[a]) * (P[c + 2] - P[a + 2]) - (P[b + 2] - P[a + 2]) * (P[c] - P[a]);
+          if (Math.abs(area) < 1e-12 * hf.cellSize ** 2) continue;
+          const mean = primPiece ? means.get(primPiece[triPrim[t]]) : undefined;
+          if (levelMean && mean === undefined) continue;
+          for (let e = 0; e < 3; e++) {
+            const a = points[e], b = points[(e + 1) % 3];
+            splatSegment(hf, P[a], P[a + 2], P[b], P[b + 2], p.radius, (k, d, u) => {
+              if (sites[k] || d > best[k] + epsilon) return;
+              const y = mean ?? P[a + 1] + (P[b + 1] - P[a + 1]) * u;
+              if (d < best[k] - epsilon || (up ? y < SH[k] : y > SH[k])) SH[k] = y;
+              best[k] = Math.min(best[k], d);
+            });
+          }
+        }
       }
+      const curves = hasCurves && p.radius > 0 ? distancesTo(sites, hf) : null;
+      const W = new Float32Array(n), T = new Float64Array(n);
+      let any = false;
+      for (let k = 0; k < n; k++) {
+        const nearest = curves?.nearest[k] ?? -1;
+        const useCurve = nearest >= 0 && sites[nearest] === 2 && curves!.dist[k] <= best[k];
+        const d = sites[k] ? 0 : useCurve ? curves!.dist[k] : best[k];
+        W[k] = d === 0 ? 1 : p.radius > 0 ? 1 - smoothstep(0, p.radius, d) : 0;
+        if (!W[k]) continue;
+        T[k] = (useCurve ? SH[nearest] : SH[k]) + p.offset;
+        any = true;
+      }
+      if (!any) { ctx.warn(`stamp does not overlap heightfield "${hf.name}"`); return; }
       writeLayer(hf, p.layer, null, (k, v) => {
         const w = W[k];
         if (!w) return v;

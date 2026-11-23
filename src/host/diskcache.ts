@@ -249,7 +249,8 @@ function packVolume(v: Volume, A: Arrays) {
   if (v.kind === 'grid') return { k: 'grid', name: v.name, dims: v.dims, origin: encAll(v.origin), voxel: enc(v.voxel), values: A.add(v.values) };
   const layers = [...v.layers].map(([k, a]) => [k, A.add(a)]);
   if (v.kind === 'image') return { k: 'image', name: v.name, width: v.width, height: v.height, size: enc(v.size), ...(v.sizeStated ? { stated: 1 } : {}), layers };
-  return { k: 'heightfield', name: v.name, width: v.width, height: v.height, cellSize: enc(v.cellSize), origin: encAll(v.origin), layers };
+  const grid = v instanceof Heightfield ? v.noiseGrid() : null;
+  return { k: 'heightfield', name: v.name, width: v.width, height: v.height, cellSize: enc(v.cellSize), origin: encAll(v.origin), ...(grid ? { grid: encAll([...grid.origin, ...grid.offset]) } : {}), layers };
 }
 
 function packGeometry(g: Geometry, A: Arrays): any {
@@ -367,7 +368,10 @@ function unpackGeometry(j: any, arrays: Typed[]): Geometry {
       return [k, a];
     }));
     if (v.k === 'image') { const img = new Image(v.width, v.height, v.name, layers); if (v.size !== undefined) img.setSize(dec(v.size), v.stated === 1); return img; }
-    return new Heightfield(v.width, v.height, dec(v.cellSize), decAll(v.origin) as [number, number], layers, v.name);
+    const hf = new Heightfield(v.width, v.height, dec(v.cellSize), decAll(v.origin) as [number, number], layers, v.name);
+    // a crop keeps the grid of its map, so noise on it reads the same points after a reload
+    if (v.grid !== undefined) { const q = decAll(v.grid); must(q.length === 4, 'heightfield grid'); hf.setNoiseGrid([q[0], q[1]], [q[2], q[3]]); }
+    return hf;
   });
   return g;
 }

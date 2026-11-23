@@ -69,6 +69,7 @@ export class Heightfield implements HeightfieldVolume {
   cellSize: number;
   origin: [number, number];
   layers: Map<string, Float32Array>;
+  private grid?: { origin: [number, number]; offset: [number, number] };
 
   constructor(width: number, height: number, cellSize: number, origin: [number, number], layers?: Map<string, Float32Array>, name = 'heightfield') {
     if (!(width >= 2 && height >= 2)) throw new Error(`heightfield needs at least 2 × 2 samples (got ${width} × ${height})`);
@@ -104,6 +105,8 @@ export class Heightfield implements HeightfieldVolume {
   x(i: number) { return this.origin[0] + i * this.cellSize; }
   /** world Z of row j */
   z(j: number) { return this.origin[1] + j * this.cellSize; }
+  /** The map's origin and sample indices for noise on both the map and its crops. */
+  noiseGrid() { return this.grid ?? { origin: this.origin, offset: [0, 0] as [number, number] }; }
   /** fractional column of world X */
   fx(x: number) { return (x - this.origin[0]) / this.cellSize; }
   /** fractional row of world Z */
@@ -150,12 +153,27 @@ export class Heightfield implements HeightfieldVolume {
   }
 
   clone(): Heightfield {
-    return new Heightfield(this.width, this.height, this.cellSize, this.origin, new Map(this.layers), this.name);
+    const out = this.emptyLike();
+    out.layers = new Map(this.layers);
+    return out;
   }
 
   /** The same grid without layers. */
   emptyLike(): Heightfield {
-    return new Heightfield(this.width, this.height, this.cellSize, this.origin, undefined, this.name);
+    const out = new Heightfield(this.width, this.height, this.cellSize, this.origin, undefined, this.name);
+    out.grid = this.grid;
+    return out;
+  }
+
+  /** Keep the original sampling grid when a crop moves its local origin. */
+  takeNoiseGrid(src: Heightfield, i: number, j: number) {
+    const { origin, offset } = src.noiseGrid();
+    this.setNoiseGrid(origin, [offset[0] + i, offset[1] + j]);
+  }
+
+  /** Set the sampling grid (a stored crop gets back the grid of its map). */
+  setNoiseGrid(origin: [number, number], offset: [number, number]) {
+    this.grid = { origin: [origin[0], origin[1]], offset: [offset[0], offset[1]] };
   }
 }
 
@@ -439,6 +457,7 @@ export function cropHeightfield(src: HeightfieldVolume, i0: number, i1: number, 
     throw new Error(`crop ${i0}..${i1} × ${j0}..${j1} is not a range of at least 2 × 2 samples inside ${hf.width} × ${hf.height}`);
   const w = i1 - i0 + 1, h = j1 - j0 + 1;
   const out = new Heightfield(w, h, hf.cellSize, [hf.x(i0), hf.z(j0)], undefined, hf.name);
+  out.takeNoiseGrid(hf, i0, j0);
   for (const [name, a] of hf.layers) {
     const b = new Float32Array(w * h);
     for (let j = 0; j < h; j++) b.set(a.subarray((j0 + j) * hf.width + i0, (j0 + j) * hf.width + i1 + 1), j * w);
@@ -456,7 +475,7 @@ export interface ToMeshOptions {
   layers?: boolean;
   /** point N from the field gradient */
   normals?: boolean;
-  /** point uv 0..1 over the field */
+  /** point uv 0..1 over the field, with v = 1 at min Z */
   uv?: boolean;
   /** point Cd: none, mask (white → red), height (low → high ramp), terrain (grass / rock / sediment / snow / road), preview */
   color?: 'none' | 'mask' | 'height' | 'terrain' | 'preview';
@@ -547,7 +566,7 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
   }
   if (o.uv) {
     const uv = g.points.add('uv', 'float', 3).data as Float64Array;
-    for (let b = 0; b < nz; b++) for (let a = 0; a < nx; a++) { const p = b * nx + a; uv[p * 3] = I[a] / (hf.width - 1); uv[p * 3 + 1] = J[b] / (hf.height - 1); }
+    for (let b = 0; b < nz; b++) for (let a = 0; a < nx; a++) { const p = b * nx + a; uv[p * 3] = I[a] / (hf.width - 1); uv[p * 3 + 1] = 1 - J[b] / (hf.height - 1); }
   }
   const color = o.color ?? 'none';
   if (color !== 'none') {
