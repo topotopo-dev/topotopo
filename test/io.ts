@@ -98,6 +98,24 @@ terrain.volumes = [hf];
 const scene = Geometry.merge([terrain, packed]);
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
+{
+  const copy = await engine.cook({ nodes: {
+    base: { type: 'box' },
+    shade: { type: 'sphere', params: { center: [0, 2, 0] } },
+    a: { type: 'attrib_create', in: ['base'], params: { name: 'name', class: 'prim', value: 'base' } },
+    b: { type: 'attrib_create', in: ['shade'], params: { name: 'name', class: 'prim', value: 'shade' } },
+    kit: { type: 'merge', in: ['a', 'b'] },
+    pts: { type: 'points', params: { positions: [[0, 0, 0], [2, 0, 0]] } },
+    lamps: { type: 'copy_to_points', in: ['kit', 'pts'], params: { pack: true } },
+  }, output: 'lamps' });
+  if (!copy.geo) throw new Error(copy.errors.map((e) => e.message).join(', '));
+  const result = await exportFilesAsync(copy.geo, 'csv', 'lamps.csv', { instances: 'rows' });
+  const csv = importCSV(text(result.files.find((f) => f.path === 'lamps.csv')!.bytes));
+  const sidecar = JSON.parse(text(result.files.find((f) => f.path === 'lamps.meshes.json')!.bytes));
+  const paths = result.files.map((f) => f.path);
+  check(csv.points.get('Mesh')?.data.join() === 'lamps,lamps' && sidecar.meshes[0].name === 'lamps' && paths.includes('lamps_meshes/lamps.glb'),
+    `packed kit export uses the copy node name in the stream, sidecar and mesh file (${paths.join(', ')})`);
+}
 const baseline = await unrealLandscapeBundle(scene);
 const zero = await unrealLandscapeBundle(scene, { tile_size: 0 });
 check(baseline.files.length === zero.files.length && baseline.files.every((f, i) => f.path === zero.files[i].path && same(f.bytes, zero.files[i].bytes)), 'tiled export: tile_size 0 is byte-identical to the default single bundle');

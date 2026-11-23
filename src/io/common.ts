@@ -124,7 +124,7 @@ export const safeName = (s: string) => String(s).replace(/[^A-Za-z0-9_-]+/g, '_'
 
 /**
  * Unique, file-name-safe names of the packed sources of g (index = source index): the source's single prim "name"
- * value, else source_<i>. glTF node/mesh names, USD prototypes, the instance stream's Mesh column and the meshes
+ * value, else detail "source_name", else source_<i>. glTF node/mesh names, USD prototypes, the instance stream's Mesh column and the meshes
  * sidecar all use these, so they match across files.
  */
 export function packedSourceNames(g: Geometry): string[] {
@@ -132,7 +132,10 @@ export function packedSourceNames(g: Geometry): string[] {
   return g.packedSources.map((src, k) => {
     const na = src.prims.get('name');
     const vals = na && na.type === 'string' ? new Set(na.data as string[]) : null;
-    const base = (vals && vals.size === 1 ? safeName([...vals][0] ?? '') : '') || `source_${k}`;
+    const sourceName = src.detail.get('source_name');
+    const base = (vals && vals.size === 1 ? safeName([...vals][0] ?? '') : '')
+      || (sourceName?.type === 'string' ? safeName(sourceName.get(0) as string) : '')
+      || `source_${k}`;
     let n = base, i = 1;
     while (used.has(n.toLowerCase())) n = `${base}_${i++}`;
     used.add(n.toLowerCase());

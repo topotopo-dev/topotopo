@@ -3,6 +3,7 @@ import { Attribute, AttribTable, GeoBuilder, Geometry, defaultValueFor } from '.
 import { EdgeSet } from '../core/edges.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
+import { safeName } from '../io/common.ts';
 import { rng, rngState } from '../core/random.ts';
 import { connectivity, primNormals, triangulate } from '../core/topology.ts';
 import { composePackedXforms } from '../core/packed.ts';
@@ -255,6 +256,12 @@ defineNode({
       throw new NodeError('scatter: the input is a heightfield, which has no polygons to scatter on', 'use heightfield_scatter (it reads the mask layers), or heightfield_to_mesh first and scatter on the mesh');
     if (!g.numPrims && g.volumes.some((v) => v.kind === 'sdf' || v.kind === 'grid'))
       throw new NodeError('scatter: the input is an SDF volume, which has no polygons to scatter on or in', 'sdf_to_mesh first, then scatter on the mesh (mode volume for points inside it)');
+    if (mode === 'surface' && hasPoly) for (const v of g.volumes) {
+      if (v.kind === 'heightfield')
+        warn(`scatter: the input also has a heightfield (${v.name}). Points land on the polygons only. Use heightfield_scatter for the terrain, or heightfield_to_mesh first.`);
+      else if (v.kind === 'sdf' || v.kind === 'grid')
+        warn(`scatter: the input also has an SDF volume (${v.name}). Points land on the polygons only. Use sdf_to_mesh first to scatter on it.`);
+    }
     const dA = cornerReader(g, p.density_attrib, 'density_attrib');
     const mA = cornerReader(g, p.density_mask, 'density_mask');
     const weighted = !!(dA || mA);
@@ -723,6 +730,7 @@ defineNode({
   type: 'copy_to_points',
   category: 'copy',
   packed: 'keep',
+  usesNodeName: (p) => p.pack && p.variants === 'none' && !p.piece_attrib,
   summary: 'Instance geometry onto points using P, orient | N+up, pscale, scale, rot, pivot, trans. Template point attributes (Cd…) are copied over. pack:true makes packed instances (cheap at millions).',
   aliases: ['copytopoints', 'instance', 'copy_to_pts'],
   description:
@@ -764,19 +772,19 @@ defineNode({
     },
     output: 'forest',
   },
-  cook: ({ input, p, warn }) => {
+  cook: ({ input, p, warn, node }) => {
     const src = input(0);
     const t = p.scale_attrib || p.rotate_attrib ? foldExtraXforms(input(1), p.scale_attrib, p.rotate_attrib) : input(1);
     const sel = mask(t, 'point', p.group);
     const tpts: number[] = [];
-    for (let i = 0; i < t.numPoints; i++) if (!sel || sel[i]) tpts.push(i);
-    if (!tpts.length || (!src.numPoints && !src.volumes.length)) return new Geometry();
+    if (src.numPoints || src.volumes.length)
+      for (let i = 0; i < t.numPoints; i++) if (!sel || sel[i]) tpts.push(i);
     // variants
-    let pieceOf: ((i: number) => Geometry) | null = null;
     let pieceKey: ((i: number) => any) | null = null;
     let subsets: Map<any, Geometry> | null = null;
     const splitAttr = p.variants === 'name' ? 'name' : p.variants === 'piece' ? '' : p.piece_attrib;
-    if (p.variants === 'piece' || splitAttr) {
+    const useVariants = p.variants === 'piece' || !!splitAttr;
+    if (tpts.length && useVariants) {
       let values: any[];
       subsets = new Map<any, Geometry>();
       if (!splitAttr) {
@@ -839,8 +847,7 @@ defineNode({
         if (typeof v === 'number') return values[((Math.floor(v) % values.length) + values.length) % values.length];
         return undefined;
       };
-      pieceOf = (i) => subsets!.get(pieceKey!(i)) ?? new Geometry();
-    } else if (p.variant_weights && typeof p.variant_weights === 'object' && Object.keys(p.variant_weights).length) warn('variant_weights needs variants ("name" or "piece") or piece_attrib to split the source into variants');
+    } else if (tpts.length && p.variant_weights && typeof p.variant_weights === 'object' && Object.keys(p.variant_weights).length) warn('variant_weights needs variants ("name" or "piece") or piece_attrib to split the source into variants');
     const copyNames = new Set<string>();
     const pats = String(p.copy_attribs).split(/[\s,]+/).filter(Boolean);
     const matches = (n: string) => pats.some((pt) => !pt.startsWith('^') && new RegExp('^' + pt.replace(/\*/g, '.*') + '$').test(n)) && !pats.some((pt) => pt.startsWith('^') && new RegExp('^' + pt.slice(1).replace(/\*/g, '.*') + '$').test(n));
@@ -848,16 +855,23 @@ defineNode({
 
     if (p.pack) {
       const sources = subsets ? [...subsets.values()] : [src];
-      const keyIndex = subsets ? new Map([...subsets.keys()].map((k, i) => [k, i])) : null;
+      const keys = subsets ? [...subsets.keys()] : [];
+      const keyIndex = subsets ? new Map(keys.map((k, i) => [k, i])) : null;
       const pick = (ti: number) => (keyIndex ? keyIndex.get(pieceKey!(ti)) ?? -1 : 0);
-      return packedCopies(src, sources, pick, t, tpts, copyNames, p.copy_attrib);
+      const sourceName = (i: number) => {
+        if (!subsets) return node;
+        const key = keys[i];
+        return safeName(typeof key === 'string' ? key : `${splitAttr || 'piece'}_${key}`);
+      };
+      return packedCopies(src, sources, pick, sourceName, t, tpts, copyNames, p.copy_attrib);
     }
 
-    if (!pieceOf) {
+    if (!useVariants) {
       // fast path: one source repeated
       const np = src.numPoints, nv = src.numVertices, npr = src.numPrims, nc = tpts.length;
       const out = Geometry.blank();
       const rep = (n: number) => {
+        if (!nc) return [];
         const ident = new Int32Array(n); // one identity index list shared by every copy
         for (let i = 0; i < n; i++) ident[i] = i;
         return tpts.map(() => ({ src: ident }));
@@ -875,7 +889,7 @@ defineNode({
       out.edgeGroups = new Map([...src.edgeGroups].map(([k, e]) => { const o = new EdgeSet(); for (let c = 0; c < nc; c++) for (const [a, b] of e) o.add(a + c * np, b + c * np); return [k, o]; }));
       out.volumes = [];
       // packed prims in the source: repeated, each copy composing its transform into theirs
-      if (src.primKind) {
+      if (nc && src.primKind) {
         out.primKind = new Uint8Array(npr * nc);
         out.packedSource = new Int32Array(npr * nc);
         out.packedXform = new Float64Array(npr * nc * 9);
@@ -929,10 +943,26 @@ defineNode({
       return out;
     }
     // variants path: transform each chosen piece
+    const writeCopyAttribs = (g: Geometry, c: number, ti?: number) => {
+      if (p.copy_attrib) (g.prims.add(p.copy_attrib, 'int', 1).data as Int32Array).fill(c);
+      for (const n of copyNames) {
+        const ta = t.points.get(n)!;
+        const a = g.points.add(n, ta.type, ta.size);
+        if (ti === undefined) continue;
+        const v = ta.get(ti);
+        for (let i = 0; i < g.numPoints; i++) a.set(i, v);
+      }
+    };
+    if (!tpts.length) {
+      const empty = src.subsetPoints([]);
+      empty.volumes = [];
+      writeCopyAttribs(empty, 0);
+      return empty;
+    }
     const parts: Geometry[] = [];
     tpts.forEach((ti, c) => {
-      const piece = pieceOf!(ti);
-      if (!piece.numPoints) return;
+      const piece = subsets!.get(pieceKey!(ti));
+      if (!piece?.numPoints) return;
       const M = pointTransform(t, ti), Nm = m4normalMatrix(M);
       const g = piece.clone();
       const Pd = g.P;
@@ -948,13 +978,7 @@ defineNode({
           d[i * 3] /= l; d[i * 3 + 1] /= l; d[i * 3 + 2] /= l;
         }
       }
-      if (p.copy_attrib) (g.prims.add(p.copy_attrib, 'int', 1).data as Int32Array).fill(c);
-      for (const n of copyNames) {
-        const ta = t.points.get(n)!;
-        const a = g.points.add(n, ta.type, ta.size);
-        const v = ta.get(ti);
-        for (let i = 0; i < g.numPoints; i++) a.set(i, v);
-      }
+      writeCopyAttribs(g, c, ti);
       parts.push(g);
     });
     return Geometry.merge(parts);
@@ -1044,19 +1068,22 @@ export function instanceXforms(t: Geometry, tpts: ArrayLike<number>): { pos: Flo
  * the shared sources once, so unpacking gives the same result as pack:false.
  */
 function packedCopies(
-  src: Geometry, sources: Geometry[], pick: (ti: number) => number, t: Geometry, tpts: number[], copyNames: Set<string>, copyAttrib: string,
+  src: Geometry, sources: Geometry[], pick: (ti: number) => number, sourceName: (i: number) => string,
+  t: Geometry, tpts: number[], copyNames: Set<string>, copyAttrib: string,
 ): Geometry {
-  const strip = (g: Geometry) => {
+  const prepare = (g: Geometry, i: number) => {
     const kill = [...copyNames].filter((n) => g.points.has(n) || (n === 'Cd' && g.findAttrib('Cd')));
-    if (!kill.length) return g;
+    const needsName = !g.detail.has('source_name');
+    if (!kill.length && !needsName) return g;
     const c = g.clone();
+    if (needsName) c.detail.add('source_name', 'string', 1).set(0, sourceName(i));
     for (const n of kill) {
       c.points.delete(n);
       if (n === 'Cd') { c.prims.delete('Cd'); c.vertices.delete('Cd'); }
     }
     return c;
   };
-  const srcs = sources.map(strip);
+  const srcs = tpts.length ? sources.map(prepare) : [];
   const chosen: number[] = [], copyIdx: number[] = [], srcIdx: number[] = [];
   tpts.forEach((ti, c) => {
     const s = pick(ti);

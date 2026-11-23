@@ -886,6 +886,8 @@ Make them:
   file *.glb                   EXT_mesh_gpu_instancing comes in packed (instancing:"expand" for real geometry).
   file *.csv / *.json          a placement list (P, yaw, pscale, a piece name per row) as the template points: help
                                topic "recipes", 15 (instance a placement list).
+  copy_to_points and pack keep a source's detail "source_name" or set it from the variant or node name (numbered for
+  several sources without variants).
 Nodes that KEEP instances (work on anchors / packed prims): transform (also rotates/scales each instance), match_size,
   copy_xform, copy_to_points, merge, switch, null, foreach (pieces/prims/points: one iteration per instance), solver,
   graph_ref, file, delete (not edge dissolve), group, group_*, attrib_* (create, randomize, promote, delete, rename,
@@ -905,7 +907,7 @@ Read them: primintrinsic(0, "bounds", pr) in a wrangle (or primintrinsic('n', pr
   const p = point(0, 'P', pt); p[1] -= b[2]; setpointattrib(0, 'P', pt, p);"}
 See them: render draws instances (an evenly spread subset above 600k triangles, with a note "rendering 9.5k of 30k
   instances"); inspect/build summaries say "packed: N instances of K sources (M triangles expanded)".
-Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named like the source's prim "name",
+Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source,
   TRANSLATION/ROTATION/SCALE per instance, with custom_attribs:true the anchor attributes as _NAME instance accessors
   (Cd → _COLOR); shear is approximated with a warning; the instanced mesh holds the source's polygons, as
   readers instance triangle meshes only: its polylines and loose points are written as copies, its scene empties are left
@@ -913,6 +915,7 @@ Export: glb/gltf → EXT_mesh_gpu_instancing (one mesh + node per source, named 
   positions, orientations, scales, ids, velocities, with custom_attribs:true primvars per instance); geo → Houdini PackedGeometry prims sharing embedded sources;
   csv / points.json → one row per instance (instance stream: Position/Rotation/Scale or P/orient/scale, Mesh column)
   + <name>.meshes.json + one GLB per source; json keeps them losslessly; obj/ply/stl expand them (warned).
+  Packed source names come from a single prim "name" value, then detail "source_name", then source_<i>, and are made safe and unique.
   instancing:"expand" (export option) always writes real geometry (instances:"expand" for csv/points.json only).
   Unreal: instances.csv + meshes for PCG / ISM, or glb instances where the importer supports EXT_mesh_gpu_instancing;
   USD PointInstancer → HISM.
@@ -1664,6 +1667,7 @@ Options: up_axis "y" (default) | "z", scale (100 = m → cm), split_by_name (one
   precision 64 | 32 (geo), instancing "packed" | "expand", instances "rows" | "expand" (csv / points.json of packed
   prims), meshes (instance rows: also write one GLB per source, default true), maps "embed" | "external" | "none"
   (glb / gltf texture maps, MAPS below). For Unreal and Blender keep the default uncompressed GLB.
+  Packed source names come from a single prim "name" value, then detail "source_name", then source_<i>, and are made safe and unique.
 MAPS (glb / gltf; CLI --maps, export targets and the export tool "maps"): where the images of the materials go.
   embed (default): inside the file. Self-contained, but every module carries full copies of the maps it uses.
   external: each distinct image is written once as <image>-<hash>.png (or .jpg) in a shared maps/ folder and the glTF

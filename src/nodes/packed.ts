@@ -37,6 +37,7 @@ defineNode({
   type: 'pack',
   category: 'copy',
   packed: 'keep',
+  usesNodeName: true,
   summary: 'Turn pieces into packed instances: one anchor point + packed prim per piece, referencing a shared source (identical pieces share one source).',
   aliases: ['packgeometry', 'pack_geometry', 'assemble'],
   description:
@@ -55,7 +56,7 @@ defineNode({
   },
   outputs: 'packed prims (one per piece) on anchor points; carried attributes on the anchor point / packed prim',
   example: { type: 'pack', in: ['fractured'], params: { by: 'connectivity', pivot: 'centroid' } },
-  cook: ({ input, p }) => {
+  cook: ({ input, p, node }) => {
     const g = input(0);
     if (!g.numPrims && !g.numPoints) return g;
     const n = g.numPrims;
@@ -125,6 +126,13 @@ defineNode({
       if (si < 0) { si = sources.length; sources.push(piece); }
       srcIdx.push(si);
     }
+    sources.forEach((source, i) => {
+      if (source.detail.has('source_name')) return;
+      // The deduplication hash is memoised on the unnamed geometry.
+      const named = p.source_dedup ? source.clone() : source;
+      named.detail.add('source_name', 'string', 1).set(0, sources.length === 1 ? node : `${node}_${i}`);
+      sources[i] = named;
+    });
     // output: anchors + packed prims (+ isolated points, kept as they are)
     const count = srcIdx.length;
     const out = Geometry.blank();
@@ -189,6 +197,7 @@ defineNode({
     if (!g.hasPacked()) return g;
     const r = expandPacked(g, { group: mask(g, 'prim', p.group), transfer: p.transfer_attributes, limit: p.limit, pieceAttrib: p.piece_attrib, recursive: !!p.recursive });
     for (const n of r.notes) warn(n);
+    r.geo.detail.delete('source_name');
     return r.geo;
   },
 });

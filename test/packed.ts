@@ -14,6 +14,7 @@ import { allNodeDefs } from '../src/graph/registry.ts';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
 import { exportGeometry, exportGeometryAsync, exportOBJ } from '../src/io/export.ts';
 import { importGeometryAsync } from '../src/io/import.ts';
+import { packedSourceNames } from '../src/io/common.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { summarize } from '../src/inspect.ts';
 import { fingerprint } from './fingerprint.ts';
@@ -31,6 +32,11 @@ const check = (ok: any, msg: string) => {
 };
 const eq = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
 const fpEq = (a: Geometry, b: Geometry) => eq(fingerprint(a), fingerprint(b));
+const withoutSourceName = (g: Geometry) => {
+  const out = g.clone();
+  out.detail.delete('source_name');
+  return out;
+};
 const maxDiff = (a: ArrayLike<number>, b: ArrayLike<number>) => {
   if (a.length !== b.length) return Infinity;
   let m = 0;
@@ -155,13 +161,93 @@ const SRC: Record<string, NodeSpec> = {
   valid(un2, 'unpack one level');
   check(un2.numPacked === 3 && fpEq(un2, pk), 'unpack is one level: the nested instances come back packed (equal to the inner pack)');
   check(fpEq(await cook(nested, 'unr'), input), 'unpack recursive:true expands every level');
-  check(fpEq(await cook(nested, 'un3'), input) && fpEq(expandPacked(pk2, { transfer: 'name Cd material piece' }).geo, input), 'nested: unpack twice, or expandPacked once, equals the input');
+  const expanded = expandPacked(pk2, { transfer: 'name Cd material piece' }).geo;
+  check(fpEq(await cook(nested, 'un3'), input) && fpEq(withoutSourceName(expanded), input), 'nested: unpack twice, or expandPacked once, equals the input');
   // unpack options
   const lim = await run({ ...nodes, u: { type: 'unpack', in: ['pk'], params: { limit: 2, piece_attrib: 'piece' } } }, 'u');
   check(lim.geo.prims.has('piece') && new Set(lim.geo.prims.get('piece')!.data as Int32Array).size === 2 && lim.warnings.some((w) => /limit/.test(w)), 'unpack limit:2 expands two instances (piece attribute, note)');
   const part = await cook({ ...nodes, u: { type: 'unpack', in: ['pk'], params: { group: '0' } } }, 'u');
   valid(part, 'unpack group');
   check(part.numPacked === 2 && part.numPrims === 2 + 6 * 4, 'unpack group "0": the other instances stay packed');
+}
+
+// ---------------------------------------------------------------- empty copy_to_points
+{
+  const nodes: Record<string, NodeSpec> = {
+    box: { type: 'box' },
+    named: { type: 'attrib_create', in: ['box'], params: { name: 'name', class: 'prim', value: 'lamp' } },
+    pointAttr: { type: 'attrib_create', in: ['named'], params: { name: 'offset', class: 'point', value: [1, 2, 3] } },
+    vertexAttr: { type: 'attrib_create', in: ['pointAttr'], params: { name: 'corner', class: 'vertex', type: 'int', value: 2 } },
+    detailAttr: { type: 'attrib_create', in: ['vertexAttr'], params: { name: 'label', class: 'detail', value: 'fixture' } },
+    primGroup: { type: 'group', in: ['detailAttr'], params: { name: 'shade', class: 'prim' } },
+    pointGroup: { type: 'group', in: ['primGroup'], params: { name: 'base', class: 'point' } },
+    vertexGroup: { type: 'group', in: ['pointGroup'], params: { name: 'corners', class: 'vertex' } },
+    source: { type: 'group', in: ['vertexGroup'], params: { name: 'edges', class: 'edge' } },
+    emptySource: { type: 'delete', in: ['source'], params: { class: 'point' } },
+    point: { type: 'points', params: { positions: [[1, 0, 0]] } },
+    scale: { type: 'attrib_create', in: ['point'], params: { name: 'pscale', value: 2 } },
+    slope: { type: 'attrib_create', in: ['scale'], params: { name: 'slope', value: 14 } },
+    empty: { type: 'delete', in: ['slope'], params: { class: 'point' } },
+  };
+  for (const pack of [false, true]) for (const variants of ['none', 'name', 'piece']) {
+    const copy = (source: string, points: string) => cook({
+      ...nodes, copies: { type: 'copy_to_points', in: [source, points], params: { pack, variants } },
+    }, 'copies');
+    const one = await copy('source', 'slope');
+    const schema = fingerprint(one);
+    for (const [label, source, points] of [['empty template', 'source', 'empty'], ['empty source', 'emptySource', 'slope']]) {
+      const empty = await copy(source, points);
+      const fp = fingerprint(empty);
+      check(one.numPoints > 0 && empty.numPoints === 0 && empty.numPrims === 0 && !checkGeo(empty).length &&
+        empty.points.has('slope') && eq(fp.attributes, schema.attributes) && eq(fp.groups, schema.groups),
+      `copy_to_points ${label} (pack:${pack}, variants:${variants}): same attributes and groups as one copy (point attributes: ${empty.points.names()})`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- packed source names
+{
+  const nodes: Record<string, NodeSpec> = {
+    base: { type: 'box' },
+    shade: { type: 'sphere', params: { center: [0, 2, 0] } },
+    a: { type: 'attrib_create', in: ['base'], params: { name: 'name', class: 'prim', value: 'Lamp Base' } },
+    b: { type: 'attrib_create', in: ['shade'], params: { name: 'name', class: 'prim', value: 'Shade' } },
+    aPart: { type: 'attrib_create', in: ['a'], params: { name: 'part', class: 'prim', type: 'int', value: 7 } },
+    bPart: { type: 'attrib_create', in: ['b'], params: { name: 'part', class: 'prim', type: 'int', value: 9 } },
+    kit: { type: 'merge', in: ['aPart', 'bPart'] },
+    hand: { type: 'attrib_create', in: ['kit'], params: { name: 'source_name', class: 'detail', value: 'Street Lamp' } },
+    pts: { type: 'points', params: { positions: [[0, 0, 0], [2, 0, 0]] } },
+    lamps: { type: 'copy_to_points', in: ['kit', 'pts'], params: { pack: true } },
+    open: { type: 'unpack', in: ['lamps'] },
+  };
+  const sourceNames = (g: Geometry) => g.packedSources.map((s) => s.detail.get('source_name')?.get(0));
+  const names = async (label: string, src: string, params: Record<string, unknown>, detail: string[], exported: string[]) => {
+    const g = await cook({ ...nodes, lamps: { type: 'copy_to_points', in: [src, 'pts'], params: { pack: true, ...params } } }, 'lamps');
+    const actual = packedSourceNames(g), stored = sourceNames(g);
+    check(eq(stored, detail) && eq(actual, exported), `packed copy ${label}: source_name ${JSON.stringify(stored)}, export names ${actual}`);
+  };
+  await names('uses the node name for a kit', 'kit', {}, ['lamps'], ['lamps']);
+  await names('uses variant names', 'kit', { variants: 'name' }, ['Lamp_Base', 'Shade'], ['Lamp_Base', 'Shade']);
+  await names('uses connectivity piece numbers', 'kit', { variants: 'piece' }, ['piece_0', 'piece_1'], ['Lamp_Base', 'Shade']);
+  await names('uses the numeric split attribute and value', 'kit', { piece_attrib: 'part' }, ['part_7', 'part_9'], ['Lamp_Base', 'Shade']);
+  await names('keeps an explicit source_name', 'hand', {}, ['Street Lamp'], ['Street_Lamp']);
+  const renamed = await cook({ ...nodes, street_lamps: nodes.lamps }, 'street_lamps');
+  check(eq(packedSourceNames(renamed), ['street_lamps']), 'packed copies with different node names have separate cache entries');
+  const explicit = { ...nodes, lamps: { ...nodes.lamps, in: ['hand', 'pts'] } };
+  const unpacked = await cook(explicit, 'open');
+  check(!unpacked.detail.has('source_name'), `unpack drops the source_name detail attribute (detail: ${unpacked.detail.names()})`);
+  check(!(await cook(nodes, 'kit')).detail.has('source_name'), 'packed copy leaves its input source untouched');
+  const all = await cook({ ...nodes, fixture: { type: 'pack', in: ['kit'], params: { by: 'all' } } }, 'fixture');
+  check(eq(sourceNames(all), ['fixture']) && eq(packedSourceNames(all), ['fixture']), `pack one source uses its node name (export names ${packedSourceNames(all)})`);
+  const packAll: NodeSpec = { type: 'pack', in: ['kit'], params: { by: 'all' } };
+  const merged = await cook({ ...nodes, first: packAll, second: packAll, merged: { type: 'merge', in: ['first', 'second'] } }, 'merged');
+  check(eq(packedSourceNames(merged), ['first', 'second']), 'merging packed sources keeps distinct source names on identical meshes');
+  const pieces = await cook({ ...nodes, fixture: { type: 'pack', in: ['kit'] } }, 'fixture');
+  check(eq(sourceNames(pieces), ['fixture_0', 'fixture_1']) && eq(packedSourceNames(pieces), ['fixture_0', 'fixture_1']),
+    `pack several sources numbers its node name (export names ${packedSourceNames(pieces)})`);
+  const collision = await cook({ ...nodes, fixture: { type: 'pack', in: ['hand'] } }, 'fixture');
+  check(eq(sourceNames(collision), ['Street Lamp', 'Street Lamp']) && eq(packedSourceNames(collision), ['Street_Lamp', 'Street_Lamp_1']),
+    `pack keeps explicit names and export makes them unique (export names ${packedSourceNames(collision)})`);
 }
 
 // ---------------------------------------------------------------- packed copy_to_points = real copies after unpack
@@ -279,7 +365,7 @@ const SRC: Record<string, NodeSpec> = {
   };
   const r = await run(nodes, 'bool');
   check(r.warnings.some((w) => /unpacked 3 instances for bool/.test(w)), `boolean auto-unpacks with one warning (${r.warnings.join(' | ')})`);
-  check(fpEq(r.geo, await cook(nodes, 'boolReal')), 'auto-unpacked boolean = boolean of the unpacked input');
+  check(fpEq(withoutSourceName(r.geo), await cook(nodes, 'boolReal')), 'auto-unpacked boolean = boolean of the unpacked input');
   const sig = r.report.results.get('inst')!.sig;
   check(!!engine.cache.get('unpack:' + sig), 'the auto-unpacked input is cached under its signature');
   const r2 = await engine.cook({ nodes: { ...nodes, bool: { type: 'boolean', in: ['inst', 'cut'], params: { operation: 'union' } } }, output: 'bool' });

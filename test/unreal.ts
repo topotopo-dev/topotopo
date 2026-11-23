@@ -159,6 +159,22 @@ section('the plan: what each kind becomes');
 // ----------------------------------------------------------------------------------------------------------- cook
 section('the cook');
 {
+  const game = project('lampgame', false);
+  const lamps = pkg(game, 'props', {
+    source: { type: 'box' },
+    pts: { type: 'points', params: { positions: [[0, 0, 0]] } },
+    lamps: { type: 'copy_to_points', in: ['source', 'pts'], params: { pack: true } },
+  }, { placed: { node: 'lamps', kind: 'instances' } });
+  const report = path.join(tmp, 'lamps.json');
+  const result = await cook([lamps, '--for', 'unreal', '--report', report]);
+  const output = readJson(report).outputs.find((o: any) => o.id === 'placed');
+  const mesh = output?.import.find((s: any) => s.as === 'static_mesh');
+  const instances = output?.import.find((s: any) => s.as === 'instances');
+  check(result.code === 0 && mesh?.name === 'lamps' && mesh.file.endsWith('/lamps.glb') &&
+    instances?.meshes?.lamps === '/Game/props/outputs/placed/Meshes/lamps.lamps',
+  `Unreal cook uses the copy node name in its mesh file and import plan (${mesh?.name})`);
+}
+{
   const game = project('game');
   const dir = path.join(game, 'Content', 'props');
   const report = path.join(tmp, 'report.json');
