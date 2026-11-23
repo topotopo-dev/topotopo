@@ -853,10 +853,10 @@ section('CLI --frames');
   check(q.status === 0 && fs.existsSync(path.join(out, 'step_2.json')) && fs.existsSync(path.join(out, 'step_4.json')) && !fs.existsSync(path.join(out, 'step_3.json')), '{frame} pattern with a step');
   const occupied = path.join(out, 'blocked_2.obj');
   fs.writeFileSync(occupied, 'saved by hand');
-  const blocked = run('--frames', '1-2', '--export', path.join(out, 'blocked_{frame}.obj'));
+  const blocked = run('--frames', '1-2', '--export', path.join(out, 'clear.json'), '--export', path.join(out, 'blocked_{frame}.obj'));
   check(blocked.status === 1 && blocked.stderr.includes(`${occupied} was not written by TopoTopo`) && blocked.stderr.includes('--overwrite')
     && fs.readFileSync(occupied, 'utf8') === 'saved by hand' && !fs.existsSync(path.join(out, 'blocked_1.obj'))
-    && !fs.existsSync(occupied + '.source.json'), 'an occupied later frame refuses the export before the first frame is written');
+    && !fs.existsSync(occupied + '.source.json') && !fs.existsSync(path.join(out, 'clear.0001.json')), 'an occupied second export in a later frame refuses all exports before the first frame is written');
   const single = run('--frame', '5');
   check(single.status === 0 && /at frame 5/.test(single.stdout), '--frame N');
   const badRange = run('--frames', '5-1');
@@ -914,6 +914,29 @@ section('CLI --output, --var and export sources (replay from the manifest)');
     outputs: { mesh: { node: 'ground', label: 'Ground mesh', export: 'glb' }, field: { node: 'hills' } },
     vars: { relief: 2, seed: 1, count: 10 },
   }, null, 2));
+  const obj = path.join(dir, 'a.obj'), binary = path.join(dir, 'b.glb');
+  const both = cli(g, '--export', obj, '--export', binary);
+  const missing = [obj, `${obj}.source.json`, binary, `${binary}.source.json`].filter((p) => !fs.existsSync(p)).map((p) => path.basename(p));
+  const listed = both.stdout.split('\n').some((line) => line.startsWith(`exported ${obj}`) && line.includes(` | exported ${binary}`));
+  check(both.status === 0 && !missing.length && listed,
+    `repeated --export writes and lists both targets in order with their sources (exit ${both.status}, missing ${missing.join(', ') || 'none'})`);
+  const formattedObj = path.join(dir, 'formatted.obj'), formattedGlb = path.join(dir, 'formatted.glb');
+  const formatted = cli(g, '--scale', '2', '--export', formattedObj, '--format', 'obj', '--scale', '3', '--export', formattedGlb);
+  const exportInfo = (p: string) => JSON.parse(fs.readFileSync(`${p}.source.json`, 'utf8')).source.export;
+  check(formatted.status === 0 && fs.existsSync(`${formattedObj}.source.json`) && fs.existsSync(`${formattedGlb}.source.json`)
+    && fs.readFileSync(formattedObj, 'utf8').includes('\nv ') && fs.readFileSync(formattedGlb).subarray(0, 4).toString() === 'glTF'
+    && exportInfo(formattedObj).format === 'obj' && exportInfo(formattedObj).options.scale === 3
+    && exportInfo(formattedGlb).format === 'glb' && exportInfo(formattedGlb).options.scale === 2,
+    'a local --format and --scale apply to one export, and the earlier --scale applies to the rest');
+  const fresh = path.join(dir, 'fresh.obj'), occupied = path.join(dir, 'occupied.glb');
+  fs.writeFileSync(occupied, 'saved by hand');
+  const blocked = cli(g, '--export', fresh, '--export', occupied);
+  check(blocked.status === 1 && blocked.stderr.includes('occupied.glb was not written by TopoTopo') && blocked.stderr.includes('--overwrite')
+    && fs.readFileSync(occupied, 'utf8') === 'saved by hand' && ![fresh, `${fresh}.source.json`, `${occupied}.source.json`].some((p) => fs.existsSync(p)),
+    `an occupied second export is refused before either export is written (${blocked.stderr.trim().split('\n')[0] ?? ''})`);
+  const replaced = cli(g, '--export', fresh, '--export', occupied, '--overwrite');
+  check(replaced.status === 0 && fs.existsSync(`${fresh}.source.json`) && fs.existsSync(`${occupied}.source.json`)
+    && fs.readFileSync(occupied).subarray(0, 4).toString() === 'glTF', '--overwrite lets the unit write both exports and their sources');
   const first = cli(g, '--output', 'mesh', '--var', 'relief=5', '--var', 'seed=3', '--export', path.join(dir, 'a', 'land.glb'));
   check(first.status === 0 && /cooked .*land\.json → output "mesh" \(ground\) with relief=5, seed=3/.test(first.stdout) && /; source: .*land\.glb\.source\.json/.test(first.stdout),
     `--output and --var: the named output cooked with the overrides (${first.status ? first.stderr.slice(0, 200) : first.stdout.split('\n')[0]})`);
@@ -997,10 +1020,14 @@ section('CLI --output, --var and export sources (replay from the manifest)');
   // several outputs in one run: each --output takes the options after it; options before the first apply to all; the
   // graph loads once and the nodes the outputs share cook once
   const m = (f: string) => path.join(dir, 'm', f);
-  const many = cli(g, '--var', 'relief=5', '--var', 'seed=3', '--output', 'mesh', '--export', m('land.glb'), '--output', 'field', '--export', m('field.png'), '--views', 'top', '--size', '128', '--render', m('field_top.png'));
+  const many = cli(g, '--var', 'relief=5', '--var', 'seed=3', '--output', 'mesh', '--export', m('land.glb'), '--export', m('land.obj'),
+    '--output', 'field', '--export', m('field.png'), '--export', m('field-geo.json'), '--views', 'top', '--size', '128', '--render', m('field_top.png'));
   check(many.status === 0 && sha(m('land.glb')) === sha(path.join(dir, 'a', 'land.glb')) && JSON.parse(fs.readFileSync(m('field.json'), 'utf8')).source.output === 'field'
     && fs.existsSync(m('field_top.png')) && /2 of 2 outputs in one run/.test(many.stdout),
     `several --output: each output exported as its own run would (the same land.glb bytes), the field exported and rendered (${many.status ? many.stderr.trim() : many.stdout.split('\n').filter((l) => /outputs in one run/.test(l)).join('')})`);
+  check(many.status === 0 && ['land.obj', 'field-geo.json'].every((f) => fs.existsSync(m(f)) && fs.existsSync(m(`${f}.source.json`)))
+    && JSON.parse(fs.readFileSync(m('land.obj.source.json'), 'utf8')).source.output === 'mesh'
+    && JSON.parse(fs.readFileSync(m('field-geo.json.source.json'), 'utf8')).source.output === 'field', 'each --output writes its own second export and source');
   check(/output "field" \(hills\) with relief=5, seed=3 in \d+ ms \(2 nodes reused from the outputs before\)/.test(many.stdout), `several --output: the second output reuses the nodes the first cooked (${many.stdout.split('\n').find((l) => /output "field"/.test(l))})`);
   const scaled = cli(g, '--scale', '100', '--output', 'mesh', '--export', m('x100.glb'), '--output', 'mesh', '--scale', '1', '--export', m('x1.glb'));
   const recScale = (f: string) => JSON.parse(fs.readFileSync(m(f + '.source.json'), 'utf8')).source.export.options.scale;

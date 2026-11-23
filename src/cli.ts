@@ -3,9 +3,9 @@
 //   node src/cli.ts <graph.json> [--node name | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
-//                   [--shading flat|matcap|ao|pbr] [--exposure 0] [--cd auto|ignore|multiply] [--grey] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
+//                   [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--cd auto|ignore|multiply] [--grey] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
 //                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
-//                   [--heightfield-layer mask|<layer>|none] [--export out.glb]
+//                   [--heightfield-layer mask|<layer>|none] [--export out.glb] [--export out.obj]
 //                   [--compress meshopt] [--maps embed|external|none] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
 //                   [--instancing packed|expand] [--instances rows|expand] [--no-meshes] [--custom-attribs | --no-custom-attribs] [--vertex-colors] [--no-materials]
 //                   [--split-by-name | --no-split-by-name] [--precision 32|64] [--height-min 0 --height-max 100] [--heightfield 0]
@@ -133,7 +133,7 @@ if (['-v', '-V', '--version'].includes(argv[0] ?? '')) {
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
-    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb]',
+    '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--export out.obj]',
     '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--uv-attrib uv2] [--uv-per-piece] [--json]',
     '           summary: one screen (counts, triangles, bbox in mm, parts, materials, images, uv state, closed or open edges)',
     '           topology: a closed solid or why not (open edges after welding seam splits, non-manifold, flipped, inward), with where',
@@ -165,9 +165,10 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added; exports use the published copies, whatever --follow shows)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
-    '                          [--shading flat|matcap|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
+    '                          [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
+    '                          Zebra reflects black and white stripes to show how smoothly surfaces flow.',
     '                          [--cd auto|ignore|multiply] (shading pbr: auto = a named material wins over Cd, Cd colours prims without one; multiply = Cd tints the material too)',
-    '                          [--grey] (value check: pbr with every base colour a neutral 18% grey; roughness, metallic and normal maps still apply)',
+    '                          [--grey] works with pbr (neutral 18% grey, retaining roughness, metallic and normal maps) and matcap (uniform clay). It implies pbr if shading is omitted.',
     '                          views: persp front back left right top bottom front_left front_right back_left back_right uv sheet section texture persp@<az>',
     '                          framing: every 3D view fits the bounds; [--zoom 1] is relative to that fit (above 1 only with --look-at or --ortho-scale)',
     '                          [--azimuth 35] (degrees around +Y: 0 = camera on +Z at the front, 90 = on +X, the right side) [--elevation 25] (degrees above the horizon)',
@@ -187,6 +188,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '             --size 1200x600 --render side.png --views front --underlay ref.png --render beauty.png --views front_left --shading pbr',
     '           side.png: the front view over the reference; beauty.png: a pbr three-quarter view. Options after the last of several',
     '           --render apply to it alone (a warning says so)',
+    '         Repeat --export to write several files per output. Each file uses its own extension unless --format applies.',
+    '           Export options before the first --export apply to every export. Options after an --export apply to that file up to the next --export.',
     '         export options (every option of the export tool; booleans as --name / --no-name):',
     '                         [--compress none|meshopt|draco] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis y|z] [--scale 100]',
     '                         [--maps embed|external|none] (glb/gltf texture maps: inside the file (default), once each in a shared maps/ folder referenced by URI (--export-all: exports/maps/), or none: material names and factors only)',
@@ -546,30 +549,44 @@ async function cook() {
   }
   const rendersByUnit = new Map(units.map((u) => [u, rendersOf(u)]));
 
+  // Each --export takes its own options over those before the first --export and the shared output options.
+  function exportsOf(u: Unit) {
+    const starts = u.args.flatMap((arg, i) => arg === '--export' ? [i] : []);
+    const shared = starts.length > 1 ? u.args.slice(0, starts[0]) : [];
+    return starts.map((start, i) => {
+      const args = starts.length === 1 ? u.args : u.args.slice(start, starts[i + 1]);
+      const format = uopt({ args, base: shared }, '--format') ?? uopt({ args: u.base, base: [] }, '--format');
+      return { out: u.args[start + 1], format, args, shared };
+    });
+  }
+  const exportsByUnit = new Map(units.map((u) => [u, exportsOf(u)]));
+
   const exportsDir = exportsFolderFor(file);
   const exportWrite = { packageDir: path.dirname(exportsDir), hint: 'pass --overwrite to replace it, or export to another path' };
 
-  async function prepareExport(r: CookReport, u: Unit, frame?: number) {
-    const ex = uopt(u, '--export');
-    if (!ex) return;
-    const p = frame === undefined ? ex : framePath(ex, frame);
-    const raw = (uopt(u, '--format') ?? exportFormatFromPath(ex)).toLowerCase();
-    const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
-    if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
-    // the export tool's options (the MCP export tool and export targets use the same names and code)
-    const a = exportArgs(u);
-    const x = await forExport(r);
-    const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file), version: TOPOTOPO_VERSION, engine: engineSha256() });
-    return { fmt, res: await serializeExport(x.geo!, fmt, p, a, engine.host, source) };
+  async function prepareExports(r: CookReport, u: Unit, frame?: number) {
+    const prepared: { fmt: ExportFormat; res: Awaited<ReturnType<typeof serializeExport>> }[] = [];
+    for (const { out, format, args, shared } of exportsByUnit.get(u)!) {
+      if (!out || out.startsWith('--')) fail('--export needs an output path (e.g. --export out.glb)');
+      const p = frame === undefined ? out : framePath(out, frame);
+      const raw = (format ?? exportFormatFromPath(out)).toLowerCase();
+      const fmt = (({ png: 'png16', raw: 'r16' } as Record<string, string>)[raw] ?? raw) as ExportFormat;
+      if (!EXPORT_FORMATS.includes(fmt)) fail(`unknown export format "${fmt}" (${EXPORT_FORMATS.join(', ')}); pass --format`);
+      const a = exportArgs({ args, base: u.base }, shared);
+      const x = await forExport(r);
+      const source = exportSource({ graph: graphName(file), spec: graph, node: r.target, output: u.outputName, frame: r.frame, fps: r.fps, format: fmt, options: a, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file), version: TOPOTOPO_VERSION, engine: engineSha256() });
+      prepared.push({ fmt, res: await serializeExport(x.geo!, fmt, p, a, engine.host, source) });
+    }
+    return prepared;
   }
 
-  async function writeOutputs(r: CookReport, u: Unit, frame?: number, prepared?: Awaited<ReturnType<typeof prepareExport>>) {
+  async function writeOutputs(r: CookReport, u: Unit, frame?: number, prepared?: Awaited<ReturnType<typeof prepareExports>>) {
     const geo = r.geo!;
     const at = (p: string) => (frame === undefined ? p : framePath(p, frame));
-    const ex = prepared ?? await prepareExport(r, u, frame);
+    const exports = prepared ?? await prepareExports(r, u, frame);
     const options = { ...exportWrite, overwrite: uhas(u, '--overwrite') };
     const renders = rendersByUnit.get(u)!;
-    if (ex && renders.length) checkExportFiles([ex.res], options);
+    if (exports.length > 1 || (exports.length && renders.length)) checkExportFiles(exports.map((ex) => ex.res), options);
     // Receipts for the viewer's saved files, only for files inside the package's exports/ (exportsFolderFor): a run whose
     // output goes elsewhere leaves no exports/ folder behind (the viewer lists that folder's files without receipts too).
     const record = (paths: string[], format: string) => {
@@ -590,13 +607,16 @@ async function cook() {
       record([p], 'png');
       console.log(`rendered ${p} (${img.width}x${img.height})${img.notes.length ? ' — ' + img.notes.join('; ') : ''}`);
     }
-    if (ex) {
-      const { fmt, res } = ex;
+    const summaries: string[] = [];
+    for (const { fmt, res } of exports) {
       for (const w of res.warnings) console.warn(`warning: ${w}`);
       writeExportFiles(res, options);
       if (res.files.length) record(res.files.map((f) => f.path), fmt);
       const files = res.files.filter((f) => f.path !== res.sourceManifest);
-      console.log(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${res.summary}` : ''}${res.sourceFile ? `; source: ${res.sourceFile}` : ''}`);
+      summaries.push(`exported ${files.length === 1 ? files[0].path : files.map((f) => f.path).join(', ')}${files.length > 1 || fmt !== 'glb' ? ` — ${res.summary}` : ''}${res.sourceFile ? `; source: ${res.sourceFile}` : ''}`);
+    }
+    if (summaries.length) {
+      console.log(summaries.join(' | '));
       if (exportNote) console.log(exportNote);
     }
   }
@@ -605,26 +625,26 @@ async function cook() {
    * The export flags given for an output, as the export tool's options (snake_case, as export targets and the MCP
    * export tool name them): its own over those for every output.
    */
-  function exportArgs(u: Unit): Record<string, unknown> {
+  function exportArgs(u: Unit, shared: string[] = []): Record<string, unknown> {
     // every option of the export tool has a flag: --name value, booleans --name / --no-name (io/targets.ts)
-    try { return { ...exportOptionsFromFlags(u.base), ...exportOptionsFromFlags(u.args) }; } catch (e) { return fail(`export: ${(e as Error).message}`); }
+    try { return { ...exportOptionsFromFlags(u.base), ...exportOptionsFromFlags(shared), ...exportOptionsFromFlags(u.args) }; } catch (e) { return fail(`export: ${(e as Error).message}`); }
   }
 
   if (framesArg) {
     const range = parseFrames(framesArg), unit = units[0];
     // A later frame can add files of its own. Check the serialized files of every frame before writing the first.
-    const preflight = uopt(unit, '--export') && !uhas(unit, '--overwrite');
-    const pending: { report: CookReport; frame: number; prepared: NonNullable<Awaited<ReturnType<typeof prepareExport>>> }[] = [];
+    const preflight = exportsByUnit.get(unit)!.length > 0 && !uhas(unit, '--overwrite');
+    const pending: { report: CookReport; frame: number; prepared: Awaited<ReturnType<typeof prepareExports>> }[] = [];
     const res = await engine.cookFrames(graph, range, async (r, f) => {
       report(r);
       if (!r.ok || !r.geo) return;
       const cooked = [...r.results.values()].filter((n) => !n.cached && !n.error).length;
       console.log(`frame ${f}: ${r.target} in ${r.ms.toFixed(0)} ms (${cooked} node(s) cooked) — ${r.geo.numPoints} points, ${r.geo.numPrims} prims`);
       if (inspectOf(units[0])) console.log(await inspectText(r, units[0]));
-      if (preflight) pending.push({ report: r, frame: f, prepared: (await prepareExport(r, unit, f))! });
+      if (preflight) pending.push({ report: r, frame: f, prepared: await prepareExports(r, unit, f) });
       else await writeOutputs(r, unit, f);
     }, { target: units[0].target, fps });
-    checkExportFiles(pending.map((p) => p.prepared.res), exportWrite);
+    checkExportFiles(pending.flatMap((p) => p.prepared.map((ex) => ex.res)), exportWrite);
     for (const p of pending) await writeOutputs(p.report, unit, p.frame, p.prepared);
     console.log(`cooked ${file} frames ${range.start}-${range.end}${range.step !== 1 ? `:${range.step}` : ''}: ${res.frames - res.failed.length}/${res.frames} ok`);
     if (res.failed.length) fail(`failed frames: ${res.failed.join(', ')}`);

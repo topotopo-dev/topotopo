@@ -23,6 +23,7 @@ import { unrealLandscapeBundle } from '../src/io/unreal.ts';
 import { heightmapExport } from '../src/io/heightmap.ts';
 import { glbSceneReport, sceneReportText } from '../src/io/inspect-scene.ts';
 import { decodePNG } from '../src/io/png-decode.ts';
+import { renderGeometry } from '../src/render/raster.ts';
 import { importCSV } from '../src/io/points.ts';
 import { canonicalJSON, exportSource, graphSha256, nodesRead, nodesSha256, sameSource } from '../src/io/source.ts';
 import { publishedOutputs } from '../src/io/targets.ts';
@@ -520,5 +521,16 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   check(colorAcc?.type === 'VEC4' && (mat.alphaMode ?? 'OPAQUE') === 'OPAQUE', `an opaque material keeps its alpha mode under vertex alpha 0.3 (${mat.alphaMode ?? 'OPAQUE'}, COLOR_0 ${colorAcc?.type})`);
   const jb = gj(await exportGeometryAsync(await cook({ alpha_mode: 'blend' }), 'glb', { vertexColors: true }) as Uint8Array);
   check(jb.materials[jb.meshes[0].primitives[0].material].alphaMode === 'BLEND', 'a material with alpha_mode blend still exports BLEND');
+
+  const textured = await cook({ base_color_map: 'image:paint' });
+  textured.volumes.push(new Image(2, 2, 'paint').set('C', Float32Array.from({ length: 16 }, (_, i) => [0.8, 0.05, 0.16, 1][i % 4])));
+  const imported = await importGeometryAsync(await exportGeometryAsync(textured, 'glb', { vertexColors: true }) as Uint8Array, 'glb');
+  const bare = imported.clone();
+  for (const cls of ['point', 'vertex', 'prim', 'detail'] as const) bare.table(cls).delete('Cd');
+  bare.prims.delete('material');
+  bare.detail.delete('materials');
+  const shot = (geo: Geometry, grey: boolean, textures: boolean) => Buffer.from(renderGeometry(geo, { shading: 'matcap', views: ['persp'], size: 128, grey, textures, wireframe: false }).rgba);
+  check(!shot(imported, false, true).equals(shot(imported, false, false)) && !shot(imported, false, false).equals(shot(bare, false, false))
+    && shot(imported, true, true).equals(shot(bare, false, false)), 'matcap grey ignores embedded GLB base colour maps and vertex colours');
 }
 process.exit(fail ? 1 : 0);

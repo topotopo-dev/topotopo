@@ -4,7 +4,7 @@
 // Opt-in overlays answer specific questions (help topic "render"): crisp 1 px edge overlays
 // (all / hard / boundary / edge groups), a section view and a persp clip plane with filled caps,
 // vector glyphs (N, up, orient, v), point/prim numbers, group/piece/attribute labels, legends,
-// flat/matcap/AO shading and a self-describing annotation footer. A heightfield drawn at fewer samples than it has
+// flat/matcap/zebra/AO shading and a self-describing annotation footer. A heightfield drawn at fewer samples than it has
 // (above heightfieldRes quads per side) gets a second footer line saying so.
 // Framing: every 3D view fits the bounds (the 8 bbox corners projected into the view, with a small margin), so
 // nothing is cropped; zoom is relative to that fit. Views can be W×H (size [w, h]), have a transparent background,
@@ -54,7 +54,7 @@ export interface UnderlayImage { width: number; height: number; rgba: Uint8Array
 /** Edge overlays: every polygon edge, edges sharper than hardAngle (+ crease/hard/sharp edge groups), open/non-manifold/flipped edges, edge groups. */
 export type WireMode = 'none' | 'all' | 'hard' | 'boundary' | 'groups';
 export type GlyphMode = 'none' | 'N' | 'up' | 'orient' | 'v' | 'custom';
-export type ShadingMode = 'default' | 'flat' | 'matcap' | 'ao' | 'pbr';
+export type ShadingMode = 'default' | 'flat' | 'matcap' | 'zebra' | 'ao' | 'pbr';
 export type Axis = 'x' | 'y' | 'z';
 export interface ClipOptions {
   axis: Axis;
@@ -182,7 +182,7 @@ export interface RenderOptions {
   /**
    * value check: shading 'pbr' (implied when shading is not given) with every base colour replaced by a neutral 18%
    * grey (linear 0.18); base colour maps and Cd give no colour, while alpha, roughness, metallic, normal and orm maps,
-   * emissive and unlit still apply
+   * emissive and unlit still apply. In 'matcap', uses the bare clay colour for every surface.
    */
   grey?: boolean;
   /** ao sample radius in output pixels (default 10) */
@@ -244,7 +244,7 @@ export function parseViews(spec: string | readonly string[] | null | undefined):
 const AXES: Axis[] = ['x', 'y', 'z'];
 const WIRE_MODES = ['none', 'all', 'hard', 'boundary', 'groups'];
 const GLYPH_MODES = ['none', 'N', 'up', 'orient', 'v', 'custom'];
-const SHADING_MODES = ['default', 'flat', 'matcap', 'ao', 'pbr'];
+const SHADING_MODES: ShadingMode[] = ['default', 'flat', 'matcap', 'zebra', 'ao', 'pbr'];
 /** The automatic wireframe draws polygon edges up to this many polygons. */
 export const AUTO_WIRE_MAX = 6000;
 const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9], SOCKET_C = [0.35, 1, 0.72];
@@ -423,10 +423,10 @@ export async function readUnderlay(p: string, readFile?: (path: string) => Promi
   return { width: img.width, height: img.height, rgba };
 }
 
-/** grey is a pbr value check: it implies shading 'pbr' and refuses another shading. */
+/** Grey works with matcap and pbr and defaults to pbr. */
 function greyShading(o: RenderOptions): RenderOptions {
-  if (!o.grey || o.shading === 'pbr') return o;
-  if (o.shading && o.shading !== 'default') throw new Error(`render: grey is a value check of shading "pbr" (given shading "${o.shading}"); leave shading out or set it to "pbr"`);
+  if (!o.grey || o.shading === 'pbr' || o.shading === 'matcap') return o;
+  if (o.shading && o.shading !== 'default') throw new Error(`render: grey works with shading "pbr" or "matcap" (given "${o.shading}"). Leave shading out to use "pbr".`);
   return { ...o, shading: 'pbr' };
 }
 
@@ -483,6 +483,8 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const glyphMode = o.glyphs && o.glyphs !== 'none' ? o.glyphs : o.glyphAttrib && o.glyphs !== 'none' ? 'custom' : null;
   if (o.shading && !SHADING_MODES.includes(o.shading)) throw new Error(`unknown shading "${o.shading}" (use ${SHADING_MODES.join(', ')})`);
   const shadingMode = o.shading && o.shading !== 'default' ? o.shading : null;
+  const matcap = shadingMode === 'matcap', zebra = shadingMode === 'zebra';
+  const plainSurface = zebra || (matcap && !!o.grey);
   // reference image behind the 3D views
   const ulFit: UnderlayFit = o.underlayFit ?? (o.camera ? 'view' : 'bounds');
   if (!UNDERLAY_FITS.includes(ulFit)) throw new Error(`unknown underlay_fit "${o.underlayFit}" (use ${UNDERLAY_FITS.join(', ')})`);
@@ -584,7 +586,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       }
     }
   } else {
-    const f = resolveAttr('Cd');
+    const f = plainSurface ? undefined : resolveAttr('Cd');
     if (f && f.attr.type === 'float') {
       const a = f.attr;
       const get = (i: number) => { const x = a.get(i); return Array.isArray(x) ? x : [x as number, x as number, x as number]; };
@@ -593,7 +595,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     }
     // material base colours where there is no colour (no Cd, or Houdini's default white); an inspection view, so Cd
     // stays visible here (shading 'pbr' follows the export rule: a named material wins)
-    const pm = primMaterials(g), table = pm ? readMaterials(g) : null;
+    const pm = plainSurface ? null : primMaterials(g), table = pm ? readMaterials(g) : null;
     if (pm && table && Object.keys(table).length) {
       const cd = colorOf, hasCd = !!(f && f.attr.type === 'float');
       colorOf = (v) => {
@@ -643,7 +645,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // edges read as a defect of the material; when auto draws them the footer says so
   const autoWire = o.wireframe === undefined || o.wireframe === 'auto';
   const wire = !wireMode && o.wireframe !== 'none' && (o.wireframe === true
-    || (autoWire && closedPrims > 0 && closedPrims <= AUTO_WIRE_MAX && o.shading !== 'pbr' && !o.textures));
+    || (autoWire && closedPrims > 0 && closedPrims <= AUTO_WIRE_MAX && o.shading !== 'pbr' && o.shading !== 'zebra' && !o.textures));
   const flat = (v: ViewName) => v === 'uv' || v === 'sheet' || v === 'texture';
   const autoEdgesShown = wire && autoWire && views.some((v) => !flat(v));
   if (autoEdgesShown) notes.push('wireframe auto: polygon edges drawn (wireframe false hides them)');
@@ -675,16 +677,16 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   const outA = transparent ? new Float32Array(outW * outH) : null;
 
   // --- uv data (uv view, checker shading)
-  const materialNames = primMaterials(g), materialTable = readMaterials(g);
+  const materialNames = plainSurface ? null : primMaterials(g), materialTable = plainSurface ? {} : readMaterials(g);
   const hasMasks = Object.values(materialTable).some((m) => m.alphaMode === 'MASK');
   const uvd = views.includes('uv') || views.includes('sheet') || o.checker || o.textures || hasMasks ? readUV(g) : null;
   const checkerOn = !!(o.checker && uvd);
   if (o.checker && !uvd) notes.push('checker: no uv attribute (run uv_project, uv_unwrap or uv_flatten first)');
   // base colour maps (image textures) on the mesh: texture × Cd (as glTF multiplies COLOR_0), off under checker / colour-by
-  const showTextureColor = !!(o.textures && !checkerOn && !o.colorBy && !o.highlight);
+  const showTextureColor = !!(!plainSurface && o.textures && !checkerOn && !o.colorBy && !o.highlight);
   const texS = uvd && (showTextureColor || hasMasks) ? textureSampler(g, notes) : null;
-  if (o.textures && !uvd && nTri) notes.push('textures: no uv attribute, maps not shown');
-  else if (o.textures && uvd && !texS && !checkerOn) notes.push('textures: no material with an image base colour (texture_to_material)');
+  if (!plainSurface && o.textures && !uvd && nTri) notes.push('textures: no uv attribute, maps not shown');
+  else if (!plainSurface && o.textures && uvd && !texS && !checkerOn) notes.push('textures: no material with an image base colour (texture_to_material)');
   const texCd = !!(texS && g.findAttrib('Cd', ['vertex', 'point', 'prim', 'detail']));
   const texRGB = [0, 0, 0, 1];
   const alphaAttr = resolveAttr('Alpha');
@@ -714,7 +716,6 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   };
   // shading
   const flatN = shadingMode === 'flat' && nTri ? primNormals(g) : null;
-  const matcap = shadingMode === 'matcap';
   let pbrS: PBRScene | null = null;
   const pbrBlend: { prim: number; tris: number[] }[] = [];
   if (shadingMode === 'pbr' && nTri) {
@@ -1284,7 +1285,21 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
           let nx = tn[0] / l, ny = tn[1] / l, nz = tn[2] / l;
           if (back) { nx = -nx; ny = -ny; nz = -nz; }
           let k: number, spec: number, rim: number;
-          if (matcap) {
+          if (zebra) {
+            // Reflect the ray towards the camera in view space. Its length cancels in the angle.
+            const vx = cam.persp ? (cam.ox - xx) / cam.focal : 0;
+            const vy = cam.persp ? (yy - cam.oy) / cam.focal : 0;
+            const twiceDot = 2 * (nx * vx + ny * vy + nz);
+            const rx = twiceDot * nx - vx, ry = twiceDot * ny - vy, rz = twiceDot * nz - 1;
+            // Horizontal bands of an evenly striped sky (like rows of light tubes): the stripe is the reflected ray's
+            // elevation, 9 degrees per stripe, so bands bend smoothly over a smooth surface and have no pinch point.
+            // A half-stripe offset keeps a face-on plane inside one stripe.
+            const elevation = Math.asin(Math.max(-1, Math.min(1, ry / (Math.hypot(rx, ry, rz) || 1))));
+            const stripe = Math.floor(elevation / (Math.PI / 20) + 0.5) & 1;
+            k = !back && (colorByActive || checkerOn) ? 0.4 : 0;
+            spec = back ? 0.32 : stripe * (1 - k);
+            rim = 0;
+          } else if (matcap) {
             // clay: view-facing falloff darkens towards silhouettes, a soft key from the upper left,
             // a thin bright rim at the very edge; form reads from the gradient, not from the light direction
             const facing = Math.max(0, nz), key = Math.max(0, nx * M1[0] + ny * M1[1] + nz * M1[2]);
@@ -1310,9 +1325,9 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
             if (texCd) { fr *= texRGB[0]; fg *= texRGB[1]; fb *= texRGB[2]; } else { fr = texRGB[0]; fg = texRGB[1]; fb = texRGB[2]; }
             if (suspicious) { fr = fr * 0.35 + 0.12; fg = fg * 0.35 + 0.22; fb = fb * 0.35 + 0.6; }
           }
-          col[ci] = aces(fr * k + spec + rim);
-          col[ci + 1] = aces(fg * k + spec + rim);
-          col[ci + 2] = aces(fb * k + spec + rim);
+          col[ci] = zebra ? fr * k + spec : aces(fr * k + spec + rim);
+          col[ci + 1] = zebra ? fg * k + spec : aces(fg * k + spec + rim);
+          col[ci + 2] = zebra ? fb * k + spec : aces(fb * k + spec + rim);
         }
       }
     };
@@ -1648,7 +1663,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         // which parts, and where the most visible one is
         const top = [...backPrims].sort((x, y) => y[1] - x[1] || x[0] - y[0]);
         const parts = partsOf(g, top.map(([p]) => p));
-        notes.push(`${bp.toFixed(1)}% of the shaded pixels in the ${views[backView]} view are back faces of closed pieces (blue): flipped normals? ${top.length ? `First ${primWhere(g, top[0][0])}${parts ? `; parts: ${parts} prims` : ''}; ` : ''}reverse those faces or clean fix_winding`);
+        notes.push(`${bp.toFixed(1)}% of the shaded pixels in the ${views[backView]} view are back faces of closed pieces (${zebra ? 'grey' : 'blue'}): flipped normals? ${top.length ? `First ${primWhere(g, top[0][0])}${parts ? `; parts: ${parts} prims` : ''}; ` : ''}reverse those faces or clean fix_winding`);
       }
     }
     const overlays = [...ovDesc, ...gn.slice(0, 3)].join('  ·  ');

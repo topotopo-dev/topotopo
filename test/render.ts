@@ -1,6 +1,7 @@
 // Renderer overlays: every option renders at the expected size, and pixel probes confirm each feature
 // (edge overlays, section caps incl. inside-out, clip, glyphs, labels, legends, shading, views, footer).
 //   node test/render.ts
+import { createHash } from 'node:crypto';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
@@ -253,6 +254,53 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   let sh = '';
   try { render(box, { shading: 'toon' as any }); } catch (e: any) { sh = e.message; }
   check(/unknown shading/.test(sh), 'unknown shading rejected');
+}
+
+{
+  const dark = await cook({ b: { type: 'box' }, out: { type: 'material', in: ['b'], params: { name: 'paint', base_color: [0.035, 0.09, 0.045] } } });
+  const o = { views: ['persp'], size: T, shading: 'matcap', wireframe: false, viewLabels: false, footer: false, grid: false } satisfies RenderOptions;
+  const bareClay = render(box, o), paintedClay = render(dark, o);
+  const greyClay = render(dark, { ...o, grey: true });
+  check(same(greyClay, bareClay), 'matcap grey gives a painted box the same clay as a bare box');
+  const hash = createHash('sha256').update(paintedClay.rgba).digest('hex');
+  check(hash === 'aee1af8c347e0e074d92042eaac6022bb5801ad9dff004046d95173d740f8b9b', `matcap without grey keeps the painted box pixels (${hash})`);
+
+  const z = { ...o, shading: 'zebra', transparent: true } satisfies RenderOptions;
+  const bands = render(sphere, z);
+  let black = 0, white = 0;
+  for (let i = 0; i < bands.rgba.length; i += 4) {
+    if (bands.rgba[i + 3] !== 255) continue;
+    if (bands.rgba[i] < 12) black++;
+    if (bands.rgba[i] > 243) white++;
+  }
+  // the bands are horizontal rows of a striped sky, so each column down the sphere crosses several of them
+  const columnChanges: number[] = [];
+  for (let x = 0; x < bands.width; x++) {
+    let height = 0, changes = 0, previous: boolean | undefined;
+    for (let y = 0; y < bands.height; y++) {
+      const i = (y * bands.width + x) * 4;
+      if (bands.rgba[i + 3] !== 255) continue;
+      const light = bands.rgba[i] >= 188;
+      if (previous !== undefined && light !== previous) changes++;
+      previous = light;
+      height++;
+    }
+    if (height > T / 2) columnChanges.push(changes);
+  }
+  check(black > 2000 && white > 2000, `zebra sphere has broad black and white bands (${black} black, ${white} white pixels)`);
+  check(columnChanges.length > 60 && columnChanges.every((n) => n >= 4 && n <= 40),
+    `zebra sphere has continuous bands down central columns (${Math.min(...columnChanges)} to ${Math.max(...columnChanges)} changes per column)`);
+  const quad = await cook({ out: { type: 'grid', params: { divisions: [1, 1] } } });
+  const face = render(quad, { ...z, views: ['top'] });
+  const center = px(face, T / 2, T / 2);
+  check((center[0] === 0 || center[0] === 255) && count(face, (c) => c[0] === center[0], 60, 60, 140, 140) === 80 * 80,
+    'zebra on a face-on quad has one value across the surface');
+  const light = await cook({ b: { type: 'box' }, out: { type: 'material', in: ['b'], params: { name: 'paint', base_color: [0.9, 0.15, 0.4] } } });
+  check(same(render(dark, z), render(light, z)), 'zebra ignores material base colours');
+  const reversed = await cook({ s: { type: 'sphere' }, out: { type: 'reverse', in: ['s'] } });
+  const back = render(reversed, z);
+  const [r, g, b] = px(back, T / 2, T / 2);
+  check(r === g && r === b && r > 32 && r < 210 && note(back, /back faces of closed pieces \(grey\)/), 'zebra shows reversed faces in grey');
 }
 
 // ---------------------------------------------------------------- footer and notes
