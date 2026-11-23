@@ -613,7 +613,7 @@ defineNode({
   type: 'sweep',
   category: 'curve',
   summary: 'Sweep a cross-section along curves using rotation-minimising frames (tubes, ribbons, rails, mouldings).',
-  description: 'The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. The end caps lie in the profile plane, perpendicular to the curve at its last point: where the last segment is tilted, the cap is tilted with it and its rim pokes above or below a horizontal plane the tube was meant to end on (a ground or snap plane). End the path with a short horizontal run, or cut the result with clip. uv: u runs around the profile, v along the curve; caps take the profile\'s flat layout.',
+  description: 'The profile is drawn in the XY plane around the origin, looking along the curve: at every curve point it is placed with its +Z along the curve (the direction of travel), its +Y on the up direction (the "up" param, or the point attribute up) kept perpendicular to the curve, and its +X = Y × Z, to the left of the direction of travel when up points up. The frame then turns as little as possible from point to point (rotation-minimising), so a flat ribbon does not twist on its own; twist adds a turn. The built-in ribbon faces the frame\'s +Y, which is up on a level path with the default up. The sides are wound so a closed profile drawn counter-clockwise (seen from +Z) faces outward; caps on open curves face away from the curve. The end caps lie in the profile plane, perpendicular to the curve at its last point: where the last segment is tilted, the cap is tilted with it and its rim pokes above or below a horizontal plane the tube was meant to end on (a ground or snap plane). End the path with a short horizontal run, or cut the result with clip. uv: u runs around the profile, v along the curve; caps take the profile\'s flat layout.',
   inputs: [
     { name: 'backbone', desc: 'curves to sweep along (Bezier/NURBS curves are sampled adaptively)' },
     { name: 'profile', desc: 'cross-section curve drawn in the XY plane (optional; one per backbone or a single shared one)', optional: true },
@@ -624,7 +624,7 @@ defineNode({
     shape: { type: 'enum', options: ['circle', 'square', 'rect', 'ribbon', 'half_circle'], default: 'circle', desc: 'built-in profile when no profile input; rect is size wide (X) and high (Y), for straps and bars' },
     radius: { type: 'float', default: 0.1, desc: 'built-in profile radius / half width', aliases: ['width', 'rad'] },
     size: { type: 'vec2', default: [0.2, 0.05], desc: 'rect profile: width along the profile X (sideways) and height along Y (up)' },
-    divisions: { type: 'int', default: 12, min: 2, max: 1024, desc: 'built-in profile segments', aliases: ['sides', 'cols'] },
+    divisions: { type: 'int', default: 12, min: 1, max: 1024, desc: 'built-in profile segments (equal strips across a ribbon); minimum 1 for ribbon, 2 for other shapes; square and rect use four sides', aliases: ['sides', 'cols'] },
     caps: { type: 'bool', default: true, desc: 'cap open ends (closed profiles only)' },
     twist: { type: 'float', default: 0, desc: 'total twist in degrees along each curve' },
     scale_ramp: { type: 'ramp', default: [[0, 1], [1, 1]], desc: 'profile scale along the curve (u 0..1); point pscale also multiplies' },
@@ -642,6 +642,7 @@ defineNode({
   },
   cook: (ctx) => {
     const { input, hasInput, p } = ctx;
+    if (!hasInput(1) && p.shape !== 'ribbon' && p.divisions < 2) throw new NodeError(`divisions for shape "${p.shape}" must be at least 2`);
     const g = evaluateSplines(input(0));
     let profiles: Profile[];
     if (hasInput(1)) {
@@ -651,7 +652,7 @@ defineNode({
       if (!profiles.length) throw new NodeError('profile input has no curves');
     } else if (p.shape === 'square') profiles = [{ pts: [[-p.radius, -p.radius, 0], [p.radius, -p.radius, 0], [p.radius, p.radius, 0], [-p.radius, p.radius, 0]], closed: true }];
     else if (p.shape === 'rect') { const w = p.size[0] / 2, h = p.size[1] / 2; profiles = [{ pts: [[-w, -h, 0], [w, -h, 0], [w, h, 0], [-w, h, 0]], closed: true }]; }
-    else if (p.shape === 'ribbon') profiles = [{ pts: [[-p.radius, 0, 0], [p.radius, 0, 0]], closed: false }];
+    else if (p.shape === 'ribbon') profiles = [{ pts: Array.from({ length: p.divisions + 1 }, (_, i) => [p.radius * (1 - 2 * i / p.divisions), 0, 0]), closed: false }];
     else if (p.shape === 'half_circle') profiles = [{ pts: Array.from({ length: p.divisions + 1 }, (_, i) => { const a = (Math.PI * i) / p.divisions; return [p.radius * Math.cos(a), p.radius * Math.sin(a), 0]; }), closed: false }];
     else profiles = [circleProfile(p.radius, p.divisions)];
     const ramp = p.scale_ramp.length === 2 && p.scale_ramp.every((k: any) => k.value === 1) ? null : p.scale_ramp;
@@ -812,6 +813,68 @@ function area2(poly: number[][]) {
   return a / 2;
 }
 
+function pyramidAttributes(
+  g: Geometry, mesh: Geometry, raw: [number, number][][], srcPrim: number[], plane: Plane,
+  base: number, height: number, twist: number, bottom: Uint8Array,
+): Geometry {
+  const F = FRAMES[plane], { parent, depth } = orientNested(raw);
+  const b = new GeoBuilder(g);
+  for (const cls of ['point', 'vertex', 'prim'] as const) b.skip[cls].add('N');
+  b.skip.vertex.add('uv');
+  const groups = { bottom: b.group('prim', 'bottom'), top: b.group('prim', 'top'), side: b.group('prim', 'side') };
+  const positions: Vec3[] = [], flat: ({ xy: [number, number]; world: Vec3 } | null)[] = [];
+  // Undo the kernel's twist and taper to match each ring to the input outline.
+  for (let pt = 0; pt < mesh.numPoints; pt++) {
+    const q: Vec3 = [mesh.P[3 * pt], mesh.P[3 * pt + 1], mesh.P[3 * pt + 2]];
+    positions.push(q);
+    const w = dot(q, F.N);
+    if (w === Math.fround(base + height)) { flat.push(null); continue; }
+    const t = (w - base) / height, a = -twist * t * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const u = dot(q, F.U) / (1 - t), v = dot(q, F.V) / (1 - t);
+    const x = c * u - s * v, y = s * u + c * v;
+    flat.push({ xy: [x, y], world: add(add(scale(F.U, x), scale(F.V, y)), scale(F.N, base)) });
+  }
+  const nearestContour = ([x, y]: [number, number]) => {
+    let owner = 0, best = Infinity;
+    raw.forEach((poly, i) => poly.forEach(([u, v], j) => {
+      const [a, c] = poly[(j + 1) % poly.length], dx = a - u, dy = c - v;
+      const t = Math.min(1, Math.max(0, ((x - u) * dx + (y - v) * dy) / (dx * dx + dy * dy || 1)));
+      const d = Math.hypot(x - u - t * dx, y - v - t * dy);
+      if (d < best) { best = d; owner = i; }
+    }));
+    return owner;
+  };
+  const contours = flat.map((pos) => pos ? nearestContour(pos.xy) : -1);
+  const solid = (i: number) => depth[i] % 2 ? parent[i] : i;
+  const firstCorner = (i: number) => g.primStart[srcPrim[i]];
+  const pointVertex = flat.map((pos, pt) => pos ? nearestCurveVertex(g, srcPrim[contours[pt]], pos.world).vertex : -1);
+  const apexOwner = new Map<number, number>();
+  const primOwners = Array.from({ length: mesh.numPrims }, (_, pr) => {
+    const pts = mesh.primPoints(pr);
+    const ring = pts.flatMap((pt) => flat[pt] ? [flat[pt]!.xy] : []);
+    const mid: [number, number] = [ring.reduce((s, q) => s + q[0], 0) / ring.length, ring.reduce((s, q) => s + q[1], 0) / ring.length];
+    const owner = bottom[pr]
+      ? pts.reduce((best, pt) => contours[pt] >= 0 ? Math.min(best, solid(contours[pt])) : best, Infinity)
+      : nearestContour(mid);
+    for (const pt of pts) if (!flat[pt]) apexOwner.set(pt, Math.min(apexOwner.get(pt) ?? Infinity, solid(owner)));
+    return owner;
+  });
+  positions.forEach((q, pt) => {
+    const v = flat[pt] ? pointVertex[pt] : firstCorner(apexOwner.get(pt) ?? 0);
+    b.addPoint(...q, g.vertexPoint[v]);
+  });
+  primOwners.forEach((owner, pr) => {
+    const pts = mesh.primPoints(pr);
+    const corners = pts.map((pt) => {
+      const pos = flat[pt];
+      if (!pos) return firstCorner(owner);
+      return bottom[pr] ? pointVertex[pt] : nearestCurveVertex(g, srcPrim[owner], pos.world).vertex;
+    });
+    groups[bottom[pr] ? 'bottom' : 'side'].add(b.addPrim(pts, true, srcPrim[owner], corners));
+  });
+  return b.build();
+}
+
 defineNode({
   type: 'extrude',
   category: 'curve',
@@ -824,7 +887,7 @@ defineNode({
     'Input attributes carry over as polyextrude carries them: caps and side walls take the attributes and groups of the ' +
     'shape they were made from (side walls of a hole take those of the hole), new points those of the point they came from, ' +
     'corners those of their source corner; N is dropped. A vertex uv stays on the caps, and side walls get their own: ' +
-    'u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries none.',
+    'u once around the outline by length, v up the extrusion, both 0 to 1. scale_top [0, 0] (a pyramid) carries the same attributes and groups, except vertex uv. The apex point copies the first point of its source outline.',
   aliases: ['linear_extrude', 'extrude2d'],
   inputs: [
     { name: 'shapes', desc: 'closed polygons lying in a plane (e.g. shape2d, circle, text)' },
@@ -854,6 +917,7 @@ defineNode({
     if (!g.numPrims) throw new NodeError('extrude needs closed shapes (polygons) as input');
     const plane: Plane = p.plane === 'auto' ? detectPlane(g) : p.plane;
     const { polys: raw, offset } = toPolygons(g, plane);
+    const srcPrim = Array.from({ length: g.numPrims }, (_, pr) => pr).filter((pr) => g.primSize(pr) >= 3);
     const F = FRAMES[plane];
     const pyramid = p.scale_top[0] === 0 && p.scale_top[1] === 0;
     const trim = trimTarget(ctx, 1, g);
@@ -873,23 +937,17 @@ defineNode({
       const out = mergeTriangles(tri, Float64Array.from(bottom));
       const bm = new Uint8Array(out.numPrims), on = primNormals(out);
       for (let t = 0; t < out.numPrims; t++) bm[t] = (on[t * 3] * F.N[0] + on[t * 3 + 1] * F.N[1] + on[t * 3 + 2] * F.N[2]) * down < -0.9999 ? 1 : 0;
-      out.addGroup('prim', 'bottom', bm);
-      out.addGroup('prim', 'top', new Uint8Array(out.numPrims));
-      out.addGroup('prim', 'side', bm.map((x) => 1 - x));
-      return out;
+      return pyramidAttributes(g, out, raw, srcPrim, plane, p.center ? offset - p.height / 2 : offset, p.height, p.twist, bm);
     }
     // shapes inside shapes are holes (and shapes inside holes islands): outlines counter-clockwise, holes clockwise
     const { polys, depth, parent } = orientNested(raw);
     const root = polys.map((_, i) => { let r = i; while (parent[r] >= 0) r = parent[r]; return r; });
     const centre = polys.map((poly) => [poly.reduce((s, q) => s + q[0], 0) / poly.length, poly.reduce((s, q) => s + q[1], 0) / poly.length]);
     // where each contour corner came from: toPolygons skips prims under 3 corners, orientNested may reverse a contour
-    const srcPrim: number[] = [], srcVertex: number[][] = [];
-    for (let pr = 0, k = 0; pr < g.numPrims && k < raw.length; pr++) {
-      if (g.primStart[pr + 1] - g.primStart[pr] < 3) continue;
-      const vs = Array.from({ length: raw[k].length }, (_, j) => g.primStart[pr] + j);
-      srcPrim.push(pr); srcVertex.push(area2(raw[k]) > 0 === (depth[k] % 2 === 0) ? vs : vs.reverse());
-      k++;
-    }
+    const srcVertex = raw.map((poly, i) => {
+      const vs = Array.from({ length: poly.length }, (_, j) => g.primStart[srcPrim[i]] + j);
+      return area2(poly) > 0 === (depth[i] % 2 === 0) ? vs : vs.reverse();
+    });
     // like polyextrude: new points take their source point's attributes, caps and side walls their contour prim's,
     // corners their source corner's (normals are left out: they no longer fit)
     const b = new GeoBuilder(g);
@@ -1041,11 +1099,21 @@ function signed2(t: number[][]) {
 
 const NO_SHAPES = 'no closed shapes in the input (polygons, or polylines whose ends meet, with 3+ points): output is empty';
 
+function nearestCurveVertex(g: Geometry, prim: number, q: Vec3): { vertex: number; distance: number } {
+  let vertex = -1, distance = Infinity;
+  for (let v = g.primStart[prim]; v < g.primStart[prim + 1]; v++) {
+    const i = g.vertexPoint[v] * 3;
+    const d = Math.hypot(g.P[i] - q[0], g.P[i + 1] - q[1], g.P[i + 2] - q[2]);
+    if (d < distance) { vertex = v; distance = d; }
+  }
+  return { vertex, distance };
+}
+
 defineNode({
   type: 'offset_curve',
   category: 'curve',
   summary: '2D offset (grow/shrink) of closed shapes, like PolyExpand2D. Negative distance = inset. Open paths become straps.',
-  description: 'Closed shapes grow by distance (shrink when negative). An open path (a polyline whose ends do not meet) becomes a strap: a closed outline at |distance| on both sides, with its ends cut square at the end points (cap butt), rounded, or extended by the distance; extrude it for a 3D strap or band. Shapes and straps in one input are joined.',
+  description: 'Closed shapes grow by distance (shrink when negative). An open path (a polyline whose ends do not meet) becomes a strap: a closed outline at |distance| on both sides, with its ends cut square at the end points (cap butt), rounded, or extended by the distance; extrude it for a 3D strap or band. Shapes and straps in one input are joined. Each output outline or strap keeps its source prim attributes and groups. When shapes merge, the lowest source prim number wins. Each output point copies the attributes of the nearest point on its source prim and keeps its new position.',
   aliases: ['polyexpand2d', 'offset2d', 'inset2d', 'strap', 'stroke'],
   inputs: [{ name: 'shapes', desc: 'closed polygons in a plane, or open paths for straps' }],
   params: {
@@ -1081,30 +1149,105 @@ defineNode({
     const jt = p.join === 'round' ? 'Round' : p.join === 'miter' ? 'Miter' : 'Square';
     const cs = crossSection(polys, 'EvenOdd');
     let o = cs.offset(p.distance, jt, 2, p.segments);
+    const inherit = g.points.map.size > 1 || g.pointGroups.size || g.primGroups.size || g.prims.map.size || g.detail.map.size;
+    const sources: { prim: number; hole: boolean; region: ReturnType<typeof crossSection> }[] = [];
+    if (inherit && polys.length) {
+      const prims = Array.from(open.keys()).filter((pr) => !open[pr] && g.primSize(pr) >= 3);
+      const { depth, parent } = orientNested(polys);
+      // Track each contour's contribution against the same even-odd section used for the offset.
+      polys.forEach((poly, i) => {
+        const hole = depth[i] % 2 === 1;
+        const section = crossSection([poly, ...polys.filter((_, j) => parent[j] === i)], 'EvenOdd');
+        const contribution = hole ? section.subtract(cs) : section.intersect(cs);
+        section.delete();
+        if (!contribution.isEmpty()) {
+          const region = contribution.offset(hole ? -p.distance : p.distance, jt, 2, p.segments);
+          sources.push({ prim: prims[i], hole, region });
+        }
+        contribution.delete();
+      });
+    }
     cs.delete();
     let nStraps = 0, planeOffset = offset;
     if (anyOpen) {
       const lines = g.subsetPrims(open, false);
       const w = Math.abs(p.distance);
       if (!polys.length) planeOffset = toPolygons(lines, plane).offset;
-      if (w > 0) for (const path of toPaths(lines, plane)) {
+      const prims = Array.from(open.keys()).filter((pr) => open[pr]);
+      if (w > 0) for (const { path, prim } of toPaths(lines, plane)) {
         const st = strap(path, w, p.join, p.cap, p.segments);
         const u = o.add(st);
-        o.delete(); st.delete(); o = u;
+        if (inherit) sources.push({ prim: prims[prim], hole: false, region: st });
+        else st.delete();
+        o.delete(); o = u;
         nStraps++;
       }
       else warn('distance is 0: open paths give no strap');
     }
     if (!polys.length && !nStraps && g.numPoints) warn(NO_SHAPES);
-    const out = p.output === 'faces' ? crossSectionFaces(o, plane, planeOffset) : polygonsToGeo(o.toPolygons(), plane, planeOffset);
-    o.delete();
-    return out;
+    sources.sort((a, b) => a.prim - b.prim);
+    const attach = (geo: Geometry, contours: [number, number][][], faces: boolean) => {
+      const F = FRAMES[plane];
+      const { depth, parent } = orientNested(contours);
+      const owners = contours.map((poly, i) => {
+        const part = crossSection([poly, ...contours.filter((_, j) => parent[j] === i)], 'EvenOdd');
+        const owner = sources.find(({ hole, region }) => {
+          if (hole !== (depth[i] % 2 === 1)) return false;
+          const common = region.intersect(part);
+          const overlaps = !common.isEmpty();
+          common.delete();
+          return overlaps;
+        });
+        part.delete();
+        if (owner) return owner.prim;
+        // When clipping removes the individual offset, use the source closest to the surviving boundary.
+        let closest: number | undefined, best = Infinity;
+        for (const { prim, hole } of sources) {
+          if (hole !== (depth[i] % 2 === 1)) continue;
+          for (const [u, v] of poly) {
+            const q = add(add(scale(F.U, u), scale(F.V, v)), scale(F.N, planeOffset));
+            const { distance } = nearestCurveVertex(g, prim, q);
+            if (distance < best) { closest = prim; best = distance; }
+          }
+        }
+        return closest;
+      });
+      const pointOwners: number[] = [];
+      contours.forEach((poly, i) => {
+        let j = i;
+        while (owners[j] === undefined && parent[j] >= 0) j = parent[j];
+        owners[i] ??= owners[j];
+        for (let pt = 0; pt < poly.length; pt++) pointOwners.push(owners[i] ?? -1);
+      });
+      const b = new GeoBuilder(g);
+      b.volumes = [];
+      for (const key of g.vertices.map.keys()) b.skip.vertex.add(key);
+      for (let pt = 0; pt < geo.numPoints; pt++) {
+        const q: Vec3 = [geo.P[pt * 3], geo.P[pt * 3 + 1], geo.P[pt * 3 + 2]];
+        const { vertex } = nearestCurveVertex(g, pointOwners[pt], q);
+        b.addPoint(...q, vertex < 0 ? null : g.vertexPoint[vertex]);
+      }
+      const outer = depth.indexOf(0);
+      for (let pr = 0; pr < geo.numPrims; pr++) b.addPrim(geo.primPoints(pr), true, owners[faces ? outer : pr] ?? -1);
+      const out = b.build();
+      out.vertexGroups.clear(); out.edgeGroups.clear();
+      return out;
+    };
+    try {
+      if (p.output === 'faces') return crossSectionFaces(o, plane, planeOffset, inherit ? (geo, polys) => attach(geo, polys, true) : undefined);
+      const contours = o.toPolygons() as [number, number][][];
+      const out = polygonsToGeo(contours, plane, planeOffset);
+      return inherit ? attach(out, contours, false) : out;
+    } finally {
+      for (const { region } of sources) region.delete();
+      o.delete();
+    }
   },
 });
 
 /** Open polylines as 2D point lists in the plane frame. */
-function toPaths(g: Geometry, plane: Plane): [number, number][][] {
-  const F = FRAMES[plane], P = g.P, out: [number, number][][] = [];
+function toPaths(g: Geometry, plane: Plane): { path: [number, number][]; prim: number }[] {
+  const F = FRAMES[plane], P = g.P, out: { path: [number, number][]; prim: number }[] = [];
   for (let pr = 0; pr < g.numPrims; pr++) {
     const path: [number, number][] = [];
     for (const i of g.primPoints(pr)) {
@@ -1113,7 +1256,7 @@ function toPaths(g: Geometry, plane: Plane): [number, number][][] {
       const last = path[path.length - 1];
       if (!last || Math.hypot(q[0] - last[0], q[1] - last[1]) > 1e-12) path.push(q);
     }
-    if (path.length >= 2) out.push(path);
+    if (path.length >= 2) out.push({ path, prim: pr });
   }
   return out;
 }

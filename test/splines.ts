@@ -5,7 +5,8 @@
 // and every node type fed spline prims (keep nodes keep them valid, the others convert with a warning).
 //   node test/splines.ts
 import '../src/nodes/index.ts';
-import { Geometry } from '../src/core/geometry.ts';
+import { GeoBuilder, Geometry } from '../src/core/geometry.ts';
+import { primNormals } from '../src/core/topology.ts';
 import {
   arcLength, bezierToNurbs, closestPoint, curvatureAt, evalPoint, fitSplineTolerance, interpolateSpline, makeSpline,
   nurbsToBezier, setSplinePrim, splineFromPrim, splinesToPolylines, toPolyline,
@@ -405,6 +406,105 @@ const primPos = (g: Geometry, p: number) => {
   }
   for (const b of bad) console.log('   ' + b);
   check(!bad.length, `every node type with spline input: ${n} types cooked, ${kept} kept splines, ${converted} converted with a warning`);
+}
+
+// Sweep profile winding, subdivisions and UVs.
+{
+  const path: NodeSpec = { type: 'curve', params: { points: [[0, 0, 0], [2, 0, 0], [4, 0, 0]] } };
+  for (const [divisions, up] of [[1, [0, 1, 0]], [4, [0, 0, 1]], [12, [0, 1, 0]]] as const) {
+    const out = await cook({ path, out: { type: 'sweep', in: ['path'], params: { shape: 'ribbon', radius: 1, divisions, up } } }, 'out');
+    const normals = primNormals(out), uv = out.vertices.get('uv')!;
+    const facing = Array.from({ length: out.numPrims }, (_, i) => up.reduce<number>((d, x, j) => d + x * normals[3 * i + j], 0));
+    check(Math.min(...facing) > 0.998, `sweep ribbon faces up with divisions ${divisions} (minimum dot ${Math.min(...facing)})`);
+    const u = Array.from({ length: out.numVertices }, (_, v) => (uv.get(v) as number[])[0]);
+    const widths = Array.from({ length: out.numPrims }, (_, i) => {
+      const [a, b] = out.primPoints(i), axis = up[1] ? 2 : 1;
+      return Math.abs(out.P[3 * a + axis] - out.P[3 * b + axis]);
+    });
+    check(out.numPrims === 2 * divisions && out.numPoints === 3 * (divisions + 1) &&
+      widths.every((w) => Math.abs(w - 2 / divisions) < 1e-9) && Math.min(...u) === 0 && Math.max(...u) === 1,
+    `sweep ribbon has ${divisions} equal strips per segment and u from 0 to 1 (${out.numPrims} faces)`);
+  }
+  for (const shape of ['circle', 'half_circle', 'square', 'rect']) {
+    const result = await engine.cook({ nodes: { path, out: { type: 'sweep', in: ['path'], params: { shape, divisions: 1 } } }, output: 'out' });
+    check(!result.ok && result.errors.some(({ message }) => message.includes('divisions') && message.includes(shape) && message.includes('2')),
+      `sweep ${shape} requires at least 2 divisions`);
+  }
+  const profile: NodeSpec = { type: 'curve', params: { points: [[-1, 0, 0], [1, 0, 0]] } };
+  const circle = await cook({ path, out: { type: 'sweep', in: ['path'], params: { shape: 'circle', divisions: 8 } } }, 'out');
+  const supplied = await cook({ path, profile, out: { type: 'sweep', in: ['path', 'profile'], params: { shape: 'ribbon' } } }, 'out');
+  const hashes = (g: Geometry) => {
+    const h = fingerprint(g).hashes;
+    return [h.P, h.topology, h.attributes['vertex.uv'], h.attributes['group.prim.caps'], h.attributes['group.prim.sides']].join(' ');
+  };
+  check(hashes(circle) === '86c0fbc16d65f113 15c77e2c74a6cbb6 df69629543c324df 3b6aec566537d42c dfe6efb7b12d2a8d',
+    'sweep circle profile keeps its fingerprint');
+  check(hashes(supplied) === 'ea40b7ea218d89a0 5cc09a601c7aff3a c8f6dfd5fa104f9f 56a42fa7a6194b1d dede88460da9803c',
+    'sweep profile input keeps its fingerprint');
+}
+
+// Offset outlines and pyramid caps and walls keep their source attributes.
+{
+  const b = new GeoBuilder();
+  const w = b.attrib('point', 'w'), name = b.attrib('prim', 'name', 1, 'string'), tag = b.attrib('vertex', 'tag');
+  const uv = b.attrib('vertex', 'uv', 3);
+  const ring = (x: number, label: string, base: number) => {
+    const pts = Array.from({ length: 8 }, (_, j) => {
+      const a = j * Math.PI / 4, pt = b.addPoint(x + Math.cos(a), 0, Math.sin(a));
+      w.set(pt, base + j);
+      return pt;
+    });
+    const first = b.numVertices, pr = b.addPrim(pts);
+    name.set(pr, label);
+    b.group('prim', label).add(pr);
+    pts.forEach((_, j) => { tag.set(first + j, base + j); uv.set(first + j, [0, j, 0]); });
+  };
+  const from = async (geo: Geometry, type: string, params: Record<string, unknown>) => {
+    const result = await engine.cook({ nodes: { src: { type: 'input' }, out: { type, in: ['src'], params } }, output: 'out' },
+      { inputs: [{ geo, sig: JSON.stringify(geoToJSON(geo)) }] });
+    if (!result.ok || !result.geo) throw new Error(result.errors.map(({ message }) => message).join(', '));
+    return result.geo;
+  };
+  ring(0, 'ring', 2);
+  const source = b.build(), offset = await from(source, 'offset_curve', { distance: 0.25 });
+  const nearest = (g: Geometry, i: number, src: Geometry) => {
+    const distance = (j: number) => Math.hypot(g.P[i * 3] - src.P[j * 3], g.P[i * 3 + 2] - src.P[j * 3 + 2]);
+    return src.points.get('w')!.get(src.primPoints(0).reduce((a, j) => distance(j) < distance(a) ? j : a));
+  };
+  check(offset.numPrims === 1 && offset.prims.get('name')?.get(0) === 'ring' && offset.primGroups.get('ring')?.[0] === 1 &&
+    Array.from({ length: offset.numPoints }, (_, i) => offset.points.get('w')?.get(i) === nearest(offset, i, source)).every(Boolean),
+  `offset_curve copies the ring name, group and nearest point weights (${offset.prims.get('name')?.get(0)}, ${offset.points.get('w')?.get(0)})`);
+  ring(2.3, 'other', 20);
+  const pair = b.build(), merged = await from(pair, 'offset_curve', { distance: 0.25, output: 'faces' });
+  check(merged.numPrims === 1 && merged.prims.get('name')?.get(0) === 'ring' && merged.primGroups.get('ring')?.[0] === 1 &&
+    !merged.primGroups.get('other')?.[0] && Array.from({ length: merged.numPoints }, (_, i) => merged.points.get('w')?.get(i) === nearest(merged, i, source)).every(Boolean),
+  `offset_curve merged rings take the lower prim's name, group and point weights (${merged.numPrims} faces, ${merged.prims.get('name')?.get(0)})`);
+  const first = b.numVertices;
+  const a = b.addPoint(10, 0, 0), c = b.addPoint(12, 0, 0), pr = b.addPrim([a, c], false);
+  w.set(a, 100); w.set(c, 200); name.set(pr, 'path'); b.group('prim', 'path').add(pr);
+  tag.set(first, 100); tag.set(first + 1, 200);
+  const separate = await from(b.build(), 'offset_curve', { distance: 0.05 });
+  check(separate.numPrims === 3 && ['ring', 'other', 'path'].every((label) => {
+    const pr = Array.from({ length: separate.numPrims }, (_, i) => i).find((i) => separate.prims.get('name')?.get(i) === label);
+    return pr !== undefined && separate.primGroups.get(label)?.[pr] === 1 && separate.primPoints(pr).every((i) => {
+      const v = separate.points.get('w')?.get(i) as number;
+      return label === 'ring' ? v >= 2 && v < 10 : label === 'other' ? v >= 20 && v < 28 : v === 100 || v === 200;
+    });
+  }), 'offset_curve disjoint outlines and straps keep their own attributes');
+  const pyramid = await from(source, 'extrude', { scale_top: [0, 0], height: 2 });
+  const apex = Array.from({ length: pyramid.numPoints }, (_, i) => i).find((i) => pyramid.P[3 * i + 1] === 2);
+  check(apex !== undefined && Array.from({ length: pyramid.numPrims }, (_, i) =>
+    pyramid.prims.get('name')?.get(i) === 'ring' && pyramid.primGroups.get('ring')?.[i] === 1).every(Boolean) &&
+    Array.from({ length: pyramid.numPoints }, (_, i) => pyramid.points.get('w')?.get(i) === (i === apex ? 2 : nearest(pyramid, i, source))).every(Boolean) &&
+    Array.from({ length: pyramid.numVertices }, (_, i) => pyramid.vertices.get('tag')?.get(i) === pyramid.points.get('w')?.get(pyramid.vertexPoint[i])).every(Boolean) &&
+    !pyramid.vertices.has('uv'),
+  `extrude pyramid keeps source prim, group and corner values, and its apex takes the first point weight (${pyramid.prims.get('name')?.get(0)}, ${apex === undefined ? 'no apex' : pyramid.points.get('w')?.get(apex)})`);
+  const twisted = await from(source, 'extrude', { scale_top: [0, 0], height: -2, center: true, twist: 90, divisions: 2 });
+  const mid = Array.from({ length: twisted.numPoints }, (_, i) => i).find((i) =>
+    Math.hypot(twisted.P[3 * i] - Math.SQRT1_2 / 2, twisted.P[3 * i + 1], twisted.P[3 * i + 2] + Math.SQRT1_2 / 2) < 1e-6);
+  const tip = Array.from({ length: twisted.numPoints }, (_, i) => i).find((i) => twisted.P[3 * i + 1] === -1);
+  check(mid !== undefined && tip !== undefined && twisted.points.get('w')?.get(mid) === 2 && twisted.points.get('w')?.get(tip) === 2,
+    `extrude centered, twisted pyramid keeps its ring and apex weights (${mid === undefined ? 'no ring point' : twisted.points.get('w')?.get(mid)}, ${tip === undefined ? 'no apex' : twisted.points.get('w')?.get(tip)})`);
 }
 
 console.log(`\nsplines: ${pass} passed, ${fail} failed`);

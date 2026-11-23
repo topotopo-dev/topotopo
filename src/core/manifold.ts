@@ -330,7 +330,9 @@ export function polygonsToGeo(polys: [number, number][][], plane: Plane, offset 
 }
 
 /** Faces for a CrossSection in the world plane: one polygon per shape, a few for a shape with holes. */
-export function crossSectionFaces(cs: any, plane: Plane, offset = 0): Geometry {
+export function crossSectionFaces(
+  cs: any, plane: Plane, offset = 0, mapPart: (geo: Geometry, polys: [number, number][][]) => Geometry = (geo) => geo,
+): Geometry {
   const W = M();
   const parts = cs.decompose();
   const out: Geometry[] = [];
@@ -341,7 +343,7 @@ export function crossSectionFaces(cs: any, plane: Plane, offset = 0): Geometry {
     const flat = polys.flat();
     // single contour without holes → keep as one n-gon
     if (polys.length === 1) {
-      out.push(polygonsToGeo(polys, plane, offset, true));
+      out.push(mapPart(polygonsToGeo(polys, plane, offset, true), polys));
       continue;
     }
     const tris = W.triangulate(polys) as [number, number, number][];
@@ -349,7 +351,7 @@ export function crossSectionFaces(cs: any, plane: Plane, offset = 0): Geometry {
     const pos: number[] = [];
     for (const [u, v] of flat) pos.push(U[0] * u + V[0] * v + N[0] * offset, U[1] * u + V[1] * v + N[1] * offset, U[2] * u + V[2] * v + N[2] * offset);
     // a face with holes as the few polygons it needs, not a fan of triangles
-    out.push(mergeTriangles(new Geometry({ positions: pos, prims: tris }), new Float64Array(tris.length)));
+    out.push(mapPart(mergeTriangles(new Geometry({ positions: pos, prims: tris }), new Float64Array(tris.length)), polys));
   }
   return Geometry.merge(out);
 }

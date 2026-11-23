@@ -1017,13 +1017,13 @@ defineNode({
 defineNode({
   type: 'grid_split',
   category: 'topology',
-  summary: 'Split quads into a grid of cells by target size (facades → window cells) or fixed counts. Shared edges stay welded. Only quads are split: cut first, then split.',
-  description: 'Only 4-sided polygons are divided; triangles and n-gons pass through unsplit. After a boolean the faces around the cut are often n-gons, so they stay whole: run grid_split on the quads BEFORE the cut (or triangulate the n-gons first), not after it.',
+  summary: 'Split selected quads into a grid of cells by target size or division counts. Shared edges stay welded.',
+  description: 'Selected quads divide into cells. Neighbours agree on their shared edges, and faces next to split quads gain points along those edges. Opposite edges of a split quad have the same count. In size mode the longest edge in each connected set sets the count. In count mode the largest requested count wins. Run grid_split before a boolean to divide faces that the cut would turn into n-gons.',
   aliases: ['divide_quads', 'facade_split', 'quad_split', 'split_faces'],
-  inputs: [{ name: 'geo', desc: 'polygon mesh (quads are split; triangles and n-gons pass through unsplit)' }],
+  inputs: [{ name: 'geo', desc: 'polygon mesh (selected quads form grids; adjacent faces gain shared edge points)' }],
   params: {
     group: P.group('prim', 'quads to split ("" = all)'),
-    mode: { type: 'enum', options: ['size', 'count'], default: 'size', desc: 'size = divide each edge by length / target size; count = fixed divisions' },
+    mode: { type: 'enum', options: ['size', 'count'], default: 'size', desc: 'size = round the longest linked edge length / its target size; count = use the largest requested divisions along linked edges' },
     size: { type: 'vec2', default: [1, 1], desc: 'target cell size [horizontal, vertical]: edges mostly along Y use the 2nd value' },
     divisions: { type: 'ivec2', default: [2, 2], min: 1, max: 256, desc: 'count mode: cells along the quad\'s first and second edge' },
   },
@@ -1043,16 +1043,52 @@ defineNode({
     const Pd = g.P;
     const corner = new Int32Array(g.numPoints).fill(-1);
     const cornerPt = (i: number) => (corner[i] >= 0 ? corner[i] : (corner[i] = b.copyPoint(i)));
-    const edgePts = new Map<string, number[]>();
-    const edgeCount = (a: number, c: number) => {
+    const split = (pr: number) => g.primClosed[pr] && g.primSize(pr) === 4 && (!sel || sel[pr]);
+    const edgeIds = new Map<number, number>(), parents: number[] = [], lengths: number[] = [], requests: number[] = [];
+    const countMode = p.mode === 'count';
+    const edgeId = (a: number, c: number, axis: number) => {
+      const key = edgeKey(a, c), id = edgeIds.get(key);
+      if (id !== undefined) {
+        if (countMode) requests[id] = Math.max(requests[id], p.divisions[axis]);
+        return id;
+      }
       const dx = Pd[c * 3] - Pd[a * 3], dy = Pd[c * 3 + 1] - Pd[a * 3 + 1], dz = Pd[c * 3 + 2] - Pd[a * 3 + 2];
       const len = Math.hypot(dx, dy, dz);
       const vertical = len > 0 && Math.abs(dy) / len > 0.7071;
-      return Math.max(1, Math.round(len / Math.max(1e-9, vertical ? p.size[1] : p.size[0])));
+      const next = parents.length;
+      edgeIds.set(key, next);
+      parents.push(next);
+      lengths.push(countMode ? 0 : len);
+      requests.push(countMode ? p.divisions[axis] : Math.max(1, Math.round(len / Math.max(1e-9, vertical ? p.size[1] : p.size[0]))));
+      return next;
     };
-    // interior points of edge a→c with n segments, shared between neighbouring quads
+    const root = (id: number) => {
+      while (parents[id] !== id) { parents[id] = parents[parents[id]]; id = parents[id]; }
+      return id;
+    };
+    // A shared edge has one ID, and opposite edges connect those IDs across each selected quad.
+    for (let pr = 0; pr < g.numPrims; pr++) {
+      if (!split(pr)) continue;
+      const [a, c, d, e] = g.primPoints(pr);
+      parents[root(edgeId(d, e, 0))] = root(edgeId(a, c, 0));
+      parents[root(edgeId(e, a, 1))] = root(edgeId(c, d, 1));
+    }
+    const longest = new Float64Array(parents.length).fill(-1), counts = new Float64Array(parents.length);
+    for (let id = 0; id < parents.length; id++) {
+      const r = root(id);
+      if (lengths[id] < longest[r]) continue;
+      counts[r] = lengths[id] === longest[r] ? Math.max(counts[r], requests[id]) : requests[id];
+      longest[r] = lengths[id];
+    }
+    const edgeCount = (a: number, c: number) => {
+      const id = edgeIds.get(edgeKey(a, c));
+      return id === undefined ? 1 : counts[root(id)];
+    };
+    const edgePts = new Map<number, number[]>();
+    // Interior points in edge order, shared by all incident faces.
     const edgeInterior = (a: number, c: number, n: number): number[] => {
-      const lo = Math.min(a, c), hi = Math.max(a, c), key = `${lo}:${hi}:${n}`;
+      if (n === 1) return [];
+      const lo = Math.min(a, c), hi = Math.max(a, c), key = edgeKey(lo, hi);
       let pts = edgePts.get(key);
       if (!pts) {
         pts = [];
@@ -1064,15 +1100,25 @@ defineNode({
     for (let pr = 0; pr < g.numPrims; pr++) {
       const s = g.primStart[pr], n = g.primSize(pr);
       const vs = Array.from({ length: n }, (_, k) => s + k);
-      if (!g.primClosed[pr] || n !== 4 || (sel && !sel[pr])) {
-        const id = b.addPrim(vs.map((v) => cornerPt(g.vertexPoint[v])), !!g.primClosed[pr], pr, vs);
+      if (!split(pr)) {
+        const closed = !!g.primClosed[pr];
+        const pts: number[] = [], sources: Src[] = [];
+        for (let j = 0; j < n; j++) {
+          const v = vs[j], a = g.vertexPoint[v];
+          pts.push(cornerPt(a)); sources.push(v);
+          if (!closed) continue;
+          const next = vs[(j + 1) % n], c = g.vertexPoint[next], count = edgeCount(a, c);
+          edgeInterior(a, c, count).forEach((pt, k) => {
+            const t = (k + 1) / count;
+            pts.push(pt); sources.push({ i: [v, next], w: [1 - t, t] });
+          });
+        }
+        const id = b.addPrim(pts, closed, pr, sources);
         cu.set(id, 0); cv.set(id, 0);
         continue;
       }
       const c = vs.map((v) => g.vertexPoint[v]);
-      let nu: number, nv: number;
-      if (p.mode === 'count') { nu = p.divisions[0]; nv = p.divisions[1]; }
-      else { nu = Math.max(edgeCount(c[0], c[1]), edgeCount(c[3], c[2])); nv = Math.max(edgeCount(c[1], c[2]), edgeCount(c[0], c[3])); }
+      const nu = edgeCount(c[0], c[1]), nv = edgeCount(c[1], c[2]);
       // point lattice (i along c0→c1, j along c0→c3)
       const L: number[][] = Array.from({ length: nu + 1 }, () => new Array(nv + 1));
       L[0][0] = cornerPt(c[0]); L[nu][0] = cornerPt(c[1]); L[nu][nv] = cornerPt(c[2]); L[0][nv] = cornerPt(c[3]);
