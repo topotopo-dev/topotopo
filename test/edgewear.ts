@@ -10,6 +10,7 @@
 //   node test/edgewear.ts
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
+import type { NodeResult } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { findImage } from '../src/core/image.ts';
 import type { Image } from '../src/core/image.ts';
@@ -36,12 +37,13 @@ await pooled.init();
 const pooled2 = new Engine(createNodeHost({ workers: 2, pool: { minElements: 1 } }));
 await pooled2.init();
 
-interface Cooked { geo: Geometry; stats: Record<string, number>; warnings: string[] }
+interface Cooked { geo: Geometry; stats: Record<string, number>; warnings: string[]; ms: number; stages: NodeResult['stages'] }
 async function cook(nodes: Nodes, output: string, engine = serial, statsOf = output): Promise<Cooked> {
   const graph: GraphSpec = { nodes, output };
   const r = await engine.cook(graph);
   if (!r.ok || !r.geo) throw new Error(`cook failed: ${r.errors.map((x) => `[${x.node}] ${x.message}`).join('; ')}`);
-  return { geo: r.geo, stats: (r.results.get(statsOf) as any)?.stats ?? {}, warnings: r.warnings.map((w) => w.message) };
+  const result = r.results.get(statsOf);
+  return { geo: r.geo, stats: result?.stats ?? {}, warnings: r.warnings.map((w) => w.message), ms: result?.ms ?? 0, stages: result?.stages };
 }
 /** The text of the error a cook ends with (message and hint), '' when it cooks. */
 async function err(nodes: Nodes, output: string): Promise<string> {
@@ -502,8 +504,10 @@ section('what a face is: flush stacks are no edge, a small boss is held, a large
 }
 section('thin sheets keep their wear; the floor around a low step does not chip');
 {
-  // a 2 × 1.5 m sheet: its two faces are never pressed against each other, however thin
-  const rimOf = (t: Texels, th: number) => t.idx.filter((k) => { const [x, y, z] = t.p(k); return Math.abs(y - th) < 1e-5 && Math.max(Math.abs(x) - 1, Math.abs(z) - 0.75) > -0.003; });
+  const rimOf = (t: Texels, height: number, from = -Infinity, to = 0.003) => t.idx.filter((k) => {
+    const [x, y, z] = t.p(k), d = -Math.max(Math.abs(x) - 1, Math.abs(z) - 0.75);
+    return Math.abs(y - height) < 1e-5 && d > from && d < to;
+  });
   const sheet = (th: number): Nodes => ({ s0: { type: 'box', params: { size: [2, th, 1.5], center: [0, th / 2, 0] } }, su: { type: 'uv_unwrap', in: ['s0'] } });
   for (const th of [0.0005, 0.0008, 0.003]) {
     const t = await texels(sheet(th), 'su', { resolution: 2048, amount: 0.6 });
@@ -511,6 +515,62 @@ section('thin sheets keep their wear; the floor around a low step does not chip'
     const rim = rimOf(t, th), C = mean(rim.map((k) => t.at('C', k))), ch = share(rim.map((k) => t.at('chip', k)));
     check(rim.length > 10000 && C > 0.35 && ch > 0.3, `a sheet ${th * 1000} mm thick, amount 0.6: the face within 3 mm of its rim reads C ${f3(C)}, ${(ch * 100).toFixed(0)}% chipped`);
   }
+  // both faces of a thin sheet wear like a thick plate at the rim, and stay unworn away from it
+  const wear = { resolution: 1024, amount: 0.6 };
+  const readSheet = async (th: number) => {
+    const t = await texels(sheet(th), 'su', wear);
+    nest(t.im);
+    if (th === 0.0005 || th === 0.02) {
+      const stageMs = Object.entries(t.c.stages ?? {}).map(([name, { ms }]) => `${name} ${ms.toFixed(0)} ms`);
+      console.log(`  ${th * 1000} mm bake_edge_wear, serial: ${t.c.ms.toFixed(0)} ms (${stageMs.join(', ')})`);
+    }
+    const readFace = (side: string, height: number) => {
+      const label = `${th * 1000} mm ${side}`;
+      const rim = rimOf(t, height, 0.00015, 0.0015), field = rim.map((k) => t.at('C', k));
+      const C = mean(field), chip = share(rim.map((k) => t.at('chip', k))), low = field.filter((v) => v < 0.05).length / rim.length;
+      const band = mean(rimOf(t, height, 0.003, 0.006).map((k) => t.at('C', k)));
+      console.log(`  ${label}: ${rim.length} rim texels, C ${f3(C)}, chipped share ${f3(chip)}, C < 0.05 share ${f3(low)}, C at 3–6 mm ${f3(band)}`);
+      const flat = rimOf(t, height, 0.012, Infinity);
+      const flatMax = (layer: string) => max(flat.map((k) => Math.abs(t.at(layer, k))));
+      const flatC = flatMax('C'), flatChip = flatMax('chip'), convex = flatMax('convex'), concave = flatMax('concave');
+      const flats = `${label} beyond 12 mm (${flat.length} texels): maxima C ${flatC}, chip ${flatChip}, convex ${f3(convex)}, concave ${f3(concave)}`;
+      if (th <= 0.001) check(flat.length > 0 && flatC === 0 && flatChip === 0 && convex < 0.02 && concave < 0.02, flats);
+      else console.log(`  ${flats}`);
+      return { label, C, chip, low, band };
+    };
+    return { top: readFace('top', th), bottom: readFace('bottom', 0) };
+  };
+  const plate = await readSheet(0.02);
+  const checkRim = (face: typeof plate.top, ref: typeof plate.top) => {
+    const C = face.C / ref.C, chip = face.chip / ref.chip;
+    check(C >= 0.9 && C <= 1.15, `${face.label} rim C ${f3(face.C)} / ${f3(ref.C)} = ${f3(C)} (0.9–1.15 of the 20 mm plate)`);
+    check(chip >= 0.9, `${face.label} rim chipped share ${f3(face.chip)} / ${f3(ref.chip)} = ${f3(chip)} (at least 0.9 of the 20 mm plate)`);
+    check(face.low < 0.02, `${face.label} rim share with C < 0.05 is ${f3(face.low)} (under 0.02)`);
+  };
+  for (const th of [0.0005, 0.001, 0.003]) {
+    const thin = await readSheet(th);
+    checkRim(thin.top, plate.top);
+    if (th === 0.0005) checkRim(thin.bottom, plate.bottom);
+    const band = thin.top.band / plate.top.band;
+    check(band <= 1.25, `${thin.top.label} C at 3–6 mm ${f3(thin.top.band)} / ${f3(plate.top.band)} = ${f3(band)} (at most 1.25 of the 20 mm plate)`);
+  }
+  // a wall joined to the sheet, with its foot away from the outer rim along the sampled stretch
+  const wall: Nodes = {
+    s: { type: 'box', params: { size: [0.3, 0.0005, 0.3], center: [0, 0.00025, 0] } },
+    w: { type: 'box', params: { size: [0.003, 0.02025, 0.3], center: [0, 0.010375, 0] } },
+    m0: { type: 'merge', in: ['s', 'w'] },
+    j: { type: 'boolean', in: ['m0'], params: { operation: 'union' } },
+    u: { type: 'uv_unwrap', in: ['j'] },
+  };
+  const wallTexels = await texels(wall, 'u', wear);
+  nest(wallTexels.im);
+  const foot = wallTexels.idx.filter((k) => {
+    const [x, y, z] = wallTexels.p(k), d = Math.abs(x) - 0.0015;
+    return Math.abs(y - 0.0005) < 1e-5 && Math.abs(z) < 0.138 && d > 0.0005 && d < 0.003;
+  });
+  const atFoot = (layer: string) => foot.map((k) => wallTexels.at(layer, k));
+  const convex = mean(atFoot('convex')), concave = mean(atFoot('concave')), chip = max(atFoot('chip'));
+  check(concave > convex && convex < 0.1 && chip === 0, `wall foot on a 0.5 mm sheet (${foot.length} texels): mean concave ${f3(concave)}, convex ${f3(convex)}, max chip ${chip}`);
   // the 3 mm sheet in the lower-left quarter of the uv square, a box 30 m away in the upper-right: the sheet unchanged
   const far: Nodes = {
     ...sheet(0.003),
