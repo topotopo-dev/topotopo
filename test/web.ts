@@ -120,7 +120,8 @@ try {
   section('preview words');
   {
     const item: PreviewItem = { package: 'props/harbour', title: 'Harbour', url: '/l/props/harbour/', state: 'waiting' };
-    check(previewRowWords(item, 0) === 'waiting · next' && previewRowWords(item, 1) === 'waiting · 2 before it', 'waiting previews show their place in line');
+    check(previewRowWords(item, 0) === 'waiting · next' && previewRowWords(item, 1) === 'waiting · 2 before it'
+      && previewRowWords(item, 1, Date.now(), false) === 'waiting · 1 before it', 'waiting previews show their place in line (the one being made counts, none while paused)');
     const current: PreviewItem = { ...item, state: 'baking', startedAt: 1000 };
     check(previewRowWords(current, 0, 13_000) === 'making its preview · 12 s'
         && previewRowWords(current, 0, 14_000) === 'making its preview · 13 s', 'the current preview shows elapsed time');
@@ -186,7 +187,7 @@ try {
         && waiting.items.every((x: PreviewItem) => x.state === 'waiting' && !('dir' in x)), 'Re-bake puts a waiting preview first and the API uses package names and links');
       const list = await get('/previews');
       check(list.status === 200 && list.body.includes('href="/l/previews/second/">Second &lt;&amp;&gt;</a>') && list.body.includes('waiting · next')
-        && list.body.includes('waiting · 2 before it') && list.body.includes('>Resume</button>') && list.body.includes('>Skip</button>'), 'the Previews page links each waiting package and offers Resume and Skip');
+        && list.body.includes('waiting · 1 before it') && !list.body.includes('waiting · 2 before it') && list.body.includes('>Resume</button>') && list.body.includes('>Skip</button>'), 'the Previews page links each waiting package and offers Resume and Skip');
       const home = await get('/');
       const folder = await page('/p/previews/first', web.port);
       const status = await json('/api/status');

@@ -173,9 +173,10 @@ function previewDuration(ms: number) {
   return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
 }
 
-export function previewRowWords(item: PreviewItem, before: number, now = Date.now()) {
+/** `before`: the waiting rows ahead of it; `making`: whether one is being made (it is ahead too, unless paused between bakes) */
+export function previewRowWords(item: PreviewItem, before: number, now = Date.now(), making = true) {
   switch (item.state) {
-    case 'waiting': return before ? `waiting · ${before + 1} before it` : 'waiting · next';
+    case 'waiting': return before ? `waiting · ${before + Number(making)} before it` : 'waiting · next';
     case 'baking': return PREVIEW_WORDS.making.replace('{seconds}', String(Math.max(0, Math.floor((now - (item.startedAt ?? now)) / 1000))));
     case 'done': return `made in ${previewDuration(item.ms ?? 0)}`;
     case 'failed': return `could not make its preview: ${item.error || 'no reason given'}`;
@@ -201,9 +202,10 @@ export function previewSummary(bakes: PreviewsData, finishedAt?: number) {
 
 export function previewView(bakes: PreviewsData, finishedAt?: number) {
   let waiting = 0;
+  const making = bakes.items.some((item) => item.state === 'baking');
   const rows = bakes.items.map((item) => {
     const { state, startedAt } = item;
-    const line = previewRowWords(item, waiting);
+    const line = previewRowWords(item, waiting, Date.now(), making);
     if (state === 'waiting') waiting++;
     const skip = state === 'waiting' || state === 'baking';
     return `<li class="preview-row">

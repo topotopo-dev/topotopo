@@ -161,7 +161,7 @@ export class BakeQueue {
     let leftMs = 0, estimated = true;
     for (const { dir, state, startedAt } of this.order) {
       if (state !== 'waiting' && state !== 'baking') continue;
-      const ms = this.lastMs.get(dir) ?? (state === 'waiting' ? average : undefined);
+      const ms = this.lastMs.get(dir) ?? average;
       if (ms === undefined) { estimated = false; break; }
       leftMs += Math.max(0, ms - (startedAt === undefined ? 0 : Math.max(0, now - startedAt)));
     }
