@@ -122,7 +122,6 @@
       "in": [
         "core"
       ],
-      "note": "the comment avoids the name of the var height: the layer-name warning also reads comments (F-118)",
       "params": {
         "expression": "// a peak with concave flanks under the ridges (0..1 here, metres further on)\nconst s = (samples - 1) * spacing, r = Math.hypot(x / 1.35, z + 0.06 * s) / s;\nreturn 1.0 * pow(clamp(1 - r / 0.45, 0, 1), 1.6);"
       }
@@ -226,75 +225,14 @@
         "rain_density": "=0.02 / ((samples - 1) * spacing / 252) / ((samples - 1) * spacing / 252)"
       }
     },
-    "no_mask": {
+    "drop_layers": {
       "type": "heightfield_layer",
       "in": [
         "eroded"
       ],
-      "note": "one node per layer: heightfield_layer delete takes a single layer name, and a list silently deletes nothing (F-119)",
       "params": {
         "operation": "delete",
-        "layer": "mask"
-      }
-    },
-    "no_drainage": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_mask"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "drainage"
-      }
-    },
-    "no_direction": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_drainage"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "direction"
-      }
-    },
-    "no_flow": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_direction"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "flow"
-      }
-    },
-    "no_sediment": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_flow"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "sediment"
-      }
-    },
-    "no_debris": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_sediment"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "debris"
-      }
-    },
-    "no_water": {
-      "type": "heightfield_layer",
-      "in": [
-        "no_debris"
-      ],
-      "params": {
-        "operation": "delete",
-        "layer": "water"
+        "layer": "mask drainage direction flow sediment debris water"
       }
     },
     "course": {
@@ -307,7 +245,7 @@
     "paved": {
       "type": "heightfield_path",
       "in": [
-        "no_water",
+        "drop_layers",
         "course"
       ],
       "params": {
@@ -321,7 +259,7 @@
     "unpaved": {
       "type": "heightfield_layer",
       "in": [
-        "no_water"
+        "drop_layers"
       ],
       "params": {
         "layer": "path",
