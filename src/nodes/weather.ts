@@ -45,7 +45,7 @@ const SHARED = (): Record<string, ParamDef> => ({
   sun: { type: 'vec3', default: [0, 1, 0], desc: 'where the sun comes from (fade, chalk, greying): straight up by default, a model does not know where south is' },
   padding: { type: 'int', default: 4, min: 0, max: 64, desc: 'texels the islands are padded by', aliases: ['dilation'] },
   samples: { type: 'int', default: 32, min: 4, max: 256, desc: 'rays per cloud point of the occlusion, cavity, shelter and visibility bake' },
-  leak_density: { type: 'float', default: 120, min: 0, max: 500, desc: 'run starts per metre of ledge, sill, coping or overhang edge, and per metre where a rusting part meets the surface (0 = no runs): most runs are faint, a few strong, and under a long edge they merge into a wash. 120 is fast, while 250 to 500 gives a denser, finer streaking for a final look and takes longer to bake (about 3 times as long at 500)', aliases: ['runs_per_metre'] },
+  leak_density: { type: 'float', default: 120, min: 0, max: 500, desc: 'run starts per metre of ledge, sill, coping or overhang edge, and per metre where a rusting part meets the surface (0 = no runs): most runs are faint, a few strong, and under a long edge they merge into a wash. 120 is fast; 250 to 500 gives a denser, finer streaking for a final look at a small cost (a 2048 bake of a prop under a metre tall takes about 10 % longer at 250, 25 % at 500)', aliases: ['runs_per_metre'] },
   leak_wander: { type: 'float', default: 0, min: 0, max: 1, desc: 'how much the leak runs spread sideways and meander (0 = straight down, as on a flat face in still air, 1 = fanned out and winding, like wind-blown rain on a rough wall)', aliases: ['run_wander'] },
 });
 
