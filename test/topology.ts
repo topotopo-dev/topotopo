@@ -10,7 +10,7 @@ import { halfEdges } from '../src/core/halfedge.ts';
 import type { HalfEdgeMesh } from '../src/core/halfedge.ts';
 import { evalGroup, evalEdgeGroup } from '../src/core/groups.ts';
 import { convertSelection } from '../src/core/groupconvert.ts';
-import { boundaryLoops, primArea, primNormals, topologyReport, triangleReport, triangulate } from '../src/core/topology.ts';
+import { boundaryLoops, buildEdges, primArea, primNormals, topologyReport, triangleReport, triangulate } from '../src/core/topology.ts';
 import { readFileSync } from 'node:fs';
 import { geoFromJSON, geoToJSON } from '../src/io/json.ts';
 import { budgetReport, nodeBudgetInput, summarize, inspect } from '../src/inspect.ts';
@@ -625,6 +625,55 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   check(/; 452 triangles/.test(sm) && /bbox: min \(-0\.525, -0\.450, -0\.030\) max/.test(sm) && /parts \(prim "name", 4\)/.test(sm) && /^uv: \d+ charts/m.test(sm) && /^topology: closed solid/m.test(sm),
     `inspect summary: one screen with triangles, bbox to the mm, parts, uv and topology (${sm.split('\n').find((x) => x.startsWith('bbox'))})`);
   check(!/^image "/m.test(summarize(g)) && /bbox: .* m, center/.test(summarize(g)), 'the short summary: bbox in metres to the mm');
+}
+
+// Grid subdivisions propagate across quads and insert their edge points on neighbouring faces.
+{
+  const split = async (geo: Geometry, params: Record<string, unknown>) => {
+    const r = await engine.cook({ nodes: { src: { type: 'input' }, out: { type: 'grid_split', in: ['src'], params } }, output: 'out' },
+      { inputs: [{ geo, sig: JSON.stringify(geoToJSON(geo)) }] });
+    if (!r.ok || !r.geo) throw new Error(r.errors.map(({ message }) => message).join(', '));
+    return r.geo;
+  };
+  // A boundary edge may be shorter than its source border. Every interior edge must have two incident faces.
+  const interiorCracks = (src: Geometry, out: Geometry) => {
+    const border = buildEdges(src), edges = buildEdges(out);
+    const srcBorder = [...border.count.keys()].filter((i) => border.count[i] === 1);
+    const along = (pt: number, a: number, b: number) => {
+      const d = Array.from({ length: 3 }, (_, k) => src.P[b * 3 + k] - src.P[a * 3 + k]);
+      const q = Array.from({ length: 3 }, (_, k) => out.P[pt * 3 + k] - src.P[a * 3 + k]);
+      const t = q.reduce((s, x, k) => s + x * d[k], 0) / d.reduce((s, x) => s + x * x, 0);
+      return t >= -1e-9 && t <= 1 + 1e-9 && q.every((x, k) => Math.abs(x - t * d[k]) < 1e-9);
+    };
+    return [...edges.count.keys()].filter((i) => edges.count[i] !== 2 &&
+      (edges.count[i] !== 1 || !srcBorder.some((e) => along(edges.a[i], border.a[e], border.b[e]) &&
+        along(edges.b[i], border.a[e], border.b[e])))).length;
+  };
+  const strip = new Geometry({ positions: [0, 0, 0, 2, 0, 0, 5, 0, 0, 0, 0, 4, 2, 0, 2, 5, 0, 6],
+    prims: [[0, 1, 4, 3], [1, 2, 5, 4]] });
+  const cells = await split(strip, { size: [1, 1] });
+  const cracks = interiorCracks(strip, cells);
+  check(cracks === 0 && cells.numPrims === 48, `grid_split size shares the longest opposite edge count across a 2 x 1 strip (${cells.numPrims} cells, ${cracks} cracked edges)`);
+  const tilted = new Geometry({ positions: [0, 0, 0, 3, 0, 0, 0, 4, 1, 0, 0, 1], prims: [[0, 1, 2, 3]] });
+  const tiltedCells = await split(tilted, { size: [1, 4] });
+  check(tiltedCells.numPrims === 1, `grid_split size uses the longest edge's direction to choose the target (${tiltedCells.numPrims} cells)`);
+
+  const l = new Geometry({ positions: [0, 0, 0, 2, 0, 0, 5, 0, 0, 0, 0, 1, 2, 0, 1, 5, 0, 3, 0, 0, 5, 2, 0, 5],
+    prims: [[0, 1, 4, 3], [1, 2, 5, 4], [4, 7, 6, 3]] });
+  const lSize = await split(l, { size: [1, 1] }), lCount = await split(l, { mode: 'count', divisions: [2, 4] });
+  check(interiorCracks(l, lSize) === 0, `grid_split size keeps an L of quads joined (${interiorCracks(l, lSize)} cracked edges)`);
+  check(interiorCracks(l, lCount) === 0 && lCount.numPrims === 32,
+    `grid_split count uses the largest request across a rotated quad in an L (${lCount.numPrims} cells, ${interiorCracks(l, lCount)} cracked edges)`);
+
+  const box = (await cook({ box: { type: 'box' } })).clone();
+  box.addGroup('prim', 'one', Uint8Array.from({ length: box.numPrims }, (_, i) => Number(i === 0)));
+  const boxed = await split(box, { group: 'one', mode: 'count', divisions: [2, 3] });
+  check(interiorCracks(box, boxed) === 0 && boxed.numPrims === 11 && sum(boxed.primGroups.get('one')) === 6,
+    `grid_split keeps a box closed after splitting only one face (${interiorCracks(box, boxed)} cracked edges)`);
+  const fan = new Geometry({ positions: [0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 2, 0, 0.5], prims: [[0, 1, 2, 3], [2, 1, 4]] });
+  const joined = await split(fan, { mode: 'count', divisions: [2, 3] });
+  check(interiorCracks(fan, joined) === 0 && joined.numPrims === 7 && joined.primSize(6) === 5,
+    `grid_split inserts the quad's shared edge points in the triangle outline (${joined.primSize(6)} corners, ${interiorCracks(fan, joined)} cracked edges)`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
