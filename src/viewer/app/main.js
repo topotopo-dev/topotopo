@@ -44,7 +44,7 @@ const local = store(`topotopo.viewer.${location.host}.`), browser = store('topot
 const listeners = new Map();
 let version = 0;
 const ctx = {
-  THREE, store: local, objects: new Map(), hover: null, tool: 'move',
+  THREE, store: local, objects: new Map(), hover: null, tool: 'move', packageEdits: null,
   on(type, f) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(f); },
   emit(type) { if (type !== 'hover' && type !== 'hint') version++; for (const f of listeners.get(type) ?? []) f(); for (const f of listeners.get('*') ?? []) f(type); },
   version: () => version,
@@ -107,6 +107,7 @@ $('status-cook').querySelector('.cstop').onclick = async (e) => {
   // at once: the server hears the stop only when the node it is on lets it (see the line's title)
   const c = cooks.get(graph);
   if (c?.state?.running) { c.state = { ...c.state, running: { ...c.state.running, stopping: true } }; renderCook(); }
+  if (ctx.packageEdits) props.controls.flush();
   const j = await api.stop(graph);
   if (!j.ok) ctx.message(j.error, 'err');
   else ctx.message(j.stopping ? 'stopping: the cook ends when the node it is on has finished' : 'nothing is cooking');
@@ -229,10 +230,11 @@ ctx.graph = {
   },
 };
 const refreshGraphs = ctx.coalesce(async () => {
-  const issued = performance.now();
+  const issued = performance.now(), state = ctx.packageEdits;
   const list = await api.graphs();
-  if (!list) return;
+  if (!list || state !== ctx.packageEdits) return;
   const G = ctx.graph;
+  props.controls.readGraphs(list, issued);
   G.list = list; G.fetched = issued;
   const names = list.map((g) => g.name);
   const sel = $('graph');
@@ -260,6 +262,7 @@ function renderPackageNotice() {
 }
 function showPackage(info) {
   ctx.package = info;
+  props.controls.openPackage(info);
   document.title = pageTitle(info);
   renderPackageNotice();
 }
@@ -1147,13 +1150,13 @@ outliner.render();
 props.render();
 ctx.requestRender();
 await refreshPackage();
+ctx.guides.load();
 await refreshGraphs();
 await ctx.outputs.refresh();
 ctx.packages.refresh();
 loadGeo();
 ctx.layers.refresh();
 ctx.layers.loadWhere();
-ctx.guides.load();
 // for debugging in the browser console: the context, and a frame drawn now (where requestAnimationFrame is paused)
 ctx.draw = draw;
 window.topotopo = ctx;

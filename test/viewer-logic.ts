@@ -295,6 +295,57 @@ section('guides: cancellation while a prior save is queued');
   } finally { api.saveMarkers = originalSave; }
 }
 
+section('revert the guides to the tab opening');
+{
+  const originalRead = api.markers, originalSave = api.saveMarkers;
+  const first = [{ id: 'a', kind: 'site', name: 'camp', points: [[0, 0, 0]], radius: 5 }];
+  const later = [{ ...first[0], name: 'well' }, { ...first[0], id: 'b', name: 'hill' }];
+  let stored = first;
+  api.markers = async () => ({ markers: stored });
+  api.saveMarkers = async (body: string) => {
+    stored = JSON.parse(body).markers;
+    return { ok: true, count: stored.length, savedAt: Date.now() };
+  };
+  try {
+    const opening = { at: Date.now(), guides: null };
+    const ctx: any = {
+      store: { get: (_k: string, fallback: unknown) => fallback, set: () => {} }, guidesRoot: new THREE.Group(), objects: new Map(),
+      selection: sel.createSelection(() => 0), undo: createUndo(), requestRender: () => {}, pxWorld: () => 0.01,
+      message: () => {}, emit: () => {}, layers: {}, coalesce, packageEdits: { opening },
+    };
+    const guides = ctx.guides = createGuides(ctx);
+    await guides.load();
+    stored = later;
+    await guides.load();
+    check(guides.list === later && mk.markersBody(opening.guides!) === mk.markersBody(first), 'a second read updates the guides and keeps the opening list');
+    const diff = vars.revertDiff(opening, new Map(), guides.list);
+    vars.revertPackage(ctx, diff, () => { throw new Error('no values to revert'); });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    check(diff.guideCount === 2 && ctx.undo.size === 1 && mk.markersBody(stored) === mk.markersBody(first), 'revert saves the whole opening list in one undo step');
+    ctx.undo.undo();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    check(mk.markersBody(stored) === mk.markersBody(later), 'undo saves the later list again');
+
+    const writes: string[] = [];
+    let finish = (_result: any) => {};
+    api.saveMarkers = async (body: string) => {
+      writes.push(body);
+      if (writes.length > 1) return { ok: true, savedAt: Date.now() };
+      return new Promise((resolve) => { finish = resolve; });
+    };
+    guides.replace(first);
+    guides.replace(later);
+    ctx.packageEdits = { opening: {} };
+    guides.resetPackage();
+    stored = [{ ...first[0], name: 'bridge' }];
+    await guides.load();
+    finish({ ok: true, savedAt: Date.now() });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    check(writes.length === 1 && guides.list === stored && mk.markersBody(ctx.packageEdits.opening.guides) === mk.markersBody(stored),
+      'a package switch reads a new opening list and a queued save from the old package leaves it alone');
+  } finally { api.markers = originalRead; api.saveMarkers = originalSave; }
+}
+
 section('guides: placing while the scene loads');
 {
   // a heavy terrain still cooking: a click that finds no surface would put the null on the grid (y = 0) under it
@@ -1185,6 +1236,42 @@ section('Controls rules (section 8)');
     'nor while a change is on the way (pending, unanswered), dragged or typed');
   check(vars.sessionText(0, 'terrain.json') === 'values as in terrain.json' && vars.sessionText(1, 'terrain.json') === '1 value differs from terrain.json' && vars.sessionText(3, null) === '3 values differ from the graph',
     'the line above the Controls over a graph file');
+}
+
+section('package save line and revert');
+{
+  const at = new Date(2026, 0, 1, 13, 40).getTime(), savedAt = at + 22 * 60_000;
+  const state = { pending: false, error: '', savedAt: null as number | null };
+  check(vars.packageSaveText(state) === '' && vars.packageSaveText({ ...state, pending: true }) === 'Saving…', 'the save line starts empty and says when a save is on its way');
+  vars.finishPackageSave(state, undefined, 'file is locked', at + 1);
+  check(vars.packageSaveText(state) === 'Not saved: file is locked' && vars.packageSaveText({ ...state, pending: true }) === 'Saving…', 'a failure stands while idle, and a new save shows its progress');
+  vars.finishPackageSave(state, at, '');
+  check(vars.packageSaveText(state) === 'Not saved: file is locked', 'an earlier save that answers late does not clear a later failure');
+  vars.finishPackageSave(state, savedAt, '');
+  vars.finishPackageSave(state, at, '');
+  check(vars.packageSaveText(state) === 'Saved 14:02', 'a successful save clears the failure and keeps the latest write time');
+  check(vars.revertTitle(at) === 'Put back the values and guides as they were when you opened this tab (13:40)', 'the Revert button explains when its values and guides were read');
+  const ask = (values: number, guides: number, added: string[] = []) => vars.revertAsk(at, values, guides, added);
+  const end = 'as they were at 13:40, when you opened this tab? Undo brings your changes back.';
+  check(ask(1, 0) === `Put back 1 value ${end}` && ask(0, 2) === `Put back 2 guides ${end}`
+    && ask(2, 1) === `Put back 2 values and 1 guide ${end}` && ask(1, 0, ['stones']) === `Put back 1 value ${end} stones is new since then and stays.`,
+  'the ask counts values, guides or both and names new graphs');
+
+  const graphs = new Map([['road', { width: 3, tint: [1, 0, 0], curb: true }], ['path', { radius: 5 }]]);
+  const opening = { at, graphs: null };
+  vars.rememberOpening(opening, 'graphs', graphs);
+  const current = new Map([['road', { width: 8, tint: [1, 0, 0], detail: 2 }], ['path', { radius: 7 }], ['stones', { size: 10 }]]);
+  vars.rememberOpening(opening, 'graphs', current);
+  const diff = vars.revertDiff(opening, current, []);
+  check(diff.values === 4 && diff.newGraphs.join() === 'stones' && JSON.stringify(diff.edits) === JSON.stringify([
+    { name: 'road', before: { width: 8, curb: null, detail: 2 }, after: { width: 3, curb: true, detail: null } },
+    { name: 'path', before: { radius: 7 }, after: { radius: 5 } },
+  ]), 'revert uses the first values across graphs, restores missing values, removes additions and leaves the new graph alone');
+  check(vars.pastRangeText('road_width', { min: 3, max: 14 }, -50) === 'road_width = -50 is past its range 3 to 14: kept. Undo or ↺ brings it back.'
+    && vars.pastRangeText('road_width', { max: 14 }, 15).includes('past its maximum of 14')
+    && vars.pastRangeText('road_width', { min: 3 }, 2).includes('past its minimum of 3')
+    && !vars.pastRangeText('road_width', { default: 3 }, 100) && !vars.pastRangeText('road_width', { min: 3, max: 14 }, 14),
+  'a typed value beyond a declared bound is kept and names the range or bound, with no warning for a derived bound');
 }
 
 section('cook state line');

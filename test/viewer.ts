@@ -619,6 +619,82 @@ section('POST /api/vars: a burst during a cook is applied by one more cook');
   } finally { v.close(); }
 }
 
+section('package values: write time, failed rename, and Stop with values waiting');
+{
+  const seen: number[] = [];
+  let release = () => {};
+  let hold = new Promise<void>((resolve) => { release = resolve; });
+  defineNode({
+    type: 'test_view_saved', category: 'flow', summary: 'test only: waits while a value cook runs', inputs: [],
+    params: { value: { type: 'float', default: 1, desc: 'value' } },
+    cook: async (ctx) => {
+      seen.push(ctx.p.value);
+      if (ctx.p.value === 2) await sleep(250);
+      if (ctx.p.value === 3 || ctx.p.value === 5) await hold;
+      return new GeoBuilder().build();
+    },
+  });
+  const dir = path.join(tmp, 'saved');
+  const engine = new Engine(createNodeHost({ baseDir: dir }));
+  await engine.init();
+  const ws = new Session(dir, engine);
+  ws.load();
+  ws.setGraph('g', { nodes: { a: { type: 'test_view_saved', params: { value: '=s' } } }, vars: { s: 1 } });
+  const v = await startViewer(ws, 0);
+  const post = async (s: number) => {
+    const res = await fetch(`${v.url}api/vars?graph=g`, { method: 'POST', body: JSON.stringify({ vars: { s } }) });
+    return { status: res.status, j: await res.json() as any, arrivedAt: Date.now() };
+  };
+  const file = ws.graphFile('g');
+  try {
+    const startedAt = Date.now();
+    const saved = await post(2);
+    check(saved.j.ok && Number.isFinite(saved.j.savedAt) && saved.j.savedAt >= startedAt && saved.j.savedAt <= saved.arrivedAt
+      && saved.j.ms >= 200 && saved.arrivedAt - saved.j.savedAt >= saved.j.ms - 5,
+      `the values answer gives the write time before the ${saved.j.ms.toFixed(0)} ms cook (${saved.arrivedAt - saved.j.savedAt} ms before the answer)`);
+
+    const before = ws.getGraph('g'), disk = fs.readFileSync(file, 'utf8');
+    const rename = fs.renameSync;
+    fs.renameSync = (from, to) => {
+      if (to === file) throw new Error('could not replace the graph file');
+      return rename(from, to);
+    };
+    try {
+      const { j } = await post(8);
+      check(!j.ok && j.savedAt === undefined && /^graphs\/g\.json could not be written: it may be read-only/.test(j.notSaved ?? '') && !/\.part/.test(j.notSaved) && j.vars.s === 2,
+        `a failed rename answers that the value was not saved, naming the graph file and not its temporary file, and returns the stored value (${j.notSaved})`);
+      check(ws.getGraph('g') === before && fs.readFileSync(file, 'utf8') === disk && !fs.readdirSync(path.dirname(file)).some((f) => f.endsWith('.part')),
+        'a failed rename keeps the previous graph in memory and on disk and removes the temporary file');
+    } finally { fs.renameSync = rename; }
+
+    const active = post(3);
+    const running = await until(() => seen.includes(3), 5000);
+    const waiting = post(4);
+    const queued = await until(() => ws.activity('g')?.superseded === true, 5000);
+    const stopped = await (await fetch(`${v.url}api/cook/stop?graph=g`, { method: 'POST' })).json() as any;
+    release();
+    const [, last] = await Promise.all([active, waiting]);
+    check(running && queued && stopped.stopping && last.j.stopped === 'a' && Number.isFinite(last.j.savedAt) && last.j.vars.s === 4
+      && JSON.parse(fs.readFileSync(file, 'utf8')).vars.s === 4 && !seen.includes(4) && ws.held('g'),
+      'Stop saves the queued value, returns its write time and holds the graph without running the node for that value');
+
+    hold = new Promise<void>((resolve) => { release = resolve; });
+    const next = new Session(path.join(tmp, 'other'), engine);
+    next.load();
+    next.setGraph('g', { ...ws.getGraph('g'), vars: { s: 10 } });
+    const oldActive = post(5);
+    const oldRunning = await until(() => seen.includes(5), 5000);
+    const oldWaiting = post(6);
+    const oldQueued = await until(() => ws.activity('g')?.superseded === true, 5000);
+    v.setSession(next);
+    release();
+    const [previous, dropped] = await Promise.all([oldActive, oldWaiting]);
+    check(oldRunning && oldQueued && Number.isFinite(previous.j.savedAt) && previous.j.vars.s === 5
+      && dropped.j.notSaved === 'the package changed' && next.getGraph('g').vars?.s === 10,
+      'a package switch answers the old write and keeps its queued value out of the new package');
+  } finally { release(); v.close(); }
+}
+
 section('a dropped PNG and an image-only graph show as textured quads');
 {
   const engine = new Engine(createNodeHost({ baseDir: path.join(tmp, 'wspng') }));
@@ -822,7 +898,9 @@ section('markers: POST /api/markers writes inputs/markers.json, read back throug
       { id: 'd', kind: 'zone', name: 'keep empty', points: [[0, 0, 0], [10, 0, 0], [10, 0, 10], [0, 0, 10]] }, // clockwise seen from above
       { id: 'e', kind: 'volume', name: 'no trees', points: [[30, 1, 30], [20, 2, 40]], height: 8 },
     ];
+    const startedAt = Date.now();
     const r = await api('POST', { markers });
+    check(Number.isFinite(r.j.savedAt) && r.j.savedAt >= startedAt && r.j.savedAt <= Date.now(), 'the guides answer gives a write time between the request and its answer');
     check(r.status === 200 && r.j.ok && r.j.count === 5 && r.j.path === 'markers.json' && r.j.points === 17 && r.j.prims === 8,
       `POST /api/markers with two sites, a path, a zone and a volume: 200 (${JSON.stringify(r.j)})`);
     check(await until(() => /data: \{"inputs":\d+\}/.test(events), 5000), 'and broadcasts an {inputs: n} event');

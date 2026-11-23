@@ -10,6 +10,7 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { api } from './api.js';
 import * as M from './markers.js';
+import { rememberOpening, finishPackageSave } from './vars.js';
 import { COLORS, fatSegments, lineMaterial, disposeTree } from './scene.js';
 import { fmtLen } from './units.js';
 import { AXIS_VIEWS } from './camera.js';
@@ -198,13 +199,26 @@ export function createGuides(ctx) {
   };
 
   // ------------------------------------------------------------------ saving: the whole list, the latest wins
-  let saving = false, added = null;
-  const save = ctx.coalesce(async () => {
+  let saving = null, added = null;
+  const write = ctx.coalesce(async () => {
+    const state = ctx.packageEdits;
+    if (state && !state.guidesPending) return;
     const body = M.markersBody(G.gizmoDrag?.start ?? G.list);
     if (body === G.saved) return;
+    const current = () => state === ctx.packageEdits;
     const announce = !added;
-    saving = true;
-    const r = await api.saveMarkers(body).finally(() => { saving = false; });
+    saving = { state };
+    let r;
+    try {
+      r = await api.saveMarkers(body);
+      if (!r.ok && state && current()) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        if (!current() || M.markersBody(G.gizmoDrag?.start ?? G.list) !== body) return;
+        r = await api.saveMarkers(body);
+      }
+    } finally { saving = null; }
+    if (!current()) return;
+    if (state) finishPackageSave(state, r.savedAt, r.error);
     if (r.ok) {
       G.saved = body;
       if (announce && !G.mode && M.markersBody(G.list) === body) {
@@ -214,8 +228,21 @@ export function createGuides(ctx) {
     } else ctx.message(`guides not saved — ${r.error}`, 'err');
     ctx.emit('guides');
   });
-  G.saving = () => saving || (G.saved === null ? G.list.length > 0 : M.markersBody(G.list) !== G.saved);
-  const canLoad = () => M.shouldReloadGuides(G.saving(), !!(G.draft || G.down || G.dragging || G.gizmoDrag));
+  const save = () => {
+    const state = ctx.packageEdits;
+    if (state && !state.guidesPending && M.markersBody(G.gizmoDrag?.start ?? G.list) === G.saved) return;
+    if (state) state.guidesPending = true;
+    const done = write();
+    if (state) void done.then(() => {
+      if (state !== ctx.packageEdits || !state.guidesPending) return;
+      state.guidesPending = false; ctx.emit('guides');
+    });
+    return done;
+  };
+  const dirty = () => G.saved === null ? G.list.length > 0 : M.markersBody(G.list) !== G.saved;
+  const inFlight = () => !!saving && saving.state === ctx.packageEdits;
+  G.saving = () => ctx.packageEdits ? ctx.packageEdits.guidesPending : inFlight() || dirty();
+  const canLoad = () => M.shouldReloadGuides(inFlight() || dirty(), !!(G.draft || G.down || G.dragging || G.gizmoDrag));
   const setList = (list) => {
     G.gizmoEnd(true);
     // A placement already has its own confirmation, even if its save waits behind another edit.
@@ -224,6 +251,13 @@ export function createGuides(ctx) {
     entries();
     ctx.selection.prune(alive);
     G.draw(); save(); ctx.emit('guides');
+  };
+  G.replace = setList;
+  G.resetPackage = () => {
+    G.list = []; G.saved = null; added = null;
+    G.gizmoDrag = G.dragging = G.draft = G.down = G.cursor = G.mode = null;
+    entries(); ctx.selection.prune(alive);
+    G.drawDraft(); G.draw(); ctx.emit('guides');
   };
   /** One undoable change of the list: `edit(list)` changes a copy in place. */
   G.change = (label, edit, key) => {
@@ -236,11 +270,14 @@ export function createGuides(ctx) {
     return true;
   };
   G.load = ctx.coalesce(async () => {
-    if (!canLoad()) return;
+    const state = ctx.packageEdits;
+    if (!(state && G.saved === null) && !canLoad()) return;
     const list = G.list;
     const j = await api.markers();
-    if (G.list !== list || !canLoad()) return;
+    if (state !== ctx.packageEdits) return;
     if (!j.markers) { if (j.error) ctx.message(`guides: ${j.error}`, 'err'); return; }
+    if (state && !j.error) rememberOpening(state.opening, 'guides', j.markers);
+    if (G.list !== list || !canLoad()) { if (state) ctx.emit('package-edits'); return; }
     const body = M.markersBody(j.markers), changed = body !== M.markersBody(G.list);
     if (changed && G.saved !== null) {
       ctx.undo.clear();
@@ -248,7 +285,7 @@ export function createGuides(ctx) {
       ctx.message(j.error ? `${note}\n${j.error}` : note, j.error ? 'err' : '', 2000);
     } else if (j.error) ctx.message(j.error, 'err');
     G.saved = body;
-    if (!changed) return;
+    if (!changed) { if (state) ctx.emit('package-edits'); return; }
     G.list = j.markers;
     for (const k of ['radius', 'height']) { const last = G.list.findLast((m) => m[k] > 0); if (last) G.defaults[k] = last[k]; }
     for (const id of [...G.hidden]) if (!byId(id)) G.hidden.delete(id);
@@ -664,7 +701,7 @@ export function createGuides(ctx) {
     const live = d.live;
     const label = d.h.part === 'body' || live.kind === 'site' ? `move ${live.name}` : d.h.part === 'corner' ? `resize ${live.name}` : `move CV ${d.h.k} of ${live.name}`;
     G.change(label, (list) => { const j = list.findIndex((o) => o.id === live.id); if (j < 0) return false; list[j] = live; });
-    ctx.message(`${label} · ${M.EDITOR_NAMES[live.kind]} saved to inputs/markers.json`, 'ok', 1500);
+    ctx.message(ctx.packageEdits ? label : `${label} · ${M.EDITOR_NAMES[live.kind]} saved to inputs/markers.json`, 'ok', 1500);
     return true;
   };
   G.gizmoTarget = () => ['move', 'rotate', 'scale'].includes(ctx.tool) && !G.mode && !ctx.isolated && !G.dragging
@@ -742,7 +779,7 @@ export function createGuides(ctx) {
     }
     const label = transformLabel(d.tool, d.target);
     G.change(label, (list) => { list.splice(0, list.length, ...live); });
-    ctx.message(`${label} · saved to inputs/markers.json`, 'ok', 1500, 1500);
+    ctx.message(ctx.packageEdits ? label : `${label} · saved to inputs/markers.json`, 'ok', 1500, 1500);
     return true;
   };
   /** Double-click in select mode: on a CV removes it, on a line of a curve or an area adds a CV there. */
