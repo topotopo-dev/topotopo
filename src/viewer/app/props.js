@@ -11,6 +11,7 @@ import { parseId } from './selection.js';
 import { DISPLAY_MODES, LAYER_MODES } from './scene.js';
 import { fmtLen, fmtNum, fmtSize, fmtCount } from './units.js';
 import { isNum, same, HEX3, fmt, short, kindOf, blank, menuOf, rangeOf, widenRange, pastDeclared, snapTo, controlList, controlSections, sectionClosed, baseValue, rowShape, sessionText, serverValueWins } from './vars.js';
+import { packageSaveText, finishPackageSave, rememberOpening, revertTitle, revertAsk, revertDiff, revertPackage, pastRangeText } from './vars.js';
 import { fmtDuration } from './cooking.js';
 import { kindLine, layerChoices, shownLayer, detailChoices, PREVIEW_RES, countsLine } from './output-info.js';
 
@@ -282,9 +283,10 @@ export function createProps(ctx) {
 function createControls(ctx) {
   const box = $('controls'), count = $('controls-count');
   const bar = $('controls-session'), barText = bar.querySelector('.stext'), saveBtn = $('vars-save'), resetBtn = $('vars-reset');
+  const revertBtn = $('vars-revert');
   const ctl = {
     graph: null, mode: 'package', file: null, graphVars: {}, rows: new Map(), active: null, deferred: null, saving: false,
-    pending: {}, timer: 0, lastSend: -1e9, seq: 0,
+    pending: {}, rangeNotes: new Map(), timer: 0, lastSend: -1e9, seq: 0, edits: null,
     // var → id of its newest POST not answered yet / time its newest POST was answered: older server state is ignored
     unacked: new Map(), ackAt: new Map(),
     // var → its value when the change being made began (the undo step's "before")
@@ -293,6 +295,34 @@ function createControls(ctx) {
     // section key → its heading (sectionHead)
     heads: new Map(),
   };
+  ctx.on('package-edits', renderBar);
+  ctx.on('guides', renderBar);
+
+  function openPackage(info) {
+    if (info.file != null) return;
+    const key = JSON.stringify([info.folder, info.package?.id]);
+    const previous = ctx.packageEdits;
+    if (previous?.key === key) return;
+    ctx.packageEdits = { key, opening: {}, graphs: new Map(), answers: new Map(), varsPending: 0, guidesPending: false };
+    if (previous) {
+      ctx.undo.clear();
+      ctx.guides.resetPackage();
+      ctx.guides.load();
+    }
+    renderBar();
+  }
+
+  function readGraphs(list, issued) {
+    const state = ctx.packageEdits;
+    if (!state) return;
+    const graphs = new Map();
+    for (const g of list) if (g.mode === 'package') {
+      if (state.answers.get(g.name)?.at > issued && state.graphs.has(g.name)) g.vars = g.graphVars = state.graphs.get(g.name);
+      graphs.set(g.name, g.graphVars ?? g.vars ?? {});
+    }
+    rememberOpening(state.opening, 'graphs', graphs);
+    state.graphs = graphs;
+  }
   addEventListener('pointerup', () => endDrag(), true);
   addEventListener('pointercancel', () => endDrag(), true);
   function endDrag() {
@@ -326,7 +356,7 @@ function createControls(ctx) {
         let v = Number(num.value);
         if (num.value.trim() === '' || !Number.isFinite(v)) return show();
         if (int) v = Math.round(v);
-        widen(v); cur = v; show(); queueVar(name, v, true);
+        widen(v); cur = v; show(); queueVar(name, v, true, false, v, pastRangeText(name, vd, v));
       });
       cw.append(slider, num);
       fit(); widen(cur); show();
@@ -469,12 +499,13 @@ function createControls(ctx) {
    */
   function render(g, issued = performance.now()) {
     const name = g?.name ?? null;
-    if (ctl.graph !== name) {
-      if (ctl.graph) flushVars();
+    if (ctl.graph !== name || ctl.edits !== ctx.packageEdits) {
+      if (ctl.graph && ctl.edits === ctx.packageEdits) flushVars();
+      clearTimeout(ctl.timer); ctl.timer = 0; ctl.rangeNotes.clear();
       ctl.pending = {}; ctl.unacked.clear(); ctl.ackAt.clear(); ctl.begin.clear(); ctl.values.clear();
       for (const r of ctl.rows.values()) r.el.remove();
       ctl.rows.clear(); ctl.deferred = null;
-      ctl.graph = name;
+      ctl.graph = name; ctl.edits = ctx.packageEdits;
     }
     ctl.mode = g?.mode ?? 'package'; ctl.file = g?.file ?? null;
     const params = g?.params ?? {}, vars = g?.vars ?? {};
@@ -576,10 +607,22 @@ function createControls(ctx) {
     renderBar();
   }
 
-  /** The line above the Controls over a graph file: how many values differ from it, Save values, Reset all. */
+  const hasPending = (state) => state.varsPending || state.guidesPending || (ctl.edits === state && Object.keys(ctl.pending).length);
   function renderBar() {
-    // over a graph file, with values to save or reset
-    const file = ctl.mode === 'file';
+    const file = ctl.mode === 'file', state = ctx.packageEdits;
+    revertBtn.hidden = file || !state;
+    barText.title = '';
+    if (!revertBtn.hidden) {
+      const pending = hasPending(state), text = packageSaveText({ ...state, pending });
+      const { values, guideCount } = revertDiff(state.opening, state.graphs, ctx.guides.list);
+      bar.hidden = false;
+      saveBtn.hidden = resetBtn.hidden = true;
+      if (barText.textContent !== text) barText.textContent = text;
+      barText.title = text;
+      revertBtn.title = state.opening.at === undefined ? '' : revertTitle(state.opening.at);
+      revertBtn.disabled = !!(pending || state.asking || !(values || guideCount));
+      return;
+    }
     bar.hidden = !file || !ctl.rows.size;
     if (bar.hidden) return;
     const changed = [...ctl.rows.values()].filter((r) => r.changed()).length;
@@ -588,9 +631,28 @@ function createControls(ctx) {
     saveBtn.hidden = !ctl.file;
     saveBtn.disabled = !changed || ctl.saving;
     saveBtn.title = ctl.file ? `write the ${changed || ''} changed value${changed === 1 ? '' : 's'} into "vars" of ${ctl.file}`.replace('  ', ' ') : '';
+    resetBtn.hidden = false;
     resetBtn.disabled = !changed;
     resetBtn.title = `every value back to ${ctl.file ?? 'the graph'}'s`;
   }
+
+  revertBtn.onclick = async () => {
+    revertBtn.blur();
+    const state = ctx.packageEdits;
+    if (!state || revertBtn.disabled) return;
+    const diff = () => revertDiff(state.opening, state.graphs, ctx.guides.list);
+    const changes = diff();
+    state.asking = true; renderBar();
+    const yes = await ctx.ask(revertAsk(state.opening.at, changes.values, changes.guideCount, changes.newGraphs), 'Revert', 'Keep');
+    state.asking = false;
+    if (yes && state === ctx.packageEdits && !hasPending(state)) {
+      const current = diff();
+      if (same(current.edits, changes.edits) && M.markersBody(current.beforeGuides) === M.markersBody(changes.beforeGuides)) {
+        revertPackage(ctx, current, (graph, values) => sendVars(graph, values));
+      }
+    }
+    renderBar();
+  };
 
   /** ↺ and Reset all: the vars back to their base value (over a graph file: the file's, one undo step for all). */
   function resetVars(names) {
@@ -600,7 +662,7 @@ function createControls(ctx) {
     // over a graph file null drops the session value; in a package the default is stored
     for (const r of rows) { r.reset(r.base); queueVar(r.name, ctl.mode === 'file' ? null : r.base, false, true, r.base); }
     const apply = (m, reset) => {
-      if (ctl.graph !== graph) { api.vars(graph, Object.fromEntries(m)); return; }
+      if (ctl.graph !== graph) { sendVars(graph, Object.fromEntries(m)); return; }
       for (const [k, v] of m) if (ctl.rows.has(k)) { ctl.rows.get(k)[reset ? 'reset' : 'set'](v); queueVar(k, v, false, true); }
       flushVars();
     };
@@ -629,9 +691,10 @@ function createControls(ctx) {
    * A change from a control; `final` ends the change (one undo step from its start). `undoing` skips the record.
    * `shown` is what the control shows when `value` is not it (null: back to the graph file's value).
    */
-  function queueVar(name, value, final = false, undoing = false, shown = value) {
+  function queueVar(name, value, final = false, undoing = false, shown = value, rangeNote = '') {
     if (!undoing && !ctl.begin.has(name)) ctl.begin.set(name, ctl.values.get(name));
     ctl.pending[name] = value;
+    if (rangeNote) ctl.rangeNotes.set(name, rangeNote); else ctl.rangeNotes.delete(name);
     ctl.values.set(name, shown);
     ctl.rows.get(name)?.sync();
     renderBar();
@@ -641,7 +704,7 @@ function createControls(ctx) {
       if (!undoing && !same(before, shown)) {
         const apply = (v) => {
           if (ctl.graph === graph && ctl.rows.has(name)) { ctl.rows.get(name).set(v); queueVar(name, v, true, true); }
-          else api.vars(graph, { [name]: v });
+          else sendVars(graph, { [name]: v });
         };
         ctx.undo.push({ label: `${name} = ${short(shown)}`, undo: () => apply(before), redo: () => apply(shown) });
       }
@@ -652,19 +715,59 @@ function createControls(ctx) {
     else if (!ctl.timer) ctl.timer = setTimeout(flushVars, wait);
   }
 
-  /** Send the changes on the way; the answer comes once a cook has applied them (or a stop ended it). */
-  async function flushVars() {
+  function flushVars() {
     clearTimeout(ctl.timer); ctl.timer = 0;
     const vars = ctl.pending, graph = ctl.graph;
-    if (!graph || !Object.keys(vars).length) return;
+    if (ctl.edits !== ctx.packageEdits || !graph || !Object.keys(vars).length) return;
     ctl.pending = {};
-    const id = ++ctl.seq;
+    const rangeNotes = new Map(ctl.rangeNotes);
+    ctl.rangeNotes.clear();
     ctl.lastSend = performance.now();
-    for (const k in vars) ctl.unacked.set(k, id);
+    return sendVars(graph, vars, rangeNotes);
+  }
+
+  /** The answer reports the write separately from the cook. */
+  async function sendVars(graph, vars, rangeNotes = new Map()) {
+    const state = ctx.packageEdits, file = (ctx.graph.list.find((g) => g.name === graph)?.mode ?? ctl.mode) === 'file';
+    const id = ++ctl.seq;
+    if (graph === ctl.graph) for (const k in vars) ctl.unacked.set(k, id);
+    if (state) { state.varsPending++; renderBar(); }
     const j = await api.vars(graph, vars);
     const now = performance.now();
-    for (const k in vars) if (ctl.unacked.get(k) === id) { ctl.unacked.delete(k); ctl.ackAt.set(k, now); }
+    if (state !== ctx.packageEdits) return;
+    const reason = j.notSaved || (j.errors ?? []).join('; ') || j.error || 'unknown error';
+    const newer = (state?.answers.get(graph)?.id ?? 0) > id;
+    if (state) {
+      state.varsPending--;
+      finishPackageSave(state, j.savedAt, reason);
+    }
+    if (j.graphVars && !file && !newer) {
+      state?.graphs.set(graph, j.graphVars);
+      state?.answers.set(graph, { id, at: now });
+      const g = ctx.graph.list.find((g) => g.name === graph);
+      if (g) { g.vars = j.vars; g.graphVars = j.graphVars; }
+    }
+    if (state) renderBar();
     if (graph !== ctl.graph) return;
+    for (const k in vars) if (ctl.unacked.get(k) === id) { ctl.unacked.delete(k); ctl.ackAt.set(k, now); }
+    if (!file) {
+      const entries = Object.entries(vars), graphVars = newer ? state.graphs.get(graph) : j.graphVars;
+      const confirmed = entries.filter(([k, v]) => v === null ? !Object.hasOwn(graphVars ?? {}, k) : same(graphVars?.[k], v));
+      const saved = confirmed.map(([k, v]) => v === null ? `removed ${k}` : `${k} = ${short(v)}`).join(', ');
+      const notes = confirmed.map(([k]) => rangeNotes.get(k)).filter(Boolean).join('\n');
+      if (!isNum(j.savedAt)) {
+        const what = entries.map(([k, v]) => v === null ? `removing ${k}` : `${k} = ${short(v)}`).join(', ');
+        ctx.message(`${what} was not saved: ${reason}`, 'err');
+      } else if (saved && !newer) {
+        const result = j.stopped ? `${saved} saved · its cook was stopped`
+          : j.ok ? `${saved} · cooked in ${fmtDuration(j.ms)}` : `${saved} saved, cook failed — ${reason}`;
+        const text = notes && j.ok ? notes : [result, notes].filter(Boolean).join('\n');
+        ctx.message(text, notes || (!j.ok && !j.stopped) ? 'err' : j.stopped ? '' : 'ok');
+      } else if (notes) ctx.message(notes, 'err');
+      const g = ctx.graph.current();
+      if (g) render(g, now);
+      return;
+    }
     const what = Object.entries(vars).map(([k, v]) => `${k} = ${v === null ? short(ctl.values.get(k)) : short(v)}`).join(', ');
     // the cook's own state (time, failing node, where it stopped) is in the status bar; this says what was sent
     if (j.stopped) ctx.message(`${what} set · its cook was stopped at ${j.stopped}`);
@@ -673,5 +776,5 @@ function createControls(ctx) {
     if (j.graphVars) ctl.graphVars = j.graphVars;
     if (j.vars) applyValues(j.vars, now);
   }
-  return { render, flush: flushVars };
+  return { render, flush: flushVars, openPackage, readGraphs };
 }

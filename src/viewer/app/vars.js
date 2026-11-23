@@ -1,5 +1,6 @@
 // The Controls section's rules: which widget a var gets, a slider's range and step,
 // how values print. Plain functions, tested in Node (test/viewer-logic.ts); props.js builds the widgets.
+import { markersBody } from './markers.js';
 
 export const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -151,4 +152,88 @@ export function sessionText(changed, file) {
   const where = file ?? 'the graph';
   if (!changed) return `values as in ${where}`;
   return `${changed} value${changed === 1 ? '' : 's'} differ${changed === 1 ? 's' : ''} from ${where}`;
+}
+
+const localTime = (ms) => {
+  const d = new Date(ms);
+  return [d.getHours(), d.getMinutes()].map((n) => String(n).padStart(2, '0')).join(':');
+};
+
+export function packageSaveText({ pending, error, savedAt }) {
+  if (pending) return 'Saving…';
+  if (error) return `Not saved: ${error}`;
+  return savedAt == null ? '' : `Saved ${localTime(savedAt)}`;
+}
+
+export function finishPackageSave(state, savedAt, error, now = Date.now()) {
+  if (isNum(savedAt)) {
+    state.savedAt = Math.max(state.savedAt ?? 0, savedAt);
+    if (savedAt >= (state.failedAt ?? 0)) state.error = '';
+  } else if (error) {
+    state.error = error;
+    state.failedAt = now;
+  }
+}
+
+/** Each part of the opening snapshot is kept from its first successful read. */
+export function rememberOpening(opening, part, data) {
+  if (opening[part] != null) return;
+  opening.at ??= Date.now();
+  opening[part] = structuredClone(data);
+}
+
+export const revertTitle = (at) => `Put back the values and guides as they were when you opened this tab (${localTime(at)})`;
+
+export function revertAsk(at, values, guides, newGraphs) {
+  const changes = [];
+  if (values) changes.push(`${values} value${values === 1 ? '' : 's'}`);
+  if (guides) changes.push(`${guides} guide${guides === 1 ? '' : 's'}`);
+  const kept = newGraphs.map((name) => ` ${name} is new since then and stays.`).join('');
+  return `Put back ${changes.join(' and ')} as they were at ${localTime(at)}, when you opened this tab? Undo brings your changes back.${kept}`;
+}
+
+/** Only graphs read when the tab opened have values to put back. Null removes a stored value. */
+export function revertDiff(opening, graphs, guides) {
+  const edits = [], newGraphs = [];
+  let values = 0, guideCount = 0;
+  if (opening.graphs) for (const [name, current] of graphs) {
+    if (!opening.graphs.has(name)) { newGraphs.push(name); continue; }
+    const old = opening.graphs.get(name), before = [], after = [];
+    for (const k of new Set([...Object.keys(old), ...Object.keys(current)])) {
+      const a = Object.hasOwn(old, k) ? old[k] : undefined, b = Object.hasOwn(current, k) ? current[k] : undefined;
+      if (same(a, b)) continue;
+      before.push([k, b ?? null]); after.push([k, a ?? null]);
+    }
+    values += after.length;
+    if (after.length) edits.push({ name, before: Object.fromEntries(before), after: Object.fromEntries(after) });
+  }
+  if (opening.guides && markersBody(opening.guides) !== markersBody(guides)) {
+    const before = new Map(guides.map((m) => [m.id, m])), after = new Map(opening.guides.map((m) => [m.id, m]));
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      if (!before.has(id) || !after.has(id) || markersBody([before.get(id)]) !== markersBody([after.get(id)])) guideCount++;
+    }
+    // A change in list order is restored too.
+    if (!guideCount) guideCount = guides.length;
+  }
+  return { edits, values, guideCount, newGraphs, beforeGuides: guides, afterGuides: opening.guides };
+}
+
+export function revertPackage(ctx, diff, applyVars) {
+  const { edits, guideCount } = diff;
+  const before = guideCount ? structuredClone(diff.beforeGuides) : null;
+  const after = guideCount ? structuredClone(diff.afterGuides) : null;
+  const apply = (side, guides) => {
+    for (const edit of edits) applyVars(edit.name, edit[side]);
+    if (guides) ctx.guides.replace(guides);
+  };
+  const step = { label: 'revert values and guides', undo: () => apply('before', before), redo: () => apply('after', after) };
+  step.redo();
+  ctx.undo.push(step);
+}
+
+export function pastRangeText(name, vd, value) {
+  if (!pastDeclared(vd, value)) return '';
+  const range = isNum(vd.min) && isNum(vd.max) ? `range ${fmt(vd.min)} to ${fmt(vd.max)}`
+    : isNum(vd.min) ? `minimum of ${fmt(vd.min)}` : `maximum of ${fmt(vd.max)}`;
+  return `${name} = ${fmt(value)} is past its ${range}: kept. Undo or ↺ brings it back.`;
 }

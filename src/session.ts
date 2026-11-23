@@ -18,6 +18,7 @@ import type { Sidecar } from './io/sidecars.ts';
 import { fileFormat } from './host/sidecars.ts';
 import { godotIgnore, isEngineFile } from './engines.ts';
 import { targetRefusal } from './io/targets.ts';
+import { writeAtomic } from './package.ts';
 
 export interface EditOp {
   op: 'set' | 'add' | 'remove' | 'connect' | 'rename' | 'output' | 'vars' | 'bypass' | 'replace' | 'insert' | 'export';
@@ -354,11 +355,10 @@ export class Session {
     return this.besidePackage.get(name) ?? path.join(this.graphDir, name + '.json');
   }
 
-  private persist(name: string) {
-    const g = this.graphs.get(name);
+  private persist(name: string, g?: GraphSpec) {
     const file = this.graphFile(name);
     if (!g) { if (fs.existsSync(file)) fs.unlinkSync(file); return; }
-    fs.writeFileSync(file, JSON.stringify(g, null, 2));
+    writeAtomic(file, JSON.stringify(g, null, 2));
   }
 
   bump(name: string) {
@@ -378,9 +378,9 @@ export class Session {
 
   setGraph(name: string, spec: GraphSpec) {
     if (!NAME_RE.test(name)) throw new Error(`graph name must match ${NAME_RE}`);
+    this.persist(name, spec);
     this.graphs.set(name, spec);
     this.settleSession(name);
-    this.persist(name);
   }
 
   deleteGraph(name: string) {
@@ -792,7 +792,7 @@ export class Session {
       clearTimeout(this.watchTimers.get(key));
       this.watchTimers.set(key, setTimeout(() => { this.watchTimers.delete(key); if (this.watching) fn(); }, ms).unref());
     };
-    // persist() is not atomic: let the writer finish, and read again if the JSON is still half written
+    // another program may write in place, not atomically: let the writer finish, and read again if the JSON is still half written
     const settle = (dir: string, name: string, apply: (name: string, file: string, last: boolean) => void) => {
       let tries = 0;
       const run = () => {

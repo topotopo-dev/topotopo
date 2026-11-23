@@ -257,6 +257,8 @@ export function markersFromGeometry(g: Geometry): Marker[] {
 
 interface VarsBody {
   ok: boolean; ms: number; errors: string[];
+  savedAt?: number;
+  notSaved?: string;
   /** the values the controls show (the graph's vars with the session's over them), the graph's own, the session's names */
   vars?: Record<string, any>; graphVars?: Record<string, any>; overrides?: string[];
   /** the cook was stopped (POST /api/cook/stop) at this node */
@@ -499,9 +501,10 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
       writeAtomic(markersGeoFile(), exportGeometry(g, 'json'));
       writeAtomic(markersListFile(), JSON.stringify({ markers: list }, null, 1));
     }
+    const savedAt = Date.now();
     watchInputs();
     inputsChanged();
-    return { ok: true, count: list.length, path: list.length ? 'markers.json' : null, ...counts };
+    return { ok: true, count: list.length, path: list.length ? 'markers.json' : null, ...counts, savedAt };
   };
 
   // ---------------------------------------------------------------- POST /api/vars
@@ -511,12 +514,12 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
   // stop (POST /api/cook/stop) ends the cook. Over a graph file the values are session values, set at once; in a
   // package they edit the stored graph (an agent reads them there).
   const varQueues = new Map<string, { busy: boolean; next: VarsBatch | null }>();
-  const varsState = (name: string) => {
-    const g = ws.graphs.get(name);
-    return { vars: g ? ws.effectiveGraph(name).vars ?? {} : {}, graphVars: g?.vars ?? {}, overrides: Object.keys(ws.sessionVars(name)) };
+  const varsState = (name: string, session = ws) => {
+    const g = session.graphs.get(name);
+    return { vars: g ? session.effectiveGraph(name).vars ?? {} : {}, graphVars: g?.vars ?? {}, overrides: Object.keys(session.sessionVars(name)) };
   };
-  const reply = (name: string, report: { ok: boolean; ms: number; errors: { node: string; message: string }[]; stopped?: string }): VarsReply =>
-    ({ status: 200, body: { ok: report.ok, ms: report.ms, errors: report.errors.map(issueText), ...varsState(name), ...(report.stopped ? { stopped: report.stopped } : {}) } });
+  const reply = (name: string, report: { ok: boolean; ms: number; errors: { node: string; message: string }[]; stopped?: string }, session = ws): VarsReply =>
+    ({ status: 200, body: { ok: report.ok, ms: report.ms, errors: report.errors.map(issueText), ...varsState(name, session), ...(report.stopped ? { stopped: report.stopped } : {}) } });
   /** Session values a request sets, checked against the graph: its own vars only, and a graph that still validates. */
   const sessionErrors = (name: string, vars: Record<string, any>): string[] => {
     const g = ws.getGraph(name);
@@ -531,19 +534,30 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     const tried = { ...g, vars: trial };
     return ws.engine.validate(tried, '', ws.dryScope(tried).scope).errors.map(issueText);
   };
-  const applyBatch = async (name: string, b: VarsBatch): Promise<VarsReply> => {
+  const applyBatch = async (name: string, b: VarsBatch, stopAt?: string): Promise<VarsReply> => {
     if (!ws.graphs.get(name)) return { status: 404, body: { ok: false, ms: 0, errors: [`no graph ${name}`] } };
     if (sessionMode(name)) {
       const report = await ws.cook(name, undefined, undefined, { kind: 'edit' });
       if (!report.stopped) ws.bump(name);
       return reply(name, report);
     }
+    const session = ws, before = session.getGraph(name);
+    const writtenAt = () => session.graphs.get(name) === before ? undefined : Math.trunc(fs.statSync(session.graphFile(name)).mtimeMs);
+    let savedAt: number | undefined;
     try {
-      const { report } = await ws.edit(name, [{ op: 'vars', vars: b.vars }], { kind: 'edit' });
-      return reply(name, report);
+      const edit = session.edit(name, [{ op: 'vars', vars: b.vars }], { kind: 'edit', ...(stopAt ? { signal: { aborted: true } } : {}) });
+      // edit stores the graph synchronously, before yielding to its cook. Take the file's write time while it is ours.
+      savedAt = writtenAt();
+      const { report } = await edit;
+      const r = reply(name, stopAt ? { ...report, ok: false, stopped: stopAt } : report, session);
+      r.body.savedAt = savedAt ?? writtenAt();
+      return r;
     } catch (e: any) {
       // rejected edits carry their issues (one string each); op errors are plain messages
-      return { status: 400, body: { ok: false, ms: 0, errors: Array.isArray(e?.errors) ? e.errors.map(issueText) : [String(e?.message ?? e)] } };
+      const errors = Array.isArray(e?.errors) ? e.errors.map(issueText) : [String(e?.message ?? e)];
+      return savedAt === undefined
+        ? { status: 400, body: { ok: false, ms: 0, errors, notSaved: errors.join('; '), ...varsState(name, session) } }
+        : { status: 200, body: { ok: false, ms: 0, errors, savedAt, ...varsState(name, session) } };
     }
   };
   const applyVars = (name: string, vars: Record<string, any>) => new Promise<VarsReply>((resolve) => {
@@ -559,29 +573,47 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
     // the latest value wins: the cook of the values before (and the previews of them) stop at their next node boundary
     if (q.busy) { ws.stop(name, ['edit', 'preview'], { superseded: true }); return; }
     q.busy = true;
+    const session = ws;
     (async () => {
       try {
         while (q.next) {
           const b = q.next;
           q.next = null;
+          if (ws !== session) {
+            const reason = 'the package changed';
+            for (const w of b.waiters) w({ status: 409, body: { ok: false, ms: 0, errors: [reason], notSaved: reason } });
+            break;
+          }
           const r = await applyBatch(name, b).catch((e: any): VarsReply => ({ status: 500, body: { ok: false, ms: 0, errors: [String(e?.message ?? e)] } }));
           // superseded: its values are in the batch that came after it, and that cook answers its requests too
           const later = q.next as VarsBatch | null;
-          if (r.body.stopped && later) { later.vars = { ...b.vars, ...later.vars }; later.waiters.unshift(...b.waiters); continue; }
+          if (r.body.stopped && later) {
+            if (sessionMode(name) || r.body.savedAt === undefined) later.vars = { ...b.vars, ...later.vars };
+            // If the next write fails, the values already stored by this batch are still saved.
+            const waiters = r.body.savedAt === undefined ? b.waiters
+              : b.waiters.map((w) => (next: VarsReply) => w(next.body.savedAt === undefined ? r : next));
+            later.waiters.unshift(...waiters);
+            continue;
+          }
           for (const w of b.waiters) w(r);
         }
       } finally { q.busy = false; }
     })();
   });
-  /** POST /api/cook/stop: stop every cook of the graph, and the values waiting to cook (they stay set). */
+  /** POST /api/cook/stop: stop every cook of the graph, including the cook of the values waiting to be saved. */
   const stopCooks = (name: string) => {
     const n = ws.stop(name);
     const q = varQueues.get(name), waiting = q?.next;
     if (q) q.next = null;
     if (waiting) {
       const at = ws.activity(name)?.node ?? ws.engine.findOutput(ws.getGraph(name)).name;
-      const r: VarsReply = { status: 200, body: { ok: false, ms: 0, errors: [], ...varsState(name), stopped: at } };
-      for (const w of waiting.waiters) w(r);
+      if (sessionMode(name)) {
+        const r: VarsReply = { status: 200, body: { ok: false, ms: 0, errors: [], ...varsState(name), stopped: at } };
+        for (const w of waiting.waiters) w(r);
+      } else {
+        // The edit saves and validates as usual, but its pre-stopped cook runs no nodes.
+        void applyBatch(name, waiting, at).then((r) => { for (const w of waiting.waiters) w(r); });
+      }
     }
     // nothing cooks it again on its own until the graph or a value changes
     if (n || waiting) ws.hold(name);
