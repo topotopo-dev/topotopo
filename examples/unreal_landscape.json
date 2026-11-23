@@ -863,17 +863,10 @@
         "uv_length": true
       }
     },
-    "road_up": {
-      "type": "reverse",
-      "in": [
-        "road_strip"
-      ],
-      "note": "a ribbon swept with up +Y faces -Y, and Unreal draws only the front, so it is turned to face up (F-117): remove this node when F-117 lands (road_lay then reads road_strip)"
-    },
     "road_lay": {
       "type": "wrangle",
       "in": [
-        "road_up",
+        "road_strip",
         "ground_grid"
       ],
       "params": {
