@@ -1,11 +1,16 @@
 import type { NodeDef } from './types.ts';
-import { norm } from './params.ts';
+import { norm, resolveParamName } from './params.ts';
 
 const nodes = new Map<string, NodeDef>();
 const lookup = new Map<string, string>(); // normalised name/alias -> type
 
 export function defineNode(def: NodeDef): NodeDef {
   if (nodes.has(def.type)) throw new Error(`duplicate node type ${def.type}`);
+  if (def.renamed) {
+    // Shared lists of old names can include params this node still accepts.
+    const renamed = Object.entries(def.renamed).filter(([key]) => resolveParamName(def, key) === null);
+    def.renamed = renamed.length ? Object.fromEntries(renamed) : undefined;
+  }
   nodes.set(def.type, def);
   for (const n of [def.type, ...(def.aliases ?? [])]) {
     const k = norm(n);
