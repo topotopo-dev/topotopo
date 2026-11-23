@@ -7,9 +7,12 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import { evalExpr, vecOut } from '../graph/params.ts';
 import { codeVarNames, pickVars } from '../core/usercode.ts';
-import { pointNormals, primArea } from '../core/topology.ts';
+import { pointNormals, primArea, triangulate } from '../core/topology.ts';
 import { halfEdges } from '../core/halfedge.ts';
 import { edgeWhere, pointWhere, primWhere } from '../core/report.ts';
+import { vertexUV } from '../core/tangents.ts';
+import { findIslands } from '../core/uv.ts';
+import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import {
   CURVATURE_TYPES, RayScene, SurfaceQuery, bboxDiagonal, faceMeans, faceSamples, fmt, curvatureOfType, discreteCurvature, duplicatePoints,
   fillFromNearestValid, newNearest, nonManifoldPoints, percentileFit, pieceReport, rayMeasure, selfIntersections,
@@ -319,7 +322,7 @@ function optPair(name: string, v: any): [number, number] | null {
  * at least one), and the ones checked (the named, or every one) have the samples, heights, match, size and channel
  * values asked. Reports through fail; returns how many checks ran. The reference is read only when match is on.
  */
-function volumeChecks(g: Geometry, p: Record<string, any>, fail: (name: string, msg: string) => void, reference: () => Geometry | null): number {
+function volumeChecks(g: Geometry, p: Record<string, any>, fail: (name: string, msg: string, hint?: string) => void, reference: () => Geometry | null): number {
   let checks = 0;
   const near = (x: number) => fmt(Math.round(x * 1000) / 1000);
   /** The fields of one kind a pattern picks, after checking that each of its names is there. */
@@ -384,7 +387,18 @@ function volumeChecks(g: Geometry, p: Record<string, any>, fail: (name: string, 
   // ---- images
   const images = pick('images', 'image', String(p.images ?? ''), g.volumes.filter((v): v is ImageVolume => v.kind === 'image'));
   const size = optPair('image_size', p.image_size), imin = optNumber('image_min', p.image_min), imax = optNumber('image_max', p.image_max);
-  if ((size || imin !== null || imax !== null) && !images.length) { checks++; fail('images', 'no image to check'); }
+  const layers = String(p.image_layers).split(/[\s,]+/).filter(Boolean);
+  if ((size || imin !== null || imax !== null || layers.length) && !images.length) { checks++; fail('images', 'no image to check'); }
+  if (layers.length && images.length) {
+    checks++;
+    const required = layers.map((layer) => [layer, namePattern(layer)] as const);
+    for (const im of images) {
+      const names = [...im.layers.keys()];
+      for (const [layer, matches] of required) {
+        if (!names.some(matches)) fail('image_layers', `"${im.name}" has no layer matching "${layer}"`, `"${im.name}" layers: ${names.join(', ') || 'none'}`);
+      }
+    }
+  }
   if (size && images.length) {
     checks++;
     for (const im of images) if (im.width !== size[0] || im.height !== size[1]) fail('image_size', `"${im.name}" is ${im.width} × ${im.height} px (want ${size[0]} × ${size[1]})`);
@@ -430,7 +444,7 @@ defineNode({
   type: 'assert',
   category: 'measure',
   packed: 'keep',
-  summary: 'Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, attributes, groups, an expression, heightfields, images) and fail, warn or mark when a check fails. Passes the geometry through.',
+  summary: 'Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, UV overlaps, attributes, groups, an expression, heightfields, image sizes, layers and values) and fail, warn or mark when a check fails. Passes the geometry through.',
   description:
     'Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the ' +
     'node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit ' +
@@ -441,7 +455,7 @@ defineNode({
     'Heightfields and images (which have no points) have checks of their own: heightfields / images name the ones that ' +
     'must exist, and the checks after each read those (every one when the name is empty): samples, height_min / ' +
     'height_max and match for heightfields (match compares with the heightfield of the reference input at the same ' +
-    'world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size and ' +
+    'world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size, image_layers and ' +
     'image_min / image_max (every channel of every layer) for images. Each cook records stats checks and failed.',
   aliases: ['expect', 'check', 'verify'],
   inputs: [
@@ -465,6 +479,8 @@ defineNode({
     no_self_intersections: { type: 'bool', default: false, desc: 'no two non-adjacent triangles cross each other (BVH search, capped at max_tests)', aliases: ['no_intersections'] },
     strict_intersections: { type: 'bool', default: false, desc: 'no_self_intersections also fails on touching contacts, coplanar overlaps and triangles folding through a shared corner or onto a shared edge', aliases: ['strict'] },
     max_tests: { type: 'int', default: 2000000, min: 1000, max: 1000000000, desc: 'self-intersections: candidate triangle pairs to test before stopping (the message says when it stopped)', advanced: true },
+    uv_overlaps: { type: 'json', default: null, desc: 'at most this many overlapping UV triangle pairs, counted both within and across islands defined by UV continuity as in uv_layout (null = off)' },
+    uv_attrib: { type: 'string', default: 'uv', desc: 'point or vertex UV attribute to check for overlaps' },
     attrib: { type: 'string', default: '', desc: 'attribute that must exist ("" = off)', aliases: ['attribute'] },
     attrib_class: { type: 'enum', options: ['auto', 'point', 'vertex', 'prim', 'detail'], default: 'auto', desc: 'where attrib must live (auto = any class: vertex, point, prim, detail)' },
     attrib_min: { type: 'json', default: null, desc: 'attrib: smallest allowed value of every component (null = off)' },
@@ -480,6 +496,7 @@ defineNode({
     match_tolerance: { type: 'float', default: 1e-4, min: 0, desc: 'match: largest height difference allowed (m)', advanced: true },
     images: { type: 'string', default: '', desc: 'image names that must exist (space-separated, * wildcards, ^name excludes; "" = off); the image checks read these, or every image when empty', aliases: ['image'] },
     image_size: { type: 'json', default: null, desc: '[width, height] in pixels (or one number for both) every image checked must have (null = off)' },
+    image_layers: { type: 'string', default: '', desc: 'every image checked must have a layer matching each space-separated name or * pattern ("" = off)' },
     image_min: { type: 'json', default: null, desc: 'no channel value of an image checked may lie below this, in any layer; NaN fails (null = off)' },
     image_max: { type: 'json', default: null, desc: 'no channel value of an image checked may lie above this, in any layer; NaN fails (null = off)' },
   },
@@ -496,11 +513,15 @@ defineNode({
     const src = input(0);
     const g = src;
     const fails: string[] = [];
+    const hints = new Set<string>();
     const ptFail = new Uint8Array(g.numPoints), primFail = new Uint8Array(g.numPrims);
     let checks = 0;
     let prCache: PieceReport | null = null;
     const pieces = () => prCache ?? (prCache = pieceReport(g));
-    const fail = (name: string, msg: string) => fails.push(`${name}: ${msg}`);
+    const fail = (name: string, msg: string, hint?: string) => {
+      fails.push(`${name}: ${msg}`);
+      if (hint) hints.add(hint);
+    };
     /** the first prim / point set in a mask, in words: its part and position (core/report.ts) */
     const firstPrimOf = (m: Uint8Array) => { const q = m.indexOf(1); return q >= 0 ? `; first ${primWhere(g, q)}` : ''; };
     const firstPointOf = (m: Uint8Array) => { const q = m.indexOf(1); return q >= 0 ? `; first ${pointWhere(g, q)}` : ''; };
@@ -661,6 +682,24 @@ defineNode({
       if (!found) fail('group', `"${name}" does not exist (groups: ${groupList(g)})`);
       else if (!size) fail('group', `${found} group "${name}" is empty`);
     }
+    const uvLimit = optNumber('uv_overlaps', p.uv_overlaps);
+    if (uvLimit !== null) {
+      checks++;
+      const uv = vertexUV(g, p.uv_attrib);
+      if (!uv) fail('uv_overlaps', `no point or vertex UV attribute "${p.uv_attrib}"`);
+      else {
+        const { tris, triPrim } = triangulate(g);
+        const { islandOfPrim } = findIslands(g, uv);
+        const r = uvOverlapCheck(uv, tris, triPrim, islandOfPrim);
+        const total = r.across + r.within;
+        if (total > uvLimit) {
+          const pair = r.firstAcross && r.firstAcross.area >= (r.firstWithin?.area ?? 0) ? r.firstAcross : r.firstWithin;
+          if (pair) for (const t of pair.t) primFail[triPrim[t]] = 1;
+          const largest = pair ? `; largest: ${uvPairText(g, uv, tris, triPrim, ...pair.t)}` : '';
+          fail('uv_overlaps', `${total} overlapping UV triangle pair(s) (want <= ${uvLimit})${largest}`);
+        } else if (r.scan.stopped) fail('uv_overlaps', `could not finish the overlap check: ${r.scan.reason ?? 'pair limit reached'}`);
+      }
+    }
     checks += volumeChecks(g, p, fail, () => (hasInput(1) ? input(1) : null));
     if (String(p.expr ?? '').trim()) {
       checks++;
@@ -711,6 +750,6 @@ defineNode({
     }
     if (!fails.length) return src;
     if (p.on_fail === 'warn') { warn(msg); return src; }
-    throw new NodeError(msg, 'fix the geometry, or use on_fail "mark" and render {highlight: "assert_fail"} to see where');
+    throw new NodeError(msg, [...hints, 'fix the geometry, or use on_fail "mark" and render {highlight: "assert_fail"} to see where'].join('; '));
   },
 });

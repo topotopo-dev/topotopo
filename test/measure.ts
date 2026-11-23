@@ -269,6 +269,28 @@ const f = (x: number) => (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(2) : x
   check(!noImage.ok && /images: no image to check/.test(err(noImage)), `image checks on geometry without an image fail: ${err(noImage)}`);
   const badSize = await cook({ ...pic, a: { type: 'assert', in: ['n'], params: { image_size: [64, 0.5] } } }, 'a');
   check(!badSize.ok && /image_size/.test(err(badSize)), 'a malformed image_size is a param error');
+  const bricks = { bricks: { type: 'tex_pattern', params: { pattern: 'bricks', resolution: 64, name: 'bricks' } } };
+  const layered = await cook({ ...bricks, a: { type: 'assert', in: ['bricks'], params: { image_layers: 'C i*' } } }, 'a');
+  check(layered.ok && layered.results.get('a')?.stats?.checks === 1, `every requested layer pattern matches (${err(layered)})`);
+  const missingLayer = await cook({ ...pic, ...bricks, both: { type: 'merge', in: ['n', 'bricks'] }, a: { type: 'assert', in: ['both'], params: { images: '*', image_layers: 'C i*' } } }, 'a');
+  check(!missingLayer.ok && /image_layers: "grain" has no layer matching "i\*"/.test(err(missingLayer)) && /"grain" layers: C\b/.test(missingLayer.errors[0]?.hint ?? '') && !err(missingLayer).includes('"bricks" has no layer'),
+    `each selected image must have the layer, with its available layers in the hint: ${err(missingLayer)}`);
+}
+
+// ---------------------------------------------------------------- assert: UV overlaps
+{
+  const quads: Record<string, NodeSpec> = {
+    grid: { type: 'grid', params: { divisions: [1, 1] } },
+    uv: { type: 'uv_project', in: ['grid'] },
+    named: { type: 'attrib_rename', in: ['uv'], params: { class: 'vertex', from: 'uv', to: 'uv2' } },
+    moved: { type: 'transform', in: ['named'], params: { translate: [0, 1, 0] } },
+    both: { type: 'merge', in: ['named', 'moved'] },
+  };
+  const pass = await cook({ ...quads, a: { type: 'assert', in: ['both'], params: { uv_attrib: 'uv2', uv_overlaps: 2 } } }, 'a');
+  check(pass.ok && pass.results.get('a')?.stats?.checks === 1, `UV overlap count may equal the limit (${pass.errors[0]?.message ?? ''})`);
+  const fail = await cook({ ...quads, a: { type: 'assert', in: ['both'], params: { uv_attrib: 'uv2', uv_overlaps: 0 } } }, 'a');
+  const message = fail.errors[0]?.message ?? '';
+  check(!fail.ok && /uv_overlaps: 2 overlapping UV triangle pair\(s\) \(want <= 0\); largest: .+/.test(message), `UV overlap failure includes count and largest pair: ${message}`);
 }
 
 // ---------------------------------------------------------------- core helpers
