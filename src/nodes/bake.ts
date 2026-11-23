@@ -10,10 +10,11 @@ import { Image, MAIN_LAYER, imageRef, referenceableImages, sampleUV } from '../c
 import { MATERIAL_KINDS, parsePacking, primMaterials, readMaterials, resolveKind } from '../core/materials.ts';
 import type { PackedChannel } from '../core/materials.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
+import { disjointPackedUV } from '../core/uvpack.ts';
 import { bakedImageSize, triangleTexelSizes } from '../core/texelsize.ts';
 import { markGutter } from '../core/texscale.ts';
 import {
-  applyPadding, averagedVertexNormals, bakeMemoGrew, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, paddingMap, rasterizeUV, resolve, uvIslands, vertexPositions, vertexValues,
+  applyPadding, averagedVertexNormals, bakeMemoGrew, bakePadding, bakeSamples, curvatureEdges, edgeGrid, idColor, interpolate, interpolateCorners, memoBake, normalize3, rasterizeUV, resolveData, uvIslands, vertexPositions, vertexValues,
 } from '../core/bake.ts';
 import { MIKK_RESET_BYTES, cornerTangents, loadMikkTSpace, mikkTSpaceHeapBytes, mikkTSpaceReady, shadingFrame } from '../core/tangents.ts';
 import type { BakeSamples, CurvatureArgs } from '../core/bake.ts';
@@ -113,7 +114,8 @@ export function setup(ctx: CookContext): Bake {
     const sel = mask(g, 'prim', group);
     let skip: Uint8Array | null = null;
     if (sel) { skip = new Uint8Array(triPrim.length); for (let t = 0; t < triPrim.length; t++) skip[t] = sel[triPrim[t]] ? 0 : 1; }
-    const s = bakeSamples(uv, tris, W, H, S, skip);
+    // The sample coordinates are inputs to several kernels and stay read-only.
+    const s = bakeSamples(uv, tris, W, H, S, skip, !!ctx.engine.host.pool);
     // per-sample positions and normals, interpolated on first use (id, mask and colour bakes do not need them)
     return { tris, triPrim, uv, skip, s, P: null as Float64Array | null, N: null as Float64Array | null };
   });
@@ -151,42 +153,56 @@ function bakeSize(b: Bake): number {
  */
 export function finishImage(b: Bake, vals: ArrayLike<number>, ch: number, background: number[], extra: Record<string, { vals: ArrayLike<number>; ch: number; background: number[] }> = {}): { img: Image; coverage: Float32Array; map: Int32Array } {
   const { ctx, s } = b, p = ctx.p;
-  const { data, coverage } = resolve(s, vals, ch);
   const img = new Image(s.W, s.H, outName(ctx));
   img.setSize(bakeSize(b));
   const pad = Math.max(0, Math.round(p.padding));
-  const map = paddingMap(coverage, s.W, s.H, pad);
+  const { coverage, map, covered } = bakePadding(s, pad);
+  const data = resolveData(s, vals, ch);
   applyPadding(data, ch, map, background);
   img.set(MAIN_LAYER, data);
   // with a high-res mesh: where the projection found nothing, to see which parts need a larger cage
   const layers = b.missed ? { ...extra, missed: { vals: b.missed, ch: 1, background: [0] } } : extra;
   for (const [k, e] of Object.entries(layers)) {
-    const r = resolve(s, e.vals, e.ch);
-    applyPadding(r.data, e.ch, map, e.background);
-    if (k === 'island') markGutter(r.data, coverage);
-    img.set(k, r.data);
+    if (k !== 'island' && e.vals === vals && e.ch === ch && e.background.length === background.length &&
+        e.background.every((v, i) => Object.is(v, background[i]))) {
+      // the same values as the main layer, resolved once; a copy, since a layer that shares the main layer's array
+      // cannot be written to a file and read back
+      img.set(k, data.slice());
+      continue;
+    }
+    const values = resolveData(s, e.vals, e.ch);
+    applyPadding(values, e.ch, map, e.background);
+    if (k === 'island') markGutter(values, coverage);
+    img.set(k, values);
   }
   // every bake tells later nodes the texel size of each texel and its uv island (the nodes that make them themselves pass
   // them in extra): one copy per mesh, uv, size and padding, shared by every bake of this cook, so it costs no more memory
   if (!('texel' in layers)) {
-    const t0 = performance.now(), made = bakeMemoStats.made;
-    const shared = memoBake(b.g, `texel|${b.key}|${pad}`, () => {
-      const t = texelLayers(b, vertexPositions(b.g));
-      const T = resolve(s, t.texel.vals, 4), I = resolve(s, t.island.vals, 1);
-      applyPadding(T.data, 4, map, t.texel.background);
-      applyPadding(I.data, 1, map, t.island.background);
-      markGutter(I.data, coverage);
-      return { texel: T.data, island: I.data };
-    });
+    const shared = bakedTexelLayers(b, pad, coverage, map);
     img.set('texel', shared.texel).set('island', shared.island);
-    if (bakeMemoStats.made !== made) ctx.stage('texel and island', performance.now() - t0);
   }
   img.set('mask', coverage);
-  let covered = 0;
-  for (let i = 0; i < coverage.length; i++) if (coverage[i] > 0) covered++;
   ctx.stat('texels', covered);
   ctx.stat('coverage', covered / coverage.length);
   return { img, coverage, map };
+}
+
+/** Resolved texel sizes and islands, shared by bakes of the same raster and padding. */
+export function bakedTexelLayers(b: Bake, pad: number, coverage: Float32Array, map: Int32Array) {
+  return memoBake(b.s, `texel|${pad}`, () => {
+    const { s, g, uv, tris } = b;
+    const sizes = triangleTexelSizes(vertexPositions(g), uv, tris, s.W, s.H);
+    const T = new Float32Array(s.n * 4);
+    for (let i = 0; i < s.n; i++) {
+      const t = s.tri[i];
+      T[i * 4] = sizes[t * 2]; T[i * 4 + 1] = sizes[t * 2 + 1]; T[i * 4 + 3] = 1;
+    }
+    const texel = resolveData(s, T, 4), island = resolveData(s, bakeSampleIslands(b), 1);
+    applyPadding(texel, 4, map, [0, 0, 0, 1]);
+    applyPadding(island, 1, map, [-1]);
+    markGutter(island, coverage);
+    return { texel, island };
+  });
 }
 
 /** finishImage, wrapped as the node's output: the image alone, or the mesh with the image added (keep_mesh). */
@@ -195,24 +211,20 @@ function finish(b: Bake, vals: ArrayLike<number>, ch: number, background: number
   return wrapImage(b, img);
 }
 
-/**
- * The layers a bake adds so later nodes work in metres and stay on one island: "texel" (RGBA: R metres one texel covers
- * along u, G along v, at each sample's triangle) and "island" (the uv island; the first sample of a texel decides).
- * `first` maps each texel to its first sample when supersampled (null at supersample 1).
- */
-export function texelLayers(b: Bake, P3: Float64Array): { texel: { vals: Float32Array; ch: number; background: number[] }; island: { vals: Float32Array; ch: number; background: number[] }; first: Int32Array | null } {
-  const n = b.s.n, nt = b.s.W * b.s.H;
-  const triTexel = triangleTexelSizes(P3, b.uv, b.tris, b.s.W, b.s.H);
-  const isl = uvIslands(b.g, b.uv, b.tris);
-  const T = new Float32Array(n * 4), ID = new Float32Array(n);
-  const first = b.s.S > 1 ? new Int32Array(nt).fill(-1) : null;
-  if (first) for (let i = 0; i < n; i++) if (first[b.s.texel[i]] < 0) first[b.s.texel[i]] = i;
-  for (let i = 0; i < n; i++) {
-    const f = first ? first[b.s.texel[i]] : i, t = b.s.tri[i];
-    T[i * 4] = triTexel[t * 2]; T[i * 4 + 1] = triTexel[t * 2 + 1]; T[i * 4 + 3] = 1;
-    ID[i] = isl.triIsland[b.s.tri[f]];
-  }
-  return { texel: { vals: T, ch: 4, background: [0, 0, 0, 1] }, island: { vals: ID, ch: 1, background: [-1] }, first };
+/** UV island per sample. The first sample of a texel decides when supersampled. */
+export function bakeSampleIslands(b: Bake): Float32Array {
+  const { s, g, uv, tris } = b;
+  return memoBake(s, 'sample islands', () => {
+    const { triIsland } = uvIslands(g, uv, tris);
+    const id = new Float32Array(s.n);
+    const first = s.S > 1 ? new Int32Array(s.W * s.H).fill(-1) : null;
+    for (let i = 0; i < s.n; i++) {
+      const t = s.texel[i];
+      if (first && first[t] < 0) first[t] = i;
+      id[i] = triIsland[s.tri[first ? first[t] : i]];
+    }
+    return id;
+  });
 }
 
 /** The surface-measure setup of a bake's mesh, uv and size (core/surface.ts), made once and shared by every bake. */
@@ -1085,10 +1097,12 @@ defineBake({
     const renamed = order.map((name, i) => [name, layerOf[i]] as const).filter(([name, l]) => l !== `mat_${name}`);
     if (renamed.length && (p.masks === 'all' || p.masks === 'materials')) ctx.warn(`${type}: layer names are identifiers an expression can read: ${renamed.slice(0, 6).map(([m, l]) => `material "${m}" is ${l}`).join(', ')}${renamed.length > 6 ? `, … ${renamed.length - 6} more` : ''}`);
     // uv that overlap: a texel two faces share holds the last one's values
-    const ov = uvOverlapCheck(b.uv, b.tris, b.triPrim, new Int32Array(g.numPrims), { skip: skip ? (x, y) => !!(skip[x] || skip[y]) : undefined });
-    if (ov.within + ov.across > 0) {
-      const first = ov.firstWithin ?? ov.firstAcross!;
-      ctx.warn(`${type}: the uv of ${ov.within + ov.across} pair${ov.within + ov.across > 1 ? 's' : ''} of triangles overlap (first: ${uvPairText(g, b.uv, b.tris, b.triPrim, first.t[0], first.t[1])}); a texel they share holds the last one's values: unwrap again or lay the islands out (uv_layout)`);
+    if ((p.uv_attrib || 'uv') !== 'uv' || !disjointPackedUV.has(g)) {
+      const ov = uvOverlapCheck(b.uv, b.tris, b.triPrim, new Int32Array(g.numPrims), { skip: skip ? (x, y) => !!(skip[x] || skip[y]) : undefined });
+      if (ov.within + ov.across > 0) {
+        const first = ov.firstWithin ?? ov.firstAcross!;
+        ctx.warn(`${type}: the uv of ${ov.within + ov.across} pair${ov.within + ov.across > 1 ? 's' : ''} of triangles overlap (first: ${uvPairText(g, b.uv, b.tris, b.triPrim, first.t[0], first.t[1])}); a texel they share holds the last one's values: unwrap again or lay the islands out (uv_layout)`);
+      }
     }
     // per-sample values
     const n = b.s.n, nt = b.s.W * b.s.H;
@@ -1131,12 +1145,13 @@ defineBake({
       C[i * 4] = r; C[i * 4 + 1] = gr; C[i * 4 + 2] = bl; C[i * 4 + 3] = al;
       R[i] = rough; M[i] = metal;
     }
-    const P3 = vertexPositions(g);
-    const { texel: texelLayer, island: islandLayer, first } = texelLayers(b, P3);
     const texMat = new Int32Array(nt).fill(-1);
-    for (let i = 0; i < n; i++) if ((first ? first[b.s.texel[i]] : i) === i) texMat[b.s.texel[i]] = sampleMat[i];
+    for (let i = 0; i < n; i++) {
+      const texel = b.s.texel[i];
+      if (texMat[texel] < 0) texMat[texel] = sampleMat[i];
+    }
     const finishWith = (normal: Float32Array | null) => finishMaterial(ctx, b, {
-      C, R, M, O, Hm, normal, texelLayer, islandLayer, texMat, order, layerOf, kinds, kindsPresent,
+      C, R, M, O, Hm, normal, texMat, order, layerOf, kinds, kindsPresent,
     });
     if (!withNormalMap) return finishWith(null);
     // the materials' normal maps, re-expressed in the tangent frame of the bake's uv (see normalsInBakeFrame)
@@ -1187,7 +1202,6 @@ function normalsInBakeFrame(b: Bake, mapUV: Float64Array, sameUV: boolean, UV: F
 
 interface MaterialBakeValues {
   C: Float32Array; R: Float32Array; M: Float32Array; O: Float32Array | null; Hm: Float32Array | null; normal: Float32Array | null;
-  texelLayer: { vals: Float32Array; ch: number; background: number[] }; islandLayer: { vals: Float32Array; ch: number; background: number[] };
   texMat: Int32Array; order: string[]; layerOf: string[]; kinds: string[]; kindsPresent: string[];
 }
 
@@ -1201,8 +1215,6 @@ function finishMaterial(ctx: CookContext, b: Bake, v: MaterialBakeValues): Geome
     if (v.O) extra.occlusion = { vals: v.O, ch: 1, background: [1] };
     if (v.Hm) extra.height = { vals: v.Hm, ch: 1, background: [0.5] };
     if (v.normal) extra.normal = { vals: v.normal, ch: 4, background: [0.5, 0.5, 1, 1] };
-    extra.texel = v.texelLayer;
-    extra.island = v.islandLayer;
     const { img, map } = finishImage(b, v.C, 4, [0, 0, 0, 1], extra);
     // the labels from one material index per texel, padded through the same map as every layer
     const labels: Record<string, Float32Array> = {};

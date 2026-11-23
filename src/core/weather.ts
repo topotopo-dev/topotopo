@@ -571,6 +571,11 @@ function compactBakes(nodes: Record<string, NodeSpec>, masks: string[], texts: s
     if (!used.length) { masks.splice(k, 1); continue; }
     // C stays: it is the image's main layer, so the other layers keep their variable names (m_occ, not m)
     if (!used.includes('C')) used.unshift('C');
+    if (id === 'noise') {
+      const measures = spec.params!.measures as { name: string }[];
+      // The first measure supplies C. The rest are independent and only needed when the stack reads them.
+      spec.params!.measures = measures.filter((m, i) => i === 0 || used.includes(m.name));
+    }
     nodes[`${id}_kept`] = { type: 'tex_compact', in: [id], params: { keep: used.join(' '), half: spec.type === 'bake_mask' ? '' : '*' } };
     masks[k] = `${id}_kept`;
   }

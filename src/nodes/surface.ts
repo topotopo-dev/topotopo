@@ -17,7 +17,7 @@ import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
 import type { CookContext, NodeDef, ParamDef } from '../graph/types.ts';
 import { coerce, didYouMean, evalRamp } from '../graph/params.ts';
-import { BAKE_DOC, BAKE_PARAMS, buriedOf, checkSurfaceRadius, cloudOf, finishImage, setup, surfaceOf, surfaceRunner, surfaceWarnings, texelLayers, wrapImage } from './bake.ts';
+import { BAKE_DOC, BAKE_PARAMS, buriedOf, checkSurfaceRadius, cloudOf, finishImage, setup, surfaceOf, surfaceRunner, surfaceWarnings, wrapImage } from './bake.ts';
 import type { Bake } from './bake.ts';
 import { P, mask } from './util.ts';
 import { NAMED_BY_NODE } from './texture.ts';
@@ -215,7 +215,8 @@ function cookMeasure(ctx: CookContext) {
     }
   }
   for (const m of ms) if (m.by === 'curvature') checkSurfaceRadius(b, m.f.radius, `measure "${m.name}": curvature radius`);
-  const raw: Arr[] = ms.map(() => new Float32Array(n));
+  const shared = !!ctx.engine.host.pool && n >= 32768 && typeof SharedArrayBuffer !== 'undefined';
+  const raw: Arr[] = ms.map((m) => shared && m.by === 'noise' ? new Float32Array(new SharedArrayBuffer(n * 4)) : new Float32Array(n));
   const extents = ms.map(() => 0);
   const out = () => finishMeasure(ctx, b, ms, raw, extents);
   if (!n) return out();
@@ -224,7 +225,6 @@ function cookMeasure(ctx: CookContext) {
   const mesh = surfaceOf(b);
   surfaceWarnings(b, mesh);
   const { run, deadline, check, guard } = surfaceRunner(ctx, 'fewer measures, fewer samples, a smaller curvature radius or a lower resolution; or raise the limit');
-  const P = b.P;
   let N: Float64Array | null = null;
   const normals = () => { if (!N) { N = interpolate(s, b.tris, mesh.VN, 3); normalize3(N); } return N; };
   const steps: (() => unknown)[] = [];
@@ -239,6 +239,7 @@ function cookMeasure(ctx: CookContext) {
       }
     });
     else if (m.by === 'height') timed(`height ${m.name}`, () => {
+      const P = b.P;
       const [ux, uy, uz] = m.f.up;
       let lo = Infinity, hi = -Infinity;
       for (let i = 0; i < g.numPoints; i++) { const h = g.P[i * 3] * ux + g.P[i * 3 + 1] * uy + g.P[i * 3 + 2] * uz; if (h < lo) lo = h; if (h > hi) hi = h; }
@@ -251,7 +252,7 @@ function cookMeasure(ctx: CookContext) {
     });
     else if (m.by === 'noise') timed(`noise ${m.name}`, () => {
       const seed = hashString(m.name, hashNumber(Number(p.seed) || 0)) & 0x7fffffff;
-      return seq(runNoise(run, s, b.tris, mesh.VP, { noise: m.f.noise, fractal: m.f.fractal, octaves: m.f.octaves, roughness: m.f.roughness, size: m.f.size, seed, deadline }), (V: Arr) => R.set(V));
+      return runNoise(run, s, b.tris, mesh.VP, { noise: m.f.noise, fractal: m.f.fractal, octaves: m.f.octaves, roughness: m.f.roughness, size: m.f.size, seed, deadline }, R);
     });
     else if (m.by === 'distance') timed(`distance ${m.name}`, () => {
       const hi = m.band ? m.band.hi + m.band.fall : m.f.range;
@@ -343,9 +344,9 @@ function finishMeasure(ctx: CookContext, b: Bake, ms: Measure[], raw: Float32Arr
   let t0 = performance.now();
   ms.forEach((m, j) => {
     const sel = m.where ? mask(g, 'prim', m.where) : null;
-    const R = raw[j], v = new Float32Array(n), ext = extents[j];
+    const v = raw[j], ext = extents[j];
     const f = shaper(m, ext);
-    for (let i = 0; i < n; i++) v[i] = f(R[i]);
+    for (let i = 0; i < n; i++) v[i] = f(v[i]);
     if (sel) {
       const off = new Uint8Array(b.triPrim.length);
       for (let t = 0; t < off.length; t++) off[t] = sel[b.triPrim[t]] ? 0 : 1;
@@ -356,16 +357,6 @@ function finishMeasure(ctx: CookContext, b: Bake, ms: Measure[], raw: Float32Arr
     if (!first) { first = v; firstBg = bg; }
   });
   ctx.stage('shape', performance.now() - t0);
-  t0 = performance.now();
-  if (n) {
-    const mesh = surfaceOf(b);
-    const { texel, island } = texelLayers(b, mesh.VP);
-    layers.texel = texel; layers.island = island;
-  } else {
-    layers.texel = { vals: new Float32Array(0), ch: 4, background: [0, 0, 0, 1] };
-    layers.island = { vals: new Float32Array(0), ch: 1, background: [-1] };
-  }
-  ctx.stage('texel and island', performance.now() - t0);
   t0 = performance.now();
   ctx.stat('measures', ms.length);
   const { img } = finishImage(b, first!, 1, [firstBg], layers);
@@ -795,14 +786,6 @@ function finishEdgeWear(ctx: CookContext, b: Bake, L: WearLayers, amount: number
   const layers: Record<string, { vals: Float32Array; ch: number; background: number[] }> = {
     chip: one(chip), bare: one(bare), core: one(core), convex: one(L.convex), concave: one(L.concave), handled: one(L.handled),
   };
-  if (n) {
-    // the same for every cook of this raster (finishImage copies them)
-    const { texel, island } = perCloudMemo(b.s, 'texelLayers', () => texelLayers(b, surfaceOf(b).VP)) as ReturnType<typeof texelLayers>;
-    layers.texel = texel; layers.island = island;
-  } else {
-    layers.texel = { vals: new Float32Array(0), ch: 4, background: [0, 0, 0, 1] };
-    layers.island = { vals: new Float32Array(0), ch: 1, background: [-1] };
-  }
   ctx.stage('masks', performance.now() - t0);
   t0 = performance.now();
   const { img } = finishImage(b, C, 1, [0], layers);

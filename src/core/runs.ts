@@ -18,7 +18,8 @@
 //                  (so thin runs stay thin at any resolution), gaps along the run from 3D noise, per run width wander
 //
 // Everything a texel reads is a function of its 3D position and normal, so both sides of a uv seam give one value.
-// Single-threaded and deterministic (hash-seeded, no Math.random).
+// Deterministic (hash-seeded, no Math.random).
+import type { KernelJob } from '../graph/parallel.ts';
 import type { Geometry } from './geometry.ts';
 import { RayScene } from './analysis.ts';
 import { makeNoise } from './noise.ts';
@@ -679,6 +680,8 @@ const smoothstep = (a: number, b: number, x: number) => { const t = Math.max(0, 
 export interface RasterOpts {
   /** called now and then; may throw (a time limit) */
   check?: () => void;
+  deadline?: number;
+  run?: (job: KernelJob) => unknown;
   /** test every segment at every sample, without the grid (a reference for tests) */
   brute?: boolean;
   /**
@@ -726,6 +729,35 @@ function slabGrid(P: ArrayLike<number>, ids: ArrayLike<number> | null, n: number
   }
 }
 
+interface RunRasterArgs {
+  breakup: number;
+  seed: number;
+  kw: number;
+  kl: number;
+  ns: number;
+  tauCap: number;
+  grid: { origin: number[]; size: number; dims: number[]; dx: number; dy: number } | null;
+  deadline?: number;
+}
+
+type RunRasterIn = Omit<RunSet, 'A' | 'count' | 'segs' | 'kw' | 'kl'> & RasterIn & {
+  ends: Float64Array;
+  startS: Float32Array;
+  items: Int32Array | null;
+  count: Int32Array | null;
+  mapX: Int32Array;
+  mapY: Int32Array;
+  mapZ: Int32Array;
+};
+
+export const RUN_RASTER_DEADLINE = 'run raster: past the deadline';
+
+/** How far from a segment of half width hw a sample can still be covered. */
+function runReach(hw: number, pool: boolean, tau: number, wander: number): number {
+  const w = pool ? 1 : wander;
+  return w * hw + 0.5 * Math.max(tau, 0.6 * w * hw);
+}
+
 /**
  * The run values at every sample: the strongest run there (a stripe of the run's width, box-filtered over the sample
  * size, with gaps from 3D noise along the run and a wandering width); along, head, strength and id of that run.
@@ -733,7 +765,7 @@ function slabGrid(P: ArrayLike<number>, ids: ArrayLike<number> | null, n: number
  * still be covered: the widest the run gets (width wander) plus half the filter window. The cell size follows the
  * ordinary runs; a wide pool lens just fills more cells.
  */
-export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: number, out: RasterOut, opts: RasterOpts = {}): void {
+export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: number, out: RasterOut, opts: RasterOpts = {}): void | Promise<void> {
   const n = inp.P.length / 3, check = opts.check;
   out.C.fill(0); out.along.fill(0); out.head.fill(0); out.strength.fill(0); out.id.fill(0);
   out.stain?.fill(0);
@@ -746,11 +778,8 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
   const med = tv[tv.length >> 1] || 0;
   const tauCap = Math.max(1e-6, Math.min(tv[tv.length - 1] || 0, 3 * med));
   const wander = breakup > 0 ? 1 + 0.5 * breakup : 1;
-  /** how far from a run segment of half width hw a sample can still be covered */
-  const reachOf = (hw: number, pool: boolean, tau: number) => { const w = pool ? 1 : wander; return w * hw + 0.5 * Math.max(tau, 0.6 * w * hw); };
-  const noise = makeNoise('perlin', Math.floor(seed * 131) + 91);
-  const FA = 1 / (0.05 * rs.kl), FB = 1 / (0.025 * rs.kw), FW = 1 / (0.015 * rs.kl);
-  const P = inp.P, N = inp.N;
+  const reachOf = (hw: number, pool: boolean) => runReach(hw, pool, tauCap, wander);
+  const P = inp.P;
 
   // the grid
   let items: Int32Array | null = null, count: Int32Array | null = null;
@@ -761,7 +790,7 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     mnx = mny = mnz = Infinity;
     let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
     for (let k = 0; k < ns; k++) {
-      const hw = Math.max(rs.HW[k * 2], rs.HW[k * 2 + 1]), r = reachOf(hw, rs.POOL[k] === 1, tauCap);
+      const hw = Math.max(rs.HW[k * 2], rs.HW[k * 2 + 1]), r = reachOf(hw, rs.POOL[k] === 1);
       if (rs.POOL[k] !== 1 && r > r0) r0 = r;
       if (r > rAll) rAll = r;
       for (let e = 0; e < 2; e++) {
@@ -779,7 +808,7 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     count = new Int32Array(cells + 1);
     let total = 0;
     const range = (k: number, f: (cell: number) => void) => {
-      const r = reachOf(Math.max(rs.HW[k * 2], rs.HW[k * 2 + 1]), rs.POOL[k] === 1, tauCap);
+      const r = reachOf(Math.max(rs.HW[k * 2], rs.HW[k * 2 + 1]), rs.POOL[k] === 1);
       const x0 = Math.min(A[k * 6], A[k * 6 + 3]) - r, x1 = Math.max(A[k * 6], A[k * 6 + 3]) + r;
       const y0 = Math.min(A[k * 6 + 1], A[k * 6 + 4]) - r, y1 = Math.max(A[k * 6 + 1], A[k * 6 + 4]) + r;
       const z0 = Math.min(A[k * 6 + 2], A[k * 6 + 5]) - r, z1 = Math.max(A[k * 6 + 2], A[k * 6 + 5]) + r;
@@ -809,7 +838,6 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
       range(k, (c) => { items![fill[c]++] = k; });
     }
   }
-  const all = opts.brute ? Int32Array.from({ length: ns }, (_, k) => k) : null;
   // Clip only the first drawn segment of each run to give the head a flat edge.
   const startS = new Float32Array(rs.runLen.length).fill(Infinity);
   for (let k = 0; k < ns; k++) {
@@ -817,23 +845,49 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     if (rs.POOL[k] !== 1 && rs.AMP[k] > 0) startS[id] = Math.min(startS[id], rs.SS[k * 2]);
   }
 
-  for (let i = 0; i < n; i++) {
-    if ((i & 4095) === 0) check?.();
-    if (inp.skip && inp.skip[i]) continue;
+  const grid = opts.brute ? null : { origin: [mnx, mny, mnz], size: cs, dims: [rx, ry, rz], dx, dy };
+  const args: RunRasterArgs = { breakup, seed, kw: rs.kw, kl: rs.kl, ns, tauCap, grid, deadline: opts.deadline };
+  const { A: ends, NRM, HW, SS, ID, POOL, AMP, runLen, strength: runStrength, pooled, key } = rs;
+  const { C, along, head, strength, id } = out;
+  const input = { ...inp, ends, NRM, HW, SS, ID, POOL, AMP, runLen, strength: runStrength, pooled, key, startS, items, count, mapX, mapY, mapZ };
+  const finish = () => { if (out.stain && opts.stain && opts.stain > 0) rasterStain(rs, inp, tauCap, opts.stain, out.stain, opts); };
+  if (opts.run && inp.tau instanceof Float32Array) {
+    // The result layer and the runs' strength table have different names in the kernel.
+    const r = opts.run({ count: n, args, inputs: { ...input, tau: inp.tau }, results: { C, along, head, outStrength: strength, id } });
+    return r instanceof Promise ? r.then(finish) : finish();
+  }
+  rasterRunsRange(args, input, { C, along, head, strength, id }, 0, n, check);
+  finish();
+}
+
+/** The strongest run at each sample in the range, keeping the order of the segments in its cell. */
+export function rasterRunsRange(args: RunRasterArgs, rs: RunRasterIn, out: RasterOut, start: number, end: number, check?: () => void): void {
+  const { breakup, seed, ns, tauCap, grid, deadline } = args;
+  const { P, N, tau: texelSize, skip, ends: A, startS, items, count, mapX, mapY, mapZ } = rs;
+  const [mnx, mny, mnz] = grid?.origin ?? [0, 0, 0], [rx, ry, rz] = grid?.dims ?? [0, 0, 0];
+  const cs = grid?.size ?? 1, dx = grid?.dx ?? 0, dy = grid?.dy ?? 0;
+  const wander = breakup > 0 ? 1 + 0.5 * breakup : 1;
+  const noise = makeNoise('perlin', Math.floor(seed * 131) + 91);
+  const FA = 1 / (0.05 * args.kl), FB = 1 / (0.025 * args.kw), FW = 1 / (0.015 * args.kl);
+  for (let i = start; i < end; i++) {
+    if (((i - start) & 4095) === 0) {
+      if (deadline && Date.now() > deadline) throw new Error(RUN_RASTER_DEADLINE);
+      check?.();
+    }
+    if (skip && skip[i]) continue;
     const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
-    let list: Int32Array, s0: number, s1: number;
-    if (all) { list = all; s0 = 0; s1 = ns; } else {
+    let s0 = 0, s1 = ns;
+    if (grid) {
       const ci = Math.floor((px - mnx) / cs), cj = Math.floor((py - mny) / cs), ck = Math.floor((pz - mnz) / cs);
       if (ci < 0 || cj < 0 || ck < 0 || ci >= rx || cj >= ry || ck >= rz) continue;
       const cell = (mapZ[ck] * dy + mapY[cj]) * dx + mapX[ci];
       s0 = count![cell]; s1 = count![cell + 1];
       if (s0 === s1) continue;
-      list = items!;
     }
-    const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2], tau = Math.max(1e-6, Math.min(inp.tau[i], tauCap));
+    const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2], tau = Math.max(1e-6, Math.min(texelSize[i], tauCap));
     let best = 0, bk = -1, bAlong = 0;
     for (let m = s0; m < s1; m++) {
-      const k = all ? m : list[m], o = k * 6;
+      const k = grid ? items![m] : m, o = k * 6;
       const id = rs.ID[k], pool = rs.POOL[k] === 1;
       const ax = A[o], ay = A[o + 1], az = A[o + 2];
       const ex = A[o + 3] - ax, ey = A[o + 4] - ay, ez = A[o + 5] - az;
@@ -844,7 +898,7 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
       const cx = ax + ex * t - px, cy = ay + ey * t - py, cz = az + ez * t - pz;
       const d2 = cx * cx + cy * cy + cz * cz;
       let hw = rs.HW[k * 2] + (rs.HW[k * 2 + 1] - rs.HW[k * 2]) * t;
-      const reach = reachOf(hw, pool, tau);
+      const reach = runReach(hw, pool, tau, wander);
       if (d2 > reach * reach) continue; // beyond the widest the run gets plus the filter
       const dist = Math.sqrt(d2);
       // the texel lies on the same surface: its normal agrees with the run's there
@@ -878,7 +932,6 @@ export function rasterRuns(rs: RunSet, inp: RasterIn, breakup: number, seed: num
     const hd = Math.max(0, 1 - bAlong / 0.35);
     out.head[i] = v * hd * hd; out.strength[i] = rs.strength[bk]; out.id[i] = rs.key[bk];
   }
-  if (out.stain && opts.stain && opts.stain > 0) rasterStain(rs, inp, tauCap, opts.stain, out.stain, opts);
 }
 
 /**
@@ -971,29 +1024,28 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
     while (base << (levelOf[r] + 1) <= Math.min(fit, 8)) levelOf[r]++;
   }
   const levels = [...new Set(segs.map((k) => levelOf[ID[k]]))].sort((x, y) => x - y);
+  const at = lat && levels.some((level) => (base << level) > 1) ? new Int32Array(lat.gw * lat.gh).fill(-1) : null;
+  if (at && lat) for (let i = 0; i < n; i++) at[lat.pix[i]] = i;
   const drawLevel = (level: number, out: Float32Array): void => {
     const f = base << level;
     // the samples that take the stain exactly: every one, or the lattice and those whose four corners do not all lie on
     // their island and surface (the rest are interpolated from the lattice afterwards)
-    let at: Int32Array | null = null, onLat: Uint8Array | null = null;
     const corner = (i: number, x: number, y: number): number => {
-      if (!lat || !at || !onLat || x >= lat.gw || y >= lat.gh) return -1;
+      if (!lat || !at || x >= lat.gw || y >= lat.gh) return -1;
       const j = at[y * lat.gw + x];
-      if (j < 0 || !onLat[j] || (skip && skip[j]) || lat.island[j] !== lat.island[i]) return -1;
+      if (j < 0 || (skip && skip[j]) || lat.island[j] !== lat.island[i]) return -1;
       return N[i * 3] * N[j * 3] + N[i * 3 + 1] * N[j * 3 + 1] + N[i * 3 + 2] * N[j * 3 + 2] >= 0.95 ? j : -1;
     };
     const exact = new Uint8Array(n);
     if (!lat || f === 1) { for (let i = 0; i < n; i++) if (!(skip && skip[i])) exact[i] = 1; }
     else {
       const { pix, gw } = lat;
-      at = new Int32Array(gw * lat.gh).fill(-1); onLat = new Uint8Array(n);
-      for (let i = 0; i < n; i++) at[pix[i]] = i;
-      for (let i = 0; i < n; i++) { const x = pix[i] % gw, y = (pix[i] - x) / gw; if (!(x % f) && !(y % f)) onLat[i] = 1; }
       for (let i = 0; i < n; i++) {
         if ((i & 4095) === 0) check?.();
         if (skip && skip[i]) continue;
-        if (onLat[i]) { exact[i] = 1; continue; }
-        const x = pix[i] % gw, y = (pix[i] - x) / gw, x0 = x - (x % f), y0 = y - (y % f);
+        const x = pix[i] % gw, y = (pix[i] - x) / gw, mx = x % f, my = y % f;
+        if (!mx && !my) { exact[i] = 1; continue; }
+        const x0 = x - mx, y0 = y - my;
         if (corner(i, x0, y0) < 0 || corner(i, x0 + f, y0) < 0 || corner(i, x0, y0 + f) < 0 || corner(i, x0 + f, y0 + f) < 0) exact[i] = 1;
       }
     }
@@ -1085,14 +1137,16 @@ function rasterStain(rs: RunSet, inp: RasterIn, tauCap: number, K: number, stain
     }
     for (let i = 0; i < n; i++) if (exact[i]) out[i] = 0;
     for (let q = 0; q < S.length; q++) out[S[q]] = 1 - rest[q];
-    if (!lat || f === 1 || !at || !onLat) return;
+    if (!lat || f === 1 || !at) return;
     // every other sample from the four lattice corners around it
     const { pix, gw } = lat;
     for (let i = 0; i < n; i++) {
       if ((i & 4095) === 0) check?.();
       if (exact[i] || (skip && skip[i])) continue;
       const x = pix[i] % gw, y = (pix[i] - x) / gw, x0 = x - (x % f), y0 = y - (y % f);
-      const a = corner(i, x0, y0), b = corner(i, x0 + f, y0), c = corner(i, x0, y0 + f), d = corner(i, x0 + f, y0 + f);
+      // The exact pass has already checked that these four corners lie on the same island and surface.
+      const lo = y0 * gw + x0, hi = lo + f * gw;
+      const a = at[lo], b = at[lo + f], c = at[hi], d = at[hi + f];
       const tx = (x - x0) / f, ty = (y - y0) / f;
       out[i] = (out[a] * (1 - tx) + out[b] * tx) * (1 - ty) + (out[c] * (1 - tx) + out[d] * tx) * ty;
     }

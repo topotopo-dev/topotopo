@@ -271,11 +271,13 @@ export interface BakeSamples {
 }
 
 /** Rasterise at S × S samples per texel and list the covered samples (row-major sample order). */
-export function bakeSamples(uv: ArrayLike<number>, tris: ArrayLike<number>, W: number, H: number, S: number, skip?: Uint8Array | null): BakeSamples {
+export function bakeSamples(uv: ArrayLike<number>, tris: ArrayLike<number>, W: number, H: number, S: number, skip?: Uint8Array | null, shared = false): BakeSamples {
   const w = W * S, h = H * S;
   const map = rasterizeUV(uv, tris, w, h, true, skip);
   const n = map.covered;
-  const texel = new Int32Array(n), tri = new Int32Array(n), b1 = new Float32Array(n), b2 = new Float32Array(n), pix = new Int32Array(n);
+  const storage = (shared && typeof SharedArrayBuffer !== 'undefined') ? SharedArrayBuffer : ArrayBuffer;
+  const texel = new Int32Array(n), pix = new Int32Array(n);
+  const tri = new Int32Array(new storage(n * 4)), b1 = new Float32Array(new storage(n * 4)), b2 = new Float32Array(new storage(n * 4));
   let k = 0;
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
@@ -318,13 +320,8 @@ export function resolve(s: BakeSamples, vals: ArrayLike<number>, ch: number): { 
   const nt = s.W * s.H;
   if (s.S === 1) {
     // one sample per texel at most: a scatter
-    const data = new Float32Array(nt * ch), coverage = new Float32Array(nt);
-    for (let k = 0; k < s.n; k++) {
-      const t = s.texel[k];
-      coverage[t] = 1;
-      for (let c = 0; c < ch; c++) data[t * ch + c] = vals[k * ch + c];
-    }
-    return { data, coverage };
+    const coverage = new Float32Array(nt);
+    return { data: scatterSamples(s, vals, ch, coverage), coverage };
   }
   const acc = new Float64Array(nt * ch), cnt = new Int32Array(nt);
   for (let k = 0; k < s.n; k++) {
@@ -339,6 +336,38 @@ export function resolve(s: BakeSamples, vals: ArrayLike<number>, ch: number): { 
     for (let c = 0; c < ch; c++) data[t * ch + c] = acc[t * ch + c] / cnt[t];
   }
   return { data, coverage };
+}
+
+function scatterSamples(s: BakeSamples, vals: ArrayLike<number>, ch: number, coverage?: Float32Array): Float32Array {
+  const data = new Float32Array(s.W * s.H * ch);
+  for (let k = 0; k < s.n; k++) {
+    const t = s.texel[k];
+    if (coverage) coverage[t] = 1;
+    for (let c = 0; c < ch; c++) data[t * ch + c] = vals[k * ch + c];
+  }
+  return data;
+}
+
+/** Resolve the values alone when the bake already has its coverage. */
+export function resolveData(s: BakeSamples, vals: ArrayLike<number>, ch: number): Float32Array {
+  return s.S === 1 ? scatterSamples(s, vals, ch) : resolve(s, vals, ch).data;
+}
+
+/** The coverage and padding of a raster are the same for every layer and bake that uses it. */
+export function bakePadding(s: BakeSamples, pad: number): { coverage: Float32Array; map: Int32Array; covered: number } {
+  return memoBake(s, `padding|${pad}`, () => {
+    const coverage = new Float32Array(s.W * s.H), inv = 1 / (s.S * s.S);
+    for (let k = 0; k < s.n; k++) coverage[s.texel[k]]++;
+    let covered = s.n;
+    if (s.S > 1) {
+      covered = 0;
+      for (let k = 0; k < coverage.length; k++) {
+        if (coverage[k] > 0) covered++;
+        coverage[k] *= inv;
+      }
+    }
+    return { coverage, map: paddingMap(coverage, s.W, s.H, pad), covered };
+  });
 }
 
 /**

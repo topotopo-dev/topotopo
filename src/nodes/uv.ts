@@ -3,14 +3,14 @@
 import type { Geometry } from '../core/geometry.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
-import type { ParamDef } from '../graph/types.ts';
+import type { CookContext, ParamDef } from '../graph/types.ts';
 import { primArea, primNormals, relaxPoints, triangulate } from '../core/topology.ts';
 import {
   buildCharts, chartNeedsCut, cutGraph, edgeGroupTest, findIslands, lscm, normaliseCharts,
   pairsWhere, pointPairTest, polygonSides, primComponents, cornerClasses, readUV, uvSeamPairs, writeUV,
 } from '../core/uv.ts';
 import type { Island, Sides } from '../core/uv.ts';
-import { packCharts } from '../core/uvpack.ts';
+import { disjointPackedUV, packCharts } from '../core/uvpack.ts';
 import { MIN_VISIBLE_SHARE, cutLongCharts, islandWeights, packsDenser, visibilityScale, worldAngles } from '../core/uvislands.ts';
 import { uvOverlapCheck, uvPairText } from '../core/uvoverlap.ts';
 import { primWhere } from '../core/report.ts';
@@ -129,6 +129,7 @@ interface LayoutOut {
   /** islands cut into parts; the texel weight attribute was found */
   cut: number;
   weighted: boolean;
+  disjoint: boolean;
 }
 
 /**
@@ -138,7 +139,7 @@ interface LayoutOut {
  * reported with the parts they are in.
  */
 function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandOfPrim: Int32Array, o: LayoutRun, warn: (m: string) => void): LayoutOut {
-  const res: LayoutOut = { uv, labels: islandOfPrim, count: islands.length, cut: 0, weighted: false };
+  const res: LayoutOut = { uv, labels: islandOfPrim, count: islands.length, cut: 0, weighted: false, disjoint: false };
   if (!islands.length) return res;
   const tiles = o.fit === 'udim' ? Math.max(1, Math.floor(o.tiles)) : 1;
   const tpu = Math.max(0, o.texelsPerUnit), fixed = tpu > 0 ? tpu / Math.max(1, o.resolution) : 0, spill = fixed > 0 && o.fit === 'udim';
@@ -178,6 +179,7 @@ function layoutIslands(g: Geometry, uv: Float64Array, islands: Island[], islandO
   }
   res.uv = r.uv;
   const chk = uvOverlapCheck(r.uv, tri.tris, tri.triPrim, labels);
+  res.disjoint = !best.obstacles && chk.within === 0 && chk.across === 0;
   if (chk.across && chk.firstAcross) warn(`${o.node}: ${chk.across} triangle pairs of different islands overlap after packing; this is a bug, please report it with the graph. Largest: ${uvPairText(g, r.uv, tri.tris, tri.triPrim, chk.firstAcross.t[0], chk.firstAcross.t[1])}`);
   if (chk.within && chk.firstWithin) warn(`${o.node}: ${chk.within} overlapping triangle pairs inside islands were already in the input (folds${o.islandAttrib ? `, or pieces joined by island_attrib "${o.islandAttrib}"` : ''}); packing moves each island whole, so they stay. Largest: ${uvPairText(g, r.uv, tri.tris, tri.triPrim, chk.firstWithin.t[0], chk.firstWithin.t[1])}`);
   const used = r.uvArea / Math.max(1, r.tilesUsed);
@@ -194,6 +196,17 @@ const VISIBILITY_WEIGHT: ParamDef = {
 };
 
 const visibilityWeightOf = (x: unknown) => Math.max(0, Math.min(1, Number(x) || 0));
+
+function layoutVisibility(ctx: CookContext, g: Geometry, surroundings: Geometry | null, group: Uint8Array | null) {
+  // A cold visibility pass can cast millions of rays. Queue it while the pool starts.
+  const pool = ctx.engine.host.pool;
+  if (pool && !pool.threads && g.numPrims >= 128) void pool.warm(true);
+  const t0 = performance.now();
+  return andThen(faceVisibilityRun(ctx, g, surroundings, group), (vis) => {
+    ctx.stage('visibility', performance.now() - t0);
+    return vis;
+  });
+}
 
 /**
  * Said after a visibility measure: how many faces, and how much of the area, read as hidden (the minimum texel density);
@@ -301,7 +314,7 @@ defineNode({
     const weight = visibilityWeightOf(p.visibility_weight);
     if (weight > 0) {
       const around = hasInput(1) && input(1).numPrims > 0;
-      const vis = await faceVisibilityRun(ctx, src, around ? input(1) : null, null);
+      const vis = await layoutVisibility(ctx, src, around ? input(1) : null, null);
       (g.prims.add('visibility', 'float', 1).data as Float64Array).set(vis);
       reportVisibility(src, vis, null, around, 'uv_unwrap', warn, stat);
     }
@@ -527,14 +540,17 @@ defineNode({
     }
     const { islands, islandOfPrim } = findIslands(g, uv, attr, gm);
     const run = (primScale: Float64Array | null) => {
+      const t0 = performance.now();
       const out = layoutIslands(g, uv, islands, islandOfPrim, {
         orient: p.orient, scaleMode: p.scale_mode, padding: paddingTexels(p.padding, p.units, p.resolution), resolution: p.resolution,
         fit: p.fit, tiles: p.udims, texelsPerUnit: Math.max(0, p.texels_per_unit), iterations: p.iterations, seed: Math.floor(Number(p.seed) || 0),
         texelWeight: String(p.texel_weight ?? ''), primScale, cutLong: !!p.cut_long, node: 'uv_layout', islandAttrib: attr ? p.island_attrib : undefined,
       }, warn);
+      ctx.stage('pack and check', performance.now() - t0);
       if (p.texel_weight && p.texel_weight !== 'texel_weight' && !numericPrimAttrib(g, p.texel_weight)) warn(`uv_layout: texel_weight "${p.texel_weight}" is not a numeric prim attribute; every island has weight 1`);
       if (out.cut) stat('islands cut', out.cut);
       writeUV(g, out.uv);
+      if (out.disjoint) disjointPackedUV.add(g);
       if (p.write_island) writePrimInt(g, 'island', out.labels);
       return g;
     };
@@ -542,7 +558,7 @@ defineNode({
     if (!(weight > 0)) return run(null);
     // visibility_weight: the share of sky each polygon sees (against the geometry and the surroundings) scales its texel density
     const around = hasInput(1) && input(1).numPrims > 0;
-    return andThen(faceVisibilityRun(ctx, g, around ? input(1) : null, gm), (vis) => {
+    return andThen(layoutVisibility(ctx, g, around ? input(1) : null, gm), (vis) => {
       (g.prims.add('visibility', 'float', 1).data as Float64Array).set(vis);
       reportVisibility(g, vis, gm, around, 'uv_layout', warn, stat);
       return run(visibilityScale(vis, weight));

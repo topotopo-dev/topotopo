@@ -888,5 +888,17 @@ section('a time bound: every measure on a mid-size model, rays per cloud point')
   check(ms0 < 20000, `cooked in ${(ms0 / 1000).toFixed(1)} s (< 20 s)`);
 }
 
+section('a bake_measure image is written to json and read back');
+{
+  const { geoToJSON, geoFromJSON } = await import('../src/io/json.ts');
+  const c = await cook({ box: { type: 'box' }, uv: { type: 'uv_project', in: ['box'] }, m: { type: 'bake_measure', in: ['uv'], params: { resolution: 64, measures: [{ by: 'facing', name: 'top' }] } } }, 'm');
+  const im = c.geo.volumes.find((v) => v.kind === 'image') as Image;
+  let back: Geometry | null = null, why = '';
+  try { back = geoFromJSON(JSON.parse(JSON.stringify(geoToJSON(c.geo)))); } catch (e: any) { why = e.message; }
+  const again = back?.volumes.find((v) => v.kind === 'image') as Image | undefined;
+  const same = (a?: ArrayLike<number>, b?: ArrayLike<number>) => !!a && !!b && a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => Object.is(v, b[i]));
+  check(!!again && same(im.layer('C'), again.layer('C')) && same(im.layer('top'), again.layer('top')), `C and the first measure's layer hold the same values and survive a json round trip${why ? ` (${why})` : ''}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

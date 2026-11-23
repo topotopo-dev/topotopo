@@ -2,11 +2,10 @@
 // streaks under a ledge), traced in 3D over edges and across uv seams, stopped by ledges, then stored per texel.
 // Algorithms: core/runs.ts. Rasterisation into uv space, padding and the layers work as in the other bakes (nodes/bake.ts).
 import { Image, MAIN_LAYER } from '../core/image.ts';
-import { bakeSamples, dilate, interpolate, normalize3, resolve, vertexPositions } from '../core/bake.ts';
+import { applyPadding, bakePadding, interpolate, memoBake, normalize3, resolveData, vertexPositions } from '../core/bake.ts';
 import type { Geometry } from '../core/geometry.ts';
 import { partsOf } from '../core/report.ts';
-import { markGutter } from '../core/texscale.ts';
-import { CREASE, FlowLimit, limits, MAX_RUNS, REF_WIDTH, TOUCH, rasterRuns, sampleSources, scales, traceRuns, triTexelSizes } from '../core/runs.ts';
+import { CREASE, FlowLimit, limits, MAX_RUNS, REF_WIDTH, RUN_RASTER_DEADLINE, TOUCH, rasterRuns, sampleSources, scales, traceRuns, triTexelSizes } from '../core/runs.ts';
 import type { FlowParams } from '../core/runs.ts';
 import { triangulate, vertexNormals } from '../core/topology.ts';
 import { defineNode } from '../graph/registry.ts';
@@ -14,8 +13,7 @@ import { NodeError } from '../graph/types.ts';
 import type { CookContext } from '../graph/types.ts';
 import { P, mask, simBudget } from './util.ts';
 import { bakedImageSize } from '../core/texelsize.ts';
-import { texelLayers } from './bake.ts';
-import type { Bake } from './bake.ts';
+import { bakeSampleIslands, bakedTexelLayers, setup } from './bake.ts';
 import { NAMED_BY_NODE, imageGeo, nameParam, outName, resolutionParam, size2 } from './texture.ts';
 
 /** Most samples a bake may rasterise (output texels × supersample²), as in the other bakes. */
@@ -24,20 +22,7 @@ const MAX_SAMPLES = 4096 * 4096;
 /** The names of source parts for a message: the first few, then a count. */
 const listNames = (names: string[], max = 6) => names.slice(0, max).join(', ') + (names.length > max ? `, … ${names.length - max} more` : '');
 
-function readUV(g: Geometry, name: string): Float64Array | null {
-  const f = g.findAttrib(name || 'uv', ['vertex', 'point']);
-  if (!f || f.attr.type !== 'float') return null;
-  const a = f.attr, d = a.data as Float64Array, s = a.size;
-  const out = new Float64Array(g.numVertices * 2);
-  for (let v = 0; v < g.numVertices; v++) {
-    const i = (f.cls === 'vertex' ? v : g.vertexPoint[v]) * s;
-    out[v * 2] = d[i];
-    out[v * 2 + 1] = s > 1 ? d[i + 1] : 0;
-  }
-  return out;
-}
-
-function cook(ctx: CookContext): Geometry {
+async function cook(ctx: CookContext): Promise<Geometry> {
   const { p, type } = ctx;
   const g = ctx.input(0);
   const [W, H] = size2(p, type);
@@ -45,10 +30,8 @@ function cook(ctx: CookContext): Geometry {
   if (W * H * S * S > MAX_SAMPLES) throw new NodeError(`${type}: ${W} × ${H} at supersample ${S} is ${(W * H * S * S).toLocaleString('en-US')} samples (at most ${MAX_SAMPLES.toLocaleString('en-US')})`, 'lower resolution or supersample');
   const dir = (p.direction as number[]).map(Number);
   if (!(Math.hypot(dir[0], dir[1], dir[2]) > 0)) throw new NodeError(`${type}: direction is the zero vector`, 'gravity as a vector, e.g. [0, -1, 0] (straight down)');
-  const { tris, triPrim } = triangulate(g);
-  if (!tris.length) throw new NodeError(`${type}: input 0 has no polygons to bake`, 'bakes need a mesh with uv (e.g. box → uv_unwrap → bake_flow)');
-  const uv = readUV(g, p.uv_attrib);
-  if (!uv) throw new NodeError(`${type}: input 0 has no "${p.uv_attrib || 'uv'}" attribute`, 'unwrap it first: uv_unwrap (xatlas), uv_flatten + uv_layout, or uv_project for simple shapes; islands must not overlap');
+  if (!triangulate(g).tris.length) throw new NodeError(`${type}: input 0 has no polygons to bake`, 'bakes need a mesh with uv (e.g. box → uv_unwrap → bake_flow)');
+  if (g.findAttrib(p.uv_attrib || 'uv', ['vertex', 'point'])?.attr.type !== 'float') throw new NodeError(`${type}: input 0 has no "${p.uv_attrib || 'uv'}" attribute`, 'unwrap it first: uv_unwrap (xatlas), uv_flatten + uv_layout, or uv_project for simple shapes; islands must not overlap');
 
   // sources: a prim group of input 0, else input 1 (points or a mesh)
   const pattern = String(p.sources ?? '').trim();
@@ -88,7 +71,9 @@ function cook(ctx: CookContext): Geometry {
     throw e;
   }
   const { runs, stats } = traced;
-  ctx.stat('trace_ms', Math.round(performance.now() - tTrace));
+  const traceMs = performance.now() - tTrace;
+  ctx.stat('trace_ms', Math.round(traceMs));
+  ctx.stage('trace', traceMs);
   const srcNames = pattern ? [...new Set(cands.names)] : ['input 1'];
   if (!stats.touching) ctx.warn(`${type}: no source part touches another surface within ${+(TOUCH * kw * 100).toPrecision(2)} cm (sources: ${listNames(srcNames)}); no runs`);
   else if (stats.touching === stats.ledgeRejected) ctx.warn(`${type}: every source part that touches a surface sits on a ledge (within ${p.ledge}° of flat) or under an overhang, where no run starts (sources: ${listNames(stats.touchingParts)}); no runs`);
@@ -107,16 +92,16 @@ function cook(ctx: CookContext): Geometry {
   ctx.stat('ended_lost', stats.ended.lost);
 
   // rasterise: per covered sample position, normal and size
-  const sel = mask(g, 'prim', p.group);
-  let skip: Uint8Array | null = null;
-  if (sel) { skip = new Uint8Array(triPrim.length); for (let t = 0; t < triPrim.length; t++) skip[t] = sel[triPrim[t]] ? 0 : 1; }
-  const s = bakeSamples(uv, tris, W, H, S, skip);
-  if (s.outside) ctx.warn(`${type}: ${s.outside} triangle(s) reach outside the 0..1 uv square (clipped; UDIM tiles are not baked)`);
-  if (!s.n) ctx.warn(`${type}: no texel is covered (uv collapsed or outside 0..1)`);
+  const tSamples = performance.now();
+  const b = setup(ctx);
+  const { s, tris, triPrim, uv, skip } = b;
   const pos = vertexPositions(g);
-  const SP = interpolate(s, tris, pos, 3);
-  const SN = interpolate(s, tris, vertexNormals(g, CREASE), 3);
-  normalize3(SN);
+  const SP = b.P;
+  const SN = memoBake(s, 'flow normals', () => {
+    const normal = interpolate(s, tris, vertexNormals(g, CREASE), 3);
+    normalize3(normal);
+    return normal;
+  });
   const triTau = triTexelSizes(pos, uv, tris, W, H);
   const fin: number[] = [];
   for (const t of triTau) if (t === t && t > 0) fin.push(t);
@@ -129,56 +114,70 @@ function cook(ctx: CookContext): Geometry {
   const C = new Float32Array(s.n), along = new Float32Array(s.n), head = new Float32Array(s.n), strength = new Float32Array(s.n), id = new Float32Array(s.n);
   const stainK = Math.max(0, Number(p.stain) || 0), stain = stainK > 0 ? new Float32Array(s.n) : undefined;
   // texel sizes and islands, as every bake writes them (the stain's lattice keeps to the islands)
-  const tl = texelLayers({ s, uv, tris, g } as unknown as Bake, pos);
   // the stain is smooth: drawn exactly on a lattice of samples a third of its narrowest half width apart, between them
   // interpolated
   const medTau = (() => { const t: number[] = []; for (let k = 0; k < s.n; k += Math.max(1, Math.floor(s.n / 4096))) t.push(tau[k]); t.sort((a, b) => a - b); return t[t.length >> 1] || 1; })();
   const latStep = Math.max(1, Math.min(8, Math.floor((stainK * 0.5 * Math.min(prm.width[0], prm.width[1])) / (3 * medTau))));
   // the narrowest stain sets the finest lattice; wider ones are drawn on coarser lattices (core/runs.ts rasterStain)
-  const stainLattice = stain ? { pix: s.pix, gw: W * S, gh: H * S, step: latStep, island: tl.island.vals, tau: medTau } : undefined;
+  const stainLattice = stain ? { pix: s.pix, gw: W * S, gh: H * S, step: latStep, island: bakeSampleIslands(b), tau: medTau } : undefined;
+  ctx.stage('samples', performance.now() - tSamples);
   const tRaster = performance.now();
-  try { rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, { check: () => budget.check(), stain: stainK, stainSkew: Math.max(0, Number(p.stain_skew) || 0), stainMaxHW: 0.75 * Math.max(prm.width[0], prm.width[1]), stainLattice }); } catch (e) {
+  try {
+    await rasterRuns(runs, { P: SP, N: SN, tau, skip: skipSamples }, prm.breakup, prm.seed, { C, along, head, strength, id, stain }, {
+      check: () => budget.check(), deadline: Date.now() + budget.left(), run: (job) => ctx.parallelMap('raster_runs', job),
+      stain: stainK, stainSkew: Math.max(0, Number(p.stain_skew) || 0), stainMaxHW: 0.75 * Math.max(prm.width[0], prm.width[1]), stainLattice,
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message.includes(RUN_RASTER_DEADLINE)) throw budget.error();
     if (e instanceof FlowLimit) throw new NodeError(`${type}: the runs cover too many texel cells (${e.count.toLocaleString('en-US')} registrations)`, 'lower pool or width, or density');
     throw e;
   }
 
-  ctx.stat('raster_ms', Math.round(performance.now() - tRaster));
+  const rasterMs = performance.now() - tRaster;
+  ctx.stat('raster_ms', Math.round(rasterMs));
+  ctx.stage('runs and stain', rasterMs);
   // layers: C, along, head, strength, id, mask. C and head are means over the texel's samples (an empty sample counts 0);
   // along, strength and id are those of the run that covers the texel most: never a mean with empty samples or other runs;
   // stain (when asked for) a mean as C
   const NL = stain ? 6 : 5, NM = stain ? 3 : 2;
-  const CH = new Float32Array(s.n * NM);
-  for (let k = 0; k < s.n; k++) { CH[k * NM] = C[k]; CH[k * NM + 1] = head[k]; if (stain) CH[k * NM + 2] = stain[k]; }
-  const first = resolve(s, CH, NM);
-  const bestK = new Int32Array(W * H).fill(-1), bestC = new Float32Array(W * H).fill(-1);
-  for (let k = 0; k < s.n; k++) { const t = s.texel[k]; if (C[k] > bestC[t]) { bestC[t] = C[k]; bestK[t] = k; } }
   const data = new Float32Array(W * H * NL);
-  for (let t = 0; t < W * H; t++) {
-    data[t * NL] = first.data[t * NM]; data[t * NL + 3] = first.data[t * NM + 1];
-    if (stain) data[t * NL + 5] = first.data[t * NM + 2];
-    const k = bestK[t];
-    if (k >= 0 && C[k] > 0) { data[t * NL + 1] = along[k]; data[t * NL + 2] = strength[k]; data[t * NL + 4] = id[k]; }
+  if (S === 1) {
+    for (let k = 0; k < s.n; k++) {
+      const o = s.texel[k] * NL;
+      data[o] = C[k]; data[o + 3] = head[k];
+      if (stain) data[o + 5] = stain[k];
+      if (C[k] > 0) { data[o + 1] = along[k]; data[o + 2] = strength[k]; data[o + 4] = id[k]; }
+    }
+  } else {
+    const CH = new Float32Array(s.n * NM);
+    for (let k = 0; k < s.n; k++) { CH[k * NM] = C[k]; CH[k * NM + 1] = head[k]; if (stain) CH[k * NM + 2] = stain[k]; }
+    const first = resolveData(s, CH, NM);
+    const bestK = new Int32Array(W * H).fill(-1), bestC = new Float32Array(W * H).fill(-1);
+    for (let k = 0; k < s.n; k++) { const t = s.texel[k]; if (C[k] > bestC[t]) { bestC[t] = C[k]; bestK[t] = k; } }
+    for (let t = 0; t < W * H; t++) {
+      data[t * NL] = first[t * NM]; data[t * NL + 3] = first[t * NM + 1];
+      if (stain) data[t * NL + 5] = first[t * NM + 2];
+      const k = bestK[t];
+      if (k >= 0 && C[k] > 0) { data[t * NL + 1] = along[k]; data[t * NL + 2] = strength[k]; data[t * NL + 4] = id[k]; }
+    }
   }
   const img = new Image(W, H, outName(ctx));
   img.setSize(bakedImageSize(pos, uv, tris, W, H, skip)); // as every bake
   const pad = Math.max(0, Math.round(p.padding));
-  dilate(data, NL, W, H, first.coverage, pad, new Array(NL).fill(0));
+  const { coverage, map, covered } = bakePadding(s, pad);
+  applyPadding(data, NL, map, new Array(NL).fill(0));
   // channel order in `data`: C, along, strength, head, id (, stain)
   ['C', 'along', 'strength', 'head', 'id', ...(stain ? ['stain'] : [])].forEach((name, c) => {
     const out = new Float32Array(W * H);
     for (let i = 0; i < out.length; i++) out[i] = data[i * NL + c];
     img.set(name === 'C' ? MAIN_LAYER : name, out);
   });
-  const T = resolve(s, tl.texel.vals, 4).data, I = resolve(s, tl.island.vals, 1).data;
-  dilate(T, 4, W, H, first.coverage, pad, tl.texel.background);
-  dilate(I, 1, W, H, first.coverage, pad, tl.island.background);
-  markGutter(I, first.coverage);
-  img.set('texel', T).set('island', I);
-  img.set('mask', first.coverage);
-  let covered = 0;
-  for (let i = 0; i < first.coverage.length; i++) if (first.coverage[i] > 0) covered++;
+  const shared = bakedTexelLayers(b, pad, coverage, map);
+  img.set('texel', shared.texel).set('island', shared.island);
+  img.set('mask', coverage);
   ctx.stat('texels', covered);
-  ctx.stat('coverage', covered / first.coverage.length);
+  ctx.stat('coverage', covered / coverage.length);
+  ctx.stage('image', performance.now() - tRaster - rasterMs);
   if (!p.keep_mesh) return imageGeo(img);
   const out = ctx.input(0).clone();
   out.volumes.push(img);
