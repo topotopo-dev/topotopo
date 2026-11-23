@@ -1,0 +1,146 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": ["chart:int:1", "material:string:1", "name:string:1", "visibility:float:1"],
+      "vertex": ["N:float:3", "uv:float:3", "uv_maps:float:3"]
+    },
+    "bbox": {
+      "max": [0.3245, 0.844, 0.1795],
+      "min": [-0.3245, 0, -0.156]
+    },
+    "counts": {
+      "points": 504,
+      "prims": 448,
+      "vertices": 1800,
+      "volumes": 4
+    },
+    "groups": {
+      "edge": ["bevel_edges"],
+      "point": [],
+      "prim": ["bevel", "bevel_corner", "handled"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "d3b962cd82277e87",
+      "attributes": {
+        "detail.materials": "df64decbe422fccd",
+        "group.edge.bevel_edges": "c324422843d384ae",
+        "group.prim.bevel": "30a25eb68a062358",
+        "group.prim.bevel_corner": "2bd1d26692280068",
+        "group.prim.handled": "6d1717dbb03c9f2d",
+        "prim.chart": "cfaa18dc7e1ce906",
+        "prim.material": "d624c9c52f0ffe1f",
+        "prim.name": "1637947d599f07e7",
+        "prim.visibility": "2ced5a4d5b4b48d7",
+        "vertex.N": "16f0efbc6b53ed2e",
+        "vertex.uv": "a29204eb37b54e81",
+        "vertex.uv_maps": "a29204eb37b54e81"
+      },
+      "topology": "4e6144279a9277b9"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "size": 1.575004,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "07d879bee7d31ab4",
+          "island": "8708622ee9703568",
+          "mask": "a570fec1be6a937b",
+          "texel": "523c8dedb33f7c33"
+        },
+        "name": "weathered_base_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "size": 1.575004,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "3d7e22e5db6e3e07",
+          "island": "8708622ee9703568",
+          "mask": "a570fec1be6a937b",
+          "texel": "523c8dedb33f7c33"
+        },
+        "name": "weathered_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "size": 1.575004,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "3d09d55294283cf4",
+          "island": "8708622ee9703568",
+          "mask": "a570fec1be6a937b",
+          "texel": "523c8dedb33f7c33"
+        },
+        "name": "weathered_orm"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "size": 1.575004,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "bare": "a0f003bb76e5b0a5",
+          "blotch": "c558b3db30450019",
+          "cavity": "192c65071a890185",
+          "chip": "a2e1a2be64e06040",
+          "core": "d5763d5f9c8d49c5",
+          "damp": "4c1d28d8d87d6af6",
+          "dust": "a5a5fb20cb001136",
+          "edge_wear": "0477ea6155b66d2b",
+          "fade": "1985749711e0b095",
+          "grain": "1ea3d2a8ac459246",
+          "grime": "c1246bff7c56d561",
+          "growth": "5f099181fd28b6fb",
+          "handled": "68ed8a5a0ccfdbd0",
+          "island": "8708622ee9703568",
+          "joints": "5f099181fd28b6fb",
+          "mask": "a570fec1be6a937b",
+          "occlusion": "7bfb3f35d6ea9333",
+          "runs_dirt": "9deacbaded19f17f",
+          "runs_rust": "31ca215fd66a7769",
+          "rust": "181e5c4a176c8850",
+          "splash": "5f099181fd28b6fb",
+          "streaks": "944e71b3ab4368fd",
+          "texel": "523c8dedb33f7c33"
+        },
+        "name": "weathered_masks"
+      }
+    ]
+  },
+  "name": "example.weathered_cabinet",
+  "ok": true,
+  "source": "examples/weathered_cabinet.json",
+  "warnings": []
+}

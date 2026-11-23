@@ -1,0 +1,116 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["materials:string:1"],
+      "point": ["P:float:3"],
+      "prim": [
+        "chart:int:1",
+        "island:int:1",
+        "material:string:1",
+        "name:string:1",
+        "visibility:float:1",
+        "wpart:float:1"
+      ],
+      "vertex": ["N:float:3", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.345, 0.5135, 0.23],
+      "min": [-0.345, 0, -0.23]
+    },
+    "counts": {
+      "points": 880,
+      "prims": 672,
+      "vertices": 3000,
+      "volumes": 3
+    },
+    "groups": {
+      "edge": ["bevel_edges"],
+      "point": [],
+      "prim": ["bevel", "bevel_corner", "handled"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "38194913d96170d9",
+      "attributes": {
+        "detail.materials": "df64decbe422fccd",
+        "group.edge.bevel_edges": "c324422843d384ae",
+        "group.prim.bevel": "3fc4ec9312a65171",
+        "group.prim.bevel_corner": "a8e95f8fadddd995",
+        "group.prim.handled": "5adbf592f38e01f0",
+        "prim.chart": "6409d148b8882cb2",
+        "prim.island": "6409d148b8882cb2",
+        "prim.material": "8aa0dfc5a30c3c9f",
+        "prim.name": "ebe7fea137bbb5a3",
+        "prim.visibility": "0516a33f961184bd",
+        "prim.wpart": "c056b495f3378f57",
+        "vertex.N": "5daca4021f3891e8",
+        "vertex.uv": "2f52e6273da2436d"
+      },
+      "topology": "eb4504d52d0f2453"
+    },
+    "volumes": [
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "size": 1.257543,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "7bc9b0c2ecb3a968",
+          "island": "88c75ed3bc957721",
+          "mask": "4685ad4cb61079ba",
+          "texel": "deef6188bf84c09a"
+        },
+        "name": "weathered_base_color"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "size": 1.257543,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "8ff6d9e19553cd4f",
+          "island": "88c75ed3bc957721",
+          "mask": "4685ad4cb61079ba",
+          "texel": "deef6188bf84c09a"
+        },
+        "name": "weathered_normal"
+      },
+      {
+        "bounds": {
+          "max": [],
+          "min": []
+        },
+        "image": {
+          "height": 512,
+          "size": 1.257543,
+          "width": 512
+        },
+        "kind": "image",
+        "layers": {
+          "C": "7bf1ab85e9352f03",
+          "island": "88c75ed3bc957721",
+          "mask": "4685ad4cb61079ba",
+          "texel": "deef6188bf84c09a"
+        },
+        "name": "weathered_orm"
+      }
+    ]
+  },
+  "name": "example.worn_machine",
+  "ok": true,
+  "source": "examples/worn_machine.json",
+  "warnings": []
+}

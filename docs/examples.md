@@ -210,6 +210,13 @@ A railing and pipes that follow a path: posts at even spacing, a handrail and pi
 - In: `path_length`, `corner_radius`, `post_spacing`, `rail_height`, `pipes`, `pipe_radius`, `seed`
 - Out: `railing` (mesh), `pipes` (mesh), `path` (curves)
 
+### [Rusty drum](../examples/rusty_drum.md) (`rusty_drum`)
+
+A steel drum left standing outside on the ground for years: faded paint, rust at the rims, rain marks and a muddy splash line.
+
+- In: `wear`, `dirt`, `rust`, `age`, `resolution`, `seed`
+- Out: `drum` (mesh)
+
 ### [Sci-fi panel](../examples/scifi_panel.md) (`scifi_panel`)
 
 A sci-fi wall panel for a game level: a framed plate broken into recessed sections, with vents, pipes and small greebles, that tiles side by side.
@@ -251,3 +258,17 @@ A landscape for Unreal Engine: an eroded terrain sized to fit an Unreal Landscap
 
 - In: `samples`, `spacing`, `height`, `tree_density`, `rock_density`, `road`, `seed`
 - Out: `landscape` (terrain), `trees` (instances), `rocks` (instances), `road` (mesh), `level` (scene)
+
+### [Weathered cabinet](../examples/weathered_cabinet.md) (`weathered_cabinet`)
+
+A metal utility cabinet that has hung on an outside wall for years: chipped paint, rust runs, grime and dust.
+
+- In: `wear`, `dirt`, `rust`, `age`, `exposure`, `resolution`, `seed`
+- Out: `cabinet` (mesh), `masks` (textures)
+
+### [Worn machine](../examples/worn_machine.md) (`worn_machine`)
+
+A small workshop machine indoors: worn paint where hands and tools touch it, oily grime in the corners, dust on top; no rain and no rust runs.
+
+- In: `wear`, `dirt`, `age`, `resolution`, `seed`
+- Out: `machine` (mesh), `masks` (textures)
