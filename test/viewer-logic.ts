@@ -1358,6 +1358,18 @@ section('the tab\'s title, the welcome, and messages that clear themselves (sect
     'a message clears itself: 6 s, an error 12 s, longer when held');
   check(status.messageLife('exporting crate…', 'busy') === Infinity && status.messageLife(status.DISCONNECTED_LINE, 'err') === Infinity && status.messageLife('', 'err') === 0,
     'work in progress stays until its result replaces it; so does the disconnected line, until the page reconnects');
+  const reopen = 'http://127.0.0.1:7340/p/parts/crate/edit';
+  const offline = status.disconnectedNotice(reopen), standalone = status.disconnectedNotice(null);
+  check(offline.text === 'The editor is not answering. It stops by itself 10 minutes after its last tab is closed.'
+    && offline.links.length === 1 && offline.links[0].text === 'Open it again' && offline.links[0].href === reopen,
+    'an editor started by the web app explains its idle stop and offers to open it again');
+  check(standalone.text === 'the viewer server is not answering (stopped?): this page reconnects when it runs again'
+    && standalone.links.length === 0, 'a standalone viewer keeps its disconnected line');
+  const other = status.otherPackageNotice('Crate', 'Shelf', reopen);
+  check(other.text === 'This tab was for Crate. The editor at this address now shows Shelf.'
+    && JSON.stringify(other.links) === JSON.stringify([{ text: 'Open Crate again', href: reopen }, { text: 'Show Shelf', href: null }])
+    && status.otherPackageNotice('Crate', 'Shelf', null).links.length === 1,
+    'the other-package line names both packages and offers only the available actions');
 }
 
 section('output cards: what an output is, its formats and downloads');

@@ -6,6 +6,20 @@ export const DISCONNECTED_LINE = 'the viewer server is not answering (stopped?):
 /** When the event stream comes back. */
 export const RECONNECTED_LINE = 'connected again';
 
+export function disconnectedNotice(reopen) {
+  return reopen ? {
+    text: 'The editor is not answering. It stops by itself 10 minutes after its last tab is closed.',
+    links: [{ text: 'Open it again', href: reopen }],
+  } : { text: DISCONNECTED_LINE, links: [] };
+}
+
+export function otherPackageNotice(title, other, reopen) {
+  const links = [];
+  if (reopen) links.push({ text: `Open ${title} again`, href: reopen });
+  links.push({ text: `Show ${other}`, href: null });
+  return { text: `This tab was for ${title}. The editor at this address now shows ${other}.`, links };
+}
+
 /**
  * How long a message stays (ms), Infinity until another replaces it: an error 12 s, work in progress ("busy") until its
  * result replaces it, the disconnected line until the page reconnects, others 6 s; `hold` makes it at least that long.

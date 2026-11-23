@@ -36,6 +36,7 @@ import { sha256Hex } from '../src/core/sha256.ts';
 import { CACHE_MAX_BYTES } from '../src/host/cook.ts';
 import { NODE_CACHE_MAX_BYTES } from '../src/host/diskcache.ts';
 import { TOPOTOPO_VERSION, isNewerVersion } from '../src/host/version.ts';
+import { editCommand, editorIdleTick } from '../src/packages/commands.ts';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-web-'));
 // a config of its own: the libraries registered on this machine play no part
@@ -268,6 +269,67 @@ try {
       const editorGone = async () => { try { await fetch(url, { signal: AbortSignal.timeout(1000) }); return false; } catch { return true; } };
       check(stop.status === 200 && await until(() => stopped, 25_000) && !!url && await editorGone(), 'stopping the web app waits for the editor to exit and closes its port');
     } finally { web.close(); }
+  }
+
+  section('an editor stops by itself when no page is open');
+  {
+    const expired = { clients: 0, busy: false, idleSince: 0, now: 6000, lastTick: 4500, interval: 1500, limit: 6000 };
+    const working = editorIdleTick({ ...expired, busy: true });
+    check(!working.stop && working.idleSince === 0 && editorIdleTick(expired).stop,
+      'an export or cook keeps an idle editor open, and the next free tick can stop it');
+    const woke = editorIdleTick({ ...expired, now: 60_000 });
+    check(!woke.stop && woke.idleSince === 60_000, 'a late tick gives a sleeping editor a fresh idle window');
+    check(!editorIdleTick({ ...expired, idleSince: woke.idleSince, now: 61_500, lastTick: 60_000 }).stop,
+      'the tick after waking keeps the editor open for the new idle window');
+
+    const savedIdle = process.env.TOPOTOPO_EDITOR_IDLE_MS, idleMs = 6000;
+    let web: WebServer | undefined, stream: http.ClientRequest | undefined;
+    try {
+      process.env.TOPOTOPO_EDITOR_IDLE_MS = '0';
+      let error = '';
+      check(await editCommand(['--json'], 'topotopo', { out: () => {}, err: (s) => { error = s; } }) === 1
+        && error.includes('TOPOTOPO_EDITOR_IDLE_MS must be a positive number of milliseconds'), 'an invalid idle limit fails the editor start');
+      process.env.TOPOTOPO_EDITOR_IDLE_MS = String(idleMs);
+      const idleLib = { name: 'idle', path: path.join(tmp, 'idle-lib') };
+      const pkg = createPackage(idleLib, 'idle-box', { title: 'Idle box', graph: BOX });
+      const app = web = await startWeb({ config: { ...cfg, libraries: [idleLib], workspaces: [] }, port: 0, bake: false });
+      const get = (p: string) => reqAt(app.port, p);
+      const edit = `/p/idle/${pkg.id}/edit`, reopen = new URL(edit, app.url).href;
+      const open = async () => {
+        const page = await get(edit);
+        let url = page.headers.location;
+        if (!await until(async () => {
+          url ||= JSON.parse((await get(`${edit}?wait=1`)).body.toString()).url;
+          return !!url;
+        }, 60_000)) throw new Error('the idle editor did not start');
+        return url!;
+      };
+      const running = async () => JSON.parse((await get('/api/status')).body.toString()).editors.some((e: { package: string }) => e.package === 'Idle box');
+      const info = async (url: string) => JSON.parse((await reqAt(Number(new URL(url).port), '/api/package')).body.toString());
+      const first = await open();
+      let connected = false;
+      stream = http.get(new URL('/api/events', first), (res) => {
+        connected = res.statusCode === 200 && res.headers['content-type'] === 'text/event-stream';
+        res.resume();
+      });
+      stream.on('error', () => {});
+      check(await until(() => connected, 30_000), 'a page connects to the idle editor');
+      const before = await info(first);
+      check(before.reopen === reopen && typeof before.instanceId === 'string' && before.instanceId.length > 0,
+        'the editor gives its page the absolute edit address and its instance id');
+      await sleep(idleMs + 1500);
+      check(await running(), 'the editor stays open past the idle limit while a page is connected');
+      stream.destroy();
+      check(await until(async () => !await running(), 45_000), 'the editor stops after its last page closes');
+      const after = await info(await open());
+      check(after.reopen === reopen && typeof after.instanceId === 'string' && after.instanceId !== before.instanceId,
+        'visiting the edit address again starts a new editor');
+    } finally {
+      stream?.destroy();
+      web?.close();
+      if (savedIdle === undefined) delete process.env.TOPOTOPO_EDITOR_IDLE_MS;
+      else process.env.TOPOTOPO_EDITOR_IDLE_MS = savedIdle;
+    }
   }
 
   section('published copies');
