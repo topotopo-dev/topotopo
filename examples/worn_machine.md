@@ -22,4 +22,4 @@ A small workshop machine indoors: worn paint where hands and tools touch it, oil
 A green-grey machine with bright worn metal on the handle and lever edges, dark glossy grime in the corners and around the motor, a grey dust film on top, no streaks.
 
 ## Cook
-Up to 6 s: it bakes rays for the weathering masks at 512 pixels (4.0 s cold).
+Up to 8 s: it bakes rays for the weathering masks at 512 pixels (about 3.8 s cold).

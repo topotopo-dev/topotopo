@@ -24,4 +24,4 @@ A metal utility cabinet that has hung on an outside wall for years: chipped pain
 A pale grey cabinet with chipped edges showing grey primer and bare steel near the latch and hinges, orange rust runs below the hinges and bolts, grey rain marks under the louvres, dust on the top against the wall, darker grime in the seams.
 
 ## Cook
-Up to 6 s: it bakes rays for the weathering masks at 512 pixels (5.1 s cold).
+Up to 8 s: it bakes rays for the weathering masks at 512 pixels (about 4.5 s cold).

@@ -22,4 +22,4 @@ A steel drum left standing outside on the ground for years: faded paint, rust at
 A blue drum, paint chalky on top and on the sunny side, rust along the rolling hoops and the rims, water marks and a brown pool stain on the lid, a ragged band of mud splash around the foot.
 
 ## Cook
-Up to 6 s: it bakes rays for the weathering masks and a lid stain at 512 pixels (4.3 s cold).
+Up to 8 s: it bakes rays for the weathering masks and a lid stain at 512 pixels (about 3.6 s cold).
