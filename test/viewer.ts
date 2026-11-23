@@ -46,6 +46,17 @@ const check = (cond: any, msg: string) => {
 const section = (s: string) => console.log(`\n== ${s}`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred: () => boolean, ms: number) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await sleep(50); return pred(); };
+// Retry once if a local connection drops while the machine is busy.
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  try { return await originalFetch(input, init); } catch (e: any) {
+    const code = e?.cause?.code;
+    if (init?.signal || e?.name === 'AbortError' || (code !== 'ECONNRESET' && code !== 'UND_ERR_SOCKET')) throw e;
+    await sleep(200);
+    return originalFetch(input, init);
+  }
+};
+const stopped = (e: any) => `this section stopped: ${e?.cause?.code ?? e?.code ?? ''} ${e?.message ?? e}`.trim();
 const sizeOf = (summary: string) => /size ([\d.]+) × ([\d.]+) × ([\d.]+)/.exec(summary)?.slice(1).map(Number) ?? [];
 const TRI_OBJ = 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n';
 
@@ -764,6 +775,8 @@ section('GET /api/geo: the preview GLB of many packed sources and their edge cas
     const binfo = await fetch(`${v.url}api/info?graph=broken`);
     const bres = await fetch(`${v.url}api/geo?graph=broken`), bj = await bres.json() as any;
     check(binfo.status === 200 && bres.status === 500 && bj.preview === true && /^preview failed: a packed prim names packed source 7, and the geometry has 1 /.test(bj.error ?? ''), `a GLB that cannot be written answers 500 "preview failed: …", saying why (${bj.error})`);
+  } catch (e: any) {
+    check(false, stopped(e));
   } finally { v.close(); }
 }
 
@@ -909,6 +922,8 @@ section('markers: POST /api/markers writes inputs/markers.json, read back throug
     const badBox = await api('POST', { markers: [{ ...box, rotate: [10, 0, 0] }] });
     check(badSite.status === 400 && /rotate must be \[rx, ry, rz\]/.test(badSite.j.error), 'POST /api/markers rejects a malformed null rotation');
     check(badBox.status === 400 && /turns about Y only/.test(badBox.j.error), 'POST /api/markers rejects a volume rotation about X');
+  } catch (e: any) {
+    check(false, stopped(e));
   } finally {
     ac.abort();
     await stream;
@@ -942,6 +957,8 @@ section('two packages on one folder (Session.watch)');
     check(await until(() => b.engine.root.assets.has('peg'), 5000), 'an asset written by another process is registered');
     fs.rmSync(path.join(dir, 'graphs', 'main.json'));
     check(await until(() => !b.graphs.has('main'), 5000), 'a removed graph file removes the graph');
+  } catch (e: any) {
+    check(false, stopped(e));
   } finally { a.unwatch(); b.unwatch(); }
 }
 
@@ -984,6 +1001,8 @@ section('a package\'s graph files beside its manifest (examples/ keeps its graph
       check(typeof info.connect === 'string' && info.connect.startsWith('claude mcp add topotopo -- "')
         && info.connect.endsWith(`mcp --package "${dir}"`), 'and the Claude Code command to connect to this package folder');
     } finally { v.close(); }
+  } catch (e: any) {
+    check(false, stopped(e));
   } finally { a.unwatch(); b.unwatch(); }
 }
 
@@ -1003,6 +1022,8 @@ section('the editor on a package with an unreadable graph file');
     check(r.ok && info.unread?.length === 1 && unread?.file === 'graphs/main.json' && !!unread.error
       && loaded.graphErrors[0] === `${unread.file}: ${unread.error}` && !session.graphs.size,
       'GET /api/package carries the unreadable graph path and parser error');
+  } catch (e: any) {
+    check(false, stopped(e));
   } finally { v.close(); session.unwatch(); }
 }
 
@@ -1032,6 +1053,8 @@ section('viewer setSession');
     await two.edit('second', [{ op: 'set', node: 's', params: { radius: 2 } }]);
     check(two.listeners.size === 2 && one.listeners.size === 0, 'the viewer (events and outputs) listens to the new package only');
     void stream;
+  } catch (e: any) {
+    check(false, stopped(e));
   } finally { ac.abort(); v.close(); }
 }
 

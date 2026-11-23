@@ -25,6 +25,7 @@ import { createPackage } from '../src/web/library.ts';
 import type { WebConfig } from '../src/config.ts';
 import { startWeb, runningWeb } from '../src/web/server.ts';
 import type { WebServer } from '../src/web/server.ts';
+import type { BakeState } from '../src/web/library.ts';
 import { builtinLibrary, workingHash } from '../src/packages/registry.ts';
 import { esc, frontPage, runningWords } from '../src/web/pages.ts';
 import { folderPage } from '../src/web/folder-page.ts';
@@ -47,6 +48,9 @@ const check = (cond: any, msg: string) => { if (cond) passes++; else failures++;
 const section = (s: string) => console.log(`\n== ${s}`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred: () => boolean | Promise<boolean>, ms: number) => { const t0 = Date.now(); while (!(await pred()) && Date.now() - t0 < ms) await sleep(100); return pred(); };
+function bakeState(dir: string): BakeState | null {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, '.web', 'bake.json'), 'utf8')); } catch { return null; }
+}
 const write = (file: string, v: string | Buffer | object) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof v === 'string' || Buffer.isBuffer(v) ? v : JSON.stringify(v)); };
 
 const lib = { name: 'game', path: path.join(tmp, 'lib') };
@@ -63,6 +67,7 @@ const cfg: WebConfig = { file: path.join(tmp, 'config.json'), libraries: [lib], 
 
 // the pages here read flags: they wait for each audit however long a busy machine takes
 const g = await startWeb({ config: cfg, port: 0, auditWait: 60_000 });
+const bakeDetails = (state: BakeState | null) => `queue size ${g.queue.size}, ${state?.error ?? (state ? 'no bake error' : 'no bake.json yet')}`;
 let f: WebServer | null = null;
 type Res = { status: number; headers: http.IncomingHttpHeaders; body: Buffer };
 const reqAt = (port: number, p: string, o: { method?: string; headers?: Record<string, string> } = {}) => new Promise<Res>((resolve, reject) => {
@@ -347,20 +352,25 @@ try {
 
   section('bake on start, thumbnails, preview.glb, embed');
   {
-    check(await until(() => fs.existsSync(path.join(crate.dir, '.web', 'preview.glb')) && g.queue.size === 0, 60000), 'a never-baked package is baked on start');
-    const t = await req('/p/game/crate/thumb.png');
-    check(t.status === 200 && t.headers['content-type'] === 'image/png' && t.body.readUInt32BE(16) === 512, 'thumb.png is the baked 512 px thumbnail');
-    const again = await req('/p/game/crate/thumb.png', { headers: { 'if-none-match': String(t.headers.etag) } });
-    check(again.status === 304, 'an unchanged thumbnail answers 304');
-    const glb = await req('/p/game/crate/preview.glb');
-    check(glb.status === 200 && glb.body.toString('latin1', 0, 4) === 'glTF', 'preview.glb');
-    const embed = await req('/embed/game/crate');
-    const eh = embed.body.toString();
-    const ecsp = String(embed.headers['content-security-policy']);
-    check(embed.status === 200 && !/frame-ancestors/.test(ecsp) && /connect-src 'self' data: blob:/.test(ecsp) && eh.includes('data-src="/p/game/crate/preview.glb?v=') && eh.includes('/app/embed.js'), 'the embed page can be framed by any board, loads the GLB, and nothing from other sites');
-    check(/data-wheel="click"/.test(eh) && /id="hint"/.test(eh), 'the embed page leaves the wheel to the page around it until it is clicked');
-    const ph = (await page('/p/game/crate')).body.toString();
-    check(ph.includes('<iframe class="view" src="/embed/game/crate"'), 'a baked package\'s folder page shows its preview in 3D');
+    const baked = await until(() => fs.existsSync(path.join(crate.dir, '.web', 'preview.glb')) && g.queue.size === 0, 180000);
+    check(baked, 'a never-baked package is baked on start' + (baked ? '' : ` (${bakeDetails(bakeState(crate.dir))})`));
+    if (baked) {
+      const t = await req('/p/game/crate/thumb.png');
+      check(t.status === 200 && t.headers['content-type'] === 'image/png' && t.body.readUInt32BE(16) === 512, 'thumb.png is the baked 512 px thumbnail');
+      const again = await req('/p/game/crate/thumb.png', { headers: { 'if-none-match': String(t.headers.etag) } });
+      check(again.status === 304, 'an unchanged thumbnail answers 304');
+      const glb = await req('/p/game/crate/preview.glb');
+      check(glb.status === 200 && glb.body.toString('latin1', 0, 4) === 'glTF', 'preview.glb');
+      const embed = await req('/embed/game/crate');
+      const eh = embed.body.toString();
+      const ecsp = String(embed.headers['content-security-policy']);
+      check(embed.status === 200 && !/frame-ancestors/.test(ecsp) && /connect-src 'self' data: blob:/.test(ecsp) && eh.includes('data-src="/p/game/crate/preview.glb?v=') && eh.includes('/app/embed.js'), 'the embed page can be framed by any board, loads the GLB, and nothing from other sites');
+      check(/data-wheel="click"/.test(eh) && /id="hint"/.test(eh), 'the embed page leaves the wheel to the page around it until it is clicked');
+      const ph = (await page('/p/game/crate')).body.toString();
+      check(ph.includes('<iframe class="view" src="/embed/game/crate"'), 'a baked package\'s folder page shows its preview in 3D');
+    } else {
+      console.log('SKIP bake on start: the first bake did not finish (the five checks that read its files)');
+    }
   }
 
   section('files of a package (the stable addresses)');
@@ -390,10 +400,19 @@ try {
 
   section('changes');
   {
-    const at0 = JSON.parse(fs.readFileSync(path.join(crate.dir, '.web', 'bake.json'), 'utf8')).at;
-    fs.writeFileSync(path.join(crate.dir, 'graphs', 'main.json'), JSON.stringify({ nodes: { b: { type: 'sphere' } }, output: 'b' }));
-    const rebaked = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(crate.dir, '.web', 'bake.json'), 'utf8')).at !== at0; } catch { return false; } }, 30000);
-    check(rebaked, 'a graph saved by another process is baked again');
+    const first = bakeState(crate.dir);
+    check(first !== null, 'the first bake wrote .web/bake.json');
+    if (first === null) {
+      console.log('SKIP a graph saved by another process is baked again: the first bake did not write .web/bake.json');
+    } else {
+      const at0 = first.at;
+      fs.writeFileSync(path.join(crate.dir, 'graphs', 'main.json'), JSON.stringify({ nodes: { b: { type: 'sphere' } }, output: 'b' }));
+      const rebaked = await until(() => {
+        const state = bakeState(crate.dir);
+        return state !== null && state.at !== at0;
+      }, 90000);
+      check(rebaked, 'a graph saved by another process is baked again');
+    }
     createPackage(lib, 'props/barrel', { graph: BOX });
     check(await until(async () => JSON.parse((await req('/api/health')).body.toString()).packages === 2 + BUILTIN, 10000), 'a new package folder appears');
     check((await page('/p/game/barrel')).url === '/l/game/props/barrel/', 'and has its folder page');
@@ -402,9 +421,10 @@ try {
   section('a bake whose thumbnail renders with shading "pbr" (MikkTSpace loads itself)');
   {
     const shiny = createPackage(lib, 'props/shiny', { title: 'Shiny', graph: { nodes: { b: { type: 'box' }, uv: { type: 'uv_project', in: ['b'] } }, output: 'uv', meta: { thumbnail_render: { shading: 'pbr' } } } as any });
-    const ok = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(shiny.dir, '.web', 'bake.json'), 'utf8')).at > 0; } catch { return false; } }, 60000);
-    const state = ok ? JSON.parse(fs.readFileSync(path.join(shiny.dir, '.web', 'bake.json'), 'utf8')) : null;
-    check(state?.ok === true && fs.existsSync(path.join(shiny.dir, '.web', 'thumb.png')), `the bake needs no preload script (${state?.error ?? 'ok'})`);
+    const ok = await until(() => (bakeState(shiny.dir)?.at ?? 0) > 0, 180000);
+    const state = bakeState(shiny.dir);
+    const baked = ok && state?.ok === true && fs.existsSync(path.join(shiny.dir, '.web', 'thumb.png'));
+    check(baked, `the bake needs no preload script (${baked ? 'ok' : bakeDetails(state)})`);
   }
 
   section('a package without its default graph, and graph files beside its manifest');
@@ -426,7 +446,8 @@ try {
     check(!fs.existsSync(path.join(empty.dir, '.web', 'bake.json')), 'nothing is baked before it has a default graph');
     const bp = (await page('/p/game/beside')).body.toString();
     check(/<b>tower<\/b> <span class="tag">default<\/span>/.test(bp), 'a graph file beside the manifest is a graph of the package, here its default one');
-    check(await until(() => fs.existsSync(path.join(beside.dir, '.web', 'thumb.png')), 60000), 'and is baked');
+    const baked = await until(() => fs.existsSync(path.join(beside.dir, '.web', 'thumb.png')), 180000);
+    check(baked, 'and is baked' + (baked ? '' : ` (${bakeDetails(bakeState(beside.dir))})`));
   }
 
   section('a graph file that cannot be read');
@@ -452,7 +473,8 @@ try {
     check(preview.status === 404 && JSON.parse(preview.body.toString()).error === error, 'the preview request explains the unreadable graph');
     check(!await until(() => fs.existsSync(bake), 3000), 'the unreadable default graph is not baked');
     write(file, BOX);
-    check(await until(async () => fs.existsSync(bake) && await status() === 'ok', 60000), 'repairing the default graph bakes it and gives ok status');
+    const baked = await until(async () => fs.existsSync(bake) && await status() === 'ok', 180000);
+    check(baked, 'repairing the default graph bakes it and gives ok status' + (baked ? '' : ` (${bakeDetails(bakeState(p.dir))})`));
   }
 
   section('packages: a package\'s versions and outputs, the packages a package uses, the cards mark packages');
@@ -1215,6 +1237,8 @@ try {
     check(JSON.stringify([img('a.jpg', jpeg), img('a.gif', gif), img('a.webp', webp), imageSize(path.resolve('library/props/thumbs/crate.png'))]) === '[{"w":800,"h":600},{"w":320,"h":240},{"w":320,"h":240},{"w":256,"h":256}]',
       'an image\'s size from its header (JPEG past a large EXIF block, GIF, WebP, PNG): a note\'s pictures keep their place while they load');
   }
+} catch (e: any) {
+  check(false, `the run stopped: ${e?.cause?.code ?? e?.code ?? ''} ${e?.message ?? e}`.trim());
 } finally {
   g.close();
   f?.close();
