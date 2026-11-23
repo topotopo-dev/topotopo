@@ -46,9 +46,9 @@ async function writePlacementFiles() {
 }
 
 const examples = new Set(readExamples().map((example) => example.name));
-const exampleOnly = ['clean_asset_pipeline', 'street_from_packages'];
+const exampleOnly = ['clean_asset_pipeline', 'weather_a_prop', 'street_from_packages'];
 check(new Set(RECIPES.map((recipe) => recipe.name)).size === RECIPES.length, 'recipe names are unique');
-check(isDeepStrictEqual(RECIPES.filter((recipe) => !recipe.graph).map((recipe) => recipe.name), exampleOnly), 'only the two full examples have no inline graph');
+check(isDeepStrictEqual(RECIPES.filter((recipe) => !recipe.graph).map((recipe) => recipe.name), exampleOnly), 'only the three full examples have no inline graph');
 for (const { name, title, in: inputs, out, graph, example } of RECIPES) {
   check(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(name), `${name}: name is in snake_case`);
   for (const [label, line] of Object.entries({ title, in: inputs, out })) {

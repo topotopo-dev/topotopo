@@ -296,6 +296,14 @@ export const RECIPES: Recipe[] = [
     ],
   },
   {
+    name: 'weather_a_prop',
+    title: 'Weather a prop',
+    in: 'A UV-mapped prop with a kind for each material, plus wear, dirt, rust, age and exposure',
+    out: 'A weathered mesh with one material, colour, normal and ORM maps, and named weathering masks',
+    example: 'weathered_cabinet',
+    notes: ['See worn_machine for the same weathering building blocks wired directly, with an oil stain under the motor.'],
+  },
+  {
     name: 'street_from_packages',
     title: 'Street from packages',
     in: 'Nothing to read; the street\'s length and width, the houses\' size, the lamp spacing and the park\'s density',

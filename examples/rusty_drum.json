@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "description": "A blue steel drum with a recessed lid, two rolling hoops and folded steel rims. A position bake and seeded noise place the pool stain on the lid. The ground mount adds mud around the foot.",
+  "params": {
+    "wear": {"type": "float", "default": 0.5, "min": 0, "max": 1, "step": 0.05, "label": "wear", "desc": "chipped and worn paint"},
+    "dirt": {"type": "float", "default": 0.5, "min": 0, "max": 1, "step": 0.05, "label": "dirt", "desc": "grime and dust"},
+    "rust": {"type": "float", "default": 0.5, "min": 0, "max": 1, "step": 0.05, "label": "rust", "desc": "rust on the steel"},
+    "age": {"type": "float", "default": 0.5, "min": 0, "max": 1, "step": 0.05, "label": "age", "desc": "how long the surface has been exposed"},
+    "resolution": {"type": "enum", "options": [256, 512, 1024], "default": 512, "label": "resolution", "desc": "pixels along each side of the maps"},
+    "seed": {"type": "int", "default": 1, "min": 0, "max": 9999, "label": "seed", "desc": "changes where the marks appear"}
+  },
+  "vars": {"wear": 0.5, "dirt": 0.5, "rust": 0.5, "age": 0.5, "resolution": 512, "seed": 1},
+  "meta": {"render": {"views": ["persp"], "azimuth": 24, "elevation": 31, "size": "880x900", "shading": "pbr", "textures": true, "grid": false, "view_labels": false, "footer": false}},
+  "nodes": {
+    "shell_profile": {"type": "curve", "params": {"points": [[0, 0.018, 0], [0.272, 0.018, 0], [0.286, 0.066, 0], [0.286, 0.815, 0], [0.272, 0.868, 0], [0, 0.868, 0]]}},
+    "shell_shape": {"type": "revolve", "in": ["shell_profile"], "params": {"segments": 40}},
+    "shell": {"type": "attrib_create", "in": ["shell_shape"], "params": {"name": "name", "class": "prim", "value": "shell"}},
+    "bottom_rim_profile": {"type": "curve", "params": {"points": [[0.274, 0.007, 0], [0.279, 0, 0], [0.291, 0, 0], [0.298, 0.007, 0], [0.298, 0.021, 0], [0.29, 0.031, 0], [0.275, 0.027, 0]], "closed": true}},
+    "bottom_rim_shape": {"type": "revolve", "in": ["bottom_rim_profile"], "params": {"segments": 28}},
+    "bottom_rim": {"type": "attrib_create", "in": ["bottom_rim_shape"], "params": {"name": "name", "class": "prim", "value": "bottom_rim"}},
+    "top_rim_profile": {"type": "curve", "params": {"points": [[0.273, 0.866, 0], [0.274, 0.883, 0], [0.282, 0.893, 0], [0.294, 0.893, 0], [0.301, 0.886, 0], [0.301, 0.869, 0], [0.29, 0.858, 0]], "closed": true}},
+    "top_rim_shape": {"type": "revolve", "in": ["top_rim_profile"], "params": {"segments": 28}},
+    "top_rim": {"type": "attrib_create", "in": ["top_rim_shape"], "params": {"name": "name", "class": "prim", "value": "top_rim"}},
+    "lower_hoop_profile": {"type": "curve", "params": {"points": [[0.285, 0.244, 0], [0.298, 0.253, 0], [0.306, 0.264, 0], [0.306, 0.289, 0], [0.3, 0.299, 0], [0.285, 0.31, 0]], "closed": true}},
+    "lower_hoop_shape": {"type": "revolve", "in": ["lower_hoop_profile"], "params": {"segments": 28}},
+    "lower_hoop": {"type": "attrib_create", "in": ["lower_hoop_shape"], "params": {"name": "name", "class": "prim", "value": "lower_hoop"}},
+    "upper_hoop_profile": {"type": "curve", "params": {"points": [[0.285, 0.562, 0], [0.298, 0.571, 0], [0.306, 0.582, 0], [0.306, 0.607, 0], [0.3, 0.617, 0], [0.285, 0.628, 0]], "closed": true}},
+    "upper_hoop_shape": {"type": "revolve", "in": ["upper_hoop_profile"], "params": {"segments": 28}},
+    "upper_hoop": {"type": "attrib_create", "in": ["upper_hoop_shape"], "params": {"name": "name", "class": "prim", "value": "upper_hoop"}},
+    "fill_bung_shape": {"type": "tube", "params": {"axis": "y", "radius": 0.033, "height": 0.016, "center": [0.124, 0.875, -0.114], "cols": 12}},
+    "fill_bung": {"type": "attrib_create", "in": ["fill_bung_shape"], "params": {"name": "name", "class": "prim", "value": "fill_bung"}},
+    "vent_bung_shape": {"type": "tube", "params": {"axis": "y", "radius": 0.018, "height": 0.014, "center": [-0.133, 0.874, 0.082], "cols": 8}},
+    "vent_bung": {"type": "attrib_create", "in": ["vent_bung_shape"], "params": {"name": "name", "class": "prim", "value": "vent_bung"}},
+    "prop_parts": {"type": "merge", "in": ["shell", "bottom_rim", "top_rim", "lower_hoop", "upper_hoop", "fill_bung", "vent_bung"]},
+    "blue_enamel": {"type": "material", "in": ["prop_parts"], "params": {"name": "blue_enamel", "base_color": "#28679a", "roughness": 0.46, "metallic": 0, "kind": "painted_metal"}},
+    "hoops_and_rims": {"type": "material", "in": ["blue_enamel"], "params": {"name": "hoops_and_rims", "group": "@name=*_rim @name=*_hoop", "base_color": "#446b85", "roughness": 0.52, "metallic": 0.28, "kind": "painted_metal"}},
+    "bungs": {"type": "material", "in": ["hoops_and_rims"], "params": {"name": "bungs", "group": "@name=*_bung", "base_color": "#777268", "roughness": 0.58, "metallic": 0.7, "kind": "bare_steel"}},
+    "normals": {"type": "normal", "in": ["bungs"], "params": {"class": "vertex", "cusp_angle": 45}},
+    "unwrap": {"type": "uv_unwrap", "in": ["normals"], "params": {"resolution": 512, "padding": 7, "iterations": 1}},
+    "surface_position": {"type": "bake_position", "in": ["unwrap"], "params": {"resolution": "=resolution", "padding": 0, "name": "position", "mode": "world", "group": "@P.y>0.85"}},
+    "lid_noise": {"type": "bake_measure", "in": ["unwrap"], "params": {"resolution": "=resolution", "padding": 0, "name": "lid_noise", "seed": "=seed", "group": "@P.y>0.85", "measures": [{"by": "noise", "name": "edge", "size": [0.055, 0.055, 0.055], "octaves": 2}]}},
+    "water_marks": {"type": "tex_layers", "in": ["surface_position", "lid_noise"], "params": {
+      "name": "water",
+      "outputs": "masks",
+      "padding": 3,
+      "base_roughness": 1,
+      "base_metallic": 0,
+      "masks": [
+        {"name": "pool_radius", "write": false, "mask": "sqrt(pow((position_r + 0.045) / 0.177, 2) + pow((position_b - 0.045) / 0.142, 2)) + 0.55 * (lid_noise - 0.5)"},
+        {"name": "pool_fill", "write": false, "mask": "1 - smoothstep(0.65, 1, pool_radius)"},
+        {"name": "tide_line", "write": false, "mask": "1 - smoothstep(0.02, 0.09, abs(pool_radius - 0.95))"},
+        {"name": "runs_dirt", "mask": "min(1, dirt * (1.2 + age)) * smoothstep(0.853, 0.866, position_g) * max(0.68 * pool_fill, tide_line)"}
+      ]
+    }},
+    "weathered": {"type": "weather", "in": ["unwrap", null, "water_marks"], "params": {
+      "wear": "=wear",
+      "dirt": "=dirt",
+      "rust": "=rust",
+      "age": "=age",
+      "resolution": "=resolution",
+      "seed": "=seed",
+      "mount": "ground",
+      "layout": "keep",
+      "samples": 4,
+      "padding": 3,
+      "leak_density": 0,
+      "sun": [0.8, 0.85, 0.2],
+      "overrides": {
+        "painted_metal_fade": {"color": "#aac3cd", "opacity": 1},
+        "painted_metal_primer": {"color": "#5e5343"},
+        "painted_metal_rust": {"color": "#8a4829", "opacity": 1},
+        "runs_dirt": {"color": "#76502d", "opacity": 1, "roughness": 0.68},
+        "streaks": {"color": "#576e74", "opacity": 0.7},
+        "splash": {"color": "#35281f", "opacity": 1}
+      }
+    }},
+    "checked_maps": {"type": "assert", "in": ["weathered"], "params": {"label": "maps", "images": "weathered_base_color weathered_normal weathered_orm", "image_size": "=resolution", "image_layers": "C", "attrib": "material", "attrib_class": "prim", "on_fail": "error"}},
+    "checked_standing": {"type": "assert", "in": ["checked_maps"], "params": {"label": "standing", "expr": "abs(bbox.min.y) <= 0.000001", "on_fail": "error"}},
+    "checked_drum": {"type": "assert", "in": ["checked_standing"], "params": {"label": "uv", "uv_overlaps": 0, "on_fail": "error"}}
+  },
+  "output": "checked_drum",
+  "outputs": {
+    "drum": {"node": "checked_drum", "label": "Rusty drum", "kind": "mesh", "tags": ["drum", "steel", "weathering"]}
+  }
+}
