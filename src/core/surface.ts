@@ -809,7 +809,8 @@ export interface CurvatureCloudArgs {
  * Surface curvature (see the header) at query points [start, end) (A.QP, A.QN; A.QB 1 = buried: 0, not measured) from
  * the neighbour points A.CP, A.CN, A.CW (the surface each stands for, m²) in the grid A.GH, A.GS, A.GI, A.GP
  * (cloudGrid): the cloud itself, or its clusters when the radius is large (thinCloud). Neighbours of any part count, so
- * the concave line where two parts meet reads; buried ones (A.CB) never do. A.V out.
+ * the concave line where two parts meet reads; buried ones (A.CB) never do. The back face of a thin sheet counts as an
+ * extension of its rim when the turning neighbours lie in or below the query plane. A.V out.
  */
 export function surfaceCurvatureRange(a: CurvatureCloudArgs, A: Record<string, any>, start: number, end: number): void {
   const QP: Float64Array = A.QP, QN: Float64Array = A.QN, QB: Uint8Array | undefined = A.QB;
@@ -817,6 +818,7 @@ export function surfaceCurvatureRange(a: CurvatureCloudArgs, A: Record<string, a
   const GH: Float64Array = A.GH, GS: Int32Array = A.GS, GI: Int32Array = A.GI, GP: Float64Array = A.GP;
   const ox = GH[0], oy = GH[1], oz = GH[2], h = GH[3], gx = GH[4], gy = GH[5], gz = GH[6];
   const r = a.radius, r2 = r * r, e2 = (CURV_EPS * r) ** 2, scale = CURVATURE_SCALE * r, off = a.offset ?? 0;
+  const back = new Float64Array(4096 * 4);
   for (let i = start; i < end; i++) {
     if (late(a.deadline, i - start)) throw new Error(PAST_DEADLINE);
     if (QB && QB[i]) { V[i] = 0; continue; }
@@ -825,6 +827,7 @@ export function surfaceCurvatureRange(a: CurvatureCloudArgs, A: Record<string, a
     const y0 = Math.max(0, Math.floor((py - r - oy) / h)), y1 = Math.min(gy - 1, Math.floor((py + r - oy) / h));
     const z0 = Math.max(0, Math.floor((pz - r - oz) / h)), z1 = Math.min(gz - 1, Math.floor((pz + r - oz) / h));
     let sw = 0, s = 0;
+    let backEnd = 0, ew = 0, ex = 0, ey = 0, ez = 0, ea = 0, plane = 0;
     for (let cz = z0; cz <= z1; cz++) for (let cy = y0; cy <= y1; cy++) {
       const row = (cz * gy + cy) * gx;
       for (let k = GS[row + x0], ke = GS[row + x1 + 1]; k < ke; k++) {
@@ -834,10 +837,37 @@ export function surfaceCurvatureRange(a: CurvatureCloudArgs, A: Record<string, a
         if (a.self && q === i + off) continue;
         if (CB && CB[q]) continue; // inside another part: not a surface anyone sees
         const qx = N[q * 3], qy = N[q * 3 + 1], qz = N[q * 3 + 2];
-        if (qx * nx + qy * ny + qz * nz < -0.5) continue; // the far side of a thin plate
+        const nd = qx * nx + qy * ny + qz * nz;
         const w = (1 - d2 / r2) ** 2 * CW[q];
+        if (nd < -0.5) {
+          if (backEnd < back.length) {
+            back[backEnd++] = dx; back[backEnd++] = dy; back[backEnd++] = dz; back[backEnd++] = w;
+          }
+          continue; // the far side of a thin plate does not count on its flats
+        }
         s += (w * ((qx - nx) * dx + (qy - ny) * dy + (qz - nz) * dz)) / (d2 + e2);
         sw += w;
+        if (nd < 0.5 && nd > -0.5) {
+          ew += w;
+          ex += w * qx; ey += w * qy; ez += w * qz;
+          ea += w * (dx * qx + dy * qy + dz * qz);
+          plane += w * (dx * nx + dy * ny + dz * nz);
+        }
+      }
+    }
+    if (backEnd && ew > 0 && plane / ew <= 0.02 * r) {
+      const en = ex * nx + ey * ny + ez * nz;
+      ex -= en * nx; ey -= en * ny; ez -= en * nz;
+      const el = Math.hypot(ex, ey, ez);
+      if (el >= 1e-6) {
+        ex /= el; ey /= el; ez /= el;
+        // unfold the back face from the rim as if it were the end face of a thick plate
+        const edge = Math.max(0, ea / ew);
+        for (let k = 0; k < backEnd; k += 4) {
+          const lat = back[k] * ex + back[k + 1] * ey + back[k + 2] * ez, rho = Math.max(0, edge - lat), w = back[k + 3];
+          s += (w * (edge + rho)) / (edge * edge + rho * rho + e2);
+          sw += w;
+        }
       }
     }
     V[i] = sw > 0 ? (scale * s) / sw : 0;
@@ -1450,8 +1480,9 @@ export function refineCloud(sc: SurfaceCloud, mesh: SurfaceMesh, tris: Uint32Arr
     // up to `coarse` (the curvature needs neighbours within its radius)
     const st = Math.max(step, Math.min(coarse, Math.max(mesh.triTexel[t * 2], mesh.triTexel[t * 2 + 1]))), ht = (2 * area) / len, rows = Math.max(1, Math.round(ht / st));
     // kept in from the edges as the ordinary points, but never by more than a quarter step: on a large part the
-    // ordinary inset can be wider than the zone around a small radius, which would leave the zone empty
-    const ins = Math.min(inset[t], 0.25 * st);
+    // ordinary inset can leave the zone empty. On a sliver it crowds the points toward the middle of the triangle,
+    // so use the rows as they are, already inside the edges
+    const ins0 = Math.min(inset[t], 0.25 * st), ins = ht < 8 * ins0 ? 0 : ins0;
     for (let q = 0; q < 3; q++) mins[q] = Math.min(0.3, (ins * e[q]) / (2 * area));
     let made = 0;
     for (let j = 0; j < rows; j++) {
