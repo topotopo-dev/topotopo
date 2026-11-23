@@ -1536,7 +1536,7 @@ section('the page\'s modules');
     `index.html is a shell loading /app/main.js and /app/style.css; modules import only each other and three (${problems.join('; ') || `${files.length} files`})`);
 }
 
-section('packed instances in the viewer: drawn where they are, framed where they are (F-96, F-101)');
+section('packed instances in the viewer: drawn where they are, framed where they are');
 {
   // a source of a triangle with no material, a polyline and a loose point, packed twice far from the origin, loaded the
   // way the viewer loads /api/geo: three.js instances triangle meshes only, so a points or lines primitive in the
