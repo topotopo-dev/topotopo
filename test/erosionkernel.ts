@@ -52,6 +52,18 @@ try {
   check(!unavailable.ok && /kernel/i.test(unavailable.errors.map(e => e.message).join('; ')), 'auto pipe without loaded kernel errors clearly');
   const kernels = await loadKernels(fs.readFileSync(kernelsWasmURL));
   check(kernels === getLoadedKernels(), 'loader exposes the initialized module for auto');
+  const rainGraph = graph({ backend: 'kernel' });
+  const wet = heightfieldsOf(await cook(rainGraph))[0];
+  check(wet.layer('flow')!.some((v) => v > 0), 'kernel rain pass produces flow');
+  const dry = heightfieldsOf(await cook({ nodes: { ...rainGraph.nodes,
+    weathered: { type: 'heightfield_erode', in: ['out'], params: { backend: 'kernel', rain_density: 0, iterations: 5, thermal_talus_angle: 0 } },
+  }, output: 'weathered' }))[0];
+  for (const name of ['flow', 'water', 'sediment']) {
+    const a = wet.layer(name)!, b = dry.layer(name);
+    check(b && Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(Buffer.from(b.buffer, b.byteOffset, b.byteLength)),
+      `kernel thermal erosion preserves ${name} byte for byte after rain`);
+  }
+  check(dry.layer('wear')!.some((v, k) => v > wet.layer('wear')![k]), 'kernel thermal erosion adds to wear where it moves material');
   const basin = Float32Array.from({ length: 81 }, (_, i) => Math.min(3, ((i % 9 - 4) ** 2 + (Math.floor(i / 9) - 4) ** 2) / 8));
   const basinSaved = basin.slice();
   const filledBasin = kernels.fill_sinks(basin, 9, 9, { writeDirection: true });

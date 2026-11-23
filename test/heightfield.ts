@@ -10,6 +10,7 @@ import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Heightfield, blurGrid, distanceTransform, heightfieldsOf } from '../src/core/heightfield.ts';
+import { imagesOf } from '../src/core/image.ts';
 import { DEFAULT_EROSION, dropletParams, erodeStep, makeErosionField } from '../src/core/erosion.ts';
 import { fractal, makeNoise, makeWarp } from '../src/core/noise.ts';
 import { rng } from '../src/core/random.ts';
@@ -62,6 +63,8 @@ const maxDiff = (a: ArrayLike<number>, b: ArrayLike<number>) => {
 const sum = (a: ArrayLike<number>) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s; };
 const variance = (a: ArrayLike<number>) => { const m = sum(a) / a.length; let v = 0; for (let i = 0; i < a.length; i++) v += (a[i] - m) ** 2; return v / a.length; };
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => maxDiff(a, b) === 0;
+const sameBytes = (a: Float32Array, b: Float32Array | undefined) =>
+  b !== undefined && Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(Buffer.from(b.buffer, b.byteOffset, b.byteLength));
 
 const HF: NodeSpec = { type: 'heightfield', params: { size: [4, 4], resolution: 0.1 } };
 const NOISE = (seed = 1, extra: any = {}): NodeSpec => ({ type: 'heightfield_noise', in: ['hf'], params: { amplitude: 0.8, element_size: 1.5, seed, ...extra } });
@@ -179,6 +182,27 @@ section('noise domain warp');
   check(mask.layer('mask')!.every((v) => v >= 0 && v <= 1) && maxDiff(mask.layer('mask')!, mask0.layer('mask')!) > 0.05, 'heightfield_mask_noise takes the same warp and stays in 0..1');
 }
 
+{
+  const nodes: Record<string, NodeSpec> = {
+    hf: { type: 'heightfield', params: { size: [8, 6], resolution: 0.25 } },
+    ramp: { type: 'heightfield_layer', in: ['hf'], params: { layer: 'ramp', expression: '0.5 + 0.025 * x + 0.1 * z' } },
+    img: { type: 'heightfield_to_tex', in: ['ramp'], params: { layer: 'ramp' } },
+    mesh: { type: 'heightfield_to_mesh', in: ['ramp'] },
+    back: { type: 'tex_to_heightfield', in: ['img'], params: { layer_name: 'ramp' } },
+  };
+  const ramp = (await field(nodes, 'ramp')).layer('ramp')!;
+  const img = imagesOf(await geo(nodes, 'img'))[0];
+  const png = path.join(tmp, 'ramp.png');
+  fs.writeFileSync(png, encodeGreyPNG(Uint8Array.from(img.layers.get('C')!, (v) => Math.round(255 * v)), img.width, img.height, 8));
+  const mesh = await geo({ ...nodes, sampled: { type: 'attribute_from_map', in: ['mesh'], params: { path: png, name: 'sampled' } } }, 'sampled');
+  const error = maxDiff(mesh.points.get('sampled')!.data as Float64Array, ramp);
+  check(error <= 0.5 * 0.25 * (0.025 + 0.1) + 0.5 / 255,
+    `heightfield texture agrees with mesh UVs (max sample error ${error.toFixed(4)})`);
+  check(same((await field(nodes, 'back')).layer('ramp')!, ramp), 'tex_to_heightfield keeps heightfield_to_tex sample order');
+  const imported = await field({ im: { type: 'heightfield_from_image', params: { path: png, resolution: 0.25, height_min: 0, height_max: 1 } } }, 'im');
+  check(maxDiff(imported.layer('height')!, ramp) <= 0.5 / 255 + 1e-7, 'heightfield_from_image keeps heightfield_to_tex sample order through PNG');
+}
+
 // ---------------------------------------------------------------- filters
 section('remap, blur, terrace, clip, cutout, layer');
 {
@@ -228,6 +252,40 @@ section('remap, blur, terrace, clip, cutout, layer');
   check(/no heightfield/.test(await cookErr({ s: { type: 'sphere' }, b: { type: 'heightfield_blur', in: ['s'] } }, 'b')), 'a non-heightfield input fails with a hint');
   // immutability: the noise result is untouched by everything downstream
   check(same(n.layer('height')!, (await field(nodes, 'n')).layer('height')!) && n.layer('height') === H, 'inputs are never written');
+}
+
+{
+  const cookExpression = (expression: string) => engine.cook({ vars: { mask: 9 }, nodes: {
+    hf: HF, out: { type: 'heightfield_layer', in: ['hf'], params: { expression } },
+  }, output: 'out' });
+  const direct = await cookExpression('mask + 1');
+  check(direct.ok && direct.warnings.some((w) => /mask in the expression/.test(w.message))
+    && heightfieldsOf(direct.geo!)[0].layer('height')![0] === 1, 'layer expression warns when code reads a shadowed name');
+  for (const expression of ['// raise where the mask is high\n1', '/* mask */ 1', "'mask'.length", '"mask".length', '`mask`.length']) {
+    const result = await cookExpression(expression);
+    check(result.ok && result.warnings.length === 0, `layer expression ignores shadowed names in ${JSON.stringify(expression)} (${result.warnings.length} warnings)`);
+  }
+  const interpolation = await cookExpression('Number(`${mask}`)');
+  check(interpolation.ok && interpolation.warnings.some((w) => /mask in the expression/.test(w.message)), 'layer expression warns when a template substitution reads a shadowed name');
+
+  const nodes: Record<string, NodeSpec> = {
+    hf: HF,
+    m1: { type: 'heightfield_layer', in: ['hf'], params: { operation: 'fill', layer: 'm1' } },
+    m2: { type: 'heightfield_layer', in: ['m1'], params: { operation: 'fill', layer: 'm2' } },
+  };
+  const remove = (layer: string) => engine.cook({ nodes: { ...nodes, out: { type: 'heightfield_layer', in: ['m2'], params: { operation: 'delete', layer } } }, output: 'out' });
+  for (const layer of ['m1 m2', 'm1,m2', 'm*', 'm?']) {
+    const result = await remove(layer);
+    const layers = result.geo ? heightfieldsOf(result.geo)[0].layers : new Map();
+    check(result.ok && !layers.has('m1') && !layers.has('m2') && layers.has('height') && layers.has('mask') === (layer !== 'm*') && result.warnings.length === 0,
+      `layer delete accepts ${JSON.stringify(layer)} (remaining layers: ${[...layers.keys()].join(', ')})`);
+  }
+  const missing = await remove('m1 nope');
+  const remaining = missing.geo && heightfieldsOf(missing.geo)[0].layers;
+  check(missing.ok && !!remaining && !remaining.has('m1') && remaining.has('m2') && missing.warnings.some(({ message }) =>
+    message.includes('"nope"') && message.includes('height, mask, m2')), 'layer delete removes matching names and warns about nope with the available layers');
+  const protectedLayer = await remove('hei*');
+  check(!protectedLayer.ok && protectedLayer.errors.some(({ message }) => message.includes('the height layer cannot be deleted (fill it instead)')), 'layer delete protects height from wildcard deletion');
 }
 
 // ---------------------------------------------------------------- crop, tiles
@@ -372,6 +430,18 @@ section('masks');
   check(variance(mb.layer('mask')!) < variance((await field({ hf: HF, m: { type: 'heightfield_mask_noise', in: ['hf'], params: { contrast: 3, element_size: 0.5 } } }, 'm')).layer('mask')!), 'mask_blur smooths the mask');
 }
 
+{
+  const nodes: Record<string, NodeSpec> = {
+    map: { type: 'heightfield', params: { size: [38.4, 28.8], resolution: 0.3 } },
+    tile: { type: 'heightfield_crop', in: ['map'], params: { tiles: [4, 3], tile: [2, 1] } },
+  };
+  const params = { amplitude: 6, element_size: 9, seed: 3, warp_amplitude: 3, warp_element_size: 14, warp_seed: 1 };
+  const whole = await field({ ...nodes, noise: { type: 'heightfield_noise', in: ['map'], params }, cut: { ...nodes.tile, in: ['noise'] } }, 'cut');
+  const tile = await field({ ...nodes, noise: { type: 'heightfield_noise', in: ['tile'], params } }, 'noise');
+  const error = maxDiff(whole.layer('height')!, tile.layer('height')!);
+  check(error <= 1e-6, `warped noise matches a tile at 0.3 m spacing (max difference ${error.toExponential(2)} m)`);
+}
+
 // ---------------------------------------------------------------- erosion
 section('erosion');
 {
@@ -400,8 +470,16 @@ section('erosion');
   const r0 = roughness(base.layer('height')!, base.width), r1 = roughness(e1.layer('height')!, e1.width);
   check(r1 < r0, `erosion reduces roughness (mean |h − blur(h)| ${r0.toFixed(4)} → ${r1.toFixed(4)})`);
   const th = await run({ rain_density: 0, thermal_rate: 0.5, thermal_talus_angle: 30 });
+  const twice = await field({ ...rough,
+    wet: { type: 'heightfield_erode', in: ['n'], params: { iterations: 25, seed: 1 } },
+    dry: { type: 'heightfield_erode', in: ['wet'], params: { rain_density: 0, iterations: 8, thermal_rate: 0.5, thermal_talus_angle: 0 } },
+  }, 'dry');
+  for (const name of ['flow', 'water', 'sediment']) {
+    check(sameBytes(e1.layer(name)!, twice.layer(name)), `JS thermal erosion preserves ${name} byte for byte after rain`);
+  }
+  check(['flow', 'water', 'sediment'].every((name) => !th.layers.has(name)), 'JS thermal erosion does not create rain layers');
   const slopeMax = (hf: Heightfield) => { let m = 0; const H = hf.layer('height')!; for (let j = 0; j < hf.height; j++) for (let i = 0; i + 1 < hf.width; i++) m = Math.max(m, Math.abs(H[j * hf.width + i + 1] - H[j * hf.width + i]) / hf.cellSize); return m; };
-  check(slopeMax(th) < slopeMax(base) && sum(th.layer('debris')!) > 0 && th.layer('flow')!.every((v) => v === 0), `thermal erosion alone flattens the steepest slopes (${slopeMax(base).toFixed(2)} → ${slopeMax(th).toFixed(2)}) and writes debris`);
+  check(slopeMax(th) < slopeMax(base) && sum(th.layer('debris')!) > 0, `thermal erosion alone flattens the steepest slopes (${slopeMax(base).toFixed(2)} → ${slopeMax(th).toFixed(2)}) and writes debris`);
   const frozen = await field({ ...rough, f: { type: 'heightfield_layer', in: ['n'], params: { layer: 'rock', expression: 'x < 0 ? 1 : 0' } }, e: { type: 'heightfield_erode', in: ['f'], params: { iterations: 10, freeze_layer: 'rock' } } }, 'e');
   let frozenOk = true;
   const F = frozen.layer('rock')!, FH = frozen.layer('height')!, BH = base.layer('height')!;
@@ -557,6 +635,28 @@ section('project, path, scatter, resample, transform, to_sdf');
   check(same(lo.layer('height')!, n.layer('height')!), 'project max never lowers');
   const ridge = await field({ ...nodes, c: { type: 'curve', params: { points: [[-1, 1, 0], [1, 1, 0]] } }, p: { type: 'heightfield_project', in: ['n', 'c'], params: { width: 0.4, radius: 0 } } }, 'p');
   check(Math.abs(ridge.layer('height')![k0] - 1) < 1e-6, 'project stamps curves at their own height');
+
+  const tip = 4 - Math.SQRT2;
+  const stamp = (slope: number) => field({
+    grid: { type: 'heightfield', params: { size: [12, 12], resolution: 1 } },
+    square: { type: 'curve', params: { closed: true, points: [[-tip, 4 - slope * tip, 0], [0, 4, -tip], [tip, 4 + slope * tip, 0], [0, 4, tip]] } },
+    projected: { type: 'heightfield_project', in: ['grid', 'square'], params: { radius: 3, offset: 1 } },
+  }, 'projected');
+  const flatStamp = await stamp(0);
+  const line = [0, 1, 2, 3, 4];
+  const across = line.map((x) => flatStamp.sample(x, 2));
+  const expected = line.map((x) => {
+    const t = Math.max(0, Math.min(1, (x + 2 - tip) / Math.SQRT2 / 3));
+    return 5 * (1 - t * t * (3 - 2 * t));
+  });
+  check(across.every((v, i) => i === 0 || v < across[i - 1]) && maxDiff(across, expected) < 1e-6,
+    `diagonal polygon stamp falls off from the outline (${across.map((v) => v.toFixed(3)).join(', ')})`);
+  // The tip is placed so that (5, 0) is as far from the corner as (4, 2) is from the diagonal side.
+  const a = flatStamp.sample(5, 0), b = flatStamp.sample(4, 2);
+  check(Math.abs(a - b) < 1e-6, `diagonal polygon stamp gives equal heights at equal distances (${a.toFixed(3)}, ${b.toFixed(3)})`);
+  const slopedStamp = await stamp(0.5), t = (3 - tip) / Math.SQRT2 / 3;
+  const expectedSlope = (5 + 0.5 * (2 - (3 - tip) / 2)) * (1 - t * t * (3 - 2 * t));
+  check(Math.abs(slopedStamp.sample(2, 1) - expectedSlope) < 1e-6, 'polygon falloff uses the height at the nearest point on the outline plus offset');
   // level mean (dogfood 2026-10-15: house pads at their centre height cut deep banks on slopes): each piece sits at
   // the mean of the terrain it covers, whatever its own Y
   const tilt = { hf: HF, t: { type: 'heightfield_layer', in: ['hf'], params: { expression: '0.5 * x' } } } as Record<string, NodeSpec>;
