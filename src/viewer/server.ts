@@ -556,7 +556,8 @@ export async function startViewer(ws: Session, port = Number(process.env.TOPOTOP
       // rejected edits carry their issues (one string each); op errors are plain messages
       const errors = Array.isArray(e?.errors) ? e.errors.map(issueText) : [String(e?.message ?? e)];
       return savedAt === undefined
-        ? { status: 400, body: { ok: false, ms: 0, errors, notSaved: errors.join('; '), ...varsState(name, session) } }
+        // a value the graph refuses was never meant to be stored: only a write that failed leaves the package unsaved
+        ? { status: 400, body: { ok: false, ms: 0, errors, ...(Array.isArray(e?.errors) ? {} : { notSaved: errors.join('; ') }), ...varsState(name, session) } }
         : { status: 200, body: { ok: false, ms: 0, errors, savedAt, ...varsState(name, session) } };
     }
   };

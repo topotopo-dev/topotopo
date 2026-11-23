@@ -358,7 +358,12 @@ export class Session {
   private persist(name: string, g?: GraphSpec) {
     const file = this.graphFile(name);
     if (!g) { if (fs.existsSync(file)) fs.unlinkSync(file); return; }
-    writeAtomic(file, JSON.stringify(g, null, 2));
+    try { writeAtomic(file, JSON.stringify(g, null, 2)); }
+    catch (e: any) {
+      // the person reads this: the graph file by its path in the package, not the temporary file beside it
+      const shown = path.relative(this.dir, file).split(path.sep).join('/');
+      throw new Error(`${shown} could not be written${e?.code ? ` (${e.code})` : ''}: it may be read-only, or another program holds it (a file watcher, an editor, a virus scanner); close it or wait a moment, then try again`);
+    }
   }
 
   bump(name: string) {

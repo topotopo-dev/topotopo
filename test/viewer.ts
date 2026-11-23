@@ -651,8 +651,8 @@ section('package values: write time, failed rename, and Stop with values waiting
     };
     try {
       const { j } = await post(8);
-      check(!j.ok && j.savedAt === undefined && j.notSaved === 'could not replace the graph file' && j.vars.s === 2,
-        'a failed rename answers that the value was not saved and returns the stored value');
+      check(!j.ok && j.savedAt === undefined && /^graphs\/g\.json could not be written: it may be read-only/.test(j.notSaved ?? '') && !/\.part/.test(j.notSaved) && j.vars.s === 2,
+        `a failed rename answers that the value was not saved, naming the graph file and not its temporary file, and returns the stored value (${j.notSaved})`);
       check(ws.getGraph('g') === before && fs.readFileSync(file, 'utf8') === disk && !fs.readdirSync(path.dirname(file)).some((f) => f.endsWith('.part')),
         'a failed rename keeps the previous graph in memory and on disk and removes the temporary file');
     } finally { fs.renameSync = rename; }

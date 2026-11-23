@@ -739,7 +739,8 @@ function createControls(ctx) {
     const newer = (state?.answers.get(graph)?.id ?? 0) > id;
     if (state) {
       state.varsPending--;
-      finishPackageSave(state, j.savedAt, reason);
+      // a refused value (errors, nothing written) leaves the package as saved; a failed write or no answer does not
+      finishPackageSave(state, j.savedAt, j.notSaved || (j.errors?.length ? '' : reason));
     }
     if (j.graphVars && !file && !newer) {
       state?.graphs.set(graph, j.graphVars);
