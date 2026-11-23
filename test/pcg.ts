@@ -12,7 +12,6 @@ import { createNodeHost } from '../src/host/node.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { KDTree } from '../src/core/spatial.ts';
-import { expandPacked } from '../src/core/packed.ts';
 import { band, combineMask, kmeans, minDistanceSelect, sphereOverlapPrune } from '../src/core/pcg.ts';
 import { candidatesRange, minDistanceSelectWith, surfaceCandidates } from '../src/core/scatter.ts';
 import { rng, rngAt, rngState } from '../src/core/random.ts';
@@ -647,6 +646,31 @@ section('prune');
   check(/connect the geometry to keep away from/.test(await cookErr({ ...NG, x: { type: 'prune', in: ['p'], params: { mode: 'near_geometry' } } }, 'x')), 'near_geometry without a second input: clear error');
 }
 
+section('scatter with polygons and volumes');
+{
+  const nodes: Record<string, NodeSpec> = {
+    grid: GRID,
+    hf: { type: 'heightfield', params: { name: 'hills', size: [2, 2], height: 5 } },
+    sdf: { type: 'sdf_shape', params: { name: 'fog', center: [0, 5, 0] } },
+  };
+  const scatter = (source: string) => run({
+    ...nodes, mixed: { type: 'merge', in: ['grid', source] },
+    s: { type: 'scatter', in: [source === 'grid' ? 'grid' : 'mixed'], params: { count: 20 } },
+  }, 's');
+  const plain = await scatter('grid');
+  check(plain.ok && plain.geo?.numPoints === 20 && !plain.warnings.length, 'scatter on polygons alone gives 20 points without warnings');
+  for (const [source, kind, name, hint] of [
+    ['hf', 'heightfield', 'hills', 'heightfield_scatter'],
+    ['sdf', 'SDF volume', 'fog', 'sdf_to_mesh'],
+  ]) {
+    const r = await scatter(source);
+    const warns = r.warnings.map((w) => w.message);
+    check(r.ok && r.geo?.numPoints === 20 && eq(r.geo.P, plain.geo?.P) && warns.length === 1 &&
+      warns[0].includes(`${kind} (${name})`) && warns[0].includes('polygons only') && warns[0].includes(hint),
+    `scatter beside a ${kind} leaves points on the polygons and warns (warnings: ${warns.join(', ') || 'none'})`);
+  }
+}
+
 // ---------------------------------------------------------------- copy_to_points: variant weights, scale/rotate attributes
 section('copy_to_points variants');
 {
@@ -664,8 +688,11 @@ section('copy_to_points variants');
   const fr = counts.map((c) => c / w.numPrims), want = [0.6, 0.3, 0.1];
   check(w.numPrims === 10000 && fr.every((f, k) => Math.abs(f - want[k]) <= 0.05 * want[k]), `variant_weights [6, 3, 1] over 10k points: ${fr.map((f) => f.toFixed(4)).join(' / ')} (within 5%)`);
   const real = await geo({ ...TREES, pts: { type: 'point_grid', params: { counts: [10, 1, 10], size: [20, 0, 20] } }, cp: { type: 'copy_to_points', in: ['trees', 'pts'], params: { variants: 'name', variant_weights: [6, 3, 1], seed: 5 } } }, 'cp');
-  const packd = await geo({ ...TREES, pts: { type: 'point_grid', params: { counts: [10, 1, 10], size: [20, 0, 20] } }, cp: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_weights: [6, 3, 1], seed: 5 } } }, 'cp');
-  check(fpEq(real, expandPacked(packd, { transfer: '*' }).geo), 'variant_weights: packed copies = real copies after unpack');
+  const back = await geo({ ...TREES, pts: { type: 'point_grid', params: { counts: [10, 1, 10], size: [20, 0, 20] } },
+    cp: { type: 'copy_to_points', in: ['trees', 'pts'], params: { pack: true, variants: 'name', variant_weights: [6, 3, 1], seed: 5 } },
+    up: { type: 'unpack', in: ['cp'], params: { transfer_attributes: '*' } },
+  }, 'up');
+  check(fpEq(real, back), 'variant_weights: packed copies = real copies after unpack');
   const warnAttr = await run({ ...TREES, v: { type: 'attrib_create', in: ['pts'], params: { name: 'variant', value: 1 } }, cp: { type: 'copy_to_points', in: ['trees', 'v'], params: { pack: true, variants: 'name', variant_weights: [1, 1, 1] } } }, 'cp');
   check(warnAttr.ok && warnAttr.warnings.some((x) => /variant_weights ignored/.test(x.message)), 'variant_weights with a variant attribute: the attribute wins (warning)');
   check(/all 0/.test(await cookErr({ ...TREES, cp: { type: 'copy_to_points', in: ['trees', 'pts'], params: { variants: 'name', variant_weights: [0, 0] } } }, 'cp')), 'variant_weights all 0: clear error');
@@ -686,8 +713,10 @@ section('copy_to_points variants');
   for (const [label, params] of [['scale + yaw', { scale_attrib: 's', rotate_attrib: 'yaw' }], ['euler', { rotate_attrib: 'e' }], ['weights', { variants: 'name', variant_weights: [1, 2, 3] }]] as const) {
     const nodes = { ...PT, ...TREES, src: label === 'weights' ? ({ type: 'null', in: ['trees'] } as NodeSpec) : ({ type: 'null', in: ['b'] } as NodeSpec), o: { type: 'orient', in: ['p'], params: { mode: 'direction', random_yaw: [0, 360] } } as NodeSpec };
     const r1 = await geo({ ...nodes, cc: { type: 'copy_to_points', in: ['src', 'o'], params } }, 'cc');
-    const r2 = await geo({ ...nodes, cc: { type: 'copy_to_points', in: ['src', 'o'], params: { ...params, pack: true } } }, 'cc');
-    check(fpEq(r1, expandPacked(r2, { transfer: '*' }).geo), `copy_to_points ${label}: packed = real copies after unpack`);
+    const r2 = await geo({ ...nodes, cc: { type: 'copy_to_points', in: ['src', 'o'], params: { ...params, pack: true } },
+      up: { type: 'unpack', in: ['cc'], params: { transfer_attributes: '*' } },
+    }, 'up');
+    check(fpEq(r1, r2), `copy_to_points ${label}: packed = real copies after unpack`);
   }
   check(/scale_attrib "nope"/.test(await cookErr({ ...PT, c: { type: 'copy_to_points', in: ['b', 'p'], params: { scale_attrib: 'nope' } } }, 'c')), 'missing scale_attrib: clear error');
 }
