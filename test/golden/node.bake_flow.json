@@ -38,13 +38,13 @@
         },
         "kind": "image",
         "layers": {
-          "C": "9d39450445ff8e42",
-          "along": "68494a76205ee60c",
-          "head": "011066f743c1f61d",
-          "id": "82a453255eb483e3",
+          "C": "df0c2aab29874919",
+          "along": "72baf3917ccbd653",
+          "head": "b25b653eded52c28",
+          "id": "6da919e33c309bc5",
           "island": "19727268b1d09f96",
           "mask": "5963c5b542beec4f",
-          "strength": "ea1927b04b1d0486",
+          "strength": "af6bd2135cddd66d",
           "texel": "cca48525b745925f"
         },
         "name": "target"

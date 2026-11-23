@@ -49,7 +49,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "958269e0c579b736",
+          "C": "28642a1a8070e5d8",
           "island": "8d885882adc1eca8",
           "mask": "43d311b52f14544f",
           "texel": "3d3c4cc1a0d758fb"
@@ -87,7 +87,7 @@
         },
         "kind": "image",
         "layers": {
-          "C": "48512047ced2124d",
+          "C": "6f07e580395d774e",
           "island": "8d885882adc1eca8",
           "mask": "43d311b52f14544f",
           "texel": "3d3c4cc1a0d758fb"
@@ -111,7 +111,7 @@
           "cavity": "9005a1b59538744f",
           "chip": "94ea0dc8abc5f73e",
           "core": "f8645c4bd15c7959",
-          "damp": "b26cc6cbdd59c8e5",
+          "damp": "c38cb55578a97b97",
           "dust": "e826a99b4b24df7d",
           "edge_wear": "b4eeffcc33cdaaf6",
           "fade": "c1fef6c9df38db07",
@@ -123,7 +123,7 @@
           "joints": "9005a1b59538744f",
           "mask": "43d311b52f14544f",
           "occlusion": "4e4b8528dbd71836",
-          "runs_dirt": "70348dfea3d7ba40",
+          "runs_dirt": "831f72e6174c9be8",
           "runs_rust": "9005a1b59538744f",
           "rust": "e3a14c4630438258",
           "splash": "9005a1b59538744f",
