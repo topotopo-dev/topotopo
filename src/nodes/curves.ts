@@ -14,9 +14,10 @@ import { crossSection, crossSectionFaces, detectPlane, fromManifold, orientNeste
 import type { Plane } from '../core/manifold.ts';
 import { FRAMES, P, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
-import { MAX_ORDER, PARAMETERIZATIONS, arcTable, evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
+import { MAX_ORDER, PARAMETERIZATIONS, arcTable, evalBasis, evalPoint, evaluateSplines, hasSplinesDeep, interpolateSpline, makeSpline, samplesByLength, splineFromPrim, splinesToPolylinesDeep, tangentAt, tidySplineAttribs, typeOfKind } from '../core/splines.ts';
+import type { Spline } from '../core/splines.ts';
 import { withoutSurfaces } from '../core/nurbssurface.ts';
-import { addSurfacePrim, fitSurface, mirrorSection } from '../core/surfacefit.ts';
+import { addSurfacePrim, fitCurveNetwork, fitSurface, mirrorSection, networkCurve } from '../core/surfacefit.ts';
 import type { SurfaceSection } from '../core/surfacefit.ts';
 import { filletCurves } from './splines.ts';
 import { stampTrim, trimParams, trimTarget } from './trim.ts';
@@ -1375,10 +1376,14 @@ defineNode({
 defineNode({
   type: 'loft',
   category: 'curve',
-  summary: 'Skin a surface through a sequence of curves (in prim order), or through copies of one profile placed by "sections".',
+  splines: 'keep',
+  summary: 'Skin a surface through sections, with optional rails that guide the shape between them.',
   description: 'Output polygons joins the sections with quads and can cap closed ends. Output surface builds a smooth NURBS skin. Interpolate passes through every sample. Sections measured from a drawing or photos can wobble in the highlights. Use approximate with smoothing around 1 and a tolerance of a few millimetres to fair the skin. Pin points that must stay fixed, such as the windscreen header. Use mirror x to join positive-x half sections to their reflections for a symmetric body. Nodes that need polygons convert the surface.\n\nInput curves are taken in prim order. For one profile, sections places copies using entries like {"offset": [x, y, z], "scale": [sx, sy], "rotate": [rx, ry, rz]}. All keys are optional. A single scale number scales evenly and a single offset number moves along the profile normal. Scale and rotate (in degrees) act about the profile centre before the offset (in metres).\n\nPolygon output joins points by index when counts match, or resamples evenly by length when counts differ. For closed sections it matches winding to the first section and starts each section at the point nearest the previous start. Side faces follow the first section and closed results face outward. In both outputs, u runs along each section and v runs across the sections.',
   aliases: ['skin'],
-  inputs: [{ name: 'curves', desc: 'two or more curves, in order; or one profile with sections' }],
+  inputs: [
+    { name: 'curves', desc: 'two or more curves, in order; or one profile with sections' },
+    { name: 'rails', optional: true, desc: 'long curves the surface passes through; each crosses every section once' },
+  ],
   params: {
     sections: { type: 'json', default: [], desc: 'one input curve: a list of placements, each {offset, scale, rotate} (see the description)', aliases: ['stations', 'placements'] },
     resample: { type: 'enum', options: ['auto', 'length', 'none'], default: 'auto', desc: 'polygons only. Auto keeps points when counts match and otherwise resamples by length. Length always resamples. None joins points by index and requires matching counts. Surface output uses the section points directly.' },
@@ -1386,8 +1391,9 @@ defineNode({
     caps: { type: 'bool', default: false, desc: 'cap the first and last curves (when they are closed)' },
     output: { type: 'enum', options: ['polygons', 'surface'], default: 'polygons', desc: 'polygons joins sections with quads by default. Surface makes one NURBS skin.' },
     fit: { type: 'enum', options: ['interpolate', 'approximate'], default: 'interpolate', desc: 'output surface. Interpolate passes through every point by default. Approximate fits within tolerance when choosing CV counts.' },
-    tolerance: { type: 'float', default: 0.001, min: 0, desc: 'output surface. Maximum distance in metres when choosing CV counts for approximate fitting (default 0.001 m).' },
-    smoothing: { type: 'float', default: 0, min: 0, desc: 'output surface. Unitless penalty on second differences of CVs for approximate fitting. Default 0. Around 1 smooths noise. Tolerance wins: when this penalty cannot stay within tolerance, the fit uses the largest smaller one that can and warns.' },
+    tolerance: { type: 'float', default: 0.001, min: 0, desc: 'Maximum deviation in metres when fitting an approximate surface or fitting sections and rails to shared knots.' },
+    network_tolerance: { type: 'float', default: 0.002, min: 0, desc: 'Maximum gap in metres between a section and a rail at their crossing.' },
+    smoothing: { type: 'float', default: 0, min: 0, desc: 'For approximate surfaces, 0 turns smoothing off and about 1 softens measuring noise within the fit tolerance.' },
     cvs: { type: 'ivec2', default: [0, 0], min: 0, max: 1000, desc: 'output surface. Number of control points in u and v for approximate fitting. Default [0, 0] chooses the fewest the tolerance allows.' },
     order: { type: 'ivec2', default: [4, 4], min: 2, max: MAX_ORDER, desc: 'output surface. Spline order in u and v (degree plus one). Default [4, 4] is cubic in both directions.' },
     parameterization: { type: 'enum', options: PARAMETERIZATIONS, default: 'centripetal', desc: 'output surface. Unitless parameter spacing. Uniform is even, chord uses distance and centripetal (default) uses its square root.' },
@@ -1405,11 +1411,56 @@ defineNode({
     },
     output: 'skin',
   },
-  cook: ({ input, p, stat, warn }) => {
+  cook: ({ input, hasInput, node, p, stat, warn }) => {
     const src = input(0);
-    if (src.primKind?.includes(4)) throw new NodeError('loft needs curve sections as input. Supply curves or place one profile with sections');
     if (p.output === 'surface' && p.caps) throw new NodeError('loft: caps needs output polygons; a surface has no caps. Close the ends with sections that shrink to a small loop, or use output polygons.');
-    const g = evaluateSplines(src);
+    if (hasInput(1)) {
+      if (p.output !== 'surface') throw new NodeError('loft: rails require output surface. Set output to surface.');
+      if (p.closed) throw new NodeError('loft: rails need open lofts. Turn off closed.');
+      if (p.fit === 'approximate') throw new NodeError('loft: rails make the surface pass through every curve; fair the curves first (spline_fit with smoothing, pins on the crossings) and use fit interpolate.');
+      if (p.smoothing || p.cvs.some((n: number) => n !== 0) || p.pins) warn('loft: smoothing, cvs and pins are ignored when rails are connected. Adjust the input curves to change the fit.');
+      const mirror = p.mirror === 'x';
+      let sections = loftCurveInputs(src);
+      if (Array.isArray(p.sections) && p.sections.length) {
+        if (sections.length !== 1) throw new NodeError(`sections places copies of one profile, but the input has ${sections.length} curves`, 'merge nothing into the profile, or leave sections empty to loft through the input curves');
+        sections = p.sections.map((sec: unknown, i: number) => {
+          const { pts, closed, spline } = sections[0];
+          const place = sectionPlacement(pts, sec, i);
+          const placed = pts.map(place);
+          return { pts: placed, closed, spline: spline && makeSpline(spline.type, placed.flat(), { ...spline, weights: spline.W }) };
+        });
+      }
+      const profiles = sections.map((section, i) => {
+        if (!mirror) return networkCurve(loftSpline(section));
+        if (!section.spline) return networkCurve(loftSpline(mirrorSection(section, i)));
+        const s = section.spline;
+        mirrorSection({ pts: Array.from({ length: 33 }, (_, i) => evalPoint(s, i / 32)), closed: false }, i);
+        return networkCurve(s, true);
+      });
+      const originals = loftCurveInputs(input(1));
+      const rails = originals.map(loftSpline);
+      if (mirror) for (const [i, s] of rails.slice().entries()) {
+        if (originals[i].pts.every(([x]) => Math.abs(x) <= 1e-4)) continue;
+        const reflected = s.P.map((x, i) => i % 3 ? x : -x);
+        rails.push(makeSpline(s.type, reflected, { ...s, weights: s.W }));
+      }
+      const { surface, gap, reordered } = fitCurveNetwork(profiles, rails.map((s) => networkCurve(s)), p.order, p.tolerance, p.network_tolerance, mirror);
+      if (reordered) warn('loft: sections were reordered to follow their crossings on the first rail.');
+      stat('surface_cols', surface.cols);
+      stat('surface_rows', surface.rows);
+      stat('rails', rails.length);
+      stat('sections', sections.length);
+      stat('network_gap_max', gap);
+      return addSurfacePrim(surface);
+    }
+    let g = src;
+    if (hasSplinesDeep(src)) {
+      const r = splinesToPolylinesDeep(src);
+      g = r.geo;
+      if (r.converted) warn(`converted ${r.converted} spline curve${r.converted === 1 ? '' : 's'} to polylines for ${node} (loft works on polygons/polylines; add convert_curve or resample to choose the resolution)`);
+      if (r.surfaces) warn(`converted ${r.surfaces} NURBS surface${r.surfaces === 1 ? '' : 's'} to polygons for ${node} (loft works on polygons; add convert_curve to choose the resolution)`);
+      for (const note of new Set(r.notes)) warn(note);
+    }
     const pinned = p.output === 'surface' ? mask(g, 'point', p.pins) : null;
     let curves: SurfaceSection[] = Array.from({ length: g.numPrims }, (_, pr) => ({
       pts: curvePoints(g, pr),
@@ -1517,7 +1568,32 @@ function evenByLength(pts0: number[][], closed: boolean, n: number): number[][] 
 }
 
 /** A copy of the profile placed by one sections entry: scale and rotate about its centre, then offset. */
+function loftCurveInputs(g: Geometry) {
+  const curves: (SurfaceSection & { spline?: Spline })[] = [];
+  for (let i = 0; i < g.numPrims; i++) {
+    const kind = g.primKind?.[i] ?? 0;
+    if (kind && !typeOfKind(kind)) throw new NodeError('loft: the network needs curve primitives. Supply polylines, Bezier or NURBS curves.');
+    const pts = curvePoints(g, i);
+    if (pts.length < 2) continue;
+    const spline = kind ? splineFromPrim(g, i) : undefined;
+    let closed = !!g.primClosed[i];
+    if (!spline && !closed && pts.length > 3 && dist3(pts[0], pts.at(-1)!) < 1e-9) { pts.pop(); closed = true; }
+    curves.push({ pts, closed, spline });
+  }
+  return curves;
+}
+
+function loftSpline(curve: SurfaceSection & { spline?: Spline }) {
+  if (curve.spline) return curve.spline;
+  const fit = interpolateSpline(curve.pts.flat(), curve.closed, 4);
+  return makeSpline('nurbs', fit.P, fit);
+}
+
 function placeSection(prof: { pts: number[][]; closed: boolean }, sec: any, i: number): { pts: number[][]; closed: boolean } {
+  return { pts: prof.pts.map(sectionPlacement(prof.pts, sec, i)), closed: prof.closed };
+}
+
+function sectionPlacement(pts: number[][], sec: any, i: number) {
   if (!sec || typeof sec !== 'object' || Array.isArray(sec)) throw new NodeError(`sections[${i}] must be an object like {"offset": [0, 0.1, 0], "scale": [0.8, 0.8]}`);
   const vec = (v: any, k: string, def: number[]) => {
     if (v === undefined) return def;
@@ -1525,8 +1601,8 @@ function placeSection(prof: { pts: number[][]; closed: boolean }, sec: any, i: n
     if (a && !(Array.isArray(a) && a.every((x: any) => typeof x === 'number' && Number.isFinite(x)))) throw new NodeError(`sections[${i}].${k} must be a number or a list of numbers`);
     return a ?? v;
   };
-  const c = prof.pts.reduce((s, q) => [s[0] + q[0], s[1] + q[1], s[2] + q[2]], [0, 0, 0]).map((x) => x / prof.pts.length);
-  const N = normalize(loopNormal(prof.pts) as Vec3);
+  const c = pts.reduce((s, q) => [s[0] + q[0], s[1] + q[1], s[2] + q[2]], [0, 0, 0]).map((x) => x / pts.length);
+  const N = normalize(loopNormal(pts) as Vec3);
   const nrm: Vec3 = length(N) > 0 ? N : [0, 1, 0];
   const off = vec(sec.offset, 'offset', [0, 0, 0]);
   const offset: number[] = typeof off === 'number' ? [nrm[0] * off, nrm[1] * off, nrm[2] * off] : [off[0] ?? 0, off[1] ?? 0, off[2] ?? 0];
@@ -1537,13 +1613,12 @@ function placeSection(prof: { pts: number[][]; closed: boolean }, sec: any, i: n
   const sx = typeof sc === 'number' ? sc : sc[0] ?? 1, sy = typeof sc === 'number' ? sc : sc[1] ?? sx;
   const rot = vec(sec.rotate, 'rotate', [0, 0, 0]);
   const R = m4euler(typeof rot === 'number' ? [0, rot, 0] : [rot[0] ?? 0, rot[1] ?? 0, rot[2] ?? 0]);
-  const pts = prof.pts.map((q) => {
+  return (q: number[]) => {
     const d: Vec3 = [q[0] - c[0], q[1] - c[1], q[2] - c[2]];
     const u = dot(d, U) * sx, v = dot(d, V) * sy, w = dot(d, nrm);
     const e: Vec3 = [U[0] * u + V[0] * v + nrm[0] * w, U[1] * u + V[1] * v + nrm[1] * w, U[2] * u + V[2] * v + nrm[2] * w];
     const r = m4applyDir(R, e[0], e[1], e[2]);
     return [c[0] + r[0] + offset[0], c[1] + r[1] + offset[1], c[2] + r[2] + offset[2]];
-  });
-  return { pts, closed: prof.closed };
+  };
 }
 

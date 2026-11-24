@@ -2,8 +2,8 @@ import { GeoBuilder } from './geometry.ts';
 import type { Geometry } from './geometry.ts';
 import { cross, dot, sub } from './math.ts';
 import type { Vec3 } from './math.ts';
-import { MAX_ORDER, curveParams, evalDerivs, evalPoint, fitKnots, fitSpline, makeSpline } from './splines.ts';
-import type { FitResult, Parameterization } from './splines.ts';
+import { MAX_ORDER, arcTable, curveParams, evalDerivs, evalPoint, fitKnots, fitSpline, lengthAtU, makeSpline, spanBreaks } from './splines.ts';
+import type { FitResult, Parameterization, Spline } from './splines.ts';
 import { setSurfacePrim } from './nurbssurface.ts';
 
 export interface SurfaceSection {
@@ -330,6 +330,302 @@ function orientSectionOutward(s: SurfaceFit, section: SurfaceSection, j: number)
   const K = s.knotsU;
   s.knotsU = K.map((_, i) => K[0] + (K[s.cols] - K[s.cols - i]));
   for (const row of s.params) for (const uv of row) uv[0] = (1 - uv[0]) % 1;
+}
+
+interface NetworkCurve {
+  closed: boolean;
+  breaks: number[];
+  eval(u: number): ReturnType<typeof evalDerivs>;
+  length(u: number): number;
+}
+
+/** Use the actual spline, including its weights. An exact half can also be evaluated on its reflection. */
+export function networkCurve(s: Spline, mirrorHalf = false): NetworkCurve {
+  const tab = arcTable(s, 2), breaks = spanBreaks(s);
+  if (!(tab.total > 0)) throw new Error('loft: a network curve has no length. Supply a curve with distinct points.');
+  const length = (u: number) => lengthAtU(s, tab, u) / tab.total;
+  if (!mirrorHalf) return { closed: s.closed, breaks, eval: (u) => evalDerivs(s, u), length };
+  const start = Math.abs(evalPoint(s, 0)[0]) <= 1e-4, end = Math.abs(evalPoint(s, 1)[0]) <= 1e-4;
+  const reverse = start && !end;
+  const halfLength = (u: number) => reverse ? 1 - length(1 - u) : length(u);
+  const halfBreaks = reverse ? breaks.slice().reverse().map((u) => 1 - u) : breaks;
+  return {
+    closed: start && end,
+    breaks: [...halfBreaks.map((u) => u / 2), ...halfBreaks.slice(0, -1).reverse().map((u) => 1 - u / 2)],
+    eval: (u) => {
+      const reflected = u > 0.5, t = 2 * (reflected ? 1 - u : u);
+      const e = evalDerivs(s, reverse ? 1 - t : t);
+      if ((t === 0 && start && end) || t === 1) e.P[0] = 0;
+      const sign = reflected ? -1 : 1, dt = 2 * sign * (reverse ? -1 : 1);
+      e.P[0] *= sign;
+      for (let k = 0; k < 3; k++) {
+        e.d1[k] *= dt * (k === 0 ? sign : 1);
+        e.d2[k] *= 4 * (k === 0 ? sign : 1);
+      }
+      return e;
+    },
+    length: (u) => u <= 0.5 ? halfLength(2 * u) / 2 : 1 - halfLength(2 - 2 * u) / 2,
+  };
+}
+
+const unit = (t: number, closed: boolean) => closed ? mod(t, 1) : Math.max(0, Math.min(1, t));
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const EPS_PARAM = 1e-12;
+
+function sampleSpans(breaks: number[], minimum: number) {
+  const samples: number[] = [];
+  for (let i = 1; i < breaks.length; i++) {
+    const a = breaks[i - 1], b = breaks[i], n = Math.max(3, Math.ceil((b - a) * minimum));
+    for (let k = 0; k < n; k++) if (b > a) samples.push(lerp(a, b, k / n));
+  }
+  samples.push(1);
+  return samples;
+}
+
+function crossingSamples(curve: NetworkCurve) {
+  const t = sampleSpans(curve.breaks, 24);
+  if (curve.closed) t.pop();
+  return { curve, t, P: t.map((u) => curve.eval(u).P) };
+}
+
+type CrossingSamples = ReturnType<typeof crossingSamples>;
+
+function closestCrossing(a: CrossingSamples, b: CrossingSamples, tolerance: number) {
+  const na = a.t.length, nb = b.t.length;
+  const gaps = a.P.map((p) => Float64Array.from(b.P, (q) => {
+    const dx = p[0] - q[0], dy = p[1] - q[1], dz = p[2] - q[2];
+    return dx * dx + dy * dy + dz * dz;
+  }));
+  const cap = (i: number, n: number, closed: boolean) => closed ? mod(i, n) : i;
+  const paramDistance = (u: number, v: number, closed: boolean) => closed ? Math.min(Math.abs(u - v), 1 - Math.abs(u - v)) : Math.abs(u - v);
+  const hits: { u: number; v: number }[] = [];
+  let best = { u: 0, v: 0, P: [0, 0, 0] as Vec3, gap: Infinity };
+  for (let i = 0; i < na; i++) for (let j = 0; j < nb; j++) {
+    const d = gaps[i][j];
+    if (d > (gaps[cap(i - 1, na, a.curve.closed)]?.[j] ?? Infinity) ||
+        d > (gaps[cap(i + 1, na, a.curve.closed)]?.[j] ?? Infinity) ||
+        d > (gaps[i][cap(j - 1, nb, b.curve.closed)] ?? Infinity) ||
+        d > (gaps[i][cap(j + 1, nb, b.curve.closed)] ?? Infinity)) continue;
+    let u = a.t[i], v = b.t[j], x = a.curve.eval(u), y = b.curve.eval(v);
+    let r = sub(x.P, y.P), dd = dot(r, r);
+    for (let step = 0; step < 24; step++) {
+      const f = dot(r, x.d1), g = -dot(r, y.d1), aa = dot(x.d1, x.d1), bb = -dot(x.d1, y.d1), cc = dot(y.d1, y.d1);
+      const lockU = !a.curve.closed && ((u === 0 && f >= 0) || (u === 1 && f <= 0));
+      const lockV = !b.curve.closed && ((v === 0 && g >= 0) || (v === 1 && g <= 0));
+      const h = aa + dot(r, x.d2), k = cc - dot(r, y.d2), det = h * k - bb * bb;
+      let du = lockU ? 0 : -f / Math.max(aa, h, 1e-300), dv = lockV ? 0 : -g / Math.max(cc, k, 1e-300);
+      if (!lockU && !lockV && h > 0 && det > h * k * 1e-12) {
+        du = (bb * g - k * f) / det;
+        dv = (bb * f - h * g) / det;
+      }
+      if (Math.max(Math.abs(du), Math.abs(dv)) < 1e-14) break;
+      let moved = false;
+      for (let scale = 1; scale >= 1 / 1024; scale *= 0.5) {
+        const nextU = unit(u + scale * du, a.curve.closed), nextV = unit(v + scale * dv, b.curve.closed);
+        const nx = a.curve.eval(nextU), ny = b.curve.eval(nextV), nr = sub(nx.P, ny.P), next = dot(nr, nr);
+        if (next >= dd) continue;
+        u = nextU; v = nextV; x = nx; y = ny; r = nr; dd = next; moved = true;
+        break;
+      }
+      if (!moved) break;
+    }
+    const gap = Math.sqrt(dd);
+    if (gap <= tolerance && !hits.some((p) => paramDistance(p.u, u, a.curve.closed) < 1e-6 && Math.abs(p.v - v) < 1e-6)) hits.push({ u, v });
+    if (gap < best.gap) best = { u, v, P: x.P.map((q, k) => (q + y.P[k]) / 2) as Vec3, gap };
+  }
+  const snap = (t: number, closed: boolean) => t < EPS_PARAM ? 0 : t > 1 - EPS_PARAM ? Number(!closed) : t;
+  return { ...best, u: snap(best.u, a.curve.closed), v: snap(best.v, b.curve.closed), hits: hits.length };
+}
+
+type NetCrossing = ReturnType<typeof closestCrossing>;
+
+/** Map each common span back onto the source with a monotone cubic. Shared slopes avoid kinks at the pins. */
+function networkSamples(curve: NetworkCurve, original: number[], common: number[], pins: Vec3[], phase: number, mirror: boolean, density: number, fitSpans: number[]) {
+  const source = original.slice(), target = common.slice();
+  if (target[0] > 0) { target.unshift(0); source.unshift(0); }
+  if (target.at(-1)! < 1) { target.push(1); source.push(1); }
+  if (mirror && !target.includes(0.5)) {
+    const i = target.findIndex((u) => u > 0.5);
+    target.splice(i, 0, 0.5); source.splice(i, 0, 0.5);
+  }
+  const secants = source.slice(1).map((u, i) => (u - source[i]) / (target[i + 1] - target[i]));
+  const mean = (a: number, b: number) => a > 0 && b > 0 ? 2 * a * b / (a + b) : 0;
+  const slopes = source.map((_, i) => i > 0 && i < secants.length ? mean(secants[i - 1], secants[i])
+    : curve.closed ? mean(secants[0], secants.at(-1)!) : i === 0 ? secants[0] : secants.at(-1)!);
+  const at = (i: number, u: number) => {
+    const width = target[i + 1] - target[i], t = (u - target[i]) / width;
+    return lerp(source[i], source[i + 1], t) + width * t * (1 - t) *
+      ((1 - t) * (slopes[i] - secants[i]) - t * (slopes[i + 1] - secants[i]));
+  };
+  const params = sampleSpans([...new Set([...target, ...fitSpans])].sort((a, b) => a - b), density);
+  if (curve.closed) params.pop();
+  // Include samples inside each source knot span, even if it maps to a very narrow interval.
+  for (const t of sampleSpans(curve.breaks, 0)) {
+    const x = unit(t - phase, curve.closed), i = source.findIndex((q) => q > x) - 1;
+    if (i < 0 || x - source[i] <= EPS_PARAM || source[i + 1] - x <= EPS_PARAM) continue;
+    let a = target[i], b = target[i + 1];
+    for (let k = 0; k < 42; k++) {
+      const m = (a + b) / 2;
+      if (at(i, m) > x) b = m; else a = m;
+    }
+    params.push((a + b) / 2);
+  }
+  params.sort((a, b) => a - b);
+  let i = 0;
+  const points = params.map((u) => {
+    while (i < target.length - 2 && u >= target[i + 1]) i++;
+    return curve.eval(unit(at(i, u) + phase, curve.closed)).P;
+  });
+  const indices = common.map((u) => params.indexOf(u)), Q = points.map((q) => q.slice());
+  indices.forEach((k, j) => { Q[k] = pins[j]; });
+  return { params, points, Q: Q.flat(), pins: indices };
+}
+
+/** A family of interpolation weights in one shared spline basis. */
+function networkWeights(params: number[], order: number, closed: boolean, mirror: boolean) {
+  const stations = params.map((t, i) => ({ t, left: i, right: i }));
+  if (closed) while (stations.length < Math.max(3, order)) {
+    // Add stations only when a periodic basis needs more CVs than there are curves.
+    let k = 0, width = 0;
+    for (let i = 0; i < stations.length; i++) {
+      const span = (stations[i + 1]?.t ?? stations[0].t + 1) - stations[i].t;
+      if (span > width) { k = i; width = span; }
+    }
+    const mid = mod(stations[k].t + width / 2, 1), opposite = mod(1 - mid, 1);
+    for (const t of mirror ? [mid, opposite] : [mid]) {
+      if (stations.some((s) => Math.abs(s.t - t) <= EPS_PARAM)) continue;
+      let j = params.findIndex((u) => u > t);
+      if (j < 0) j = 0;
+      stations.push({ t, left: mod(j - 1, params.length), right: j });
+    }
+    stations.sort((a, b) => a.t - b.t);
+  }
+  if (stations.length === 1) {
+    return [{ P: Float64Array.from({ length: order * 3 }, (_, i) => Number(i % 3 === 0)), knots: fitKnots(Float64Array.of(0, 1), false, order, order), order, closed, params: Float64Array.of(params[0]), error: 0 }];
+  }
+  const n = stations.length;
+  const t = Float64Array.from(stations.map((s) => s.t));
+  const start = (order % 2 === 0 || !closed) ? t[0] : (t[0] + t[n - 1] - 1) / 2;
+  const periodic = closed ? Float64Array.from({ length: n + 1 }, (_, i) => i === n ? start + 1
+    : order % 2 === 0 ? t[i] : i === 0 ? start : (t[i] + t[i - 1]) / 2) : null;
+  if (periodic && start > 0) for (let i = 0; i < periodic.length; i++) periodic[i] -= 1;
+  const weights = params.map((_, i) => {
+    const Q = stations.flatMap((s) => [(Number(s.left === i) + Number(s.right === i)) / 2, 0, 0]);
+    // Open interpolation fixes its ends, so interior rail parameters need a clamped domain extending to them.
+    // Interpolate on the full surface domain using constant weights outside the first and last rails.
+    if (!closed) {
+      const open = Array.from(t);
+      if (open[0] > 0) { open.unshift(0); Q.unshift(Q[0], 0, 0); }
+      if (open.at(-1)! < 1) { open.push(1); Q.push(Q.at(-3)!, 0, 0); }
+      const count = open.length, o = Math.min(order, count);
+      let fit = fitColumn(Q, Float64Array.from(open), direction(Float64Array.from(open), false, o, count, mirror), false, o, count);
+      // A lower-order open interpolant is a single Bezier span. Elevate it exactly.
+      while (fit.order < order) {
+        const P = new Float64Array((fit.order + 1) * 3);
+        for (let j = 0; j <= fit.order; j++) P[j * 3] = lerp(fit.P[Math.min(j, fit.order - 1) * 3], fit.P[Math.max(j - 1, 0) * 3], j / fit.order);
+        const elevated = fit.order + 1;
+        fit = { ...fit, P, order: elevated, knots: fitKnots(Float64Array.of(0, 1), false, elevated, elevated) };
+      }
+      return fit;
+    }
+    return fitSpline(Q, { closed, order, cvs: n, knots: periodic!, params: t.map((u) => mod(u - start, 1)), corrections: 0 });
+  });
+  if (weights.some((r) => !(r.error < 1e-9))) throw new Error('loft: could not interpolate the crossings. Space the sections and rails farther apart.');
+  return weights.map(startAtZero);
+}
+
+function networkRefit(curves: NetworkCurve[], crossings: NetCrossing[][], common: number[], weights: FitResult[], phases: number[], mirror: boolean, tolerance: number, label: string) {
+  const { closed, order, knots } = weights[0];
+  const spans = Array.from(new Set(knots));
+  const samples = (density: number, fitSpans: number[]) => curves.map((curve, i) => networkSamples(curve,
+    crossings[i].map((q) => q.u), common, crossings[i].map((q) => q.P), phases[i], mirror,
+    Math.max(density, curve.breaks.length * 4), fitSpans));
+  let worst = 0, worstIndex = 0;
+  for (let split = 1; split <= 256; split *= 2) {
+    const inner = spans.slice(1).flatMap((b, i) => Array.from({ length: split - 1 }, (_, j) => lerp(spans[i], b, (j + 1) / split)));
+    const K = Float64Array.from([...knots, ...inner].sort((a, b) => a - b)), cvs = K.length - (closed ? 1 : order);
+    if (cvs < common.length + order) continue;
+    const density = Math.max(96, cvs * 4), fitSpans = Array.from(new Set(K));
+    const training = samples(density, fitSpans), validation = samples(density * 2 + 1, fitSpans);
+    const fits = training.map(({ Q, params, pins }) => fitSpline(Q, { closed, order, cvs, knots: K, params, pins, corrections: 0 }));
+    worst = 0;
+    for (let i = 0; i < fits.length; i++) {
+      const curve = makeSpline('nurbs', fits[i].P, fits[i]), { params, points } = validation[i];
+      const p = [0, 0, 0];
+      for (let j = 0; j < params.length; j++) {
+        const error = distance(evalPoint(curve, params[j], p), points[j]);
+        if (error > worst) { worst = error; worstIndex = i; }
+      }
+    }
+    if (worst <= tolerance + 1e-12) return { fits, weights: compatible([...weights, fits[0]]).slice(0, weights.length), error: worst };
+  }
+  throw new Error(`loft: ${label} ${worstIndex + 1} could only be fitted within ${+(worst * 1000).toPrecision(4)} mm. Raise tolerance or smooth the input curve.`);
+}
+
+/** The Gordon sum of the two skins, less the interpolated crossing grid. */
+export function fitCurveNetwork(sections: NetworkCurve[], rails: NetworkCurve[], order: [number, number], tolerance: number, networkTolerance: number, mirror: boolean) {
+  if (sections.length < 2) throw new Error('loft needs at least 2 curves');
+  if (!rails.length || rails.some((r) => r.closed)) throw new Error('loft: supply at least one open rail curve.');
+  const closedU = sections[0].closed;
+  if (sections.some((s) => s.closed !== closedU)) throw new Error('loft sections must be all closed or all open');
+  const sectionSamples = sections.map(crossingSamples), railSamples = rails.map(crossingSamples);
+  let gap = 0;
+  const grid = sectionSamples.map((s, i) => railSamples.map((r, j) => {
+    const q = closestCrossing(s, r, networkTolerance);
+    if (q.gap > networkTolerance) throw new Error(`loft: section ${i + 1}, rail ${j + 1} have a gap of ${+(q.gap * 1000).toPrecision(4)} mm. Move the rail onto the section or raise network_tolerance.`);
+    if (q.hits > 1) throw new Error(`loft: rail ${j + 1} meets section ${i + 1} more than once. Edit the rail so it crosses the section once.`);
+    if (q.gap / 2 > tolerance + 1e-12) throw new Error(`loft: section ${i + 1} and rail ${j + 1} need ${+(q.gap * 500).toPrecision(4)} mm of tolerance to meet at their midpoint. Move the rail closer or raise tolerance.`);
+    gap = Math.max(gap, q.gap);
+    return q;
+  }));
+  const rows = sections.map((_, i) => i).sort((i, j) => grid[i][0].v - grid[j][0].v);
+  const cols = rails.map((_, j) => j).sort((i, j) => grid[0][i].u - grid[0][j].u);
+  const seam = sections.map((_, i) => closedU && !mirror ? grid[i][cols[0]].u : 0);
+  const uGrid = rows.map((i) => cols.map((j) => ({ ...grid[i][j], u: unit(grid[i][j].u - seam[i], closedU) })));
+  const vGrid = cols.map((j) => rows.map((i) => ({ ...grid[i][j], u: grid[i][j].v })));
+  uGrid.forEach((row, i) => row.forEach((q, j) => {
+    if (j && q.u <= row[j - 1].u + EPS_PARAM)
+      throw new Error(`loft: section ${rows[i] + 1} meets rails ${cols[j - 1] + 1} and ${cols[j] + 1} out of order. Align the curves so every section meets the rails in the same order.`);
+  }));
+  vGrid.forEach((col, j) => col.forEach((q, i) => {
+    if (i && q.u <= col[i - 1].u + EPS_PARAM)
+      throw new Error(`loft: section ${rows[i] + 1} meets rails 1 and ${cols[j] + 1} out of order. Align the rails so they meet the sections in the same order.`);
+  }));
+  const relativeLength = (c: NetworkCurve, phase: number, u: number) => {
+    const x = u + phase;
+    return x <= 1 ? c.length(x) - c.length(phase) : 1 + c.length(x - 1) - c.length(phase);
+  };
+  const u = cols.map((_, j) => rows.reduce((sum, i, k) => sum + relativeLength(sections[i], seam[i], uGrid[k][j].u) / rows.length, 0));
+  const v = rows.map((_, i) => cols.reduce((sum, j, k) => sum + rails[j].length(vGrid[k][i].u) / cols.length, 0));
+  const snap = (t: number) => t < EPS_PARAM ? 0 : t > 1 - EPS_PARAM ? 1 : t;
+  u.forEach((t, i) => { u[i] = closedU ? t < EPS_PARAM ? 0 : t : snap(t); });
+  v.forEach((t, i) => { v[i] = snap(t); });
+  const [orderU, orderV] = order;
+  const U = networkRefit(rows.map((i) => sections[i]), uGrid, u, networkWeights(u, orderU, closedU, mirror), rows.map((i) => seam[i]), mirror, tolerance, 'section');
+  const V = networkRefit(cols.map((j) => rails[j]), vGrid, v, networkWeights(v, orderV, false, false), cols.map(() => 0), false, tolerance, 'rail');
+  const colsU = U.fits[0].P.length / 3, rowsV = V.fits[0].P.length / 3, P = new Float64Array(colsU * rowsV * 3);
+  const crossingSkin = cols.map((_, b) => Float64Array.from({ length: rowsV * 3 }, (_, q) => {
+    let value = 0;
+    for (let a = 0; a < rows.length; a++) value += V.weights[a].P[q - q % 3] * uGrid[a][b].P[q % 3];
+    return value;
+  }));
+  for (let j = 0; j < rowsV; j++) for (let i = 0; i < colsU; i++) for (let k = 0; k < 3; k++) {
+    let value = 0;
+    for (let a = 0; a < rows.length; a++) value += V.weights[a].P[j * 3] * U.fits[a].P[i * 3 + k];
+    for (let b = 0; b < cols.length; b++) value += U.weights[b].P[i * 3] * (V.fits[b].P[j * 3 + k] - crossingSkin[b][j * 3 + k]);
+    P[(j * colsU + i) * 3 + k] = value;
+  }
+  const result: SurfaceFit = {
+    P, cols: colsU, rows: rowsV, knotsU: U.fits[0].knots, knotsV: V.fits[0].knots,
+    orderU, orderV, closedU, closedV: false, error: Math.max(U.error, V.error), pinnedSections: 0,
+    params: v.map((y) => u.map((x): [number, number] => [x, y])),
+  };
+  if (closedU) {
+    const mid = Math.floor(rows.length / 2), c = sections[rows[mid]];
+    const pts = Array.from({ length: 16 }, (_, i) => c.eval(i / 16).P);
+    orientSectionOutward(result, { pts, closed: true }, mid);
+  }
+  return { surface: result, gap, reordered: rows.some((i, j) => i !== j) };
 }
 
 /** Write one surface prim with row-major CVs and unit weights. */
