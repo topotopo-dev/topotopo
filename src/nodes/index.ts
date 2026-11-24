@@ -1,6 +1,7 @@
 // Registers every built-in node type (import for side effects).
 import './generate.ts';
 import './curves.ts';
+import './surfaces.ts';
 import './lines.ts';
 import './skeleton.ts';
 import './splines.ts';
