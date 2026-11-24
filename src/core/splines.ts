@@ -24,6 +24,8 @@
 import { GeoBuilder, Geometry } from './geometry.ts';
 import type { Src } from './geometry.ts';
 import type { Vec3 } from './math.ts';
+import { CLOSED_V, KNOTS_V, ORDER_V, SURFACE_COLS, appendSurfaceMesh, surfaceFromPrim } from './nurbssurface.ts';
+import type { SurfaceMeshOptions } from './nurbssurface.ts';
 
 export const KIND_PACKED = 1;
 export const KIND_BEZIER = 2;
@@ -231,7 +233,7 @@ export function makeSpline(type: SplineType, P: ArrayLike<number>, o: SplineInit
 // ---------------------------------------------------------------- evaluation kernels
 
 /** Knot span k with U[k] ≤ t < U[k+1] (the last non-empty span at the end of the domain). */
-function findSpan(pc: Piece, t: number): number {
+export function findSpan(pc: Piece, t: number): number {
   const U = pc.U, p = pc.p, ncv = U.length - p - 1;
   if (p === 0) return 0;
   if (t >= U[ncv]) {
@@ -278,7 +280,7 @@ function pieceDeBoor(pc: Piece, t: number, out: number[] | Float64Array) {
   out[0] = d[p * 4] / w; out[1] = d[p * 4 + 1] / w; out[2] = d[p * 4 + 2] / w;
 }
 
-const MAXP1 = MAX_ORDER + 1;
+export const MAXP1 = MAX_ORDER + 1;
 const NDU = new Float64Array(MAXP1 * MAXP1), LEFT = new Float64Array(MAXP1), RIGHT = new Float64Array(MAXP1);
 const AA = new Float64Array(2 * MAXP1), DERS = new Float64Array(3 * MAXP1);
 
@@ -286,7 +288,7 @@ const AA = new Float64Array(2 * MAXP1), DERS = new Float64Array(3 * MAXP1);
  * B-spline basis functions and their derivatives up to nd (≤ 2) at t in span k (Piegl & Tiller A2.3), into a shared
  * scratch buffer: derivative d of basis j (the CV k - p + j) is at [d * MAXP1 + j]. Read it before the next call.
  */
-function dersBasis(pc: Piece, k: number, t: number, nd: number): Float64Array {
+export function dersBasis(pc: Piece, k: number, t: number, nd: number): Float64Array {
   const p = pc.p, U = pc.U, P1 = MAXP1;
   const ndu = NDU, left = LEFT, right = RIGHT, ders = DERS, a = AA;
   ndu[0] = 1;
@@ -1150,7 +1152,9 @@ export function setSplinePrim(g: Geometry, p: number, type: SplineType, order: n
 
 /** Remove the spline attributes (spline_order, knots, Pw) once no spline prim is left; compacts array storage. */
 export function tidySplineAttribs(g: Geometry): Geometry {
-  if (g.hasSplines()) { g.prims.get(KNOTS_ATTRIB)?.compact(); return g; }
+  if (g.hasSurfaces()) g.prims.get(KNOTS_V)?.compact();
+  else for (const name of [SURFACE_COLS, ORDER_V, KNOTS_V, CLOSED_V]) g.prims.delete(name);
+  if (g.hasSplines() || g.hasSurfaces()) { g.prims.get(KNOTS_ATTRIB)?.compact(); return g; }
   g.prims.delete(ORDER_ATTRIB);
   g.prims.delete(KNOTS_ATTRIB);
   g.points.delete(WEIGHT_ATTRIB);
@@ -1158,40 +1162,60 @@ export function tidySplineAttribs(g: Geometry): Geometry {
   return g;
 }
 
-export interface ToPolylinesOptions extends PolylineOptions {
+export interface ToPolylinesOptions extends SurfaceMeshOptions {
   /** convert only prims with group[p] set (others, splines included, stay as they are) */
   group?: ArrayLike<number> | null;
   /** also return pointOrigin: the input point each output point comes from (its heaviest CV for curve samples) */
   origins?: boolean;
+  /** Leave curves or surfaces in their exact form when the caller only needs the other kind. */
+  curves?: boolean;
+  surfaces?: boolean;
 }
 
 /**
  * Replace spline prims by polylines (closed splines by closed polygons) sampled with polylineParams. Points and
  * vertices of the samples blend the CVs' attributes with the curve's own basis weights, so a width or colour on the
  * CVs varies along the curve as the curve does. Other prims, their points and isolated points keep their numbers;
- * CV points no other prim uses are removed. Prim order is unchanged.
+ * CV points no other prim uses are removed. A NURBS surface is replaced in order by its polygon mesh.
  */
-export function splinesToPolylines(g: Geometry, o: ToPolylinesOptions = {}): { geo: Geometry; converted: number; pointOrigin?: Int32Array } {
-  if (!g.hasSplines()) return { geo: g, converted: 0, pointOrigin: o.origins ? Int32Array.from({ length: g.numPoints }, (_, i) => i) : undefined };
+export function splinesToPolylines(g: Geometry, o: ToPolylinesOptions = {}) {
+  if ((o.curves === false || !g.hasSplines()) && (o.surfaces === false || !g.hasSurfaces())) {
+    const pointOrigin = o.origins ? Int32Array.from({ length: g.numPoints }, (_, i) => i) : undefined;
+    return { geo: g, converted: 0, surfaces: 0, poleTriangles: 0, notes: [] as string[], pointOrigin };
+  }
   const np0 = g.numPoints, npr = g.numPrims;
   const b = new GeoBuilder(g);
   for (let i = 0; i < np0; i++) b.copyPoint(i);
-  const keepKind = new Uint8Array(npr);
+  const keepKind: [number, number][] = [];
+  const clearStorage: number[] = [];
+  const notes: string[] = [];
   const origin: number[] = [];
-  let converted = 0;
+  let converted = 0, surfaces = 0, poleTriangles = 0;
   for (let p = 0; p < npr; p++) {
     const s0 = g.primStart[p], e0 = g.primStart[p + 1];
     const pts = g.primPoints(p);
-    if (!g.isSpline(p) || (o.group && !o.group[p])) {
+    const selected = !o.group || o.group[p];
+    if (selected && g.isSurface(p) && o.surfaces !== false) {
+      const s = surfaceFromPrim(g, p);
+      surfaces++;
+      if (s) {
+        for (const note of s.notes) notes.push(`prim ${p}: ${note}`);
+        const first = b.numPrims;
+        poleTriangles += appendSurfaceMesh(b, g, p, s, o, o.origins ? origin : undefined);
+        for (let k = first; k < b.numPrims; k++) clearStorage.push(k);
+      } else notes.push(`prim ${p}: invalid NURBS surface CV grid; check surface_cols and vertex count`);
+      continue;
+    }
+    if (!selected || !g.isSpline(p) || o.curves === false) {
       const vs: number[] = [];
       for (let v = s0; v < e0; v++) vs.push(v);
-      b.addPrim(pts, !!g.primClosed[p], p, vs);
-      if (g.isSpline(p)) keepKind[p] = g.primKind![p];
+      const k = b.addPrim(pts, !!g.primClosed[p], p, vs);
+      if (g.isSpline(p) || g.isSurface(p)) keepKind.push([k, g.primKind![p]]);
       continue;
     }
     converted++;
     const s = splineFromPrim(g, p);
-    const us = polylineParams(s, o);
+    const us = polylineParams(s, { tolerance: o.tolerance, segments: typeof o.segments === 'number' ? o.segments : undefined });
     const ids: number[] = [], vsrc: Src[] = [];
     for (const u of us) {
       const e = evalBasis(s, u);
@@ -1200,19 +1224,17 @@ export function splinesToPolylines(g: Geometry, o: ToPolylinesOptions = {}): { g
       vsrc.push({ i: vi, w: e.w });
       if (o.origins) { let bi = 0; for (let k = 1; k < e.w.length; k++) if (e.w[k] > e.w[bi]) bi = k; origin.push(pi[bi] ?? 0); }
     }
-    b.addPrim(ids, s.closed && ids.length >= 3, p, vsrc);
+    clearStorage.push(b.addPrim(ids, s.closed && ids.length >= 3, p, vsrc));
   }
   let out = b.build();
   // spline prims left alone keep their kind
-  if (keepKind.some((k) => k)) {
+  if (keepKind.length) {
     out.ensurePacked();
-    for (let p = 0; p < npr; p++) if (keepKind[p]) out.primKind![p] = keepKind[p];
+    for (const [p, k] of keepKind) out.primKind![p] = k;
   }
-  const oa = out.prims.get(ORDER_ATTRIB), ka = out.prims.get(KNOTS_ATTRIB);
-  for (let p = 0; p < npr; p++) {
-    if (keepKind[p] || !g.isSpline(p)) continue;
-    if (oa && !oa.isArray && oa.type !== 'string') oa.set(p, 0);
-    if (ka && ka.isArray) ka.set(p, []);
+  for (const name of [ORDER_ATTRIB, KNOTS_ATTRIB, SURFACE_COLS, ORDER_V, KNOTS_V, CLOSED_V]) {
+    const a = out.prims.get(name);
+    if (a) for (const p of clearStorage) a.set(p, a.isArray ? [] : 0);
   }
   // CV points that only spline prims used go away; points other prims use and isolated points stay
   const usedBefore = new Uint8Array(np0), usedAfter = new Uint8Array(out.numPoints);
@@ -1226,12 +1248,12 @@ export function splinesToPolylines(g: Geometry, o: ToPolylinesOptions = {}): { g
     pointOrigin = Int32Array.from(all.filter((_, i) => keep[i]));
   }
   out = out.subsetPoints(keep);
-  return { geo: tidySplineAttribs(out), converted, pointOrigin };
+  return { geo: tidySplineAttribs(out), converted, surfaces, poleTriangles, notes, pointOrigin };
 }
 
 /** Does g, or any packed source inside it (recursively), hold spline prims? */
 export function hasSplinesDeep(g: Geometry, seen = new Set<Geometry>()): boolean {
-  if (g.hasSplines()) return true;
+  if (g.hasSplines() || g.hasSurfaces()) return true;
   if (!g.hasPacked()) return false;
   for (const s of g.packedSources) {
     if (seen.has(s)) continue;
@@ -1241,38 +1263,43 @@ export function hasSplinesDeep(g: Geometry, seen = new Set<Geometry>()): boolean
   return false;
 }
 
-const deepMemo = new WeakMap<Geometry, Geometry>();
-
 /**
  * splinesToPolylines on g and inside its packed sources (recursively; converted sources are new geometries, memoised,
  * so instances keep sharing them). For writers of formats without spline prims.
  */
-export function splinesToPolylinesDeep(g: Geometry, o: PolylineOptions = {}): { geo: Geometry; converted: number } {
-  let converted = 0;
+export function splinesToPolylinesDeep(g: Geometry, o: ToPolylinesOptions = {}) {
+  const memo = new WeakMap<Geometry, Geometry>();
+  let converted = 0, surfaces = 0;
+  const notes: string[] = [];
   const conv = (src: Geometry): Geometry => {
-    const m = deepMemo.get(src);
+    const m = memo.get(src);
     if (m) return m;
     let out = src;
-    if (src.hasPacked() && src.packedSources.some((s) => hasSplinesDeep(s))) {
-      out = src.clone();
-      out.packedSources = out.packedSources.map(conv);
+    memo.set(src, src);
+    if (src.hasPacked()) {
+      const sources = src.packedSources.map(conv);
+      if (sources.some((s, i) => s !== src.packedSources[i])) {
+        out = src.clone();
+        out.packedSources = sources;
+      }
     }
-    if (out.hasSplines()) { const r = splinesToPolylines(out, o); converted += r.converted; out = r.geo; }
-    deepMemo.set(src, out);
+    if (out.hasSplines() || out.hasSurfaces()) {
+      const r = splinesToPolylines(out, o);
+      converted += r.converted;
+      surfaces += r.surfaces;
+      for (const note of r.notes) notes.push(note);
+      out = r.geo;
+    }
+    memo.set(src, out);
     return out;
   };
-  let geo = g;
-  if (g.hasPacked() && g.packedSources.some((s) => hasSplinesDeep(s))) {
-    geo = g.clone();
-    geo.packedSources = geo.packedSources.map(conv);
-  }
-  if (geo.hasSplines()) { const r = splinesToPolylines(geo, o); converted += r.converted; geo = r.geo; }
-  return { geo, converted };
+  const geo = conv(g);
+  return { geo, converted, surfaces, notes };
 }
 
-/** Polyline input for a node that samples curves itself: spline prims evaluated (no-op without splines). */
-export function evaluateSplines(g: Geometry, o: PolylineOptions = {}): Geometry {
-  return g.hasSplines() ? splinesToPolylines(g, o).geo : g;
+/** Evaluate curves and surfaces for polygon or polyline consumers. */
+export function evaluateSplines(g: Geometry, o: ToPolylinesOptions = {}): Geometry {
+  return g.hasSplines() || g.hasSurfaces() ? splinesToPolylines(g, o).geo : g;
 }
 
 /** "2 bezier, 1 nurbs" counts, for summaries (null without splines). */

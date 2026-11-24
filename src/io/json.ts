@@ -76,11 +76,10 @@ export function geoToJSON(g: Geometry) {
     for (let p = 0; p < k.length; p++) if (k[p] === 1) { prims.push(p); source.push(S[p]); for (let c = 0; c < 9; c++) xform.push(X[p * 9 + c]); }
     out.packed = { prims, source, xform, sources: g.packedSources.map(geoToJSON) };
   }
-  // spline prims (only when present): prim numbers and kinds (2 Bezier, 3 NURBS); order, knots and weights are the
-  // ordinary attributes spline_order, knots and Pw
-  if (g.hasSplines()) {
+  // Spline prims: numbers and kinds (2 Bezier, 3 NURBS curve, 4 NURBS surface). CV data is stored in the ordinary tables.
+  if (g.hasSplines() || g.hasSurfaces()) {
     const prims: number[] = [], kind: number[] = [];
-    g.primKind!.forEach((k, p) => { if (k >= 2) { prims.push(p); kind.push(k); } });
+    g.primKind!.forEach((k, p) => { if (g.isSpline(p) || g.isSurface(p)) { prims.push(p); kind.push(k); } });
     out.splines = { prims, kind };
   }
   // heightfield volumes (written only when present): grid + layers (SDF volumes are functions and are not stored)
@@ -129,7 +128,7 @@ export function geoFromJSON(j: any): Geometry {
     sp.prims.forEach((p: number, i: number) => {
       const k = Number(sp.kind?.[i]);
       if (!(Number.isInteger(p) && p >= 0 && p < g.numPrims)) throw new Error(`spline prim ${p}: out of range (${g.numPrims} prims)`);
-      if (k !== 2 && k !== 3) throw new Error(`spline prim ${p}: kind ${sp.kind?.[i]} (2 = Bezier, 3 = NURBS)`);
+      if (k !== 2 && k !== 3 && k !== 4) throw new Error(`spline prim ${p}: kind ${sp.kind?.[i]} (2 = Bezier curve, 3 = NURBS curve, 4 = NURBS surface)`);
       g.primKind![p] = k;
     });
   }

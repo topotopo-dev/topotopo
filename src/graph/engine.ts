@@ -46,7 +46,7 @@
 import { Geometry, isGeometry } from '../core/geometry.ts';
 import { DEFAULT_TRANSFER, expandPacked } from '../core/packed.ts';
 import { primIntrinsic } from '../core/intrinsics.ts';
-import { splinesToPolylines } from '../core/splines.ts';
+import { hasSplinesDeep, splinesToPolylinesDeep } from '../core/splines.ts';
 import { hashString } from '../core/random.ts';
 import type { FileDep, Host, HostFiles, StopSignal, StoredNode } from '../host/types.ts';
 import { targetError, targetWarning } from '../io/targets.ts';
@@ -1651,26 +1651,36 @@ export class Engine {
       }
       if (n) result.warnings.push(`unpacked ${n} instances for ${name} (${def.type} needs real geometry; add an unpack node to choose what is transferred, or keep instances packed upstream)`);
     }
-    // spline prims (Bezier/NURBS): NodeDef.splines, by default 'keep' for nodes that keep packed prims (they work on
-    // elements and points), else converted to polylines
+    // NodeDef.splines keeps the exact prims or converts curves to polylines and surfaces to polygons.
     const sp = typeof def.splines === 'function' ? def.splines(p) : def.splines ?? (policy === 'keep' ? 'keep' : 'polyline');
     if (sp === 'keep') return;
-    let n = 0;
+    let n = 0, surfaces = 0;
+    const notes: string[] = [];
     for (let i = 0; i < inputs.length; i++) {
       const g = inputs[i];
-      if (!g || !g.hasSplines()) continue;
-      n += g.numSplines;
+      if (!g || !hasSplinesDeep(g)) continue;
       const key = (expanded[i] ? 'unpack-polyline:' : 'polyline:') + sigs[i];
       let c = this.cache.get(key);
-      if (!c) {
-        c = splinesToPolylines(g).geo;
+      let info = c && splineConversions.get(c);
+      if (!c || !info) {
+        const r = splinesToPolylinesDeep(g);
+        c = r.geo;
+        info = { curves: r.converted, surfaces: r.surfaces, notes: r.notes };
+        splineConversions.set(c, info);
         this.cache.set(key, c);
       }
       inputs[i] = c;
+      n += info.curves;
+      surfaces += info.surfaces;
+      for (const note of info.notes) notes.push(note);
     }
     if (n) result.warnings.push(`converted ${n} spline curve${n === 1 ? '' : 's'} to polylines for ${name} (${def.type} works on polygons/polylines; add convert_curve or resample to choose the resolution)`);
+    if (surfaces) result.warnings.push(`converted ${surfaces} NURBS surface${surfaces === 1 ? '' : 's'} to polygons for ${name} (${def.type} works on polygons; add convert_curve to choose the resolution)`);
+    for (const note of new Set(notes)) result.warnings.push(note);
   }
 }
+
+const splineConversions = new WeakMap<Geometry, { curves: number; surfaces: number; notes: string[] }>();
 
 function checkFinite(g: Geometry, r: NodeResult) {
   const P = g.P;

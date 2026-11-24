@@ -6,6 +6,8 @@ import type { CookContext } from '../graph/types.ts';
 import { codeVarDecl, codeVarNames, codeVarValues, runUserCode } from '../core/usercode.ts';
 import { scriptVarsGuard } from '../core/snippet-lib.ts';
 import type { Vec3 } from '../core/math.ts';
+import { setSurfacePrim } from '../core/nurbssurface.ts';
+import { clampedUniformKnots } from '../core/splines.ts';
 import { orientOutward, pointNormals, primNewell } from '../core/topology.ts';
 import { rng } from '../core/random.ts';
 import { uvSphere } from '../core/shapes.ts';
@@ -299,16 +301,36 @@ defineNode({
   type: 'grid',
   category: 'generate',
   summary: 'Flat grid of quads (default lies on the XZ ground plane facing +Y).',
+  description: 'Use type: nurbs for one flat cubic NURBS surface. Move its control points to bend the surface.',
   inputs: [],
   params: {
     size: { type: 'vec2', default: [4, 4], desc: 'width and depth' },
-    divisions: { type: 'ivec2', default: [10, 10], min: 1, max: 2048, desc: 'quads along each side', aliases: ['rows', 'cols', 'res', 'resolution'] },
+    divisions: { type: 'ivec2', default: [10, 10], min: 1, max: 2048, desc: 'quads or knot spans along each side (NURBS uses three more control points than spans)', aliases: ['rows', 'cols', 'res', 'resolution'] },
+    type: { type: 'enum', options: ['polygon', 'nurbs'], default: 'polygon', desc: 'polygon grid or one cubic NURBS surface' },
     plane: P.plane('xz'),
     center: P.center(),
   },
   outputs: 'point uv',
   example: { type: 'grid', params: { size: [10, 6], divisions: [20, 12] } },
-  cook: ({ p }) => makeGrid(p.size, p.divisions, p.plane, p.center),
+  cook: ({ p }) => {
+    if (p.type === 'polygon') return makeGrid(p.size, p.divisions, p.plane, p.center);
+    const [cols, rows] = p.divisions.map((d: number) => d + 3);
+    const ku = clampedUniformKnots(cols, 3), kv = clampedUniformKnots(rows, 3);
+    const { U, V } = FRAMES[p.plane as PlaneName];
+    const b = new GeoBuilder(), uv = b.attrib('point', 'uv', 3), pts: number[] = [];
+    const greville = (k: Float64Array, i: number) => (k[i + 1] + k[i + 2] + k[i + 3]) / 3;
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      const u = greville(ku, i), v = greville(kv, j);
+      const a = (u - 0.5) * p.size[0], c = (v - 0.5) * p.size[1];
+      const id = b.addPoint(p.center[0] + U[0] * a + V[0] * c, p.center[1] + U[1] * a + V[1] * c, p.center[2] + U[2] * a + V[2] * c);
+      pts.push(id);
+      uv.set(id, [u, v, 0]);
+    }
+    b.addPrim(pts, false);
+    const g = b.build();
+    setSurfacePrim(g, 0, cols, { knotsU: ku, knotsV: kv });
+    return g;
+  },
 });
 
 defineNode({

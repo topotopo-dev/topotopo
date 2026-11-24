@@ -518,7 +518,7 @@ function onlyDefaults(a: Attribute): boolean {
 
 /** Build a gltf-transform Document for the geometry (no IO yet). */
 export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
-  if (hasSplinesDeep(g)) g = splinesToPolylinesDeep(g).geo; // Bezier/NURBS prims (also in packed sources) as polylines
+  if (hasSplinesDeep(g)) g = splinesToPolylinesDeep(g).geo; // Curves as polylines, NURBS surfaces as polygons, including packed sources.
   // scene empties become nodes, not POINTS
   const empties = sceneEmpties(g);
   if (empties.length) {

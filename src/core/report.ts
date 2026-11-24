@@ -11,6 +11,7 @@
 // one's position and the fix. Seam welding: a boundary edge whose two points coincide (within 1e-7 of the bbox
 // diagonal) with those of exactly one other boundary edge is a seam split, not a hole.
 import type { Geometry } from './geometry.ts';
+import { evaluateSplines } from './splines.ts';
 import { buildEdges, growInt32, PairIds, primArea, triangulate } from './topology.ts';
 import type { Triangulation } from './topology.ts';
 import { halfEdges } from './halfedge.ts';
@@ -122,6 +123,7 @@ export interface SolidReportOptions {
 
 /** Whether the mesh is a closed solid, and why not (see the file comment). */
 export function solidReport(g: Geometry, o: SolidReportOptions = {}): SolidReport {
+  if (g.hasSurfaces()) return solidReport(evaluateSplines(g, { curves: false }), { ...o, tri: undefined });
   const E = buildEdges(g), P = g.P, np = g.numPoints;
   let polys = 0, degenerate = 0, firstDeg = -1;
   for (let p = 0; p < g.numPrims; p++) {

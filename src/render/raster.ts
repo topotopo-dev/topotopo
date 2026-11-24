@@ -19,6 +19,7 @@ import { readUV, polygonSides, uvSeamPairs } from '../core/uv.ts';
 import { readTrimSheets } from '../core/trim.ts';
 import { chartKinds, chartRoots, primLods } from '../core/uvreport.ts';
 import { expandForRender } from '../core/packed.ts';
+import { splinesToPolylinesDeep } from '../core/splines.ts';
 import { qNormalize, qRotate } from '../core/math.ts';
 import type { Quat, Vec3 } from '../core/math.ts';
 import { PLANE_UV, sliceTriangles, windingGrid } from './section.ts';
@@ -434,9 +435,9 @@ function greyShading(o: RenderOptions): RenderOptions {
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
   o = greyShading(o);
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
-  if (g.hasPacked() || g.hasSplines()) {
+  if (g.hasPacked() || g.hasSplines() || g.hasSurfaces()) {
     const budget = o.maxTriangles !== undefined && o.maxTriangles > 0 ? Math.min(o.maxTriangles, 50_000_000) : undefined;
-    const x = expandForRender(g, o, budget);
+    const x = expandForRender(splinesToPolylinesDeep(g, { curves: false }).geo, o, budget);
     const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r;
   }
   // heightfields draw as their grid mesh with layers as attributes, decimated to heightfieldRes quads per side
