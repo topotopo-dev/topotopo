@@ -417,13 +417,27 @@ const torus = await cook({ t: { type: 'torus', params: { rows: 16, cols: 48 } } 
   check(reach(smooth) < reach(semi) - 1e-3 && reach(semi) < reach(hard2) - 1e-3 && Math.abs(top(semi) - 0.5) < 1e-9, `crease 1, 2 levels is between smooth and sharp (${reach(smooth).toFixed(4)} < ${reach(semi).toFixed(4)} < ${reach(hard2).toFixed(4)})`);
   const half = await crease(1, 0.5), s1 = await crease(1, 0), h1 = await crease(1, 10);
   check(reach(s1) < reach(half) - 1e-3 && reach(half) < reach(h1) - 1e-3, `crease 0.5 blends sharp and smooth rules (${reach(s1).toFixed(4)} < ${reach(half).toFixed(4)} < ${reach(h1).toFixed(4)})`);
-  // creaseweight attribute (vertex class, Houdini convention: both corners carry the weight)
+  // Only the top face supplies weights. Its outgoing half-edges define the rim.
   const viaAttr = await cook({
     b: { type: 'box' },
     a: { type: 'wrangle', in: ['b'], params: { run_over: 'vertices', code: 'f@creaseweight = @P.y > 0 && primpoints(0, @primnum).every((q) => point(0, "P", q).y > 0) ? 10 : 0;' } },
     s: { type: 'subdivide', in: ['a'], params: { levels: 3 } },
   }, 's');
   check(Math.abs(top(viaAttr) - 0.5) < 1e-9 && ys(viaAttr).filter((y) => Math.abs(y - 0.5) < 1e-6).length >= 81 && viaAttr.vertices.has('creaseweight'), 'creaseweight vertex attribute creases the top and propagates');
+  const rim = await cook({
+    b: { type: 'box' },
+    a: { type: 'wrangle', in: ['b'], params: { run_over: 'vertices', code: `
+      const corners = primpoints(0, @primnum);
+      const next = corners[(corners.indexOf(@ptnum) + 1) % corners.length];
+      const p = point(0, "P", next);
+      const topFace = corners.every((q) => point(0, "P", q).y > 0);
+      f@creaseweight = @P.y > 0 && p.y > 0 ? (topFace ? (@P.x > 0 && p.x > 0 ? 1 : 0) : 3) : 0;
+    ` } },
+    first: { type: 'subdivide', in: ['a'], params: { levels: 1 } },
+    second: { type: 'subdivide', in: ['first'], params: { levels: 1 } },
+  }, 'second');
+  const reference = await crease(2, 3);
+  check(rim.P.every((v, i) => Math.abs(v - reference.P[i]) < 1e-12), 'outgoing vertex crease uses the larger shared weight and stays on the rim through chained subdivision');
   const viaPoint = await cook({
     b: { type: 'box' },
     a: { type: 'attrib_create', in: ['b'], params: { name: 'creaseweight', class: 'point', value: 10, group: '@P.y>0' } },

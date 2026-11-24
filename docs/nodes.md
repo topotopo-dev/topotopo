@@ -1217,7 +1217,7 @@ category: `curve` · aliases: `cage_from_lines`, `lines_cage`, `skin_lines`
 
 Build a cage from the long lines of a body so the smoothed surface passes through them.
 
-Draw feature lines along the length of the body, with +Z toward the front by default. Give the lines in order around a cross-section. Use an object such as {"keel":[[0,0,-0.5],[0,0,0.5]],"belt":[[0.15,0.1,-0.5],[0.2,0.1,0.5]]} with other lines around the section, or connect named open curves. Mirror x reflects the positive x half and shares centre lines. Stations cut all the lines at the same axis positions. Smooth reading uses a shape-preserving cubic between line points, and extra rows round out each section. Leave the ends open, fill closed sections with grid caps, or bring each end to a point. Set a crease weight per line or use position and weight pairs to fade a crease along its length. Group faces between lines and stations for panels or openings. Match fit_levels to the levels in subdivide so its vertex points pass through the sampled line points and extra rows.
+Draw feature lines along the length of the body, with +Z toward the front by default. Give the lines in order around a cross-section. Use an object such as {"keel":[[0,0,-0.5],[0,0,0.5]],"belt":[[0.15,0.1,-0.5],[0.2,0.1,0.5]]} with other lines around the section, or connect named open curves. Four to seven well-placed points per line read smoother than many, and cv helps when the numbers are rough. Use round for noses, tips and domes, and point only for a sharp tip. Place an intake, lamp or outlet face with stations and rows_between, select it with groups, and inset and push it in with poly_extrude before subdivide to avoid jagged or cross-shaped openings. Count a quad mesh’s triangles with nvertices(0) - 2 * nprims(0) and keep the output in quads. Match fit_levels to the levels in subdivide so the surface passes through the sampled lines.
 
 **Inputs**
 
@@ -1231,17 +1231,17 @@ Draw feature lines along the length of the body, with +Z toward the front by def
 |---|---|---|---|---|---|---|
 | `lines` | json | `{"keel":[[0,-0.067,-0.5],[0,-0.128,-0.29],[0,-0.14,0],[0,-0.122,0.29],[0,-0.051,0.5]],"sill":[[0.059,-0.045,-0.5],[0.121,-0.091,-0.29],[0.137,-0.103,0],[0.117,-0.086,0.29],[0.053,-0.036,0.5]],"belt":[[0.085,0,-0.5],[0.183,0,-0.29],[0.203,0,0],[0.172,0,0.29],[0.075,0,0.5]],"shoulder":[[0.059,0.054,-0.5],[0.127,0.113,-0.29],[0.145,0.132,0],[0.125,0.105,0.29],[0.05,0.046,0.5]],"roof":[[0,0.075,-0.5],[0,0.149,-0.29],[0,0.177,0],[0,0.147,0.29],[0,0.062,0.5]]}` |  |  |  | feature line names and [x,y,z] points in metres in section order. A small pod is used when no curves are connected |
 | `axis` | enum | `"z"` |  | `x`, `y`, `z` |  | length axis for station positions in metres. Defaults to z, with the front toward +z. Use mirror none along x |
-| `interpolation` | enum | `"smooth"` |  | `smooth`, `linear` |  | reading between points. Smooth uses a shape-preserving cubic by default, and linear uses straight segments. Spline samples are always read linearly |
+| `interpolation` | enum | `"smooth"` |  | `smooth`, `linear`, `cv` |  | Smooth passes a shape-preserving cubic through the points. Linear joins the points with straight segments. CV uses the points as controls for a clamped uniform cubic B-spline that passes through both endpoints. |
 | `stations` | json | `12` |  |  |  | count or strictly ascending axis positions in metres. Defaults to 12 evenly spaced stations across the shared line range |
 | `mirror` | enum | `"x"` |  | `x`, `none` |  | x mirrors the positive x half and shares centre lines by default. Use none for a full section |
 | `closed` | bool | `true` |  |  |  | join the section into a loop by default. For an open mirrored section, leave at least one end line off x = 0 |
 | `rows_between` | json | `0` |  |  |  | extra rows per line gap, as a count or a list of counts. Defaults to zero. Closed sections without mirroring include the last-to-first gap |
-| `ends` | json | `"cap"` |  |  |  | open, cap, point, or a pair in ascending station order. Defaults to a grid cap at both ends |
+| `ends` | json | `"cap"` |  |  |  | open, cap, round, point, or a pair in ascending station order. Cap keeps a flat grid inside a sharp rim. Round fits a dome to the tip where the lines meet. Point makes a sharp tip |
 | `creases` | json | `{}` |  |  |  | line names with subdivision sharpness weights or [axis position in metres, weight] keys. Defaults to no creases. Keys interpolate linearly and are zero outside their range |
-| `groups` | json | `{}` |  |  |  | named face selections with between: [line, line] and optional from and to in metres, snapped to the nearest stations. Defaults to no groups. Unmirrored closed sections read between in section order |
+| `groups` | json | `{}` |  |  |  | named face selections with between: [line, line] and optional from and to in metres, snapped to the nearest stations. Repeat a boundary line name to select the strip across its mirror. Unmirrored closed sections read between in section order |
 | `fit_levels` | int | `2` | 0..4 |  |  | number of subdivision levels to fit, two by default. Zero puts cage points directly on the sampled sections |
 
-**Writes:** point row (int), line (string), station (int), creaseweight (float); prim row and station (int), prim groups sides, caps and groups; edge groups line_<name>; vertex uv; detail fit_error (float, metres)
+**Writes:** point row (int), line (string), station (int); prim row and station (int), prim groups sides, caps and groups; edge groups line_<name>; vertex uv and creaseweight (float); detail fit_error (float, metres)
 
 **Example**
 
@@ -1438,7 +1438,7 @@ Draw feature lines along the length of the body, with +Z toward the front by def
             ]
           ]
         },
-        "ends": "point",
+        "ends": "round",
         "stations": [
           -0.5,
           -0.478,
@@ -6086,7 +6086,7 @@ category: `topology` · aliases: `subd`, `catmull_clark`, `subdivision`
 
 Catmull-Clark (smooth) or linear subdivision with semi-sharp creases; all attributes and groups interpolated.
 
-Creases (DeRose/Kass/Truong): edges in the "creases" edge group/pattern get crease_weight, and a crease attribute (default "creaseweight", Houdini convention: vertex class = both corners of the edge carry the weight; point class = both endpoints; prim class = every side of the prim) adds its values; the larger wins. Sharpness s >= 1 uses the sharp rules (edge midpoint, crease vertex 3/4·v + 1/8·neighbours, corner where 3+ creases meet stays fixed), 0 < s < 1 blends with the smooth rules, and s drops by 1 per level, so weight 1 is sharp for one level then smooths out; weight >= levels stays fully sharp. Boundary points touched by an interior crease become corners. The output keeps edge groups on the child edges and writes the remaining sharpness back to the crease attribute (prim class becomes vertex class).
+Creases (DeRose/Kass/Truong): edges in the "creases" edge group/pattern get crease_weight, and a crease attribute (default "creaseweight", Houdini convention: vertex class = from the vertex to the next one in its polygon; point class = both endpoints; prim class = every side of the prim) adds its values; the larger wins. Sharpness s >= 1 uses the sharp rules (edge midpoint, crease vertex 3/4·v + 1/8·neighbours, corner where 3+ creases meet stays fixed), 0 < s < 1 blends with the smooth rules, and s drops by 1 per level, so weight 1 is sharp for one level then smooths out; weight >= levels stays fully sharp. Boundary points touched by an interior crease become corners. The output keeps edge groups on the child edges and writes the remaining sharpness back to the crease attribute (prim class becomes vertex class).
 
 **Inputs**
 

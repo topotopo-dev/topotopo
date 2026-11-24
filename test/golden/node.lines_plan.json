@@ -3,13 +3,13 @@
   "fingerprint": {
     "attributes": {
       "detail": ["fit_error:float:1"],
-      "point": ["P:float:3", "creaseweight:float:1", "line:string:1", "row:int:1", "station:int:1"],
+      "point": ["P:float:3", "line:string:1", "row:int:1", "station:int:1"],
       "prim": ["row:int:1", "station:int:1"],
-      "vertex": ["uv:float:3"]
+      "vertex": ["creaseweight:float:1", "uv:float:3"]
     },
     "bbox": {
-      "max": [0.2256, 0.189, 0.5624],
-      "min": [-0.2256, -0.1522, -0.5624]
+      "max": [0.2255, 0.1891, 0.5],
+      "min": [-0.2255, -0.1522, -0.5]
     },
     "counts": {
       "points": 98,
@@ -24,7 +24,7 @@
       "vertex": []
     },
     "hashes": {
-      "P": "eb356f33f9e33145",
+      "P": "b20c938d614184b7",
       "attributes": {
         "detail.fit_error": "9be171658ea4219f",
         "group.edge.line_belt": "c324422843d384ae",
@@ -34,12 +34,12 @@
         "group.edge.line_sill": "c324422843d384ae",
         "group.prim.caps": "57fa4445f6a65dff",
         "group.prim.sides": "9620ac451669e7ff",
-        "point.creaseweight": "3f07b5050c32a61f",
         "point.line": "9a702c49c9529e6b",
         "point.row": "200409f5b81b066f",
         "point.station": "d2bd08f53613c7ef",
         "prim.row": "8f87a322bf524ef8",
         "prim.station": "19623e05ad75eb5f",
+        "vertex.creaseweight": "f25dfa05a81370df",
         "vertex.uv": "7e8dbf89824a2aa3"
       },
       "topology": "c75a98e46a51205e"

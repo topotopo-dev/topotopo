@@ -53,7 +53,13 @@ export function resolveParamName(def: NodeDef, key: string): string | null {
 export { DEFAULT_TIME, DeferredExpr, EXPR_HELPERS, ExprError, REF_FUNCS, TIME_KEYS, evalExpr } from './expr.ts';
 export type { ExprEnv, TimeState } from './expr.ts';
 
-/** Recursively evaluate "=expr" strings inside a param value (arrays too). */
+function plainObject(v: unknown): v is Record<string, unknown> {
+  if (!v || typeof v !== 'object') return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+/** Recursively evaluate "=expr" strings inside parameter arrays and objects. */
 export function evalDeep(v: any, vars: Record<string, any>, env?: ExprEnv): any {
   let scope: ExprScope | undefined;
   return evalValue(v, () => (scope ??= exprScope(vars, env)), '');
@@ -73,6 +79,7 @@ function evalValue(v: any, scope: () => ExprScope, label: string): any {
     }
   }
   if (Array.isArray(v)) return v.map((x, i) => evalValue(x, scope, label && `${label}[${i}]`));
+  if (plainObject(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, evalValue(x, scope, label && `${label}[${JSON.stringify(k)}]`)]));
   return v;
 }
 
@@ -127,10 +134,11 @@ export function scanExpr(src: string, into: ExprRefs = { geo: [], ch: [], errors
   return into;
 }
 
-/** Walk a param value the way evalDeep does and scan every "=expr" string in it. */
-export function scanValue(v: any, into: ExprRefs = { geo: [], ch: [], errors: [] }): ExprRefs {
+/** Scan expression strings, descending into objects when the caller has identified a node parameter. */
+export function scanValue(v: any, into: ExprRefs = { geo: [], ch: [], errors: [] }, objects = false): ExprRefs {
   if (typeof v === 'string' && v.length > 1 && v[0] === '=') scanExpr(v.slice(1), into);
-  else if (Array.isArray(v)) for (const x of v) scanValue(x, into);
+  else if (Array.isArray(v)) for (const x of v) scanValue(x, into, objects);
+  else if (objects && plainObject(v)) for (const x of Object.values(v)) scanValue(x, into, objects);
   return into;
 }
 
@@ -142,7 +150,7 @@ export function scanNodeRefs(def: NodeDef, raw: Record<string, any> | undefined)
     const name = resolveParamName(def, k);
     const pd = name ? def.params[name] : undefined;
     if (!pd || pd.type === 'code' || pd.type === 'graph') continue;
-    scanValue(v, into);
+    scanValue(v, into, true);
   }
   return into;
 }
@@ -364,6 +372,7 @@ export function resolveParams(def: NodeDef, raw: Record<string, any> | undefined
   const collect = (v: any) => {
     if (typeof v === 'string') { if (v.length > 1 && v[0] === '=') srcs.push(v.slice(1)); }
     else if (Array.isArray(v)) for (const x of v) collect(x);
+    else if (plainObject(v)) for (const x of Object.values(v)) collect(x);
   };
   for (const [name, pd] of Object.entries(def.params)) if (pd.type !== 'code' && pd.type !== 'graph') collect(name in given ? given[name] : pd.default);
   if (srcs.length > 1) precompileExprs(env.host, srcs);

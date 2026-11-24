@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { edgeKey, forEachPrimEdge } from '../src/core/edges.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import { halfEdges } from '../src/core/halfedge.ts';
 import type { Vec3 } from '../src/core/math.ts';
 import { newellOf } from '../src/core/polyedit.ts';
 import { evalBasis, splineFromPrim } from '../src/core/splines.ts';
 import { buildEdges, primNormals, signedVolume } from '../src/core/topology.ts';
-import type { NodeSpec } from '../src/graph/types.ts';
+import { getNodeDef } from '../src/graph/registry.ts';
+import type { GraphSpec, NodeSpec } from '../src/graph/types.ts';
 import { creaseSharpness, subdivideLevel } from '../src/nodes/topology.ts';
 import { checkGeo, createFixtureEngine } from './fixtures.ts';
 import { fingerprint } from './fingerprint.ts';
@@ -42,6 +44,11 @@ async function cook(params: Record<string, unknown>, nodes?: Record<string, Node
 const point = (g: Geometry, i: number): Vec3 => [g.P[i * 3], g.P[i * 3 + 1], g.P[i * 3 + 2]];
 const distance = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 const pts = (g: Geometry) => Array.from({ length: g.numPoints }, (_, i) => point(g, i));
+function maxValence(g: Geometry) {
+  const edges = buildEdges(g), valence = new Uint32Array(g.numPoints);
+  edges.a.forEach((a, i) => { valence[a]++; valence[edges.b[i]]++; });
+  return valence.reduce((max, n) => Math.max(max, n), 0);
+}
 const onLine = (g: Geometry, name: string, station: number) => {
   const i = (g.points.get('line')!.data as string[]).findIndex((s, i) => s === name && g.points.get('station')!.get(i) === station);
   assert.ok(i >= 0, `${name} at ${station}`);
@@ -146,35 +153,20 @@ await check('fit reaches the corresponding subdivision vertices with and without
   }
 });
 
-await check('crease weights, fade, sharp highlight and neighbouring crease warning', async () => {
-  const params = { ...base, stations: [-0.5, -0.25, 0, 0.25, 0.5], rows_between: 1, creases: { belt: 2.5, sill: [[-0.25, 2], [0.25, 2]] } };
+await check('creases are written only on along-line half-edges and can fade', async () => {
+  const params = { ...base, ends: 'open', stations: [-0.5, -0.25, 0, 0.25, 0.5], rows_between: 1,
+    creases: { belt: 2.5, sill: [[-0.25, 1], [0.25, 3]] } };
   const { geo } = await cook(params);
-  for (let i = 0; i < geo.numPoints; i++) {
-    const name = geo.points.get('line')!.get(i), s = Number(geo.points.get('station')!.get(i));
-    assert.equal(geo.points.get('creaseweight')!.get(i), name === 'belt' ? 2.5 : name === 'sill' && s >= 1 && s <= 3 ? 2 : 0);
-  }
-  const { geo: smooth } = await cook({ ...base, fit_levels: 2, creases: { belt: 2.5 } }, undefined, undefined, true);
-  const normals = primNormals(smooth), edges = buildEdges(smooth);
-  const angles = (name: string) => {
-    const group = smooth.edgeGroups.get(`line_${name}`)!;
-    const values: number[] = [];
-    for (let i = 0; i < edges.a.length; i++) {
-      const a = edges.a[i], b = edges.b[i];
-      if (!group.has(a, b) || smooth.P[a * 3] < 0 || Math.abs((smooth.P[a * 3 + 2] + smooth.P[b * 3 + 2]) / 2) > 0.1) continue;
-      const faces = Array.from({ length: smooth.numPrims }, (_, j) => j).filter((j) => {
-        const p = smooth.primPoints(j); return p.includes(a) && p.includes(b);
-      });
-      assert.equal(faces.length, 2);
-      const [u, v] = faces.map((j) => normals.subarray(j * 3, j * 3 + 3));
-      values.push(Math.acos(Math.min(1, Math.max(-1, u[0] * v[0] + u[1] * v[1] + u[2] * v[2]))));
-    }
-    assert.ok(values.length);
-    return Math.max(...values);
-  };
-  assert.ok(angles('belt') > angles('shoulder'));
-  const { result } = await cook({ ...params, rows_between: 0 });
-  assert.equal(result.warnings.length, 1);
-  assert.match(result.warnings[0].message, /sill.*belt.*rows_between/);
+  const crease = geo.vertices.get('creaseweight')!;
+  const station = geo.points.get('station')!;
+  const sharp = creaseSharpness(geo, '', 0, 'creaseweight')!.sharp;
+  forEachPrimEdge(geo, (_, v, __, a, b) => {
+    const s = Math.min(Number(station.get(a)), Number(station.get(b)));
+    const expected = geo.edgeGroups.get('line_belt')!.has(a, b) ? 2.5
+      : geo.edgeGroups.get('line_sill')!.has(a, b) ? [0, 1, 2, 0][s] : 0;
+    assert.equal(crease.get(v), expected);
+    assert.equal(sharp.get(edgeKey(a, b)) ?? 0, expected);
+  });
 });
 
 await check('groups snap to stations and propagate on both halves', async () => {
@@ -287,6 +279,227 @@ await check('30 stations by 16 rows fit in under one second', async () => {
   assert.ok(Number(geo.detail.get('fit_error')!.get(0)) < 0.0001);
   assert.ok(ms < 1000, `${ms.toFixed(1)} ms`);
   console.log(`     30 × 16 fit took ${ms.toFixed(1)} ms`);
+});
+
+await check('nested expressions set line coordinates, group limits and crease keys', async () => {
+  const graph: GraphSpec = { nodes: {
+    cage: { type: 'lines_plan', params: {
+      lines: { bottom: [[0, -0.2, -1], [0, -0.2, 1]], belt: [[0.3, 0, -1], [0.3, 0, 1]], top: [[0, '=h', -1], [0, '=h*0.5', 1]] },
+      ends: 'open', fit_levels: 0, stations: [-1, -0.5, 0, 0.5, 1],
+      groups: { door: { between: ['belt', 'top'], from: '=-bodyLength/4', to: '=bodyLength/4' } },
+      creases: { top: [[-1, '=h*5'], [1, '=h*5']] },
+    } },
+  } };
+  for (const h of [0.2, 0.4]) {
+    const result = await engine.cook({ ...graph, vars: { h, bodyLength: 2 } });
+    assert.ok(result.ok && result.geo, JSON.stringify(result.errors));
+    assert.equal(onLine(result.geo, 'top', 0)[1], h);
+    assert.equal(onLine(result.geo, 'top', 4)[1], h * 0.5);
+    assert.equal(result.geo.primGroups.get('door')!.reduce((a, b) => a + b, 0), 4);
+    assert.deepEqual([...new Set(creaseSharpness(result.geo, '', 0, 'creaseweight')?.sharp.values())], [h * 5]);
+  }
+});
+
+await check('point attributes evaluate object values and discover node dependencies', async () => {
+  const result = await engine.cook({ nodes: {
+    sample: { type: 'points', params: { attribs: { '=label': ['=h'], count: ["=npoints('guide')"] } } },
+    guide: { type: 'points', params: { positions: [[0, 0, 0], [1, 0, 0]] } },
+  }, output: 'sample', vars: { h: 0.25 } });
+  assert.ok(result.ok && result.geo, JSON.stringify(result.errors));
+  assert.equal(result.geo.points.get('=label')!.get(0), 0.25);
+  assert.equal(result.geo.points.get('count')!.get(0), 2);
+});
+
+function maxGroupAngle(g: Geometry, name: string) {
+  const normals = primNormals(g);
+  const he = halfEdges(g);
+  const group = g.edgeGroups.get(name)!;
+  let max = 0, count = 0;
+  for (let e = 0; e < he.numEdges; e++) {
+    const h = he.edgeHalf[e], twin = he.heTwin[h];
+    if (!group.has(he.edgeA[e], he.edgeB[e]) || twin < 0) continue;
+    const u = he.heFace[h] * 3, v = he.heFace[twin] * 3;
+    const dot = normals[u] * normals[v] + normals[u + 1] * normals[v + 1] + normals[u + 2] * normals[v + 2];
+    max = Math.max(max, Math.acos(Math.min(1, Math.max(-1, dot))) * 180 / Math.PI);
+    count++;
+  }
+  assert.ok(count > 0, name);
+  return max;
+}
+
+await check('neighbouring line creases leave the cross edges smooth', async () => {
+  const stations = [-0.5, -0.25, 0, 0.25, 0.5];
+  const params = { ...base, stations, ends: 'open' };
+  const angles = async (creases: Record<string, number>) => {
+    const cageParams = { ...params, creases };
+    const { geo: cage, result } = await cook(cageParams);
+    const st = cage.points.get('station')!, line = cage.points.get('line')!;
+    const patterns = { cross: [] as string[], sill: [] as string[], belt: [] as string[] };
+    const edges = buildEdges(cage);
+    edges.a.forEach((a, i) => {
+      const b = edges.b[i], s = Number(st.get(a)), t = Number(st.get(b));
+      const edge = `p${a}-${b}`;
+      if (s === 2 && t === 2 && line.get(a) === 'sill' && line.get(b) === 'belt') patterns.cross.push(edge);
+      if (s === 2 && t === 3 && line.get(a) === line.get(b)) {
+        if (line.get(a) === 'sill') patterns.sill.push(edge);
+        if (line.get(a) === 'belt') patterns.belt.push(edge);
+      }
+    });
+    const nodes: Record<string, NodeSpec> = { cage: { type: 'lines_plan', params: cageParams } };
+    let input = 'cage';
+    for (const [name, pattern] of Object.entries(patterns)) {
+      assert.ok(pattern.length, name);
+      nodes[name] = { type: 'group', in: [input], params: { class: 'edge', name, pattern: pattern.join(' ') } };
+      input = name;
+    }
+    nodes.surface = { type: 'subdivide', in: [input], params: { levels: 2 } };
+    const refined = await engine.cook({ nodes, output: 'surface' });
+    assert.ok(refined.ok && refined.geo, JSON.stringify(refined.errors));
+    const g = refined.geo;
+    return { cross: maxGroupAngle(g, 'cross'), sill: maxGroupAngle(g, 'sill'), belt: maxGroupAngle(g, 'belt'), warnings: result.warnings.length };
+  };
+  const smooth = await angles({});
+  const creased = await angles({ sill: 3, belt: 3 });
+  console.log('     crease angles (degrees)', { smooth, creased });
+  assert.ok(creased.sill > smooth.sill + 15 && creased.belt > smooth.belt + 15);
+  assert.ok(creased.cross < smooth.cross + 2, `cross edge bent by ${creased.cross} degrees`);
+  assert.equal(creased.warnings, 0);
+});
+
+const noisyLines = {
+  bottom: [[0, -0.14, -0.5], [0, -0.14, 0.5]],
+  belt: [[0.24, 0, -0.5], [0.24, 0, 0.5]],
+  top: Array.from({ length: 7 }, (_, i) => {
+    const z = i / 6 - 0.5;
+    const noise = i > 0 && i < 6 ? (i % 2 ? 0.005 : -0.005) : 0;
+    return [0, 0.28 - 0.4 * z * z + noise, z];
+  }),
+};
+
+await check('CV reading smooths a noisy arc and keeps its endpoints', async () => {
+  const readings = async (interpolation: string) => {
+    const { geo } = await cook({ lines: noisyLines, stations: 129, ends: 'open', fit_levels: 0, interpolation });
+    const samples = Array.from({ length: 129 }, (_, i) => onLine(geo, 'top', i));
+    assert.deepEqual(samples[0], noisyLines.top[0]);
+    assert.deepEqual(samples.at(-1), noisyLines.top.at(-1));
+    const signs = samples.slice(1, -1).map((p, i) => Math.sign(samples[i][1] - 2 * p[1] + samples[i + 2][1]));
+    return signs.filter((sign, i) => i && sign !== signs[i - 1]).length;
+  };
+  const smooth = await readings('smooth');
+  assert.ok(smooth > 0, 'the noisy interpolated arc must flip curvature');
+  const cv = await readings('cv');
+  console.log(`     curvature sign flips: ${smooth} smooth, ${cv} cv`);
+  assert.equal(cv, 0);
+});
+
+await check('round ends fit both tips without the valence of the point fans', async () => {
+  const example = getNodeDef('lines_plan')!.example as GraphSpec;
+  const params = example.nodes.cage.params!;
+  const tips: Vec3[] = [params.lines.keel[0], params.lines.keel.at(-1)];
+  for (const ends of ['point', 'round']) {
+    const { geo, result } = await cook({ ...params, ends }, undefined, undefined, true);
+    const cage = result.results.get('cage')!.geo!;
+    const max = maxValence(cage);
+    const misses = tips.map((tip) => pts(geo).reduce((min, p) => Math.min(min, distance(p, tip)), Infinity));
+    console.log(`     ${ends}: max valence ${max}, tip errors ${misses.map((v) => (v * 1000).toFixed(3)).join(', ')} mm`);
+    assert.ok(misses.every((v) => v < 0.00005));
+    assert.ok(ends === 'point' ? max > 5 : max <= 5);
+    assert.equal(halfEdges(cage).boundaryLoops().length, 0);
+    assertSymmetry(cage);
+    assert.equal(result.warnings.length, 0);
+  }
+});
+
+await check('round caps close small and odd mirrored sections', async () => {
+  for (const rows of [3, 4, 5, 6, 9, 10, 12]) {
+    const lines = Object.fromEntries(Array.from({ length: Math.floor(rows / 2) + 1 }, (_, i) => {
+      const a = i * 2 * Math.PI / rows;
+      const x = i === 0 || 2 * i === rows ? 0 : 0.24 * Math.sin(a);
+      const y = 0.18 * Math.cos(a);
+      return [`line${i}`, [[0, -0.01, -0.5], [x, y, 0], [0, 0.015, 0.5]]];
+    }));
+    const { geo, result } = await cook({ lines, stations: 3, ends: 'round' }, undefined, undefined, true);
+    const cage = result.results.get('cage')!.geo!;
+    const he = halfEdges(cage);
+    assert.equal(he.boundaryLoops().length, 0, `${rows} rows`);
+    assert.ok(he.isManifold && maxValence(cage) <= 5, `${rows} rows`);
+    assertSymmetry(cage);
+    assert.equal(result.warnings.length, 0, `${rows} rows`);
+    for (const tip of [lines.line0[0], lines.line0[2]] as Vec3[]) {
+      const miss = pts(geo).reduce((min, p) => Math.min(min, distance(p, tip)), Infinity);
+      assert.ok(miss < 0.00005, `${rows} rows: ${miss} m`);
+    }
+  }
+});
+
+const capStations = [-0.5, -0.445, 0, 0.445, 0.5];
+function flatCapLines(rows: number) {
+  return Object.fromEntries(Array.from({ length: rows / 2 + 1 }, (_, i) => {
+    const a = i * 2 * Math.PI / rows;
+    return [`line${i}`, capStations.map((z, j) => {
+      const radius = [0.64, 0.73, 1.0, 0.85, 0.79][j];
+      return [i === 0 || i === rows / 2 ? 0 : radius * 0.25 * Math.sin(a), radius * 0.21 * Math.cos(a), z];
+    })];
+  }));
+}
+
+await check('eight- and twelve-row subdivided caps keep the rim and cap planar', async () => {
+  const deviations: number[] = [];
+  for (const rows of [8, 12]) {
+    const lines = flatCapLines(rows);
+    const { geo, result } = await cook({ lines, stations: capStations, ends: 'cap', fit_levels: 2 }, undefined, undefined, true);
+    const positions = pts(geo), cage = result.results.get('cage')!.geo!;
+    const flags = geo.primGroups.get('caps')!;
+    let max = 0;
+    flags.forEach((cap, pr) => {
+      if (cap) for (const id of geo.primPoints(pr)) max = Math.max(max, Math.abs(Math.abs(positions[id][2]) - 0.5));
+    });
+    deviations.push(max);
+    const targets = Object.values(lines).flatMap((line) => [line[0], line.at(-1)!]) as Vec3[];
+    const miss = Math.max(...targets.map((p) => positions.reduce((d, q) => Math.min(d, distance(p, q)), Infinity)));
+    console.log(`     ${rows} rows: cap deviation ${(max * 1000).toFixed(3)} mm, rim fit ${(miss * 1000).toFixed(3)} mm`);
+    assert.ok(miss < 0.00005);
+    assert.equal(result.warnings.length, 0);
+    assertSymmetry(cage);
+  }
+  assert.ok(deviations.every((v) => v <= 0.0005), `cap deviations: ${deviations} m`);
+});
+
+await check('a repeated mirror boundary name selects only its centre-crossing strip', async () => {
+  const lines = { front: pod.sill, side: pod.belt, back: pod.shoulder };
+  const params = { ...base, lines, ends: 'open', stations: [-0.5, -0.25, 0, 0.25, 0.5],
+    groups: { panel: { between: ['front', 'front'], from: -0.25, to: 0.25 } } };
+  const { geo } = await cook(params);
+  const expected = Array.from({ length: geo.numPrims }, (_, i) => {
+    const station = Number(geo.prims.get('station')!.get(i));
+    const corners = geo.primPoints(i);
+    return Number(station >= 1 && station < 3
+      && corners.every((p) => geo.points.get('line')!.get(p) === 'front')
+      && corners.some((p) => geo.P[3 * p] < 0) && corners.some((p) => geo.P[3 * p] > 0));
+  });
+  assert.equal(expected.reduce((a, b) => a + b, 0), 2);
+  assert.deepEqual([...geo.primGroups.get('panel')!], expected);
+  assert.match((await run({ ...params, mirror: 'none' })).errors[0].message, /two different lines.*mirror/);
+  assert.match((await run({ ...params, groups: { panel: { between: ['side', 'side'] } } })).errors[0].message, /first or last/);
+});
+
+await check('an extruded face beside a creased line adds no crease across the body or down its walls', async () => {
+  const params = { ...base, ends: 'open', creases: { belt: 3 }, groups: { intake: { between: ['belt', 'shoulder'], from: -0.1, to: 0.15 } } };
+  const extrude = { inset: { type: 'poly_extrude', in: ['cage'], params: { group: 'intake', distance: -0.02, inset: 0.01 } } };
+  const result = await engine.cook({ nodes: { cage: { type: 'lines_plan', params }, ...extrude }, output: 'inset' });
+  assert.ok(result.ok && result.geo, JSON.stringify(result.errors));
+  const geo = result.geo, sharp = creaseSharpness(geo, '', 0, 'creaseweight')!.sharp;
+  const seen = new Set<number>();
+  let along = 0;
+  forEachPrimEdge(geo, (_pr, _v0, _v1, a, b) => {
+    const key = edgeKey(a, b);
+    if (seen.has(key) || !sharp.get(key)) return;
+    seen.add(key);
+    const d = distance(point(geo, a), point(geo, b));
+    assert.ok(Math.abs(geo.P[3 * b + 2] - geo.P[3 * a + 2]) > 0.5 * d, `edge ${a}-${b} is creased but does not run along the body`);
+    along++;
+  });
+  assert.ok(along > 0);
 });
 
 console.log(`lines: ${pass} passed, ${fail} failed`);

@@ -216,6 +216,12 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
 - The viewer shows each cook as it runs (the node, the time) and has a Stop button: a cook a person stopped fails with
   "cook stopped" at the node it stopped at. That is their decision, not an error to retry: ask before cooking it again.
 - "in": ordered input list (null = unconnected), a single name, or {"inputName": node} (names from help).
+- Expressions work inside JSON arrays and object values. This cage reads its top line, panel limits and crease from vars.
+  {"vars":{"h":0.2,"body_length":2},"nodes":{"cage":{"type":"lines_plan","params":{
+    "lines":{"bottom":[[0,-0.2,-1],[0,-0.2,1]],"belt":[[0.3,0,-1],[0.3,0,1]],"top":[[0,"=h",-1],[0,"=h*0.5",1]]},
+    "ends":"open","groups":{"panel":{"between":["belt","top"],"from":"=-body_length/4","to":"=body_length/4"}},
+    "creases":{"top":[[-1,"=h*5"],[1,"=h*5"]]}
+  }}},"output":"cage"}
 - Output node: "output" (a node's name; for a published output write its node, outputs.<name>.node), else a node
   named out/OUT, else the last unconnected node.
 - Optional "outputs": {"rotor":{"node":"rotor_final","label":"Rotor"}} publishes additional deliverables beside
@@ -326,7 +332,8 @@ ${graphLines(INPUTS_EXAMPLE)}
 Afterwards render it, and tell the person which of their guides you used for what.`,
 
   expressions: `PARAM EXPRESSIONS
-Any non-code param can be a string starting with "=": a JS expression evaluated with graph vars.
+Parameter values can use strings starting with "=" to evaluate with graph vars, including inside arrays and JSON objects.
+Code and graph parameters keep their own syntax.
   "vars": {"floors": 6, "h": 3}   →   "height": "=floors*h",  "count": "=floors*4"
 ONE FORM: expressions and code (wrangle, script, sdf_expr, heightfield_layer, parametric curves and surfaces, group and
   assert expressions, loop bodies) read graph vars by their bare name: height, not vars.height (an error says so).
