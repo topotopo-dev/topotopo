@@ -223,8 +223,8 @@ const RED = [0.8, 0.25, 0.2];
   check(maxDiff(rough, await shot(withMaterial({ roughness: 0.9 }), { grey: true })) > 20, 'grey: a roughness map still applies');
   check(renderArgs({ grey: 'true' }).grey === true, 'render args: grey');
   let threw = '';
-  try { renderGeometry(coloured, { grey: true, shading: 'matcap' }); } catch (e: any) { threw = e.message; }
-  check(/grey is a value check of shading "pbr"/.test(threw), 'grey with another shading is refused');
+  try { renderGeometry(coloured, { grey: true, shading: 'flat' }); } catch (e: any) { threw = e.message; }
+  check(/grey works with shading "pbr" or "matcap"/.test(threw), 'grey with a shading other than pbr or matcap is refused');
 }
 
 // ---------------------------------------------------------------- emissive, unlit, exposure
