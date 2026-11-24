@@ -22,6 +22,8 @@ import { lodOf } from './core/uvreport.ts';
 import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
 import { imageSummary, imagesOf } from './core/image.ts';
 import { sdfGridSummary } from './core/sdfgrid.ts';
+import { surfaceLayout } from './core/nurbssurface.ts';
+import { evaluateSplines, splinesToPolylinesDeep } from './core/splines.ts';
 import { uvReport, uvReportText } from './core/uvreport.ts';
 import { openEdgesText, partsOf, primWhere, solidCauses, solidReport } from './core/report.ts';
 
@@ -84,11 +86,16 @@ function arrayStats(a: Attribute, count: number, sel?: Uint8Array | null): strin
 export function summarize(g: Geometry): string {
   const lines: string[] = [];
   let polys = 0, lines_ = 0, tris = 0, quads = 0, packed = 0, bezier = 0, nurbs = 0;
+  const surfaces = new Map<string, number>();
   for (let p = 0; p < g.numPrims; p++) {
     const k = g.primKind ? g.primKind[p] : 0;
     if (k === 1) packed++;
     else if (k === 2) bezier++;
     else if (k === 3) nurbs++;
+    else if (g.isSurface(p)) {
+      const label = surfaceDescription(g, p);
+      surfaces.set(label, (surfaces.get(label) ?? 0) + 1);
+    }
     else if (g.primClosed[p]) { polys++; const s = g.primSize(p); if (s === 3) tris++; else if (s === 4) quads++; } else lines_++;
   }
   const parts = [`${n(g.numPoints)} points`, `${n(g.numPrims)} prims`];
@@ -98,6 +105,7 @@ export function summarize(g: Geometry): string {
   if (packed) kinds.push(`${n(packed)} packed`);
   if (bezier) kinds.push(`${n(bezier)} Bezier curve${bezier === 1 ? '' : 's'}`);
   if (nurbs) kinds.push(`${n(nurbs)} NURBS curve${nurbs === 1 ? '' : 's'}`);
+  for (const [label, count] of surfaces) kinds.push(`${n(count)} NURBS surface${count === 1 ? '' : 's'} (${label})`);
   lines.push(`geometry: ${parts.join(', ')}${kinds.length ? ' = ' + kinds.join(' + ') : ''}, ${n(g.numVertices)} vertices${g.volumes.length ? `, ${volumeCounts(g)}` : ''}`);
   const pk = packedSummaryLine(g);
   if (pk) lines.push(pk);
@@ -229,11 +237,11 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
   }
   if (detail === 'topology' || detail === 'all') out.push('topology:', ...topologyLines(g));
   if (detail === 'uv') {
-    const r = uvReport(g, { attribute: o.uvAttrib, resolution: o.uvResolution, perPiece: o.uvPerPiece });
+    const r = uvReport(evaluateSplines(g, { curves: false }), { attribute: o.uvAttrib, resolution: o.uvResolution, perPiece: o.uvPerPiece });
     out.push(...uvReportText(r));
     if (o.json) out.push('uv report (JSON):', JSON.stringify(r));
   }
-  if ((detail === 'elements' || detail === 'all') && o.cls === 'edge') out.push(...edgeElements(g, o));
+  if ((detail === 'elements' || detail === 'all') && o.cls === 'edge') out.push(...edgeElements(evaluateSplines(g, { curves: false }), o));
   else if (detail === 'elements' || detail === 'all') {
     const cls = (o.cls ?? 'point') as AttribClass;
     const t = g.table(cls);
@@ -248,6 +256,8 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
       if (cls === 'prim' && g.isPacked(i)) {
         const X = g.packedXform!, o9 = i * 9;
         vals.unshift(`packed pt ${g.primPoints(i)[0]} source ${g.packedSource![i]} xform[${Array.from({ length: 9 }, (_, k) => fmtNum(X[o9 + k])).join(' ')}]`);
+      } else if (cls === 'prim' && g.isSurface(i)) {
+        vals.unshift(`NURBS surface (${surfaceDescription(g, i)})`);
       } else if (cls === 'prim' && g.isSpline(i)) {
         const oa = g.prims.get('spline_order');
         vals.unshift(`${g.primKind![i] === 2 ? 'bezier' : 'nurbs'}${g.primClosed[i] ? ' closed' : ''} order ${oa ? Number(oa.get(i)) : 4} cvs[${g.primPoints(i).slice(0, 12).join(' ')}${g.primSize(i) > 12 ? ' …' : ''}]`);
@@ -258,6 +268,11 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
     }
   }
   return out.join('\n');
+}
+
+function surfaceDescription(g: Geometry, p: number): string {
+  const s = surfaceLayout(g, p);
+  return s ? `${s.cols} × ${s.rows} CVs, order ${s.orderU} × ${s.orderV}` : 'invalid CV grid';
 }
 
 /**
@@ -271,7 +286,9 @@ export const SUMMARY_UV_TRIANGLES = 200_000;
 export function summaryLines(g: Geometry): string[] {
   const short = summarize(g).split('\n');
   const out: string[] = [];
-  const tris = expandedTriangles(g);
+  const converted = splinesToPolylinesDeep(g, { curves: false });
+  const mesh = converted.geo;
+  const tris = expandedTriangles(mesh);
   out.push(short[0] + (tris ? `; ${n(tris)} triangles` : ''));
   out.push(...short.slice(1).filter((l) => !l.startsWith('attributes:') && !l.startsWith('  ') && !l.startsWith('groups:')));
   const na = g.prims.get('name');
@@ -295,12 +312,12 @@ export function summaryLines(g: Geometry): string[] {
   }
   // uv state, bounded so a summary stays quick: the overlap test (and the utilization that needs it) only up to
   // SUMMARY_UV_TRIANGLES polygon triangles, on a coarse utilization raster
-  const uvA = g.findAttrib('uv', ['vertex', 'point']);
-  if (uvA && g.numPrims) {
+  const uvA = mesh.findAttrib('uv', ['vertex', 'point']);
+  if (uvA && mesh.numPrims) {
     let polyTris = 0;
-    for (let p = 0; p < g.numPrims; p++) if (!g.primKind?.[p] && g.primClosed[p]) polyTris += Math.max(0, g.primSize(p) - 2);
+    for (let p = 0; p < mesh.numPrims; p++) if (!mesh.primKind?.[p] && mesh.primClosed[p]) polyTris += Math.max(0, mesh.primSize(p) - 2);
     const tested = polyTris <= SUMMARY_UV_TRIANGLES;
-    const r = uvReport(g, { maxPairTests: 500_000, maxExamples: 1, rasterSize: 256, overlaps: tested });
+    const r = uvReport(mesh, { maxPairTests: 500_000, maxExamples: 1, rasterSize: 256, overlaps: tested });
     const ov = r.overlap;
     const overlap = tested
       ? `in-tile overlap ${n(ov.inTile.pairs)} pairs${ov.inTile.pairs && ov.examples[0] ? ` (first ${ov.examples[0].where[0]})` : ''}${ov.acrossLods.pairs ? `, across LODs ${n(ov.acrossLods.pairs)}` : ''}`
@@ -308,10 +325,11 @@ export function summaryLines(g: Geometry): string[] {
     const use = tested ? `; utilization ${(r.utilization.value * 100).toFixed(1)}%${r.utilization.method === 'raster-estimate' ? ' (estimate)' : ''}${r.complete ? '' : ' (INCOMPLETE: inspect detail "uv")'}` : '';
     out.push(`uv: ${n(r.charts)} charts${r.tiling ? `, TILING (${n(r.tilingCharts)} charts run across tile borders)` : ''}; ${overlap}; ${n(r.outOfTile)} triangles outside 0..1; ${n(r.collapsed)} collapsed${r.wrapSeam.prims ? `; ${n(r.wrapSeam.prims)} faces span a wrap seam (first ${r.wrapSeam.examples[0]})` : ''}${use}`);
   } else if (g.numPrims) out.push('uv: none');
-  if (g.numPrims && g.primClosed.some((c) => c === 1)) {
-    const sr = solidReport(g, { flips: false });
+  if (mesh.numPrims && mesh.primClosed.some((c) => c === 1)) {
+    const sr = solidReport(mesh, { flips: false });
     out.push(`topology: ${sr.closedAfterWeld ? (sr.closed ? 'closed solid' : 'closed solid after welding seam splits') : 'NOT a closed solid'}; ${openEdgesText(sr)}${sr.openEdges ? `, first ${sr.firstOpen}` : ''}${sr.nonManifoldEdges ? `; ${n(sr.nonManifoldEdges)} non-manifold edges` : ''}; ${n(sr.pieces)} piece(s)`);
   }
+  for (const note of new Set(converted.notes)) out.push(note);
   out.push(...short.filter((l) => l.startsWith('attributes:') || l.startsWith('  ') || l.startsWith('groups:')));
   return out;
 }
@@ -338,6 +356,8 @@ export interface BudgetReport {
 
 /** Triangle budget: per part, per LOD and per node (see BudgetReport). */
 export function budgetReport(g: Geometry, nodes: NodeBudgetInput[] = []): BudgetReport {
+  const mesh = (geo: Geometry) => splinesToPolylinesDeep(geo, { curves: false }).geo;
+  g = mesh(g);
   const na = g.prims.get('name');
   const nameOf = (p: number) => (na && na.type === 'string' ? String(na.get(p) ?? '') : '');
   const by = new Map<string, BudgetPart>();
@@ -363,7 +383,7 @@ export function budgetReport(g: Geometry, nodes: NodeBudgetInput[] = []): Budget
   const lods = parts.some((x) => x.lod >= 0) ? lodSet.map((lod) => { const ps = parts.filter((x) => x.lod === lod); return { lod, triangles: ps.reduce((s, x) => s + x.triangles, 0), parts: ps }; }) : [];
   // per node: its triangles, minus those of the inputs it reads
   const tris = new Map<string, number>();
-  for (const x of nodes) if (x.geo) tris.set(x.node, expandedTriangles(x.geo));
+  for (const x of nodes) if (x.geo) tris.set(x.node, expandedTriangles(mesh(x.geo)));
   // nodes whose output draws no triangles (bakes, images, points) are not part of the mesh budget
   const rows: BudgetNode[] = nodes.filter((x) => x.geo && (tris.get(x.node) ?? 0) > 0).map((x) => {
     const t = tris.get(x.node) ?? 0, inT = x.inputs.reduce((s, i) => s + (tris.get(i) ?? 0), 0);
@@ -426,6 +446,10 @@ export function nodeBudgetInput(spec: { nodes: Record<string, { type: string; in
  */
 export function topologyLines(g: Geometry): string[] {
   const out: string[] = [];
+  if (g.hasSurfaces()) {
+    out.push('  Topology uses polygons tessellated from the NURBS surfaces.');
+    g = evaluateSplines(g, { curves: false });
+  }
   const r = topologyReport(g), s = solidReport(g);
   const causes = solidCauses(s);
   if (!s.polys) out.push(`  no polygons (${r.lines} polylines, ${g.numPoints} points): not a surface`);

@@ -15,6 +15,7 @@ import type { Plane } from '../core/manifold.ts';
 import { FRAMES, P, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
 import { arcTable, evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
+import { withoutSurfaces } from '../core/nurbssurface.ts';
 import { filletCurves } from './splines.ts';
 import { stampTrim, trimParams, trimTarget } from './trim.ts';
 import type { TrimTarget } from './trim.ts';
@@ -358,9 +359,10 @@ defineNode({
     for (let pr = 0; pr < g.numPrims; pr++) {
       const ptsIdx = g.primPoints(pr);
       const closed = !!g.primClosed[pr];
-      if ((sel && !sel[pr]) || ptsIdx.length < 2) {
-        const np = b.addPrim(ptsIdx.map((i) => b.copyPoint(i)), closed, pr);
-        if (g.isSpline(pr)) keptSplines.push([np, g.primKind![pr]]);
+      if ((sel && !sel[pr]) || ptsIdx.length < 2 || g.isSurface(pr)) {
+        const vsrc = g.isSurface(pr) ? ptsIdx.map((_, i) => g.primStart[pr] + i) : undefined;
+        const np = b.addPrim(ptsIdx.map((i) => b.copyPoint(i)), closed, pr, vsrc);
+        if (g.isSpline(pr) || g.isSurface(pr)) keptSplines.push([np, g.primKind![pr]]);
         continue;
       }
       if (g.isSpline(pr) && p.treat_splines === 'exact') {
@@ -418,7 +420,7 @@ defineNode({
       b.addPrim(ids, closed, pr);
     }
     const out = b.build();
-    if (!g.hasSplines()) return out;
+    if (!g.hasSplines() && !g.hasSurfaces()) return out;
     // spline prims outside the group stay splines (GeoBuilder makes every prim a polygon/polyline)
     if (keptSplines.length) { out.ensurePacked(); for (const [np, k] of keptSplines) out.primKind![np] = k; }
     return tidySplineAttribs(out);
@@ -443,7 +445,7 @@ defineNode({
     output: 'part',
   },
   cook: ({ input, p }) => {
-    const g = evaluateSplines(input(0));
+    const g = evaluateSplines(withoutSurfaces(input(0)));
     const b = new GeoBuilder(g);
     for (let pr = 0; pr < g.numPrims; pr++) {
       const idx = g.primPoints(pr);
@@ -485,12 +487,12 @@ defineNode({
     output: 'outline',
   },
   cook: ({ input, p }) => {
-    const g = evaluateSplines(input(0));
+    const g = evaluateSplines(input(0), { surfaces: false });
     const sel = mask(g, 'prim', p.group);
     const b = new GeoBuilder(g);
     for (let i = 0; i < g.numPoints; i++) b.copyPoint(i);
     for (let pr = 0; pr < g.numPrims; pr++) {
-      const ids = g.primPoints(pr), on = !sel || sel[pr];
+      const ids = g.primPoints(pr), on = !g.isSurface(pr) && (!sel || sel[pr]);
       const vs: number[] = [];
       for (let v = g.primStart[pr]; v < g.primStart[pr + 1]; v++) vs.push(v);
       if (on && p.mode === 'unroll' && g.primClosed[pr]) b.addPrim([...ids, ids[0]], false, pr, [...vs, vs[0]]);
@@ -500,7 +502,12 @@ defineNode({
         b.addPrim(ids, true, pr, vs);
       } else b.addPrim(ids, !!g.primClosed[pr], pr, vs);
     }
-    return b.build();
+    const out = b.build();
+    if (g.hasSurfaces()) {
+      out.ensurePacked();
+      for (let pr = 0; pr < g.numPrims; pr++) if (g.isSurface(pr)) out.primKind![pr] = g.primKind![pr];
+    }
+    return out;
   },
 });
 
@@ -643,10 +650,10 @@ defineNode({
   cook: (ctx) => {
     const { input, hasInput, p } = ctx;
     if (!hasInput(1) && p.shape !== 'ribbon' && p.divisions < 2) throw new NodeError(`divisions for shape "${p.shape}" must be at least 2`);
-    const g = evaluateSplines(input(0));
+    const g = evaluateSplines(withoutSurfaces(input(0)));
     let profiles: Profile[];
     if (hasInput(1)) {
-      const pg = evaluateSplines(input(1));
+      const pg = evaluateSplines(withoutSurfaces(input(1)));
       profiles = [];
       for (let pr = 0; pr < pg.numPrims; pr++) profiles.push({ pts: curvePoints(pg, pr), closed: !!pg.primClosed[pr] });
       if (!profiles.length) throw new NodeError('profile input has no curves');
@@ -688,7 +695,7 @@ defineNode({
   },
   cook: (ctx) => {
     const { input, p } = ctx;
-    const g = evaluateSplines(input(0));
+    const g = evaluateSplines(withoutSurfaces(input(0)));
     const wA = p.use_width ? g.points.get('width') : undefined;
     const psA = g.points.get('pscale');
     return sweepCurves(g, [circleProfile(1, p.divisions)], {

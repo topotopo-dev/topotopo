@@ -22,6 +22,7 @@ import type { Clusters, TriPoint, WrapMode } from '../core/pcg.ts';
 import { decodePNG } from '../io/png-decode.ts';
 import { rmFrames } from './curves.ts';
 import { evaluateSplines } from '../core/splines.ts';
+import { withoutSurfaces } from '../core/nurbssurface.ts';
 import { P, getPointNormals, mask } from './util.ts';
 
 const clamp01 = (x: number) => (x > 0 ? (x < 1 ? x : 1) : 0);
@@ -540,13 +541,16 @@ defineNode({
     if (mode === 'normal_up' || mode === 'random') ownN = Nattr ?? (hasPolygons(g) ? getPointNormals(g) : null);
     let surf: SurfaceNormals | null = null, curves: CurveFrames | null = null;
     if (mode === 'surface') {
-      const s = ref && hasPolygons(ref) ? ref : hasPolygons(g) ? g : null;
+      const target = ref?.hasSurfaces() || (ref && hasPolygons(ref)) ? ref : g;
+      const mesh = evaluateSplines(target, { curves: false });
+      const s = hasPolygons(mesh) ? mesh : null;
       if (!s) throw new NodeError('orient surface: connect the surface (polygons) as the second input', '"in": ["points", "terrain"]');
       surf = new SurfaceNormals(s);
     } else if (mode === 'curve_tangent') {
-      const hasCurves = (x: Geometry) => { for (let k = 0; k < x.numPrims; k++) if (x.primSize(k) >= 2 && !(x.primKind && x.primKind[k] === 1)) return true; return false; };
+      const hasCurves = (x: Geometry) => { for (let k = 0; k < x.numPrims; k++) if (x.primSize(k) >= 2 && !x.isPacked(k) && !x.isSurface(k)) return true; return false; };
       // Bezier/NURBS curves give their evaluated tangents
-      const s = ref && hasCurves(ref) ? evaluateSplines(ref) : hasCurves(g) ? evaluateSplines(g) : null;
+      const src = ref && hasCurves(ref) ? ref : hasCurves(g) ? g : null;
+      const s = src ? evaluateSplines(withoutSurfaces(src)) : null;
       if (!s) throw new NodeError('orient curve_tangent: connect the curves as the second input', '"in": ["points", "road"]');
       curves = new CurveFrames(s, upP);
     } else if (mode === 'direction' && !(dirP[0] || dirP[1] || dirP[2])) throw new NodeError('orient: direction is the zero vector');
@@ -685,7 +689,7 @@ defineNode({
     output: 'lamps',
   },
   cook: ({ input, p, warn }) => {
-    const g = evaluateSplines(input(0));
+    const g = evaluateSplines(withoutSurfaces(input(0)));
     const sel = mask(g, 'prim', p.group);
     const b = new GeoBuilder(g);
     b.keepSrcGroups = true;

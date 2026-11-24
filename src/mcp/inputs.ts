@@ -184,16 +184,16 @@ function stringValues(a: Attribute, count: number): [string, number][] {
   return [...freq].sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
 }
 
-/** Prim kinds: 0 polygon, 1 open polyline, 2 packed, 3 spline curve. */
+/** Prim kinds: 0 polygon, 1 open polyline, 2 packed, 3 spline curve, 4 NURBS surface. */
 function primKinds(g: Geometry): Uint8Array {
   const k = new Uint8Array(g.numPrims);
   for (let p = 0; p < g.numPrims; p++) {
     const pk = g.primKind ? g.primKind[p] : 0;
-    k[p] = pk === 1 ? 2 : pk === 2 || pk === 3 ? 3 : g.primClosed[p] ? 0 : 1;
+    k[p] = pk === 1 ? 2 : g.isSpline(p) ? 3 : g.isSurface(p) ? 4 : g.primClosed[p] ? 0 : 1;
   }
   return k;
 }
-const KIND_NAMES: [string, string][] = [['polygon', 'polygons'], ['polyline', 'polylines'], ['packed prim', 'packed prims'], ['spline curve', 'spline curves']];
+const KIND_NAMES: [string, string][] = [['polygon', 'polygons'], ['polyline', 'polylines'], ['packed prim', 'packed prims'], ['spline curve', 'spline curves'], ['NURBS surface', 'NURBS surfaces']];
 const kindsText = (c: number[]) => c.map((x, i) => (x ? plural(x, KIND_NAMES[i][0], KIND_NAMES[i][1]) : '')).filter(Boolean).join(' + ');
 
 /** A role value, or the role of a name by its prefix like the wrangle of help topic "inputs" ("Path.River.001" → path). */
@@ -207,14 +207,14 @@ function roleChecks(role: string, v: string, k: number[]): string[] {
   const curves = k[1] + k[3], what = kindsText(k);
   if (role === 'path' && !curves) return [`${v} is ${what}: a path is an open polyline (in Blender a curve, or a mesh of edges only)`];
   if (role === 'zone' && !k[0] && curves) return [`${v} is ${what}: a zone is a closed area; ends {mode:"close"} turns closed loops into polygons`];
-  if (role === 'site' && (k[0] || curves)) return [`${v} is ${what}: a site is a point; pack {by:"name", pivot:"bbox_center_bottom"} gives one anchor point per object`];
+  if (role === 'site' && (k[0] || curves || k[4])) return [`${v} is ${what}: a site is a point; pack {by:"name", pivot:"bbox_center_bottom"} gives one anchor point per object`];
   if ((role === 'volume' || role === 'blockout') && !k[0] && !k[2]) return [`${v} is ${what}: a ${role} is a mesh (a box or a closed solid)`];
   return [];
 }
 
 function geometryText(g: Geometry, rel: string, ext: string, warnings: string[]): Described {
   const kinds = primKinds(g);
-  const counts = [0, 0, 0, 0];
+  const counts = Array(KIND_NAMES.length).fill(0) as number[];
   for (let p = 0; p < g.numPrims; p++) counts[kinds[p]]++;
   const used = new Uint8Array(g.numPoints);
   for (let v = 0; v < g.numVertices; v++) used[g.vertexPoint[v]] = 1;
@@ -251,7 +251,7 @@ function geometryText(g: Geometry, rel: string, ext: string, warnings: string[])
   const isStr = (a: Attribute | undefined): a is Attribute => !!a && a.type === 'string' && !a.isArray;
   const kindsOf = (a: Attribute) => {
     const m = new Map<string, number[]>();
-    for (let p = 0; p < g.numPrims; p++) { const v = String(a.get(p)); let c = m.get(v); if (!c) m.set(v, (c = [0, 0, 0, 0])); c[kinds[p]]++; }
+    for (let p = 0; p < g.numPrims; p++) { const v = String(a.get(p)); let c = m.get(v); if (!c) m.set(v, (c = Array(KIND_NAMES.length).fill(0) as number[])); c[kinds[p]]++; }
     return m;
   };
   const shortNames: string[] = [];

@@ -70,6 +70,8 @@ export const SRC: Record<string, NodeSpec> = {
   BROKEN: { type: 'reverse', in: ['HOLED'], params: { group: '1-4' } },
   // spline toolkit: a weighted NURBS, the default Bezier, a noisy helix, a zig-zag path, a road over bumps
   NURBS: { type: 'nurbs', params: { points: [[0, 0, 0], [1, 0.5, 1], [2.5, 0, 1.2], [3, 0.8, 0], [4.2, 0.2, -0.5], [5, 0, 0.4]], weights: [1, 2, 1, 1, 0.5, 1] } },
+  SURFACE_GRID: { type: 'grid', params: { type: 'nurbs', divisions: [2, 2], size: [2, 2] } },
+  SURFACE: { type: 'wrangle', in: ['SURFACE_GRID'], params: { code: '@P.y = 0.4 * @P.x * @P.z;' } },
   BEZIER: { type: 'bezier' },
   SPIRAL: { type: 'spiral', params: { turns: 1.5, points_per_turn: 40 } },
   NOISY: { type: 'jitter', in: ['SPIRAL'], params: { amount: 0.04 } },
@@ -392,10 +394,11 @@ export function checkGeo(g: Geometry): string[] {
       for (let p = 0; p < n && !bad; p++) {
         const k = g.primKind[p];
         if (k !== 1) {
-          // 0 polygon/polyline, 2 Bezier, 3 NURBS
-          if (k > 3) bad = `prim ${p}: unknown kind ${k}`;
+          // 0 polygon/polyline, 2 Bezier curve, 3 NURBS curve, 4 NURBS surface
+          if (k > 4) bad = `prim ${p}: unknown kind ${k}`;
           else if (g.packedSource[p] !== -1) bad = `prim ${p}: not packed but has source ${g.packedSource[p]}`;
-          else if (k >= 2 && g.primSize(p) < 1) bad = `spline prim ${p} has no CVs`;
+          else if (g.isSpline(p) && g.primSize(p) < 1) bad = `spline prim ${p} has no CVs`;
+          else if (g.isSurface(p) && g.primSize(p) < 4) bad = `surface prim ${p} has fewer than four CVs`;
           continue;
         }
         if (g.primSize(p) !== 1) bad = `packed prim ${p} has ${g.primSize(p)} vertices`;

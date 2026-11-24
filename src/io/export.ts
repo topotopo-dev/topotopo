@@ -7,7 +7,7 @@ import { Geometry } from '../core/geometry.ts';
 import { primNormals, resolveVertexNormals, triangulate } from '../core/topology.ts';
 import { geoToJSON } from './json.ts';
 import { exportGLB, exportGLTF } from './gltf.ts';
-import { exportHoudiniGeo } from './hgeo.ts';
+import { exportHoudiniGeo as houdiniGeo } from './hgeo.ts';
 import { exportCSV, exportPointsJSON } from './points.ts';
 import { INSTANCE_ATTRIB_SKIP, anchorAttribs, anchorValue, decomposeXform, expandForExport, isolatedMask, packedPrims, packedSourceNames, pieces, xf, xfDir, xfLinear } from './common.ts';
 import type { ExportOptions } from './common.ts';
@@ -20,7 +20,6 @@ import type { HeightmapFormat } from './heightmap.ts';
 
 export type { ExportOptions } from './common.ts';
 export { exportGLB, exportGLTF } from './gltf.ts';
-export { exportHoudiniGeo } from './hgeo.ts';
 export { exportCSV, exportPointsJSON } from './points.ts';
 
 const SKIP_CUSTOM = new Set(['P', 'N', 'uv', 'Cd']);
@@ -482,9 +481,16 @@ export function exportFormatFromPath(path: string): string {
  */
 function splinesForExport(g: Geometry, o: ExportOptions, format: string): Geometry {
   if (!hasSplinesDeep(g)) return g;
+  const r = splinesToPolylinesDeep(g);
   const n = g.numSplines;
-  o.warn?.(`${format}: ${n ? `${n} spline curve${n === 1 ? '' : 's'}` : 'spline curves inside packed instances'} (Bezier/NURBS) written as polylines (json keeps them as splines)`);
-  return splinesToPolylinesDeep(g).geo;
+  if (r.converted) o.warn?.(`${format}: ${n ? `${n} spline curve${n === 1 ? '' : 's'}` : 'spline curves inside packed instances'} (Bezier/NURBS) written as polylines (json keeps them as splines)`);
+  if (r.surfaces) o.warn?.(`${format}: ${r.surfaces} NURBS surface${r.surfaces === 1 ? '' : 's'} written as polygons (json keeps the exact surfaces)`);
+  for (const note of r.notes) o.warn?.(note);
+  return r.geo;
+}
+
+export function exportHoudiniGeo(g: Geometry, o: ExportOptions = {}): string {
+  return houdiniGeo(splinesForExport(g, o, 'geo'), o);
 }
 
 /** Synchronous export for every format except glb/gltf (see exportGeometryAsync). */

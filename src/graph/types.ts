@@ -86,9 +86,9 @@ export interface NodeDef {
    */
   packed?: 'keep' | 'unpack' | ((p: Record<string, any>) => 'keep' | 'unpack');
   /**
-   * Spline prims (Bezier/NURBS curves): 'keep' = the node handles them (moves CVs, edits attributes or evaluates the
-   * curves itself); 'polyline' = the engine converts them to polylines before cooking the node, with a warning. Default:
-   * 'keep' when the node keeps packed prims (it works on elements and points, not on polygon shapes), else 'polyline'.
+   * Bezier/NURBS curves and NURBS surfaces: 'keep' passes the exact prims to the node; 'polyline' converts curves to
+   * polylines and surfaces to polygons before cooking, with a warning. Default: 'keep' for nodes that keep packed
+   * prims, else 'polyline'.
    */
   splines?: 'keep' | 'polyline' | ((p: Record<string, any>) => 'keep' | 'polyline');
   /**

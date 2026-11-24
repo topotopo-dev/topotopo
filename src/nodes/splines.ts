@@ -12,9 +12,10 @@ import type { Vec3 } from '../core/math.ts';
 import {
   PARAMETERIZATIONS, arcTable, autoKnots, bezierThrough, bezierToNurbs, curvatureAt, evalBasis, evalPoint, evaluateSplines,
   fitSpline, fitSplineTolerance, grevilleU, interpolateSpline, kindOf, lengthAtU, makeSpline, nurbsToBezier, polylineParams,
-  samplesByLength, setSplinePrim, splineFromPrim, tangentAt, tidySplineAttribs, typeOfKind,
+  samplesByLength, setSplinePrim, splineFromPrim, splinesToPolylines, tangentAt, tidySplineAttribs, typeOfKind,
 } from '../core/splines.ts';
 import type { ConvertedCV, FitResult, Parameterization, PolylineOptions, Spline, SplineType } from '../core/splines.ts';
+import { surfaceFromPrim, withoutSurfaces } from '../core/nurbssurface.ts';
 import { TriBVH } from '../core/spatial.ts';
 import { primNormals, resolveVertexNormals } from '../core/topology.ts';
 import { heightfieldPreviewMesh, heightfieldsOf } from '../core/heightfield.ts';
@@ -59,6 +60,7 @@ function polyOpts(p: Record<string, any>): PolylineOptions {
 function warnSplineNotes(g: Geometry, warn: (m: string) => void) {
   const notes = new Set<string>();
   for (let p = 0; p < g.numPrims && notes.size < 3; p++) if (g.isSpline(p)) for (const n of splineFromPrim(g, p).notes) notes.add(`prim ${p}: ${n}`);
+  for (let p = 0; p < g.numPrims && notes.size < 3; p++) if (g.isSurface(p)) for (const n of surfaceFromPrim(g, p)?.notes ?? []) notes.add(`prim ${p}: ${n}`);
   for (const n of notes) warn(n);
 }
 
@@ -96,7 +98,7 @@ class Rebuild {
   keep(pr: number): number {
     const g = this.g;
     const np = this.b.addPrim(g.primPoints(pr), !!g.primClosed[pr], pr, this.verts(pr));
-    if (g.isSpline(pr)) this.kinds.push({ prim: np, kind: g.primKind![pr] });
+    if (g.isSpline(pr) || g.isSurface(pr)) this.kinds.push({ prim: np, kind: g.primKind![pr] });
     return np;
   }
 
@@ -169,7 +171,7 @@ class Rebuild {
 }
 
 /** Input prims that carry a curve: polygons, polylines and splines with at least two vertices (not packed). */
-const isCurvePrim = (g: Geometry, p: number) => (g.primKind ? g.primKind[p] !== 1 : true) && g.primSize(p) >= 2;
+const isCurvePrim = (g: Geometry, p: number) => !g.isPacked(p) && !g.isSurface(p) && g.primSize(p) >= 2;
 
 const PARAM_DESC = 'parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns)';
 
@@ -216,7 +218,7 @@ function splineGenerator({ type }: GenParams, ctx: CookContext): Geometry {
     return g;
   }
   // from the input: each curve's points become CVs (or, without prims, all points in order)
-  const src = ctx.input(0);
+  const src = evaluateSplines(ctx.input(0), { surfaces: false });
   if (weights) warn('weights apply to the points param only; with an input set the point attribute Pw');
   let g = src;
   if (!src.numPrims) {
@@ -253,6 +255,7 @@ const DEFAULT_NURBS = [[0, 0, 0], [1, 0, 1.5], [2.5, 0.5, 1.5], [3, 1, 0], [4.5,
 defineNode({
   type: 'bezier',
   category: 'curve',
+  splines: 'keep',
   summary: 'Bezier curve prim from control points (CVs) and an order; evaluates exactly wherever it is used.',
   description: 'Houdini Curve SOP in Bezier mode (a BezierCurve prim). Segments of `order` CVs share their end CVs: 7 CVs of order 4 make two cubic segments (CVs 0-3 and 3-6); a closed curve wraps back to CV 0 (segments × (order-1) CVs). The CVs are ordinary points: transform, deformers, wrangles and attribute nodes move or edit them, and point attributes (Cd, width, Pw weights) blend along the curve. Nodes that need polylines get the evaluated curve automatically (with a note); convert_curve/resample choose the resolution. With an input, each polyline/polygon (or, without prims, all points in order) becomes a Bezier prim on those points.',
   aliases: ['bezier_curve', 'beziercurve'],
@@ -271,6 +274,7 @@ defineNode({
 defineNode({
   type: 'nurbs',
   category: 'curve',
+  splines: 'keep',
   summary: 'NURBS curve prim from control points (CVs), order, knots and weights; or through points with fit.',
   description: 'Houdini Curve SOP in NURBS mode (a NURBCurve prim). Open curves have n + order knots (automatic: clamped, so the curve starts and ends on its end CVs); closed curves are periodic with n + 1 breakpoints. fit:true makes the curve pass through the points (global interpolation; the CVs are computed). The CVs are ordinary points (transform/deform/wrangle move them, attributes blend along the curve); nodes that need polylines get the evaluated curve automatically. With an input, each polyline/polygon (or all points in order) becomes a NURBS prim.',
   aliases: ['nurbs_curve', 'nurbscurve'],
@@ -294,26 +298,33 @@ defineNode({
 defineNode({
   type: 'convert_curve',
   category: 'curve',
-  summary: 'Convert curves between polyline, Bezier and NURBS (exact between spline types; fit to pass through points).',
-  description: 'Houdini Convert SOP for curves. Spline → polyline evaluates the curve (adaptive by tolerance, or segments per span); closed splines become closed polygons. Bezier ↔ NURBS is exact (multiple knots / blossoming; a short last Bezier segment is degree-elevated). Polyline → spline uses the points as CVs, or with fit passes through them (NURBS: global interpolation; Bezier: smooth cubic segments). Attributes follow (CV blends). Use convert to polyline before nodes that need a specific resolution; others convert automatically.',
+  summary: 'Convert curves between polyline, Bezier and NURBS, or turn a NURBS surface into polygons.',
+  description: 'Houdini Convert SOP for curves and NURBS surfaces. Spline → polyline evaluates the curve (adaptive by tolerance, or segments per span); closed splines become closed polygons. For a NURBS surface, polyline makes quads and triangles at collapsed poles. Bezier ↔ NURBS is exact (multiple knots / blossoming; a short last Bezier segment is degree-elevated). Polyline → spline uses the points as CVs, or with fit passes through them (NURBS: global interpolation; Bezier: smooth cubic segments). Attributes follow (CV blends). Use convert to polyline before nodes that need a specific resolution; others convert automatically.',
   aliases: ['convert', 'curve_convert'],
-  inputs: [{ name: 'curves', desc: 'polylines, polygons, Bezier or NURBS curves' }],
+  inputs: [{ name: 'curves', desc: 'polylines, polygons, Bezier or NURBS curves, or NURBS surfaces' }],
   splines: 'keep',
   params: {
-    to: { type: 'enum', options: ['polyline', 'bezier', 'nurbs'], default: 'polyline', desc: 'target type', aliases: ['type', 'target'] },
+    to: { type: 'enum', options: ['polyline', 'bezier', 'nurbs'], default: 'polyline', desc: 'target curve type. polyline also turns NURBS surfaces into polygons', aliases: ['type', 'target'] },
     order: { type: 'int', default: 4, min: 2, max: 11, desc: 'order of curves made from polylines (fit Bezier is always cubic)' },
     fit: { type: 'bool', default: false, desc: 'polylines → spline: pass through the points instead of using them as CVs', aliases: ['interpolate'] },
     parameterization: { type: 'enum', options: PARAMETERIZATIONS, default: 'centripetal', desc: `knots of NURBS made from polylines (${PARAM_DESC})` },
-    segments: { type: 'int', default: 0, min: 0, max: 10000, desc: 'to polyline: segments per knot span / Bezier segment; 0 = adaptive (tolerance)', aliases: ['divisions', 'lod'] },
-    tolerance: { type: 'float', default: 0, min: 0, desc: 'to polyline: largest chord-to-curve distance; 0 = 1/2000 of each curve\'s CV box diagonal' },
+    segments: { type: 'int', default: 0, min: 0, max: 10000, desc: 'to polyline: segments per knot span in each direction or per Bezier segment. 0 adapts to tolerance', aliases: ['divisions', 'lod'] },
+    tolerance: { type: 'float', default: 0, min: 0, desc: 'to polyline: chord error for curves and surfaces. 0 uses 1/2000 of the CV box diagonal' },
     group: P.group('prim'),
   },
   example: { type: 'convert_curve', params: { to: 'polyline', tolerance: 0.001 } },
   cook: ({ input, p, warn }) => {
     const g = input(0);
     const sel = mask(g, 'prim', p.group);
-    const rb = new Rebuild(g);
     const po = polyOpts(p);
+    if (p.to === 'polyline' && g.hasSurfaces()) {
+      const r = splinesToPolylines(g, { ...po, group: sel });
+      for (const note of new Set(r.notes)) warn(note);
+      if (r.surfaces) warn(`converted ${r.surfaces} NURBS surface${r.surfaces === 1 ? '' : 's'} to polygons (${r.poleTriangles} pole triangle${r.poleTriangles === 1 ? '' : 's'})`);
+      warnSplineNotes(r.geo, warn);
+      return r.geo;
+    }
+    const rb = new Rebuild(g);
     let orderNote = false;
     for (let pr = 0; pr < g.numPrims; pr++) {
       const from = typeOfKind(g.primKind?.[pr] ?? 0) ?? 'polyline';
@@ -449,6 +460,7 @@ defineNode({
 defineNode({
   type: 'fillet_curve',
   category: 'curve',
+  splines: 'keep',
   summary: 'Round, chamfer or Bezier-blend the corners of polylines and polygons (3D, any plane per corner).',
   description: 'Like Houdini\'s PolyPath/fillet tools for curves (Fillet SOP is for surfaces). Each corner whose turn exceeds angle_min (and whose point is in group) is replaced by an arc of `radius` tangent to both edges (round), a straight cut at the same tangent points (chamfer) or a quadratic Bezier through the corner\'s handle (bezier). clamp shrinks radii that do not fit between neighbouring corners. Corners of open curves at their ends are never filleted. Attributes are blended from the corner and its neighbours; new points join point group "fillet". Bezier/NURBS input is converted to polylines first (a smooth curve has no corners).',
   aliases: ['curve_fillet', 'polyline_fillet', 'polyfillet'],
@@ -465,7 +477,7 @@ defineNode({
   outputs: 'point group fillet (new corner points)',
   example: { type: 'fillet_curve', params: { radius: 0.5, segments: 8 } },
   cook: ({ input, p }) => {
-    const g = input(0);
+    const g = evaluateSplines(input(0), { surfaces: false });
     const ra = p.radius_attrib ? g.points.get(p.radius_attrib) : null;
     if (p.radius_attrib && (!ra || ra.type === 'string' || ra.isArray)) throw new NodeError(`no numeric point attribute "${p.radius_attrib}" for radius_attrib`);
     return filletCurves(g, {
@@ -661,7 +673,7 @@ defineNode({
   outputs: 'prim int side (+1 / -1) with both',
   example: { type: 'offset_curve_3d', params: { distance: 0.6, lift: 1, both: true } },
   cook: ({ input, p }) => {
-    const g = evaluateSplines(input(0));
+    const g = evaluateSplines(input(0), { surfaces: false });
     const sel = mask(g, 'prim', p.group);
     const upA = g.points.get('up');
     const plane = p.frame === 'plane' ? normalize(p.up) : null;
@@ -759,7 +771,7 @@ defineNode({
   example: { type: 'project_curve', params: { spacing: 0.25, lift: 0.05 } },
   cook: ({ input, hasInput, p }) => {
     if (!hasInput(1)) throw new NodeError('project_curve needs a target surface or heightfield in input 1');
-    const g0 = input(0), tgt = input(1);
+    const source = input(0), g0 = withoutSurfaces(source), tgt = evaluateSplines(input(1), { curves: false });
     const g = (p.spacing > 0 ? resampleBySpacing(g0, p.spacing) : evaluateSplines(g0)).clone();
     const dir = normalize(p.direction);
     if (p.mode === 'direction' && !(Math.hypot(...dir) > 0)) throw new NodeError('direction must be a non-zero vector');
@@ -824,8 +836,11 @@ defineNode({
       hitA[i] = 1;
       if (NA) { NA[i * 3] = nrm[0]; NA[i * 3 + 1] = nrm[1]; NA[i * 3 + 2] = nrm[2]; }
     }
-    if (p.misses === 'delete' && miss.some((m) => m)) return g.subsetPoints(miss.map((m) => (m ? 0 : 1)));
-    return g;
+    const projected = p.misses === 'delete' && miss.some((m) => m) ? g.subsetPoints(miss.map((m) => (m ? 0 : 1))) : g;
+    if (source === g0) return projected;
+    const surfaces = source.subsetPrims(source.primClosed.map((_, p) => Number(source.isSurface(p))));
+    surfaces.volumes = [];
+    return Geometry.merge([projected, surfaces]);
   },
 });
 

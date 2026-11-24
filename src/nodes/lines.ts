@@ -5,6 +5,7 @@ import type { Vec3 } from '../core/math.ts';
 import { fillPatch, newellOf } from '../core/polyedit.ts';
 import type { FillPatch } from '../core/polyedit.ts';
 import { evalBasis, evalPoint, evaluateSplines, makeSpline } from '../core/splines.ts';
+import { withoutSurfaces } from '../core/nurbssurface.ts';
 import { orientOutward, topologyReport } from '../core/topology.ts';
 import { defineNode } from '../graph/registry.ts';
 import { NodeError } from '../graph/types.ts';
@@ -138,7 +139,7 @@ function lineReader(name: string, raw: unknown, source: number[] | null, interpo
 
 function readLines(ctx: CookContext, axis: number, mirror: boolean) {
   const { p } = ctx;
-  const input = ctx.inputs[0];
+  const input = ctx.inputs[0] ? withoutSurfaces(ctx.inputs[0]) : null;
   if (input && ctx.given('lines')) error('give either the lines param or input 0 (lines)');
   if (!input && !object(p.lines)) error('lines needs an object of named point lists in section order');
   const src = input ? evaluateSplines(input, { segments: 128 }) : null;

@@ -21,8 +21,10 @@
 // World transform of the instance = translate(P[anchor]) · packedXform. primClosed is 0 for packed prims. The three
 // per-prim arrays are allocated lazily (absent = no packed prims) and travel with clone, merge, subsets and GeoBuilder.
 //
-// Spline primitives (see splines.ts): primKind 2 = Bezier curve, 3 = NURBS curve. The prim's vertices are its control
-// points (CVs) in order, primClosed says whether the curve is closed; the order (degree + 1) is the prim int attribute
+// Spline primitives (see splines.ts and nurbssurface.ts): primKind 2 = Bezier curve, 3 = NURBS curve, 4 = NURBS surface.
+// A surface stores its CVs row-major (u fastest), prim int surface_cols, spline_order_v and closed_v, and float[] knots_v.
+// The prim's vertices are its control points (CVs) in order. primClosed says whether the curve or u axis is closed.
+// The order (degree + 1) for a curve or u axis is the prim int attribute
 // "spline_order", a NURBS knot vector the prim float[] attribute "knots", rational weights the point attribute "Pw"
 // (default 1). Spline prims have packedSource -1 and an identity packedXform. Clone, merge and subsets keep the kind;
 // GeoBuilder does not (a prim built from a spline prim is a new polygon/polyline). Test packed prims with
@@ -865,13 +867,14 @@ export class Geometry {
   hasSplines(): boolean {
     const k = this.primKind;
     if (!k) return false;
-    for (let i = 0; i < k.length; i++) if (k[i] >= 2) return true;
+    for (let i = 0; i < k.length; i++) if (k[i] === 2 || k[i] === 3) return true;
     return false;
   }
 
   /** Is prim p a Bezier or NURBS curve? */
   isSpline(p: number): boolean {
-    return this.primKind !== undefined && this.primKind[p] >= 2;
+    const k = this.primKind?.[p];
+    return k === 2 || k === 3;
   }
 
   /** Number of Bezier and NURBS prims. */
@@ -879,7 +882,17 @@ export class Geometry {
     const k = this.primKind;
     if (!k) return 0;
     let n = 0;
-    for (let i = 0; i < k.length; i++) if (k[i] >= 2) n++;
+    for (let i = 0; i < k.length; i++) if (k[i] === 2 || k[i] === 3) n++;
+    return n;
+  }
+
+  isSurface(p: number): boolean { return this.primKind?.[p] === 4; }
+
+  hasSurfaces(): boolean { return this.primKind?.includes(4) ?? false; }
+
+  get numSurfaces(): number {
+    let n = 0;
+    if (this.primKind) for (const k of this.primKind) if (k === 4) n++;
     return n;
   }
 
@@ -984,7 +997,7 @@ export class Geometry {
       if (remap[i] !== i) identity = false;
     }
     if (!used.length) {
-      if (!this.hasSplines()) return this.clearPacked();
+      if (!this.hasSplines() && !this.hasSurfaces()) return this.clearPacked();
       this._packedSources = undefined;
       return this;
     }

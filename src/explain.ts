@@ -5,6 +5,7 @@ import { Geometry } from './core/geometry.ts';
 import type { AttribClass, Attribute, Volume } from './core/geometry.ts';
 import type { Vec3 } from './core/math.ts';
 import { buildEdges, primArea } from './core/topology.ts';
+import { evaluateSplines } from './core/splines.ts';
 import { pointWhere } from './core/report.ts';
 import {
   RayScene, SurfaceQuery, bboxDiagonal, directedDistance, duplicatePoints, fmt, mirrorSymmetry, newNearest, pieceReport,
@@ -163,6 +164,10 @@ function sampleThickness(g: Geometry, pr: PieceReport, diag: number, query: Surf
 /** Compact text description of a cooked geometry for an LLM (about 15–35 lines). */
 export function explainGeometry(g: Geometry, label = ''): string {
   const out: string[] = [];
+  if (g.hasSurfaces()) {
+    out.push(`${plural(g.numSurfaces, 'NURBS surface')}. Shape and topology use the tessellated polygons.`);
+    g = evaluateSplines(g, { curves: false });
+  }
   const b = g.bbox();
   const size = [0, 1, 2].map((i) => b.max[i] - b.min[i]);
   const diag = bboxDiagonal(g);
@@ -367,6 +372,11 @@ export interface DiffResult {
 /** What changed from a to b: counts, bbox, topology, attribute schema, groups, volumes, sampled Hausdorff and mean distance. */
 export function diffGeometry(a: Geometry, b: Geometry, labels: [string, string] = ['a', 'b'], samples = 3000): DiffResult {
   const out: string[] = [`diff a = ${labels[0]}  vs  b = ${labels[1]}`];
+  if (a.hasSurfaces() || b.hasSurfaces()) {
+    out.push(`NURBS surfaces: ${a.numSurfaces} → ${b.numSurfaces}. Shape and topology use the tessellated polygons.`);
+    a = evaluateSplines(a, { curves: false });
+    b = evaluateSplines(b, { curves: false });
+  }
   const ma = primMix(a), mb = primMix(b);
   out.push(`counts: points ${n(a.numPoints)} → ${n(b.numPoints)} (${delta(a.numPoints, b.numPoints)}), prims ${n(a.numPrims)} → ${n(b.numPrims)} (${delta(a.numPrims, b.numPrims)}), vertices ${n(a.numVertices)} → ${n(b.numVertices)} (${delta(a.numVertices, b.numVertices)})${ma.lines || mb.lines ? `, polylines ${n(ma.lines)} → ${n(mb.lines)}` : ''}`);
   const ba = a.bbox(), bb = b.bbox();
