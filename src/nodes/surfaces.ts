@@ -1,3 +1,4 @@
+import { meshSurfaces } from '../core/surfacemesh.ts';
 import { trimSurfaces } from '../core/surfacetrim.ts';
 import { defineNode } from '../graph/registry.ts';
 import { P, mask } from './util.ts';
@@ -47,5 +48,47 @@ defineNode({
     stat('surfaces_cut', r.surfaces);
     stat('edges', r.edges);
     return r.geo;
+  },
+});
+
+defineNode({
+  type: 'surface_to_mesh',
+  category: 'curve',
+  aliases: ['surface_mesh', 'nurbs_to_mesh', 'tessellate_surface'],
+  summary: 'Make a game-ready quad mesh from an exact NURBS surface.',
+  description: 'Follow the u and v directions with quads. Size sets the target edge length in metres and tolerance controls how closely the mesh follows the surface. Add bands for lips, seals, frames and recesses. For a window, use [{ "width": 0.01, "depth": -0.006, "group": "seal" }, { "width": 0.02, "group": "frame" }]. The plain conversion every node gets is still available for previews. UVs are in metres, so a texture tiles once per metre.',
+  packed: 'keep',
+  splines: 'keep',
+  inputs: [{ name: 'surfaces', desc: 'Exact NURBS surfaces to mesh. Other primitives pass through.' }],
+  params: {
+    size: { type: 'float', default: 0.05, min: 1e-6, desc: 'Target edge length in metres. Defaults to 0.05 m.' },
+    counts: { type: 'ivec2', default: [0, 0], min: 0, max: 1024, desc: 'Starting numbers of cells in u and v. Each 0 uses size in that direction by default.' },
+    tolerance: { type: 'float', default: 0.001, min: 1e-9, desc: 'Chord error tolerance in metres. Defaults to 0.001 m.' },
+    bands: { type: 'json', default: [], desc: 'Bands from the cut into the surface. Each needs a width in metres. Depth in metres defaults to 0, rows defaults to 1, and group defaults to band0, band1 and so on. The default [] joins the grid directly to the trim.' },
+  },
+  outputs: 'A polygon mesh with point N, vertex uv in metres, and a primitive band index. Grid and transition faces are in surface with band -1. Band faces go in their named groups. For bands and transitions, min_angle gives the smallest face angle in degrees and thin_faces counts faces with angles below 15 degrees. Both are 0 when there are no such faces.',
+  example: {
+    nodes: {
+      ring: { type: 'circle', params: { plane: 'xy', segments: 16 } },
+      body: { type: 'loft', in: ['ring'], params: { output: 'surface', sections: [
+        { scale: 0.9 }, { offset: [0, 0, 1], scale: 1.1 },
+        { offset: [0, 0, 2], scale: 1.05 }, { offset: [0, 0, 3], scale: 0.9 },
+      ] } },
+      window: { type: 'curve', params: { closed: true, points: [[0, 0.2, 0.6], [0, 0.6, 0.6], [0, 0.6, 1.4], [0, 0.2, 1.4]] } },
+      cut: { type: 'trim_surface', in: ['body', 'window'], params: { direction: [1, 0, 0], edges: false } },
+      mesh: { type: 'surface_to_mesh', in: ['cut'], params: { size: 0.12, tolerance: 0.003,
+        bands: [{ width: 0.01, depth: -0.006, group: 'seal' }, { width: 0.02, group: 'frame' }] } },
+    },
+    output: 'mesh',
+  },
+  cook: ({ input, p, stat, warn }) => {
+    const { geo, stats } = meshSurfaces(input(0), { size: p.size, counts: p.counts, tolerance: p.tolerance, bands: p.bands });
+    const { poles, corners, transitions, ...reported } = stats;
+    for (const [key, value] of Object.entries(reported)) stat(key, value);
+    if (stats.quad_share < 0.95) {
+      const locations = ['poles', 'corners', 'transitions'].filter((_, i) => [poles, corners, transitions][i] === Math.max(poles, corners, transitions));
+      warn(`The mesh has ${stats.triangles} triangles, most at ${locations.join(' and ')}. Use a smaller size or adjust counts for more quads.`);
+    }
+    return geo;
   },
 });

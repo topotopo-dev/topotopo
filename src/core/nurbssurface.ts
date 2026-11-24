@@ -135,7 +135,7 @@ function basis(s: Spline, t: number, order: number) {
 
 const zero = (): Vec3 => [0, 0, 0];
 
-function evaluate(s: NurbsSurface, u: number, v: number, order: 0 | 1 | 2, provenance = false) {
+export function evaluate(s: NurbsSurface, u: number, v: number, order: 0 | 1 | 2, provenance = false) {
   const U = basis(s.u, u, order), V = basis(s.v, v, order);
   const count = order === 0 ? 1 : order === 1 ? 3 : 6;
   const h = new Float64Array(24), B = new Float64Array(6);
@@ -180,7 +180,7 @@ function unitNormal({ Su, Sv }: { Su: Vec3; Sv: Vec3 }): Vec3 | null {
   return l > 1e-14 ? [n[0] / l, n[1] / l, n[2] / l] : null;
 }
 
-function normal(s: NurbsSurface, u: number, v: number, e: { Su: Vec3; Sv: Vec3 }): Vec3 {
+export function normal(s: NurbsSurface, u: number, v: number, e: { Su: Vec3; Sv: Vec3 }): Vec3 {
   const n = unitNormal(e);
   if (n) return n;
   u = parameter(s.u, u); v = parameter(s.v, v);
