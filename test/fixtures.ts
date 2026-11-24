@@ -72,6 +72,7 @@ export const SRC: Record<string, NodeSpec> = {
   NURBS: { type: 'nurbs', params: { points: [[0, 0, 0], [1, 0.5, 1], [2.5, 0, 1.2], [3, 0.8, 0], [4.2, 0.2, -0.5], [5, 0, 0.4]], weights: [1, 2, 1, 1, 0.5, 1] } },
   SURFACE_GRID: { type: 'grid', params: { type: 'nurbs', divisions: [2, 2], size: [2, 2] } },
   SURFACE: { type: 'wrangle', in: ['SURFACE_GRID'], params: { code: '@P.y = 0.4 * @P.x * @P.z;' } },
+  TRIM_OUTLINE: { type: 'curve', params: { closed: true, points: [[-0.5, 0, -0.4], [-0.5, 0, 0.4], [0.5, 0, 0.4], [0.5, 0, -0.4]] } },
   BEZIER: { type: 'bezier' },
   SPIRAL: { type: 'spiral', params: { turns: 1.5, points_per_turn: 40 } },
   NOISY: { type: 'jitter', in: ['SPIRAL'], params: { amount: 0.04 } },
@@ -157,6 +158,7 @@ export function builtinFixtureGraph(name: string, params: Record<string, any> = 
 export const INPUTS: Record<string, string[]> = {
   resample: ['CURVE'], carve: ['CURVE'], ends: ['CIRCLE'], sweep: ['CURVE', 'PROFILEXY'], polywire: ['CURVE'], revolve: ['PROFILE'],
   extrude: ['SHAPE'], offset_curve: ['SHAPE'], boolean2d: ['SHAPE', 'CIRCLE'], fill: ['SHAPE'], loft: ['LOFT'],
+  trim_surface: ['SURFACE', 'TRIM_OUTLINE'],
   copy_to_points: ['MESH', 'PTS'], ray: ['PTS_ABOVE', 'MESH'], attrib_copy: ['MESH', 'COLORED'], attrib_transfer: ['MESH', 'COLORED'],
   boolean: ['BOX', 'CUTTERS'], remove_interior: ['OVERLAP'], material: ['MESH'], minkowski: ['BOX', 'SMALLSPHERE'], voronoi_fracture: ['MESH'], convex_hull: ['PTS'],
   sdf_combine: ['SDF', 'SDF2'], sdf_modify: ['SDF'], sdf_to_mesh: ['SDF'], sdf_from_mesh: ['MESH'],

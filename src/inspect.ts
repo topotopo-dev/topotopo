@@ -22,7 +22,7 @@ import { lodOf } from './core/uvreport.ts';
 import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
 import { imageSummary, imagesOf } from './core/image.ts';
 import { sdfGridSummary } from './core/sdfgrid.ts';
-import { surfaceLayout } from './core/nurbssurface.ts';
+import { surfaceLayout, surfaceTrims } from './core/nurbssurface.ts';
 import { evaluateSplines, splinesToPolylinesDeep } from './core/splines.ts';
 import { uvReport, uvReportText } from './core/uvreport.ts';
 import { openEdgesText, partsOf, primWhere, solidCauses, solidReport } from './core/report.ts';
@@ -272,7 +272,8 @@ export function inspect(g: Geometry, o: InspectOptions = {}): string {
 
 function surfaceDescription(g: Geometry, p: number): string {
   const s = surfaceLayout(g, p);
-  return s ? `${s.cols} × ${s.rows} CVs, order ${s.orderU} × ${s.orderV}` : 'invalid CV grid';
+  const loops = surfaceTrims(g, p)?.length ?? 0;
+  return s ? `${s.cols} × ${s.rows} CVs, order ${s.orderU} × ${s.orderV}, ${loops} trim loop${loops === 1 ? '' : 's'}` : 'invalid CV grid';
 }
 
 /**
