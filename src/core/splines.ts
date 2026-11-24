@@ -993,6 +993,31 @@ interface FitOptions {
 
 interface FitRow { cols: number[]; vals: number[]; r: number[] }
 
+/** Quadrature rows for the integral of squared curvature in the normalized curve parameter. */
+function fairnessRows(pc: Piece, n: number, closed: boolean) {
+  const rows: { idx: number[]; cf: number[]; weight: number }[] = [];
+  const { U, p, a, b } = pc, scale = b - a;
+  if (p === 1) {
+    // A linear spline has turns at the knots. Use the change of slope over the neighbouring spans.
+    for (let i = Number(!closed); i < n - Number(!closed); i++) {
+      const k = i + 1, h = (U[k] - U[k - 1]) / scale, j = (U[k + 1] - U[k]) / scale;
+      if (h > 0 && j > 0) rows.push({ idx: [(i + n - 1) % n, i, (i + 1) % n], cf: [1 / h, -1 / h - 1 / j, 1 / j], weight: 2 / (h + j) });
+    }
+    return rows;
+  }
+  for (let k = p; k < pc.cv.length; k++) {
+    const half = (U[k + 1] - U[k]) / 2;
+    if (!(half > 0)) continue;
+    const mid = U[k] + half, idx = Array.from(pc.cv.subarray(k - p, k + 1));
+    for (let j = 0; j < GLX.length; j++) {
+      const d = dersBasis(pc, k, mid + half * GLX[j], 2);
+      const cf = Array.from(d.subarray(2 * MAXP1, 2 * MAXP1 + p + 1), (x) => x * scale * scale);
+      rows.push({ idx, cf, weight: GLW[j] * half / scale });
+    }
+  }
+  return rows;
+}
+
 /** Solve the equality constraints using the Schur complement C A⁻¹ Cᵀ of the normal equations. */
 function constrainFit(A: Profile, rhs: Float64Array, pins: FitRow[]): boolean {
   if (!pins.length) return true;
@@ -1022,7 +1047,8 @@ function constrainFit(A: Profile, rhs: Float64Array, pins: FitRow[]): boolean {
 
 /**
  * Least-squares B-spline through points Q (3 per point) with n CVs. Open curves keep their ends and pins at their
- * parameters. Smoothing penalizes second differences of the CVs. Corrections re-project unpinned parameters.
+ * parameters. Smoothing balances the mean squared error against the integrated squared second derivative.
+ * Corrections re-project unpinned parameters.
  */
 export function fitSpline(Q: ArrayLike<number>, o: FitOptions & {
   cvs: number; corrections?: number; params?: ArrayLike<number>; knots?: ArrayLike<number>;
@@ -1046,7 +1072,8 @@ export function fitSpline(Q: ArrayLike<number>, o: FitOptions & {
   const empty = (): FitResult => ({ P: Float64Array.from(Q), knots: new Float64Array(0), order, closed, params, error: 0 });
   if (m < 2) return empty();
   let knots = o.knots ? Float64Array.from(o.knots) : fitKnots(tAll, closed, order, n);
-  const lam = Math.max(0, o.smoothing ?? 0) * (m / n);
+  // Set the strength against mean squared error, using the same parameter scale at every CV count.
+  const lam = Math.max(0, o.smoothing ?? 0) * m * 1e-9;
   const corrections = n === m ? 0 : Math.max(0, o.corrections ?? 2);
   const P = new Float64Array(n * 3);
   if (!closed) { for (let c = 0; c < 3; c++) { P[c] = Q[c]; P[(n - 1) * 3 + c] = Q[(m - 1) * 3 + c]; } }
@@ -1054,6 +1081,7 @@ export function fitSpline(Q: ArrayLike<number>, o: FitOptions & {
   knots = proto.knots; // (identical unless the computed vector was unusable and got replaced)
   const pc = proto.pieces[0];
   const h = Math.max(p, lam > 0 ? 2 : 0);
+  const fairness = lam > 0 ? fairnessRows(pc, n, closed) : [];
   const solveOnce = (): boolean => {
     // unknowns: open curves solve for CVs 1 … n-2 (the ends are the end points); closed curves for all n
     const off = closed ? 0 : 1, nu = closed ? n : n - 2;
@@ -1084,21 +1112,16 @@ export function fitSpline(Q: ArrayLike<number>, o: FitOptions & {
         for (let c = 0; c < 3; c++) rhs[cols[a] * 3 + c] += vals[a] * r[c];
       }
     }
-    if (lam > 0) {
-      // second differences P[i-1] - 2 P[i] + P[i+1]
-      const rows = closed ? n : n - 2;
-      for (let q = 0; q < rows; q++) {
-        const i = closed ? q : q + 1;
-        const idx = [(i - 1 + n) % n, i, (i + 1) % n], cf = [1, -2, 1];
-        const cols: number[] = [], vals: number[] = [], fixed = [0, 0, 0];
-        idx.forEach((ci, k) => {
-          if (!closed && (ci === 0 || ci === n - 1)) { for (let c = 0; c < 3; c++) fixed[c] += cf[k] * P[ci * 3 + c]; }
-          else { cols.push(ci - off); vals.push(cf[k]); }
-        });
-        for (let a = 0; a < cols.length; a++) {
-          for (let b = 0; b <= a; b++) A.add(cols[a], cols[b], (cols[a] === cols[b] && a !== b ? 2 : 1) * lam * vals[a] * vals[b]);
-          for (let c = 0; c < 3; c++) rhs[cols[a] * 3 + c] -= lam * vals[a] * fixed[c];
-        }
+    for (const { idx, cf, weight } of fairness) {
+      const penalty = lam * weight;
+      const cols: number[] = [], vals: number[] = [], fixed = [0, 0, 0];
+      idx.forEach((ci, k) => {
+        if (!closed && (ci === 0 || ci === n - 1)) { for (let c = 0; c < 3; c++) fixed[c] += cf[k] * P[ci * 3 + c]; }
+        else { cols.push(ci - off); vals.push(cf[k]); }
+      });
+      for (let a = 0; a < cols.length; a++) {
+        for (let b = 0; b <= a; b++) A.add(cols[a], cols[b], (cols[a] === cols[b] && a !== b ? 2 : 1) * penalty * vals[a] * vals[b]);
+        for (let c = 0; c < 3; c++) rhs[cols[a] * 3 + c] -= penalty * vals[a] * fixed[c];
       }
     }
     const backup = A.v.slice();

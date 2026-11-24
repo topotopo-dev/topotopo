@@ -6,7 +6,9 @@ import { GeoBuilder } from '../src/core/geometry.ts';
 import type { Geometry } from '../src/core/geometry.ts';
 import { cross, dot, normalize, sub } from '../src/core/math.ts';
 import type { Vec3 } from '../src/core/math.ts';
-import { curveParams, evalDerivs, evalPoint, fitSpline, fitSplineTolerance, makeSpline, splineFromPrim } from '../src/core/splines.ts';
+import { curveParams, evalDerivs, evalPoint, fitSpline, fitSplineTolerance, interpolateSpline, makeSpline, splineFromPrim } from '../src/core/splines.ts';
+import { closestSurfacePoint, evalSurface, surfaceFromPrim } from '../src/core/nurbssurface.ts';
+import type { NurbsSurface } from '../src/core/nurbssurface.ts';
 import { addSurfacePrim, fitSurface, mirrorSection } from '../src/core/surfacefit.ts';
 import type { SurfaceFit, SurfaceSection } from '../src/core/surfacefit.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
@@ -317,6 +319,192 @@ await check('11. Approximate 40 × 24 in under one second', () => {
   assert.ok(fit.error <= approximate.tolerance);
   assert.ok(elapsed < 1000, `${elapsed.toFixed(1)} ms`);
 });
+
+function railGraph(sections: SurfaceSection[], rails: SurfaceSection[], params: Record<string, unknown> = {}) {
+  const graph = loftGraph(sections, { tolerance: 0.00004, ...params });
+  const ids = rails.map((rail, i) => {
+    const id = `rail${i}`;
+    graph.nodes[id] = { type: 'curve', params: { points: rail.pts } };
+    return id;
+  });
+  graph.nodes.rails = { type: 'merge', in: ids };
+  graph.nodes.skin.in = ['parts', 'rails'];
+  return graph;
+}
+
+function network(counts: number[], mirror = false, railCount = 3) {
+  const stations = counts.map((_, i) => i / (counts.length - 1));
+  const across = Array.from({ length: railCount }, (_, i) => mirror ? i / railCount : i / (railCount - 1));
+  const p = (u: number, v: number) => {
+    const r = 0.16 + 0.08 * v * (1 - v), a = Math.PI * u;
+    return mirror ? [u === 0 || u === 1 ? 0 : r * Math.sin(a), -r * Math.cos(a), v]
+      : [0.4 * (u - 0.5), r * (1 - (2 * u - 1) ** 2), v];
+  };
+  const sections = counts.map((n, i) => {
+    const u = [...new Set([...across, 1])];
+    while (u.length < n) {
+      let widest = 0;
+      for (let k = 1; k < u.length - 1; k++) if (u[k + 1] - u[k] > u[widest + 1] - u[widest]) widest = k;
+      const f = n % 2 ? 0.49 : 0.51;
+      u.splice(widest + 1, 0, u[widest] * f + u[widest + 1] * (1 - f));
+    }
+    return { pts: u.map((t) => p(t, stations[i])), closed: false };
+  });
+  const rails = across.map((u) => ({ pts: stations.map((v) => p(u, v)), closed: false }));
+  return { sections, rails, crossings: stations.flatMap((v) => across.map((u) => p(u, v))) };
+}
+
+function curveDeviation(surface: NurbsSurface, curves: SurfaceSection[]) {
+  let max = 0;
+  for (const { pts, closed } of curves) {
+    const fit = interpolateSpline(pts.flat(), closed, 4), curve = makeSpline('nurbs', fit.P, fit);
+    for (let i = 0; i < 50; i++) {
+      const q = evalPoint(curve, i / 49) as Vec3;
+      max = Math.max(max, Math.sqrt(closestSurfacePoint(surface, q).d2));
+    }
+  }
+  return max;
+}
+
+const openNetwork = network([9, 9, 9, 9, 9]);
+const halfNetwork = network([13, 13, 13, 13, 13], true);
+
+async function verifyNetwork(data: ReturnType<typeof network>, mirror = false) {
+  const { sections, rails, crossings } = data;
+  const { geo, result } = await cook(railGraph(sections, rails, mirror ? { mirror: 'x' } : {}));
+  const surface = surfaceFromPrim(geo, 0)!;
+  assert.ok(surface);
+  assert.equal(surface.u.closed, mirror);
+  const stats = result.results.get('skin')?.stats;
+  assert.equal(stats?.sections, sections.length);
+  assert.equal(stats?.rails, mirror ? 5 : rails.length);
+  assert.ok(Number(stats?.network_gap_max) < 1e-9);
+  assert.ok(Number(geo.detail.get('fit_error')?.get(0)) <= 0.00004);
+  const reflections = (qs: number[][]) => qs.map(([x, y, z]) => [-x, y, z]);
+  const grid = mirror ? [...crossings, ...reflections(crossings)] : crossings;
+  const crossingError = Math.max(...grid.map((q) => Math.sqrt(closestSurfacePoint(surface, q as Vec3).d2)));
+  const full = mirror ? [...sections.map(mirrorSection), ...rails, ...rails.slice(1).map((s) => ({ ...s, pts: reflections(s.pts) }))] : [...sections, ...rails];
+  const curveError = curveDeviation(surface, full);
+  console.log(`     crossings ${crossingError.toExponential(3)} m, 50 samples per curve ${curveError.toExponential(3)} m`);
+  assert.ok(crossingError < 1e-9);
+  assert.ok(curveError < 1e-4);
+  return surface;
+}
+
+await check('Rails 1. Five sections and three rails interpolate the network', async () => {
+  await verifyNetwork(openNetwork);
+  const { sections, rails } = openNetwork;
+  const graph = railGraph([sections[0], sections[3], sections[1], sections[2], sections[4]], rails, { smoothing: 1, cvs: [6, 6], pins: '0' });
+  const { result } = await cook(graph);
+  assert.ok(result.warnings.some((w) => /reordered/.test(w.message)));
+  assert.equal(result.warnings.filter((w) => /smoothing, cvs and pins/.test(w.message)).length, 1);
+});
+
+await check('Rails 2. A rail controls the shape between sections', async () => {
+  const { sections, rails } = openNetwork;
+  const bulge: Vec3 = [0, 0.23, 0.375];
+  const bowed = rails.map((r, i) => i === 1 ? { ...r, pts: [...r.pts.slice(0, 2), bulge, ...r.pts.slice(2)] } : r);
+  const withRails = surfaceFromPrim((await cook(railGraph(sections, bowed))).geo, 0)!;
+  const without = surfaceFromPrim((await cook(loftGraph(sections))).geo, 0)!;
+  const guided = Math.sqrt(closestSurfacePoint(withRails, bulge).d2);
+  const plain = Math.sqrt(closestSurfacePoint(without, bulge).d2);
+  console.log(`     bulge distance with rails ${guided.toExponential(3)} m, without rails ${plain.toExponential(3)} m`);
+  assert.ok(guided < 1e-4 && plain > 0.03);
+});
+
+await check('Rails 3. Sections have seven, twelve and nine uneven samples', async () => {
+  await verifyNetwork(network([7, 12, 9]));
+});
+
+await check('Rails 4. A centre rail and two side rails mirror smoothly', async () => {
+  const surface = await verifyNetwork(halfNetwork, true);
+  let symmetry = 0, normalX = 0;
+  for (let j = 0; j <= 10; j++) {
+    const v = j / 10;
+    for (const u of [0, 0.5]) normalX = Math.max(normalX, Math.abs(evalSurface(surface, u, v).N[0]));
+    for (let i = 0; i <= 24; i++) {
+      const u = i / 24, { P: [x, y, z] } = evalSurface(surface, u, v);
+      symmetry = Math.max(symmetry, distance([-x, y, z], evalSurface(surface, 1 - u, v).P));
+    }
+  }
+  console.log(`     symmetry ${symmetry.toExponential(3)} m, largest centre normal x ${normalX.toExponential(3)}`);
+  assert.ok(symmetry < 1e-9 && normalX < 1e-9);
+});
+
+await check('Rails 5. Misses, inconsistent order and incompatible options give actionable errors', async () => {
+  const { sections, rails } = openNetwork;
+  const shifted = rails.map((r, i) => i ? r : { ...r, pts: r.pts.map(([x, y, z]) => [x - 0.01, y, z]) });
+  const reversed = sections.map((s, i) => i === 1 ? { ...s, pts: s.pts.slice().reverse() } : s);
+  const reversedRail = rails.map((r, i) => i === 1 ? { ...r, pts: r.pts.slice().reverse() } : r);
+  for (const [graph, pattern] of [
+    [railGraph(sections, shifted), /section 1, rail 1.*10.*mm.*move the rail onto the section or raise network_tolerance/i],
+    [railGraph(reversed, rails), /section 2.*rails.*out of order/i],
+    [railGraph(sections, reversedRail), /section 2.*rails 1 and 2.*out of order/i],
+    [railGraph(sections, rails, { output: 'polygons' }), /rails.*output.*surface/i],
+    [railGraph(sections, rails, { fit: 'approximate' }), /rails make the surface pass through every curve; fair the curves first \(spline_fit with smoothing, pins on the crossings\) and use fit interpolate\./],
+    [railGraph(sections, rails, { closed: true }), /rails need open lofts/i],
+  ] as const) {
+    const result = await engine.cook(graph);
+    assert.ok(!result.ok && result.errors.some((e) => pattern.test(e.message)), JSON.stringify(result.errors));
+  }
+});
+
+await check('Rails. Closed sections can start at different points and use an even-degree skin', async () => {
+  const { sections, rails, crossings } = halfNetwork;
+  const full = sections.map(mirrorSection).map((s, i) => ({ ...s, pts: [...s.pts.slice(i * 3), ...s.pts.slice(0, i * 3)] }));
+  const graph = railGraph(full, rails, { order: [3, 4] });
+  const surface = surfaceFromPrim((await cook(graph)).geo, 0)!;
+  assert.ok(surface.u.closed);
+  assert.equal(surface.u.order, 3);
+  for (const q of crossings) assert.ok(Math.sqrt(closestSurfacePoint(surface, q as Vec3).d2) < 1e-9);
+});
+
+await check('Rails. Use the exact rational NURBS sections and Bezier rails', async () => {
+  const stations = [0, 0.25, 0.5, 0.75, 1];
+  const sections = stations.map((z) => ({ pts: [[-0.2, 0, z], [0, 0.3 * (1 + 0.2 * z), z], [0.2, 0, z]], closed: false }));
+  const rails = [-0.2, 0, 0.2].map((x) => ({ pts: [0, 0.1, 0.8, 1].map((z) => [x, x === 0 ? 0.1 * (1 + 0.2 * z) : 0, z]), closed: false }));
+  const graph = railGraph(sections, rails);
+  sections.forEach(({ pts }, i) => { graph.nodes[`section${i}`] = { type: 'nurbs', params: { points: pts, order: 3, weights: [1, 0.5, 1] } }; });
+  rails.forEach(({ pts }, i) => { graph.nodes[`rail${i}`] = { type: 'bezier', params: { points: pts, weights: [1, 1.5, 0.6, 1] } }; });
+  const { geo, result } = await cook(graph), surface = surfaceFromPrim(geo, 0)!;
+  assert.ok(result.warnings.every((w) => !w.message.includes('converted')));
+  let error = 0;
+  for (const { pts } of sections) {
+    const section = makeSpline('nurbs', pts.flat(), { order: 3, weights: [1, 0.5, 1] });
+    for (let i = 0; i < 50; i++) error = Math.max(error, Math.sqrt(closestSurfacePoint(surface, evalPoint(section, i / 49) as Vec3).d2));
+  }
+  console.log(`     rational source deviation ${error.toExponential(3)} m`);
+  assert.ok(error < 1e-4);
+});
+
+await check('Rails 7. Smoothing has a stable effect across sample and CV counts', () => {
+  const reductions: number[] = [];
+  for (const points of [20, 80, 320]) for (const cvs of [10, 40, 160]) {
+    const t = Float64Array.from({ length: points }, (_, i) => i / (points - 1));
+    const Q = Array.from(t, (u) => [u, 0.08 * Math.sin(2 * Math.PI * u) + 0.008 * Math.sin(3 * Math.PI * u), 0]).flat();
+    const fit = (smoothing: number) => fitSpline(Q, { order: 4, closed: false, cvs, params: t, smoothing, corrections: 0 });
+    const roughness = (r: ReturnType<typeof fit>) => {
+      const curve = makeSpline('nurbs', r.P, r), q = Array.from({ length: 200 }, (_, i) => evalPoint(curve, i / 199));
+      return q.slice(1, -1).reduce((sum, b, i) => sum + b.reduce((d, x, k) => d + (q[i][k] - 2 * x + q[i + 2][k]) ** 2, 0), 0);
+    };
+    const a = fit(0), b = fit(1), before = roughness(a), after = roughness(b);
+    reductions.push(1 - after / before);
+    console.log(`     ${points} points, ${cvs} requested CVs, ${b.P.length / 3} used, error ${b.error.toExponential(6)} m, roughness ${after.toExponential(8)} (unsmoothed ${before.toExponential(8)})`);
+  }
+  assert.ok(Math.min(...reductions) > 0 && Math.max(...reductions) <= 2 * Math.min(...reductions), String(reductions));
+});
+
+await check('Rails 8. Twelve closed mirrored sections and six input rails in under one second', async () => {
+  const { sections, rails } = network(Array(12).fill(15), true, 6);
+  const start = performance.now();
+  await cook(railGraph(sections, rails, { mirror: 'x' }));
+  const elapsed = performance.now() - start;
+  console.log(`     ${elapsed.toFixed(1)} ms`);
+  assert.ok(elapsed < 1000, `${elapsed.toFixed(1)} ms`);
+});
+
+const railPreview = process.env.TOPOTOPO_LOFT_RAILS_PREVIEW;
+if (railPreview) writeFileSync(railPreview, JSON.stringify(railGraph(halfNetwork.sections, halfNetwork.rails, { mirror: 'x' }), null, 2));
 
 // Sample the isoparm grid and join it with quads for the zebra renderer.
 const preview = process.env.TOPOTOPO_SURFACE_FIT_PREVIEWS;
