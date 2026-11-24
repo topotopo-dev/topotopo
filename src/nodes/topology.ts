@@ -801,8 +801,8 @@ function copyDominant(a: Attribute, d: Attribute, idx: ArrayLike<number>) {
 
 /**
  * Initial crease sharpness of g for the subdivide node: edges matched by `creases` get `weight`,
- * plus the crease attribute (vertex: an edge is creased when both of its corners in a polygon carry
- * a weight, using the smaller one; point: both endpoints, smaller weight; prim: every side of the prim).
+ * plus the crease attribute (vertex: outgoing edge of the corner; point: both endpoints, smaller weight;
+ * prim: every side of the prim).
  * The largest value wins. Returns null when nothing is creased.
  */
 export function creaseSharpness(g: Geometry, creases: string, weight: number, attrib: string) {
@@ -813,9 +813,9 @@ export function creaseSharpness(g: Geometry, creases: string, weight: number, at
   const cls = f && f.attr.type !== 'string' ? f.cls : null;
   if (cls) {
     const d = f!.attr.data as Float64Array, sz = f!.attr.size;
-    forEachPrimEdge(g, (pr, v0, v1, a, bb) => {
+    forEachPrimEdge(g, (pr, v0, _, a, bb) => {
       if (!g.primClosed[pr]) return;
-      const s = cls === 'vertex' ? Math.min(d[v0 * sz], d[v1 * sz]) : cls === 'point' ? Math.min(d[a * sz], d[bb * sz]) : d[pr * sz];
+      const s = cls === 'vertex' ? d[v0 * sz] : cls === 'point' ? Math.min(d[a * sz], d[bb * sz]) : d[pr * sz];
       put(edgeKey(a, bb), s);
     });
   }
@@ -823,8 +823,7 @@ export function creaseSharpness(g: Geometry, creases: string, weight: number, at
 }
 
 /** Write the remaining crease sharpness back as a crease attribute (prim class becomes vertex class). */
-function writeCreaseAttrib(g: Geometry, name: string, cls: 'vertex' | 'point' | 'prim', sharp: Map<number, number>) {
-  const at = (a: number, b: number) => (a === b ? 0 : sharp.get(edgeKey(a, b)) ?? 0);
+export function writeCreaseAttrib(g: Geometry, name: string, cls: 'vertex' | 'point' | 'prim', sharp: Map<number, number>) {
   if (cls === 'point') {
     const d = g.points.add(name, 'float', 1).data as Float64Array;
     d.fill(0);
@@ -833,14 +832,10 @@ function writeCreaseAttrib(g: Geometry, name: string, cls: 'vertex' | 'point' | 
   }
   g.prims.delete(name);
   const d = g.vertices.add(name, 'float', 1).data as Float64Array;
-  for (let p = 0; p < g.numPrims; p++) {
-    const s = g.primStart[p], e = g.primStart[p + 1], n = e - s;
-    for (let k = 0; k < n; k++) {
-      const v = s + k, pt = g.vertexPoint[v];
-      const nx = g.vertexPoint[s + ((k + 1) % n)], pv = g.vertexPoint[s + ((k - 1 + n) % n)];
-      d[v] = Math.max(at(pt, nx), at(pv, pt));
-    }
-  }
+  d.fill(0);
+  forEachPrimEdge(g, (pr, v, _, a, b) => {
+    if (g.primClosed[pr]) d[v] = sharp.get(edgeKey(a, b)) ?? 0;
+  });
 }
 
 defineNode({
@@ -849,7 +844,7 @@ defineNode({
   summary: 'Catmull-Clark (smooth) or linear subdivision with semi-sharp creases; all attributes and groups interpolated.',
   description:
     'Creases (DeRose/Kass/Truong): edges in the "creases" edge group/pattern get crease_weight, and a crease attribute ' +
-    '(default "creaseweight", Houdini convention: vertex class = both corners of the edge carry the weight; point class = both ' +
+    '(default "creaseweight", Houdini convention: vertex class = from the vertex to the next one in its polygon; point class = both ' +
     'endpoints; prim class = every side of the prim) adds its values; the larger wins. Sharpness s >= 1 uses the sharp rules ' +
     '(edge midpoint, crease vertex 3/4·v + 1/8·neighbours, corner where 3+ creases meet stays fixed), 0 < s < 1 blends with ' +
     'the smooth rules, and s drops by 1 per level, so weight 1 is sharp for one level then smooths out; weight >= levels stays ' +
@@ -939,6 +934,8 @@ defineNode({
     }
     const b = new GeoBuilder(g);
     const front = b.group('prim', 'front'), side = b.group('prim', 'side');
+    // New walls and back faces carry no edge of their own in the input, so their crease weights start at zero.
+    const fresh: number[] = [];
     const base = new Int32Array(g.numPoints);
     for (let i = 0; i < g.numPoints; i++) base[i] = b.copyPoint(i);
     // unselected prims unchanged
@@ -1008,16 +1005,26 @@ defineNode({
         const vs: number[] = [];
         for (let v = g.primStart[f]; v < g.primStart[f + 1]; v++) vs.push(v);
         front.add(b.addPrim(vs.map((v) => top.get(g.vertexPoint[v])!), true, f, vs));
-        if (p.keep_back) b.addPrim(vs.map((v) => base[g.vertexPoint[v]]).reverse(), true, f, vs.slice().reverse());
+        if (p.keep_back) fresh.push(b.addPrim(vs.map((v) => base[g.vertexPoint[v]]).reverse(), true, f, vs.slice().reverse()));
       }
       for (const [a, bb, va] of boundary) {
         const f = vprimAll[va];
         const ra = [base[a], ...ringPts.get(a)!], rb = [base[bb], ...ringPts.get(bb)!];
         const vb = g.primStart[f] + ((va - g.primStart[f] + 1) % g.primSize(f));
-        for (let k = 0; k < p.divisions; k++) side.add(b.addPrim([ra[k], rb[k], rb[k + 1], ra[k + 1]], true, f, [va, vb, vb, va]));
+        for (let k = 0; k < p.divisions; k++) {
+          const q = b.addPrim([ra[k], rb[k], rb[k + 1], ra[k + 1]], true, f, [va, vb, vb, va]);
+          side.add(q);
+          fresh.push(q);
+        }
       }
     }
-    return b.build().removeUnusedPoints();
+    const out = b.build();
+    const crease = out.vertices.get('creaseweight');
+    if (crease && crease.type !== 'string') {
+      const d = crease.data as Float64Array, size = crease.size;
+      for (const q of fresh) d.fill(0, out.primStart[q] * size, out.primStart[q + 1] * size);
+    }
+    return out.removeUnusedPoints();
   },
 });
 
