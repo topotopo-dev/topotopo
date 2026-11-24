@@ -379,7 +379,7 @@ defineNode({
     order: { type: 'int', default: 4, min: 2, max: 11, desc: 'order of the fitted curve (4 = cubic)' },
     cv_count: { type: 'int', default: 0, min: 0, max: 100000, desc: 'number of CVs; 0 = as few as the tolerance allows', aliases: ['cvs', 'count'] },
     tolerance: { type: 'float', default: 0.01, min: 0, desc: 'largest allowed distance from a point to the curve (cv_count 0)', aliases: ['tol', 'max_error'] },
-    smoothing: { type: 'float', default: 0, min: 0, desc: 'second-difference penalty on the CVs (0 = none, ~1 smooths noise)', aliases: ['smooth'] },
+    smoothing: { type: 'float', default: 0, min: 0, desc: 'bending penalty, unitless: 0 = none; about 1 softens measuring noise, 10 and more fairs strongly. The same number means the same on any point or CV count', aliases: ['smooth'] },
     parameterization: { type: 'enum', options: PARAMETERIZATIONS, default: 'centripetal', desc: PARAM_DESC },
     closed: { type: 'enum', options: ['auto', 'open', 'closed'], default: 'auto', desc: 'auto = as the input prim (open for point clouds)' },
     output: { type: 'enum', options: ['nurbs', 'polyline'], default: 'nurbs', desc: 'NURBS prims or polylines sampled from the fit' },
