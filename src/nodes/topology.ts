@@ -248,12 +248,19 @@ export function subdivideOnce(g: Geometry, smooth: boolean, boundaryMode: 'smoot
  * Child edges of a crease edge carry s - 1 (dropped at 0); the returned map uses the output's point
  * numbers. Edge groups of g propagate to the child edges (and to polyline segments).
  */
-export function subdivideLevel(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): { geo: Geometry; sharp: Map<number, number> } {
+interface SubdivideLevel {
+  geo: Geometry;
+  sharp: Map<number, number>;
+  /** The child vertex point of each input point, or -1 if unused. */
+  vtxPt: Int32Array;
+}
+
+export function subdivideLevel(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): SubdivideLevel {
   return subdivideLevelFast(g, smooth, boundaryMode, sharp) ?? subdivideLevelBuilder(g, smooth, boundaryMode, sharp);
 }
 
 /** subdivideLevel through GeoBuilder: the reference implementation, used for inputs the typed-array path does not take. */
-function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): { geo: Geometry; sharp: Map<number, number> } {
+function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): SubdivideLevel {
   const E = buildEdges(g);
   const ne = E.a.length;
   // faces adjacent to each edge (only closed polygons)
@@ -399,8 +406,8 @@ function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smoo
   }
   const built = b.build();
   const out = built.removeUnusedPoints();
-  if (!childSharp.size || out.numPoints === built.numPoints) return { geo: out, sharp: childSharp };
-  // removeUnusedPoints renumbered points: renumber the crease keys the same way
+  if (out.numPoints === built.numPoints) return { geo: out, sharp: childSharp, vtxPt };
+  // removeUnusedPoints renumbered points: renumber the crease keys and vertex points the same way
   const used = new Uint8Array(built.numPoints);
   for (let v = 0; v < built.numVertices; v++) used[built.vertexPoint[v]] = 1;
   const remap = new Int32Array(built.numPoints).fill(-1);
@@ -410,7 +417,7 @@ function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smoo
     const [x, y] = edgeFromKey(k);
     if (remap[x] >= 0 && remap[y] >= 0) moved.set(edgeKey(remap[x], remap[y]), s);
   }
-  return { geo: out, sharp: moved };
+  return { geo: out, sharp: moved, vtxPt: vtxPt.map((q) => q < 0 ? -1 : remap[q]) };
 }
 
 /**
@@ -423,7 +430,7 @@ function subdivideLevelBuilder(g: Geometry, smooth: boolean, boundaryMode: 'smoo
  * Returns null (the caller falls back to the builder path) for packed prims and for closed polygons that are empty or
  * repeat a point on consecutive corners; those degenerate inputs take builder-specific paths.
  */
-function subdivideLevelFast(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): { geo: Geometry; sharp: Map<number, number> } | null {
+function subdivideLevelFast(g: Geometry, smooth: boolean, boundaryMode: 'smooth' | 'sharp', sharp: Map<number, number> | null): SubdivideLevel | null {
   if (g.primKind) return null;
   const np = g.numPoints, nprim = g.numPrims, nv = g.numVertices;
   const vp = g.vertexPoint, ps = g.primStart, closed = g.primClosed, P = g.P;
@@ -774,7 +781,7 @@ function subdivideLevelFast(g: Geometry, smooth: boolean, boundaryMode: 'smooth'
       if (m >= 0 && es[e] > 1) { childSharp.set(edgeKey(pa, m), es[e] - 1); childSharp.set(edgeKey(m, pb), es[e] - 1); }
     }
   out.edgeGroups = edgeGroups;
-  return { geo: out, sharp: childSharp };
+  return { geo: out, sharp: childSharp, vtxPt };
 }
 
 /** The builder's int/string rule: element i takes the value of source element idx[i] (none when idx[i] < 0). */
@@ -798,7 +805,7 @@ function copyDominant(a: Attribute, d: Attribute, idx: ArrayLike<number>) {
  * a weight, using the smaller one; point: both endpoints, smaller weight; prim: every side of the prim).
  * The largest value wins. Returns null when nothing is creased.
  */
-function creaseSharpness(g: Geometry, creases: string, weight: number, attrib: string) {
+export function creaseSharpness(g: Geometry, creases: string, weight: number, attrib: string) {
   const sharp = new Map<number, number>();
   const put = (k: number, s: number) => { if (s > 0 && s > (sharp.get(k) ?? 0)) sharp.set(k, s); };
   if (creases && weight > 0) for (const k of edgeMask(g, creases).keyIterator()) put(k, weight);
