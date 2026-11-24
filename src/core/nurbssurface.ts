@@ -2,7 +2,7 @@
 import earcut from 'earcut';
 import type { GeoBuilder, Geometry, Src } from './geometry.ts';
 import { crossSection } from './manifold.ts';
-import { cross, dot, sub } from './math.ts';
+import { cross, dist, dot, sub } from './math.ts';
 import type { Vec3 } from './math.ts';
 import { DEFAULT_ORDER, KNOTS_ATTRIB, MAXP1, ORDER_ATTRIB, WEIGHT_ATTRIB, dersBasis, findSpan, makeSpline, spanBreaks } from './splines.ts';
 import type { Spline } from './splines.ts';
@@ -14,23 +14,67 @@ export const KNOTS_V = 'knots_v';
 export const CLOSED_V = 'closed_v';
 export const TRIM_UV = 'trim_uv';
 export const TRIM_LOOPS = 'trim_loops';
+export const TRIM_NAMES = 'trim_names';
 export type SurfaceUV = [number, number];
 const meshSources = new WeakMap<GeoBuilder, Geometry>();
 
 /** The positively filled region of the unit square. A missing region keeps the whole square. */
-export function surfaceTrims(g: Geometry, prim: number): SurfaceUV[][] | null {
+export function surfaceTrims(g: Geometry, prim: number, names?: string[]): SurfaceUV[][] | null {
   const uv = g.prims.get(TRIM_UV), counts = g.prims.get(TRIM_LOOPS);
   if (uv?.type !== 'float[]' || counts?.type !== 'int[]') return null;
   const xy = uv.getArray(prim) as number[], sizes = counts.getArray(prim) as number[];
   if (!sizes.length || sizes.some((n) => n < 3) || sizes.reduce((a, b) => a + b, 0) * 2 !== xy.length) return null;
+  if (names) {
+    const attr = g.prims.get(TRIM_NAMES);
+    const stored = attr?.type === 'string[]' ? attr.getArray(prim) as string[] : [];
+    names.length = sizes.length;
+    sizes.forEach((_, i) => { names[i] = stored[i] ?? ''; });
+  }
   let i = 0;
   return sizes.map((n) => Array.from({ length: n }, (): SurfaceUV => [xy[i++], xy[i++]]));
 }
 
-export function setSurfaceTrims(g: Geometry, prim: number, loops: readonly SurfaceUV[][] | null): void {
+export function setSurfaceTrims(g: Geometry, prim: number, loops: readonly SurfaceUV[][] | null, names?: readonly string[]): void {
   if (!loops?.length && !g.prims.has(TRIM_UV) && !g.prims.has(TRIM_LOOPS)) return;
   g.prims.add(TRIM_UV, 'float[]', 1).set(prim, loops?.flat(2) ?? []);
   g.prims.add(TRIM_LOOPS, 'int[]', 1).set(prim, loops?.map((loop) => loop.length) ?? []);
+  if (names || g.prims.has(TRIM_NAMES)) {
+    g.prims.add(TRIM_NAMES, 'string[]', 1).set(prim, loops?.map((_, i) => names?.[i] ?? '') ?? []);
+  }
+}
+
+type TrimEdge = { a: SurfaceUV; b: SurfaceUV };
+
+export const trimEdges = (loop: SurfaceUV[]) => loop.map((a, i): TrimEdge => ({ a, b: loop[(i + 1) % loop.length] }));
+
+/** Name the source that contributes the most length to a trim boundary. */
+export function trimBoundaryName(s: NurbsSurface, edges: TrimEdge[], sources: { loops: SurfaceUV[][]; name: string }[]) {
+  const mix = (a: SurfaceUV, b: SurfaceUV, t: number): SurfaceUV => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  let best = 0, name = '';
+  for (const source of sources) {
+    let length = 0;
+    const segments = source.loops.flatMap(trimEdges);
+    for (const { a, b } of edges) {
+      if (a.some((x, d) => x === b[d] && (x === 0 || x === 1))) continue;
+      const dx = b[0] - a[0], dy = b[1] - a[1], size = Math.hypot(dx, dy);
+      if (!size) continue;
+      const intervals: [number, number][] = [];
+      for (const { a: p, b: q } of segments) {
+        if ([p, q].some(([x, y]) => Math.abs((x - a[0]) * dy - (y - a[1]) * dx) > 4e-8 * size)) continue;
+        const at = ([x, y]: SurfaceUV) => ((x - a[0]) * dx + (y - a[1]) * dy) / (size * size);
+        const pa = at(p), pb = at(q), lo = Math.max(0, Math.min(pa, pb)), hi = Math.min(1, Math.max(pa, pb));
+        if (lo < hi) intervals.push([lo, hi]);
+      }
+      intervals.sort((a, b) => a[0] - b[0]);
+      let end = 0;
+      for (const [lo, hi] of intervals) if (hi > end) {
+        length += dist(surfacePoint(s, mix(a, b, Math.max(lo, end))), surfacePoint(s, mix(a, b, hi)));
+        end = hi;
+      }
+    }
+    if (length > best) { best = length; name = source.name; }
+  }
+  return name;
 }
 
 export interface SurfaceOptions {

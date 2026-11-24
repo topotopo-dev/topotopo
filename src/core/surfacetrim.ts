@@ -3,7 +3,7 @@ import { GeoBuilder, Geometry } from './geometry.ts';
 import { PLANE_FRAMES, crossSection, detectPlane } from './manifold.ts';
 import { add, clamp, cross, dist, dot, lerp3, length, normalize, scale, sub } from './math.ts';
 import type { Vec3 } from './math.ts';
-import { closestSurfacePoint, evalSurface, meshParams, sampleTrimSegment, setSurfaceTrims, surfaceFromPrim, surfacePoint, surfaceTrims } from './nurbssurface.ts';
+import { TRIM_NAMES, closestSurfacePoint, evalSurface, meshParams, sampleTrimSegment, setSurfaceTrims, surfaceFromPrim, surfacePoint, surfaceTrims, trimBoundaryName, trimEdges } from './nurbssurface.ts';
 import type { NurbsSurface, SurfaceUV } from './nurbssurface.ts';
 import { evalPoint, fitSpline, makeSpline, polylineParams, setSplinePrim, splineFromPrim } from './splines.ts';
 import type { FitResult } from './splines.ts';
@@ -150,18 +150,136 @@ function axisProjector(s: NurbsSurface, outline: Outline, side: TrimOptions['hit
   };
 }
 
-function chain(s: NurbsSurface, before: Hit[], after: Hit[]): Hit[] {
-  if (before.length === 1) return [{ ...after[0], uv: unwrapUV(s, before[0].uv, after[0].uv) }];
+function matchHits(s: NurbsSurface, before: Hit[], after: Hit[]) {
   const pairs = before.flatMap((a, i) => after.map((b, j) => {
     const uv = unwrapUV(s, a.uv, b.uv);
     return { i, j, uv, distance: distUV(a.uv, uv) };
   })).sort((a, b) => a.distance - b.distance);
-  const ordered: Hit[] = [], used = new Set<number>();
-  for (const { i, j, uv } of pairs) if (!ordered[i] && !used.has(j)) {
-    ordered[i] = { uv, P: after[j].P };
-    used.add(j);
+  const ordered: typeof pairs = [], used = new Set<number>();
+  for (const pair of pairs) if (!ordered[pair.i] && !used.has(pair.j)) {
+    ordered[pair.i] = pair;
+    used.add(pair.j);
   }
   return ordered;
+}
+
+function chain(s: NurbsSurface, before: Hit[], after: Hit[]): Hit[] {
+  if (before.length === 1) return [{ ...after[0], uv: unwrapUV(s, before[0].uv, after[0].uv) }];
+  return matchHits(s, before, after).map(({ j, uv }) => ({ uv, P: after[j].P }));
+}
+
+type ProjectionSample = { t: number; q: Vec3; hits: Hit[] };
+
+function openEdge(s: NurbsSurface, uv: SurfaceUV, epsilon = UV_EPS) {
+  return DOMAIN.findIndex((a, i) => {
+    const d = (i + 1) % 2;
+    return !(d ? s.v : s.u).closed && Math.abs(uv[d] - a[d]) <= epsilon;
+  });
+}
+
+function orientLoop(loop: SurfaceUV[], label: string, epsilon: number) {
+  const clean = loop.filter((p, k) => distUV(p, loop[(k + 1) % loop.length]) > epsilon);
+  const area = area2(clean);
+  if (clean.length < 3 || Math.abs(area) < 1e-16) throw new Error(`${label} encloses no area. Move the outline.`);
+  return area > 0 ? clean : clean.reverse();
+}
+
+/** Follow partial hit tracks and close them just outside the edges they crossed. */
+function offEdgeLoops(s: NurbsSurface, o: TrimOptions, outline: Outline, label: string, initial: ProjectionSample[],
+  sample: (t: number) => ProjectionSample, hitError: (q: Vec3) => Error): SurfaceUV[][] {
+  type End = { hit: Hit; t: number; edge: number };
+  const entries: End[] = [], exits: End[] = [];
+  const next = new Map<Hit, { hit: Hit; bridge?: SurfaceUV[] }>();
+  const snap = (hit: Hit, edge: number) => { hit.uv[(edge + 1) % 2] = DOMAIN[edge][(edge + 1) % 2]; };
+  const record = (hit: Hit, a: ProjectionSample, miss: ProjectionSample, ends: End[]) => {
+    const edge = openEdge(s, hit.uv, 1e-6);
+    if (edge < 0) throw hitError(miss.q);
+    snap(hit, edge);
+    ends.push({ hit, t: a.t % 1, edge });
+  };
+  const trace = (a: ProjectionSample, b: ProjectionSample, depth: number) => {
+    const pairs = matchHits(s, a.hits, b.hits);
+    const changes = pairs.filter(Boolean).length !== Math.max(a.hits.length, b.hits.length);
+    if (changes && depth >= 25) {
+      const matched = new Set(pairs.map((p) => p.j));
+      a.hits.forEach((h, i) => { if (!pairs[i]) record(h, a, b, exits); });
+      b.hits.forEach((h, j) => { if (!matched.has(j)) record(h, b, a, entries); });
+    } else {
+      const mid = sample((a.t + b.t) / 2);
+      const predicted = pairs.map(({ i, j, uv }) => ({ uv: mixUV(a.hits[i].uv, uv, 0.5), P: lerp3(a.hits[i].P, b.hits[j].P, 0.5) }));
+      const different = mid.hits.length !== a.hits.length;
+      const bent = !changes && !different && predicted.length && chain(s, predicted, mid.hits).some((h, i) =>
+        dist(h.P, predicted[i].P) > o.tolerance / 4 || dist(h.P, surfacePoint(s, predicted[i].uv)) > o.tolerance / 4);
+      if (changes || different || bent) {
+        if (depth >= 25) throw hitError(mid.q);
+        trace(a, mid, depth + 1); trace(mid, b, depth + 1);
+        return;
+      }
+    }
+    for (const { i, j } of pairs.filter(Boolean)) next.set(a.hits[i], { hit: b.hits[j] });
+  };
+  for (let i = 1; i < initial.length; i++) trace(initial[i - 1], initial[i], 0);
+
+  const bridge = (a: End, b: End): SurfaceUV[] => {
+    const outside = (p: SurfaceUV, edge: number): SurfaceUV => {
+      const uv: SurfaceUV = [...p], d = (edge + 1) % 2;
+      uv[d] += uv[d] === 0 ? -0.01 : 0.01;
+      return uv;
+    };
+    const start = outside(a.hit.uv, a.edge), stop = outside(unwrapUV(s, a.hit.uv, b.hit.uv), b.edge);
+    if (a.edge === b.edge) return [start, stop];
+    const corners = (from: number, to: number, step: number) => {
+      const uv: SurfaceUV[] = [];
+      for (let edge = from; edge !== to;) {
+        const next = (edge + step + 4) % 4, corner = DOMAIN[step > 0 ? next : edge];
+        if (next !== to && ((next % 2 ? s.u : s.v).closed)) return null;
+        uv.push(outside(outside(corner, edge), next));
+        edge = next;
+      }
+      return uv;
+    };
+    const routes = [corners(a.edge, b.edge, 1), corners(a.edge, b.edge, -1)].filter((route) => route !== null);
+    if (!routes.length) throw new Error(`${label} leaves through an open edge and returns through the opposite edge of a periodic surface. Split the outline into separate cuts.`);
+    // Choose the outside route nearest the missing stretch in the projection plane.
+    const mid = outline.at((a.t + ((b.t - a.t + 1) % 1) / 2) % 1);
+    const cost = (route: SurfaceUV[]) => route.reduce((sum, uv) => {
+      const delta = sub(surfacePoint(s, uv.map((x) => clamp(x, 0, 1)) as SurfaceUV), mid);
+      return sum + length(sub(delta, scale(outline.direction, dot(delta, outline.direction))));
+    }, 0) / route.length;
+    routes.sort((a, b) => cost(a) - cost(b));
+    return [start, ...routes[0], stop];
+  };
+  const gaps = exits.flatMap((a) => entries.map((b) => ({ a, b, time: (b.t - a.t + 1) % 1,
+    distance: distUV(a.hit.uv, unwrapUV(s, a.hit.uv, b.hit.uv)) })));
+  gaps.sort((a, b) => a.time - b.time || a.distance - b.distance);
+  const used = new Set<End>();
+  for (const { a, b } of gaps) {
+    if (next.has(a.hit) || used.has(b)) continue;
+    next.set(a.hit, { hit: b.hit, bridge: bridge(a, b) });
+    used.add(b);
+  }
+  const loops: SurfaceUV[][] = [], seen = new Set<Hit>();
+  for (const first of next.keys()) {
+    if (seen.has(first)) continue;
+    const loop = [first.uv];
+    let hit = first;
+    do {
+      const link = next.get(hit);
+      if (!link || seen.has(hit)) throw new Error(`${label} leaves through an open edge without closing a cut. Move or split the outline.`);
+      seen.add(hit);
+      const previous = loop[loop.length - 1];
+      if (link.bridge) {
+        // Move the whole exterior route into the current periodic copy.
+        const du = previous[0] - hit.uv[0], dv = previous[1] - hit.uv[1];
+        loop.push(...link.bridge.map(([u, v]): SurfaceUV => [u + du, v + dv]));
+      }
+      hit = link.hit;
+      loop.push(unwrapUV(s, loop[loop.length - 1], hit.uv));
+    } while (hit !== first);
+    if (distUV(loop.pop()!, first.uv) > UV_EPS) throw new Error(`${label} leaves through an open edge without closing a cut. Move or split the outline.`);
+    loops.push(orientLoop(loop, label, UV_EPS));
+  }
+  return loops;
 }
 
 function projectOutline(s: NurbsSurface, prim: number, o: TrimOptions, outline: Outline): SurfaceUV[][] {
@@ -169,36 +287,46 @@ function projectOutline(s: NurbsSurface, prim: number, o: TrimOptions, outline: 
     const { u, v, P } = closestSurfacePoint(s, q);
     return [{ uv: [u, v], P }];
   };
-  const sample = (t: number) => {
+  const cache = new Map<number, ProjectionSample>();
+  const sample = (t: number): ProjectionSample => {
+    const known = cache.get(t);
+    if (known) return known;
+    if (t === 1) return { ...sample(0), t };
     const q = outline.at(t);
-    return { t, q, hits: project(q) };
+    const result = { t, q, hits: project(q) };
+    cache.set(t, result);
+    return result;
   };
-  const initial = outline.breaks.slice(1).flatMap((b, i) => {
+  // Only axis projection needs the extra hit-count checks. Closest always returns one hit.
+  const initial = o.project === 'closest' ? [] : outline.breaks.slice(1).flatMap((b, i) => {
     const a = outline.breaks[i];
     return [a, a + (b - a) / 4, (a + b) / 2, b - (b - a) / 4].map(sample);
   });
-  const count = initial.find((a) => a.hits.length)?.hits.length ?? 0;
+  const count = o.project === 'closest' ? 1 : initial.find((a) => a.hits.length)?.hits.length ?? 0;
   const label = `Outline prim ${outline.prim}`;
+  const projection = `${label} on surface prim ${prim}`;
   if (!count) throw new Error(`${label} misses surface prim ${prim}. Move the outline or use project: closest.`);
-  const verify = ({ q, hits }: ReturnType<typeof sample>) => {
-    if (hits.length !== count) throw new Error(`${label} changes its number of hits on surface prim ${prim} at [${q.map((x) => +x.toPrecision(8)).join(', ')}] m. Move the outline or use project: closest.`);
-  };
-  initial.forEach(verify);
-  const loops = initial[0].hits.map((): SurfaceUV[] => []);
+  const hitError = (q: Vec3) => new Error(`${label} changes its number of hits on surface prim ${prim} at [${q.map((x) => +x.toPrecision(8)).join(', ')}] m. Move the outline or use project: closest.`);
+  const offEdge = () => offEdgeLoops(s, o, outline, projection, [...cache.values(), sample(1)].sort((a, b) => a.t - b.t), sample, hitError);
+  if (initial.some((a) => a.hits.length !== count)) return offEdge();
+  const countChange = Symbol();
+  let a = sample(0);
+  const loops = a.hits.map((): SurfaceUV[] => []);
   const follow = (a: ReturnType<typeof sample>, b: ReturnType<typeof sample>, depth: number): Hit[] => {
     const end = chain(s, a.hits, b.hits);
     let middle: ReturnType<typeof sample> | undefined;
     let good = true;
     for (const f of [0.5, 0.25, 0.75]) {
       const c = sample(a.t + (b.t - a.t) * f);
-      verify(c);
+      if (c.hits.length !== count) throw countChange;
       if (f === 0.5) middle = c;
       const predicted = a.hits.map((h, i) => ({ uv: mixUV(h.uv, end[i].uv, f), P: lerp3(h.P, end[i].P, f) }));
       const actual = chain(s, predicted, c.hits);
       if (actual.some((h, i) => dist(h.P, predicted[i].P) > o.tolerance / 4 ||
           dist(h.P, surfacePoint(s, predicted[i].uv)) > o.tolerance / 4)) { good = false; break; }
     }
-    if (good) {
+    const edge = o.project === 'closest' && depth >= 16 ? openEdge(s, a.hits[0].uv) : -1;
+    if (good || (edge >= 0 && edge === openEdge(s, end[0].uv))) {
       a.hits.forEach((h, i) => loops[i].push(h.uv));
       return end;
     }
@@ -206,10 +334,14 @@ function projectOutline(s: NurbsSurface, prim: number, o: TrimOptions, outline: 
     return follow({ ...middle!, hits: follow(a, middle!, depth + 1) }, b, depth + 1);
   };
   // Use the initial steps to check hit counts even on straight spans. Refine the sampled path from its knots.
-  let a = initial[0];
-  for (let i = 4; i <= initial.length; i += 4) {
-    const b = i < initial.length ? initial[i] : { ...initial[0], t: 1 };
-    a = { ...b, hits: follow(a, b, 0) };
+  try {
+    for (const t of outline.breaks.slice(1)) {
+      const b = sample(t);
+      a = { ...b, hits: follow(a, b, 0) };
+    }
+  } catch (error) {
+    if (error === countChange) return offEdge();
+    throw error;
   }
   return loops.map((loop, i) => {
     if (distUV(a.hits[i].uv, loop[0]) > UV_EPS) throw new Error(`${label} does not close a region on surface prim ${prim}. Move the outline or use project: closest.`);
@@ -234,14 +366,15 @@ function periodicCopies(s: NurbsSurface, loop: SurfaceUV[]): SurfaceUV[][] {
 
 type BoundaryEdge = { a: SurfaceUV; b: SurfaceUV };
 type Brush = { loops: SurfaceUV[][]; name: string };
+type TrimRegion = { loops: SurfaceUV[][]; names?: string[] };
 
 /** Join the region boundary across periodic seams, canceling the shared seam segments. */
-function cutBoundaries(s: NurbsSurface, region: SurfaceUV[][], brushes: Brush[]) {
+function cutBoundaries(s: NurbsSurface, region: SurfaceUV[][], brushes: Brush[], sources: Brush[], names: boolean) {
   const key = (p: SurfaceUV) => clampUV(s, p).map((x) => Math.round(x / UV_EPS)).join(',');
   const outgoing = new Map<string, BoundaryEdge[]>();
   const seam = (a: SurfaceUV, b: SurfaceUV) => s.u.closed && a[0] === b[0] && (a[0] === 0 || a[0] === 1) ? 0
     : s.v.closed && a[1] === b[1] && (a[1] === 0 || a[1] === 1) ? 1 : -1;
-  const segments = region.flatMap((loop) => loop.map((a, i) => ({ a, b: loop[(i + 1) % loop.length] })));
+  const segments = region.flatMap(trimEdges);
   const ends = [0, 1].map((d) => [...new Set(segments.flatMap(({ a, b }) => seam(a, b) === d ? [a[1 - d], b[1 - d]] : []))].sort((a, b) => a - b));
   const seamEdges = new Map<string, BoundaryEdge>();
   const append = (e: BoundaryEdge) => {
@@ -270,14 +403,16 @@ function cutBoundaries(s: NurbsSurface, region: SurfaceUV[][], brushes: Brush[])
   for (const edges of outgoing.values()) while (edges.length) {
     let edge = edges.pop()!;
     const first = key(edge.a), uv = [edge.a];
-    let owner = brushes.length;
+    let owner = false;
+    const path: BoundaryEdge[] = [];
     for (;;) {
       const { a, b } = edge, last = uv[uv.length - 1];
+      path.push(edge);
       uv.push([last[0] + b[0] - a[0], last[1] + b[1] - a[1]]);
       const mid = mixUV(a, b, 0.5);
-      for (let i = 0; i < owner; i++) if (brushes[i].loops.some((loop) => onLoop(mid, loop))) { owner = i; break; }
+      owner ||= brushes.some((brush) => brush.loops.some((loop) => onLoop(mid, loop)));
       const next = key(b);
-      if (next === first) { if (owner < brushes.length) out.push({ uv, name: brushes[owner].name }); break; }
+      if (next === first) { if (owner) out.push({ uv, name: names ? trimBoundaryName(s, path, sources) : '' }); break; }
       const linked = outgoing.get(next)?.pop();
       if (!linked) break;
       edge = linked;
@@ -306,12 +441,14 @@ export function trimSurfaces(src: Geometry, profiles: Geometry, o: TrimOptions) 
   const outlines = selection.length ? Array.from({ length: profiles.numPrims }, (_, p) => p)
     .filter((p) => !o.outlines || o.outlines[p]).map((p) => readOutline(profiles, p, o)) : [];
   if (!outlines.length) return { geo: src, loops: 0, surfaces: 0, edges: 0 };
-  const cuts = new Map<number, { outside: SurfaceUV[][]; inside: SurfaceUV[][]; edges: { fit: FitResult; name: string }[] }>();
+  const cuts = new Map<number, { outside?: TrimRegion; inside?: TrimRegion; edges: { fit: FitResult; name: string }[] }>();
+  const named = profiles.prims.get('name')?.type === 'string' || src.prims.has(TRIM_NAMES);
   let loops = 0;
   for (const prim of selection) {
     const s = surfaceFromPrim(src, prim);
     if (!s) throw new Error(`Surface prim ${prim} has an invalid NURBS control grid. Check its control points and surface_cols.`);
-    const original = crossSection(surfaceTrims(src, prim) ?? [DOMAIN], 'Positive');
+    const previousNames: string[] = [], previous = surfaceTrims(src, prim, previousNames);
+    const original = crossSection(previous ?? [DOMAIN], 'Positive');
     const brushes: Brush[] = [];
     try {
       for (const outline of outlines) {
@@ -321,6 +458,8 @@ export function trimSurfaces(src: Geometry, profiles: Geometry, o: TrimOptions) 
       }
       const brush = crossSection(brushes.flatMap((b) => b.loops), 'Positive');
       try {
+        const sources = [...brushes, ...previous?.map((loop, i) => ({ name: previousNames[i], loops: [loop] })) ?? []];
+        const region = (loops: SurfaceUV[][]): TrimRegion => ({ loops, names: named ? loops.map((loop) => trimBoundaryName(s, trimEdges(loop), sources)) : undefined });
         const outside = o.keep === 'inside' ? null : original.subtract(brush);
         const inside = o.keep === 'outside' ? null : original.intersect(brush);
         try {
@@ -329,8 +468,9 @@ export function trimSurfaces(src: Geometry, profiles: Geometry, o: TrimOptions) 
             throw new Error(`Surface prim ${prim} and outline prim ${outline.prim} leave no area. Move the outline or change keep.`);
           }
           const boundary = ((outside ?? inside).toPolygons()) as SurfaceUV[][];
-          const edges = o.edges ? cutBoundaries(s, boundary, brushes).map(({ uv, name }) => ({ name, fit: edgeSpline(s, uv, o.tolerance) })) : [];
-          cuts.set(prim, { outside: outside ? boundary : [], inside: inside ? inside.toPolygons() as SurfaceUV[][] : [], edges });
+          const edges = o.edges ? cutBoundaries(s, boundary, brushes, sources, named).map(({ uv, name }) => ({ name, fit: edgeSpline(s, uv, o.tolerance) })) : [];
+          cuts.set(prim, { outside: outside ? region(boundary) : undefined,
+            inside: inside ? region((outside ? inside.toPolygons() : boundary) as SurfaceUV[][]) : undefined, edges });
         } finally { outside?.delete(); inside?.delete(); }
       } finally { brush.delete(); }
     } finally { original.delete(); }
@@ -338,12 +478,15 @@ export function trimSurfaces(src: Geometry, profiles: Geometry, o: TrimOptions) 
 
   if (o.keep !== 'both' && !o.edges) {
     const geo = src.clone();
-    for (const [p, cut] of cuts) setSurfaceTrims(geo, p, cut.outside.length ? cut.outside : cut.inside);
+    for (const [p, cut] of cuts) {
+      const { loops, names } = (cut.outside ?? cut.inside)!;
+      setSurfaceTrims(geo, p, loops, names);
+    }
     return { geo, loops, surfaces: cuts.size, edges: 0 };
   }
   const b = new GeoBuilder(src);
   for (let i = 0; i < src.numPoints; i++) b.copyPoint(i);
-  const kinds: [number, number][] = [], regions: [number, SurfaceUV[][]][] = [];
+  const kinds: [number, number][] = [], regions: [number, TrimRegion][] = [];
   const edges: { prim: number; fit: FitResult }[] = [];
   const append = (p: number, copyCVs = false) => {
     const vs = Array.from({ length: src.primSize(p) }, (_, k) => src.primStart[p] + k);
@@ -371,19 +514,19 @@ export function trimSurfaces(src: Geometry, profiles: Geometry, o: TrimOptions) 
     }
     for (const [p, cut] of cuts) {
       const inside = append(p, true);
-      regions.push([inside, cut.inside]);
+      regions.push([inside, cut.inside!]);
       b.group('prim', 'trim_outside').add(p);
       b.group('prim', 'trim_inside').add(inside);
     }
   }
   for (const [p, cut] of cuts) {
-    regions.push([p, cut.outside.length ? cut.outside : cut.inside]);
+    regions.push([p, (cut.outside ?? cut.inside)!]);
     // For both regions the outside prim owns the shared cut curve.
     for (const { fit, name } of cut.edges) {
       const pts = Array.from({ length: fit.P.length / 3 }, (_, i) => b.addPoint(fit.P[3 * i], fit.P[3 * i + 1], fit.P[3 * i + 2]));
       const prim = b.addPrim(pts, true);
       b.group('prim', 'edges').add(prim);
-      b.attrib('prim', 'name', 1, 'string').set(prim, name || `edge_${edges.length}`);
+      b.attrib('prim', 'name', 1, 'string').set(prim, named ? name : `edge_${edges.length}`);
       b.attrib('prim', 'edge_surface', 1, 'int').set(prim, p);
       edges.push({ prim, fit });
     }
@@ -392,7 +535,7 @@ export function trimSurfaces(src: Geometry, profiles: Geometry, o: TrimOptions) 
   const geo = b.build();
   geo.ensurePacked();
   for (const [p, kind] of kinds) geo.primKind![p] = kind;
-  for (const [p, region] of regions) setSurfaceTrims(geo, p, region);
+  for (const [p, { loops, names }] of regions) setSurfaceTrims(geo, p, loops, names);
   for (const { prim, fit } of edges) setSplinePrim(geo, prim, 'nurbs', fit.order, fit.knots);
   return { geo, loops, surfaces: cuts.size, edges: edges.length };
 }
