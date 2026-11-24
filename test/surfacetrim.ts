@@ -171,6 +171,52 @@ await check('front hit cuts one flank', async () => {
   assert.equal(b.loops, 3);
   assert.ok(b.edges.every(([i]) => { const [x, , z] = point(g, i); return z < 1e-7 || z > 4 - 1e-7 || x > 0; }));
 });
+for (const project of ['axis', 'closest']) await check(`${project} projection opens a cut at the edge of a loft`, async () => {
+  const loft = await engine.cook({ nodes: {
+    profile: { type: 'curve', params: { points: [[0, 0, -1], [0, 0, 1]] } },
+    surface: { type: 'loft', in: ['profile'], params: { output: 'surface', sections: [{}, { offset: [0, 1, 0] }] } },
+  }, output: 'surface' });
+  assert.ok(loft.ok && loft.geo, JSON.stringify(loft.errors));
+  const shape = outline([[-1, -0.3, -0.6], [-1, 0.15, -0.6], [-1, 0.42, -0.45], [-1, 0.57, 0],
+    [-1, 0.42, 0.45], [-1, 0.15, 0.6], [-1, -0.3, 0.6]], true, 'opening');
+  const both = await trim(shape, { project, direction: [1, 0, 0], hits: 'front', keep: 'both' }, loft.geo);
+  const outside = new GeoBuilder(both), inside = new GeoBuilder(both);
+  surface.appendSurfaceMesh(outside, both, 0, surface.surfaceFromPrim(both, 0)!, { tolerance });
+  surface.appendSurfaceMesh(inside, both, 1, surface.surfaceFromPrim(both, 1)!, { tolerance });
+  const kept = outside.build(), removed = inside.build(), expected = 2 - 0.531;
+  assert.ok(Math.abs(area(kept) / expected - 1) <= 0.005, `${area(kept)} vs ${expected}`);
+  const edgeLength = (g: Geometry) => boundaries(g).edges.reduce((total, [a, b]) => {
+    const p = point(g, a), q = point(g, b);
+    if (Math.abs(p[1]) > 1e-7 || Math.abs(q[1]) > 1e-7) return total;
+    return total + Math.abs(p[2] - q[2]);
+  }, 0);
+  assert.equal(boundaries(kept).loops, 1);
+  assert.ok(Math.abs(edgeLength(removed) - 1.2) < tolerance);
+  assert.ok(Math.abs(edgeLength(kept) - 0.8) < tolerance);
+  console.log(`  kept ${area(kept).toFixed(6)} m², expected ${expected} m², cut edge span ${edgeLength(removed).toFixed(6)} m`);
+});
+await check('an interior silhouette still rejects changing axis hits', async () => {
+  const grazing = rect(0.5, 1.2, 1, 2);
+  const r = await run('trim_surface', [body, grazing], { direction: [1, 0, 0], hits: 'front' });
+  assert.ok(!r.ok);
+  assert.match(r.errors[0].message, /Outline prim 0 changes its number of hits on surface prim 0 at \[[^\]]+\] m\. Move the outline or use project: closest\./);
+});
+await check('trim names follow loops and the longest contributor owns a merged cut', async () => {
+  const small = rect(0.22, 0.37, 1.33, 1.58, 0, 'small');
+  const far = rect(0.2, 0.6, 2.2, 2.8, 0, 'separate');
+  const result = await trim(Geometry.merge([small, window, far]), { hits: 'front', edges: true });
+  const names: string[] = [];
+  const loops = surface.surfaceTrims(result, 0, names)!;
+  assert.equal(result.prims.get('trim_names')?.type, 'string[]');
+  assert.equal(names.length, loops.length);
+  assert.equal(names[loops.findIndex((loop) => loop.every(([u, v]) => (u === 0 || u === 1) && (v === 0 || v === 1)))], '');
+  assert.deepEqual([...names].sort(), ['', 'separate', 'window']);
+  const edgeNames = Array.from(result.primGroups.get('edges')!).flatMap((inGroup, p) => inGroup ? [result.prims.get('name')!.get(p)] : []);
+  assert.deepEqual(edgeNames.sort(), ['separate', 'window']);
+  const later = await trim(far, { hits: 'front' }, await trim(window, { hits: 'front' }));
+  surface.surfaceTrims(later, 0, names);
+  assert.deepEqual(names.sort(), ['', 'separate', 'window']);
+});
 await check('inside and both keep complementary patches', async () => {
   const g = await trim(window, { keep: 'inside' });
   assert.equal(boundaries(mesh(g)).loops, 2);

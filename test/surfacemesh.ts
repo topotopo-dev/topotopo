@@ -342,6 +342,79 @@ await check('Overlapping bands name both loops and the gap', async () => {
   assert.match(message, /narrower.*further apart/i);
 });
 
+const closeOpenings = () => trim([rect(0.2, 0.6, 0.65, 1.45), rect(0.2, 0.6, 1.47, 2.27)], body, 'front');
+
+await check('Two openings 0.02 m apart share a grid boundary', async () => {
+  const { g, stats } = await mesh(await closeOpenings());
+  holes(g, 2);
+  console.log(`  quad share ${stats.quad_share}, ${quality(stats)}`);
+  assert.ok(stats.quad_share >= 0.95);
+  assert.equal(stats.thin_faces, 0);
+  assert.ok(stats.transition_faces > stats.triangles);
+});
+
+await check('Separate bands on openings that share a grid boundary', async () => {
+  const { g, stats } = await mesh(await closeOpenings(), { bands: [{ width: 0.005, group: 'lip' }] });
+  holes(g, 2);
+  const rings = boundary(g, 'lip');
+  assert.equal(rings.length, 4);
+  const before = rings.filter((ring) => ring.every((p) => point(g, p)[2] < 1.46));
+  const after = rings.filter((ring) => ring.every((p) => point(g, p)[2] > 1.46));
+  assert.equal(before.length, 2);
+  assert.equal(after.length, 2);
+  console.log(`  ${rings.length} separate band rings, quad share ${stats.quad_share}, ${quality(stats)}`);
+});
+
+function namedOpening(name: string, z0: number, z1: number) {
+  const opening = rect(0.2, 0.6, z0, z1);
+  opening.prims.add('name', 'string', 1).set(0, name);
+  return opening;
+}
+
+await check('Band patterns choose each opening’s groups and widths', async () => {
+  const source = await trim([namedOpening('glass', 0.65, 1.45), namedOpening('vent', 2.15, 2.95)], body, 'front');
+  const { g } = await mesh(source, { bands: {
+    'gl*ss': [{ width: 0.01, group: 'seal' }, { width: 0.02, group: 'frame' }],
+    glass: [{ width: 0.03, group: 'later' }],
+    vent: [{ width: 0.015, group: 'lip' }],
+  } });
+  const [glass, vent] = holes(g, 2).sort((a, b) => point(g, a[0])[2] - point(g, b[0])[2]);
+  const groupPoints = (name: string) => new Set(boundary(g, name).flat());
+  const seal = groupPoints('seal'), frame = groupPoints('frame'), lip = groupPoints('lip');
+  assert.ok(glass.every((p) => seal.has(p) && !frame.has(p) && !lip.has(p)));
+  assert.ok(vent.every((p) => lip.has(p) && !seal.has(p) && !frame.has(p)));
+  assert.ok([...seal, ...frame].every((p) => point(g, p)[2] < 1.8));
+  assert.ok([...lip].every((p) => point(g, p)[2] > 1.8));
+  assert.ok(!g.primGroups.get('later')?.includes(1));
+  const chords = trimChords(source);
+  for (const [outer, inner, z, width] of [[seal, new Set(glass), 1.05, 0.01], [frame, seal, 1.05, 0.03],
+    [lip, new Set(vent), 2.55, 0.015]] as const) {
+    const straight = [...outer].filter((p) => !inner.has(p) && Math.abs(point(g, p)[2] - z) < 0.2);
+    assert.ok(straight.length > 2);
+    for (const id of straight) {
+      const p = point(g, id);
+      const d = Math.min(...chords.map(([a, b]) => segmentDistance(p, a, b)));
+      assert.ok(Math.abs(d - width) < 0.0006, `${d} m instead of ${width} m`);
+    }
+  }
+});
+
+await check('Band patterns can share a group and leave another opening bare', async () => {
+  const source = await trim([namedOpening('glass', 0.4, 1.05), namedOpening('vent', 1.65, 2.3),
+    namedOpening('bare', 2.9, 3.55)], body, 'front');
+  const { g } = await mesh(source, { bands: {
+    'g*': [{ width: 0.01, group: 'edge' }],
+    'v*': [{ width: 0.015, group: 'edge' }],
+  } });
+  const cuts = holes(g, 3).sort((a, b) => point(g, a[0])[2] - point(g, b[0])[2]);
+  const rings = boundary(g, 'edge');
+  assert.equal(rings.length, 4);
+  const edge = new Set(rings.flat());
+  assert.ok(cuts[0].every((p) => edge.has(p)));
+  assert.ok(cuts[1].every((p) => edge.has(p)));
+  assert.ok(cuts[2].every((p) => !edge.has(p)));
+});
+
 await check('Polygon box passes through', async () => {
   const boxResult = await engine.cook({ nodes: { box: { type: 'box' } }, output: 'box' });
   assert.ok(boxResult.geo);

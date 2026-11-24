@@ -1,19 +1,20 @@
 import { GeoBuilder } from './geometry.ts';
 import type { Geometry, Src } from './geometry.ts';
-import { crossSection } from './manifold.ts';
+import { M, crossSection } from './manifold.ts';
 import { cross, dot, normalize, sub } from './math.ts';
 import type { Vec3 } from './math.ts';
-import { CLOSED_V, KNOTS_V, ORDER_V, SURFACE_COLS, TRIM_LOOPS, TRIM_UV, evaluate, normal, sampleTrimSegment, surfaceFromPrim, surfacePoint, surfaceTrims } from './nurbssurface.ts';
+import { CLOSED_V, KNOTS_V, ORDER_V, SURFACE_COLS, TRIM_LOOPS, TRIM_NAMES, TRIM_UV, evaluate, normal, sampleTrimSegment, surfaceFromPrim, surfacePoint, surfaceTrims, trimBoundaryName, trimEdges } from './nurbssurface.ts';
 import type { NurbsSurface, SurfaceUV } from './nurbssurface.ts';
 import { KNOTS_ATTRIB, ORDER_ATTRIB, spanBreaks } from './splines.ts';
 
 type UV = SurfaceUV;
 type Band = { width: number; depth: number; rows: number; group: string };
+type BandRules = { forName: (name: string) => Band[]; groups: string[] };
 type Path<T> = { points: T[]; closed: boolean }; // A closed path repeats its first point, possibly across a period.
 type Vertex = { uv: UV; depth: number; corner?: boolean; point?: Sample; grid?: number };
 type Sample = { id: number; P: Vec3; src: Src; faceNormal?: Vec3 };
 type Station = { uv: UV; direction: UV; scale: number; corner: boolean };
-type Loop = { trim: Path<UV>; rings: Path<Vertex>[]; outer: Path<Vertex> };
+type Loop = { trim: Path<UV>; rings: Path<Vertex>[]; outer: Path<Vertex>; bands: Band[] };
 type Options = { size: number; counts: readonly [number, number]; tolerance: number; bands: unknown };
 const DOMAIN: UV[] = [[0, 0], [1, 0], [1, 1], [0, 1]];
 const EPS = 1e-10;
@@ -49,8 +50,8 @@ function faceCosine(points: readonly Vec3[], uv?: readonly UV[]) {
 }
 const THIN = Math.cos(Math.PI / 12);
 
-function readBands(value: unknown): Band[] {
-  if (!Array.isArray(value)) throw new Error('Bands must be a list. Use [] for no bands.');
+function readBandList(value: unknown): Band[] {
+  if (!Array.isArray(value)) throw new Error('Each band pattern needs a list. Use [] for no bands.');
   return value.map((item, i) => {
     const { width, depth = 0, rows = 1, group = `band${i}` } = item ?? {};
     if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(depth) || !Number.isInteger(rows) || rows < 1 || rows > 1024 ||
@@ -59,6 +60,20 @@ function readBands(value: unknown): Band[] {
     }
     return { width, depth, rows, group };
   });
+}
+
+function readBands(value: unknown): BandRules {
+  if (Array.isArray(value)) {
+    const bands = readBandList(value);
+    return { forName: () => bands, groups: bands.map((band) => band.group) };
+  }
+  if (!value || typeof value !== 'object') throw new Error('Bands must be a list or an object mapping name patterns to lists. Use [] for no bands.');
+  const rules = Object.entries(value).map(([key, list]) => ({
+    pattern: new RegExp(`^${key.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 's'),
+    bands: readBandList(list),
+  }));
+  return { forName: (name) => rules.find(({ pattern }) => pattern.test(name))?.bands ?? [],
+    groups: [...new Set(rules.flatMap(({ bands }) => bands.map((band) => band.group)))] };
 }
 
 function upperBound(xs: ArrayLike<number>, x: number) {
@@ -153,7 +168,7 @@ function refineGrid(s: NurbsSurface, u: number[], v: number[], tolerance: number
   throw new RangeError('Cannot refine the grid within tolerance. Use a larger tolerance.');
 }
 
-type Edge = { a: UV; b: UV };
+type Edge = { a: UV; b: UV; name?: string };
 
 function key(s: NurbsSurface, p: UV) {
   const unit = Math.round(1 / EPS);
@@ -168,28 +183,37 @@ function paths(s: NurbsSurface, edges: Edge[]): Path<UV>[] {
     const k = key(s, e.a), list = next.get(k) ?? [];
     list.push(e); next.set(k, list); incoming.add(key(s, e.b));
   }
-  const out: Path<UV>[] = [];
+  const out: (Path<UV> & { name?: string })[] = [];
   // Start open chains at the natural edge, then walk the remaining closed boundaries.
   for (const start of [...[...next.keys()].filter((k) => !incoming.has(k)), ...next.keys()]) {
     const list = next.get(start)!;
     while (list.length) {
       let e: Edge | undefined = list.pop()!;
       const points = [e.a];
+      const lengths = new Map<string, number>();
       let closed = false;
       while (e) {
+        if (e.name !== undefined) lengths.set(e.name, (lengths.get(e.name) ?? 0) + dist(surfacePoint(s, e.a), surfacePoint(s, e.b)));
         points.push(shift(points[points.length - 1], delta(e.b, e.a)));
         const to = key(s, e.b);
         if (to === start) { closed = true; break; }
         e = next.get(to)?.pop();
       }
-      out.push({ points, closed });
+      const name = [...lengths].sort((a, b) => b[1] - a[1])[0]?.[0];
+      out.push({ points, closed, name });
     }
   }
   return out;
 }
 
-function trimPaths(s: NurbsSurface, region: UV[][]) {
-  const edges = region.flatMap((loop) => loop.map((a, i) => ({ a, b: loop[(i + 1) % loop.length] })));
+function trimPaths(s: NurbsSurface, region: UV[][], stored: UV[][], names: string[]) {
+  const sources = names.map((name, i) => ({ name, loops: [stored[i]] }));
+  const edges = region.flatMap((loop): Edge[] => {
+    const edges = trimEdges(loop);
+    if (!names.some(Boolean)) return edges;
+    const name = trimBoundaryName(s, edges, sources);
+    return edges.map((edge) => ({ ...edge, name }));
+  });
   const domainAxis = ({ a, b }: Edge) => [0, 1].find((d) => a[d] === b[d] && (a[d] === 0 || a[d] === 1));
   const periodic = [s.u.closed, s.v.closed];
   const seamEnds = periodic.map((closed, d) => !closed ? [] : [...new Set(edges.filter((e) => domainAxis(e) === d)
@@ -347,12 +371,13 @@ function mergeCorners(path: Path<Vertex>) {
   }
 }
 
-function makeLoops(s: NurbsSurface, trims: Path<UV>[], o: Options, bands: Band[]) {
-  const depth = bands.reduce((sum, b) => sum + b.depth, 0);
-  const width = bands.reduce((sum, b) => sum + b.width, 0);
-  const rows = bands.reduce((sum, b) => sum + b.rows, 0);
+function makeLoops(s: NurbsSurface, trims: (Path<UV> & { name?: string })[], o: Options, rules: BandRules) {
   let faces = 0;
   return trims.flatMap((trim): Loop[] => {
+    const bands = rules.forName(trim.name ?? '');
+    const depth = bands.reduce((sum, b) => sum + b.depth, 0);
+    const width = bands.reduce((sum, b) => sum + b.width, 0);
+    const rows = bands.reduce((sum, b) => sum + b.rows, 0);
     const st = stations(s, trim, o, width);
     if (!st.length) return [];
     faces += rows * (st.length - 1);
@@ -383,7 +408,7 @@ function makeLoops(s: NurbsSurface, trims: Path<UV>[], o: Options, bands: Band[]
       }
       w += b.width; d -= b.depth;
     }
-    return [{ trim, rings, outer: rings[rings.length - 1] }];
+    return [{ trim, rings, outer: rings[rings.length - 1], bands }];
   });
 }
 
@@ -583,15 +608,173 @@ function zipRuns(grid: Vertex[], ring: Vertex[], scale: UV, size: number) {
   return faces;
 }
 
+type PlacedPath = { path: Path<Vertex>; by: UV };
+type TransitionGroup = { borders: PlacedPath[]; rings: PlacedPath[]; winding: boolean };
+
+/** Associate the paths with the removed cells they bound, unwrapping across a periodic seam as needed. */
+function transitionGroups(s: NurbsSurface, u: number[], v: number[], cells: Uint8Array,
+  borders: Path<Vertex>[], rings: Path<Vertex>[]) {
+  const nu = u.length - 1, nv = v.length - 1;
+  const owner = new Int32Array(cells.length).fill(-1);
+  const tileU = new Int32Array(cells.length), tileV = new Int32Array(cells.length);
+  const groups: TransitionGroup[] = [];
+
+  function collect(start: number) {
+    const index = groups.length, group: TransitionGroup = { borders: [], rings: [], winding: false };
+    groups.push(group);
+    const pending = [start];
+    owner[start] = index;
+    while (pending.length) {
+      const a = pending.pop()!, i = a % nu, j = Math.floor(a / nu);
+      for (const [x, y] of [[i - 1, j], [i + 1, j], [i, j - 1], [i, j + 1]]) {
+        const du = Math.floor(x / nu), dv = Math.floor(y / nv);
+        if ((du && !s.u.closed) || (dv && !s.v.closed)) continue;
+        const b = (y - dv * nv) * nu + x - du * nu;
+        if (cells[b]) continue;
+        const bu = tileU[a] + du, bv = tileV[a] + dv;
+        if (owner[b] >= 0) {
+          group.winding ||= tileU[b] !== bu || tileV[b] !== bv;
+          continue;
+        }
+        owner[b] = index; tileU[b] = bu; tileV[b] = bv;
+        pending.push(b);
+      }
+    }
+  }
+
+  for (const [kind, paths] of [['borders', borders], ['rings', rings]] as const) for (const path of paths) {
+    for (let k = 1; k < path.points.length; k++) {
+      const a = path.points[k - 1].uv, b = path.points[k].uv, [dx, dy] = delta(b, a);
+      const length = Math.hypot(dx, dy);
+      if (length < EPS) continue;
+      // The removed cell is on the right of a directed grid boundary.
+      const step = kind === 'borders' ? EPS * 8 / length : 0;
+      const [x, y] = shift(mix(a, b, 0.5), [dy * step, -dx * step]);
+      const du = s.u.closed ? Math.floor(x) : 0, dv = s.v.closed ? Math.floor(y) : 0;
+      const i = upperBound(u, x - du) - 1, j = upperBound(v, y - dv) - 1;
+      if (i < 0 || i >= nu || j < 0 || j >= nv || cells[j * nu + i]) continue;
+      const id = j * nu + i;
+      if (owner[id] < 0) collect(id);
+      groups[owner[id]][kind].push({ path, by: [tileU[id] - du, tileV[id] - dv] });
+      break;
+    }
+  }
+  return groups;
+}
+
+/** Close any open paths along the natural edge, where the transition has no adjacent face. */
+function transitionContours(s: NurbsSurface, group: TransitionGroup, gridAt: (p: UV) => Vertex) {
+  const contours: Vertex[][] = [], open: Vertex[][] = [];
+  for (const [paths, reverse] of [[group.borders, true], [group.rings, false]] as const) for (const { path, by } of paths) {
+    const points = path.points.map((p) => ({ ...p, uv: shift(p.uv, by) }));
+    if (path.closed) points.pop();
+    if (reverse) points.reverse();
+    (path.closed ? contours : open).push(points);
+  }
+
+  const perimeter = ([u, v]: UV): [number, number] => {
+    if (s.u.closed) return [Math.round(v), v < 0.5 ? u : -u];
+    if (s.v.closed) return [Math.round(u), u < 0.5 ? -v : v];
+    return [0, v <= EPS ? u : u >= 1 - EPS ? 1 + v : v >= 1 - EPS ? 3 - u : 4 - v];
+  };
+  const endpoints = open.flatMap((points, i) => [points[0], points[points.length - 1]].map(({ uv }, k) => {
+    const [edge, position] = perimeter(uv);
+    return { edge, position, i, start: k === 0 };
+  })).sort((a, b) => a.edge - b.edge || a.position - b.position || Number(a.start) - Number(b.start));
+  const next = new Map<number, { i: number; corners: Vertex[] }>();
+  for (let k = 0; k < endpoints.length; k++) {
+    const a = endpoints[k], b = endpoints[(k + 1) % endpoints.length];
+    if (a.start) continue;
+    if (!b.start || a.edge !== b.edge) return null;
+    const wrap = b.position < a.position;
+    if (wrap && (s.u.closed || s.v.closed)) return null;
+    const corners: Vertex[] = [];
+    for (let t = Math.floor(a.position + EPS) + 1; !s.u.closed && !s.v.closed && t < b.position + (wrap ? 4 : 0) - EPS; t++) {
+      corners.push(gridAt(DOMAIN[t % 4]));
+    }
+    next.set(a.i, { i: b.i, corners });
+  }
+  for (const first of next.keys()) {
+    const contour: Vertex[] = [];
+    let i = first;
+    do {
+      const to = next.get(i);
+      if (!to) return null;
+      for (const point of open[i]) contour.push(point);
+      contour.push(...to.corners);
+      next.delete(i);
+      i = to.i;
+    } while (i !== first);
+    contours.push(contour);
+  }
+  return contours;
+}
+
+function triangulateTransition(contours: Vertex[][], scale: UV, sample: (v: Vertex) => Sample) {
+  const vertices = contours.flat(), positions = vertices.map((v) => sample(v).P);
+  const uv = vertices.map((v) => v.uv);
+  const triangles = M().triangulate(contours.map((path) => path.map(({ uv: [u, v] }) => [u * scale[0], v * scale[1]])), -1, false) as number[][];
+  const cosine = (face: number[]) => faceCosine(face.map((i) => positions[i]), face.length === 4 ? face.map((i) => uv[i]) : undefined);
+  const edgeKey = (a: number, b: number) => Math.min(a, b) * vertices.length + Math.max(a, b);
+  const sides = (t: number[]) => t.map((a, k) => edgeKey(a, t[(k + 1) % 3]));
+  const links = new Map<number, Set<number>>();
+  const link = (i: number) => {
+    for (const key of sides(triangles[i])) {
+      const set = links.get(key) ?? new Set<number>();
+      set.add(i); links.set(key, set);
+    }
+  };
+  const scores = triangles.map(cosine);
+  triangles.forEach((_, i) => link(i));
+  function quad(key: number) {
+    const set = links.get(key);
+    if (!set || set.size !== 2) return null;
+    const [i, j] = set, t = triangles[i], q = triangles[j];
+    const k = sides(t).indexOf(key), a = t[k], b = t[(k + 1) % 3], c = t[(k + 2) % 3];
+    const d = q.find((x) => x !== a && x !== b)!;
+    return { i, j, a, b, c, d };
+  }
+  // Improve the worst world-space angle with interior flips, leaving all boundary edges in place.
+  const pending = [...links.keys()];
+  for (let budget = 12 * triangles.length + 64; pending.length && budget > 0; budget--) {
+    const key = pending.pop()!, pair = quad(key);
+    if (!pair) continue;
+    const { i, j, a, b, c, d } = pair;
+    if (orient(uv[a], uv[d], uv[c]) <= 0 || orient(uv[d], uv[b], uv[c]) <= 0) continue;
+    const x = [a, d, c], y = [d, b, c], sx = cosine(x), sy = cosine(y);
+    if (Math.max(sx, sy) >= Math.max(scores[i], scores[j]) - 1e-10) continue;
+    for (const k of [i, j]) for (const side of sides(triangles[k])) links.get(side)!.delete(k);
+    triangles[i] = x; triangles[j] = y; scores[i] = sx; scores[j] = sy;
+    link(i); link(j);
+    pending.push(...sides(x), ...sides(y));
+  }
+
+  const candidates = [...links.keys()].flatMap((key) => {
+    const pair = quad(key);
+    if (!pair) return [];
+    const { i, j, a, b, c, d } = pair;
+    const face = [a, d, b, c], score = cosine(face);
+    const saved = Number(scores[i] > THIN) + Number(scores[j] > THIN) - Number(score > THIN);
+    return saved < 0 ? [] : [{ i, j, face, score, saved }];
+  }).sort((a, b) => b.saved - a.saved || a.score - b.score);
+  const used = new Uint8Array(triangles.length), faces: number[][] = [];
+  for (const { i, j, face } of candidates) if (!used[i] && !used[j]) {
+    used[i] = used[j] = 1;
+    faces.push(face);
+  }
+  triangles.forEach((face, i) => { if (!used[i]) faces.push(face); });
+  return faces.map((face) => face.map((i) => vertices[i]));
+}
+
 function transitionError(prim: number, rings: number, borders: number) {
   return new Error(`Surface prim ${prim} has ${rings} trim paths and ${borders} matching grid boundaries. Use a smaller size, increase counts, or make the bands narrower.`);
 }
 
-function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface, o: Options, bands: Band[], stats: MeshStats) {
+function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface, o: Options, rules: BandRules, stats: MeshStats) {
   const au = axis(s, 0, o), av = axis(s, 1, o), u = au.lines, v = av.lines, scale: UV = [au.mean, av.mean];
   refineGrid(s, u, v, o.tolerance);
   const nu = u.length - 1, nv = v.length - 1, cols = nu + Number(!s.u.closed);
-  const stored = surfaceTrims(src, prim);
+  const names: string[] = [], stored = surfaceTrims(src, prim, names);
   let region = [DOMAIN];
   if (stored) {
     const positive = crossSection(stored, 'Positive'), domain = crossSection([DOMAIN], 'Positive');
@@ -599,10 +782,9 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
     try { region = kept.toPolygons() as UV[][]; }
     finally { positive.delete(); domain.delete(); kept.delete(); }
   }
-  const loops = stored ? makeLoops(s, trimPaths(s, region), o, bands) : [];
+  const loops = stored ? makeLoops(s, trimPaths(s, region, stored, names), o, rules) : [];
   const cells = stored ? gridCells(s, u, v, region, loops, scale, o.size * 0.35) : null;
   const borders = cells ? gridPaths(s, u, v, cells) : [];
-  if (borders.length !== loops.length) throw transitionError(prim, loops.length, borders.length);
 
   const index = (axis: number[], t: number, closed: boolean) => {
     if (closed && Math.abs(t - Math.round(t)) < EPS) return 0;
@@ -613,6 +795,25 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
   const gridAt = (p: UV, i = index(u, p[0], s.u.closed), j = index(v, p[1], s.v.closed)): Vertex =>
     ({ uv: p, depth: 0, grid: j * cols + i });
   const gridBorders = borders.map(({ points, closed }) => ({ points: points.map((p) => gridAt(p)), closed }));
+  const rings = loops.map((loop) => compactPath(loop.outer));
+  const direct = new Map<Path<Vertex>, Path<Vertex>>(), shared = new Set<Path<Vertex>>();
+  const sharedGroups: TransitionGroup[] = [];
+  const groups = cells && (borders.length !== loops.length || loops.length > 1)
+    ? transitionGroups(s, u, v, cells, gridBorders, rings) : [];
+  if (borders.length !== loops.length || groups.some(({ rings }) => rings.length > 1)) {
+    let usedBorders = 0, usedRings = 0;
+    for (const { borders, rings, winding } of groups) {
+      usedBorders += borders.length;
+      usedRings += rings.length;
+      if (borders.length === 1 && rings.length === 1 && borders[0].path.closed === rings[0].path.closed) {
+        direct.set(rings[0].path, borders[0].path);
+      } else if (borders.length && rings.length > 1 && !winding) {
+        for (const { path } of rings) shared.add(path);
+        sharedGroups.push({ borders, rings, winding });
+      } else throw transitionError(prim, loops.length, gridBorders.length);
+    }
+    if (usedBorders !== gridBorders.length || usedRings !== rings.length) throw transitionError(prim, loops.length, gridBorders.length);
+  }
   const poles = new Map<number, number>();
   const joins = new Map<number, number>();
   const gridSamples: (Sample | undefined)[] = [];
@@ -638,7 +839,8 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
 
   const pn = b.attrib('point', 'N', 3), tex = b.attrib('vertex', 'uv', src.vertices.get('uv')?.size === 2 ? 2 : 3);
   const bandAttrib = b.attrib('prim', 'band', 1, 'int');
-  const faceGroups = [b.group('prim', 'surface'), ...bands.map((band) => b.group('prim', band.group))];
+  const surfaceGroup = b.group('prim', 'surface');
+  const faceGroups = new Map(rules.groups.map((name) => [name, b.group('prim', name)]));
   const generated: number[] = [];
   const displaced: Sample[] = [];
 
@@ -667,7 +869,7 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
     return result;
   }
 
-  function emit(face: Vertex[], band: number, kind: 'poles' | 'corners' | 'transitions') {
+  function emit(face: Vertex[], band: number, kind: 'poles' | 'corners' | 'transitions', group = surfaceGroup) {
     const points: Sample[] = [], uv: UV[] = [];
     for (const corner of face) {
       const p = sample(corner);
@@ -677,6 +879,7 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
     if (points.length < 3) return;
     if (points.length === 4) stats.quads++;
     else { stats.triangles++; stats[kind]++; }
+    if (kind === 'transitions') stats.transition_faces++;
     if (kind !== 'poles') {
       const cosine = faceCosine(points.map((p) => p.P), uv);
       const angle = Math.acos(clamp(cosine, -1, 1)) * 180 / Math.PI;
@@ -686,7 +889,7 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
     const first = b.numVertices;
     const id = b.addPrim(points.map((p) => p.id), true, prim, points.map((p) => p.src));
     generated.push(id);
-    faceGroups[band + 1].add(id);
+    group.add(id);
     bandAttrib.set(id, band);
     const uvOrigin = [s.u.closed, s.v.closed].map((closed, axis) =>
       closed ? Math.floor(uv.reduce((sum, p) => sum + p[axis], 0) / uv.length) : 0);
@@ -718,7 +921,8 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
     emit([gridAt([u[i], v[j]], i, j), gridAt([u[i + 1], v[j]], a, j),
       gridAt([u[i + 1], v[j + 1]], a, z), gridAt([u[i], v[j + 1]], i, z)], -1, 'poles');
   }
-  for (const loop of loops) {
+  for (const [i, loop] of loops.entries()) {
+    const { bands } = loop;
     // The duplicate endpoint of a winding loop has its own texture coordinates.
     for (const { points, closed } of loop.rings) if (closed) points[points.length - 1].point = sample(points[0]);
     stats.stations += loop.rings[0].points.length - Number(loop.trim.closed);
@@ -726,12 +930,15 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
     let row = 0;
     for (let band = 0; band < bands.length; band++) for (let r = 0; r < bands[band].rows; r++, row++) {
       const a = loop.rings[row].points, c = loop.rings[row + 1].points;
-      for (let i = 1; i < a.length; i++) emit([a[i - 1], a[i], c[i], c[i - 1]], band, 'corners');
+      const group = faceGroups.get(bands[band].group)!;
+      for (let i = 1; i < a.length; i++) emit([a[i - 1], a[i], c[i], c[i - 1]], band, 'corners', group);
     }
-    const outer = compactPath(loop.outer);
+    const outer = rings[i];
+    if (shared.has(outer)) continue;
     let best: ReturnType<typeof nearest> | undefined, match = -1;
     for (let i = 0; i < gridBorders.length; i++) {
       const border = gridBorders[i];
+      if (direct.size && direct.get(outer) !== border) continue;
       if (border.closed !== outer.closed) continue;
       const candidate = nearest(s, border, outer, scale);
       if (!best || candidate.best < best.best) { best = candidate; match = i; }
@@ -753,17 +960,23 @@ function appendMesh(b: GeoBuilder, src: Geometry, prim: number, s: NurbsSurface,
     if (!faces) throw new Error(`Cannot join a trim to the grid on surface prim ${prim}. Use a smaller size or increase counts.`);
     for (const face of faces) emit(face, -1, 'transitions');
   }
+  for (const group of sharedGroups) {
+    for (const { path } of [...group.borders, ...group.rings]) for (const p of path.points) p.point = sample(p);
+    const contours = transitionContours(s, group, gridAt);
+    if (!contours) throw transitionError(prim, loops.length, borders.length);
+    for (const face of triangulateTransition(contours, scale, sample)) emit(face, -1, 'transitions');
+  }
   for (const p of displaced) if (Math.hypot(...p.faceNormal!) > 0) pn.set(p.id, normalize(p.faceNormal!));
   return generated;
 }
 
-type MeshStats = Record<'quads' | 'triangles' | 'quad_share' | 'bands' | 'stations' | 'max_chord_error' | 'min_angle' | 'thin_faces' | 'poles' | 'corners' | 'transitions', number>;
+type MeshStats = Record<'quads' | 'triangles' | 'quad_share' | 'bands' | 'stations' | 'max_chord_error' | 'min_angle' | 'thin_faces' | 'poles' | 'corners' | 'transitions' | 'transition_faces', number>;
 
 export function meshSurfaces(src: Geometry, o: Options) {
   const stats: MeshStats = { quads: 0, triangles: 0, quad_share: 1, bands: 0, stations: 0, max_chord_error: 0,
-    min_angle: Infinity, thin_faces: 0, poles: 0, corners: 0, transitions: 0 };
+    min_angle: Infinity, thin_faces: 0, poles: 0, corners: 0, transitions: 0, transition_faces: 0 };
   if (!src.hasSurfaces()) return { geo: src, stats: { ...stats, min_angle: 0 } };
-  const bands = readBands(o.bands), b = new GeoBuilder(src);
+  const rules = readBands(o.bands), b = new GeoBuilder(src);
   const keep = new Uint8Array(src.numPoints).fill(1), pointMap = new Int32Array(src.numPoints);
   for (let p = 0; p < src.numPrims; p++) if (src.isSurface(p)) for (const i of src.primPoints(p)) keep[i] = 0;
   for (let p = 0; p < src.numPrims; p++) if (!src.isSurface(p)) for (const i of src.primPoints(p)) keep[i] = 1;
@@ -773,7 +986,7 @@ export function meshSurfaces(src: Geometry, o: Options) {
     if (src.isSurface(p)) {
       const s = surfaceFromPrim(src, p);
       if (!s) throw new Error(`Surface prim ${p} has an invalid NURBS control grid. Check its control points and surface_cols.`);
-      for (const id of appendMesh(b, src, p, s, o, bands, stats)) generated.push(id);
+      for (const id of appendMesh(b, src, p, s, o, rules, stats)) generated.push(id);
     } else {
       const pts = src.primPoints(p).map((i) => pointMap[i]), start = src.primStart[p];
       const id = b.addPrim(pts, !!src.primClosed[p], p, pts.map((_, k) => start + k));
@@ -786,11 +999,11 @@ export function meshSurfaces(src: Geometry, o: Options) {
     geo.ensurePacked();
     for (const [id, kind] of kinds) geo.primKind![id] = kind;
   }
-  for (const name of ['surface', ...bands.map((band) => band.group)]) {
+  for (const name of ['surface', ...rules.groups]) {
     const from = src.primGroups.get(name), to = geo.primGroups.get(name);
     if (from && to) for (const [id, p] of copied) to[id] = from[p];
   }
-  for (const name of [TRIM_UV, TRIM_LOOPS, SURFACE_COLS, ORDER_ATTRIB, KNOTS_ATTRIB, ORDER_V, KNOTS_V, CLOSED_V]) {
+  for (const name of [TRIM_UV, TRIM_LOOPS, TRIM_NAMES, SURFACE_COLS, ORDER_ATTRIB, KNOTS_ATTRIB, ORDER_V, KNOTS_V, CLOSED_V]) {
     const attr = geo.prims.get(name);
     if (attr) for (const id of generated) attr.set(id, attr.isArray ? [] : 0);
   }
