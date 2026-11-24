@@ -126,6 +126,13 @@ A sci-fi corridor wall on one trim sheet: a frame, a row of panels fitted to a h
 - In: `width`, `height`, `columns`, `gap`, `seed`
 - Out: `wall` (mesh)
 
+### [Electric kettle](../examples/electric_kettle.md) (`electric_kettle`)
+
+A modern electric kettle for a game or a product render: a clean upright body with a softly rounded base, a pouring lip and a handle that grow out of it without a seam, a lid with a small knob and a base plate.
+
+- In: `height`, `belly`, `spout_length`, `handle_thickness`, `gap`
+- Out: `kettle` (mesh)
+
 ### [Eroded valley](../examples/eroded_valley.md) (`eroded_valley`)
 
 A mountain valley worn by rain: sharp ridges, gullies and sediment fans, with a river along the valley floor, as a terrain for a game engine.
@@ -160,6 +167,13 @@ A village laid out along your own guides: the roads, house plots, fences, woods 
 
 - In: `road_width`, `lamp_spacing`, `floors`, `roof_pitch`, `tree_density`, `keep_clear`, `seed`
 - Out: `village` (scene)
+
+### [Hover bike](../examples/hover_bike.md) (`hover_bike`)
+
+A sleek sci-fi hover bike for a game: one flowing teardrop body with a pointed, slightly drooping nose and a raised tail, two thruster pods under it that grow out of the body with glowing round outlets facing down, a seat cushion, low handlebars on a short stem and a small curved windscreen.
+
+- In: `bike_length`, `width`, `pod_size`, `nose_droop`, `tail_rise`, `line_crease`, `hover_height`
+- Out: `bike` (mesh)
 
 ### [Image cutouts](../examples/image_cutouts.md) (`image_cutouts`)
 
