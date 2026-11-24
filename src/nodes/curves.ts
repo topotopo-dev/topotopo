@@ -1388,7 +1388,7 @@ defineNode({
     fit: { type: 'enum', options: ['interpolate', 'approximate'], default: 'interpolate', desc: 'output surface. Interpolate passes through every point by default. Approximate fits within tolerance when choosing CV counts.' },
     tolerance: { type: 'float', default: 0.001, min: 0, desc: 'output surface. Maximum distance in metres when choosing CV counts for approximate fitting (default 0.001 m).' },
     smoothing: { type: 'float', default: 0, min: 0, desc: 'output surface. Unitless penalty on second differences of CVs for approximate fitting. Default 0. Around 1 smooths noise. Tolerance wins: when this penalty cannot stay within tolerance, the fit uses the largest smaller one that can and warns.' },
-    cvs: { type: 'ivec2', default: [0, 0], min: 0, desc: 'output surface. Number of control points in u and v for approximate fitting. Default [0, 0] chooses the fewest the tolerance allows.' },
+    cvs: { type: 'ivec2', default: [0, 0], min: 0, max: 1000, desc: 'output surface. Number of control points in u and v for approximate fitting. Default [0, 0] chooses the fewest the tolerance allows.' },
     order: { type: 'ivec2', default: [4, 4], min: 2, max: MAX_ORDER, desc: 'output surface. Spline order in u and v (degree plus one). Default [4, 4] is cubic in both directions.' },
     parameterization: { type: 'enum', options: PARAMETERIZATIONS, default: 'centripetal', desc: 'output surface. Unitless parameter spacing. Uniform is even, chord uses distance and centripetal (default) uses its square root.' },
     pins: P.group('point', 'output surface. Point group to keep on the surface for approximate fitting (empty = no pins).'),

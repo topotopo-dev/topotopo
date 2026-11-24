@@ -79,12 +79,13 @@ const len = (m: number) => { const a = Math.abs(m); return String(+m.toFixed(a =
 
 /** What a cooked geometry is. */
 export function outputKind(g: Geometry): OutputInfo {
-  let polygons = 0, polylines = 0, splines = 0, packed = 0;
+  let polygons = 0, polylines = 0, splines = 0, surfaces = 0, packed = 0;
   const used = new Uint8Array(g.numPoints);
   for (let p = 0; p < g.numPrims; p++) {
     const k = g.primKind ? g.primKind[p] : 0;
     if (k === 1) packed++;
     else if (k === 2 || k === 3) splines++;
+    else if (k === 4) surfaces++;
     else if (g.primClosed[p]) polygons++;
     else polylines++;
   }
@@ -97,7 +98,7 @@ export function outputKind(g: Geometry): OutputInfo {
   const sdfs = g.volumes.filter((v) => v.kind === 'sdf' || v.kind === 'grid'), grids = sdfs.filter((v) => v.kind === 'grid');
   const curves = polylines + splines;
   const has: Record<OutputPart, boolean> = {
-    heightfield: fields.length > 0, instances: packed > 0, mesh: polygons > 0, curves: curves > 0,
+    heightfield: fields.length > 0, instances: packed > 0, mesh: polygons + surfaces > 0, curves: curves > 0,
     // loose points beside prims are an output's sockets or strays, not a part of their own
     points: loose > 0 && !g.numPrims,
     // images beside other parts are their textures
@@ -117,7 +118,10 @@ export function outputKind(g: Geometry): OutputInfo {
   const text: Record<OutputPart, () => string> = {
     heightfield: () => (alone ? `${hf.width} × ${hf.height} samples, ${len(hf.cellSize)} m apart` : `terrain ${hf.width} × ${hf.height}, ${len(hf.cellSize)} m`) + more(fields.length),
     instances: () => `${count(packed, 'instance')} of ${count(g.packedSources.length, 'source')}`,
-    mesh: () => (alone ? `${count(polygons, 'polygon')}, ${count(g.numPoints, 'point')}` : `mesh ${count(polygons, 'polygon')}`),
+    mesh: () => {
+      const what = [polygons ? count(polygons, 'polygon') : '', surfaces ? count(surfaces, 'NURBS surface') : ''].filter(Boolean).join(', ');
+      return alone ? `${what}, ${count(g.numPoints, 'point')}` : `mesh ${what}`;
+    },
     curves: () => (alone ? `${count(curves, 'curve')}, ${count(g.numPoints, 'point')}` : count(curves, 'curve')),
     points: () => count(loose, 'point'),
     image: () => `${images[0].width} × ${images[0].height} px${more(images.length)}`,

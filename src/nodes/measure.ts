@@ -22,6 +22,7 @@ import type { FaceSamples, PieceReport, RayMode, RaySampleOptions } from '../cor
 import type { CookContext } from '../graph/types.ts';
 import { P, getPointNormals, mask } from './util.ts';
 import { andThen } from '../graph/parallel.ts';
+import { splinesToPolylinesDeep } from '../core/splines.ts';
 import { namePattern } from './copy.ts';
 
 const hasPolygons = (g: Geometry) => {
@@ -456,7 +457,8 @@ defineNode({
     'must exist, and the checks after each read those (every one when the name is empty): samples, height_min / ' +
     'height_max and match for heightfields (match compares with the heightfield of the reference input at the same ' +
     'world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size, image_layers and ' +
-    'image_min / image_max (every channel of every layer) for images. Each cook records stats checks and failed.',
+    'image_min / image_max (every channel of every layer) for images. NURBS surfaces are checked on their tessellation ' +
+    '(mark then writes no assert_fail groups). Each cook records stats checks and failed.',
   aliases: ['expect', 'check', 'verify'],
   inputs: [
     { name: 'geo', desc: 'geometry to check (passed through)' },
@@ -511,7 +513,8 @@ defineNode({
   },
   cook: ({ input, hasInput, p, warn, stat, engine, vars }) => {
     const src = input(0);
-    const g = src;
+    // NURBS surfaces are measured on their tessellation (the same one render and export use); the input passes through.
+    const g = src.hasSurfaces() ? splinesToPolylinesDeep(src, { curves: false }).geo : src;
     const fails: string[] = [];
     const hints = new Set<string>();
     const ptFail = new Uint8Array(g.numPoints), primFail = new Uint8Array(g.numPrims);
@@ -744,8 +747,8 @@ defineNode({
       const out = src.clone();
       out.detail.add('assert_failed', 'int', 1).set(0, fails.length);
       out.detail.add('assert_report', 'string', 1).set(0, msg);
-      if (ptFail.some((x) => x)) out.addGroup('point', 'assert_fail', ptFail);
-      if (primFail.some((x) => x)) out.addGroup('prim', 'assert_fail', primFail);
+      if (g === src && ptFail.some((x) => x)) out.addGroup('point', 'assert_fail', ptFail);
+      if (g === src && primFail.some((x) => x)) out.addGroup('prim', 'assert_fail', primFail);
       return out;
     }
     if (!fails.length) return src;

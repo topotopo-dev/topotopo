@@ -166,6 +166,8 @@ category: `generate`
 
 Flat grid of quads (default lies on the XZ ground plane facing +Y).
 
+Use type: nurbs for one flat cubic NURBS surface. Move its control points to bend the surface.
+
 **Inputs**
 
 None (generator).
@@ -175,7 +177,8 @@ None (generator).
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `size` | vec2 | `[4,4]` |  |  |  | width and depth |
-| `divisions` | ivec2 | `[10,10]` | 1..2048 |  | `rows`, `cols`, `res`, `resolution` | quads along each side |
+| `divisions` | ivec2 | `[10,10]` | 1..2048 |  | `rows`, `cols`, `res`, `resolution` | quads or knot spans along each side (NURBS uses three more control points than spans) |
+| `type` | enum | `"polygon"` |  | `polygon`, `nurbs` |  | polygon grid or one cubic NURBS surface |
 | `plane` | enum | `"xz"` |  | `xz`, `xy`, `yz` |  | orientation plane (xz = ground, facing +Y; xy = facing +Z; yz = facing +X) |
 | `center` | vec3 | `[0,0,0]` |  |  | `t`, `translate`, `position`, `pos`, `origin` | center position |
 
@@ -836,26 +839,26 @@ None (generator).
 
 category: `curve` · aliases: `convert`, `curve_convert`
 
-Convert curves between polyline, Bezier and NURBS (exact between spline types; fit to pass through points).
+Convert curves between polyline, Bezier and NURBS, or turn a NURBS surface into polygons.
 
-Houdini Convert SOP for curves. Spline → polyline evaluates the curve (adaptive by tolerance, or segments per span); closed splines become closed polygons. Bezier ↔ NURBS is exact (multiple knots / blossoming; a short last Bezier segment is degree-elevated). Polyline → spline uses the points as CVs, or with fit passes through them (NURBS: global interpolation; Bezier: smooth cubic segments). Attributes follow (CV blends). Use convert to polyline before nodes that need a specific resolution; others convert automatically.
+Houdini Convert SOP for curves and NURBS surfaces. Spline → polyline evaluates the curve (adaptive by tolerance, or segments per span); closed splines become closed polygons. For a NURBS surface, polyline makes quads and triangles at collapsed poles. Bezier ↔ NURBS is exact (multiple knots / blossoming; a short last Bezier segment is degree-elevated). Polyline → spline uses the points as CVs, or with fit passes through them (NURBS: global interpolation; Bezier: smooth cubic segments). Attributes follow (CV blends). Use convert to polyline before nodes that need a specific resolution; others convert automatically.
 
 **Inputs**
 
 | # | name | optional | multi | description |
 |---|---|---|---|---|
-| 0 | `curves` | no | no | polylines, polygons, Bezier or NURBS curves |
+| 0 | `curves` | no | no | polylines, polygons, Bezier or NURBS curves, or NURBS surfaces |
 
 **Parameters**
 
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
-| `to` | enum | `"polyline"` |  | `polyline`, `bezier`, `nurbs` | `type`, `target` | target type |
+| `to` | enum | `"polyline"` |  | `polyline`, `bezier`, `nurbs` | `type`, `target` | target curve type. polyline also turns NURBS surfaces into polygons |
 | `order` | int | `4` | 2..11 |  |  | order of curves made from polylines (fit Bezier is always cubic) |
 | `fit` | bool | `false` |  |  | `interpolate` | polylines → spline: pass through the points instead of using them as CVs |
 | `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | knots of NURBS made from polylines (parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns)) |
-| `segments` | int | `0` | 0..10000 |  | `divisions`, `lod` | to polyline: segments per knot span / Bezier segment; 0 = adaptive (tolerance) |
-| `tolerance` | float | `0` | 0.. |  |  | to polyline: largest chord-to-curve distance; 0 = 1/2000 of each curve's CV box diagonal |
+| `segments` | int | `0` | 0..10000 |  | `divisions`, `lod` | to polyline: segments per knot span in each direction or per Bezier segment. 0 adapts to tolerance |
+| `tolerance` | float | `0` | 0.. |  |  | to polyline: chord error for curves and surfaces. 0 uses 1/2000 of the CV box diagonal |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
 
 **Example**
@@ -1505,7 +1508,11 @@ category: `curve` · aliases: `skin`
 
 Skin a surface through a sequence of curves (in prim order), or through copies of one profile placed by "sections".
 
-Sections: with several input curves, each is a section in prim order. With one curve and the sections list, each entry places a copy of it: {"offset": [x, y, z], "scale": [sx, sy], "rotate": [rx, ry, rz]} (any key may be left out; a number for offset moves it along the curve's normal, a number for scale scales it evenly), applied as scale and rotate about the curve's centre, then the offset. Correspondence: when every section has the same number of points, point k of one section joins point k of the next (insets and rounded corners stay where they are); otherwise each section is resampled evenly by length (resample "length"). Closed sections are turned to run the same way round as the first one, and each starts at the point nearest the previous section's start, so the skin does not twist. Winding: the side faces follow the first section's direction; a closed result (closed sections with caps, or closed: true) is turned to face outward, caps included. uv: u along the section, v across the sections.
+Output polygons joins the sections with quads and can cap closed ends. Output surface builds a smooth NURBS skin. Interpolate passes through every sample. Sections measured from a drawing or photos can wobble in the highlights. Use approximate with smoothing around 1 and a tolerance of a few millimetres to fair the skin. Pin points that must stay fixed, such as the windscreen header. Use mirror x to join positive-x half sections to their reflections for a symmetric body. Nodes that need polygons convert the surface.
+
+Input curves are taken in prim order. For one profile, sections places copies using entries like {"offset": [x, y, z], "scale": [sx, sy], "rotate": [rx, ry, rz]}. All keys are optional. A single scale number scales evenly and a single offset number moves along the profile normal. Scale and rotate (in degrees) act about the profile centre before the offset (in metres).
+
+Polygon output joins points by index when counts match, or resamples evenly by length when counts differ. For closed sections it matches winding to the first section and starts each section at the point nearest the previous start. Side faces follow the first section and closed results face outward. In both outputs, u runs along each section and v runs across the sections.
 
 **Inputs**
 
@@ -1518,11 +1525,20 @@ Sections: with several input curves, each is a section in prim order. With one c
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `sections` | json | `[]` |  |  | `stations`, `placements` | one input curve: a list of placements, each {offset, scale, rotate} (see the description) |
-| `resample` | enum | `"auto"` |  | `auto`, `length`, `none` |  | auto = keep the points when every section has the same count, else even by length; length = always resample evenly; none = points by index (counts must match) |
+| `resample` | enum | `"auto"` |  | `auto`, `length`, `none` |  | polygons only. Auto keeps points when counts match and otherwise resamples by length. Length always resamples. None joins points by index and requires matching counts. Surface output uses the section points directly. |
 | `closed` | bool | `false` |  |  |  | connect the last curve back to the first |
 | `caps` | bool | `false` |  |  |  | cap the first and last curves (when they are closed) |
+| `output` | enum | `"polygons"` |  | `polygons`, `surface` |  | polygons joins sections with quads by default. Surface makes one NURBS skin. |
+| `fit` | enum | `"interpolate"` |  | `interpolate`, `approximate` |  | output surface. Interpolate passes through every point by default. Approximate fits within tolerance when choosing CV counts. |
+| `tolerance` | float | `0.001` | 0.. |  |  | output surface. Maximum distance in metres when choosing CV counts for approximate fitting (default 0.001 m). |
+| `smoothing` | float | `0` | 0.. |  |  | output surface. Unitless penalty on second differences of CVs for approximate fitting. Default 0. Around 1 smooths noise. Tolerance wins: when this penalty cannot stay within tolerance, the fit uses the largest smaller one that can and warns. |
+| `cvs` | ivec2 | `[0,0]` | 0..1000 |  |  | output surface. Number of control points in u and v for approximate fitting. Default [0, 0] chooses the fewest the tolerance allows. |
+| `order` | ivec2 | `[4,4]` | 2..11 |  |  | output surface. Spline order in u and v (degree plus one). Default [4, 4] is cubic in both directions. |
+| `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | output surface. Unitless parameter spacing. Uniform is even, chord uses distance and centripetal (default) uses its square root. |
+| `pins` | group (point) | `""` |  |  |  | output surface. Point group to keep on the surface for approximate fitting (empty = no pins). |
+| `mirror` | enum | `"none"` |  | `none`, `x` |  | none uses the input directly. X joins positive-x half sections to their reflections at x = 0. |
 
-**Writes:** vertex uv; prim groups caps, sides
+**Writes:** polygons: vertex uv and prim groups caps, sides. Surface: one NURBS prim named surface and detail float fit_error (metres).
 
 **Example**
 
@@ -2113,7 +2129,7 @@ category: `curve` · aliases: `fit_curve`, `curve_fit`, `fitcurve`
 
 Least-squares NURBS through ordered points: smooth noisy polylines, compress dense curves to few CVs.
 
-Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all points in order) is approximated by a B-spline: cv_count CVs, or (cv_count 0) the fewest CVs that keep every point within tolerance (interpolating at worst). Open curves keep their end points. smoothing adds a penalty on the CVs' second differences (0 = none; around 1 irons out noise; larger flattens). Parameters are corrected (re-projected) twice. Output NURBS prims, or polylines sampled from the fit. Writes prim fit_error.
+Houdini Fit SOP (approximation). Each polyline or polygon (or all points in order when there are no prims) is fitted with cv_count CVs, or the fewest CVs that keep it within tolerance when cv_count is 0. Open curves keep their end points. Use pins with smoothing to fair a measured line while keeping the points that must stay fixed. Smoothing penalizes second differences of the CVs. Around 1 irons out noise. The fit corrects unpinned parameters twice when using fewer CVs than points. Output NURBS prims or polylines sampled from the fit. Writes prim fit_error.
 
 **Inputs**
 
@@ -2134,8 +2150,9 @@ Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all p
 | `output` | enum | `"nurbs"` |  | `nurbs`, `polyline` |  | NURBS prims or polylines sampled from the fit |
 | `segments` | int | `0` | 0..10000 |  |  | polyline output: segments per knot span; 0 = adaptive (tolerance / 4) |
 | `group` | group (prim) | `""` |  |  |  | prim group pattern to affect ("" = all). e.g. "top", "!top", "0-9", "@P.y>0" |
+| `pins` | group (point) | `""` |  |  |  | point group to keep exactly on the curve (empty = no pins) |
 
-**Writes:** prim fit_error (largest distance from an input point to the fitted curve)
+**Writes:** prim fit_error (largest distance from an unpinned input point to the fitted curve)
 
 **Example**
 
@@ -4086,7 +4103,7 @@ category: `measure` · aliases: `expect`, `check`, `verify`
 
 Check the geometry (watertight, counts, bbox, edge lengths, degenerate faces, self-intersections, UV overlaps, attributes, groups, an expression, heightfields, image sizes, layers and values) and fail, warn or mark when a check fails. Passes the geometry through.
 
-Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement). Heightfields and images (which have no points) have checks of their own: heightfields / images name the ones that must exist, and the checks after each read those (every one when the name is empty): samples, height_min / height_max and match for heightfields (match compares with the heightfield of the reference input at the same world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size, image_layers and image_min / image_max (every channel of every layer) for images. Each cook records stats checks and failed.
+Every check is off by default; enable the ones that express what the graph must produce. on_fail error makes the node (and the graph) fail with one message listing each failed check and the measured value, so a build or edit reports a broken invariant right away. warn passes through with that message as a warning. mark passes through and writes detail assert_failed (number of failed checks) and assert_report (the message), plus point / prim groups assert_fail on the offending elements where a check can localise them (render {highlight:"assert_fail"}). expr is a JS expression over npoints nprims nvertices npolys nlines bbox (.min .max .size .center, each with .x .y .z) volume area pieces open_pieces genus closed boundary_edges, also under geo (geo.pieces), and the graph vars by their bare name (as in every expression a var comes first: with a var "pieces", pieces is the var and geo.pieces the measurement). Heightfields and images (which have no points) have checks of their own: heightfields / images name the ones that must exist, and the checks after each read those (every one when the name is empty): samples, height_min / height_max and match for heightfields (match compares with the heightfield of the reference input at the same world X and Z: a tile cooked on its own against its map, along its edges or everywhere), image_size, image_layers and image_min / image_max (every channel of every layer) for images. NURBS surfaces are checked on their tessellation (mark then writes no assert_fail groups). Each cook records stats checks and failed.
 
 **Inputs**
 

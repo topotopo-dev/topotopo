@@ -16,8 +16,8 @@ const sourceBox = (src: Geometry): Box => {
 const NONE = () => [0, 0, 0, 0, 0, 0];
 const flat = (b: Box) => (b.empty ? NONE() : [b.min[0], b.max[0], b.min[1], b.max[1], b.min[2], b.max[2]]);
 
-/** typename per prim kind (0 polygon or polyline, 1 packed, 2 Bezier, 3 NURBS) */
-const TYPE_NAMES = ['Poly', 'PackedGeometry', 'BezierCurve', 'NURBCurve'];
+/** typename per prim kind (0 polygon or polyline, 1 packed, 2 Bezier curve, 3 NURBS curve, 4 NURBS surface) */
+const TYPE_NAMES = ['Poly', 'PackedGeometry', 'BezierCurve', 'NURBCurve', 'NURBMesh'];
 const COMMON = ['bounds', 'typename', 'vertexcount'];
 const SHAPE = ['closed'];
 const PACKED = ['packedbounds', 'transform', 'packedfulltransform', 'packedlocaltransform', 'pivot'];
