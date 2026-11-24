@@ -26,6 +26,46 @@ export interface Recipe {
 /** The recipes, in the order the topic prints them. */
 export const RECIPES: Recipe[] = [
   {
+    name: 'flowing_body',
+    title: 'Flowing body from lines',
+    in: 'Long feature lines along the body and crease weights for the character line',
+    out: 'A smooth closed body made of quads, with a named intake group',
+    graph: {
+      nodes: {
+        cage: { type: 'lines_plan', params: {
+          lines: {
+            keel: [[0, -0.02, -0.65], [0, -0.034, -0.642], [0, -0.051, -0.624],
+              [0, -0.13, -0.33], [0, -0.14, 0], [0, -0.12, 0.34], [0, -0.029, 0.624], [0, -0.015, 0.642], [0, -0.004, 0.65]],
+            sill: [[0.02, -0.015, -0.65], [0.032, -0.025, -0.642], [0.048, -0.037, -0.624],
+              [0.158, -0.099, -0.33], [0.186, -0.1, 0], [0.161, -0.085, 0.34], [0.041, -0.019, 0.624], [0.027, -0.008, 0.642], [0.017, 0, 0.65]],
+            belt: [[0.028, 0, -0.65], [0.046, 0, -0.642], [0.069, 0, -0.624],
+              [0.225, 0.005, -0.33], [0.249, 0.005, 0], [0.211, 0.012, 0.34], [0.055, 0.011, 0.624], [0.037, 0.012, 0.642], [0.023, 0.012, 0.65]],
+            shoulder: [[0.02, 0.015, -0.65], [0.033, 0.024, -0.642], [0.049, 0.035, -0.624],
+              [0.163, 0.119, -0.33], [0.173, 0.154, 0], [0.152, 0.119, 0.34], [0.039, 0.042, 0.624], [0.026, 0.032, 0.642], [0.016, 0.025, 0.65]],
+            roof: [[0, 0.021, -0.65], [0, 0.035, -0.642], [0, 0.052, -0.624],
+              [0, 0.171, -0.33], [0, 0.211, 0], [0, 0.155, 0.34], [0, 0.056, 0.624], [0, 0.042, 0.642], [0, 0.031, 0.65]],
+          },
+          mirror: 'x', ends: 'cap', fit_levels: 2,
+          stations: [-0.65, -0.642, -0.624, -0.58, -0.48, -0.35, -0.24, -0.12, 0, 0.1, 0.22, 0.35, 0.48, 0.58, 0.624, 0.642, 0.65],
+          creases: { belt: [[-0.49, 0], [-0.24, 2.2], [0.25, 2.2], [0.49, 0]] },
+          groups: { intake: { between: ['belt', 'shoulder'], from: -0.24, to: 0.1 } },
+        } },
+        skin: { type: 'subdivide', in: ['cage'], params: { levels: 2 } },
+        inset: { type: 'poly_extrude', in: ['skin'], params: { group: 'intake', distance: -0.018, inset: 0.008 } },
+        body: { type: 'material', in: ['inset'], params: { name: 'shell', base_color: [0.32, 0.49, 0.57], roughness: 0.34 } },
+      },
+      output: 'body',
+    },
+    notes: [
+      'Draw the lines first. The side and plan views of each line together give its 3D points.',
+      'Add more lines or raise rows_between for rounder sections.',
+      'Match fit_levels to the levels in subdivide.',
+      'Check the highlights with a matcap render from several sides.',
+      'Use groups after subdivide to cut openings or make glass.',
+      'To grow a spout or pod from the body, use poly_extrude on a cage group before subdivide.',
+    ],
+  },
+  {
     name: 'rocks_on_terrain',
     title: 'Rocks on terrain',
     in: 'Nothing to read: the terrain is generated; the scatter count, the seed and the rocks\' size range',
