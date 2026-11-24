@@ -2,14 +2,14 @@
 
 # TopoTopo node reference
 
-274 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+275 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
 - [generate](#generate-nodes): [beam](#beam) · [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
-- [curve](#curve-nodes): [bezier](#bezier) · [blueprint](#blueprint) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [lines_plan](#lines_plan) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [trim_surface](#trim_surface) · [voronoi2d](#voronoi2d)
+- [curve](#curve-nodes): [bezier](#bezier) · [blueprint](#blueprint) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [lines_plan](#lines_plan) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [surface_to_mesh](#surface_to_mesh) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [trim_surface](#trim_surface) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_string](#attrib_string) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
@@ -2364,6 +2364,150 @@ Input closed polygons lie on XZ at a constant Y. Containment uses even/odd nesti
     }
   },
   "output": "roof"
+}
+```
+
+### surface_to_mesh
+
+category: `curve` · aliases: `surface_mesh`, `nurbs_to_mesh`, `tessellate_surface`
+
+Make a game-ready quad mesh from an exact NURBS surface.
+
+Follow the u and v directions with quads. Size sets the target edge length in metres and tolerance controls how closely the mesh follows the surface. Add bands for lips, seals, frames and recesses. For a window, use [{ "width": 0.01, "depth": -0.006, "group": "seal" }, { "width": 0.02, "group": "frame" }]. The plain conversion every node gets is still available for previews. UVs are in metres, so a texture tiles once per metre.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `surfaces` | no | no | Exact NURBS surfaces to mesh. Other primitives pass through. |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `size` | float | `0.05` | 0.000001.. |  |  | Target edge length in metres. Defaults to 0.05 m. |
+| `counts` | ivec2 | `[0,0]` | 0..1024 |  |  | Starting numbers of cells in u and v. Each 0 uses size in that direction by default. |
+| `tolerance` | float | `0.001` | 1e-9.. |  |  | Chord error tolerance in metres. Defaults to 0.001 m. |
+| `bands` | json | `[]` |  |  |  | Bands from the cut into the surface. Each needs a width in metres. Depth in metres defaults to 0, rows defaults to 1, and group defaults to band0, band1 and so on. The default [] joins the grid directly to the trim. |
+
+**Writes:** A polygon mesh with point N, vertex uv in metres, and a primitive band index. Grid and transition faces are in surface with band -1. Band faces go in their named groups. For bands and transitions, min_angle gives the smallest face angle in degrees and thin_faces counts faces with angles below 15 degrees. Both are 0 when there are no such faces.
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ring": {
+      "type": "circle",
+      "params": {
+        "plane": "xy",
+        "segments": 16
+      }
+    },
+    "body": {
+      "type": "loft",
+      "in": [
+        "ring"
+      ],
+      "params": {
+        "output": "surface",
+        "sections": [
+          {
+            "scale": 0.9
+          },
+          {
+            "offset": [
+              0,
+              0,
+              1
+            ],
+            "scale": 1.1
+          },
+          {
+            "offset": [
+              0,
+              0,
+              2
+            ],
+            "scale": 1.05
+          },
+          {
+            "offset": [
+              0,
+              0,
+              3
+            ],
+            "scale": 0.9
+          }
+        ]
+      }
+    },
+    "window": {
+      "type": "curve",
+      "params": {
+        "closed": true,
+        "points": [
+          [
+            0,
+            0.2,
+            0.6
+          ],
+          [
+            0,
+            0.6,
+            0.6
+          ],
+          [
+            0,
+            0.6,
+            1.4
+          ],
+          [
+            0,
+            0.2,
+            1.4
+          ]
+        ]
+      }
+    },
+    "cut": {
+      "type": "trim_surface",
+      "in": [
+        "body",
+        "window"
+      ],
+      "params": {
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "edges": false
+      }
+    },
+    "mesh": {
+      "type": "surface_to_mesh",
+      "in": [
+        "cut"
+      ],
+      "params": {
+        "size": 0.12,
+        "tolerance": 0.003,
+        "bands": [
+          {
+            "width": 0.01,
+            "depth": -0.006,
+            "group": "seal"
+          },
+          {
+            "width": 0.02,
+            "group": "frame"
+          }
+        ]
+      }
+    }
+  },
+  "output": "mesh"
 }
 ```
 

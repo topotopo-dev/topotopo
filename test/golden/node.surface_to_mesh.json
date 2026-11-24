@@ -1,0 +1,56 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["N:float:3", "P:float:3", "uv:float:3"],
+      "prim": [
+        "band:int:1",
+        "closed_v:int:1",
+        "knots:float[]:1",
+        "knots_v:float[]:1",
+        "spline_order:int:1",
+        "spline_order_v:int:1",
+        "surface_cols:int:1"
+      ],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [1, 0.4, 1],
+      "min": [-1, -0.4, -1]
+    },
+    "counts": {
+      "points": 1764,
+      "prims": 1681,
+      "vertices": 6724,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["surface"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "f5818edd0351e757",
+      "attributes": {
+        "group.prim.surface": "b1a48504d6486f1e",
+        "point.N": "71c62e59a6b87813",
+        "point.uv": "b3bac10d74700297",
+        "prim.band": "e1de5bdd24e4d107",
+        "prim.closed_v": "e783db65dbca299f",
+        "prim.knots": "d659cb81f5b49e5b",
+        "prim.knots_v": "d659cb81f5b49e5b",
+        "prim.spline_order": "e783db65dbca299f",
+        "prim.spline_order_v": "e783db65dbca299f",
+        "prim.surface_cols": "e783db65dbca299f",
+        "vertex.uv": "d9e5ece5645e320f"
+      },
+      "topology": "513df177e7cfa635"
+    }
+  },
+  "name": "node.surface_to_mesh",
+  "ok": true,
+  "source": "fixture for node type \"surface_to_mesh\" (test/fixtures.ts)",
+  "warnings": []
+}
