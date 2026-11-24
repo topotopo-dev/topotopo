@@ -121,7 +121,7 @@ defineNode({
   type: 'blueprint', category: 'curve',
   aliases: ['orthographic_views', 'drawing_outlines', 'sheet'],
   summary: 'Turn orthographic drawings into smooth closed curves in their 3D planes at one scale.',
-  description: 'Connect a sheet image from image_file or a texture node. Select its image, layer and channel, then set ink to pick out dark strokes or filled shapes. Set views to the pixel boxes for the side, top, front and rear you have. Render the sheet with a pixel grid to locate the boxes, paper seeds and shapes to keep. Warnings point to views whose boxes, marks or seeds need checking. Use close to seal breaks in ink before filling and thin to remove narrow marks attached to the filled outline. Seed enclosed paper outside the object, erase interfering marks, and add solid shapes where the drawing has gaps. Use mirror when one half of a view is clean. Set length in metres and choose its length_view, or set metres_per_pixel directly. Use smoothing to reduce pixel noise and tolerance to set the fit in pixels. Side and top are centred along Z with the object’s front at +Z. Front and rear sit at the ends of the side and require a side box. The curves feed rails, sections and trims.',
+  description: 'Connect a sheet image from image_file or a texture node. Select its image, layer and channel, then set ink to pick out dark strokes or filled shapes. Set views to the pixel boxes for the side, top, front and rear you have. Render the sheet with a pixel grid to locate the boxes, paper seeds and shapes to keep. Warnings point to views whose boxes, marks or seeds need checking. Use close to seal breaks in ink before filling and thin to remove narrow marks attached to the filled outline. Seed enclosed paper outside the object, erase interfering marks, and add solid shapes where the drawing has gaps. Use mirror when one half of a view is clean. Set length in metres and choose its length_view, or set metres_per_pixel directly. Raise tolerance (in pixels) for smoother outlines with fewer control points. Side and top are centred along Z with the object’s front at +Z. Front and rear sit at the ends of the side and require a side box. The curves feed rails, sections and trims.',
   inputs: [{ name: 'image', desc: 'geometry carrying the drawing sheet image' }],
   params: {
     image: imageParam(), layer: layerParam(),
@@ -133,7 +133,6 @@ defineNode({
     ink: { type: 'float', default: 0.5, desc: 'unitless ink cutoff. Values below 0.5 are ink by default' },
     close: { type: 'int', default: 2, min: 0, max: BLUEPRINT_MAX_RADIUS, desc: 'radius in pixels for sealing gaps in ink before filling. The default 2 can seal gaps up to about 4 pixels wide. Set 0 to turn it off' },
     thin: { type: 'int', default: 2, min: 0, max: BLUEPRINT_MAX_RADIUS, desc: 'radius in pixels for removing narrow marks attached to the filled silhouette. The default 2 can remove marks up to about 4 pixels wide. Set 0 to turn it off. Solid shapes are added after this step' },
-    smoothing: { type: 'float', default: 0.03, min: 0, desc: 'unitless penalty on changes between spline control points, 0.03 by default and 0 for no penalty' },
     tolerance: { type: 'float', default: 1, min: 0, desc: 'target fit error in sheet pixels, 1 pixel by default' },
   },
   outputs: 'closed cubic NURBS with prim name and point blueprint_px in sheet pixels. Detail metres_per_pixel, length, width and height in metres where measured (0 otherwise). Stats show per-view extents in metres and control point counts as <view>_cvs, plus views, parts_dropped, parts_dropped_large (over 1% of the kept area) and extent_mismatch as a fraction.',
@@ -147,9 +146,9 @@ defineNode({
   },
   cook: (ctx) => {
     const { p } = ctx, s = source(ctx, 0, p.image, p.layer);
-    const { views, length, length_view, metres_per_pixel, ink, close, thin, smoothing, tolerance } = p;
+    const { views, length, length_view, metres_per_pixel, ink, close, thin, tolerance } = p;
     const result = blueprint(channel(s.data, s.ch, p.channel), s.img.width, s.img.height, {
-      views, length, length_view, metres_per_pixel, ink, close, thin, smoothing, tolerance,
+      views, length, length_view, metres_per_pixel, ink, close, thin, tolerance,
     });
     for (const [name, value] of Object.entries(result.stats)) ctx.stat(name, value);
     for (const message of result.warnings) ctx.warn(message);

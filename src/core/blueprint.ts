@@ -18,7 +18,7 @@ type View = {
 };
 type Options = {
   views: unknown; length: number; length_view: ViewName; metres_per_pixel: number;
-  ink: number; close: number; thin: number; smoothing: number; tolerance: number;
+  ink: number; close: number; thin: number; tolerance: number;
 };
 
 const VIEW_KEYS = ['box', 'ground', 'centre', 'front', 'mirror', 'erase', 'seeds', 'solid', 'close', 'thin'];
@@ -278,7 +278,8 @@ function fitSamples(outline: PixelPoint[], tolerance: number) {
 }
 
 function fitContour(points: number[], o: Options): FitResult {
-  const options = { closed: true, order: 4, mode: 'chord' as const, smoothing: o.smoothing, tolerance: o.tolerance };
+  // No bending penalty: the samples are already averaged, and a penalty would fight the pixel tolerance at sharp corners.
+  const options = { closed: true, order: 4, mode: 'chord' as const, tolerance: o.tolerance };
   const n = points.length / 3;
   if (n > 16 && o.tolerance > 0) {
     const params = curveParams(points, true, 'chord').subarray(0, n);
@@ -313,7 +314,7 @@ function fitContour(points: number[], o: Options): FitResult {
 function fitOutline(outline: PixelPoint[], box: Box, o: Options): FitResult {
   const fit = fitContour(fitSamples(outline, o.tolerance), o);
   const bounds = splineBox(fit);
-  // Restore the measured extents so that smoothing cannot change the sheet calibration.
+  // Restore the measured extents so that the fit cannot change the sheet calibration.
   for (const axis of [0, 1] as const) {
     const ratio = (box[axis + 2] - box[axis]) / (bounds[axis + 2] - bounds[axis]);
     for (let k = axis; k < fit.P.length; k += 3) fit.P[k] = box[axis] + (fit.P[k] - bounds[axis]) * ratio;

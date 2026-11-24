@@ -1,0 +1,50 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["height:float:1", "length:float:1", "metres_per_pixel:float:1", "width:float:1"],
+      "point": ["P:float:3", "blueprint_px:float:2"],
+      "prim": ["knots:float[]:1", "name:string:1", "spline_order:int:1"],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [0.5063, 1.1221, 0.5074],
+      "min": [-0.5067, 0, -0.5077]
+    },
+    "counts": {
+      "points": 32,
+      "prims": 2,
+      "vertices": 32,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": [],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "0d74812c81ab0b02",
+      "attributes": {
+        "detail.height": "8e4d77f8dec18066",
+        "detail.length": "8e4d77f8dec18066",
+        "detail.metres_per_pixel": "c225debf00b8d181",
+        "detail.width": "8e4d77f8dec18066",
+        "point.blueprint_px": "eea2dc1c25811c7e",
+        "prim.knots": "44d59975fd8642df",
+        "prim.name": "7d28f4ebf7e183d5",
+        "prim.spline_order": "0d808c851df8569f"
+      },
+      "topology": "8c8280344056d5ee"
+    },
+    "splines": {
+      "bezier": 0,
+      "hash": "d4253284045e3d7e",
+      "nurbs": 2
+    }
+  },
+  "name": "node.blueprint",
+  "ok": true,
+  "source": "fixture for node type \"blueprint\" (test/fixtures.ts)",
+  "warnings": []
+}

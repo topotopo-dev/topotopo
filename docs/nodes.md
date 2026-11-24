@@ -2,14 +2,14 @@
 
 # TopoTopo node reference
 
-272 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+274 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
 - [generate](#generate-nodes): [beam](#beam) · [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
-- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [lines_plan](#lines_plan) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
+- [curve](#curve-nodes): [bezier](#bezier) · [blueprint](#blueprint) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [lines_plan](#lines_plan) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [trim_surface](#trim_surface) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_string](#attrib_string) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
@@ -688,6 +688,96 @@ Houdini Curve SOP in Bezier mode (a BezierCurve prim). Segments of `order` CVs s
     ],
     "order": 4
   }
+}
+```
+
+### blueprint
+
+category: `curve` · aliases: `orthographic_views`, `drawing_outlines`, `sheet`
+
+Turn orthographic drawings into smooth closed curves in their 3D planes at one scale.
+
+Connect a sheet image from image_file or a texture node. Select its image, layer and channel, then set ink to pick out dark strokes or filled shapes. Set views to the pixel boxes for the side, top, front and rear you have. Render the sheet with a pixel grid to locate the boxes, paper seeds and shapes to keep. Warnings point to views whose boxes, marks or seeds need checking. Use close to seal breaks in ink before filling and thin to remove narrow marks attached to the filled outline. Seed enclosed paper outside the object, erase interfering marks, and add solid shapes where the drawing has gaps. Use mirror when one half of a view is clean. Set length in metres and choose its length_view, or set metres_per_pixel directly. Raise tolerance (in pixels) for smoother outlines with fewer control points. Side and top are centred along Z with the object’s front at +Z. Front and rear sit at the ends of the side and require a side box. The curves feed rails, sections and trims.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `image` | no | no | geometry carrying the drawing sheet image |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `image` | string | `""` |  |  | `input_image`, `source_image` | which image of the input to use ("" = its only image; needed when it holds several) |
+| `layer` | string | `""` |  |  |  | layer name (empty selects the main layer) |
+| `channel` | enum | `"luminance"` |  | `alpha`, `luminance`, `r`, `g`, `b` |  | unitless image channel, luminance by default. Alpha needs RGBA. Luminance, R, G and B accept grey |
+| `views` | json | `{}` |  |  |  | No boxes by default. Use side, top, front or rear keys with box [x0, y0, x1, y1] in sheet pixels from the top left, with the end excluded. Optional erase rectangles, seeds [x, y], and solid shapes ["disc", cx, cy, radius] or ["rect", x0, y0, x1, y1] use the same pixels. Optional close and thin radii in whole pixels override the global values for this view. Ground defaults to the bottom edge for upright views and uses a column for a rotated side. Centre defaults to the midpoint across the outline, or the box midpoint for mirror. Mirror keeps upper, lower, left or right and reflects it about centre. Front is left or right, up or down, and defaults to left for side and up for top. The front and rear views always use the sheet horizontal axis. |
+| `length` | float | `0` | 0.. |  |  | horizontal silhouette extent in metres in length_view. The default 0 leaves this unset |
+| `length_view` | enum | `"side"` |  | `side`, `top`, `front`, `rear` |  | view whose horizontal pixel extent calibrates length, side by default |
+| `metres_per_pixel` | float | `0` | 0.. |  |  | direct scale in metres per sheet pixel. The default 0 uses length instead |
+| `ink` | float | `0.5` |  |  |  | unitless ink cutoff. Values below 0.5 are ink by default |
+| `close` | int | `2` | 0..8192 |  |  | radius in pixels for sealing gaps in ink before filling. The default 2 can seal gaps up to about 4 pixels wide. Set 0 to turn it off |
+| `thin` | int | `2` | 0..8192 |  |  | radius in pixels for removing narrow marks attached to the filled silhouette. The default 2 can remove marks up to about 4 pixels wide. Set 0 to turn it off. Solid shapes are added after this step |
+| `tolerance` | float | `1` | 0.. |  |  | target fit error in sheet pixels, 1 pixel by default |
+
+**Writes:** closed cubic NURBS with prim name and point blueprint_px in sheet pixels. Detail metres_per_pixel, length, width and height in metres where measured (0 otherwise). Stats show per-view extents in metres and control point counts as <view>_cvs, plus views, parts_dropped, parts_dropped_large (over 1% of the kept area) and extent_mismatch as a fraction.
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "shapes": {
+      "type": "tex_shape",
+      "params": {
+        "resolution": [
+          128,
+          48
+        ],
+        "tile": [
+          2,
+          1
+        ],
+        "falloff": 0
+      }
+    },
+    "drawing": {
+      "type": "tex_invert",
+      "in": [
+        "shapes"
+      ]
+    },
+    "out": {
+      "type": "blueprint",
+      "in": [
+        "drawing"
+      ],
+      "params": {
+        "views": {
+          "side": {
+            "box": [
+              0,
+              0,
+              64,
+              48
+            ]
+          },
+          "top": {
+            "box": [
+              64,
+              0,
+              128,
+              48
+            ],
+            "front": "left"
+          }
+        },
+        "length": 2
+      }
+    }
+  },
+  "output": "out"
 }
 ```
 
@@ -1506,7 +1596,7 @@ Draw feature lines along the length of the body, with +Z toward the front by def
 
 category: `curve` · aliases: `skin`
 
-Skin a surface through a sequence of curves (in prim order), or through copies of one profile placed by "sections".
+Skin a surface through sections, with optional rails that guide the shape between them.
 
 Output polygons joins the sections with quads and can cap closed ends. Output surface builds a smooth NURBS skin. Interpolate passes through every sample. Sections measured from a drawing or photos can wobble in the highlights. Use approximate with smoothing around 1 and a tolerance of a few millimetres to fair the skin. Pin points that must stay fixed, such as the windscreen header. Use mirror x to join positive-x half sections to their reflections for a symmetric body. Nodes that need polygons convert the surface.
 
@@ -1519,6 +1609,7 @@ Polygon output joins points by index when counts match, or resamples evenly by l
 | # | name | optional | multi | description |
 |---|---|---|---|---|
 | 0 | `curves` | no | no | two or more curves, in order; or one profile with sections |
+| 1 | `rails` | yes | no | long curves the surface passes through; each crosses every section once |
 
 **Parameters**
 
@@ -1530,8 +1621,9 @@ Polygon output joins points by index when counts match, or resamples evenly by l
 | `caps` | bool | `false` |  |  |  | cap the first and last curves (when they are closed) |
 | `output` | enum | `"polygons"` |  | `polygons`, `surface` |  | polygons joins sections with quads by default. Surface makes one NURBS skin. |
 | `fit` | enum | `"interpolate"` |  | `interpolate`, `approximate` |  | output surface. Interpolate passes through every point by default. Approximate fits within tolerance when choosing CV counts. |
-| `tolerance` | float | `0.001` | 0.. |  |  | output surface. Maximum distance in metres when choosing CV counts for approximate fitting (default 0.001 m). |
-| `smoothing` | float | `0` | 0.. |  |  | output surface. Unitless penalty on second differences of CVs for approximate fitting. Default 0. Around 1 smooths noise. Tolerance wins: when this penalty cannot stay within tolerance, the fit uses the largest smaller one that can and warns. |
+| `tolerance` | float | `0.001` | 0.. |  |  | Maximum deviation in metres when fitting an approximate surface or fitting sections and rails to shared knots. |
+| `network_tolerance` | float | `0.002` | 0.. |  |  | Maximum gap in metres between a section and a rail at their crossing. |
+| `smoothing` | float | `0` | 0.. |  |  | output surface, fit approximate. Unitless bending penalty: 0 = none; about 1 softens measuring noise, 10 and more fairs strongly. Tolerance wins: when this penalty cannot stay within tolerance, the fit uses the largest smaller one that can and warns. |
 | `cvs` | ivec2 | `[0,0]` | 0..1000 |  |  | output surface. Number of control points in u and v for approximate fitting. Default [0, 0] chooses the fewest the tolerance allows. |
 | `order` | ivec2 | `[4,4]` | 2..11 |  |  | output surface. Spline order in u and v (degree plus one). Default [4, 4] is cubic in both directions. |
 | `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | output surface. Unitless parameter spacing. Uniform is even, chord uses distance and centripetal (default) uses its square root. |
@@ -2144,7 +2236,7 @@ Houdini Fit SOP (approximation). Each polyline or polygon (or all points in orde
 | `order` | int | `4` | 2..11 |  |  | order of the fitted curve (4 = cubic) |
 | `cv_count` | int | `0` | 0..100000 |  | `cvs`, `count` | number of CVs; 0 = as few as the tolerance allows |
 | `tolerance` | float | `0.01` | 0.. |  | `tol`, `max_error` | largest allowed distance from a point to the curve (cv_count 0) |
-| `smoothing` | float | `0` | 0.. |  | `smooth` | second-difference penalty on the CVs (0 = none, ~1 smooths noise) |
+| `smoothing` | float | `0` | 0.. |  | `smooth` | bending penalty, unitless: 0 = none; about 1 softens measuring noise, 10 and more fairs strongly. The same number means the same on any point or CV count |
 | `parameterization` | enum | `"centripetal"` |  | `uniform`, `chord`, `centripetal` |  | parameterisation: uniform (even), chord (follows point distances), centripetal (√distances; best for sharp turns) |
 | `closed` | enum | `"auto"` |  | `auto`, `open`, `closed` |  | auto = as the input prim (open for point clouds) |
 | `output` | enum | `"nurbs"` |  | `nurbs`, `polyline` |  | NURBS prims or polylines sampled from the fit |
@@ -2490,6 +2582,133 @@ Delaunay-triangulate points projected on a plane (keeps 3D positions) — terrai
     }
   },
   "output": "mesh"
+}
+```
+
+### trim_surface
+
+category: `curve` · aliases: `surface_trim`, `nurbs_trim`, `trim_profile`
+
+Cut openings or keep patches on NURBS surfaces using closed outlines.
+
+A trim is a boundary that tells a smooth surface which part to keep. Project closed side outlines along X, plan outlines along Y, and front outlines along Z. Use hits all to cut both flanks of a symmetric body. Use keep both to get the body and the matching patch for glass or a lid. The trim lives on the exact surface, which keeps its control points. Rendered and exported meshes follow the cut, and later polygon nodes see the openings. The cut edges are closed NURBS curves ready for sweep.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `surfaces` | no | no | NURBS surfaces to cut. Other primitives pass through. |
+| 1 | `outlines` | no | no | Closed polyline, Bezier or NURBS outlines. |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `project` | enum | `"axis"` |  | `axis`, `closest` |  | Axis projects along a line in both directions by default. Closest finds the nearest point on the surface. |
+| `direction` | vec3 | `[0,0,0]` |  |  |  | Unitless axis direction. The default [0, 0, 0] uses the normal of the outline plane. |
+| `hits` | enum | `"all"` |  | `all`, `front`, `back` |  | Axis projection keeps all crossings by default. Front keeps the positive side of the outline plane, and back keeps the negative side. |
+| `keep` | enum | `"outside"` |  | `outside`, `inside`, `both` |  | Outside cuts out the outlined area by default. Inside keeps that area. Both outputs each part as its own surface. |
+| `group` | group (prim) | `""` |  |  |  | Surface primitive group. Empty by default cuts every surface. |
+| `outline_group` | group (prim) | `""` |  |  |  | Outline primitive group. Empty by default uses every outline. |
+| `tolerance` | float | `0.0005` | 1e-9.. |  |  | Maximum projection and edge fitting error in metres. Defaults to 0.0005 m. |
+| `edges` | bool | `true` |  |  |  | Output closed NURBS curves along the cut boundaries by default. |
+
+**Writes:** Exact NURBS surfaces with trim boundaries in their UV domain. Both creates primitive groups trim_outside and trim_inside. The edges group contains the cut curves with primitive name and edge_surface.
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "ring": {
+      "type": "circle",
+      "params": {
+        "plane": "xy",
+        "segments": 16
+      }
+    },
+    "body": {
+      "type": "loft",
+      "in": [
+        "ring"
+      ],
+      "params": {
+        "output": "surface",
+        "sections": [
+          {
+            "scale": 0.9
+          },
+          {
+            "offset": [
+              0,
+              0,
+              1
+            ],
+            "scale": 1.1
+          },
+          {
+            "offset": [
+              0,
+              0,
+              2
+            ],
+            "scale": 1.05
+          },
+          {
+            "offset": [
+              0,
+              0,
+              3
+            ],
+            "scale": 0.9
+          }
+        ]
+      }
+    },
+    "window": {
+      "type": "curve",
+      "params": {
+        "closed": true,
+        "points": [
+          [
+            0,
+            0.2,
+            0.6
+          ],
+          [
+            0,
+            0.6,
+            0.6
+          ],
+          [
+            0,
+            0.6,
+            1.4
+          ],
+          [
+            0,
+            0.2,
+            1.4
+          ]
+        ]
+      }
+    },
+    "cut": {
+      "type": "trim_surface",
+      "in": [
+        "body",
+        "window"
+      ],
+      "params": {
+        "direction": [
+          1,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "output": "cut"
 }
 ```
 

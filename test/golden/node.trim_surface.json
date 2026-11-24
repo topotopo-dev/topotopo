@@ -1,0 +1,65 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": [],
+      "point": ["P:float:3", "uv:float:3"],
+      "prim": [
+        "closed_v:int:1",
+        "edge_surface:int:1",
+        "knots:float[]:1",
+        "knots_v:float[]:1",
+        "name:string:1",
+        "spline_order:int:1",
+        "spline_order_v:int:1",
+        "surface_cols:int:1",
+        "trim_loops:int[]:1",
+        "trim_uv:float[]:1"
+      ],
+      "vertex": []
+    },
+    "bbox": {
+      "max": [1, 0.4, 1],
+      "min": [-1, -0.4, -1]
+    },
+    "counts": {
+      "points": 29,
+      "prims": 2,
+      "vertices": 29,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [],
+      "point": [],
+      "prim": ["edges"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "7aaad4515956808b",
+      "attributes": {
+        "group.prim.edges": "74bebe66fe85123c",
+        "point.uv": "801cfb95690fc5bf",
+        "prim.closed_v": "69691905919ff61f",
+        "prim.edge_surface": "69691905919ff61f",
+        "prim.knots": "2a1b113c5f8cf5aa",
+        "prim.knots_v": "96b44723050aab55",
+        "prim.name": "b27f5158cb26632a",
+        "prim.spline_order": "52bdce43f6fefb99",
+        "prim.spline_order_v": "97fb10012697271b",
+        "prim.surface_cols": "639f8dc0e0b6c19a",
+        "prim.trim_loops": "1ec0d386e7d62bbc",
+        "prim.trim_uv": "7b386c36f727762c"
+      },
+      "topology": "919f66e0ee32c99a"
+    },
+    "splines": {
+      "bezier": 0,
+      "hash": "3be7d9e399822c59",
+      "nurbs": 2
+    }
+  },
+  "name": "node.trim_surface",
+  "ok": true,
+  "source": "fixture for node type \"trim_surface\" (test/fixtures.ts)",
+  "warnings": []
+}
