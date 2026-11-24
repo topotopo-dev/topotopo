@@ -8,7 +8,7 @@ defineNode({
   category: 'curve',
   aliases: ['surface_trim', 'nurbs_trim', 'trim_profile'],
   summary: 'Cut openings or keep patches on NURBS surfaces using closed outlines.',
-  description: 'A trim is a boundary that tells a smooth surface which part to keep. Project closed side outlines along X, plan outlines along Y, and front outlines along Z. Outlines can cross an open surface edge, where the cut ends at that edge. Use keep both to get the surrounding surface and the matching patch. The trim lives on the exact surface, which keeps its control points. Rendered and exported meshes follow the cut, and later polygon nodes see the openings. The cut edges are closed NURBS curves ready for sweep.',
+  description: 'A trim is a boundary that tells a smooth surface which part to keep. Project closed side outlines along X, plan outlines along Y, and front outlines along Z. Outlines can cross an open surface edge, where the cut ends at that edge. Use hits all to cut both flanks of a symmetric body. Use keep both to get the surrounding surface and the matching patch. The trim lives on the exact surface, which keeps its control points. Rendered and exported meshes follow the cut, and later polygon nodes see the openings. The cut edges are closed NURBS curves ready for sweep.',
   packed: 'keep',
   splines: 'keep',
   inputs: [

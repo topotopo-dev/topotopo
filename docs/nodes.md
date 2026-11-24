@@ -2373,7 +2373,7 @@ category: `curve` · aliases: `surface_mesh`, `nurbs_to_mesh`, `tessellate_surfa
 
 Make a game-ready quad mesh from an exact NURBS surface.
 
-Follow the u and v directions with quads. Size sets the target edge length in metres and tolerance controls how closely the mesh follows the surface. Add bands for lips, seals, frames and recesses. For a window, use [{ "width": 0.01, "depth": -0.006, "group": "seal" }, { "width": 0.02, "group": "frame" }]. The plain conversion every node gets is still available for previews. UVs are in metres, so a texture tiles once per metre.
+Follow the u and v directions with quads. Size sets the target edge length in metres and tolerance controls how closely the mesh follows the surface. Add bands for lips, seals, frames and recesses. For a window, use [{ "width": 0.01, "depth": -0.006, "group": "seal" }, { "width": 0.02, "group": "frame" }]. Use name patterns for different bands per opening, for example { "glass*": [{ "width": 0.01, "group": "seal" }], "*": [] }. The plain conversion every node gets is still available for previews. UVs are in metres, so a texture tiles once per metre.
 
 **Inputs**
 
@@ -2388,7 +2388,7 @@ Follow the u and v directions with quads. Size sets the target edge length in me
 | `size` | float | `0.05` | 0.000001.. |  |  | Target edge length in metres. Defaults to 0.05 m. |
 | `counts` | ivec2 | `[0,0]` | 0..1024 |  |  | Starting numbers of cells in u and v. Each 0 uses size in that direction by default. |
 | `tolerance` | float | `0.001` | 1e-9.. |  |  | Chord error tolerance in metres. Defaults to 0.001 m. |
-| `bands` | json | `[]` |  |  |  | Bands from the cut into the surface. Each needs a width in metres. Depth in metres defaults to 0, rows defaults to 1, and group defaults to band0, band1 and so on. The default [] joins the grid directly to the trim. |
+| `bands` | json | `[]` |  |  |  | A band list for every cut, or an object mapping trim name patterns to lists. The first matching pattern wins and * matches any text. Unmatched trims get no bands. Each band needs a width in metres. Depth in metres defaults to 0, rows defaults to 1, and group defaults to band0, band1 and so on. The default [] joins the grid directly to the trim. |
 
 **Writes:** A polygon mesh with point N, vertex uv in metres, and a primitive band index. Grid and transition faces are in surface with band -1. Band faces go in their named groups. For bands and transitions, min_angle gives the smallest face angle in degrees and thin_faces counts faces with angles below 15 degrees. Both are 0 when there are no such faces.
 
@@ -2735,7 +2735,7 @@ category: `curve` · aliases: `surface_trim`, `nurbs_trim`, `trim_profile`
 
 Cut openings or keep patches on NURBS surfaces using closed outlines.
 
-A trim is a boundary that tells a smooth surface which part to keep. Project closed side outlines along X, plan outlines along Y, and front outlines along Z. Use hits all to cut both flanks of a symmetric body. Use keep both to get the body and the matching patch for glass or a lid. The trim lives on the exact surface, which keeps its control points. Rendered and exported meshes follow the cut, and later polygon nodes see the openings. The cut edges are closed NURBS curves ready for sweep.
+A trim is a boundary that tells a smooth surface which part to keep. Project closed side outlines along X, plan outlines along Y, and front outlines along Z. Outlines can cross an open surface edge, where the cut ends at that edge. Use hits all to cut both flanks of a symmetric body. Use keep both to get the surrounding surface and the matching patch. The trim lives on the exact surface, which keeps its control points. Rendered and exported meshes follow the cut, and later polygon nodes see the openings. The cut edges are closed NURBS curves ready for sweep.
 
 **Inputs**
 
@@ -2757,7 +2757,7 @@ A trim is a boundary that tells a smooth surface which part to keep. Project clo
 | `tolerance` | float | `0.0005` | 1e-9.. |  |  | Maximum projection and edge fitting error in metres. Defaults to 0.0005 m. |
 | `edges` | bool | `true` |  |  |  | Output closed NURBS curves along the cut boundaries by default. |
 
-**Writes:** Exact NURBS surfaces with trim boundaries in their UV domain. Both creates primitive groups trim_outside and trim_inside. The edges group contains the cut curves with primitive name and edge_surface.
+**Writes:** Exact NURBS surfaces with trim boundaries in their UV domain and outline names in the primitive trim_names attribute when the outlines are named. Both creates primitive groups trim_outside and trim_inside. The edges group contains the cut curves with primitive name and edge_surface.
 
 **Example**
 
