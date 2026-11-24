@@ -1,0 +1,76 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["fit_error:float:1", "materials:string:1"],
+      "point": ["N:float:3", "P:float:3", "line:string:1", "row:int:1", "station:int:1"],
+      "prim": ["material:string:1", "name:string:1", "row:int:1", "station:int:1"],
+      "vertex": ["creaseweight:float:1", "uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.4016, 0.9078, 1.15],
+      "min": [-0.4016, 0.15, -1.15]
+    },
+    "counts": {
+      "points": 4826,
+      "prims": 4722,
+      "vertices": 19060,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": [
+        "line_belt",
+        "line_crown",
+        "line_edge",
+        "line_keel",
+        "line_mid",
+        "line_roof",
+        "line_shoulder",
+        "line_sill"
+      ],
+      "point": [],
+      "prim": ["caps", "front", "inner", "lower", "outer", "pod_front", "pod_rear", "rim", "side", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "57ef115bfe3fd2ed",
+      "attributes": {
+        "detail.fit_error": "9be171658ea4219f",
+        "detail.materials": "25a4b111f34640ff",
+        "group.edge.line_belt": "c324422843d384ae",
+        "group.edge.line_crown": "c324422843d384ae",
+        "group.edge.line_edge": "c324422843d384ae",
+        "group.edge.line_keel": "c324422843d384ae",
+        "group.edge.line_mid": "c324422843d384ae",
+        "group.edge.line_roof": "c324422843d384ae",
+        "group.edge.line_shoulder": "c324422843d384ae",
+        "group.edge.line_sill": "c324422843d384ae",
+        "group.prim.caps": "2fbdaa5d584de777",
+        "group.prim.front": "dfad4edd9a098d77",
+        "group.prim.inner": "973bcc1dce1faeb7",
+        "group.prim.lower": "42cae55dcc21fbb7",
+        "group.prim.outer": "1da19f417a7294bb",
+        "group.prim.pod_front": "413b745dbed050f7",
+        "group.prim.pod_rear": "e83828dd57179777",
+        "group.prim.rim": "baf8bafde6c9c657",
+        "group.prim.side": "853a77dde66464f7",
+        "group.prim.sides": "c4590a61df43e7db",
+        "point.N": "fc76d9025c094e30",
+        "point.line": "6d1df41777909a21",
+        "point.row": "8cfb2fbcf9864b36",
+        "point.station": "3b0ebe55f25b340f",
+        "prim.material": "d5ada1159ae4e7a7",
+        "prim.name": "3a278f512e1e248b",
+        "prim.row": "1a47f205870f81df",
+        "prim.station": "ef80780594ab1fdf",
+        "vertex.creaseweight": "2269d245b463459f",
+        "vertex.uv": "c26147c1ae173553"
+      },
+      "topology": "d2182f510c390103"
+    }
+  },
+  "name": "example.hover_bike",
+  "ok": true,
+  "source": "examples/hover_bike.json",
+  "warnings": []
+}

@@ -1,0 +1,887 @@
+{
+ "version": 1,
+ "description": "An electric kettle: an upright white body drawn from four feature lines and smoothed, with a pouring lip and a handle grown out of it, a flush lid with a fine gap line, a steel knob and a steel base plate.",
+ "params": {
+  "height": {
+   "type": "float",
+   "default": 0.24,
+   "min": 0.18,
+   "max": 0.32,
+   "step": 0.005,
+   "label": "height",
+   "desc": "height of the whole kettle, knob included (m)"
+  },
+  "belly": {
+   "type": "float",
+   "default": 0.15,
+   "min": 0.12,
+   "max": 0.2,
+   "step": 0.005,
+   "label": "belly",
+   "desc": "width of the body at its widest (m)"
+  },
+  "spout_length": {
+   "type": "float",
+   "default": 0.035,
+   "min": 0.01,
+   "max": 0.06,
+   "step": 0.005,
+   "label": "spout length",
+   "desc": "how far the spout reaches out past the body (m)"
+  },
+  "handle_thickness": {
+   "type": "float",
+   "default": 0.026,
+   "min": 0.016,
+   "max": 0.04,
+   "step": 0.002,
+   "label": "handle thickness",
+   "desc": "thickness of the handle where you grip it (m)"
+  },
+  "gap": {
+   "type": "float",
+   "default": 0.0015,
+   "min": 0.0008,
+   "max": 0.003,
+   "step": 0.0001,
+   "label": "gap",
+   "desc": "how far the lid stands proud of the top (m)"
+  }
+ },
+ "vars": {
+  "height": 0.24,
+  "belly": 0.15,
+  "spout_length": 0.035,
+  "handle_thickness": 0.026,
+  "gap": 0.0015
+ },
+ "nodes": {
+  "cage": {
+   "type": "lines_plan",
+   "note": "four feature lines run up the body from base to rim; mirrored they make an eight-sided cage with a flat top and bottom, and creases hold the base line and the top rim crisp",
+   "params": {
+    "lines": {
+     "a": [
+      [
+       "=belly/2*0.3061",
+       "=0.01+(height-0.026-gap)*0",
+       "=belly/2*0.7391"
+      ],
+      [
+       "=belly/2*0.3559",
+       "=0.01+(height-0.026-gap)*0.07",
+       "=belly/2*0.8592"
+      ],
+      [
+       "=belly/2*0.3827",
+       "=0.01+(height-0.026-gap)*0.28",
+       "=belly/2*0.9239"
+      ],
+      [
+       "=belly/2*0.3769",
+       "=0.01+(height-0.026-gap)*0.55",
+       "=belly/2*0.91+spout_length*0.04"
+      ],
+      [
+       "=belly/2*0.3454",
+       "=0.01+(height-0.026-gap)*0.78",
+       "=belly/2*0.8777+spout_length*0.2"
+      ],
+      [
+       "=belly/2*0.2626",
+       "=0.01+(height-0.026-gap)*0.9",
+       "=belly/2*0.8453+spout_length*0.55"
+      ],
+      [
+       "=belly/2*0.1852",
+       "=0.01+(height-0.026-gap)*1",
+       "=belly/2*0.813+spout_length*1"
+      ]
+     ],
+     "b": [
+      [
+       "=belly/2*0.7391",
+       "=0.01+(height-0.026-gap)*0",
+       "=belly/2*0.3061"
+      ],
+      [
+       "=belly/2*0.8592",
+       "=0.01+(height-0.026-gap)*0.07",
+       "=belly/2*0.3559"
+      ],
+      [
+       "=belly/2*0.9239",
+       "=0.01+(height-0.026-gap)*0.28",
+       "=belly/2*0.3827"
+      ],
+      [
+       "=belly/2*0.91",
+       "=0.01+(height-0.026-gap)*0.55",
+       "=belly/2*0.3769"
+      ],
+      [
+       "=belly/2*0.8777",
+       "=0.01+(height-0.026-gap)*0.78",
+       "=belly/2*0.3635+spout_length*0.02"
+      ],
+      [
+       "=belly/2*0.8031",
+       "=0.01+(height-0.026-gap)*0.9",
+       "=belly/2*0.3502+spout_length*0.12"
+      ],
+      [
+       "=belly/2*0.6911",
+       "=0.01+(height-0.026-gap)*1",
+       "=belly/2*0.3368+spout_length*0.3"
+      ]
+     ],
+     "c": [
+      [
+       "=belly/2*0.7391",
+       "=0.01+(height-0.026-gap)*0",
+       "=belly/2*-0.3061"
+      ],
+      [
+       "=belly/2*0.8592",
+       "=0.01+(height-0.026-gap)*0.07",
+       "=belly/2*-0.3559"
+      ],
+      [
+       "=belly/2*0.9239",
+       "=0.01+(height-0.026-gap)*0.28",
+       "=belly/2*-0.3827"
+      ],
+      [
+       "=belly/2*0.91",
+       "=0.01+(height-0.026-gap)*0.55",
+       "=belly/2*-0.3769"
+      ],
+      [
+       "=belly/2*0.8777",
+       "=0.01+(height-0.026-gap)*0.78",
+       "=belly/2*-0.3635"
+      ],
+      [
+       "=belly/2*0.8453",
+       "=0.01+(height-0.026-gap)*0.9",
+       "=belly/2*-0.3502"
+      ],
+      [
+       "=belly/2*0.813",
+       "=0.01+(height-0.026-gap)*1",
+       "=belly/2*-0.3368"
+      ]
+     ],
+     "d": [
+      [
+       "=belly/2*0.3061",
+       "=0.01+(height-0.026-gap)*0",
+       "=belly/2*-0.7391"
+      ],
+      [
+       "=belly/2*0.3559",
+       "=0.01+(height-0.026-gap)*0.07",
+       "=belly/2*-0.8592"
+      ],
+      [
+       "=belly/2*0.3827",
+       "=0.01+(height-0.026-gap)*0.28",
+       "=belly/2*-0.9239"
+      ],
+      [
+       "=belly/2*0.3769",
+       "=0.01+(height-0.026-gap)*0.55",
+       "=belly/2*-0.91"
+      ],
+      [
+       "=belly/2*0.3635",
+       "=0.01+(height-0.026-gap)*0.78",
+       "=belly/2*-0.8777"
+      ],
+      [
+       "=belly/2*0.3502",
+       "=0.01+(height-0.026-gap)*0.9",
+       "=belly/2*-0.8453"
+      ],
+      [
+       "=belly/2*0.3368",
+       "=0.01+(height-0.026-gap)*1",
+       "=belly/2*-0.813"
+      ]
+     ]
+    },
+    "creases": {
+     "a": [
+      [
+       "=0.01",
+       1.6
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.04",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.95",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)",
+       1.6
+      ]
+     ],
+     "b": [
+      [
+       "=0.01",
+       1.6
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.04",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.95",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)",
+       1.6
+      ]
+     ],
+     "c": [
+      [
+       "=0.01",
+       1.6
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.04",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.95",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)",
+       1.6
+      ]
+     ],
+     "d": [
+      [
+       "=0.01",
+       1.6
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.04",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)*0.95",
+       0
+      ],
+      [
+       "=0.01+(height-0.026-gap)",
+       1.6
+      ]
+     ]
+    },
+    "mirror": "x",
+    "axis": "y",
+    "ends": "cap",
+    "fit_levels": 2,
+    "stations": [
+     "=0.01+(height-0.026-gap)*0",
+     "=0.01+(height-0.026-gap)*0.07",
+     "=0.01+(height-0.026-gap)*0.28",
+     "=0.01+(height-0.026-gap)*0.55",
+     "=0.01+(height-0.026-gap)*0.78",
+     "=0.01+(height-0.026-gap)*0.9",
+     "=0.01+(height-0.026-gap)*1"
+    ]
+   }
+  },
+  "g_htop": {
+   "type": "group",
+   "in": [
+    "cage"
+   ],
+   "params": {
+    "name": "htop",
+    "class": "prim",
+    "expr": "@station==4 && abs(@P.x)<0.012 && @P.z<0"
+   }
+  },
+  "g_hbot": {
+   "type": "group",
+   "in": [
+    "g_htop"
+   ],
+   "params": {
+    "name": "hbot",
+    "class": "prim",
+    "expr": "@station==2 && abs(@P.x)<0.012 && @P.z<0"
+   }
+  },
+  "e_top": {
+   "type": "group",
+   "in": [
+    "g_hbot"
+   ],
+   "params": {
+    "name": "htop_edges",
+    "class": "edge",
+    "pattern": "border:htop"
+   }
+  },
+  "e_bot": {
+   "type": "group",
+   "in": [
+    "e_top"
+   ],
+   "params": {
+    "name": "hbot_edges",
+    "class": "edge",
+    "pattern": "border:hbot"
+   }
+  },
+  "holes": {
+   "type": "delete",
+   "in": [
+    "e_bot"
+   ],
+   "params": {
+    "group": "htop hbot"
+   }
+  },
+  "hpath": {
+   "type": "curve",
+   "note": "the handle path: out from the upper back, round the grip and back in low on the body",
+   "params": {
+    "points": [
+     [
+      0,
+      "=(0.01+(height-0.026-gap)*0.84)",
+      "=-((belly/2)*0.93*0.924+0.004)"
+     ],
+     [
+      0,
+      "=(0.01+(height-0.026-gap)*0.84)+0.008",
+      "=-(((belly/2)*0.93*0.924+0.004)+0.016)"
+     ],
+     [
+      0,
+      "=(0.01+(height-0.026-gap)*0.84)+0.014",
+      "=-((belly/2)+0.022)"
+     ],
+     [
+      0,
+      "=(0.01+(height-0.026-gap)*0.84)-0.014",
+      "=-((belly/2)+0.038)"
+     ],
+     [
+      0,
+      "=((0.01+(height-0.026-gap)*0.84)+(0.01+(height-0.026-gap)*0.415))/2",
+      "=-((belly/2)+0.042)"
+     ],
+     [
+      0,
+      "=(0.01+(height-0.026-gap)*0.415)+0.02",
+      "=-((belly/2)+0.034)"
+     ],
+     [
+      0,
+      "=(0.01+(height-0.026-gap)*0.415)+0.006",
+      "=-(((belly/2)*0.99*0.924+0.004)+0.016)"
+     ],
+     [
+      0,
+      "=(0.01+(height-0.026-gap)*0.415)",
+      "=-((belly/2)*0.99*0.924+0.004)"
+     ]
+    ]
+   }
+  },
+  "hprof": {
+   "type": "curve",
+   "params": {
+    "closed": true,
+    "points": [
+     [
+      "=handle_thickness/2",
+      "=(handle_thickness*0.6+0.01)/2",
+      0
+     ],
+     [
+      "=-handle_thickness/2",
+      "=(handle_thickness*0.6+0.01)/2",
+      0
+     ],
+     [
+      "=-handle_thickness/2",
+      "=-(handle_thickness*0.6+0.01)/2",
+      0
+     ],
+     [
+      "=handle_thickness/2",
+      "=-(handle_thickness*0.6+0.01)/2",
+      0
+     ]
+    ]
+   }
+  },
+  "handle": {
+   "type": "sweep",
+   "in": [
+    "hpath",
+    "hprof"
+   ],
+   "params": {
+    "caps": false,
+    "up": [
+     1,
+     0,
+     0
+    ],
+    "scale_ramp": [
+     [
+      0,
+      0.8
+     ],
+     [
+      0.5,
+      1.15
+     ],
+     [
+      1,
+      0.8
+     ]
+    ]
+   }
+  },
+  "hte": {
+   "type": "group",
+   "in": [
+    "handle"
+   ],
+   "params": {
+    "name": "hte",
+    "class": "edge",
+    "pattern": "boundary",
+    "bbox_min": [
+     -1,
+     "=((0.01+(height-0.026-gap)*0.84)+(0.01+(height-0.026-gap)*0.415))/2",
+     -1
+    ]
+   }
+  },
+  "hbe": {
+   "type": "group",
+   "in": [
+    "hte"
+   ],
+   "params": {
+    "name": "hbe",
+    "class": "edge",
+    "pattern": "boundary",
+    "bbox_max": [
+     1,
+     "=((0.01+(height-0.026-gap)*0.84)+(0.01+(height-0.026-gap)*0.415))/2",
+     1
+    ]
+   }
+  },
+  "joined": {
+   "type": "merge",
+   "in": [
+    "holes",
+    "hbe"
+   ]
+  },
+  "bridge1": {
+   "type": "polybridge",
+   "note": "the handle ends are bridged into the holes, so the handle is one surface with the body",
+   "in": [
+    "joined"
+   ],
+   "params": {
+    "source": "htop_edges",
+    "target": "hte",
+    "divisions": 1
+   }
+  },
+  "bridge2": {
+   "type": "polybridge",
+   "in": [
+    "bridge1"
+   ],
+   "params": {
+    "source": "hbot_edges",
+    "target": "hbe",
+    "divisions": 1
+   }
+  },
+  "skin": {
+   "type": "subdivide",
+   "in": [
+    "bridge2"
+   ],
+   "params": {
+    "levels": 2
+   }
+  },
+  "body_cut": {
+   "type": "null",
+   "in": [
+    "skin"
+   ]
+  },
+  "body_name": {
+   "type": "attrib_create",
+   "in": [
+    "body_cut"
+   ],
+   "params": {
+    "name": "name",
+    "class": "prim",
+    "value": "body"
+   }
+  },
+  "body_mat": {
+   "type": "material",
+   "in": [
+    "body_name"
+   ],
+   "params": {
+    "name": "body",
+    "base_color": [
+     0.92,
+     0.92,
+     0.9
+    ],
+    "metallic": 0,
+    "roughness": 0.5
+   }
+  },
+  "lid_prof": {
+   "type": "curve",
+   "note": "the lid is a round plate resting on the flat top, standing proud by gap, with a softly rounded edge",
+   "params": {
+    "points": [
+     [
+      0,
+      "=(0.01+(height-0.026-gap))-0.0025",
+      0
+     ],
+     [
+      "=(belly/2*0.88-0.012)",
+      "=(0.01+(height-0.026-gap))-0.0025",
+      0
+     ],
+     [
+      "=(belly/2*0.88-0.012)",
+      "=(0.01+(height-0.026-gap))+gap-0.0014",
+      0
+     ],
+     [
+      "=(belly/2*0.88-0.012)-0.0004",
+      "=(0.01+(height-0.026-gap))+gap-0.0006",
+      0
+     ],
+     [
+      "=(belly/2*0.88-0.012)-0.0014",
+      "=(0.01+(height-0.026-gap))+gap",
+      0
+     ],
+     [
+      0,
+      "=(0.01+(height-0.026-gap))+gap",
+      0
+     ]
+    ]
+   }
+  },
+  "lid_solid": {
+   "type": "revolve",
+   "in": [
+    "lid_prof"
+   ],
+   "params": {
+    "segments": 64
+   }
+  },
+  "lid_name": {
+   "type": "attrib_create",
+   "in": [
+    "lid_solid"
+   ],
+   "params": {
+    "name": "name",
+    "class": "prim",
+    "value": "lid"
+   }
+  },
+  "lid_mat": {
+   "type": "material",
+   "in": [
+    "lid_name"
+   ],
+   "params": {
+    "name": "body",
+    "base_color": [
+     0.92,
+     0.92,
+     0.9
+    ],
+    "metallic": 0,
+    "roughness": 0.5
+   }
+  },
+  "knob_prof": {
+   "type": "curve",
+   "params": {
+    "points": [
+     [
+      0,
+      "=((0.01+(height-0.026-gap))+gap)-0.001",
+      0
+     ],
+     [
+      0.007,
+      "=((0.01+(height-0.026-gap))+gap)-0.001",
+      0
+     ],
+     [
+      0.0075,
+      "=((0.01+(height-0.026-gap))+gap)+0.0015",
+      0
+     ],
+     [
+      0.0035,
+      "=((0.01+(height-0.026-gap))+gap)+0.004",
+      0
+     ],
+     [
+      0.0035,
+      "=((0.01+(height-0.026-gap))+gap)+0.008",
+      0
+     ],
+     [
+      0.0085,
+      "=((0.01+(height-0.026-gap))+gap)+0.0095",
+      0
+     ],
+     [
+      0.0085,
+      "=((0.01+(height-0.026-gap))+gap)+0.0135",
+      0
+     ],
+     [
+      0.006,
+      "=((0.01+(height-0.026-gap))+gap)+0.0155",
+      0
+     ],
+     [
+      0,
+      "=((0.01+(height-0.026-gap))+gap)+0.016",
+      0
+     ]
+    ]
+   }
+  },
+  "knob_rev": {
+   "type": "revolve",
+   "in": [
+    "knob_prof"
+   ],
+   "params": {
+    "segments": 20
+   }
+  },
+  "knob_name": {
+   "type": "attrib_create",
+   "in": [
+    "knob_rev"
+   ],
+   "params": {
+    "name": "name",
+    "class": "prim",
+    "value": "knob"
+   }
+  },
+  "knob_mat": {
+   "type": "material",
+   "in": [
+    "knob_name"
+   ],
+   "params": {
+    "name": "trim",
+    "base_color": [
+     0.75,
+     0.76,
+     0.78
+    ],
+    "metallic": 1,
+    "roughness": 0.3
+   }
+  },
+  "plate_prof": {
+   "type": "curve",
+   "params": {
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      "=(belly/2*0.78-0.003)-0.001",
+      0,
+      0
+     ],
+     [
+      "=(belly/2*0.78-0.003)",
+      0.001,
+      0
+     ],
+     [
+      "=(belly/2*0.78-0.003)",
+      0.009,
+      0
+     ],
+     [
+      "=(belly/2*0.78-0.003)-0.0005",
+      0.01,
+      0
+     ],
+     [
+      0,
+      0.01,
+      0
+     ]
+    ]
+   }
+  },
+  "plate_rev": {
+   "type": "revolve",
+   "in": [
+    "plate_prof"
+   ],
+   "params": {
+    "segments": 32
+   }
+  },
+  "plate_name": {
+   "type": "attrib_create",
+   "in": [
+    "plate_rev"
+   ],
+   "params": {
+    "name": "name",
+    "class": "prim",
+    "value": "base_plate"
+   }
+  },
+  "plate_mat": {
+   "type": "material",
+   "in": [
+    "plate_name"
+   ],
+   "params": {
+    "name": "trim",
+    "base_color": [
+     0.75,
+     0.76,
+     0.78
+    ],
+    "metallic": 1,
+    "roughness": 0.3
+   }
+  },
+  "kettle_parts": {
+   "type": "merge",
+   "in": [
+    "body_mat",
+    "lid_mat",
+    "knob_mat",
+    "plate_mat"
+   ]
+  },
+  "shaded": {
+   "type": "normal",
+   "in": [
+    "kettle_parts"
+   ],
+   "params": {
+    "class": "vertex",
+    "cusp_angle": 85
+   }
+  },
+  "budget": {
+   "type": "assert",
+   "in": [
+    "shaded"
+   ],
+   "params": {
+    "label": "budget",
+    "on_fail": "error",
+    "expr": "nvertices - 2 * nprims < 6000"
+   }
+  },
+  "closed": {
+   "type": "assert",
+   "in": [
+    "budget"
+   ],
+   "params": {
+    "label": "closed",
+    "on_fail": "error",
+    "watertight": true,
+    "no_flipped": true
+   }
+  },
+  "standing": {
+   "type": "assert",
+   "in": [
+    "closed"
+   ],
+   "params": {
+    "label": "standing",
+    "on_fail": "error",
+    "expr": "Math.abs(bbox.min.y) < 0.00001"
+   }
+  },
+  "kettle": {
+   "type": "null",
+   "in": [
+    "standing"
+   ]
+  }
+ },
+ "output": "kettle",
+ "meta": {
+  "render": {
+   "views": [
+    "persp"
+   ],
+   "azimuth": -60,
+   "elevation": 20,
+   "size": "1600x900",
+   "shading": "pbr",
+   "grid": false
+  }
+ },
+ "outputs": {
+  "kettle": {
+   "node": "kettle",
+   "label": "Kettle",
+   "kind": "mesh",
+   "tags": [
+    "kettle",
+    "appliance",
+    "product-design",
+    "smooth",
+    "prop"
+   ],
+   "description": "An electric kettle in four named pieces: a white body with a pouring lip and handle grown from it, a flush lid, a steel knob and a steel base plate."
+  }
+ }
+}
