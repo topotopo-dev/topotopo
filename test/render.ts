@@ -6,7 +6,9 @@ import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { Geometry } from '../src/core/geometry.ts';
-import { parseViews, readUnderlay, renderGeometry } from '../src/render/raster.ts';
+import { dist, length, scale } from '../src/core/math.ts';
+import { packedFromMatrices } from '../src/core/packed.ts';
+import { curvatureCombs, parseViews, readUnderlay, renderGeometry } from '../src/render/raster.ts';
 import type { RenderOptions, RenderResult, UnderlayImage as UnderlayImageT } from '../src/render/raster.ts';
 import { renderArgs } from '../src/render/options.ts';
 import { windingGrid } from '../src/render/section.ts';
@@ -199,6 +201,74 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(note(custom, /glyphs v/), 'glyph_attrib alone implies glyphs "custom"');
   const missing = render(v, { views: ['top'], size: T, glyphs: 'up' });
   check(note(missing, /no attribute "up"/), 'glyphs on a missing attribute: note');
+}
+
+// ---------------------------------------------------------------- curvature combs
+{
+  const h = Math.SQRT1_2, radius = 2, glyphScale = 0.42;
+  const circle = await cook({ out: { type: 'nurbs', params: {
+    points: [[2, 0, 0], [2, 2, 0], [0, 2, 0], [-2, 2, 0], [-2, 0, 0], [-2, -2, 0], [0, -2, 0], [2, -2, 0], [2, 0, 0]],
+    order: 3, knots: [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1], weights: [1, h, 1, h, 1, h, 1, h, 1],
+  } } });
+  const { curves: [circleComb], peak } = curvatureCombs(circle);
+  const step = 2 * radius * Math.sin(Math.PI / 64);
+  check(circleComb.samples.length === 65 && Math.abs(peak - 1 / radius) < 1e-10 &&
+    circleComb.samples.every(({ point, offset }, i, samples) =>
+      offset !== null && dist(scale(offset, glyphScale), scale(point, glyphScale / radius)) < 1e-6 * glyphScale &&
+      (i === 0 || Math.abs(dist(point, samples[i - 1].point) - step) < 1e-10)),
+  'comb: exact NURBS circle has equal arc-length spacing and equal outward teeth');
+
+  const s = await cook({ out: { type: 'nurbs', params: {
+    points: [[-1, -1, 0], [-1 / 3, 1, 0], [1 / 3, -1, 0], [1, 1, 0]], order: 4,
+  } } });
+  const { curves: [{ samples: sSamples }] } = curvatureCombs(s);
+  const mid = sSamples[8];
+  check(sSamples.length === 17 && length(mid.point) < 1e-10 && mid.offset === null &&
+    sSamples.slice(0, 8).every(({ offset }) => offset && offset[1] > 0) &&
+    sSamples.slice(9).every(({ offset }) => offset && offset[1] < 0),
+  'comb: NURBS S-curve flips side and has zero tooth at the inflection');
+
+  const opts = { views: ['front' as const], size: T, footer: false, orthoScale: 6, glyphScale };
+  const straight = new Geometry({ positions: [0, 0, 0, 1, 0, 0, 2, 0, 0], prims: [[0, 1, 2]], closed: false });
+  const { curves: [straightComb] } = curvatureCombs(straight);
+  const straightRender = render(straight, { ...opts, glyphs: 'comb' });
+  check(straightComb.samples.length === 3 && straightComb.samples.every(({ offset }) => offset === null) &&
+    straightRender.notes.includes('glyphs comb: 1 curve, longest tooth 0.00 m = curvature 0.00 /m'),
+  'comb: straight polyline is counted and draws no teeth');
+
+  const arc = new Geometry({ positions: Array.from({ length: 7 }, (_, i) => {
+    const angle = (i - 3) * 0.015;
+    return [radius * Math.sin(angle), radius * Math.cos(angle) + (i === 3 ? 0.001 : 0), 0];
+  }).flat(), prims: [[0, 1, 2, 3, 4, 5, 6]], closed: false });
+  const { curves: [{ samples: arcSamples }] } = curvatureCombs(arc);
+  const teeth = arcSamples.map(({ offset }) => offset ? length(offset) : 0);
+  check(teeth[2] > 0 && teeth[4] > 0 && teeth[3] >= 3 * Math.max(teeth[2], teeth[4]),
+    'comb: 1 mm nudge in a polyline arc gives a tooth at least three times its neighbours');
+
+  const mesh = render(box, { ...opts, ...renderArgs({ glyphs: 'comb' }) });
+  let invalid = '';
+  try { render(box, { ...opts, ...renderArgs({ glyphs: 'bogus' }) }); } catch (e) { invalid = (e as Error).message; }
+  check(mesh.notes.includes('glyphs comb: no curves to comb (Bezier, NURBS or polylines)') &&
+    invalid === 'unknown glyphs "bogus" (use none, N, up, orient, v, custom, comb)',
+  'comb: a mesh gives the no-curves note, and an unknown mode lists comb');
+
+  const plain = render(circle, opts), drawn = render(circle, { ...opts, glyphs: 'comb' });
+  check(diff(plain, drawn) > 50 && count(drawn, ([r, g, b]) => r === 255 && g === 184 && b === 102) > 50 &&
+    count(drawn, ([r, g, b]) => r === 240 && g === 107 && b === 31) > 50 &&
+    drawn.notes.includes('glyphs comb: 1 curve, longest tooth 0.42 m = curvature 0.50 /m'),
+  'comb: raster shows orange teeth and envelope and reports the curve count and scale');
+
+  const ring = await cook({ out: { type: 'circle', params: { open: true, segments: 24 } } });
+  const limited = curvatureCombs(Geometry.merge([ring, circle]), 12);
+  check(limited.curves.length === 2 && limited.curves[0].closed &&
+    limited.curves[0].samples.every(({ offset }) => offset && Math.abs(length(offset) - 1) < 1e-10) &&
+    limited.curves[1].samples.every(({ offset }) => offset && Math.abs(length(offset) - 0.5) < 1e-10) &&
+    limited.curves.reduce((sum, c) => sum + c.samples.length, 0) === 12,
+  'comb: polyline loop closes, two curves share one scale, and the sample limit is global');
+
+  const packed = packedFromMatrices(circle, [[2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1]]);
+  check(note(render(packed, { ...opts, orthoScale: 10, glyphs: 'comb' }), /1 curve, longest tooth 0\.42 m = curvature 0\.25 \/m/),
+    'comb: packed NURBS curvature is evaluated after the instance transform');
 }
 
 // ---------------------------------------------------------------- labels and legends

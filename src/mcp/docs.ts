@@ -1607,6 +1607,10 @@ QUESTION → OPTION
                    glyph_scale (default 5% of the bbox diagonal), max_glyphs (default 400, evenly subsampled). Lines start on
                    the surface with a bright tip; parts behind the surface are dimmed. orient: X red, Y green, Z blue.
                    N missing → computed face normals. Flipped normals: glyphs point into the surface (dimmed) + blue faces.
+  Where does a curve's curvature change?  glyphs:"comb" on Bezier curves, NURBS curves and polylines.
+                   Orange teeth point away from the centre of curvature, and a darker orange line joins their tips.
+                   glyph_scale sets the longest tooth across the render (default 15% of the bbox diagonal).
+                   max_glyphs limits the total comb samples (default 2000).
   Which group is which? What is where?             label_groups:true (names on the group, prim-group borders and group points in
                    the label colour, legend with counts) · label_pieces:true (#0, #1 … connected pieces) · label_attrib:"name"
                    (each distinct value of a string/int attribute) · point_numbers / prim_numbers (visible ones, first max_labels)
@@ -1647,6 +1651,7 @@ CLI: several renders per cook: the options after a --render apply to that render
   beauty.png a pbr three-quarter view:
     topotopo g.json --size 1200x600 --render side.png --views front --underlay ref.png --render beauty.png --views front_left --shading pbr
 CLI: --wireframe all --section y:0.5 --clip x:0.5 --glyphs N --labels groups,pieces --shading matcap --legend --size 1600 --scale 2
+     --views front --glyphs comb
   --shading pbr --exposure 0.5 --views front_left --size 1600x600 --transparent --no-grid --sockets
   --azimuth -90 --elevation 10 --look-at 0.6,0.15,0 --zoom 4 --ortho-scale 0.5
   --from 6,1.7,9 --to 0,2,0 --fov 60 (a camera by position)

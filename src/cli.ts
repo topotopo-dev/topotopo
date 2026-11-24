@@ -2,7 +2,7 @@
 // Command line: cook a graph JSON file, then render / export / inspect.
 //   node src/cli.ts <graph.json> [--node name | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
-//                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v] [--labels groups,pieces,points,prims,attrib:name]
+//                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v|comb] [--labels groups,pieces,points,prims,attrib:name]
 //                   [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--cd auto|ignore|multiply] [--grey] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
 //                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb] [--export out.obj]
@@ -164,7 +164,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--follow owner/name] (use that package\'s working folder, where the package finds it, instead of its copy, for this run: renders, inspect and exports use it, unpublished (the export\'s source record lists it under "followed"); repeat it)',
     '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added; exports use the published copies, whatever --follow shows)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
-    '                          [--glyphs N|up|orient|v] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
+    '                          [--glyphs N|up|orient|v|comb] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
     '                          Zebra reflects black and white stripes to show how smoothly surfaces flow.',
     '                          [--cd auto|ignore|multiply] (shading pbr: auto = a named material wins over Cd, Cd colours prims without one; multiply = Cd tints the material too)',

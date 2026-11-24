@@ -165,10 +165,10 @@ const RENDER_PROPS = {
     type: 'object', description: 'cut the persp view(s) by a plane and remove the camera side to reveal interiors: {axis, offset (bbox fraction, default 0.5), absolute, cap (default true: fill the cut red, blue where a solid is inside-out; false: see the inside, back faces blue)}',
     properties: { axis: { type: 'string', enum: ['x', 'y', 'z'] }, offset: { type: 'number' }, absolute: { type: 'boolean' }, cap: { type: 'boolean' } },
   },
-  glyphs: { type: 'string', enum: ['none', 'N', 'up', 'orient', 'v', 'custom'], description: 'per-element vectors as lines with a bright tip (parts behind the surface dimmed): N (normals; computed face normals if absent), up, v (length by magnitude), orient (X red, Y green, Z blue axes), custom (glyph_attrib)' },
+  glyphs: { type: 'string', enum: ['none', 'N', 'up', 'orient', 'v', 'custom', 'comb'], description: 'per-element vectors as lines with a bright tip (parts behind the surface dimmed): N (normals; computed face normals if absent), up, v (length by magnitude), orient (X red, Y green, Z blue axes), custom (glyph_attrib). Use comb for orange curvature teeth and an envelope on Bezier curves, NURBS curves and polylines.' },
   glyph_attrib: { type: 'string', description: 'attribute for glyphs "custom": 3 floats = vector, 4 floats = quaternion' },
-  glyph_scale: { type: 'number', description: 'glyph length in world units (default 5% of the bbox diagonal)' },
-  max_glyphs: { type: 'number', description: 'evenly subsample to at most this many glyphs (default 400)' },
+  glyph_scale: { type: 'number', description: 'glyph length in world units (default 5% of the bbox diagonal). For comb, the longest tooth defaults to 15% of the bbox diagonal.' },
+  max_glyphs: { type: 'number', description: 'evenly subsample to at most this many glyphs (default 400, or 2000 for comb)' },
   max_triangles: { type: 'number', description: 'packed instances: draw up to this many expanded triangles (default 600000, max 50M); above it an evenly spread subset is drawn and a note says so' },
   heightfield_res: { description: 'heightfields: the most quads drawn per side (default 256: a 513 × 513 field draws at 257 × 257, and the footer and a note say so), or "full" for every sample', anyOf: [{ type: 'number', minimum: 1 }, { type: 'string', enum: ['full'] }] },
   heightfield_layer: { type: 'string', description: 'heightfields: the layer drawn in red over the shaded terrain (default "mask"; e.g. "flow", "sediment", "path"; "none" for none). 0..1 layers show as they are, others from their min to their max; the footer legend names it, and a note says when a field has no such layer' },
@@ -447,7 +447,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
     },
     {
       name: 'render',
-      description: 'Render a node\'s output to a PNG you can see: labelled orthographic + perspective views, smooth shading, wireframe, curves and points; back-faces show BLUE (flipped normals). color_by maps an attribute to colours; highlight shows a group in orange. Overlays that answer questions (help topic "render"): wireframe "all"/"hard"/"boundary"/"groups" (topology, creases, holes), views "section" or clip (interiors, wall thickness), glyphs N/up/orient/v (orientation), label_groups/label_pieces/label_attrib/point_numbers/prim_numbers (what is where), shading matcap/ao (form), legend, views "turntable".',
+      description: 'Render a node\'s output to a PNG you can see: labelled orthographic + perspective views, smooth shading, wireframe, curves and points; back-faces show BLUE (flipped normals). color_by maps an attribute to colours; highlight shows a group in orange. Overlays that answer questions (help topic "render"): wireframe "all"/"hard"/"boundary"/"groups" (topology, creases, holes), views "section" or clip (interiors, wall thickness), glyphs N/up/orient/v (orientation) or comb (curve curvature), label_groups/label_pieces/label_attrib/point_numbers/prim_numbers (what is where), shading matcap/ao (form), legend, views "turntable".',
       inputSchema: {
         type: 'object',
         properties: {
