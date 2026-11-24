@@ -2,14 +2,14 @@
 
 # TopoTopo node reference
 
-271 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
+272 node types and 45 outputs of TopoTopo's own packages. Node types and parameter names are case- and underscore-insensitive and accept the listed
 aliases. Every parameter can also be an `"=expr"` string evaluated with the graph vars. The same definitions drive
 validation, the MCP `catalog`/`help` tools and this page.
 
 ## Contents
 
 - [generate](#generate-nodes): [beam](#beam) · [box](#box) · [grid](#grid) · [lsystem](#lsystem) · [parametric_surface](#parametric_surface) · [platonic](#platonic) · [point_grid](#point_grid) · [points](#points) · [sphere](#sphere) · [terrain](#terrain) · [text](#text) · [torus](#torus) · [tube](#tube)
-- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
+- [curve](#curve-nodes): [bezier](#bezier) · [boolean2d](#boolean2d) · [carve](#carve) · [circle](#circle) · [convert_curve](#convert_curve) · [curve](#curve) · [curve_attribs](#curve_attribs) · [ends](#ends) · [extrude](#extrude) · [fill](#fill) · [fillet_curve](#fillet_curve) · [line](#line) · [lines_plan](#lines_plan) · [loft](#loft) · [nurbs](#nurbs) · [offset_curve](#offset_curve) · [offset_curve_3d](#offset_curve_3d) · [parametric_curve](#parametric_curve) · [polywire](#polywire) · [project_curve](#project_curve) · [resample](#resample) · [revolve](#revolve) · [shape2d](#shape2d) · [spiral](#spiral) · [spline_fit](#spline_fit) · [straight_skeleton](#straight_skeleton) · [sweep](#sweep) · [trace_image](#trace_image) · [triangulate2d](#triangulate2d) · [voronoi2d](#voronoi2d)
 - [transform](#transform-nodes): [match_size](#match_size) · [mirror](#mirror) · [transform](#transform)
 - [deform](#deform-nodes): [bend](#bend) · [jitter](#jitter) · [lattice](#lattice) · [noise_displace](#noise_displace) · [path_deform](#path_deform) · [peak](#peak) · [point_deform](#point_deform) · [ray](#ray) · [rest](#rest) · [smooth](#smooth) · [soft_transform](#soft_transform) · [taper](#taper) · [twist](#twist)
 - [attribute](#attribute-nodes): [attrib_array](#attrib_array) · [attrib_copy](#attrib_copy) · [attrib_create](#attrib_create) · [attrib_delete](#attrib_delete) · [attrib_noise](#attrib_noise) · [attrib_promote](#attrib_promote) · [attrib_randomize](#attrib_randomize) · [attrib_rename](#attrib_rename) · [attrib_string](#attrib_string) · [attrib_transfer](#attrib_transfer) · [color](#color) · [connectivity](#connectivity) · [material](#material) · [measure](#measure)
@@ -1208,6 +1208,294 @@ None (generator).
     "length": 5,
     "points": 11
   }
+}
+```
+
+### lines_plan
+
+category: `curve` · aliases: `cage_from_lines`, `lines_cage`, `skin_lines`
+
+Build a cage from the long lines of a body so the smoothed surface passes through them.
+
+Draw feature lines along the length of the body, with +Z toward the front by default. Give the lines in order around a cross-section. Use an object such as {"keel":[[0,0,-0.5],[0,0,0.5]],"belt":[[0.15,0.1,-0.5],[0.2,0.1,0.5]]} with other lines around the section, or connect named open curves. Mirror x reflects the positive x half and shares centre lines. Stations cut all the lines at the same axis positions. Smooth reading uses a shape-preserving cubic between line points, and extra rows round out each section. Leave the ends open, fill closed sections with grid caps, or bring each end to a point. Set a crease weight per line or use position and weight pairs to fade a crease along its length. Group faces between lines and stations for panels or openings. Match fit_levels to the levels in subdivide so its vertex points pass through the sampled line points and extra rows.
+
+**Inputs**
+
+| # | name | optional | multi | description |
+|---|---|---|---|---|
+| 0 | `lines` | yes | no | open curves in section order with prim string name (defaults to line0, line1 and so on) |
+
+**Parameters**
+
+| name | type | default | min..max | options | aliases | description |
+|---|---|---|---|---|---|---|
+| `lines` | json | `{"keel":[[0,-0.067,-0.5],[0,-0.128,-0.29],[0,-0.14,0],[0,-0.122,0.29],[0,-0.051,0.5]],"sill":[[0.059,-0.045,-0.5],[0.121,-0.091,-0.29],[0.137,-0.103,0],[0.117,-0.086,0.29],[0.053,-0.036,0.5]],"belt":[[0.085,0,-0.5],[0.183,0,-0.29],[0.203,0,0],[0.172,0,0.29],[0.075,0,0.5]],"shoulder":[[0.059,0.054,-0.5],[0.127,0.113,-0.29],[0.145,0.132,0],[0.125,0.105,0.29],[0.05,0.046,0.5]],"roof":[[0,0.075,-0.5],[0,0.149,-0.29],[0,0.177,0],[0,0.147,0.29],[0,0.062,0.5]]}` |  |  |  | feature line names and [x,y,z] points in metres in section order. A small pod is used when no curves are connected |
+| `axis` | enum | `"z"` |  | `x`, `y`, `z` |  | length axis for station positions in metres. Defaults to z, with the front toward +z. Use mirror none along x |
+| `interpolation` | enum | `"smooth"` |  | `smooth`, `linear` |  | reading between points. Smooth uses a shape-preserving cubic by default, and linear uses straight segments. Spline samples are always read linearly |
+| `stations` | json | `12` |  |  |  | count or strictly ascending axis positions in metres. Defaults to 12 evenly spaced stations across the shared line range |
+| `mirror` | enum | `"x"` |  | `x`, `none` |  | x mirrors the positive x half and shares centre lines by default. Use none for a full section |
+| `closed` | bool | `true` |  |  |  | join the section into a loop by default. For an open mirrored section, leave at least one end line off x = 0 |
+| `rows_between` | json | `0` |  |  |  | extra rows per line gap, as a count or a list of counts. Defaults to zero. Closed sections without mirroring include the last-to-first gap |
+| `ends` | json | `"cap"` |  |  |  | open, cap, point, or a pair in ascending station order. Defaults to a grid cap at both ends |
+| `creases` | json | `{}` |  |  |  | line names with subdivision sharpness weights or [axis position in metres, weight] keys. Defaults to no creases. Keys interpolate linearly and are zero outside their range |
+| `groups` | json | `{}` |  |  |  | named face selections with between: [line, line] and optional from and to in metres, snapped to the nearest stations. Defaults to no groups. Unmirrored closed sections read between in section order |
+| `fit_levels` | int | `2` | 0..4 |  |  | number of subdivision levels to fit, two by default. Zero puts cage points directly on the sampled sections |
+
+**Writes:** point row (int), line (string), station (int), creaseweight (float); prim row and station (int), prim groups sides, caps and groups; edge groups line_<name>; vertex uv; detail fit_error (float, metres)
+
+**Example**
+
+```json
+{
+  "nodes": {
+    "cage": {
+      "type": "lines_plan",
+      "params": {
+        "lines": {
+          "keel": [
+            [
+              0,
+              0.004,
+              -0.5
+            ],
+            [
+              0,
+              -0.058,
+              -0.478
+            ],
+            [
+              0,
+              -0.128,
+              -0.29
+            ],
+            [
+              0,
+              -0.14,
+              0
+            ],
+            [
+              0,
+              -0.122,
+              0.29
+            ],
+            [
+              0,
+              -0.044,
+              0.478
+            ],
+            [
+              0,
+              0.006,
+              0.5
+            ]
+          ],
+          "sill": [
+            [
+              0,
+              0.004,
+              -0.5
+            ],
+            [
+              0.052,
+              -0.039,
+              -0.478
+            ],
+            [
+              0.121,
+              -0.091,
+              -0.29
+            ],
+            [
+              0.137,
+              -0.103,
+              0
+            ],
+            [
+              0.117,
+              -0.086,
+              0.29
+            ],
+            [
+              0.047,
+              -0.031,
+              0.478
+            ],
+            [
+              0,
+              0.006,
+              0.5
+            ]
+          ],
+          "belt": [
+            [
+              0,
+              0.004,
+              -0.5
+            ],
+            [
+              0.075,
+              0,
+              -0.478
+            ],
+            [
+              0.183,
+              0,
+              -0.29
+            ],
+            [
+              0.203,
+              0,
+              0
+            ],
+            [
+              0.172,
+              0,
+              0.29
+            ],
+            [
+              0.066,
+              0.001,
+              0.478
+            ],
+            [
+              0,
+              0.006,
+              0.5
+            ]
+          ],
+          "shoulder": [
+            [
+              0,
+              0.004,
+              -0.5
+            ],
+            [
+              0.052,
+              0.048,
+              -0.478
+            ],
+            [
+              0.127,
+              0.113,
+              -0.29
+            ],
+            [
+              0.145,
+              0.132,
+              0
+            ],
+            [
+              0.125,
+              0.105,
+              0.29
+            ],
+            [
+              0.044,
+              0.041,
+              0.478
+            ],
+            [
+              0,
+              0.006,
+              0.5
+            ]
+          ],
+          "roof": [
+            [
+              0,
+              0.004,
+              -0.5
+            ],
+            [
+              0,
+              0.066,
+              -0.478
+            ],
+            [
+              0,
+              0.149,
+              -0.29
+            ],
+            [
+              0,
+              0.177,
+              0
+            ],
+            [
+              0,
+              0.147,
+              0.29
+            ],
+            [
+              0,
+              0.055,
+              0.478
+            ],
+            [
+              0,
+              0.006,
+              0.5
+            ]
+          ]
+        },
+        "ends": "point",
+        "stations": [
+          -0.5,
+          -0.478,
+          -0.429,
+          -0.306,
+          -0.184,
+          -0.061,
+          0.061,
+          0.184,
+          0.306,
+          0.429,
+          0.478,
+          0.5
+        ],
+        "creases": {
+          "belt": [
+            [
+              -0.38,
+              0
+            ],
+            [
+              -0.14,
+              1.6
+            ],
+            [
+              0.14,
+              1.6
+            ],
+            [
+              0.38,
+              0
+            ]
+          ]
+        },
+        "groups": {
+          "side_panel": {
+            "between": [
+              "belt",
+              "shoulder"
+            ],
+            "from": -0.16,
+            "to": 0.17
+          }
+        }
+      }
+    },
+    "body": {
+      "type": "subdivide",
+      "in": [
+        "cage"
+      ],
+      "params": {
+        "levels": 2
+      }
+    }
+  },
+  "output": "body"
 }
 ```
 

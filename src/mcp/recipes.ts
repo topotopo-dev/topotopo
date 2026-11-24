@@ -60,7 +60,7 @@ export const RECIPES: Recipe[] = [
       'Draw the lines first. The side and plan views of each line together give its 3D points.',
       'Add more lines or raise rows_between for rounder sections.',
       'Match fit_levels to the levels in subdivide.',
-      'Check the highlights with a matcap render from several sides.',
+      'Check the surface from several sides with shading "zebra" (bands that bend smoothly mean a smooth surface; a kink or wobble shows a problem) and with "matcap" plus grey for the form.',
       'Use groups after subdivide to cut openings or make glass.',
       'To grow a spout or pod from the body, use poly_extrude on a cage group before subdivide.',
     ],

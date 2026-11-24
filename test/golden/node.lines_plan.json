@@ -1,0 +1,52 @@
+{
+  "errors": [],
+  "fingerprint": {
+    "attributes": {
+      "detail": ["fit_error:float:1"],
+      "point": ["P:float:3", "creaseweight:float:1", "line:string:1", "row:int:1", "station:int:1"],
+      "prim": ["row:int:1", "station:int:1"],
+      "vertex": ["uv:float:3"]
+    },
+    "bbox": {
+      "max": [0.2256, 0.189, 0.5624],
+      "min": [-0.2256, -0.1522, -0.5624]
+    },
+    "counts": {
+      "points": 98,
+      "prims": 96,
+      "vertices": 384,
+      "volumes": 0
+    },
+    "groups": {
+      "edge": ["line_belt", "line_keel", "line_roof", "line_shoulder", "line_sill"],
+      "point": [],
+      "prim": ["caps", "sides"],
+      "vertex": []
+    },
+    "hashes": {
+      "P": "eb356f33f9e33145",
+      "attributes": {
+        "detail.fit_error": "9be171658ea4219f",
+        "group.edge.line_belt": "c324422843d384ae",
+        "group.edge.line_keel": "c324422843d384ae",
+        "group.edge.line_roof": "c324422843d384ae",
+        "group.edge.line_shoulder": "c324422843d384ae",
+        "group.edge.line_sill": "c324422843d384ae",
+        "group.prim.caps": "57fa4445f6a65dff",
+        "group.prim.sides": "9620ac451669e7ff",
+        "point.creaseweight": "3f07b5050c32a61f",
+        "point.line": "9a702c49c9529e6b",
+        "point.row": "200409f5b81b066f",
+        "point.station": "d2bd08f53613c7ef",
+        "prim.row": "8f87a322bf524ef8",
+        "prim.station": "19623e05ad75eb5f",
+        "vertex.uv": "7e8dbf89824a2aa3"
+      },
+      "topology": "c75a98e46a51205e"
+    }
+  },
+  "name": "node.lines_plan",
+  "ok": true,
+  "source": "fixture for node type \"lines_plan\" (test/fixtures.ts)",
+  "warnings": []
+}
