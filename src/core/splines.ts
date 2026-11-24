@@ -948,23 +948,10 @@ export interface FitResult {
   error: number;
 }
 
-/**
- * Least-squares B-spline through points Q (3 per point) with n CVs: open curves keep their first and last point;
- * smoothing ≥ 0 adds a penalty on the second differences of the CVs (relative to the data weight); `corrections`
- * re-projects the parameters onto the curve and refits. n = number of points interpolates.
- */
-export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: number; cvs: number; mode?: Parameterization; smoothing?: number; corrections?: number }): FitResult {
-  const m = Math.floor(Q.length / 3), closed = o.closed && m >= 3;
-  const mode = o.mode ?? 'centripetal';
-  const tAll = curveParams(Q, closed, mode);
-  const params = closed ? tAll.subarray(0, m).slice() : tAll.slice();
-  let n = Math.max(2, Math.min(Math.round(o.cvs), m));
-  if (closed) n = Math.max(3, n);
-  let p = Math.min(clampOrder(o.order) - 1, n - 1);
-  const order = p + 1;
-  const empty = (): FitResult => ({ P: Float64Array.from(Q), knots: new Float64Array(0), order, closed, params, error: 0 });
-  if (m < 2) return empty();
-  // knots
+/** Knot placement for curve fitting. Closed parameters include the return to the first point. */
+export function fitKnots(tAll: Float64Array, closed: boolean, order: number, n: number): Float64Array {
+  const p = order - 1, m = tAll.length - Number(closed);
+  const params = tAll.subarray(0, m);
   let knots: Float64Array;
   if (!closed) {
     if (n === m) knots = averagedKnots(params, p);
@@ -993,9 +980,75 @@ export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: num
       knots[j] = i >= m ? 1 : (1 - f) * tAll[i] + f * tAll[i + 1];
     }
   }
+  return knots;
+}
+
+interface FitOptions {
+  closed: boolean;
+  order: number;
+  mode?: Parameterization;
+  smoothing?: number;
+  pins?: readonly number[];
+}
+
+interface FitRow { cols: number[]; vals: number[]; r: number[] }
+
+/** Solve the equality constraints using the Schur complement C A⁻¹ Cᵀ of the normal equations. */
+function constrainFit(A: Profile, rhs: Float64Array, pins: FitRow[]): boolean {
+  if (!pins.length) return true;
+  const S = new Profile(pins.length, pins.length - 1, false);
+  const d = new Float64Array(pins.length * 3);
+  const Y = pins.map(({ cols, vals }) => {
+    const y = new Float64Array(rhs.length);
+    cols.forEach((col, j) => { y[col * 3] += vals[j]; });
+    A.solve(y);
+    return y;
+  });
+  pins.forEach(({ cols, vals, r }, i) => {
+    for (let c = 0; c < 3; c++) d[i * 3 + c] = r[c];
+    cols.forEach((col, j) => {
+      for (let k = 0; k <= i; k++) S.add(i, k, vals[j] * Y[k][col * 3]);
+      for (let c = 0; c < 3; c++) d[i * 3 + c] -= vals[j] * rhs[col * 3 + c];
+    });
+  });
+  if (!S.cholesky()) return false;
+  S.solve(d);
+  Y.forEach((y, j) => {
+    for (let i = 0; i < rhs.length; i += 3)
+      for (let c = 0; c < 3; c++) rhs[i + c] += y[i] * d[j * 3 + c];
+  });
+  return true;
+}
+
+/**
+ * Least-squares B-spline through points Q (3 per point) with n CVs. Open curves keep their ends and pins at their
+ * parameters. Smoothing penalizes second differences of the CVs. Corrections re-project unpinned parameters.
+ */
+export function fitSpline(Q: ArrayLike<number>, o: FitOptions & {
+  cvs: number; corrections?: number; params?: ArrayLike<number>; knots?: ArrayLike<number>;
+}): FitResult {
+  const m = Math.floor(Q.length / 3), closed = o.closed && m >= 3;
+  const pins = new Set(o.pins);
+  for (const i of pins) {
+    if (!Number.isInteger(i) || i < 0 || i >= m) throw new Error(`pins: point index ${i} is outside the ${m} input points`);
+  }
+  const n = Math.max(closed ? 3 : 2, o.knots ? Math.round(o.cvs) : Math.min(Math.round(o.cvs), m));
+  const interiorPins = [...pins].filter((i) => closed || (i > 0 && i < m - 1)).length;
+  const ends = closed ? 0 : Math.min(2, m);
+  if (interiorPins + ends > n) {
+    const fixed = closed ? '' : ` plus ${ends} fixed ends`;
+    throw new Error(`pins: ${interiorPins} pinned points${fixed} need more than ${n} CVs`);
+  }
+  const order = Math.min(clampOrder(o.order), n), p = order - 1;
+  const tAll = o.params ? Float64Array.from(closed ? [...Array.from(o.params), 1] : o.params)
+    : curveParams(Q, closed, o.mode ?? 'centripetal');
+  const params = tAll.slice(0, m);
+  const empty = (): FitResult => ({ P: Float64Array.from(Q), knots: new Float64Array(0), order, closed, params, error: 0 });
+  if (m < 2) return empty();
+  let knots = o.knots ? Float64Array.from(o.knots) : fitKnots(tAll, closed, order, n);
   const lam = Math.max(0, o.smoothing ?? 0) * (m / n);
   const corrections = n === m ? 0 : Math.max(0, o.corrections ?? 2);
-  let P = new Float64Array(n * 3);
+  const P = new Float64Array(n * 3);
   if (!closed) { for (let c = 0; c < 3; c++) { P[c] = Q[c]; P[(n - 1) * 3 + c] = Q[(m - 1) * 3 + c]; } }
   const proto = makeSpline('nurbs', new Float64Array(n * 3), { order, closed, knots });
   knots = proto.knots; // (identical unless the computed vector was unusable and got replaced)
@@ -1007,7 +1060,8 @@ export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: num
     if (nu <= 0) return true;
     const A = new Profile(nu, Math.min(h, nu - 1), closed);
     const rhs = new Float64Array(nu * 3);
-    const tp = closed ? pc.b - pc.a : 1;
+    const tp = pc.b - pc.a;
+    const constraints: FitRow[] = [];
     for (let k = 0; k < m; k++) {
       const t = pc.a + params[k] * tp;
       const span = findSpan(pc, t);
@@ -1020,6 +1074,7 @@ export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: num
         if (!closed && (ci === 0 || ci === n - 1)) { for (let c = 0; c < 3; c++) r[c] -= N[j] * P[ci * 3 + c]; continue; }
         cols.push(ci - off); vals.push(N[j]);
       }
+      if (pins.has(k) && (closed || (k > 0 && k < m - 1))) constraints.push({ cols, vals, r });
       for (let a = 0; a < cols.length; a++) {
         for (let b = 0; b <= a; b++) {
           // a CV can appear twice in a span of a closed curve with few CVs: count both
@@ -1056,6 +1111,8 @@ export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: num
       if (!A.cholesky()) return false;
     }
     A.solve(rhs);
+    if (!constrainFit(A, rhs, constraints))
+      throw new Error('pins: constraints cannot be solved with these point parameters and CVs');
     for (let i = 0; i < nu; i++) for (let c = 0; c < 3; c++) P[(i + off) * 3 + c] = rhs[i * 3 + c];
     return true;
   };
@@ -1063,6 +1120,7 @@ export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: num
   let curve = makeSpline('nurbs', P, { order, closed, knots });
   for (let it = 0; it < corrections; it++) {
     for (let k = closed ? 0 : 1; k < (closed ? m : m - 1); k++) {
+      if (pins.has(k)) continue;
       let u = params[k];
       for (let j = 0; j < 4; j++) {
         const { P: C, d1, d2 } = evalDerivs(curve, u);
@@ -1081,7 +1139,10 @@ export function fitSpline(Q: ArrayLike<number>, o: { closed: boolean; order: num
   const tmp = [0, 0, 0];
   for (let k = 0; k < m; k++) {
     evalPoint(curve, params[k], tmp);
-    error = Math.max(error, Math.hypot(tmp[0] - Q[k * 3], tmp[1] - Q[k * 3 + 1], tmp[2] - Q[k * 3 + 2]));
+    const distance = Math.hypot(tmp[0] - Q[k * 3], tmp[1] - Q[k * 3 + 1], tmp[2] - Q[k * 3 + 2]);
+    if (pins.has(k)) {
+      if (!(distance <= 1e-9)) throw new Error('pins: constraints cannot be solved with these point parameters and CVs');
+    } else error = Math.max(error, distance);
   }
   return { P, knots, order, closed, params, error };
 }
@@ -1092,12 +1153,12 @@ export function interpolateSpline(Q: ArrayLike<number>, closed: boolean, order: 
 }
 
 /** Fewest CVs (searched) whose least-squares fit stays within tol of every point; interpolates at worst. */
-export function fitSplineTolerance(Q: ArrayLike<number>, o: { closed: boolean; order: number; tolerance: number; mode?: Parameterization; smoothing?: number; maxCvs?: number }): FitResult {
+export function fitSplineTolerance(Q: ArrayLike<number>, o: FitOptions & { tolerance: number; maxCvs?: number }): FitResult {
   const m = Math.floor(Q.length / 3);
   const closed = o.closed && m >= 3;
   const nMax = Math.max(2, Math.min(m, o.maxCvs && o.maxCvs > 0 ? o.maxCvs : m));
-  const nMin = Math.min(nMax, Math.max(closed ? 3 : 2, clampOrder(o.order)));
-  const fit = (n: number) => fitSpline(Q, { closed, order: o.order, cvs: n, mode: o.mode, smoothing: o.smoothing });
+  const nMin = Math.min(nMax, Math.max(closed ? 3 : 2, clampOrder(o.order) + new Set(o.pins).size));
+  const fit = (n: number) => fitSpline(Q, { ...o, closed, cvs: n });
   let lo = nMin - 1, hiFit: FitResult | null = null, hi = nMin;
   // grow geometrically until within tolerance (or the maximum), then bisect between the last miss and the first hit
   for (;;) {

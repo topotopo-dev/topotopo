@@ -372,7 +372,7 @@ defineNode({
   type: 'spline_fit',
   category: 'curve',
   summary: 'Least-squares NURBS through ordered points: smooth noisy polylines, compress dense curves to few CVs.',
-  description: 'Houdini Fit SOP (approximation). Each polyline/polygon (or, without prims, all points in order) is approximated by a B-spline: cv_count CVs, or (cv_count 0) the fewest CVs that keep every point within tolerance (interpolating at worst). Open curves keep their end points. smoothing adds a penalty on the CVs\' second differences (0 = none; around 1 irons out noise; larger flattens). Parameters are corrected (re-projected) twice. Output NURBS prims, or polylines sampled from the fit. Writes prim fit_error.',
+  description: 'Houdini Fit SOP (approximation). Each polyline or polygon (or all points in order when there are no prims) is fitted with cv_count CVs, or the fewest CVs that keep it within tolerance when cv_count is 0. Open curves keep their end points. Use pins with smoothing to fair a measured line while keeping the points that must stay fixed. Smoothing penalizes second differences of the CVs. Around 1 irons out noise. The fit corrects unpinned parameters twice when using fewer CVs than points. Output NURBS prims or polylines sampled from the fit. Writes prim fit_error.',
   aliases: ['fit_curve', 'curve_fit', 'fitcurve'],
   inputs: [{ name: 'points', desc: 'polylines/polygons (each fitted), or ordered points without prims (one curve)' }],
   params: {
@@ -385,8 +385,9 @@ defineNode({
     output: { type: 'enum', options: ['nurbs', 'polyline'], default: 'nurbs', desc: 'NURBS prims or polylines sampled from the fit' },
     segments: { type: 'int', default: 0, min: 0, max: 10000, desc: 'polyline output: segments per knot span; 0 = adaptive (tolerance / 4)' },
     group: P.group('prim'),
+    pins: P.group('point', 'point group to keep exactly on the curve (empty = no pins)'),
   },
-  outputs: 'prim fit_error (largest distance from an input point to the fitted curve)',
+  outputs: 'prim fit_error (largest distance from an unpinned input point to the fitted curve)',
   example: {
     nodes: {
       spiral: { type: 'spiral', params: { turns: 1.5, points_per_turn: 40 } },
@@ -398,8 +399,11 @@ defineNode({
   cook: ({ input, p, warn }) => {
     const src = input(0);
     const sel = mask(src, 'prim', p.group);
-    const fit = (Q: Float64Array, closed: boolean): FitResult => {
-      const o = { closed, order: p.order, mode: p.parameterization as Parameterization, smoothing: p.smoothing };
+    const pinned = mask(src, 'point', p.pins);
+    const fit = (pts: ArrayLike<number>, closed: boolean): FitResult => {
+      const Q = positionsOf(src, pts);
+      const pins = pinned ? Array.from(pts, (point, i) => pinned[point] ? i : -1).filter((i) => i >= 0) : undefined;
+      const o = { closed, order: p.order, mode: p.parameterization as Parameterization, smoothing: p.smoothing, pins };
       return p.cv_count > 0 ? fitSpline(Q, { ...o, cvs: p.cv_count }) : fitSplineTolerance(Q, { ...o, tolerance: Math.max(1e-9, p.tolerance) });
     };
     /** Curve vertices of a fit: CVs (nurbs) or samples (polyline), each blending the two data points around its parameter. */
@@ -425,8 +429,7 @@ defineNode({
       // a point cloud in point order: one curve, the points are consumed
       const m = src.numPoints;
       if (m < 2) throw new NodeError('spline_fit needs at least 2 points');
-      const Q = positionsOf(src, Array.from({ length: m }, (_, i) => i));
-      const r = fit(Q, p.closed === 'closed' && m >= 3);
+      const r = fit(Array.from({ length: m }, (_, i) => i), p.closed === 'closed' && m >= 3);
       worst = r.error;
       const b = new GeoBuilder(src);
       const { verts: vs } = verts(r, m);
@@ -444,7 +447,7 @@ defineNode({
       if ((sel && !sel[pr]) || !isCurvePrim(src, pr)) { rb.keep(pr); continue; }
       const pts = src.primPoints(pr), m = pts.length;
       const closed = (p.closed === 'auto' ? !!src.primClosed[pr] : p.closed === 'closed') && m >= 3;
-      const r = fit(positionsOf(src, pts), closed);
+      const r = fit(pts, closed);
       worst = Math.max(worst, r.error);
       const { verts: vs } = verts(r, m);
       const { prim } = rb.addCurve(pr, vs, r.closed, p.output === 'nurbs' ? { type: 'nurbs', order: r.order, knots: r.knots } : undefined);

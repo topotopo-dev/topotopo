@@ -14,8 +14,10 @@ import { crossSection, crossSectionFaces, detectPlane, fromManifold, orientNeste
 import type { Plane } from '../core/manifold.ts';
 import { FRAMES, P, mask } from './util.ts';
 import { evalRamp } from '../graph/params.ts';
-import { arcTable, evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
+import { MAX_ORDER, PARAMETERIZATIONS, arcTable, evalBasis, evaluateSplines, samplesByLength, splineFromPrim, tangentAt, tidySplineAttribs } from '../core/splines.ts';
 import { withoutSurfaces } from '../core/nurbssurface.ts';
+import { addSurfacePrim, fitSurface, mirrorSection } from '../core/surfacefit.ts';
+import type { SurfaceSection } from '../core/surfacefit.ts';
 import { filletCurves } from './splines.ts';
 import { stampTrim, trimParams, trimTarget } from './trim.ts';
 import type { TrimTarget } from './trim.ts';
@@ -1374,16 +1376,25 @@ defineNode({
   type: 'loft',
   category: 'curve',
   summary: 'Skin a surface through a sequence of curves (in prim order), or through copies of one profile placed by "sections".',
-  description: 'Sections: with several input curves, each is a section in prim order. With one curve and the sections list, each entry places a copy of it: {"offset": [x, y, z], "scale": [sx, sy], "rotate": [rx, ry, rz]} (any key may be left out; a number for offset moves it along the curve\'s normal, a number for scale scales it evenly), applied as scale and rotate about the curve\'s centre, then the offset. Correspondence: when every section has the same number of points, point k of one section joins point k of the next (insets and rounded corners stay where they are); otherwise each section is resampled evenly by length (resample "length"). Closed sections are turned to run the same way round as the first one, and each starts at the point nearest the previous section\'s start, so the skin does not twist. Winding: the side faces follow the first section\'s direction; a closed result (closed sections with caps, or closed: true) is turned to face outward, caps included. uv: u along the section, v across the sections.',
+  description: 'Output polygons joins the sections with quads and can cap closed ends. Output surface builds a smooth NURBS skin. Interpolate passes through every sample. Sections measured from a drawing or photos can wobble in the highlights. Use approximate with smoothing around 1 and a tolerance of a few millimetres to fair the skin. Pin points that must stay fixed, such as the windscreen header. Use mirror x to join positive-x half sections to their reflections for a symmetric body. Nodes that need polygons convert the surface.\n\nInput curves are taken in prim order. For one profile, sections places copies using entries like {"offset": [x, y, z], "scale": [sx, sy], "rotate": [rx, ry, rz]}. All keys are optional. A single scale number scales evenly and a single offset number moves along the profile normal. Scale and rotate (in degrees) act about the profile centre before the offset (in metres).\n\nPolygon output joins points by index when counts match, or resamples evenly by length when counts differ. For closed sections it matches winding to the first section and starts each section at the point nearest the previous start. Side faces follow the first section and closed results face outward. In both outputs, u runs along each section and v runs across the sections.',
   aliases: ['skin'],
   inputs: [{ name: 'curves', desc: 'two or more curves, in order; or one profile with sections' }],
   params: {
     sections: { type: 'json', default: [], desc: 'one input curve: a list of placements, each {offset, scale, rotate} (see the description)', aliases: ['stations', 'placements'] },
-    resample: { type: 'enum', options: ['auto', 'length', 'none'], default: 'auto', desc: 'auto = keep the points when every section has the same count, else even by length; length = always resample evenly; none = points by index (counts must match)' },
+    resample: { type: 'enum', options: ['auto', 'length', 'none'], default: 'auto', desc: 'polygons only. Auto keeps points when counts match and otherwise resamples by length. Length always resamples. None joins points by index and requires matching counts. Surface output uses the section points directly.' },
     closed: { type: 'bool', default: false, desc: 'connect the last curve back to the first' },
     caps: { type: 'bool', default: false, desc: 'cap the first and last curves (when they are closed)' },
+    output: { type: 'enum', options: ['polygons', 'surface'], default: 'polygons', desc: 'polygons joins sections with quads by default. Surface makes one NURBS skin.' },
+    fit: { type: 'enum', options: ['interpolate', 'approximate'], default: 'interpolate', desc: 'output surface. Interpolate passes through every point by default. Approximate fits within tolerance when choosing CV counts.' },
+    tolerance: { type: 'float', default: 0.001, min: 0, desc: 'output surface. Maximum distance in metres when choosing CV counts for approximate fitting (default 0.001 m).' },
+    smoothing: { type: 'float', default: 0, min: 0, desc: 'output surface. Unitless penalty on second differences of CVs for approximate fitting. Default 0. Around 1 smooths noise. Tolerance wins: when this penalty cannot stay within tolerance, the fit uses the largest smaller one that can and warns.' },
+    cvs: { type: 'ivec2', default: [0, 0], min: 0, desc: 'output surface. Number of control points in u and v for approximate fitting. Default [0, 0] chooses the fewest the tolerance allows.' },
+    order: { type: 'ivec2', default: [4, 4], min: 2, max: MAX_ORDER, desc: 'output surface. Spline order in u and v (degree plus one). Default [4, 4] is cubic in both directions.' },
+    parameterization: { type: 'enum', options: PARAMETERIZATIONS, default: 'centripetal', desc: 'output surface. Unitless parameter spacing. Uniform is even, chord uses distance and centripetal (default) uses its square root.' },
+    pins: P.group('point', 'output surface. Point group to keep on the surface for approximate fitting (empty = no pins).'),
+    mirror: { type: 'enum', options: ['none', 'x'], default: 'none', desc: 'none uses the input directly. X joins positive-x half sections to their reflections at x = 0.' },
   },
-  outputs: 'vertex uv; prim groups caps, sides',
+  outputs: 'polygons: vertex uv and prim groups caps, sides. Surface: one NURBS prim named surface and detail float fit_error (metres).',
   example: {
     nodes: {
       a: { type: 'circle', params: { radius: 1, segments: 32 } },
@@ -1394,19 +1405,51 @@ defineNode({
     },
     output: 'skin',
   },
-  cook: ({ input, p }) => {
-    const g = evaluateSplines(input(0));
-    let curves = Array.from({ length: g.numPrims }, (_, pr) => ({ pts: curvePoints(g, pr), closed: !!g.primClosed[pr] }))
+  cook: ({ input, p, stat, warn }) => {
+    const src = input(0);
+    if (src.primKind?.includes(4)) throw new NodeError('loft needs curve sections as input. Supply curves or place one profile with sections');
+    if (p.output === 'surface' && p.caps) throw new NodeError('loft: caps needs output polygons; a surface has no caps. Close the ends with sections that shrink to a small loop, or use output polygons.');
+    const g = evaluateSplines(src);
+    const pinned = p.output === 'surface' ? mask(g, 'point', p.pins) : null;
+    let curves: SurfaceSection[] = Array.from({ length: g.numPrims }, (_, pr) => ({
+      pts: curvePoints(g, pr),
+      closed: !!g.primClosed[pr],
+      pins: pinned ? g.primPoints(pr).flatMap((point, i) => pinned[point] ? [i] : []) : undefined,
+    }))
       .filter((c) => c.pts.length >= 2);
     if (Array.isArray(p.sections) && p.sections.length) {
       if (curves.length !== 1) throw new NodeError(`sections places copies of one profile, but the input has ${curves.length} curves`, 'merge nothing into the profile, or leave sections empty to loft through the input curves');
-      curves = p.sections.map((sec: any, i: number) => placeSection(curves[0], sec, i));
+      curves = p.sections.map((sec: any, i: number) => ({ ...placeSection(curves[0], sec, i), pins: curves[0].pins }));
     }
     if (curves.length < 2) throw new NodeError('loft needs at least 2 curves', 'merge two or more curves in order, or give one profile and a sections list');
     // every open polyline whose ends meet is a loop
-    for (const c of curves) if (!c.closed && c.pts.length > 3 && dist3(c.pts[0], c.pts[c.pts.length - 1]) < 1e-9) { c.pts.pop(); c.closed = true; }
+    if (p.mirror === 'x') curves = curves.map(mirrorSection);
+    else for (const c of curves) if (!c.closed && c.pts.length > 3 && dist3(c.pts[0], c.pts[c.pts.length - 1]) < 1e-9) {
+      const end = c.pts.length - 1;
+      if (c.pins?.includes(end)) c.pins = [...c.pins.filter((i) => i !== end && i !== 0), 0];
+      c.pts.pop();
+      c.closed = true;
+    }
     const closedU = curves[0].closed;
     if (curves.some((c) => c.closed !== closedU)) throw new NodeError('loft sections must be all closed or all open', 'close them with ends {mode: close}, or open them');
+    if (p.output === 'surface') {
+      const fit = fitSurface(curves, {
+        closedV: p.closed, fit: p.fit, tolerance: p.tolerance, smoothing: p.smoothing,
+        cvs: p.cvs, order: p.order, mode: p.parameterization, mirror: p.mirror === 'x',
+      });
+      stat('surface_cols', fit.cols);
+      stat('surface_rows', fit.rows);
+      stat('pinned_sections', fit.pinnedSections);
+      if (fit.orderU !== p.order[0] || fit.orderV !== p.order[1]) warn(`loft: order lowered to [${fit.orderU}, ${fit.orderV}] to fit the sections`);
+      const used = fit.smoothing;
+      if (p.fit === 'approximate' && p.smoothing > 0 && used && (used[0] < p.smoothing || used[1] < p.smoothing)) {
+        stat('smoothing_u', used[0]);
+        stat('smoothing_v', used[1]);
+        warn(`loft: smoothing ${p.smoothing} did not fit within tolerance ${p.tolerance} m, so it was lowered to [${+used[0].toPrecision(3)}, ${+used[1].toPrecision(3)}] (u, v); raise tolerance to smooth more`);
+      }
+      if (p.fit === 'approximate' && fit.error > Math.max(p.tolerance, 1e-9)) warn(`loft: fit_error is ${+fit.error.toPrecision(4)} m. Increase cvs or tolerance, or reduce smoothing`);
+      return addSurfacePrim(fit);
+    }
     const same = curves.every((c) => c.pts.length === curves[0].pts.length);
     if (p.resample === 'none' && !same) throw new NodeError(`resample "none" needs every section with the same number of points (${curves.map((c) => c.pts.length).join(', ')})`, 'use resample "auto" or "length"');
     const n = Math.max(...curves.map((c) => c.pts.length));
