@@ -18,9 +18,10 @@ import { drawText, textWidth } from './font.ts';
 import { readUV, polygonSides, uvSeamPairs } from '../core/uv.ts';
 import { readTrimSheets } from '../core/trim.ts';
 import { chartKinds, chartRoots, primLods } from '../core/uvreport.ts';
-import { expandForRender } from '../core/packed.ts';
-import { qNormalize, qRotate } from '../core/math.ts';
+import { expandForRender, expandPacked, RENDER_TRIANGLE_BUDGET } from '../core/packed.ts';
+import { add, cross, length, qNormalize, qRotate, scale, sub } from '../core/math.ts';
 import type { Quat, Vec3 } from '../core/math.ts';
+import { arcTable, evalDerivs, hasSplinesDeep, splineFromPrim, spanBreaks, typeOfKind, uAtLength } from '../core/splines.ts';
 import { PLANE_UV, sliceTriangles, windingGrid } from './section.ts';
 import { openEdgesText, partsOf, primWhere, solidReport } from '../core/report.ts';
 import type { Slice } from './section.ts';
@@ -53,7 +54,7 @@ export const UNDERLAY_FITS: UnderlayFit[] = ['bounds', 'width', 'height', 'view'
 export interface UnderlayImage { width: number; height: number; rgba: Uint8Array }
 /** Edge overlays: every polygon edge, edges sharper than hardAngle (+ crease/hard/sharp edge groups), open/non-manifold/flipped edges, edge groups. */
 export type WireMode = 'none' | 'all' | 'hard' | 'boundary' | 'groups';
-export type GlyphMode = 'none' | 'N' | 'up' | 'orient' | 'v' | 'custom';
+export type GlyphMode = 'none' | 'N' | 'up' | 'orient' | 'v' | 'custom' | 'comb';
 export type ShadingMode = 'default' | 'flat' | 'matcap' | 'zebra' | 'ao' | 'pbr';
 export type Axis = 'x' | 'y' | 'z';
 export interface ClipOptions {
@@ -153,12 +154,12 @@ export interface RenderOptions {
   sectionAbsolute?: boolean;
   /** cut persp views by a plane, removing the camera's side, and cap the cut */
   clip?: ClipOptions | null;
-  /** per-element vector glyphs: N, up, orient (3 axes), v, or custom (glyphAttrib) */
+  /** vector glyphs (N, up, orient, v, custom via glyphAttrib) or a curve curvature comb */
   glyphs?: GlyphMode;
   glyphAttrib?: string | null;
-  /** glyph length (default 5% of the bbox diagonal); v and custom vectors scale so the longest has this length */
+  /** glyph length (default 5% of the bbox diagonal, 15% for comb); v, custom and comb scale to this maximum */
   glyphScale?: number;
-  /** at most this many glyphs, evenly subsampled (default 400) */
+  /** at most this many glyphs, evenly subsampled (default 400, 2000 for comb) */
   maxGlyphs?: number;
   /** each point/prim group's name at its centroid, its border/points in the label colour, and a legend */
   labelGroups?: boolean;
@@ -243,11 +244,12 @@ export function parseViews(spec: string | readonly string[] | null | undefined):
 
 const AXES: Axis[] = ['x', 'y', 'z'];
 const WIRE_MODES = ['none', 'all', 'hard', 'boundary', 'groups'];
-const GLYPH_MODES = ['none', 'N', 'up', 'orient', 'v', 'custom'];
+const GLYPH_MODES = ['none', 'N', 'up', 'orient', 'v', 'custom', 'comb'];
 const SHADING_MODES: ShadingMode[] = ['default', 'flat', 'matcap', 'zebra', 'ao', 'pbr'];
 /** The automatic wireframe draws polygon edges up to this many polygons. */
 export const AUTO_WIRE_MAX = 6000;
 const CUT_C = [0.93, 0.4, 0.3], CUT_FLIP_C = [0.25, 0.38, 0.9], SOCKET_C = [0.35, 1, 0.72];
+const COMB_TOOTH_C = [1, 0.72, 0.4], COMB_ENVELOPE_C = [0.94, 0.42, 0.12];
 /** Barycentric tolerance of the blend pass's shared-edge rule. */
 const EDGE_EPS = 1e-9;
 
@@ -430,14 +432,121 @@ function greyShading(o: RenderOptions): RenderOptions {
   return { ...o, shading: 'pbr' };
 }
 
+interface CombSample { point: Vec3; offset: Vec3 | null }
+interface CombCurve { closed: boolean; samples: CombSample[] }
+
+function combSample(point: Vec3, outward: Vec3, curvature: number): CombSample {
+  return {
+    point,
+    offset: Number.isFinite(curvature) && curvature >= 1e-9 ? scale(norm3(outward), curvature) : null,
+  };
+}
+
+function polylineComb(g: Geometry, start: number, n: number, closed: boolean, count: number): CombSample[] {
+  const pointAt = (i: number): Vec3 => {
+    const p = g.vertexPoint[start + i] * 3;
+    return [g.P[p], g.P[p + 1], g.P[p + 2]];
+  };
+  const lengths = new Float64Array(count < n ? n + Number(closed) : 0);
+  for (let i = 1; i < lengths.length; i++) lengths[i] = lengths[i - 1] + length(sub(pointAt(i % n), pointAt(i - 1)));
+  const total = lengths[lengths.length - 1];
+  let k = 0;
+  return Array.from({ length: count }, (_, i) => {
+    if (count === n) k = i;
+    else {
+      const fraction = !closed && count === 1 ? 0.5 : i / (closed ? count : count - 1);
+      const target = total * fraction;
+      // Snap each arc-length sample to a vertex, reserving distinct vertices for the remaining samples.
+      if (i > 0) k++;
+      const last = n - count + i;
+      if (total > 0) {
+        while (k < last && lengths[k + 1] <= target) k++;
+        if (k < last && lengths[k + 1] - target < target - lengths[k]) k++;
+      } else k = Math.round(fraction * (closed ? n : n - 1));
+      if (!closed && count > 1 && i === count - 1) k = n - 1;
+    }
+    const point = pointAt(k);
+    if (!closed && (k === 0 || k === n - 1)) return { point, offset: null };
+    const a = sub(point, pointAt((k + n - 1) % n)), b = sub(pointAt((k + 1) % n), point);
+    const la = length(a), lb = length(b), chord = length(add(a, b));
+    if (!(la > 0 && lb > 0 && chord > 0)) return { point, offset: null };
+    const inDir = scale(a, 1 / la), outDir = scale(b, 1 / lb);
+    const turn = cross(inDir, outDir);
+    // The local turn sets the side. The weighted tangent gives the radial direction even for unequal edges.
+    const outward = cross(add(scale(inDir, lb), scale(outDir, la)), turn);
+    return combSample(point, outward, 2 * length(turn) / chord);
+  });
+}
+
+/** Exact spline and vertex curvature samples. Offsets are normalized to the peak across the sampled curves. */
+export function curvatureCombs(g: Geometry, maxGlyphs = 2000): { curves: CombCurve[]; curveCount: number; peak: number } {
+  const sources: { closed: boolean; count: number; sample: (count: number) => CombSample[] }[] = [];
+  for (let p = 0; p < g.numPrims; p++) {
+    if (typeOfKind(g.primKind?.[p] ?? 0)) {
+      const s = splineFromPrim(g, p);
+      const count = 16 * (spanBreaks(s).length - 1) + Number(!s.closed);
+      sources.push({ closed: s.closed, count, sample: (n) => {
+        const tab = arcTable(s);
+        return Array.from({ length: n }, (_, i) => {
+          const fraction = !s.closed && n === 1 ? 0.5 : i / (s.closed ? n : n - 1);
+          const u = fraction === 1 ? 1 : uAtLength(s, tab, tab.total * fraction);
+          const { P, d1, d2 } = evalDerivs(s, u);
+          const speed = length(d1);
+          if (!(speed > 1e-14)) return { point: P, offset: null };
+          const tangent = scale(d1, 1 / speed), bend = cross(tangent, d2);
+          return combSample(P, cross(tangent, bend), length(bend) / (speed * speed));
+        });
+      } });
+    } else if (!g.primClosed[p] && !g.isPacked(p) && !(g.primKind && g.primKind[p] > 1) && g.primSize(p) >= 2) {
+      // Other spline prims (surfaces) are skipped: their vertices are a control grid, not a curve.
+      const start = g.primStart[p], end = g.primStart[p + 1];
+      // A loop drawn as an open polyline (e.g. an unrolled polygon) repeats its first point.
+      const closed = end - start > 3 && g.vertexPoint[start] === g.vertexPoint[end - 1];
+      const count = end - start - Number(closed);
+      sources.push({ closed, count, sample: (n) => polylineComb(g, start, count, closed, n) });
+    }
+  }
+  const curveCount = sources.length;
+  const extra = sources.reduce((sum, source) => sum + source.count - 1, 0);
+  const limit = Math.max(0, Math.min(curveCount + extra, Math.floor(maxGlyphs)));
+  const reserved = Math.min(limit, curveCount);
+  const curves: CombCurve[] = [];
+  let seenExtra = 0, allocatedExtra = 0, peak = 0;
+  for (const [i, source] of sources.entries()) {
+    // First spread one sample per curve, then distribute the rest in proportion to their sample counts.
+    const base = Math.round((i + 1) * reserved / curveCount) - Math.round(i * reserved / curveCount);
+    seenExtra += source.count - 1;
+    const nextExtra = limit > reserved ? Math.round(seenExtra * (limit - reserved) / extra) : 0;
+    const count = base + nextExtra - allocatedExtra;
+    allocatedExtra = nextExtra;
+    if (!count) continue;
+    const samples = source.sample(count);
+    for (const { offset } of samples) if (offset) peak = Math.max(peak, length(offset));
+    curves.push({ closed: source.closed, samples });
+  }
+  if (peak > 0) for (const { samples } of curves) {
+    for (const sample of samples) if (sample.offset) sample.offset = scale(sample.offset, 1 / peak);
+  }
+  return { curves, curveCount, peak };
+}
+
 /** Render the geometry; returns RGBA pixels. Shading 'pbr' needs renderGeometryAsync first (or MikkTSpace loaded). */
 export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult {
+  return rasterize(g, o);
+}
+
+function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curvatureCombs>): RenderResult {
   o = greyShading(o);
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
   if (g.hasPacked() || g.hasSplines()) {
     const budget = o.maxTriangles !== undefined && o.maxTriangles > 0 ? Math.min(o.maxTriangles, 50_000_000) : undefined;
+    if (!comb && o.glyphs === 'comb' && hasSplinesDeep(g)) {
+      // Apply the same instance budget in world space while the spline primitives are still intact.
+      const exact = g.hasPacked() ? expandPacked(g, { maxTriangles: budget ?? RENDER_TRIANGLE_BUDGET }).geo : g;
+      comb = curvatureCombs(exact, o.maxGlyphs);
+    }
     const x = expandForRender(g, o, budget);
-    const r = renderGeometry(x.geo, x.opts); r.notes.unshift(...x.notes); return r;
+    const r = rasterize(x.geo, x.opts, comb); r.notes.unshift(...x.notes); return r;
   }
   // heightfields draw as their grid mesh with layers as attributes, decimated to heightfieldRes quads per side
   const hfRes = o.heightfieldRes ?? HEIGHTFIELD_RENDER_RES;
@@ -929,7 +1038,33 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
   // glyphs: world segments (start = anchor) with a base and a tip colour
   const glSeg: number[] = [], glCol: number[] = [];
   const glPal: RGB[][] = [];
-  if (glyphMode && np) {
+  let combFitPts = fitPts;
+  const combCurves: { closed: boolean; teeth: { point: Vec3; tip: Vec3 }[] }[] = [];
+  if (glyphMode === 'comb') {
+    const { curves, curveCount, peak } = comb ?? curvatureCombs(g, o.maxGlyphs);
+    const diagonal = length(sub(bb.max, bb.min));
+    const longest = peak > 0 ? (o.glyphScale && o.glyphScale > 0 ? o.glyphScale : diagonal * 0.15) : 0;
+    if (!curveCount) notes.push('glyphs comb: no curves to comb (Bezier, NURBS or polylines)');
+    else {
+      const label = `${curves.length} curve${curves.length === 1 ? '' : 's'}`;
+      notes.push(`glyphs comb: ${label}, longest tooth ${fmtNum(longest)} m = curvature ${fmtNum(peak)} /m`);
+      ovDesc.push(`GLYPHS COMB ${label.toUpperCase()}`);
+    }
+    const tips: number[] = [];
+    for (const { closed, samples } of curves) {
+      const teeth = samples.map(({ point, offset }) => {
+        const tip = offset && longest > 0 ? add(point, scale(offset, longest)) : point;
+        if (tip !== point) tips.push(...tip);
+        return { point, tip };
+      });
+      combCurves.push({ closed, teeth });
+    }
+    if (!fixedBounds && tips.length) {
+      combFitPts = new Float64Array(fitPts.length + tips.length);
+      combFitPts.set(fitPts);
+      combFitPts.set(tips, fitPts.length);
+    }
+  } else if (glyphMode && np) {
     const L = o.glyphScale && o.glyphScale > 0 ? o.glyphScale : Math.max(1e-6, diag * 0.05);
     const name = glyphMode === 'custom' ? o.glyphAttrib ?? '' : glyphMode;
     const f = name ? g.findAttrib(name, name === 'N' ? ['point', 'vertex', 'prim'] : ['point', 'prim', 'vertex', 'detail']) : null;
@@ -990,7 +1125,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
     }
   }
   if (o.legend && !cbLegend.length) notes.push('legend: nothing to explain (use with color_by or highlight)');
-  const hasOverlay = sockets.length > 0 || oeA.length > 0 || dotPts.length > 0 || wl.length > 0 || glCol.length > 0 || legendItems.length > 0 || hasSection || clipK >= 0;
+  const hasOverlay = sockets.length > 0 || oeA.length > 0 || dotPts.length > 0 || wl.length > 0 || glCol.length > 0 || combCurves.length > 0 || legendItems.length > 0 || hasSection || clipK >= 0;
   const legendView = views.findIndex((v) => v !== 'uv' && v !== 'sheet' && v !== 'texture');
   const backView = annotate ? views.findIndex((v) => v !== 'uv' && v !== 'sheet' && v !== 'texture' && v !== 'section' && !(clipK >= 0 && isPerspView(v))) : -1;
   let backPix = 0, shadedPix = 0;
@@ -1052,7 +1187,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
       const r = 0.44 - t * 0.2, gg = 0.46 - t * 0.2, b = 0.5 - t * 0.2;
       for (let x = 0; x < W; x++) { const i = (y * W + x) * 3; col[i] = r; col[i + 1] = gg; col[i + 2] = b; }
     }
-    const cam = makeCam(vname, bmin, bmax, W, H, o, kind, azDeg, secK, fitPts);
+    const cam = makeCam(vname, bmin, bmax, W, H, o, kind, azDeg, secK, kind === 'section' ? fitPts : combFitPts);
     if (pbrS) pbrS.camera(cam.r, cam.u, cam.f);
     // project points
     const sx = new Float32Array(np), sy = new Float32Array(np), cz = new Float32Array(np), vz = new Float32Array(np);
@@ -1563,6 +1698,17 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
         const mx = x0 + (x1 - x0) * 0.62, my = y0 + (y1 - y0) * 0.62, mz = z0 + (z1 - z0) * 0.62;
         if (clipProj(x0, y0, z0, mx, my, mz)) lineOv(tb, TW, TH, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], pal[0], 0.95 * dim, ui, zt, dtol, 0.3 * dim);
         if (clipProj(mx, my, mz, x1, y1, z1)) lineOv(tb, TW, TH, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], pal[1], dim, ui, zt, dtol, 0.35 * dim);
+      }
+      if (!flat2d && combCurves.length) {
+        const combLine = (a: Vec3, b: Vec3, c: RGB) => {
+          if (clipProj(...a, ...b))
+            lineOv(tb, TW, TH, q0[0] * inv, q0[1] * inv, q0[2], q1[0] * inv, q1[1] * inv, q1[2], c, 1, ui, zt, dtol, 0.35);
+        };
+        for (const { closed, teeth } of combCurves) {
+          for (const { point, tip } of teeth) if (tip !== point) combLine(point, tip, COMB_TOOTH_C);
+          for (let i = 1; i < teeth.length; i++) combLine(teeth[i - 1].tip, teeth[i].tip, COMB_ENVELOPE_C);
+          if (closed && teeth.length > 1) combLine(teeth[teeth.length - 1].tip, teeth[0].tip, COMB_ENVELOPE_C);
+        }
       }
       // sockets: orient axes and a dot, through surfaces (dimmer where hidden)
       for (const sk of (flat2d ? [] : sockets)) {
