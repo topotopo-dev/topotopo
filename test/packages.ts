@@ -409,7 +409,7 @@ section('publishing: the version rule');
   check(r11.changes.join() === 'output "box": param "w" default 1 → 2', `a default output that is a named output is listed once: ${r11.changes}`);
   const r12 = await step(() => { g.outputs.lid = { node: 'b' }; }, '1.2', /output "lid" added/);
   check(JSON.stringify(Object.keys(readJSON(path.join(RULES, 'versions', '1.2', 'version.json')).outputs.lid.sliders)) === '["w"]'
-    && r12.warnings.some((w) => /^output "lid" \(graph "main"\) does not read the var "style" of its graph: it is not one of its params/.test(w)),
+    && r12.warnings.some((w) => w === 'output "lid" (graph "main") does not read the var "style" of its graph, so changing that var does not change this output.'),
     `an output's params are the vars its node reads; the others warn (${r12.warnings.filter((w) => /does not read/.test(w))})`);
   await step(() => { g.params.w.max = 20; }, '1.3', /range 0\.\.10 → 0\.\.20 \(wider\)/);
   await step(() => { g.params.w.min = 1; }, '2.0', /range 0\.\.20 → 1\.\.20 \(narrower\)/);
@@ -960,9 +960,9 @@ size 1234
   fs.renameSync(groveCopy, groveCopy + '-away');
   const m = await open(dirs.forest);
   const g = await m.engine.cook({ nodes: { g: { type: 'studio/grove' } } });
-  check(/the copy of studio\/grove 1\.0 is missing: packages\/studio\/grove\/1\.0/.test(errorOf(g)), `a missing copy: ${errorOf(g)}`);
+  check(g.ok && exists(groveCopy, 'version.json'), `opening restores the missing copy (${errorOf(g) || 'cooked'})`);
   const back = m.pk.use('studio/grove');
-  check(back.text === 'copied what was missing of studio/grove 1.0 again from library "game": studio/grove 1.0' && exists(groveCopy, 'version.json'), `use copies it again: ${back.text}`);
+  check(back.text === 'package forest already uses studio/grove 1.0' && !back.copied.length, `use finds the restored pin (${back.text})`);
   check((await m.engine.cook({ nodes: { g: { type: 'studio/grove' } } })).ok, 'and the same session cooks it');
   fs.rmSync(groveCopy + '-away', { recursive: true });
   const depCopy = path.join(dirs.forest, 'packages', 'studio', 'trees', '1.0');
@@ -1264,11 +1264,11 @@ section('the CLI: init, libraries, use, remove, packages, publish, search');
   check(byName.code === 0 && /lists "lib" in /.test(byName.out) && both.code === 0 && after === '', `remove by a registered name takes a path entry to its folder too, every entry of that folder (${byName.err || byName.out.split('\n')[0]}; left "${after}")`);
   check(/is in no workspace: topotopo workspace init <folder> makes one; outside a workspace every registered library counts/.test((await run('workspace', ['library', 'add', 'game'], CLI)).err), 'outside a workspace it says so');
 
-  // a folder named must exist; a version is named apart
+  // only an existing folder is taken as a folder; a version is named apart
   const typo = await run('use', ['nordic/rocks', path.join(CLI, 'nowhere')]);
-  check(typo.code === 1 && /^no folder .*nowhere$/.test(typo.err) && !Object.keys(readManifest(CLI).uses).length, `a folder that does not exist is an error, never the package above it: ${typo.err}`);
-  const version = await run('use', ['nordic/rocks', '1.0'], CLI);
-  check(version.code === 1 && /^"1\.0" is no folder here: a version is named with --version, topotopo use nordic\/rocks --version 1\.0$/.test(version.err), `a version where the folder goes: ${version.err}`);
+  check(typo.code === 1 && /is in no package/.test(typo.err) && !Object.keys(readManifest(CLI).uses).length, `a nonexistent path is not taken as a folder (${typo.err})`);
+  const version = await run('use', ['1.0'], CLI);
+  check(version.code === 1 && /^"1\.0" is not a package name: write owner\/name/.test(version.err), `a bare version is not a package name (${version.err})`);
   const at = await run('use', ['nordic/rocks@1.0', CLI]);
   check(at.code === 1 && /"nordic\/rocks@1\.0" is not a package name: name the version apart, topotopo use nordic\/rocks --version 1\.0/.test(at.err), `owner/name@version: ${at.err}`);
   check((await run('use', ['nordic/rocks', CLI, '--version', '9.0'])).code === 1, 'a version no library has fails');
@@ -2365,6 +2365,104 @@ section('workspace-root commands and unpublished packages');
     `check cooks a valid graph in a named unpublished package (${fineKit?.cooked ?? 'no item'})`);
   const { removeLibrary } = await import('../src/config.ts');
   removeLibrary('workspace-commands-parts');
+}
+
+section('a copied package restores the versions it already uses');
+{
+  const source = path.join(ROOT, 'examples', 'guided_town');
+  const dir = path.join(tmp, 'copied-town');
+  const manifest = 'guided_town.topo';
+  const lock = 'packages/lock.json';
+  for (const rel of [manifest, lock, 'graphs/town.json', 'inputs/markers.json'])
+    write(path.join(dir, rel), fs.readFileSync(path.join(source, rel)));
+  const restored: string[] = [];
+  const saved = console.error;
+  console.error = (...args) => { restored.push(args.join(' ')); };
+  try {
+    const { pk, ws } = await open(dir);
+    const r = await ws.cook('town');
+    check(r.ok && pk.check().length === 0 && exists(dir, 'packages', 'topotopo', 'street', '1.0', 'version.json'),
+      `the copied town cooks and has its pinned street copy (${errorOf(r) || 'cooked'})`);
+  } finally { console.error = saved; }
+  const streetNotice = "restored the copy of topotopo/street 1.0 from TopoTopo's built-in library";
+  check(restored.filter((s) => s === streetNotice).length === 1,
+    `the restored street copy is announced once (${restored.join(' | ') || 'no announcement'})`);
+  check([manifest, lock].every((rel) => fs.readFileSync(path.join(dir, rel)).equals(fs.readFileSync(path.join(source, rel)))),
+    'a restored copy leaves the manifest and lock byte for byte');
+
+  const graph: GraphSpec = {
+    nodes: { first: { type: 'topotopo/street/bench' }, second: { type: 'topotopo/street/bollard' } }, output: 'first',
+  };
+  const broken = path.join(tmp, 'unavailable-copy');
+  const pkg = 'topotopo/street', version = '99.0';
+  writePackage(broken, { name: 'test/unavailable', uses: { [pkg]: version } }, { main: graph });
+  json(lockFile(broken), { packages: { [pkg]: { [version]: readLock(source).packages[pkg]['1.0'] } } });
+  const missing = await run('publish', [broken, '--dry-run']);
+  check(missing.code === 1 && (missing.out.match(/the copy of topotopo\/street 99\.0 is missing/g) ?? []).length === 1
+    && missing.out.includes('run topotopo use topotopo/street') && !exists(broken, 'packages', 'topotopo'),
+    `an unavailable version blocks publishing once with its fix (${missing.out.trim() || missing.err})`);
+
+  const workspace = path.join(tmp, 'restore-workspace');
+  const member = path.join(workspace, 'member');
+  writePackage(member, {}, { main: graph });
+  initWorkspace(workspace, { engine: 'none' });
+  (await open(member)).pk.use(pkg);
+  const store = copiesFor(member), sharedCopy = path.join(store.packages, 'topotopo', 'street', '1.0');
+  const sharedLock = fs.readFileSync(path.join(store.packages, 'lock.json'));
+  fs.renameSync(sharedCopy, sharedCopy + '-away');
+  const shared = await open(member), cooked = await shared.ws.cook('main');
+  check(cooked.ok && exists(sharedCopy, 'version.json') && !exists(member, 'packages', 'topotopo')
+    && readWorkspace(workspace).uses[pkg] === '1.0' && fs.readFileSync(path.join(store.packages, 'lock.json')).equals(sharedLock),
+    `the workspace restores its shared copy in place (${errorOf(cooked) || 'cooked'})`);
+  const editedPackage = path.join(tmp, 'edited-copy');
+  writePackage(editedPackage, { name: 'test/edited' }, { main: graph });
+  (await open(editedPackage)).pk.use(pkg);
+  const bench = path.join(editedPackage, 'packages', 'topotopo', 'street', '1.0', 'graphs', 'bench.json');
+  const edited = fs.readFileSync(bench, 'utf8') + ' ';
+  write(bench, edited);
+  const refused = await run('publish', [editedPackage, '--dry-run']);
+  check(refused.code === 1 && refused.out.includes('was edited by hand') && fs.readFileSync(bench, 'utf8') === edited,
+    `publishing still rejects an edited copy (${refused.out.trim()})`);
+}
+
+section('use takes several packages and an optional folder');
+{
+  const dir = path.join(tmp, 'use-several');
+  writePackage(dir, {}, {});
+  const result = await run('use', ['topotopo/street', 'topotopo/nature', dir]);
+  const uses = readManifest(dir).uses;
+  check(result.code === 0 && uses['topotopo/street'] === '1.0' && uses['topotopo/nature'] === '1.0',
+    `both names are pinned in the folder given last (${result.err || result.out})`);
+  const mixed = await run('use', ['topotopo/architecture', 'topotopo/unknown-package', 'topotopo/nature'], dir);
+  check(mixed.code === 1 && /already uses topotopo\/nature/.test(mixed.out) && mixed.err.includes('topotopo/unknown-package')
+    && readManifest(dir).uses['topotopo/architecture'] === '1.0',
+    `a failing name reports its error and the other names still run (${mixed.err || mixed.out})`);
+}
+
+section('an example graph in a new package');
+{
+  const manual = path.join(tmp, 'example-graph');
+  const graph = readJSON(path.join(ROOT, 'examples', 'unreal_landscape.json'));
+  writePackage(manual, { name: 'test/land-manual' }, { main: graph });
+  const missing = await run('publish', [manual, '--dry-run']);
+  const occurrences = missing.out.match(/does not use (?:package )?topotopo\/nature/g)?.length ?? 0;
+  check(missing.code === 1 && occurrences === 1 && missing.out.includes('run topotopo use topotopo/nature')
+    && /nodes pine_src, fir_src, .* and 1 more/.test(missing.out),
+    `publishing names the missing package and its fix once (${occurrences} occurrences; ${missing.out.split('\n').find((s) => s.includes('does not use'))})`);
+
+  const dir = path.join(tmp, 'example-package');
+  const made = await run('init', ['--example', 'unreal_landscape', dir, '--name', 'test/land']);
+  const published = made.code === 0 ? await run('publish', [dir, '--dry-run']) : made;
+  check(made.code === 0 && published.code === 0 && /would publish test\/land 1\.0/.test(published.out)
+    && !published.out.includes('does not use') && readManifest(dir).uses['topotopo/nature'] === '1.0'
+    && JSON.stringify(readJSON(path.join(dir, 'graphs', 'main.json'))) === JSON.stringify(graph),
+    `init --example installs the graph and its packages and the publish dry run passes (${published.err || published.out.split('\n')[0]})`);
+  check(published.out.includes('changing those vars does not change this output'), 'publish explains why the unread vars do not affect the output');
+  const unknown = path.join(tmp, 'unknown-example');
+  const invalid = await run('init', ['--example', 'unknown-example', unknown]);
+  check(invalid.code === 1 && invalid.err.includes('unknown-example') && invalid.err.includes('unreal_landscape')
+    && invalid.err.includes('guided_town') && !exists(unknown),
+    `an unknown example lists the examples and leaves the folder alone (${invalid.err.split('\n')[0]})`);
 }
 
 await engines[0]?.host.pool?.close();

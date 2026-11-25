@@ -380,11 +380,12 @@ const STARTER = { description: 'A starting point: replace it with the package\'s
  * that is a package already, `name` sets the name it publishes under (when it has none yet); without it, that is an
  * error. Fails for a folder inside another package, and for one that holds project.json (oldManifest).
  */
-export function initPackage(dir: string, o: { name?: string; title?: string } = {}): { dir: string; id: string; manifest: PackageManifest; said: string } {
+export function initPackage(dir: string, o: { name?: string; title?: string; main?: Uint8Array } = {}): { dir: string; id: string; manifest: PackageManifest; said: string } {
   const abs = path.resolve(dir);
   if (o.name !== undefined) ownPackageName(o.name);
   const at = manifestAt(abs);
   if (at) {
+    if (o.main) throw new Error(`${abs} is a package already. Choose another folder for --example.`);
     if (o.name === undefined) throw new Error(`${abs} is a package already (${at.file}); --name owner/name sets the name it publishes under`);
     const m = readManifest(abs);
     if (m.name === o.name) return { dir: abs, id: at.id, manifest: m, said: `package ${at.id} → ${abs} publishes as ${m.name} already` };
@@ -405,8 +406,12 @@ export function initPackage(dir: string, o: { name?: string; title?: string } = 
   const graphs = path.join(abs, 'graphs');
   fs.mkdirSync(graphs, { recursive: true });
   const held = [...graphFiles(abs).keys()];
-  const graph = held.length && !held.includes('main') ? held[0] : 'main';
-  if (!held.length) fs.writeFileSync(path.join(graphs, 'main.json'), JSON.stringify(STARTER, null, 2) + '\n');
+  const main = path.join(graphs, 'main.json');
+  const graph = !o.main && held.length && !held.includes('main') ? held[0] : 'main';
+  if (o.main) {
+    if (fs.existsSync(main)) throw new Error(`${main} already exists. Choose another folder for --example.`);
+    fs.writeFileSync(main, o.main, { flag: 'wx' });
+  } else if (!held.length) fs.writeFileSync(main, JSON.stringify(STARTER, null, 2) + '\n');
   const raw = { title, graph, created: new Date().toISOString().slice(0, 10), ...(o.name !== undefined ? { name: o.name } : {}) };
   const manifest = parseManifest(raw, id);
   writeAtomic(path.join(abs, `${id}${MANIFEST_EXT}`), JSON.stringify(raw, null, 2) + '\n');

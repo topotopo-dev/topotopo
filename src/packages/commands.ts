@@ -13,8 +13,8 @@
 //   topotopo workspace library add|remove <name or folder> [--workspace <folder>]
 //                                                                     the shared libraries the workspace lists
 //   topotopo workspace add|list [folder]                              register a workspace for the web app's front page; list them
-//   topotopo init [folder] [--name owner/name]                        make a folder a package, or set the name it publishes under
-//   topotopo use owner/name [folder] [--version 1.1]                  add a package from the places the package looks in
+//   topotopo init [--example <name>] [folder] [--name owner/name]     make a package, optionally from an example, or set its publishing name
+//   topotopo use owner/name [owner/name ...] [folder] [--version 1.1] add packages from the places the package looks in
 //   topotopo remove owner/name [folder]                               remove a package no graph of the package names
 //   topotopo packages [owner/name] [folder]                           what the package uses and can use; one package
 //   topotopo publish [folder] --note "..." [--big] [--dry-run]        publish the next version of the package
@@ -29,6 +29,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { KINDS } from '../graph/outputs.ts';
+import { packagesNamedIn } from '../graph/packages.ts';
 import { parsePackageName } from '../graph/scope.ts';
 import { addLibrary, loadConfig, removeLibrary } from '../config.ts';
 import { createPackage, isStale, placeNamed, readBakeState, scanAll, workspaceRef } from '../web/library.ts';
@@ -47,8 +48,8 @@ export const PACKAGE_COMMANDS: { usage: string; what: string }[] = [
   { usage: 'workspace init [folder] [--name n] [--engine godot:<path>|unreal:<path>|none] [--library <name or folder>] [--follow | --no-follow]', what: 'make a folder a workspace (<name>.topows; the engine project at or above it is found, else one below; --library lists shared libraries when it is made; its packages share one copy of each package, moved into topotopo-packages/; --follow shows its own packages live from their working folders, for looking), or change its name, engine or follow' },
   { usage: 'workspace library add|remove <name or folder> [--workspace <folder>]', what: 'list or unlist a shared library the workspace\'s packages use: a registered library\'s name, or a folder outside the workspace (written as its path from the workspace)' },
   { usage: 'workspace add|list [folder]', what: 'register a workspace by its name for the web app\'s front page, or list the registered ones' },
-  { usage: 'init [folder] [--name owner/name]', what: 'make a folder a package (<id>.topo, graphs/main.json), or set the name an existing package publishes under' },
-  { usage: 'use owner/name [folder] [--version 1.1]', what: 'add a package: its newest version (or --version) in the places the package looks in (its workspace and the libraries the workspace lists; outside a workspace every registered library; TopoTopo\'s built-in library), copied in' },
+  { usage: 'init [--example <name>] [folder] [--name owner/name]', what: 'make a folder a package (<id>.topo, graphs/main.json). With --example it starts with that example graph and the packages it needs. With --name you can also name an existing package for publishing.' },
+  { usage: 'use owner/name [owner/name ...] [folder] [--version 1.1]', what: 'add each named package from the workspace or the libraries it looks in, including TopoTopo\'s built-in library. Use the newest version of each or pass --version to choose one version number for all names. An existing folder can come last.' },
   { usage: 'remove owner/name [folder]', what: 'remove a package no graph of the package names: its copy goes, with the copies nothing else uses' },
   { usage: 'packages [owner/name] [folder]', what: 'what the package (or, at a workspace\'s root, the workspace) uses and can use, one line each; with a package, its versions and its outputs' },
   { usage: 'publish [folder] --note "..." [--big] [--dry-run]', what: 'publish the next version of the package into versions/; --dry-run checks everything and writes nothing' },
@@ -133,13 +134,13 @@ const versionGiven = (folder: string | undefined, meant: string) => {
 };
 
 /** The packages a package uses, in an engine of their own (its worker pool closed by `close`). */
-async function usesOfPackage(folder: string) {
+async function usesOfPackage(folder: string, opts: { restore?: boolean } = {}) {
   const { Engine } = await import('../graph/engine.ts');
   const { createNodeHost } = await import('../host/node.ts');
   const { openPackages } = await import('./registry.ts');
   const engine = new Engine(createNodeHost({ baseDir: folder }));
   await engine.init();
-  return { engine, pk: openPackages(engine, folder), close: async () => { await engine.host.pool?.close(); } };
+  return { engine, pk: openPackages(engine, folder, opts), close: async () => { await engine.host.pool?.close(); } };
 }
 
 const quoted = (s: string) => (/[\s"]/.test(s) ? JSON.stringify(s) : s);
@@ -308,12 +309,28 @@ export async function editCommand(argv: string[], prog: string, io: Io = console
 
 // ---------------------------------------------------------------------------------------------------- packages
 
-/** `init [folder] [--name owner/name]`: make a folder a package, or set the name an existing package publishes under. */
+/** Make a folder a package, optionally from an example, or set an existing package's publishing name. */
 export async function initCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
-    const a = args(argv, ['--name'], [], `usage: ${prog} init [folder] [--name owner/name]`);
-    const r = initPackage(a.rest[0] ?? '.', { name: a.opt('--name') });
+    const usage = `usage: ${prog} init [--example <name>] [folder] [--name owner/name]`;
+    const a = args(argv, ['--name', '--example'], [], usage);
+    if (a.rest.length > 1) fail(usage);
+    const name = a.opt('--example');
+    const example = name === undefined ? undefined : await (async () => {
+      const { readExamples } = await import('../mcp/examples.ts');
+      const all = readExamples();
+      return all.find((e) => e.name === name) ?? fail(`Unknown example "${name}". Available examples are ${all.map((e) => e.name).join(', ') || 'none in this installation'}.`);
+    })();
+    const r = initPackage(a.rest[0] ?? '.', { name: a.opt('--name'), main: example && fs.readFileSync(example.graphFile) });
     io.out(r.said);
+    if (example) {
+      const needed = packagesNamedIn(example.graph);
+      if (needed.length) {
+        const { pk, close } = await usesOfPackage(r.dir);
+        try { for (const pkg of needed) io.out(pk.use(pkg).text); }
+        finally { await close(); }
+      }
+    }
     const ws = locate(r.dir).workspace;
     if (!/ publishes as \S+ (already|now)$/.test(r.said))
       io.out(`  graphs go in graphs/ (it shows "${r.manifest.graph}"); ${ws ? `it finds packages in its workspace and the libraries the workspace lists (${prog} workspace library add <name or folder>${workspaceFlag(ws)} lists one)` : 'outside a workspace it finds packages in every registered library'}; TopoTopo's own packages need none`);
@@ -326,19 +343,26 @@ export async function librariesCommand(_argv: string[], prog: string, io: Io = c
   return (await run(io, async () => fail(`\`${prog} libraries\` is gone: \`${prog} workspace library add <entry>\` lists a library for the workspace; outside a workspace every registered library counts`))) ?? 1;
 }
 
-/** `use owner/name [folder] [--version 1.1]`: add a package to those the package uses, from the places it looks in. */
+/** Add the named packages in order, from the places the package looks in. */
 export async function useCommand(argv: string[], prog: string, io: Io = consoleIo): Promise<number> {
   return (await run(io, async () => {
-    const usage = `usage: ${prog} use owner/name [folder] [--version 1.1]`;
+    const usage = `usage: ${prog} use owner/name [owner/name ...] [folder] [--version 1.1]`;
     const a = args(argv, ['--version'], [], usage);
-    const [pkg, folder] = a.rest;
-    if (!pkg) fail(usage);
-    versionGiven(folder, `a version is named with --version, ${prog} use ${pkg} --version ${/^\d+$/.test(folder ?? '') ? `${folder}.0` : folder}`);
-    const { pk, close } = await usesOfPackage(packageOf(folder, prog));
+    const last = a.rest.at(-1);
+    const folder = last !== undefined && isDir(path.resolve(last)) ? a.rest.pop() : undefined;
+    if (!a.rest.length) fail(usage);
+    if (a.rest.some((name) => isDir(path.resolve(name)))) fail(`The folder must come after the package names.\n${usage}`);
+    const v = a.rest.slice(1).find((x) => /^\d+(\.\d+)?$/.test(x));
+    if (v) versionGiven(v, `a version is named with --version, ${prog} use ${a.rest[0]} --version ${/^\d+$/.test(v) ? `${v}.0` : v}`);
+    const { pk, close } = await usesOfPackage(packageOf(folder, prog), { restore: false });
     try {
-      io.out(pk.use(pkg, { version: a.opt('--version') }).text);
-      for (const p of pk.check()) io.err(`warning: ${p}`);
-      return 0;
+      let code = 0;
+      for (const pkg of a.rest) {
+        try { io.out(pk.use(pkg, { version: a.opt('--version') }).text); }
+        catch (e: any) { io.err(String(e?.message ?? e)); code = 1; }
+      }
+      if (code === 0 || a.rest.length > 1) for (const p of pk.check()) io.err(`warning: ${p}`);
+      return code;
     } finally { await close(); }
   })) ?? 0;
 }

@@ -49,6 +49,7 @@ import { didYouMean, resolveParamName } from '../graph/params.ts';
 import { getNodeDef } from '../graph/registry.ts';
 import { ID_RE, parsePackageName } from '../graph/scope.ts';
 import type { PackageIssue, PackageResolver, Scope } from '../graph/scope.ts';
+import { isGraph } from '../graph/types.ts';
 import type { GraphSpec, NodeDef } from '../graph/types.ts';
 import { TOPOTOPO_VERSION } from '../host/version.ts';
 import { kindMismatch, outputKind, publishedKind } from '../io/kinds.ts';
@@ -398,6 +399,12 @@ function usesClosure(uses: Record<string, string>, lock: Lock): [string, string]
   return [...out.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : compareVersions(a[1], b[1])));
 }
 
+/** Whether `use` would need to copy a pinned version or repair its lock. */
+function needsCopies(packages: string, pkg: string, v: string, lock: Lock): boolean {
+  try { return usesClosure({ [pkg]: v }, lock).some(([p, w]) => !fs.existsSync(path.join(copyAt(packages, p, w), 'version.json'))); }
+  catch { return true; } // the lock lacks one
+}
+
 // -------------------------------------------------------------------------------------------- what a package holds
 
 /** A package's graphs by name (graphs/ and the graph files beside its manifest); unreadable ones are problems. */
@@ -408,6 +415,32 @@ function readGraphs(dir: string, problems: string[]): Map<string, GraphSpec> {
     catch (e: any) { problems.push(`${path.relative(dir, file).split(path.sep).join('/')}: ${e.message}`); }
   }
   return out;
+}
+
+/** Group a publishing package's undeclared dependencies before checking individual outputs. */
+function missingUses(graphs: Iterable<GraphSpec>, uses: Record<string, string>, own: string | undefined): string[] {
+  const missing = new Map<string, Set<string>>();
+  const walk = (graph: GraphSpec, prefix: string, depth: number) => {
+    if (depth > 64 || !isGraph(graph)) return;
+    for (const [name, spec] of Object.entries(graph.nodes)) {
+      if (!spec || typeof spec !== 'object') continue;
+      const node = prefix + name;
+      if (typeof spec.type === 'string' && spec.type.includes('/')) {
+        const n = parsePackageName(spec.type);
+        if (typeof n !== 'string' && n.package !== own && uses[n.package] === undefined) {
+          if (!missing.has(n.package)) missing.set(n.package, new Set());
+          missing.get(n.package)!.add(node);
+        }
+      }
+      for (const value of Object.values(spec.params ?? {})) if (isGraph(value)) walk(value, `${node}/`, depth + 1);
+    }
+  };
+  for (const graph of graphs) walk(graph, '', 0);
+  return [...missing].map(([pkg, nodes]) => {
+    const names = [...nodes].slice(0, 5).join(', ');
+    const more = nodes.size > 5 ? ` and ${nodes.size - 5} more` : '';
+    return `this package does not use ${pkg}, which ${nodes.size === 1 ? `node ${names} needs` : `nodes ${names}${more} need`}: run ${program()} use ${pkg}`;
+  });
 }
 
 /**
@@ -731,6 +764,8 @@ interface Context {
    * uses, read where a library holds them (`library`); this says why the others its first use could not add.
    */
   unavailable?: Map<string, string>;
+  /** The package's own working graphs, which can add a package to this store. */
+  ownWorking?: boolean;
 }
 
 /** Whether a context resolves `pkg` to its working folder, when the session follows it. */
@@ -978,6 +1013,9 @@ export class PackageUses implements SessionPackages {
   private selfPublished: Loaded | PackageIssue | null = null;
   /** why first use could not add a package, said when a graph names it */
   private unavailable = new Map<string, string>();
+  /** pinned copies a restore could not find, not looked for again until the manifest or lock changes */
+  private unrestorable = new Set<string>();
+  private readonly restore: boolean;
   private disk = '';
   private watchers: fs.FSWatcher[] = [];
   private watchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -987,12 +1025,13 @@ export class PackageUses implements SessionPackages {
    * `builtin`: the folder of TopoTopo's built-in library (default: the one TopoTopo ships, BUILTIN_LIBRARY); `start`: the
    * folder it was opened for, when that is in no package (default: the package's folder, else the engine's)
    */
-  constructor(engine: Engine, dir: string | null, opts: { builtin?: string; start?: string } = {}) {
+  constructor(engine: Engine, dir: string | null, opts: { builtin?: string; start?: string; restore?: boolean } = {}) {
     this.engine = engine;
     this.dir = dir === null ? null : path.resolve(dir);
     this.start = this.dir ?? path.resolve(opts.start ?? engine.root.files.resolvePath('.'));
     this.store = this.dir === null ? null : copiesFor(this.dir);
     this.builtin = path.resolve(opts.builtin ?? BUILTIN_LIBRARY.path);
+    this.restore = opts.restore ?? true;
     this.root = { label: 'this package', uses: {}, packages: this.store ? this.store.packages : '', lock: { packages: {} }, follows: true };
     this.resolver = { resolve: (name) => this.resolveIn(this.root, name), names: () => this.namesIn(this.root), offered: () => this.offered() };
     if (this.store) readShaCache(this.store);
@@ -1114,8 +1153,9 @@ export class PackageUses implements SessionPackages {
   }
 
   /** Read the manifest and the lock again (the tools wrote them, or another process did). */
-  private reload() {
+  private reload(restore = true) {
     this.disk = this.diskStamp();
+    if (restore) this.unrestorable.clear();
     // a version that loaded stays as it is (it is frozen); one that could not load, or loaded with a warning, is tried again
     this.forgetWarned();
     // the package itself is read again with its uses and lock (its files are hashed again when next named)
@@ -1132,7 +1172,41 @@ export class PackageUses implements SessionPackages {
       this.root = { ...this.root, uses: readUses(store), lock: readLockAt(store.packages), self: pkg ? { package: pkg, get: () => this.loadSelf(pkg) } : undefined };
       this.error = null;
     } catch (e: any) { this.error = e.message; this.root = { ...this.root, uses: {}, lock: { packages: {} }, self: undefined }; }
+    if (restore && this.restoreMissing()) return this.reload(false);
     if (this.policy) this.applyPolicy();
+  }
+
+  /** Restore a missing pin through the same published version and copy store as `use`. */
+  private restoreMissing(): boolean {
+    const store = this.store;
+    if (!this.restore || !store || this.error) return false;
+    const missing = (uses: Record<string, string>, lock: Lock) => Object.entries(uses).filter(([pkg, v]) => {
+      if (this.unrestorable.has(`${pkg} ${v}`)) return false;
+      let closure: [string, string][];
+      try { closure = usesClosure({ [pkg]: v }, lock); }
+      catch { closure = [[pkg, v]]; }
+      return closure.some(([p, w]) => !fs.existsSync(copyAt(store.packages, p, w)));
+    });
+    if (!missing(this.root.uses, this.root.lock).length) return false;
+    let changed = false;
+    try {
+      withStoreLock(store, () => {
+        const uses = readUses(store);
+        const lock = readLockAt(store.packages);
+        let scanned: Scanned | undefined;
+        for (const [pkg, v] of missing(uses, lock)) {
+          try {
+            const { place } = this.versionToAdd(pkg, v, scanned ??= this.scanLibraries());
+            for (const copy of this.copyIn(pkg, v, place, true)) {
+              changed = true;
+              // MCP uses stdout for its protocol.
+              console.error(`restored the copy of ${copy} from ${place.place}`);
+            }
+          } catch { this.unrestorable.add(`${pkg} ${v}`); /* the missing-copy error stays */ }
+        }
+      });
+    } catch { /* another process or an unreadable store can prevent the restoration */ }
+    return changed;
   }
 
   private diskStamp(): string {
@@ -1237,7 +1311,9 @@ export class PackageUses implements SessionPackages {
     if (this.followed.has(pkg) && followsIn(ctx, pkg)) return this.loadFollowed(pkg);
     const v = ctx.uses[pkg];
     if (v !== undefined) return this.loadCopy(ctx, pkg, v);
-    if (ctx !== this.root && !ctx.unavailable) return { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
+    if (ctx !== this.root && !ctx.unavailable) return ctx.ownWorking
+      ? { error: `this package does not use ${pkg}: run ${program()} use ${pkg}` }
+      : { error: `${ctx.label} does not use package ${pkg}`, hint: `its uses: ${Object.keys(ctx.uses).join(', ') || 'none'}` };
     if (!this.dir) return { error: `package ${pkg}: this graph is in no package, and only packages use packages`, hint: `${makePackage()}; then a graph of it that names ${pkg} adds the package (or ${program()} use ${pkg})` };
     if (this.error) return { error: `package ${pkg}: ${this.error}` };
     const why = (ctx.unavailable ?? this.unavailable).get(pkg);
@@ -1279,7 +1355,7 @@ export class PackageUses implements SessionPackages {
     // the package in use that needs it, whose `use` copies and records it again
     const direct = ctx.packages === this.root.packages ? this.directUser(pkg, v) : undefined;
     if (!fs.existsSync(path.join(dir, 'version.json')))
-      return { error: missingCopy(pkg, v, this.shown(dir)), hint: `${ctx.label} uses it, and the copies are kept with the ${ctx.packages === this.root.packages && this.store?.workspace ? 'workspace' : 'package'} (commit ${this.shown(ctx.packages)}/): restore it, or run ${program()} use ${direct ?? pkg}, which copies what is missing` };
+      return { error: missingCopy(pkg, v, this.shown(dir), direct ?? pkg) };
     const info = readVersionInfo(dir);
     const m = readManifest(dir);
     const hash = copyHash(dir, ctx.packages);
@@ -1372,7 +1448,7 @@ export class PackageUses implements SessionPackages {
       this.selfStamp ||= workingHash(this.dir!);
       // its outputs may use the packages this session follows: their results are keyed by those folders too
       const signature = sha(`${this.selfStamp}|${follows ? this.joint : ''}`);
-      const ctx: Context = { label: key, uses: this.root.uses, packages: this.root.packages, lock: this.root.lock, follows };
+      const ctx: Context = { label: key, uses: this.root.uses, packages: this.root.packages, lock: this.root.lock, follows, ownWorking: true };
       r = this.build({ pkg, version: null, dir: this.dir!, hash: this.selfStamp, signature, manifest: this.manifest!, ctx, scope: `${pkg}@package-${follows ? '' : 'published-'}${signature.slice(0, 16)}` });
     } catch (e: any) { r = { error: `${key} (${this.dir}): ${e.message}` }; }
     finally { this.loading.delete(key); }
@@ -1524,11 +1600,8 @@ export class PackageUses implements SessionPackages {
       const inUse = uses[pkg];
       if (inUse !== undefined && o.version !== undefined && o.version !== inUse)
         throw new Error(`${store.workspace ? `the ${this.holder} (every package in it)` : 'this package'} uses ${pkg} ${inUse}: ${program()} update ${pkg} --to ${o.version} shows the before/after of going to ${o.version}, and applies it when asked`);
-      if (inUse !== undefined) {
-        let complete = false;
-        try { complete = usesClosure({ [pkg]: inUse }, readLockAt(store.packages)).every(([p, w]) => fs.existsSync(path.join(copyAt(store.packages, p, w), 'version.json'))); } catch { /* the lock lacks one: copy again */ }
-        if (complete) return { version: inUse, copied: [], text: `${this.holder} already uses ${pkg} ${inUse}` };
-      }
+      if (inUse !== undefined && !needsCopies(store.packages, pkg, inUse, readLockAt(store.packages)))
+        return { version: inUse, copied: [], text: `${this.holder} already uses ${pkg} ${inUse}` };
       const { version: v, place } = this.versionToAdd(pkg, inUse ?? o.version);
       const copied = this.copyIn(pkg, v, place);
       if (inUse === undefined) writeUses(store, { ...uses, [pkg]: v });
@@ -1588,7 +1661,7 @@ export class PackageUses implements SessionPackages {
   }
 
   /** Copy a version as published, and the versions it holds copies of, into the package; record them in the lock. */
-  private copyIn(pkg: string, v: string, place: Place): string[] {
+  private copyIn(pkg: string, v: string, place: Place, restoring = false): string[] {
     const store = this.store!, packages = store.packages;
     if (versionHash(place.dir) !== place.info.hash)
       throw new Error(`${lfsSaid(`${pkg} ${v} in ${place.dir} (${place.place})`, place.dir) || `${pkg} ${v} in ${place.dir} (${place.place}) was changed after publishing: its files do not match the hash in its version.json`}, so it is not copied`);
@@ -1613,6 +1686,7 @@ export class PackageUses implements SessionPackages {
     for (const key of byKey.keys()) visit(key);
     const lock = readLockAt(packages);
     const copied: string[] = [];
+    let lockChanged = false;
     for (const w of wanted) {
       if (!fs.existsSync(path.join(w.from, 'version.json'))) throw new Error(`${pkg} ${v} in ${place.place} lists ${w.pkg} ${w.v} in its packages/lock.json but holds no copy of it (${w.from})`);
       const to = copyAt(packages, w.pkg, w.v), have = lock.packages[w.pkg]?.[w.v];
@@ -1627,9 +1701,12 @@ export class PackageUses implements SessionPackages {
         copied.push(`${w.pkg} ${w.v}`);
       }
       // the lock keeps the library a copy came from
-      if (!have || copied.includes(`${w.pkg} ${w.v}`)) (lock.packages[w.pkg] ??= {})[w.v] = { hash: w.hash, library: place.library, uses: w.uses };
+      if (!have || (!restoring && copied.includes(`${w.pkg} ${w.v}`))) {
+        (lock.packages[w.pkg] ??= {})[w.v] = { hash: w.hash, library: place.library, uses: w.uses };
+        lockChanged = true;
+      }
     }
-    writeLockAt(packages, lock);
+    if (!restoring || lockChanged) writeLockAt(packages, lock);
     return copied;
   }
 
@@ -1798,6 +1875,7 @@ export class PackageUses implements SessionPackages {
     forgetScans();
     let changed = false;
     if (this.diskStamp() !== this.disk) { this.reload(); changed = true; }
+    else if (this.restoreMissing()) { this.reload(false); changed = true; }
     if (this.followed.size && this.restamp()) changed = true;
     if (this.restampSelf()) changed = true;
     return changed;
@@ -2168,8 +2246,8 @@ function readVersions(dir: string, pkg: string, library: string, place: string, 
  * attached to the engine's root scope, and the working folders to follow this session. `builtin`: the folder of
  * TopoTopo's built-in library (default: the one TopoTopo ships).
  */
-export function openPackages(engine: Engine, start: string, opts: { follow?: string[]; builtin?: string } = {}): PackageUses {
-  const pk = new PackageUses(engine, packageDirOf(start), { builtin: opts.builtin, start });
+export function openPackages(engine: Engine, start: string, opts: { follow?: string[]; builtin?: string; restore?: boolean } = {}): PackageUses {
+  const pk = new PackageUses(engine, packageDirOf(start), { builtin: opts.builtin, start, restore: opts.restore });
   engine.root.packages = pk.resolver;
   for (const f of opts.follow ?? []) pk.follow(f, true);
   // a workspace that follows its own packages ("follow": true): the used packages whose working folder is inside it
@@ -2411,6 +2489,7 @@ export async function publishPackage(pk: PackageUses, o: PublishOptions): Promis
   r.blocks.push(...pk.verifyCopies());
   const unread: string[] = [];
   const graphs = readGraphs(dir, unread);
+  r.blocks.push(...missingUses(graphs.values(), pk.uses(), m.name));
   const outs = folderOutputs(m, graphs);
   // the package as a package that uses it cooks it: its own scope, its graphs as they are now
   const self = m.name ? pk.ownPackage(true) : null;
@@ -2482,7 +2561,7 @@ export async function publishPackage(pk: PackageUses, o: PublishOptions): Promis
       : `${what} has no tags, which search finds an output by: "tags": ["conifer", "low-poly"] in its graph's outputs`);
     if (!x.description) r.warnings.push(`${what} has no description: ${x.name === null ? 'describe its graph ("description")' : 'give it "description" in its graph\'s outputs, or describe its graph'}`);
     const read = new Set(varsRead(x.spec, x.node)), idle = Object.keys(x.spec.vars ?? {}).filter((k) => !read.has(k));
-    if (idle.length) r.warnings.push(`${what} does not read ${idle.length === 1 ? 'the var' : 'the vars'} ${idle.map((k) => `"${k}"`).join(', ')} of its graph: ${idle.length === 1 ? 'it is not one of its params' : 'they are not its params'} (an output's params are the vars its node reads; move it to a graph of its own to give it params of its own)`);
+    if (idle.length) r.warnings.push(`${what} does not read ${idle.length === 1 ? 'the var' : 'the vars'} ${idle.map((k) => `"${k}"`).join(', ')} of its graph, so changing ${idle.length === 1 ? 'that var' : 'those vars'} does not change this output.`);
   }
   const outputs = Object.fromEntries(outs.named.map((x) => [x.name!, outputInfo(x, kinds.get(x)!, maps.get(x) ?? maps.get(sameNamed(x)!))]));
   const def = outputInfo(outs.default, kinds.get(outs.default)!, maps.get(outs.default) ?? maps.get(sameNamed(outs.default)!));
