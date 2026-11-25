@@ -20,10 +20,9 @@
 //     "parameters", {"embedded": "<key>", "pivot": [0, 0, 0], "viewportlod": "full"}]]
 // and each packed source once in sharedprimitivedata as "PackedGeometry", ["geo:embedded", "<key>", <its .geo array>]
 // (nested instances expanded). The 3×3 is Houdini's row-vector matrix in row order, which is topotopo's column-major
-// packedXform as it is; the anchor point P is the instance position. This mirrors how Houdini stores shared volume
-// voxels; the exact key names Houdini uses for embedded packed geometry are not confirmed (verify in Houdini), so the
-// reader accepts any parameter that names a shared geometry, a flat or nested 3×3 / 4×4 transform and a pivot.
-// instancing 'expand' writes real geometry instead (the safe path for other readers).
+// packedXform as it is; the anchor point P is the instance position. Houdini 22 loads these as Packed Geometry.
+// The reader accepts any parameter that names a shared geometry, a flat or nested 3×3 / 4×4 transform and a pivot.
+// instancing 'expand' writes polygons and polylines for readers that need unpacked geometry.
 //
 // Written: every attribute (float as fpreal64 by default or fpreal32, int as int32, strings via the string table)
 // and every group, polygons as Polygon_run and polylines as PolygonCurve_run (open polygons), in Houdini's own
@@ -38,7 +37,7 @@
 // polylines keep their direction.
 import { Attribute, AttribTable, Geometry, defaultValueFor } from '../core/geometry.ts';
 import type { AttribType } from '../core/geometry.ts';
-import { materialBasename } from '../core/materials.ts';
+import { MATERIAL_ATTRIB, materialBasename } from '../core/materials.ts';
 import { EdgeSet } from '../core/edges.ts';
 import { expandForExport } from './common.ts';
 import type { ExportOptions } from './common.ts';
@@ -167,9 +166,17 @@ function houdiniGeoJSON(g: Geometry, o: ExportOptions): any[] {
   }
   const attributes: any[] = [];
   const add = (key: string, t: AttribTable) => { const l = tableJSON(t, prec); if (l.length) attributes.push(key, l); };
+  let primAttribs = g.prims;
+  const material = g.prims.get(MATERIAL_ATTRIB);
+  if (material?.type === 'string' && material.size === 1) {
+    primAttribs = new AttribTable(g.numPrims);
+    primAttribs.map = new Map(g.prims.map);
+    const paths = (material.data as string[]).map((name) => name ? `/mat/${name}` : '');
+    primAttribs.set('shop_materialpath', new Attribute('string', 1, paths));
+  }
   add('vertexattributes', g.vertices.gather(fileVtx));
   add('pointattributes', g.points);
-  add('primitiveattributes', g.prims);
+  add('primitiveattributes', primAttribs);
   add('globalattributes', g.detail);
   const nPolys = g.primClosed.reduce((s, c) => s + c, 0), nCurves = g.numPrims - nPolys - nPacked;
   const summary = [nPolys ? `${nPolys} Polygons` : '', nCurves ? `${nCurves} Polygon Curves` : '', nPacked ? `${nPacked} Packed Geos` : ''].filter(Boolean).join('\n');

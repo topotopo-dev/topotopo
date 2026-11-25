@@ -31,6 +31,9 @@ graph and its seeds, and the core is browser-ready.
   Y/Z-up and scale. Mesh splitting follows the `name` attribute, for Unreal, Blender and Houdini. The `file` node reads
   the same formats back (glTF with meshopt and external buffers, `.geo` and uncompressed `.bgeo`, CSV).
 
+  **Houdini.** Houdini 22 loads packed `.geo` instances as Packed Geometry with their point attributes intact.
+  Run [`topotopo_materials.py`](integrations/houdini/README.md) to build the shaders under `/mat` from the exported material table.
+
   **Scene and folder import.** Give the `file` node a GLB/glTF scene, a `.blend` file, or a folder of models.
   Scene empties become points, shared meshes stay packed, and object names, hierarchy paths and custom properties
   arrive as attributes. `.blend` uses Blender's own headless exporter (install Blender; `TOPOTOPO_BLENDER` selects

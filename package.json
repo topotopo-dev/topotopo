@@ -33,6 +33,8 @@
     "kernels/pkg",
     "kernels/pkg-simd",
     "integrations/godot/addons/**",
+    "integrations/houdini/*.py",
+    "integrations/houdini/README.md",
     "integrations/unreal/TopoTopo/**",
     "launcher/win32-x64/topotopo-open.exe",
     "!kernels/README.md",

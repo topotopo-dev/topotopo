@@ -587,4 +587,31 @@ for (const tileSize of [-7, 7.5, NaN, 8]) {
   check(!shot(imported, false, true).equals(shot(imported, false, false)) && !shot(imported, false, false).equals(shot(bare, false, false))
     && shot(imported, true, true).equals(shot(bare, false, false)), 'matcap grey ignores embedded GLB base colour maps and vertex colours');
 }
+// ---------------------------------------------------------------- Houdini material paths on plain and packed primitives
+{
+  const { DEFAULT_MATERIAL, writeMaterials } = await import('../src/core/materials.ts');
+  const mesh = g.clone();
+  const material = mesh.prims.add('material', 'string', 1);
+  material.set(0, 'brick');
+  material.set(1, 'copper');
+  writeMaterials(mesh, { brick: DEFAULT_MATERIAL, copper: { ...DEFAULT_MATERIAL, metallic: 0.8 } });
+
+  const roundTrip = (geo: Geometry) => importGeometryAsync(exportGeometry(geo, 'geo'), 'geo');
+  const expectedPaths = ['/mat/brick', '/mat/copper', ...Array(mesh.numPrims - 2).fill('')];
+  const plain = await roundTrip(mesh);
+  const plainPaths = plain.prims.get('shop_materialpath')?.data;
+  check(JSON.stringify(plainPaths) === JSON.stringify(expectedPaths), `geo material paths per polygon (${JSON.stringify(plainPaths)})`);
+  check(JSON.stringify(plain.prims.get('material')?.data) === JSON.stringify(material.data)
+    && plain.detail.get('materials')?.get(0) === mesh.detail.get('materials')?.get(0), 'geo keeps material names and the detail table');
+
+  const instances = packedFromMatrices(mesh, [m4identity(), m4identity()]);
+  instances.prims.add('material', 'string', 1).set(0, 'copper');
+  const packedBack = await roundTrip(instances);
+  const instancePaths = packedBack.prims.get('shop_materialpath')?.data;
+  const sourcePaths = packedBack.packedSources[0]?.prims.get('shop_materialpath')?.data;
+  check(packedBack.numPacked === 2 && JSON.stringify(instancePaths) === JSON.stringify(['/mat/copper', '']),
+    `geo material paths per packed primitive (${JSON.stringify(instancePaths)})`);
+  check(JSON.stringify(sourcePaths) === JSON.stringify(expectedPaths), `geo material paths inside the packed source (${JSON.stringify(sourcePaths)})`);
+}
+
 process.exit(fail ? 1 : 0);

@@ -1844,10 +1844,10 @@ UNREAL LANDSCAPE BUNDLE: export {format:"unreal_landscape", path:"exports/level"
   new_landscape_location_cm, Rotation 0, Scale = landscape.scale. 4. One landscape material layer per layers[] entry;
   assign layers/<name>.png in the import panel (or Paint > Target Layers > Import). 5. Import. 6. objects.glb through the
   Interchange glTF import at the origin (X = x, Y = z, Z = y, cm), or meshes/*.glb + instances.csv for PCG / ISM by Mesh.
-HOUDINI: File SOP reads .geo (and glb/obj/usd); packed prims are written as PackedGeometry with embedded geometry
-  stored once in sharedprimitivedata (layout not yet confirmed against a Houdini-written file: instancing "expand" is
-  the safe path). CSV points: Table Import SOP, map P.x/P.y/P.z → P (and other columns).
-  A material name becomes a Houdini material path with a wrangle: s@shop_materialpath = "/mat/" + s@material;
+HOUDINI: Use a File SOP to load .geo (or glb/obj/usd). Houdini 22 loads packed .geo instances as Packed Geometry with their point attributes intact.
+  The .geo export writes /mat/<material name> to shop_materialpath on each prim with a material, including inside packed sources, and keeps material and the materials detail table.
+  Run integrations/houdini/topotopo_materials.py to build the shaders under /mat from the exported table.
+  For CSV points, use a Table Import SOP and map P.x/P.y/P.z → P (and other columns).
 BLENDER: File > Import > glTF 2.0 (custom attributes, exported with custom_attribs:true, arrive as mesh attributes
   named _NAME).
 PACKED INSTANCES (help topic "instancing"): glb/gltf write EXT_mesh_gpu_instancing (per-instance attributes with

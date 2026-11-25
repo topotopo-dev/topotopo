@@ -234,6 +234,10 @@ function sameGeo(a: Geometry, b: Geometry, label: string, tol = 0) {
     const j = JSON.parse(text);
     check(Array.isArray(j) && j[0] === 'fileversion' && text.includes('"Polygon_run"') && text.includes('"PolygonCurve_run"'), `geo ${prec}: Houdini key/value layout with Polygon_run and PolygonCurve_run`);
     const back = importGeometry(bytes, 'geo');
+    // the export adds Houdini's material path beside each material name
+    const names = src.prims.get('material')?.data as string[] | undefined, paths = back.prims.get('shop_materialpath')?.data as string[] | undefined;
+    check(!!names && !!paths && paths.every((p, i) => p === (names[i] ? `/mat/${names[i]}` : '')), `geo ${prec}: shop_materialpath is /mat/<material> per prim`);
+    back.prims.delete('shop_materialpath');
     sameGeo(src, back, `geo fpreal${prec}: every attribute, group, string and polyline round trips`, prec === 64 ? 0 : 1e-6);
     const idx = j[j.indexOf('topology') + 1][1][1] as number[];
     const p0 = src.primPoints(0);
