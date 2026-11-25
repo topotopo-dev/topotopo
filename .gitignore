@@ -13,8 +13,8 @@ dist/
 .claude/worktrees/
 bench/last.json
 /integrations/unreal/_build/
-/integrations/unreal/TopoTopoPCG/Binaries/
-/integrations/unreal/TopoTopoPCG/Intermediate/
+/integrations/unreal/TopoTopo/Binaries/
+/integrations/unreal/TopoTopo/Intermediate/
 .cache/
 **/packages/.cache.json
 **/packages/.lock

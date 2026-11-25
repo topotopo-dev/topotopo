@@ -3,6 +3,7 @@
 
 #include "TopoTopoLandscapeImport.h"
 #include "TopoTopoStream.h"
+#include "TopoTopoTileInstances.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/PlatformMisc.h"
@@ -23,24 +24,30 @@
 
 namespace TopoTopoWeightTests
 {
-FString FindDemoBundle()
+FString FindDemoBundle(bool bTiled = false)
 {
     FString Path;
-    if (FParse::Value(FCommandLine::Get(), TEXT("TopoTopoDemoBundle="), Path))
+    const TCHAR* Argument = bTiled ? TEXT("TopoTopoDemoTiledBundle=") : TEXT("TopoTopoDemoBundle=");
+    const TCHAR* Variable = bTiled ? TEXT("TOPOTOPO_DEMO_TILED_BUNDLE") : TEXT("TOPOTOPO_DEMO_BUNDLE");
+    if (FParse::Value(FCommandLine::Get(), Argument, Path))
     {
         return TopoTopoStream::ResolveFilePath(Path);
     }
-    Path = FPlatformMisc::GetEnvironmentVariable(TEXT("TOPOTOPO_DEMO_BUNDLE"));
+    Path = FPlatformMisc::GetEnvironmentVariable(Variable);
     if (!Path.IsEmpty()) { return TopoTopoStream::ResolveFilePath(Path); }
-    if (FParse::Value(FCommandLine::Get(), TEXT("TopoTopoDemoCSV="), Path))
+    if (!bTiled)
     {
-        return FPaths::GetPath(TopoTopoStream::ResolveFilePath(Path));
+        if (FParse::Value(FCommandLine::Get(), TEXT("TopoTopoDemoCSV="), Path))
+        {
+            return FPaths::GetPath(TopoTopoStream::ResolveFilePath(Path));
+        }
+        Path = FPlatformMisc::GetEnvironmentVariable(TEXT("TOPOTOPO_DEMO_CSV"));
+        if (!Path.IsEmpty()) { return FPaths::GetPath(TopoTopoStream::ResolveFilePath(Path)); }
     }
-    Path = FPlatformMisc::GetEnvironmentVariable(TEXT("TOPOTOPO_DEMO_CSV"));
-    if (!Path.IsEmpty()) { return FPaths::GetPath(TopoTopoStream::ResolveFilePath(Path)); }
 
+    const TCHAR* Relative = bTiled ? TEXT("out/unreal_landscape_tiled/landscape") : TEXT("out/unreal_landscape/landscape");
     TArray<FString> Roots;
-    if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TopoTopoPCG")))
+    if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TopoTopo")))
     {
         Roots.Add(Plugin->GetBaseDir());
     }
@@ -51,7 +58,7 @@ FString FindDemoBundle()
         FPaths::NormalizeDirectoryName(Root);
         for (int32 Depth = 0; Depth < 16 && !Root.IsEmpty(); ++Depth)
         {
-            const FString Candidate = FPaths::Combine(Root, TEXT("out/unreal_demo/landscape"));
+            const FString Candidate = FPaths::Combine(Root, Relative);
             if (FPaths::FileExists(FPaths::Combine(Candidate, TEXT("landscape.json")))) { return Candidate; }
             const FString Parent = FPaths::GetPath(Root);
             if (Parent == Root) { break; }
@@ -79,7 +86,7 @@ bool FTopoTopoWeightLayersTest::RunTest(const FString& Parameters)
     {
         // UE simple automation has no skipped-result API. A warning distinguishes this from acceptance.
         AddWarning(TEXT("SKIPPED TopoTopo.Editor.WeightLayers: demo Landscape bundle is absent. Run npm run export:demo, ")
-            TEXT("then supply -TopoTopoDemoBundle=\"<repository>/out/unreal_demo/landscape\" or TOPOTOPO_DEMO_BUNDLE. ")
+            TEXT("then supply -TopoTopoDemoBundle=\"<repository>/out/unreal_landscape/landscape\" or TOPOTOPO_DEMO_BUNDLE. ")
             TEXT("The existing -TopoTopoDemoCSV/TOPOTOPO_DEMO_CSV path is also accepted. No Landscape assertions were executed."));
         return true;
     }
@@ -91,14 +98,15 @@ bool FTopoTopoWeightLayersTest::RunTest(const FString& Parameters)
         AddError(TEXT("Reading the demo Landscape and weight PNGs failed: ") + Error);
         return false;
     }
-    const TArray<FName> ExpectedNames = {
-        TEXT("mask"), TEXT("sediment"), TEXT("debris"), TEXT("flow"), TEXT("water"),
-        TEXT("path"), TEXT("rock"), TEXT("road"), TEXT("grass"), TEXT("trees")
-    };
-    if (!TestEqual(TEXT("Ten demo manifest weight layers"), Data.WeightLayers.Num(), ExpectedNames.Num())) { return false; }
+    const TArray<FName> ExpectedNames = {TEXT("rock"), TEXT("grass"), TEXT("road")};
+    const double ExpectedMeans[] = {33.320580, 215.453936, 6.225406};
+    if (!TestEqual(TEXT("Three demo manifest weight layers"), Data.WeightLayers.Num(), ExpectedNames.Num())) { return false; }
     for (int32 Index = 0; Index < ExpectedNames.Num(); ++Index)
     {
-        TestEqual(FString::Printf(TEXT("Manifest layer %d keeps its order"), Index), Data.WeightLayers[Index].Name, ExpectedNames[Index]);
+        const auto& Layer = Data.WeightLayers[Index];
+        TestEqual(FString::Printf(TEXT("Manifest layer %d keeps its order"), Index), Layer.Name, ExpectedNames[Index]);
+        TestTrue(Layer.Name.ToString() + TEXT(" PNG has the expected weight mean"),
+            FMath::IsNearlyEqual(TopoTopoWeightTests::Mean(Layer.Weights), ExpectedMeans[Index], 1.e-6));
     }
     TestEqual(TEXT("Demo heightmap width"), Data.Width, 253);
     TestEqual(TEXT("Demo heightmap height"), Data.Height, 253);
@@ -117,7 +125,7 @@ bool FTopoTopoWeightLayersTest::RunTest(const FString& Parameters)
 
     // This is the command's Landscape import path, with transient assets and no current-level mutation,
     // asset registration, saving, or transaction. GLB/PCG assets are not prerequisites for this test.
-    AddInfo(TEXT("Importing heightmap, ten weight layers and generated material into an isolated transient world: ") + Directory);
+    AddInfo(TEXT("Importing heightmap, three weight layers and generated material into an isolated transient world: ") + Directory);
     ALandscape* Landscape = TopoTopoImport::ImportLandscape(World, Data, TEXT("/Game/TopoTopo/WeightLayersTest"), true, true, Error);
     if (!TestNotNull(TEXT("Landscape import succeeds: ") + Error, Landscape)) { return false; }
     TestTrue(TEXT("Test Landscape is transient"), Landscape->HasAnyFlags(RF_Transient));
@@ -131,7 +139,7 @@ bool FTopoTopoWeightLayersTest::RunTest(const FString& Parameters)
         ++ImportedLayerCount;
         TestTrue(TEXT("No unexpected imported target layers"), ExpectedNames.Contains(Layer.GetLayerName()));
     }
-    TestEqual(TEXT("Ten assigned imported layer infos including all-zero maps"), ImportedLayerCount, ExpectedNames.Num());
+    TestEqual(TEXT("Three assigned imported layer infos"), ImportedLayerCount, ExpectedNames.Num());
     TestTrue(TEXT("Landscape Paint target display uses explicit order"), Landscape->TargetDisplayOrder == ELandscapeLayerDisplayMode::UserSpecific);
     TArray<FName> DisplayNames;
     for (FName Name : Landscape->TargetDisplayOrderList)
@@ -182,7 +190,7 @@ bool FTopoTopoWeightLayersTest::RunTest(const FString& Parameters)
     if (!TestNotNull(TEXT("Generated Landscape material assigned"), Material)) { return false; }
     TestTrue(TEXT("Test material is transient"), Material->HasAnyFlags(RF_Transient));
     const TArray<FName> MaterialLayers = Landscape->RetrieveTargetLayerNamesFromMaterials(false);
-    TestEqual(TEXT("Material references ten distinct layers"), MaterialLayers.Num(), ExpectedNames.Num());
+    TestEqual(TEXT("Material references three distinct layers"), MaterialLayers.Num(), ExpectedNames.Num());
     for (FName Name : ExpectedNames)
     {
         TestTrue(Name.ToString() + TEXT(" referenced by material"), MaterialLayers.Contains(Name));
@@ -261,6 +269,54 @@ bool FTopoTopoWeightLayersTest::RunTest(const FString& Parameters)
                 UnshadedEdit.GetWeightDataFast(Target->LayerInfoObj, 0, 0, 7, 7, UnshadedWeights.GetData(), 8);
                 TestTrue(TEXT("material=0 preserves all imported weights"), UnshadedWeights == Tiny.WeightLayers[0].Weights);
             }
+        }
+    }
+    return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoTiledDemoBundleTest, "TopoTopo.Editor.TiledLandscape.DemoBundle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTopoTopoTiledDemoBundleTest::RunTest(const FString& Parameters)
+{
+    const FString Directory = TopoTopoWeightTests::FindDemoBundle(true);
+    if (Directory.IsEmpty() || !FPaths::FileExists(FPaths::Combine(Directory, TEXT("landscape.json"))))
+    {
+        AddError(TEXT("Tiled demo bundle missing. Run npm run export:demo -- --tiles 2, then supply ")
+            TEXT("-TopoTopoDemoTiledBundle=\"<repository>/out/unreal_landscape_tiled/landscape\" or set TOPOTOPO_DEMO_TILED_BUNDLE."));
+        return false;
+    }
+    TopoTopoImport::FLandscapeData Data;
+    FString Error;
+    if (!TopoTopoImport::ReadLandscape(Directory, Data, Error))
+    {
+        AddError(TEXT("Reading the tiled demo heights and weights failed: ") + Error);
+        return false;
+    }
+    TestTrue(TEXT("Tiled demo has a 2 x 2 grid"), Data.TileGrid == FIntPoint(2, 2));
+    TestEqual(TEXT("Tiled demo quads per tile side"), Data.TileSizeQuads, 126);
+    TestEqual(TEXT("Tiled demo assembled width"), Data.Width, 253);
+    TestEqual(TEXT("Tiled demo assembled height"), Data.Height, 253);
+    TestEqual(TEXT("Tiled demo weight layers"), Data.WeightLayers.Num(), 3);
+
+    const FTopoTopoStreamOptions Options;
+    FTopoTopoStream Global;
+    TArray<TopoTopoImport::FTileInstances> Tiles;
+    if (!TopoTopoStream::LoadFile(FPaths::Combine(Directory, TEXT("instances.csv")), Options, Global, Error)
+        || !TopoTopoImport::ReadTileInstances(Data, Options, Global, Tiles, Error))
+    {
+        AddError(TEXT("Reading the tiled demo instance streams failed: ") + Error);
+        return false;
+    }
+    TestEqual(TEXT("Tiled demo global instance count"), Global.Rows.Num(), 1418);
+    const int32 ExpectedCounts[] = {413, 366, 372, 267};
+    if (!TestEqual(TEXT("Tiled demo has four instance streams"), Tiles.Num(), static_cast<int32>(UE_ARRAY_COUNT(ExpectedCounts)))) { return false; }
+    for (const TopoTopoImport::FTileInstances& Tile : Tiles)
+    {
+        const FIntPoint Grid = Tile.Tile.GridPosition;
+        if (TestTrue(TEXT("Tiled demo coordinate is in the 2 x 2 grid"), Grid.X >= 0 && Grid.X < 2 && Grid.Y >= 0 && Grid.Y < 2))
+        {
+            TestEqual(FString::Printf(TEXT("Instance count for tile %d,%d"), Grid.X, Grid.Y), Tile.Stream.Rows.Num(), ExpectedCounts[Grid.Y * 2 + Grid.X]);
         }
     }
     return !HasAnyErrors();

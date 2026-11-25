@@ -369,7 +369,7 @@ function encodeBinaryJSON(v: any): Uint8Array {
   }
   check(serr < 1e-5 && close((sb.points.get('Cd')!.get(2) as number[])[0], (pts.points.get('Cd')!.get(2) as number[])[0], 1e-6), `pcg struct csv re-import: position, rotation, colour (max error ${serr.toExponential(1)})`);
 
-  // Attribute columns never repeat a column (Unreal FNames are case-insensitive and the TopoTopoPCG loader
+  // Attribute columns never repeat a column (Unreal FNames are case-insensitive and the TopoTopo plugin's loader
   // rejects duplicate columns): attributes named exactly Seed, Name, Density or Position were written next to the
   // standard columns of the same name, and `constructor` (an Object.prototype key) got a suffix it does not need
   const clashGeo = (attrs: [string, 'int' | 'float' | 'string', number][]) => {
@@ -851,7 +851,8 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
     const info = JSON.parse(fs.readFileSync(path.join(tmp, 'demo.json'), 'utf8'));
     const files: string[] = info.files.map((f: any) => f.path);
     const need = ['landscape/landscape.json', 'landscape/heightmap.png', 'landscape/objects.glb', 'landscape/objects_expanded.glb', 'landscape/instances.csv', 'scene.glb', 'scene_expanded.glb', 'scene.usda', 'scene.geo', 'instances.csv', 'instances.meshes.json'];
-    check(need.every((f) => files.includes(f) && fs.statSync(path.join(tmp, f)).size > 0) && info.scene.instances > 100 && info.warnings.length === 0 && /files, /.test(out),
+    check(need.every((f) => files.includes(f) && fs.statSync(path.join(tmp, f)).size > 0) && info.graph === 'examples/unreal_landscape.json'
+      && info.scene.instances === 1418 && info.scene.sources === 6 && info.warnings.length === 0 && /files, /.test(out),
       `export:demo: ${files.length} files, ${info.scene.instances} instances of ${info.scene.sources} sources in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     const man = JSON.parse(fs.readFileSync(path.join(tmp, 'landscape', 'landscape.json'), 'utf8'));
     check(man.landscape.exact_fit && man.landscape.components.join() === '2,2' && ['grass', 'rock', 'road'].every((l) => man.layers.some((x: any) => x.name === l)), 'export:demo: the landscape fits Unreal exactly (2×2 components) with grass/rock/road layers');

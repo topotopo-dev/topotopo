@@ -1,6 +1,6 @@
 # The TopoTopo cook protocol for the Unreal plugin
 
-This is the contract between the TopoTopo command line and the Unreal plugin (`TopoTopoImport/`). The cook is the one the
+This is the contract between the TopoTopo command line and the Unreal plugin (`TopoTopo/`). The cook is the one the
 Godot addon uses, so [the Godot protocol](../godot/PROTOCOL.md) defines the jobs file, the progress lines, the report, the
 record and freshness; this page says what differs for Unreal. Protocol version **1**, record schema **1**. TopoTopo's side
 is `src/host/cook.ts`, `src/host/cook-command.ts` and `src/host/unreal.ts`; its tests are `test/unreal.ts`.
@@ -18,7 +18,7 @@ user's config (`~/.topotopo/config.json`, or the file `TOPOTOPO_CONFIG` names), 
 ```text
 topotopo cook <.topo | package folder | folder>... --for unreal [--into </Game/folder>] [--flat] [--skip a,b] [--instancing packed|expand] [--force] [--no-cache] [--timeout <s>] [--report <file>] [--progress json] [--quiet]
 topotopo cook --jobs <jobs.json> [--force] [--no-cache] [--progress json]
-topotopo unreal setup <unreal project folder or .uproject> [--no-enable] [--with-pcg]
+topotopo unreal setup <unreal project folder or .uproject> [--no-enable]
 topotopo unreal status <unreal project folder or .uproject> [--strict] [--json]
 ```
 
@@ -56,7 +56,7 @@ folder under `Saved/TopoTopo/`. Everything there belongs to the cook. For the op
 | instances | `<id>.instances.csv`, `<id>.instances.meshes.json`, `<id>_meshes/<source>.glb`, and `<id>.glb` for any plain meshes beside them |
 | points | `<id>.points.csv` |
 | textures | one PNG per image |
-| terrain | the `unreal_landscape` bundle: `landscape.json`, `heightmap.png`, `heightmap.json`, `layers/*.png`, ...; a warning when its `exact_fit` is false, which TopoTopoPCG refuses to place |
+| terrain | the `unreal_landscape` bundle with `landscape.json`, `heightmap.png`, `heightmap.json` and `layers/*.png`. Placement requires `exact_fit` |
 | scene | by what it holds: with a heightfield a terrain bundle, else as mesh and instances |
 | curves, material, volume | none: skipped, with why |
 
@@ -94,7 +94,7 @@ decided here, on TopoTopo's side, and tested without the editor.
 | `texture` | `file`, `folder`, `name` | imports the PNG as a Texture |
 | `instances` | `file`, `folder`, `name`, `meshes` | writes a TopoTopo Instances asset from the rows, its groups by the `Mesh` column (every row is read before the asset changes); `meshes` maps each value to an asset; rebuilds actors in open levels |
 | `points` | `file`, `folder`, `name`, optional `meshes` | writes a PCG Data Asset; the columns that are no native point property become attributes (whole numbers, numbers or strings), and `meshes` adds a `MeshPath` attribute |
-| `landscape` | `file`, `folder`, `name` | keeps the bundle's path on the package asset: placing it is a separate action, through TopoTopoPCG's `TopoTopo.ImportScene` |
+| `landscape` | `file`, `folder`, `name` | keeps the bundle's path on the package asset. Place Terrain in Level calls `TopoTopo.ImportScene` |
 
 A step runs when a file it names has another hash in the record than when it last ran, when its asset is missing, or on Recook.
 An output whose `state` is `failed` runs no steps: its assets stay. A step the plugin does not know fails that output and asks
@@ -109,18 +109,19 @@ make the asset /Game/p/outputs/crate`).
 
 ## Setup and status
 
-`unreal setup` copies the plugin to `Plugins/TopoTopoImport/`, replacing what an earlier setup copied and leaving what the build
+`unreal setup` copies the plugin to `Plugins/TopoTopo/`, replacing what an earlier setup copied and leaving what the build
 wrote beside it (`Binaries/`, `Intermediate/`). It writes the install record, enables the plugin in the `.uproject`, adds the
 exclusions to the `/Game/` entry of Auto Reimport in `Config/DefaultEditorPerProjectUserSettings.ini`, and adds `*.topotopo-part`,
-`**/.topotopo/cook.lock` and `Saved/TopoTopo/` to `.gitignore`. `--no-enable` leaves the `.uproject` alone; `--with-pcg` also
-installs TopoTopoPCG the same way. The exclusions are `*/graphs/*`, `*/assets/*`, `*/inputs/*`, `*/exports/*`, `*/versions/*`,
+`**/.topotopo/cook.lock` and `Saved/TopoTopo/` to `.gitignore`. Setup removes earlier TopoTopo plugin folders and their
+`.uproject` entries when their descriptors identify TopoTopo as the creator. It warns about other folders with those names.
+`--no-enable` skips enabling the new plugin. The exclusions are `*/graphs/*`, `*/assets/*`, `*/inputs/*`, `*/exports/*`, `*/versions/*`,
 `*/packages/*`, `*/attachments/*`, `*/.topotopo/*`, `*/topotopo-packages/*`, `topotopo-packages/*`, `*topotopo-workspace.json`;
 the plugin adds any that are missing when the editor starts, because a user's saved settings can hold another list. They match
 those folder names anywhere under `Content/`, so a folder of that name that is no package's is not auto-imported either.
 Exclusions per package folder were weighed and left: a new package's files reach Auto Reimport together with its `.topo`,
 before a rule for it could be written.
 
-`unreal status` lists every package under `Content/`, with the freshness rule, each output, and the folders Auto Reimport still
+`unreal status` reports the TopoTopo plugin and lists every package under `Content/`, with the freshness rule, each output, and the folders Auto Reimport still
 sees. Packages belong under the project's `Content/` for now: one in a plugin's `Content/` is listed as unsupported, and `cook`
 refuses it (exit 2), because the plugin watches and cooks only the project's `Content/`. `--strict` exits 1 when a package is not
 current, a folder is seen or a package is unsupported. `--json` prints the same as JSON. An `--into` or `outputs/folder` that

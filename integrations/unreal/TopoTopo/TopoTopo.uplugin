@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
-  "Version": 6,
-  "VersionName": "0.1.5",
-  "FriendlyName": "TopoTopo PCG",
-  "Description": "TopoTopo point streams, PCG instances and Unreal scene import.",
+  "Version": 7,
+  "VersionName": "0.2.0",
+  "FriendlyName": "TopoTopo",
+  "Description": "Imports TopoTopo packages (.topo), reads point streams, spawns PCG instances and imports Landscapes and scenes.",
   "Category": "Procedural",
   "CreatedBy": "faxcorp",
   "CreatedByURL": "https://topotopo.dev",
@@ -14,7 +14,9 @@
   "SupportedTargetPlatforms": ["Win64"],
   "Modules": [
     { "Name": "TopoTopoPCG", "Type": "Runtime", "LoadingPhase": "Default" },
-    { "Name": "TopoTopoPCGEditor", "Type": "Editor", "LoadingPhase": "PostEngineInit" }
+    { "Name": "TopoTopoPCGEditor", "Type": "Editor", "LoadingPhase": "PostEngineInit" },
+    { "Name": "TopoTopoImport", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "TopoTopoImportEditor", "Type": "Editor", "LoadingPhase": "Default" }
   ],
   "Plugins": [
     { "Name": "PCG", "Enabled": true },

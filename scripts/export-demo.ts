@@ -1,19 +1,17 @@
-// Export the Unreal demo scene (test/scenes/unreal_demo.json, the fixed scene the Unreal plugin's checks expect; the
-// unreal_landscape example is the one to start a level from) as the file set for the Unreal 5.8 / Houdini / Blender
-// round trip:
-//   landscape/         unreal_landscape bundle of node "landscape": heightmap.png + .json, layers/*.png, landscape.json
+// Export examples/unreal_landscape.json for the Unreal 5.8 / Houdini / Blender round trip:
+//   landscape/         unreal_landscape bundle of the Level output: heightmap.png + .json, layers/*.png, landscape.json
 //                      (import settings + steps), objects.glb (road + instances), instances.csv + instances.meshes.json
 //                      + meshes/*.glb
-//   scene.glb          node "scene": terrain mesh, road and EXT_mesh_gpu_instancing instances with per-instance attributes
+//   scene.glb          node "showcase": terrain mesh, road and EXT_mesh_gpu_instancing instances with per-instance attributes
 //   scene_expanded.glb the same with the instances as real geometry (importers without EXT_mesh_gpu_instancing)
 //   scene.usda         the same as a USD stage: PointInstancer with per-instance primvars, UsdPreviewSurface materials
 //   scene.geo          the same as Houdini JSON geometry (fpreal32): PackedGeometry prims with shared embedded geometry
-//   instances.csv      node "instances" as Unreal PCG rows (+ instances.meshes.json + instances_meshes/*.glb)
+//   instances.csv      Trees and Rocks outputs as Unreal PCG rows (+ instances.meshes.json + instances_meshes/*.glb)
 //   demo.json          the list of files with sizes and the scene counts
-//   node scripts/export-demo.ts [out dir] [--tiles N]   (default out/unreal_demo)
+//   node scripts/export-demo.ts [out dir] [--tiles N]   (default out/unreal_landscape)
 //   npm run export:demo -- --tiles 2
 //   PowerShell: npm.cmd run export:demo -- --tiles 2 (passes --tiles through the npm command shim).
-//     writes out/unreal_demo_tiled/: the same 253×253 field split into 2×2 tiles of 126 quads / 127 samples,
+//     writes out/unreal_landscape_tiled/: the same 253×253 field split into 2×2 tiles of 126 quads / 127 samples,
 //     with shared edge samples and per-tile CSVs in landscape/tiles/<x>_<y>/. Meshes and instance positions stay shared.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,6 +20,7 @@ import zlib from 'node:zlib';
 import '../src/nodes/index.ts';
 import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
+import { openPackages } from '../src/packages/registry.ts';
 import { exportFilesAsync } from '../src/io/files.ts';
 import type { FileExportOptions } from '../src/io/files.ts';
 import type { ExportFormat } from '../src/io/export.ts';
@@ -40,20 +39,22 @@ for (let i = 2; i < process.argv.length; i++) {
   } else if (arg.startsWith('--') || outArg !== undefined) throw new Error(`unexpected argument: ${arg}; usage: export-demo.ts [out dir] [--tiles N]`);
   else outArg = arg;
 }
-const out = path.resolve(outArg ?? path.join(root, 'out', tiles ? 'unreal_demo_tiled' : 'unreal_demo'));
+const out = path.resolve(outArg ?? path.join(root, 'out', tiles ? 'unreal_landscape_tiled' : 'unreal_landscape'));
 const examples = path.join(root, 'examples');
-const graph = JSON.parse(fs.readFileSync(path.join(root, 'test', 'scenes', 'unreal_demo.json'), 'utf8'));
+const graph = JSON.parse(fs.readFileSync(path.join(examples, 'unreal_landscape.json'), 'utf8'));
+graph.nodes.demo_instances = { type: 'merge', in: [graph.outputs.trees.node, graph.outputs.rocks.node] };
 const host = createNodeHost({ baseDir: examples });
 const engine = new Engine(host);
 await engine.init();
+openPackages(engine, examples);
 
 const t0 = performance.now();
 const cook = async (target: string): Promise<Geometry> => {
   const r = await engine.cook(graph, { target });
-  if (!r.ok || !r.geo) throw new Error(`unreal_demo: node "${target}" failed: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
+  if (!r.ok || !r.geo) throw new Error(`unreal_landscape: node "${target}" failed: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
   return r.geo;
 };
-const scene = await cook('scene'), landscape = await cook('landscape'), instances = await cook('instances');
+const scene = await cook('showcase'), landscape = await cook(graph.outputs.level.node), instances = await cook('demo_instances');
 const cookMs = performance.now() - t0;
 let tileSize = 0;
 if (tiles) {
@@ -102,7 +103,7 @@ await write(scene, 'geo', 'scene.geo', { precision: 32 });
 await write(instances, 'csv', 'instances.csv', { pcg: true });
 
 const info = {
-  graph: 'test/scenes/unreal_demo.json',
+  graph: 'examples/unreal_landscape.json',
   cook_ms: Math.round(cookMs),
   scene: { points: scene.numPoints, prims: scene.numPrims, instances: scene.numPacked, sources: scene.packedSources.length },
   instances: instances.numPacked,

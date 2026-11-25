@@ -3,7 +3,6 @@
 
 #include "Editor.h"
 #include "EditorFramework/AssetImportData.h"
-#include "HAL/IConsoleManager.h"
 #include "Logging/MessageLog.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Containers/Ticker.h"
@@ -94,12 +93,6 @@ void UTopoTopoPackage::ShowCookReport()
 void UTopoTopoPackage::PlaceTerrainInLevel()
 {
     FMessageLog Log(TopoTopo::MessageLogName);
-    if (!IConsoleManager::Get().FindConsoleObject(TEXT("TopoTopo.ImportScene")))
-    {
-        Log.Error(FText::FromString(TEXT("TopoTopo: placing terrain needs the TopoTopoPCG plugin: topotopo unreal setup <project> --with-pcg")));
-        Log.Open(EMessageSeverity::Error, true);
-        return;
-    }
     const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
     const FString Project = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
     bool bPlaced = false;

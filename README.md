@@ -411,7 +411,7 @@ an animation is shown at):
   (tileable stone, wood and painted metal from texture nodes alone) and `image_cutouts` (props traced from pictures).
 
 `npm run export:demo` writes the Unreal plugin's demo file set (landscape bundle, `scene.glb`, `scene.usda`,
-`scene.geo`, `instances.csv` with meshes) to `out/unreal_demo/`, from the fixed scene in `test/scenes/unreal_demo.json`.
+`scene.geo`, `instances.csv` with meshes) to `out/unreal_landscape/` from `examples/unreal_landscape.json`.
 
 To cook a graph from the command line:
 
@@ -463,33 +463,29 @@ node src/cli.ts examples/growth.json --frames 1-24 --render "out/growth_{frame:0
 ## Unreal Engine 5.8
 
 A package inside `Content/` imports as a source asset through the
-[TopoTopoImport plugin](integrations/unreal/TopoTopoImport/README.md): each published output becomes ordinary Unreal
+[TopoTopo plugin](integrations/unreal/TopoTopo/README.md): each published output becomes ordinary Unreal
 assets. A mesh becomes a Static Mesh with its materials, textures, LODs and sockets; instances become meshes, a
 **TopoTopo Instances** asset you drag into a level (hierarchical instanced static meshes) and a PCG Data Asset; points
-become a PCG Data Asset; textures become Textures; terrain becomes a landscape bundle that TopoTopoPCG places. Auto
+become a PCG Data Asset; textures become Textures; use **Place Terrain in Level** on the package to place the landscape. Auto
 Reimport redoes it when the `.topo` changes, and the plugin cooks in the background when a graph, input or asset does.
 Only what changed cooks and imports again, assets update where they are, and a failed output keeps its last good assets.
 The `.uasset` files and the record `<package>/.topotopo/unreal.json` are committed; cooked files stay in `Saved/TopoTopo/`.
 
 ```text
-topotopo unreal setup <unreal project folder or .uproject> [--no-enable] [--with-pcg]
+topotopo unreal setup <unreal project folder or .uproject> [--no-enable]
 topotopo unreal status <unreal project folder or .uproject> [--strict] [--json]
 topotopo cook <.topo | package folder | folder>... --for unreal [--into </Game/folder>] [--flat] [--skip a,b] [--instancing packed|expand] [--force] [--no-cache] [--timeout <s>] [--report <file>] [--progress json] [--quiet]
 ```
 
-`unreal setup` copies the plugin to `Plugins/TopoTopoImport/`, records where TopoTopo is, enables the plugin, excludes
-TopoTopo's working folders from Auto Reimport and adds the cooked files to `.gitignore`. The plugin is C++ source, so Unreal
-builds it when the project opens (`--with-pcg` also installs TopoTopoPCG). `unreal status --strict` exits 1 when a
-package is stale, failed, never cooked or still seen by Auto Reimport. `--help-topic unreal` has the details; the plugin's
-contract is [integrations/unreal/PROTOCOL.md](integrations/unreal/PROTOCOL.md).
+`unreal setup` copies the plugin to `Plugins/TopoTopo/`, removes older installs made by TopoTopo, and enables the plugin.
+It records where TopoTopo is, excludes its working folders from Auto Reimport and adds the cooked files to `.gitignore`.
+Unreal builds the C++ plugin when the project opens. `unreal status --strict` exits 1 when a package is stale, failed,
+never cooked or still seen by Auto Reimport. See `--help-topic unreal` and the [cook protocol](integrations/unreal/PROTOCOL.md).
 
-The optional [TopoTopoPCG plugin](integrations/unreal/TopoTopoPCG/README.md) reads CSV or `points.json`
-directly into PCG, resolves mesh names through the instance sidecar and editable asset mappings, and provides a
-**TopoTopo Instance Spawner** backed by Unreal's Static Mesh Spawner. **Tools > Import TopoTopo scene** imports
-the GLB prototypes and materials, places the CSV instances as HISM components, and can import an exact-fit
-Landscape heightmap. Generate the sample with `npm run export:demo`; the plugin README gives installation,
-the two-node PCG graph, coordinates, automation tests and editor verification steps. It is separate from the npm
-package; copy it into your Unreal project's `Plugins/` directory.
+The plugin reads CSV or `points.json` directly into PCG and provides a **TopoTopo Instance Spawner**. Use
+**Tools > Import TopoTopo scene** to import a bundle's meshes, instances and Landscape. Generate the
+`unreal_landscape` demo with `npm run export:demo`. The [plugin README](integrations/unreal/TopoTopo/README.md)
+covers setup, PCG and editor tests.
 
 ## Godot 4.7
 

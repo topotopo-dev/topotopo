@@ -129,7 +129,7 @@ public:
     UFUNCTION(CallInEditor, Category = "TopoTopo")
     void ShowCookReport();
 
-    /** Place the package's terrain outputs in the open level (needs the TopoTopoPCG plugin). */
+    /** Place the package's terrain outputs in the open level. */
     UFUNCTION(CallInEditor, Category = "TopoTopo")
     void PlaceTerrainInLevel();
 

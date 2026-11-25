@@ -79,7 +79,7 @@ FString FindDemoCSV()
     }
 
     TArray<FString> Roots;
-    if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TopoTopoPCG")))
+    if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TopoTopo")))
     {
         Roots.Add(Plugin->GetBaseDir());
     }
@@ -90,7 +90,7 @@ FString FindDemoCSV()
         FPaths::NormalizeDirectoryName(Root);
         for (int32 Depth = 0; Depth < 16 && !Root.IsEmpty(); ++Depth)
         {
-            const FString Candidate = FPaths::Combine(Root, TEXT("out/unreal_demo/landscape/instances.csv"));
+            const FString Candidate = FPaths::Combine(Root, TEXT("out/unreal_landscape/landscape/instances.csv"));
             if (FPaths::FileExists(Candidate))
             {
                 return Candidate;
@@ -137,7 +137,7 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
     if (FilePath.IsEmpty() || !FPaths::FileExists(FilePath))
     {
         AddError(TEXT("Demo CSV missing. Run npm run export:demo in the TopoTopo repository, then launch the editor with ")
-            TEXT("-TopoTopoDemoCSV=\"<repository>/out/unreal_demo/landscape/instances.csv\" or set TOPOTOPO_DEMO_CSV before launch."));
+            TEXT("-TopoTopoDemoCSV=\"<repository>/out/unreal_landscape/landscape/instances.csv\" or set TOPOTOPO_DEMO_CSV before launch."));
         return false;
     }
     AddInfo(TEXT("Loading demo: ") + FilePath);
@@ -150,35 +150,30 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
         AddError(Error);
         return false;
     }
-    TestEqual(TEXT("Demo has 535 points"), Stream.Rows.Num(), 535);
+    TestEqual(TEXT("Demo has 1418 points"), Stream.Rows.Num(), 1418);
     if (Stream.Rows.IsEmpty())
     {
         return false;
     }
     const FTopoTopoStreamRow& First = Stream.Rows[0];
-    TransformNear(*this, TEXT("First pine"), First.Transform, FVector(3840.23858, -6233.69197, 363.347349),
-        FRotator(0, -105.954505, 0), FVector(2.02927671));
+    TransformNear(*this, TEXT("First oak"), First.Transform, FVector(669.606975, 9904.88283, 147.662754),
+        FRotator(0, 5.9791318, 0), FVector(1.15748431));
     TestEqual(TEXT("First seed"), First.Seed, 0);
     Near(*this, TEXT("First density"), First.Density, 1);
     TestTrue(TEXT("First color is white"), First.Color.Equals(FVector4(1, 1, 1, 1), 1.e-6));
     if (const auto* Value = Attribute(*this, First, TEXT("Mesh"), ETopoTopoAttributeType::String))
     {
-        TestEqual(TEXT("First mesh name"), Value->StringValue, FString(TEXT("pine")));
+        TestEqual(TEXT("First mesh name"), Value->StringValue, FString(TEXT("oak")));
     }
     if (const auto* Value = Attribute(*this, First, TEXT("MeshPath"), ETopoTopoAttributeType::String))
     {
-        TestEqual(TEXT("Sidecar name resolves into asset folder"), Value->StringValue, FString(TEXT("/Game/TopoTopo/Demo/pine.pine")));
+        TestEqual(TEXT("Sidecar name resolves into asset folder"), Value->StringValue, FString(TEXT("/Game/TopoTopo/Demo/oak.oak")));
     }
-    const TCHAR* FloatNames[] = {TEXT("curveu"), TEXT("hitprim"), TEXT("hitdist"), TEXT("height"), TEXT("slope"), TEXT("mask"), TEXT("tint")};
-    for (const TCHAR* Name : FloatNames)
-    {
-        Attribute(*this, First, Name, ETopoTopoAttributeType::Float);
-    }
-    Attribute(*this, First, TEXT("id"), ETopoTopoAttributeType::Integer);
+    Attribute(*this, First, TEXT("slope"), ETopoTopoAttributeType::Float);
     Attribute(*this, First, TEXT("copynum"), ETopoTopoAttributeType::Integer);
     Attribute(*this, First, TEXT("material"), ETopoTopoAttributeType::String);
     Attribute(*this, First, TEXT("name_attr"), ETopoTopoAttributeType::String);
-    TestEqual(TEXT("All 12 CSV extras plus resolved MeshPath"), Stream.AttributeNames.Num(), 13);
+    TestEqual(TEXT("All five CSV extras plus resolved MeshPath"), Stream.AttributeNames.Num(), 6);
 
     TMap<FString, int32> Counts;
     for (const FTopoTopoStreamRow& Row : Stream.Rows)
@@ -189,49 +184,46 @@ bool FTopoTopoDemoPointStreamTest::RunTest(const FString& Parameters)
             ++Counts.FindOrAdd(Mesh->StringValue);
         }
     }
-    TestEqual(TEXT("Five distinct mesh names"), Counts.Num(), 5);
-    TestEqual(TEXT("Pine instances"), Counts.FindRef(TEXT("pine")), 117);
-    TestEqual(TEXT("Fir instances"), Counts.FindRef(TEXT("fir")), 81);
-    TestEqual(TEXT("Oak instances"), Counts.FindRef(TEXT("oak")), 94);
-    TestEqual(TEXT("Rock A instances"), Counts.FindRef(TEXT("rock_a")), 118);
-    TestEqual(TEXT("Rock B instances"), Counts.FindRef(TEXT("rock_b")), 125);
+    TestEqual(TEXT("Six distinct mesh names"), Counts.Num(), 6);
+    TestEqual(TEXT("Pine instances"), Counts.FindRef(TEXT("pine")), 373);
+    TestEqual(TEXT("Fir instances"), Counts.FindRef(TEXT("fir")), 333);
+    TestEqual(TEXT("Oak instances"), Counts.FindRef(TEXT("oak")), 499);
+    TestEqual(TEXT("Boulder instances"), Counts.FindRef(TEXT("boulder")), 71);
+    TestEqual(TEXT("Slab instances"), Counts.FindRef(TEXT("slab")), 63);
+    TestEqual(TEXT("Stone instances"), Counts.FindRef(TEXT("stone")), 79);
 
     UPCGPointArrayData* Data = TopoTopoPCG::CreatePointData(Stream);
     if (!TestNotNull(TEXT("PCG point data created"), Data))
     {
         return false;
     }
-    TestEqual(TEXT("PCG emits 535 points"), Data->GetNumPoints(), 535);
-    TransformNear(*this, TEXT("PCG first pine"), Data->GetConstTransformValueRange()[0],
-        FVector(3840.23858, -6233.69197, 363.347349), FRotator(0, -105.954505, 0), FVector(2.02927671));
+    TestEqual(TEXT("PCG emits 1418 points"), Data->GetNumPoints(), 1418);
+    TransformNear(*this, TEXT("PCG first oak"), Data->GetConstTransformValueRange()[0],
+        FVector(669.606975, 9904.88283, 147.662754), FRotator(0, 5.9791318, 0), FVector(1.15748431));
     const PCGMetadataEntryKey Entry = Data->GetConstMetadataEntryValueRange()[0];
     if (const auto* Mesh = MetadataAttribute<FString>(*this, Data, TEXT("Mesh")))
     {
-        TestEqual(TEXT("PCG retains human mesh name"), Mesh->GetValueFromItemKey(Entry), FString(TEXT("pine")));
+        TestEqual(TEXT("PCG retains human mesh name"), Mesh->GetValueFromItemKey(Entry), FString(TEXT("oak")));
     }
     if (const auto* MeshPath = MetadataAttribute<FSoftObjectPath>(*this, Data, TEXT("MeshPath")))
     {
         TestEqual(TEXT("PCG provides spawner-compatible soft path"), MeshPath->GetValueFromItemKey(Entry).ToString(),
-            FString(TEXT("/Game/TopoTopo/Demo/pine.pine")));
+            FString(TEXT("/Game/TopoTopo/Demo/oak.oak")));
     }
-    MetadataAttribute<int64>(*this, Data, TEXT("id"));
     MetadataAttribute<int64>(*this, Data, TEXT("copynum"));
-    for (const TCHAR* Name : FloatNames)
-    {
-        MetadataAttribute<double>(*this, Data, Name);
-    }
+    MetadataAttribute<double>(*this, Data, TEXT("slope"));
     MetadataAttribute<FString>(*this, Data, TEXT("material"));
     MetadataAttribute<FString>(*this, Data, TEXT("name_attr"));
 
     // A manual asset rename wins over the sidecar's suggested folder/name path.
-    Options.MeshMapping.Add(TEXT("pine"), FSoftObjectPath(TEXT("/Game/Custom/SM_Pine.SM_Pine")));
+    Options.MeshMapping.Add(TEXT("oak"), FSoftObjectPath(TEXT("/Game/Custom/SM_Oak.SM_Oak")));
     FTopoTopoStream Remapped;
     if (TestTrue(TEXT("Demo reload with mapping override"), TopoTopoStream::LoadFile(FilePath, Options, Remapped, Error))
         && !Remapped.Rows.IsEmpty())
     {
         if (const auto* Value = Attribute(*this, Remapped.Rows[0], TEXT("MeshPath"), ETopoTopoAttributeType::String))
         {
-            TestEqual(TEXT("Explicit mapping overrides sidecar"), Value->StringValue, FString(TEXT("/Game/Custom/SM_Pine.SM_Pine")));
+            TestEqual(TEXT("Explicit mapping overrides sidecar"), Value->StringValue, FString(TEXT("/Game/Custom/SM_Oak.SM_Oak")));
         }
     }
     return true;

@@ -7,11 +7,11 @@ export const UNREAL_COMMANDS: { usage: string; what: string }[] = [
     what: 'cook the published outputs of packages inside an Unreal project\'s Content/ into Saved/TopoTopo/, only what changed, with the record <package>/.topotopo/unreal.json; what the plugin imports them from; options come from <id>.topo.import and flags override them',
   },
   {
-    usage: 'unreal setup <unreal project folder or .uproject> [--no-enable] [--with-pcg]',
-    what: 'install the Unreal plugin into a project: Plugins/TopoTopoImport, where TopoTopo is (~/.topotopo/config.json "install"), the Auto Reimport exclusions of TopoTopo\'s folders, the plugin enabled in the .uproject, .gitignore lines; --with-pcg also installs TopoTopoPCG, which places terrain outputs',
+    usage: 'unreal setup <unreal project folder or .uproject> [--no-enable]',
+    what: 'install and enable the TopoTopo plugin in Plugins/TopoTopo/. Setup removes earlier TopoTopo plugin installs, records the CLI location, configures Auto Reimport exclusions and updates .gitignore',
   },
   {
     usage: 'unreal status <unreal project folder or .uproject> [--strict] [--json]',
-    what: 'every package under Content/: ok, failed, stale (and why) or never cooked, each output, TopoTopo folders Auto Reimport still sees; --strict exits 1 on any of them (for CI)',
+    what: 'report whether the TopoTopo plugin is installed and show the state of every package and output under Content/. Use --strict to check package freshness and Auto Reimport exclusions in CI',
   },
 ];
