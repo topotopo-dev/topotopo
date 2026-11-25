@@ -110,5 +110,30 @@ for (const [index, recipe] of RECIPES.entries()) {
   }
 }
 
+// Check what the prop recipe promises beyond a successful default cook.
+const prop = RECIPES.find((recipe) => recipe.name === 'prop_variants_and_lods')?.graph;
+check(!!prop, 'prop_variants_and_lods: has a complete recipe graph');
+if (prop) {
+  const { geo: instances } = await engine.cook(prop);
+  const variants = instances?.packedSource && Array.from(instances.packedSource, (source) =>
+    instances.packedSources[source]?.prims.get('name')?.get(0));
+  check(isDeepStrictEqual(variants, ['wide', 'tall', 'wide']), 'prop_variants_and_lods: packed sources follow the point strings');
+
+  const output = prop.outputs?.lods;
+  const lods = output && await engine.cook(prop, { target: output.node });
+  check(!!lods?.ok && !!lods.geo && !lods.warnings.length, 'prop_variants_and_lods: the named LOD output cooks without warnings');
+  if (lods?.geo) {
+    const triangles = lods.geo.detail.get('lod_tris')?.get(0) as number[] | undefined;
+    check(triangles?.length === 3 && triangles[0] > triangles[1] && triangles[1] > triangles[2],
+      'prop_variants_and_lods: each level has fewer triangles than the last');
+
+    const { NodeIO } = await import('@gltf-transform/core');
+    const bytes = await exportGeometryAsync(lods.geo, 'glb');
+    const document = await new NodeIO().readBinary(bytes);
+    const names = document.getRoot().listMeshes().map((mesh) => mesh.getName()).sort();
+    check(isDeepStrictEqual(names, ['lamp_lod0', 'lamp_lod1', 'lamp_lod2']), 'prop_variants_and_lods: GLB has one mesh per level');
+  }
+}
+
 console.log(`recipes: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
