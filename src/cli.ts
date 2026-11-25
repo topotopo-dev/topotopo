@@ -84,7 +84,7 @@ import { encodePNG } from './render/png.ts';
 import { EXPORT_FORMATS, exportFormatFromPath } from './io/export.ts';
 import type { ExportFormat } from './io/export.ts';
 import { exportSource } from './io/source.ts';
-import { outputKind } from './io/kinds.ts';
+import { fittingFormats, outputKind } from './io/kinds.ts';
 import { packagesUsed } from './graph/packages.ts';
 import { PACKAGE_COMMANDS } from './packages/commands.ts';
 import { GODOT_COMMANDS } from './host/godot-commands.ts';
@@ -95,15 +95,15 @@ import { isGraph } from './graph/types.ts';
 import type { GraphSpec } from './graph/types.ts';
 import { openPackages } from './packages/registry.ts';
 import { ArtifactStore } from './host/artifacts.ts';
-import { checkExportFiles, ExportConflict, exportsFolderFor, filesShaFor, prepareTarget, serializeExport, unchangedTarget, writeExportFiles, writeTargets } from './host/export-targets.ts';
+import { checkExportFiles, checkTargetCollisions, ExportConflict, exportsFolderFor, filesShaFor, prepareTarget, serializeExport, unchangedTargetFiles, writeExportFiles, writeTargets } from './host/export-targets.ts';
 import type { PreparedTarget } from './host/export-targets.ts';
 import { TOPOTOPO_VERSION } from './host/version.ts';
 import { engineSha256 } from './host/engine-code.ts';
-import { exportOptionsFromFlags, prefixGone, publishedOutputs } from './io/targets.ts';
+import { exportOptionsFromFlags, prefixGone, publishedOutputs, resolveTarget } from './io/targets.ts';
 import { budgetReport, inspect, nodeBudgetInput, summarize } from './inspect.ts';
 import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
 import { uvReport } from './core/uvreport.ts';
-import { didYouMean } from './graph/params.ts';
+import { didYouMean, norm } from './graph/params.ts';
 import { parseVarArg, withVars } from './graph/vars.ts';
 import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
 import { exampleText, readExamples } from './mcp/examples.ts';
@@ -125,6 +125,12 @@ const prog = import.meta.url.endsWith('.ts') ? 'node src/cli.ts' : 'topotopo';
 // the hints of every command name it so
 setProgram(prog);
 
+function issueText(message: string, hint?: string, hintLabel = 'hint: '): string {
+  const pkg = /^package (\S+): this graph is in no package, and only packages use packages$/.exec(message);
+  return pkg ? `run ${prog} init <folder> first: only a package can use packages (this graph needs ${pkg[1]})`
+    : `${message}${hint ? ` (${hintLabel}${hint})` : ''}`;
+}
+
 // the global version flag is the first argument (or the only one); later ones belong to the command (use <package> --version 1.0)
 if (['-v', '-V', '--version'].includes(argv[0] ?? '')) {
   console.log(`topotopo ${TOPOTOPO_VERSION}`);
@@ -132,6 +138,15 @@ if (['-v', '-V', '--version'].includes(argv[0] ?? '')) {
 }
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
+    'First job',
+    `  ${prog} init parts    Make a package for your graphs and the packages they use.`,
+    `  ${prog} --help-topic examples    Find a graph to try.`,
+    `  ${prog} --help-example <name>    Copy its graph JSON to parts/graphs/main.json.`,
+    `  ${prog} parts/graphs/main.json --render preview.png`,
+    `  ${prog} parts/graphs/main.json --export part.glb`,
+    `  ${prog} edit parts    Open the package in the editor.`,
+    `  ${prog} mcp    Connect an AI client over stdio.`,
+    '',
     `usage: ${prog} <graph.json> [--node n | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]`,
     '         [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr] [--export out.glb] [--export out.obj]',
     '         [--inspect summary|attributes|topology|all|uv|budget|scene] [--uv-resolution 1024] [--uv-attrib uv2] [--uv-per-piece] [--json]',
@@ -146,9 +161,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '           its packages and shared nodes (a material package\'s maps) load and cook once:',
     '           --scale 100 --output wall --export wall.glb --output gate --export gate.glb --render gate.png',
     '         [--var name=value] (override a graph var for this run; repeat it; numbers, true/false and JSON values are parsed, other text is a string)',
-    '         [--export-all] (every output with an export target in the graph, into exports/ of its package folder; a line per output with its',
-    '           kind, time and size. In a package, an output whose last export would be made the same (its nodes, vars, packages, the',
-    '           package\'s other graphs, assets/ and inputs/, options and the engine code, all its files in place) is skipped)',
+    '         [--export-all] (every published output into exports/ of its package folder, using the editor\'s first fitting format when there is no target.',
+    '           One line per output says written, unchanged or failed. Exit 1 if any output fails. In a package, unchanged exports are kept.)',
     '         [--force] (--export-all: export every output, the unchanged ones too)',
     '         [--overwrite] (--export / --export-all: replace files that were changed or were not written by TopoTopo)',
     '         [--timing] (every cooked node with its time, slowest first, and the lib.run time of a script by node type; said without the flag for the slowest nodes of a cook that takes 1 s or more)',
@@ -165,7 +179,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         [--locked] (a build machine: a package the graph names that the package does not use, or a copy missing or edited by hand, fails the run instead of being added; exports use the published copies, whatever --follow shows)',
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v|comb] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
-    '                          [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--size 800|1600x600] [--render-scale 2]',
+    '                          [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--size 800|1600x600] (whole PNG including footer) [--render-scale 2]',
     '                          Zebra reflects black and white stripes to show how smoothly surfaces flow.',
     '                          [--cd auto|ignore|multiply] (shading pbr: auto = a named material wins over Cd, Cd colours prims without one; multiply = Cd tints the material too)',
     '                          [--grey] works with pbr (neutral 18% grey, retaining roughness, metallic and normal maps) and matcap (uniform clay). It implies pbr if shading is omitted.',
@@ -173,6 +187,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                          framing: every 3D view fits the bounds; [--zoom 1] is relative to that fit (above 1 only with --look-at or --ortho-scale)',
     '                          [--azimuth 35] (degrees around +Y: 0 = camera on +Z at the front, 90 = on +X, the right side) [--elevation 25] (degrees above the horizon)',
     '                          [--look-at x,y,z] (world metres, Y up, +Z front) [--ortho-scale 0.5] (metres across an ortho view)',
+    '                          Coordinates accept commas, spaces or both, for example --from "6 1.7 9" --to 0,2,0.',
     '                          camera by position: [--from x,y,z --to x,y,z] [--fov 40] (degrees across the width): the persp view from exactly there, nothing fitted,',
     '                            to match a concept or game camera (an --underlay then fills the view); without --views the render is that one view',
     '                          [--bounds x0,y0,z0,x1,y1,z1] (world metres: every 3D view frames these corners instead of the own box of the geometry, so a sequence shares one camera)',
@@ -205,7 +220,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '                       in its sidecar; replay: --output/--node, --frame, --fps, --var per var, --format and each option as its flag',
     '                       (heightmap .json, <name>.meshes.json, landscape.json) or in <file>.source.json beside it; --help-topic export',
     '       with --frames, output paths may use {frame} or {frame:04}; otherwise out.0001.png style names are written',
-    `       ${prog} --catalog | --help-node <type> | --help-topic <name> | --help-example <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output; --help-topic examples lists the examples)`,
+    `       ${prog} --catalog | --help-node <type or alias> | --help-topic <name> | --help-example <name> | --version   (in a package: the outputs of the packages it uses too, --help-node owner/name/output; --help-topic examples lists the examples)`,
     `       ${prog} mcp [--package dir] [--viewer]   (the MCP server over stdio, for MCP clients)`,
     `       ${prog} view <graph.json> [--port 7341] [--follow owner/name]   (live 3D viewer in the browser; re-cooks when the file is saved; guides and files dropped on the page go to the package's inputs/, beside the file in no package)`,
     `       ${prog} refresh <graph.json> <generated.json | ->   (a regenerated graph written over graph.json keeping what a person tuned: changed var values that still fit, control labels and steps, node ui, meta; - reads stdin)`,
@@ -215,7 +230,8 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     `       ${prog} library add <name> <folder> | remove <name> | list | new <library or workspace> <folder/name> [--title t] [--tags a,b] | bake <package>|--stale|--all   (registered libraries)`,
     `       ${prog} edit [folder] [--port 7341]   (the live viewer on a package, default the current folder's)`,
     '       a package and the packages it uses (a folder named must exist; default: the current folder\'s package; kinds: ' + KINDS.join(', ') + '; --help-topic packages):',
-    ...PACKAGE_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
+    ...PACKAGE_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.usage === 'check [folder]'
+      ? 'cook the published outputs of the working graphs, the newest published versions and the versions in listed libraries. Exit 1 on a broken output, changing nothing but missing .gdignore files inside a Godot project' : c.what})`),
     '       Godot (exit 0 ok, 1 an output or package failed, 2 usage or setup; --help-topic godot):',
     ...GODOT_COMMANDS.map((c) => `       ${prog} ${c.usage}   (${c.what})`),
     '       Unreal (the same exit codes; --help-topic unreal):',
@@ -256,11 +272,13 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   else {
     const name = opt('--help-node')!;
     // an output of a package this one does not use yet is read where its library holds it (nothing is copied)
-    const d = defs.find((x) => x.type === name) ?? (name.includes('/') ? engine.resolveDef(name) ?? pk.describe(name) ?? undefined : undefined);
+    const resolved = engine.resolveDef(name);
+    const d = resolved ?? (name.includes('/') ? pk.describe(name) : null);
     // a package output this folder cannot cook as it is (one of TopoTopo's own it does not use, a folder in no package)
-    const why = name.includes('/') && !engine.resolveDef(name) ? engine.packageIssue(name) : null;
-    const said = why ? `${why.error}${why.hint ? ` (${why.hint})` : ''}` : '';
-    console.log(d ? `${nodeDoc(d)}${said ? `\nin this folder: ${said}` : ''}` : said || `unknown node "${name}" (see --catalog)`);
+    const why = name.includes('/') && !resolved ? engine.packageIssue(name) : null;
+    const said = why ? issueText(why.error, why.hint, '') : '';
+    const alias = d?.aliases?.some((n) => norm(n) === norm(name)) && norm(d.type) !== norm(name) ? `${name} is another name for ${d.type}\n` : '';
+    console.log(d ? `${alias}${nodeDoc(d)}${said ? `\nin this folder: ${said}` : ''}` : said || `unknown node "${name}" (see --catalog)`);
   }
   process.exit(0);
 }
@@ -276,7 +294,7 @@ if (argv[0] === 'refresh') {
   if (!file || file.startsWith('-') || !from || (from.startsWith('-') && from !== '-')) fail(`usage: ${prog} refresh <graph.json> <generated.json | - (read from stdin)>`);
   const read = (f: string, what: string): GraphSpec => {
     let g: unknown;
-    try { g = JSON.parse(fs.readFileSync(f === '-' ? 0 : f, 'utf8')); } catch (e) { return fail(`${prog} refresh: ${what} ${f === '-' ? '(stdin)' : `"${f}"`}: ${(e as Error).message}`); }
+    try { g = JSON.parse(fs.readFileSync(f === '-' ? 0 : f, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { return fail(`${prog} refresh: ${what} ${f === '-' ? '(stdin)' : `"${f}"`}: ${(e as Error).message}`); }
     return isGraph(g) ? g : fail(`${prog} refresh: ${what} ${f === '-' ? '(stdin)' : `"${f}"`} is not a graph (an object with "nodes")`);
   };
   const generated = read(from, 'the generated graph');
@@ -364,7 +382,7 @@ async function cook() {
   if (file.startsWith('-')) fail(`${prog}: unknown option "${file}" (the first argument is the graph file; see --help)`);
   if (!fs.existsSync(file)) fail(`${prog}: no such graph file "${file}"`);
   let graph;
-  try { graph = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  try { graph = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
   catch (e) { fail(`${prog}: ${file} is not valid JSON: ${(e as Error).message}`); }
   // --var name=value (repeatable): the graph's vars for this run; exports record the result, so a manifest replays
   const varArgs = argv.flatMap((x, i) => (x === '--var' ? [argv[i + 1]] : []));
@@ -383,7 +401,7 @@ async function cook() {
       if (units.some((u) => u.args.includes(f))) fail(`${f} applies to the whole run: put it before the first --output`);
     for (const f of ['--export', '--render']) if (units[0].base.includes(f)) fail(`${f} before the first --output would write every output to one file: give each --output its own ${f}`);
     if (argv.includes('--frames')) fail('several outputs in one run cook one frame: use --frame N, not --frames');
-    if (argv.includes('--export-all')) fail('--export-all already exports every output with an export target: leave out --output, or give each --output its own --export');
+    if (argv.includes('--export-all')) fail('--export-all already exports every published output: leave out --output, or give each --output its own --export');
   }
   for (const u of units) {
     const outputName = uopt(u, '--output');
@@ -414,10 +432,17 @@ async function cook() {
   try { pk = openPackages(engine, path.dirname(path.resolve(file)), { follow: followArgs }); } catch (e) { fail(`--follow: ${(e as Error).message}`); }
   const dry = pk!.dryRun(graph);
   const invalid = engine.validate(graph, '', { ...engine.root, id: dry.id, packages: dry.resolver }).errors;
-  if (invalid.length) fail(invalid.map((e) => `error [${e.node}] ${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`).join('\n'));
+  if (invalid.length) {
+    const errors = invalid.map((e) => `[${e.node}] ${issueText(e.message, e.hint)}`);
+    if (argv.includes('--export-all') && isGraph(graph)) return failedExports(errors.join(' · '));
+    fail(errors.map((e) => `error ${e}`).join('\n'));
+  }
   if (argv.includes('--locked')) {
     const unlocked = pk!.locked(graph);
-    if (unlocked.length) fail(unlocked.map((x) => `--locked: ${x}`).join('\n'));
+    if (unlocked.length) {
+      if (argv.includes('--export-all')) return failedExports(`--locked: ${unlocked.join(' · ')}`);
+      fail(unlocked.map((x) => `--locked: ${x}`).join('\n'));
+    }
   } else for (const n of pk!.addFor(graph)) console.log(n);
   for (const p of pk!.check()) console.error(`warning: ${p}`);
   // --follow names the working folders exports use too (their source record lists them under "followed"); --locked
@@ -489,7 +514,7 @@ async function cook() {
   }
 
   function report(r: CookReport) {
-    for (const e of r.errors) console.error(`error [${e.node}] ${e.message}${e.hint ? ` (hint: ${e.hint})` : ''}`);
+    for (const e of r.errors) console.error(`error [${e.node}] ${issueText(e.message, e.hint)}`);
     for (const w of r.warnings) console.error(`warning [${w.node}] ${w.message}`);
   }
   /** Where the cook's time went: with --timing every cooked node, else the slowest when the cook took a second or more. */
@@ -524,7 +549,7 @@ async function cook() {
     if (has('--no-footer')) a.footer = false;
     // a reference image path is relative to the current folder, as the output paths are
     if (get('--underlay') !== undefined) a.underlay = path.resolve(get('--underlay')!);
-    try { return renderArgs(a); } catch (e: any) { return fail(e.message); }
+    try { return renderArgs(a, { canvasSize: true }); } catch (e: any) { return fail(e.message); }
   }
 
   // Several renders per cook: every --render takes the render options that follow it, up to the next --render;
@@ -543,7 +568,14 @@ async function cook() {
     return renderAt.map((start, n) => {
       const seg = av.slice(start, n + 1 < renderAt.length ? renderAt[n + 1] : av.length);
       if (!seg[1] || seg[1].startsWith('--')) fail('--render needs an output path (e.g. --render out.png)');
-      const from = (args: string[], f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
+      const from = (args: string[], f: string) => {
+        const i = args.indexOf(f);
+        if (i < 0) return undefined;
+        if (!['--from', '--to', '--look-at', '--bounds'].includes(f)) return args[i + 1];
+        let end = i + 1;
+        while (end < args.length && !args[end].startsWith('--')) end++;
+        return args.slice(i + 1, end).join(' ');
+      };
       return { out: seg[1], get: (f: string) => from(seg, f) ?? from(sharedArgs, f) ?? from(u.base, f), has: (f: string) => seg.includes(f) || sharedArgs.includes(f) || u.base.includes(f) };
     });
   }
@@ -600,7 +632,8 @@ async function cook() {
       if (get('--section') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('section') ? views : [...(views ?? parseViews('quad')!), 'section'];
       if (get('--texture') !== undefined) views = !views && v === undefined ? ro.views : views && views.includes('texture') ? views : [...(views ?? parseViews('quad')!), 'texture'];
       const title = path.basename(file, '.json') + (multi ? ` · ${u.outputName}` : '') + (r.frame !== 1 ? ` @ frame ${r.frame}` : '');
-      const img = await renderGeometryAsync(geo, { ...ro, views, colorBy: get('--color-by') ?? null, checker: has('--checker'), title }, (t) => engine.host.readFile(t));
+      const img = await renderGeometryAsync(geo, { ...ro, views, colorBy: get('--color-by') ?? null, checker: has('--checker'), title }, (t) => engine.host.readFile(t))
+        .catch((e: Error) => fail(e.message));
       const p = at(out);
       fs.mkdirSync(path.dirname(path.resolve(p)), { recursive: true });
       fs.writeFileSync(p, encodePNG(img.rgba, img.width, img.height, (d) => zlib.deflateSync(d)));
@@ -657,9 +690,9 @@ async function cook() {
       report(r);
       if (!r.ok || !r.geo) {
         timing(r);
-        if (!multi) process.exit(1);
-        console.error(`output "${u.outputName}" did not cook: nothing was written for it`);
-        failed.push(u.outputName!);
+        if (!multi && !argv.includes('--export-all')) process.exit(1);
+        if (multi) console.error(`output "${u.outputName}" did not cook: nothing was written for it`);
+        failed.push(u.outputName ?? r.target);
         continue;
       }
       const vars = varArgs.length ? ` with ${varArgs.map((v) => v.trim()).join(', ')}` : '';
@@ -675,42 +708,84 @@ async function cook() {
     if (failed.length) { await engine.host.pool?.close(); process.exit(1); }
   }
 
-  /** --export-all: every published output with an export target (io/targets.ts), into the package's exports/ (exportsFolderFor). */
+  function outputsForExport() {
+    const spec: GraphSpec = graph;
+    const outputs = Object.fromEntries(Object.entries(spec.outputs ?? {}).filter(([, o]) => o && o.publish !== false));
+    return publishedOutputs(graphName(file), { ...spec, outputs }, engine.findOutput(spec).name).map((p) => ({ ...p, spec }));
+  }
+
+  type ExportLine = { label: string; status: 'written' | 'unchanged' | 'FAILED'; detail: string };
+  function showExports(lines: ExportLine[]) {
+    const counts = { written: 0, unchanged: 0, FAILED: 0 };
+    for (const [i, { label, status, detail }] of lines.entries()) {
+      console.log(`[${i + 1}/${lines.length}] ${JSON.stringify(label)} ${status}: ${detail.replace(/\r?\n/g, ' · ')}`);
+      counts[status]++;
+    }
+    console.log(`--export-all: ${counts.written} written, ${counts.unchanged} unchanged, ${counts.FAILED} failed`);
+    if (counts.FAILED) process.exitCode = 1;
+  }
+
+  async function failedExports(detail: string) {
+    showExports(outputsForExport().map(({ label }) => ({ label, status: 'FAILED', detail })));
+    await engine.host.pool?.close();
+  }
+
+  /** Cook each published output with one engine, then write the exports that could be prepared. */
   async function exportAll() {
     const name = graphName(file), exportsDir = exportsFolderFor(file);
-    const published = publishedOutputs(name, graph, engine.findOutput(graph).name);
-    if (!published.some((p) => p.target)) fail(`--export-all: no output of ${file} has an export target; add "export": "glb" to the graph (default output) or to an entry of "outputs"`);
-    const prepared: PreparedTarget[] = [];
-    // a target the export refuses (its path written with a prefix that is gone) fails the run before anything cooks
-    const refused = published.find((p) => p.target?.refused);
-    if (refused) fail(`--export-all: "${refused.label}": ${prefixGone(refused.target!.refused!)}; nothing was written`);
     const blocked = exportScope ? exportBlocked() : null;
-    if (blocked) fail(`--export-all: ${blocked}; nothing was written`);
-    // paths as the person finds them from where they ran the command
+    if (blocked) return failedExports(blocked);
     const rel = (f: string) => path.relative(process.cwd(), f) || f;
-    const targets = published.filter((p): p is typeof p & { target: NonNullable<typeof p.target> } => !!p.target);
     const time = resolveTime({ frame: single, fps });
     const cook = { frame: time.frame, fps: time.fps, packages: packagesUsed(engine, graph, exportScope ?? engine.root), files: filesShaFor(file) };
-    const force = argv.includes('--force'), unchanged: string[] = [], t0 = performance.now();
-    for (const [i, p] of targets.entries()) {
-      const at = `[${i + 1}/${targets.length}] ${p.output ?? p.label}`, dest = rel(path.join(exportsDir, ...p.target.path.split('/')));
-      // its last export would be made the same: left as it is (--force exports it anyway)
-      if (!force && unchangedTarget(name, p, exportsDir, cook)) { unchanged.push(p.label); console.log(`${at}: unchanged since its last export, ${dest} kept`); continue; }
+    const force = argv.includes('--force');
+    const options = { ...exportWrite, overwrite: argv.includes('--overwrite') };
+    const lines: ExportLine[] = [];
+    const pending: { output: PreparedTarget; line: ExportLine }[] = [];
+    const kept: NonNullable<ReturnType<typeof unchangedTargetFiles>>[] = [];
+    for (const p of outputsForExport()) {
+      const line: ExportLine = { label: p.label, status: 'FAILED', detail: '' };
+      lines.push(line);
       const t = performance.now();
-      const r = await engine.cook(graph, { target: p.node, frame: single, fps, ...(exportScope ? { scope: exportScope } : {}) });
-      report(r);
-      if (!r.ok || !r.geo) fail(`--export-all: "${p.label}" did not cook${exportScope ? ' with the published copies' : ''}; nothing was written`);
-      const x = await prepareTarget(r.geo!, name, p, exportsDir, engine.host, cook);
-      prepared.push(x);
-      const kb = x.files.reduce((n, f) => n + f.bytes.byteLength, 0) / 1024;
-      console.log(`${at}, ${outputKind(r.geo!).published ?? 'nothing'}: ${((performance.now() - t) / 1000).toFixed(1)} s, ${kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`} → ${dest} — ${x.summary}${x.sourceFile ? `; source: ${rel(x.sourceFile)}` : ''}`);
+      try {
+        if (p.target?.refused) throw new Error(prefixGone(p.target.refused));
+        const keep = (target: NonNullable<typeof p.target>, fallback = '') => {
+          const last = !force && unchangedTargetFiles(name, { ...p, target }, exportsDir, cook);
+          if (!last) return false;
+          kept.push(last);
+          line.status = 'unchanged';
+          line.detail = `${rel(path.join(exportsDir, target.path))} kept${fallback}`;
+          return true;
+        };
+        if (p.target && keep(p.target)) continue;
+        const r = await engine.cook(graph, { target: p.node, frame: single, fps, scope: exportScope ?? engine.root });
+        if (!r.ok || !r.geo) {
+          const reason = r.errors.map((e) => `[${e.node}] ${issueText(e.message, e.hint)}`).join(' · ') || 'it produced no geometry';
+          throw new Error(`did not cook${exportScope ? ' with the published copies' : ''}: ${reason}`);
+        }
+        const info = outputKind(r.geo);
+        const format = p.target ? undefined : fittingFormats(info)[0]?.format;
+        const fallback = format ? ` (default format: ${format})` : '';
+        const target = p.target ?? (format ? resolveTarget(format, p.output ?? name) : null);
+        if (!target) throw new Error('no export target: add "export": {"format": ..., "path": ...} to the output');
+        if (format && keep(target, fallback)) continue;
+        const output = await prepareTarget(r.geo, name, { ...p, target }, exportsDir, engine.host, cook);
+        const dest = rel(path.join(exportsDir, target.path));
+        const warnings = [...new Set([...r.warnings.map((w) => `[${w.node}] ${w.message}`), ...output.warnings])];
+        line.detail = `${dest}${fallback} — ${info.published ?? 'empty'}, ${output.summary}, ${((performance.now() - t) / 1000).toFixed(1)} s`
+          + `${output.sourceFile ? ` · source: ${rel(output.sourceFile)}` : ''}${warnings.length ? ` · warning: ${warnings.join(' · ')}` : ''}`;
+        pending.push({ output, line });
+      } catch (e) { line.detail = (e as Error).message; }
     }
-    writeTargets(prepared, exportsDir, { ...exportWrite, overwrite: argv.includes('--overwrite') });
-    console.log(`exported ${prepared.length} of ${targets.length} output${targets.length === 1 ? '' : 's'} into ${rel(exportsDir)} in ${((performance.now() - t0) / 1000).toFixed(1)} s`
-      + `${unchanged.length ? `; ${unchanged.length} unchanged since their last export, kept (--force exports them too)` : ''}`);
-    const skipped = published.filter((p) => !p.target).map((p) => p.label);
-    if (skipped.length) console.log(`no export target (skipped): ${skipped.join(', ')}`);
+    try {
+      checkTargetCollisions([...kept, ...pending.map((p) => p.output)]);
+      for (const { output, line } of pending) {
+        try { writeTargets([output], exportsDir, options); line.status = 'written'; }
+        catch (e) { line.detail = (e as Error).message; }
+      }
+    } catch (e) { for (const { line } of pending) line.detail = (e as Error).message; }
     if (exportNote) console.log(exportNote);
+    showExports(lines);
   }
   // stop the kernel worker threads (idle ones would not hold the process, but a clean exit should not wait on them)
   await engine.host.pool?.close();

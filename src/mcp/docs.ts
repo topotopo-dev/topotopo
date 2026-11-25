@@ -237,9 +237,11 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   inside the project, where the engine imports from; a path starting with "exports/" drops it, with a warning, so it
   never lands in exports/exports/; an "engine:" path prefix is gone: it warns, and exporting it is refused). The person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
   targets; set one with edit {op:"export", output?, export}.
+  The CLI's --export-all also exports published outputs without a target when the editor offers a fitting format.
   The viewer's Download buttons need no target: they offer the formats that fit the output (a heightfield: png16,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
+  CLI --help-node accepts node aliases. CLI graph-file cooks and refresh accept a leading UTF-8 BOM in graph JSON.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.
 - A value outside a param's range (help gives min/max; a package output's "params" declarations) is clamped with a
   warning. "strict": true on the graph makes it the node's error instead, for every node of the graph; "strict" on a
@@ -260,7 +262,7 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   graph lacks are dropped. The report lists what was kept, reset and dropped.
 - Several graphs can coexist (name param); graph_ref composes them. Graphs persist as JSON in the package.
 - "fragment": true marks a graph that is a piece another graph or a script completes (merging in nodes it names but
-  does not hold): it is never cooked on its own, and topotopo check skips it.`,
+  does not hold). In the working graphs, topotopo check skips fragments without a published output.`,
 
   inputs: `HUMAN INPUT (guides, blockouts and masks in the package inputs/ folder)
 People feed in their own material by dropping files into <package>/inputs/ (or onto the live viewer, or with its Add
@@ -1280,6 +1282,9 @@ followed package with no published version in use is refused, saying to publish 
 --locked (a build machine) exports published versions alone: a followed package it does not use fails the run.
 
 OUT OF DATE AND UPDATE: what a package uses changes only by an update, after a before/after.
+- CLI topotopo check [folder] cooks the published outputs of the working graphs, including assertions. In a
+  workspace it checks each package and the newest published versions in its listed libraries. It also cooks the
+  newest published version of each package it checks. A broken output is named with its error and exits 1.
 - workspace {action:"outdated"} (CLI: topotopo outdated) lists the packages in use that have newer versions:
   the newer versions with their notes (and their outputs of another kind), one line for those up to date, what it could
   not check, and the update to run for each.
@@ -1575,7 +1580,7 @@ FRAMING: every 3D view fits the bounds: the bbox corners fill the view with a sm
   ortho_scale: the world width in metres across an ortho or section view (default: fit the bounds).
     e.g. render {views:"front", ortho_scale:0.5} shows 50 cm across the front view, at any size.
   size: pixels per view, n or "WxH": size:"1600x600" gives wide views a long prop fills (the fit follows the aspect);
-    scale 2 makes a 2× image.
+    scale 2 makes a 2× image. CLI --size sets the whole PNG before --render-scale, including the footer and all views.
 CAMERA BY POSITION (match a concept or game camera; the fit can hide a piece that is 15 % too narrow):
   camera: {from: [x, y, z], to: [x, y, z], fov: 40}: the persp view's eye at from, looking at to, world +Y up, fov in
     degrees across the view's WIDTH (horizontal, as Unreal and Houdini give it; default 40, about a 50 mm lens). A
@@ -1586,6 +1591,7 @@ CAMERA BY POSITION (match a concept or game camera; the fit can hide a piece tha
     geometry loses the triangles that reach behind it (a note counts them).
     e.g. render {camera:{from:[6, 1.7, 9], to:[0, 2, 0], fov:60}, size:"1600x900", underlay:"inputs/concept.png"}
     CLI: --from 6,1.7,9 --to 0,2,0 --fov 60 --size 1600x900 --underlay concept.png
+    CLI --from, --to, --look-at and --bounds accept commas, spaces or both between coordinates.
 BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no ground grid or axis gizmo; the footer
   stays). grid:false drops the persp ground grid. underlay:"inputs/side.png" draws a reference image (PNG, relative to
   the package) behind the 3D views at underlay_opacity (default 0.5); underlay_fit "bounds" (default: fitted into the
@@ -1721,14 +1727,16 @@ SOURCE: every export (export tool, export targets and the viewer's Export and Do
       --instancing packed --materials --no-quantize --scale 100 --split-by-name --tangents auto --up-axis z --export crate.glb
   These sidecars and manifests are metadata of the file beside them: inputs list and the viewer show
   them with it (kind "metadata"), and a file node reading one says what to read instead.
-EXPORT-ALL (CLI --export-all): cooks and exports each output with an export target, one line per output (its name,
-  kind, time, size and file), then writes them all (nothing when one fails to cook). It cooks only the outputs it
-  exports, not the default output first. In a package, an output is kept as it is when its last export would be made
+EXPORT-ALL (CLI --export-all): cooks and exports each published output. A viewer-only output ("publish":false) is
+  cooked only if a published one needs it. An output without a target uses the editor's first fitting format when
+  available. Otherwise its line asks for an export target. Each line says written, unchanged or FAILED with the
+  reason. Successful outputs can be written even when another output fails. The last line counts each status, and
+  any failed output exits 1. In a package, an export is kept when its last export would be made
   the same: its receipt in exports/.outputs.json, every file it wrote still there, and the record's source block equal
   to the one an export would write now but for graph_sha256 and seeds (so its nodes, vars, frame, fps, packages, files
   of the package, export options and the engine's code: any edit to it, as in a source checkout under one version,
-  exports again). Its line says "unchanged since its last export"; --force
-  exports it anyway. A graph in no package exports every output every time (its files are not known).
+  exports again). Its line says "unchanged" and the path kept. Use --force to write those exports again too.
+  A graph in no package writes its exports on every run.
 glTF layout: one node+mesh per "name", one primitive per material. Polygons → TRIANGLES, polylines → one LINE_STRIP each
   (LINES above 256 curves), loose points → POINTS with pscale as _PSCALE. Scene empties (scene_null: isolated points with
   scene_empty 1, name, parent, orient, scale) → meshless nodes (sockets) under their parent: the scene, another empty or
@@ -1979,7 +1987,7 @@ export function catalogText(defs: NodeDef[], filter?: { category?: string; searc
     for (const d of items) out.push(`  ${d.type}${d.inputs.length ? '' : ' ◦'}${d.deprecated ? ' (deprecated)' : ''} — ${d.summary}${kindTags(d) ? `  (${kindTags(d)})` : ''}`);
   }
   out.push(filter?.cli
-    ? '(◦ = generator, no inputs). --help-node <type> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ') + '; --help-example <name> for an example\'s card and graph'
+    ? '(◦ = generator, no inputs). --help-node <type or alias> for a node\'s params; --help-topic <name> for a topic: overview, ' + topicList().join(', ') + '; --help-example <name> for an example\'s card and graph'
     : '(◦ = generator, no inputs). Use help {nodes:[...]} for params. Help topics: ' + topicList().join(', '));
   if (hidden) out.push(`${hidden} deprecated node type(s) hidden (include_deprecated: true lists them).`);
   return out.join('\n');

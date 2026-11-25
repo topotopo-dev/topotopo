@@ -12,6 +12,8 @@ const num = (v: unknown, key: string): number => {
   return n;
 };
 const bool = (v: unknown) => v === true || v === 'true' || v === 1;
+const coordinates = (v: unknown) => typeof v === 'string'
+  ? v.trim().split(/\s*,\s*|\s+/).map((s) => s === '' ? NaN : Number(s)) : v;
 const axis = (v: unknown, key: string): Axis => {
   const s = String(v).toLowerCase();
   if (s !== 'x' && s !== 'y' && s !== 'z') throw new Error(`render: ${key} expects "x", "y" or "z", got ${JSON.stringify(v)}`);
@@ -25,8 +27,8 @@ export function parsePlane(s: string, key: string): { axis: Axis; offset: number
 }
 
 /** Pixels per view: 800, "800", "1600x900" (also 1600×900 or 1600,900) or [1600, 900]. */
-export function parseSize(v: unknown): number | [number, number] {
-  const bad = () => new Error(`render: size expects pixels per view, n or "WxH" (e.g. 800 or "1600x900"), got ${JSON.stringify(v)}`);
+export function parseSize(v: unknown, canvasSize = false): number | [number, number] {
+  const bad = () => new Error(`render: ${canvasSize ? '--size expects whole PNG dimensions' : 'size expects pixels per view'}, n or "WxH" (e.g. 800 or "1600x900"), got ${JSON.stringify(v)}`);
   if (Array.isArray(v)) {
     if (v.length !== 2 || !v.every((x) => Number.isFinite(+x) && +x > 0)) throw bad();
     return [+v[0], +v[1]];
@@ -42,12 +44,15 @@ export function parseSize(v: unknown): number | [number, number] {
 }
 
 /** Map tool-style arguments (snake_case; camelCase also accepted) to RenderOptions. */
-export function renderArgs(a: Record<string, any>): RenderOptions {
+export function renderArgs(a: Record<string, any>, { canvasSize = false } = {}): RenderOptions {
   const o: RenderOptions = {};
   const has = (k: string) => a[k] !== undefined && a[k] !== null;
   const pick = (snake: string, camel = snake) => (has(snake) ? a[snake] : has(camel) ? a[camel] : undefined);
   if (has('views')) o.views = parseViews(a.views);
-  if (has('size')) o.size = parseSize(a.size);
+  if (has('size')) {
+    o.size = parseSize(a.size, canvasSize);
+    if (canvasSize) o.canvasSize = true;
+  }
   for (const [s, c] of [['azimuth', 'azimuth'], ['elevation', 'elevation'], ['zoom', 'zoom'], ['hard_angle', 'hardAngle'], ['max_labels', 'maxLabels'],
     ['glyph_scale', 'glyphScale'], ['max_glyphs', 'maxGlyphs'], ['ao_radius', 'aoRadius'], ['ortho_scale', 'orthoScale'], ['scale', 'scale'], ['ssaa', 'ssaa'],
     ['max_triangles', 'maxTriangles'], ['exposure', 'exposure'], ['underlay_opacity', 'underlayOpacity']] as const) {
@@ -115,17 +120,17 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   }
   const look = pick('look_at', 'lookAt') ?? pick('target');
   if (look !== undefined) {
-    const v = typeof look === 'string' ? look.split(',').map(Number) : look;
-    if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => Number.isFinite(+x))) throw new Error(`render: look_at expects [x, y, z], got ${JSON.stringify(look)}`);
+    const v = coordinates(look);
+    if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => Number.isFinite(+x))) throw new Error(`render: look_at expects three coordinates (e.g. --look-at 0,2,0), got ${JSON.stringify(look)}`);
     o.target = [+v[0], +v[1], +v[2]];
   }
-  // camera by position: {from: [x, y, z], to: [x, y, z], fov?: degrees across the width}; "x,y,z" strings also read
+  // camera by position: {from: [x, y, z], to: [x, y, z], fov?: degrees across the width}; coordinate strings also read
   const cam = pick('camera');
   if (cam !== undefined) {
-    const need = `render: camera expects {from: [x, y, z], to: [x, y, z], fov?: degrees across the view's width (default 40)} in world metres, got ${JSON.stringify(cam)}`;
+    const need = `render: camera expects {from: [x, y, z], to: [x, y, z], fov?: degrees across the view's width (default 40)} in world metres (e.g. --from 6,1.7,9 --to 0,2,0), got ${JSON.stringify(cam)}`;
     if (typeof cam !== 'object' || Array.isArray(cam)) throw new Error(need);
     const v3 = (v: unknown) => {
-      const x = typeof v === 'string' ? v.split(',').map((t) => (t.trim() === '' ? NaN : Number(t))) : v;
+      const x = coordinates(v);
       if (!Array.isArray(x) || x.length !== 3 || !x.every((t) => Number.isFinite(+t))) throw new Error(need);
       return [+x[0], +x[1], +x[2]] as [number, number, number];
     };
@@ -135,9 +140,9 @@ export function renderArgs(a: Record<string, any>): RenderOptions {
   // bounds: [[x0, y0, z0], [x1, y1, z1]] (or "x0,y0,z0,x1,y1,z1") in world metres, min then max
   const bd = pick('bounds');
   if (bd !== undefined) {
-    const v = typeof bd === 'string' ? bd.split(',').map((x) => (x.trim() === '' ? NaN : Number(x))) : bd;
+    const v = coordinates(bd);
     const flat = Array.isArray(v) && v.length === 6 && !v.some(Array.isArray) ? v : Array.isArray(v) && v.length === 2 && v.every((t) => Array.isArray(t) && t.length === 3) ? [...v[0], ...v[1]] : null;
-    const msg = `render: bounds expects [[x0, y0, z0], [x1, y1, z1]] (world metres, min then max, each min <= max), got ${JSON.stringify(bd)}`;
+    const msg = `render: bounds expects min and max triples in world metres, each min <= max (e.g. --bounds 0,0,0,1,2,3), got ${JSON.stringify(bd)}`;
     if (!flat || !flat.every((x) => typeof x === 'number' && Number.isFinite(x))) throw new Error(msg);
     for (let k = 0; k < 3; k++) if (flat[k] > flat[k + 3]) throw new Error(msg);
     o.bounds = [[flat[0], flat[1], flat[2]], [flat[3], flat[4], flat[5]]];

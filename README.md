@@ -75,15 +75,25 @@ Requires Node ≥ 22.18.
 **As a package.** The npm package ships compiled JavaScript (`dist/`) with a `topotopo` command:
 
 ```bash
+npx topotopo --help                                         # first job and full command reference
+npx topotopo init parts                                     # make a package before using built-in packages
+npx topotopo --help-topic examples                          # find a graph to try
+npx topotopo --help-example machined_bracket                # copy its graph JSON to parts/graphs/main.json
 npx topotopo --catalog                                      # node types by category
-npx topotopo --help-node scatter                            # one node's params, defaults and example
+npx topotopo --help-node heightfield_road                   # node help also accepts aliases
 npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
-npx topotopo graph.json --render out.png --export out.glb   # cook, render, export
-npx topotopo graph.json --export-all                        # every output's export target, into its package's exports/
-npx topotopo view graph.json                                # live 3D viewer, re-cooks on save; drops go to its package's inputs/
+npx topotopo parts/graphs/main.json --render out.png --size 1000x650 --export out.glb
+npx topotopo edit parts                                     # open the package in the editor
+npx topotopo view graph.json                                # open one graph in the live 3D viewer
 npx topotopo refresh graph.json generated.json             # a regenerated graph over graph.json, keeping the values a person tuned
-npx topotopo mcp --package /absolute/path/to/package    # the MCP server over stdio
+npx topotopo mcp --package parts                            # connect an AI client over stdio
 ```
+
+**In CI.** Run `topotopo check parts` to cook the working graphs' published outputs, including their assertions, and
+check the newest published versions in scope. The check covers each package when run on a workspace. Run
+`topotopo parts/graphs/main.json --locked --export-all` for each graph you ship. It exports published outputs into
+the package's `exports/`, uses the editor's first fitting format when an output has no target, and reports written,
+unchanged or failed for each. Both commands exit 1 on a failed output.
 
 **Open by double-click (Windows).** Install TopoTopo (`npm install -g topotopo`), then link the files once:
 

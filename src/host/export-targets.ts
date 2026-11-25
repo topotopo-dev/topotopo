@@ -198,6 +198,8 @@ export interface PreparedTarget {
  */
 export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string>; files?: string }
 
+type TargetPaths = Pick<PreparedTarget, 'graph' | 'label' | 'root'> & { files: Pick<ExportFile, 'path' | 'shared'>[] };
+
 /**
  * Serialize one published output to its target inside `exportsDir` (nothing is written yet); a target still written
  * with the export prefix that is gone is refused, saying what to write. The export records its source: the graph it is
@@ -221,35 +223,44 @@ export async function prepareTarget(geo: Geometry, graph: string, p: PublishedOu
 }
 
 /**
- * Whether a published output's last export into `exportsDir` would be made the same now (io/source.ts sameSource):
+ * The files kept when a published output's last export would be made the same now (io/source.ts sameSource):
  * its receipt there, every file it wrote still in place, and the source block its record holds the same as the one an
  * export would record now (`cook`: its frame, fps, packages and files). Nothing is cooked.
  */
-export function unchangedTarget(graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, cook: TargetCook): boolean {
-  if (p.target.refused || !cook.files) return false;
+export function unchangedTargetFiles(graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, cook: TargetCook): TargetPaths | null {
+  if (p.target.refused || !cook.files) return null;
   const last = new ArtifactStore(exportsDir).records().filter((a) => a.label === p.target.path && a.graph === graph && (a.output ?? '') === (p.output ?? '')).pop();
-  if (!last || !last.files.every((f) => fs.statSync(f, { throwIfNoEntry: false })?.isFile())) return false;
+  if (!last || !last.files.every((f) => fs.statSync(f, { throwIfNoEntry: false })?.isFile())) return null;
+  const options = resolvedExportOptions(p.target.format, p.target.options);
   const now = withExportOptions(exportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
     format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION, engine: engineSha256(),
-  }), resolvedExportOptions(p.target.format, p.target.options));
+  }), options);
   // the record: the file among them that holds a source block (<file>.source.json or the format's sidecar)
   for (const f of last.files) {
     if (!/\.json$/i.test(f)) continue;
     const record = readExportRecord(f);
     if (!record) continue;
-    return sameSource(record.source, now) && (!('sha256' in record) || !!record.sha256 && typeof record.sha256 === 'object' && !Array.isArray(record.sha256)
+    const same = sameSource(record.source, now) && (!('sha256' in record) || !!record.sha256 && typeof record.sha256 === 'object' && !Array.isArray(record.sha256)
       && Object.entries(record.sha256).every(([name, hash]) => matchesHash(path.resolve(path.dirname(f), name), hash)));
+    if (!same) return null;
+    const maps = path.join(exportsDir, 'maps');
+    return { graph, label: p.label, root: exportsDir, files: last.files.map((file, i) => ({
+      path: file, shared: i > 0 && options.maps === 'external' && path.dirname(file) === maps && /\.(?:png|jpg)$/i.test(file),
+    })) };
   }
-  return false;
+  return null;
+}
+
+export function unchangedTarget(graph: string, p: PublishedOutput & { target: ResolvedTarget }, exportsDir: string, cook: TargetCook): boolean {
+  return unchangedTargetFiles(graph, p, exportsDir, cook) !== null;
 }
 
 /**
- * Write prepared targets and record the receipts of those inside `exportsDir` (the viewer lists that folder); two
- * targets writing one file are refused before any write.
+ * Refuse targets that would write the same file, except for shared maps named by their content.
  */
-export function writeTargets(prepared: PreparedTarget[], exportsDir: string, options: WriteOptions = {}): number {
-  const owner = new Map<string, PreparedTarget>(), shared = new Set<string>();
+export function checkTargetCollisions(prepared: TargetPaths[]): void {
+  const owner = new Map<string, TargetPaths>();
   for (const p of prepared) for (const f of p.files) {
     const key = path.resolve(f.path).toLowerCase(), other = owner.get(key);
     // a shared map is named by its content: the targets that use it write it once
@@ -258,8 +269,14 @@ export function writeTargets(prepared: PreparedTarget[], exportsDir: string, opt
     if (other && other !== p) throw Object.assign(new Error(`"${other.label}" (${other.graph}) and "${p.label}" (${p.graph}) both write ${path.relative(p.root, f.path)}: give one a different export path`), { status: 409 });
     owner.set(key, p);
   }
+}
+
+/** Write prepared targets and record their receipts so the viewer can list them. */
+export function writeTargets(prepared: PreparedTarget[], exportsDir: string, options: WriteOptions = {}): number {
+  checkTargetCollisions(prepared);
   checkExportFiles(prepared, { packageDir: path.dirname(exportsDir), ...options });
   const store = new ArtifactStore(exportsDir);
+  const shared = new Set<string>();
   let written = 0;
   for (const p of prepared) {
     const files = p.files.filter((f) => { if (!f.shared) return true; const key = path.resolve(f.path).toLowerCase(); if (shared.has(key)) return false; shared.add(key); return true; });
