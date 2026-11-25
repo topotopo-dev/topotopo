@@ -236,8 +236,9 @@ defineNode({
     'halving) or, when screen_sizes is given, from screen sizes (fraction of the screen height the object covers, ' +
     'like Unreal LOD screen size): each such level reduces as far as an error of pixel_error pixels at screen_height ' +
     'allows. Every level\'s prims get prim int "lod" and prim "name" = name_format with {name} = the prim\'s input name ' +
-    '(or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1), so exporters that ' +
-    'split by name (export split_by_name, glTF/USD) write one mesh per level. merge outputs all levels together; ' +
+    '(or base_name) and {level} = the level, by default "{name}_lod{level}" (gun_lod0, gun_lod1). ' +
+    'To give a whole asset made of named parts one name per level, set name_format to "lamp_lod{level}" without {name}. ' +
+    'Exporters that split by name (export split_by_name, glTF/USD) then write one mesh per level. merge outputs all levels together; ' +
     'spacing offsets level k by k·spacing for side-by-side previews. switch outputs only level "level", named the same ' +
     'way (gun_lod2; name_format "{name}" keeps the input names). group reduces only those prims (e.g. "@name=magazine"): ' +
     'the others pass through once, unchanged and unnamed by the levels. A ratio level that stops well short of its ' +
@@ -261,8 +262,8 @@ defineNode({
     keep_uv: { type: 'bool', default: true, desc: 'when the input uv has no overlaps, keep every level free of uv folds (as decimate keep_uv: reduce in steps around a fold; a level can stop above its target); off = plain reductions' },
     mode: { type: 'enum', options: ['merge', 'switch'], default: 'merge', desc: 'merge = all levels in one geometry; switch = only "level"' },
     level: { type: 'int', default: 0, min: 0, desc: 'switch mode: the level to output' },
-    name_format: { type: 'string', default: '{name}_lod{level}', desc: 'prim name of each level: {name} = the input prim name (or base_name), {level} = the level number (merge needs {level})', aliases: ['name_pattern', 'suffix_format'] },
-    base_name: { type: 'string', default: 'mesh', desc: 'the {name} of prims without a "name" attribute (mesh_lod0 …)', aliases: ['name'] },
+    name_format: { type: 'string', default: '{name}_lod{level}', desc: 'Prim name of each level. {name} is the input prim name (or base_name) and {level} is the level number (merge needs {level}). To give a whole asset made of named parts one name per level, set name_format to "lamp_lod{level}" without {name}.', aliases: ['name_pattern', 'suffix_format'] },
+    base_name: { type: 'string', default: 'mesh', desc: 'fallback for {name} on prims that have no name or an empty name (mesh_lod0 …)', aliases: ['name'] },
     group: P.group('prim', 'prims to make levels of ("" = all); the others pass through once, unchanged'),
     spacing: { type: 'vec3', default: [0, 0, 0], desc: 'offset of level k = k * spacing (side-by-side previews; keep 0 for export)', aliases: ['offset'] },
   },

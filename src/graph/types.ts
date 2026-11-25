@@ -149,7 +149,9 @@ export interface GraphMeta {
 
 /**
  * Where a published output exports to: a format name ("glb"), written as exports/<output>.<ext>, or an object with
- * an explicit format or a path inside exports/ with an unambiguous extension, plus the export tool's options.
+ * an explicit format or a path with an unambiguous extension, plus the export tool's options.
+ * Write paths relative to the package's exports/ folder. Use "path": "lamp.glb" for exports/lamp.glb and leave off
+ * the "exports/" prefix.
  */
 export type ExportTarget = string | ({ format: string; path?: string } | { format?: undefined; path: string }) & { [option: string]: unknown };
 
