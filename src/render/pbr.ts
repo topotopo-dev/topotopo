@@ -343,7 +343,7 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
     }
     triVcol[t] = v; triAlpha[t] = na[0]; triVA[t] = na[1];
   }
-  if (cdHidden) notes.push('pbr: Cd on prims with a named material is not shown: the material decides their colour, as in glTF export (cd "multiply" tints the material with it)');
+  if (cdHidden) notes.push('pbr: Cd on prims with a named material is not shown: the material decides their colour, and a GLB export leaves that Cd out too (export option vertex_colors writes it as COLOR_0). Cd on prims without a named material exports as COLOR_0, or as the base colour when it is one opaque tint');
   if (alphaHidden) notes.push('pbr: the Alpha attribute is not used on prims with a named material: the material\'s alpha decides, as in glTF export (cd "multiply" uses it)');
   for (const label of new Set(opaqueMapAlpha)) notes.push(`pbr: material "${label}" has a base colour map with alpha below 1 but is opaque (alpha_mode "mask" or "blend" uses that alpha)`);
   // MikkTSpace frames for normal-mapped triangles (computed once over every triangle: the frames do not depend on the

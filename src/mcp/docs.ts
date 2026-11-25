@@ -1338,6 +1338,23 @@ EXPORTS record the package versions their graph used in the source block: "packa
 
 THE CLI COMMANDS (a folder named must exist; without one, the current folder's package):
 ${PACKAGE_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
+  ci: `BUILD IN CI
+
+Pin topotopo to an exact version in devDependencies, commit package-lock.json, and run npm ci.
+Run the TopoTopo commands in an npm script so the local topotopo command is on PATH.
+Set TOPOTOPO_HOME, TOPOTOPO_CONFIG, TOPOTOPO_CACHE and TOPOTOPO_NODE_CACHE_DIR to paths
+inside the CI workspace. TOPOTOPO_CONFIG takes a file path. The other three take directory paths.
+
+- topotopo check <package> cooks the working graphs' published outputs and the newest published versions
+  in scope. Use topotopo check . from the package folder. It exits 1 if a package or output check fails,
+  including a failing assertion.
+- In the package folder, run topotopo graphs/main.json --locked --export-all for each graph you ship,
+  substituting its path. It writes each published output into exports/ using its export target or the first
+  fitting format. It exits 1 on a graph, cook or export error, including missing or changed locked dependencies.
+  Add --force to rewrite unchanged outputs.
+
+For a build that also runs Unreal, see [Without a window (CI) in the Unreal plugin README](https://github.com/topotopo-dev/topotopo/blob/main/integrations/unreal/TopoTopo/README.md#without-a-window-ci).`,
+
   godot: `GODOT (packages inside a Godot project, imported by the TopoTopo plugin)
 A package inside a Godot project imports as <id>.topo: the plugin (topotopo godot setup puts it in addons/topotopo/) cooks
 each published output into a plain GLB Godot imports itself, and keeps them current while graphs change (from the

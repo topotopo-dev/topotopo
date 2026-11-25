@@ -105,7 +105,7 @@ import { glbSceneReport, sceneReportText } from './io/inspect-scene.ts';
 import { uvReport } from './core/uvreport.ts';
 import { didYouMean, norm } from './graph/params.ts';
 import { parseVarArg, withVars } from './graph/vars.ts';
-import { catalogText, nodeDoc, topicList, topicText } from './mcp/docs.ts';
+import { catalogText, topicList, topicText } from './mcp/docs.ts';
 import { exampleText, readExamples } from './mcp/examples.ts';
 
 const argv = process.argv.slice(2);
@@ -271,6 +271,7 @@ if (argv.includes('--catalog') || opt('--help-node')) {
   const defs = [...allNodeDefs(), ...engine.assetsIn().map((x) => x.def), ...engine.packageDefs()];
   if (argv.includes('--catalog')) console.log(catalogText(defs, { cli: true }));
   else {
+    const { nodeHelpText } = await import('./mcp/tools.ts');
     const name = opt('--help-node')!;
     // an output of a package this one does not use yet is read where its library holds it (nothing is copied)
     const resolved = engine.resolveDef(name);
@@ -279,7 +280,7 @@ if (argv.includes('--catalog') || opt('--help-node')) {
     const why = name.includes('/') && !resolved ? engine.packageIssue(name) : null;
     const said = why ? issueText(why.error, why.hint, '') : '';
     const alias = d?.aliases?.some((n) => norm(n) === norm(name)) && norm(d.type) !== norm(name) ? `${name} is another name for ${d.type}\n` : '';
-    console.log(d ? `${alias}${nodeDoc(d)}${said ? `\nin this folder: ${said}` : ''}` : said || `unknown node "${name}" (see --catalog)`);
+    console.log(d ? `${alias}${nodeHelpText(d)}${said ? `\nin this folder: ${said}` : ''}` : said || `unknown node "${name}" (see --catalog)`);
   }
   process.exit(0);
 }

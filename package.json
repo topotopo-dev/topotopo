@@ -23,6 +23,7 @@
     "dist",
     "library/*/versions/**",
     "library/*/thumbs/*.png",
+    "library/*/sizes.json",
     "examples/*.json",
     "examples/*.md",
     "examples/*/*.topo",
