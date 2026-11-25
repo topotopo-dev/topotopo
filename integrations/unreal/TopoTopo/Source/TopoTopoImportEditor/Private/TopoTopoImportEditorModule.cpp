@@ -122,7 +122,7 @@ namespace
             Add(TEXT("TopoTopoRecook"), LOCTEXT("Recook", "Recook"), LOCTEXT("RecookTip", "Cook every output again, ignoring the record and the cache, and import them all."), &UTopoTopoPackage::Recook);
             Add(TEXT("TopoTopoOpen"), LOCTEXT("Open", "Open in TopoTopo"), LOCTEXT("OpenTip", "Open the package in TopoTopo's viewer, in the browser."), &UTopoTopoPackage::OpenInTopoTopo);
             Add(TEXT("TopoTopoReport"), LOCTEXT("Report", "Show Cook Report"), LOCTEXT("ReportTip", "Open the TopoTopo message log."), &UTopoTopoPackage::ShowCookReport);
-            Add(TEXT("TopoTopoTerrain"), LOCTEXT("Terrain", "Place Terrain in Level"), LOCTEXT("TerrainTip", "Place the package's terrain outputs in the open level (needs the TopoTopoPCG plugin)."), &UTopoTopoPackage::PlaceTerrainInLevel);
+            Add(TEXT("TopoTopoTerrain"), LOCTEXT("Terrain", "Place Terrain in Level"), LOCTEXT("TerrainTip", "Place the package's terrain outputs in the open level."), &UTopoTopoPackage::PlaceTerrainInLevel);
         }));
     }
 }

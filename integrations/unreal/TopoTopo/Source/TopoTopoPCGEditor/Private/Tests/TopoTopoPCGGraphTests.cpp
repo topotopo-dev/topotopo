@@ -36,8 +36,8 @@ struct FExpectedMesh
 };
 
 constexpr FExpectedMesh ExpectedMeshes[] = {
-    {TEXT("pine"), 117}, {TEXT("fir"), 81}, {TEXT("oak"), 94},
-    {TEXT("rock_a"), 118}, {TEXT("rock_b"), 125}
+    {TEXT("pine"), 373}, {TEXT("fir"), 333}, {TEXT("oak"), 499},
+    {TEXT("boulder"), 71}, {TEXT("slab"), 63}, {TEXT("stone"), 79}
 };
 
 FString FindDemoCSV()
@@ -54,7 +54,7 @@ FString FindDemoCSV()
     }
 
     TArray<FString> Roots;
-    if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TopoTopoPCG")))
+    if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TopoTopo")))
     {
         Roots.Add(Plugin->GetBaseDir());
     }
@@ -65,7 +65,7 @@ FString FindDemoCSV()
         FPaths::NormalizeDirectoryName(Root);
         for (int32 Depth = 0; Depth < 16 && !Root.IsEmpty(); ++Depth)
         {
-            const FString Candidate = FPaths::Combine(Root, TEXT("out/unreal_demo/landscape/instances.csv"));
+            const FString Candidate = FPaths::Combine(Root, TEXT("out/unreal_landscape/landscape/instances.csv"));
             if (FPaths::FileExists(Candidate))
             {
                 return Candidate;
@@ -225,11 +225,11 @@ private:
                 OutputPoints += Points->GetNumPoints();
             }
         }
-        Test.TestEqual(TEXT("Graph output contains 535 points"), OutputPoints, 535);
+        Test.TestEqual(TEXT("Graph output contains 1418 points"), OutputPoints, 1418);
 
         TArray<UInstancedStaticMeshComponent*> Instances;
         Actor->GetComponents(Instances); // Includes UHierarchicalInstancedStaticMeshComponent subclasses.
-        Test.TestEqual(TEXT("Exactly five ISM/HISM components"), Instances.Num(), 5);
+        Test.TestEqual(TEXT("Exactly six ISM/HISM components"), Instances.Num(), 6);
         int32 TotalInstances = 0;
         for (const FExpectedMesh& Expected : ExpectedMeshes)
         {
@@ -241,19 +241,19 @@ private:
                 if (!Instance->GetStaticMesh() || Instance->GetStaticMesh()->GetPathName() != ExpectedPath) { continue; }
                 ++MeshComponents;
                 MeshInstances += Instance->GetInstanceCount();
-                if (FString(Expected.Name) == TEXT("pine"))
+                if (FString(Expected.Name) == TEXT("oak"))
                 {
                     FTransform First;
-                    if (Test.TestTrue(TEXT("First pine instance has a world transform"), Instance->GetInstanceTransform(0, First, true)))
+                    if (Test.TestTrue(TEXT("First oak instance has a world transform"), Instance->GetInstanceTransform(0, First, true)))
                     {
                         // ISM matrices are floats even with LWC. 0.01 cm / 0.0001 degrees/scale comfortably
                         // covers float storage without permitting an axis swap or local/world-space error.
-                        Test.TestTrue(TEXT("First pine world position"),
-                            First.GetLocation().Equals(FVector(3840.23858, -6233.69197, 363.347349), 0.01));
-                        Test.TestTrue(TEXT("First pine world rotation"),
-                            First.Rotator().Equals(FRotator(0, -105.954505, 0), 0.0001));
-                        Test.TestTrue(TEXT("First pine world scale"),
-                            First.GetScale3D().Equals(FVector(2.02927671), 0.0001));
+                        Test.TestTrue(TEXT("First oak world position"),
+                            First.GetLocation().Equals(FVector(669.606975, 9904.88283, 147.662754), 0.01));
+                        Test.TestTrue(TEXT("First oak world rotation"),
+                            First.Rotator().Equals(FRotator(0, 5.9791318, 0), 0.0001));
+                        Test.TestTrue(TEXT("First oak world scale"),
+                            First.GetScale3D().Equals(FVector(1.15748431), 0.0001));
                     }
                 }
             }
@@ -261,7 +261,7 @@ private:
             Test.TestEqual(FString::Printf(TEXT("%s instance count"), Expected.Name), MeshInstances, Expected.Instances);
             TotalInstances += MeshInstances;
         }
-        Test.TestEqual(TEXT("Total spawned instance count"), TotalInstances, 535);
+        Test.TestEqual(TEXT("Total spawned instance count"), TotalInstances, 1418);
     }
 
     void Cleanup()
@@ -294,16 +294,16 @@ private:
 };
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoPCGGraphSpawns536Test, "TopoTopo.PCG.GraphSpawns536",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTopoTopoPCGGraphSpawnsDemoTest, "TopoTopo.PCG.GraphSpawnsDemo",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FTopoTopoPCGGraphSpawns536Test::RunTest(const FString& Parameters)
+bool FTopoTopoPCGGraphSpawnsDemoTest::RunTest(const FString& Parameters)
 {
     using namespace TopoTopoGraphTests;
     const FString FilePath = FindDemoCSV();
     if (FilePath.IsEmpty() || !FPaths::FileExists(FilePath))
     {
-        AddError(TEXT("Demo CSV missing. Run npm run export:demo, then supply -TopoTopoDemoCSV=\"<repository>/out/unreal_demo/landscape/instances.csv\" ")
+        AddError(TEXT("Demo CSV missing. Run npm run export:demo, then supply -TopoTopoDemoCSV=\"<repository>/out/unreal_landscape/landscape/instances.csv\" ")
             TEXT("or TOPOTOPO_DEMO_CSV before starting the editor."));
         return false;
     }
@@ -328,7 +328,7 @@ bool FTopoTopoPCGGraphSpawns536Test::RunTest(const FString& Parameters)
     if (!MissingMeshes.IsEmpty())
     {
         // UE simple automation has no skipped-result API. Surface an explicit warning, never a silent pass.
-        AddWarning(TEXT("SKIPPED TopoTopo.PCG.GraphSpawns536: required demo meshes are absent: ")
+        AddWarning(TEXT("SKIPPED TopoTopo.PCG.GraphSpawnsDemo: required demo meshes are absent: ")
             + FString::Join(MissingMeshes, TEXT(", "))
             + TEXT(". Import the demo into /Game/TopoTopo/PluginDemo using TopoTopo.ImportScene, then rerun. No PCG assertions were executed."));
         return true;

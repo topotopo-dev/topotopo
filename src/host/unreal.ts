@@ -1,7 +1,7 @@
 // The Unreal flavour of the engine cook (src/host/cook.ts) and the Unreal plugin's commands (the plugin is
-// integrations/unreal/TopoTopoImport, the contract integrations/unreal/PROTOCOL.md):
+// integrations/unreal/TopoTopo, the contract integrations/unreal/PROTOCOL.md):
 //   topotopo cook <.topo | package folder | folder>... --for unreal [options]   cook packages inside Content/ (cook-command.ts)
-//   topotopo unreal setup <project> [--no-enable] [--with-pcg]                  install the plugin into a project
+//   topotopo unreal setup <project> [--no-enable]                               install the plugin into a project
 //   topotopo unreal status <project> [--strict] [--json]                        what is current, for people and CI
 // A package lives in the project's Content/ (or a plugin's); what a level uses are the .uasset files the plugin makes, and
 // those are what a repository commits. So the cooked files are the plugin's intermediate files, kept out of Content/ under
@@ -13,8 +13,8 @@
 //                  PCG columns), plus <id>.glb when it also has plain meshes; with instancing expand one GLB
 //   points         <id>.points.csv (the PCG columns)
 //   textures       one PNG per image
-//   terrain        the unreal_landscape bundle of src/io/unreal.ts, which TopoTopoPCG places in a level; a warning when
-//                  it does not fit Unreal's landscape grid, since TopoTopoPCG refuses that
+//   terrain        the unreal_landscape bundle of src/io/unreal.ts, which the plugin places in a level if it fits
+//                  Unreal's landscape grid; the cook warns when it does not fit
 //   curves, material, volume   not imported yet: listed as skipped, with why
 //   scene          by what it holds: a heightfield makes it a terrain bundle, else as mesh + instances
 // Options come from <id>.topo.import [params], written by the plugin, as in Godot; folder is a content path (/Game/...).
@@ -57,11 +57,9 @@ export { UNREAL_COMMANDS };
 const deflate = (d: Uint8Array) => zlib.deflateSync(d, { level: 6 });
 
 /** The plugin's name, its folder in a project, and what this TopoTopo carries (shipped in the npm package). */
-export const PLUGIN_NAME = 'TopoTopoImport';
+export const PLUGIN_NAME = 'TopoTopo';
 export const PLUGIN_SOURCE = fileURLToPath(new URL(`../../integrations/unreal/${PLUGIN_NAME}`, import.meta.url));
-/** The older plugin that places terrain bundles and reads point streams in PCG graphs: --with-pcg installs it. */
-export const PCG_PLUGIN_NAME = 'TopoTopoPCG';
-export const PCG_PLUGIN_SOURCE = fileURLToPath(new URL(`../../integrations/unreal/${PCG_PLUGIN_NAME}`, import.meta.url));
+const LEGACY_PLUGINS = ['TopoTopoImport', 'TopoTopoPCG'];
 /** Where cooked files go, below the project. */
 export const COOKED_DIR = 'Saved/TopoTopo';
 /** The glTF extensions Interchange's glTF translator reads (UE 5.8, GLTFAsset.h); a cooked GLB requires none but these. */
@@ -522,7 +520,8 @@ export function unrealStatus(project: string): UnrealStatus {
 
 /** A status as people read it. */
 export function unrealStatusText(r: UnrealStatus): string {
-  const lines = [`Unreal project ${r.project}: ${r.packages.length} package${r.packages.length === 1 ? '' : 's'}${r.plugin ? '' : ` (no ${PLUGIN_NAME} plugin: ${program()} unreal setup ${r.project})`}`];
+  const plugin = r.plugin ? `${PLUGIN_NAME} plugin installed` : `no ${PLUGIN_NAME} plugin: ${program()} unreal setup ${r.project}`;
+  const lines = [`Unreal project ${r.project}: ${r.packages.length} package${r.packages.length === 1 ? '' : 's'} (${plugin})`];
   for (const p of r.packages) {
     const state = p.state === 'never_cooked' ? 'never cooked' : p.state;
     lines.push(`  ${state.padEnd(12)} ${p.content}${p.state === 'ok' ? '' : `: ${p.text}`}${p.note === 'update_topotopo' ? ' (cooked by a newer TopoTopo: update TopoTopo)' : ''}`);
@@ -641,18 +640,33 @@ function copyPlugin(from: string, to: string): number {
  * already. Throws a SetupError for a file that is no JSON object.
  */
 export function enableInUproject(text: string, name: string, platforms?: string[]): string | null {
+  return updateUproject(text, name, platforms, []).text;
+}
+
+/** Update the plugin list and drop references to the old TopoTopo folders setup removes. */
+function updateUproject(text: string, name: string | undefined, platforms: string[] | undefined, retired: string[]): { text: string | null; enabled: boolean } {
   let raw: any;
   try { raw = JSON.parse(text.replace(/^﻿/, '')); } catch (e: any) { throw new SetupError(`the .uproject is no JSON: ${e.message}`); }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SetupError('the .uproject is no JSON object');
   const plugins: any[] = Array.isArray(raw.Plugins) ? raw.Plugins : (raw.Plugins = []);
-  const have = plugins.find((p) => String(p?.Name).toLowerCase() === name.toLowerCase());
-  // a plugin whose descriptor names its target platforms needs the same list in its entry, or 5.8 warns at startup
-  const samePlatforms = !platforms || JSON.stringify(have?.SupportedTargetPlatforms) === JSON.stringify(platforms);
-  if (have?.Enabled === true && samePlatforms) return null;
-  if (have) { have.Enabled = true; if (platforms) have.SupportedTargetPlatforms = platforms; }
-  else plugins.push({ Name: name, Enabled: true, ...(platforms ? { SupportedTargetPlatforms: platforms } : {}) });
+  const key = (p: any) => String(p?.Name).toLowerCase();
+  const retiredKeys = new Set(retired.map((n) => n.toLowerCase()));
+  const next = plugins.filter((p) => !retiredKeys.has(key(p)));
+  let enabled = false;
+  if (name) {
+    const have = next.find((p) => key(p) === name.toLowerCase());
+    // Match the descriptor's platforms to avoid a startup warning in Unreal 5.8.
+    const samePlatforms = !platforms || JSON.stringify(have?.SupportedTargetPlatforms) === JSON.stringify(platforms);
+    if (have?.Enabled !== true || !samePlatforms) {
+      if (have) { have.Enabled = true; if (platforms) have.SupportedTargetPlatforms = platforms; }
+      else next.push({ Name: name, Enabled: true, ...(platforms ? { SupportedTargetPlatforms: platforms } : {}) });
+      enabled = true;
+    }
+  }
+  if (!enabled && next.length === plugins.length) return { text: null, enabled };
+  raw.Plugins = next;
   const nl = text.includes('\r\n') ? '\r\n' : '\n';
-  return JSON.stringify(raw, null, '\t').replace(/\n/g, nl) + nl;
+  return { text: JSON.stringify(raw, null, '\t').replace(/\n/g, nl) + nl, enabled };
 }
 
 /** The SupportedTargetPlatforms a plugin descriptor names, or undefined when it names none. */
@@ -663,14 +677,20 @@ function pluginPlatforms(uplugin: string): string[] | undefined {
   } catch { return undefined; }
 }
 
+/** Check ownership without following a linked legacy plugin folder or descriptor. */
+function isLegacyInstall(folder: string, name: string): boolean {
+  const descriptor = path.join(folder, `${name}.uplugin`);
+  try {
+    return fs.lstatSync(folder).isDirectory() && fs.lstatSync(descriptor).isFile()
+      && JSON.parse(fs.readFileSync(descriptor, 'utf8').replace(/^\uFEFF/, ''))?.CreatedByURL === 'https://topotopo.dev';
+  } catch { return false; }
+}
+
 export interface UnrealSetupOptions {
   /** enable the plugin in the .uproject (default true) */
   enable?: boolean;
-  /** also install TopoTopoPCG */
-  pcg?: boolean;
-  /** the plugins to copy (default: the ones this TopoTopo carries) */
+  /** the plugin to copy (default: the one this TopoTopo carries) */
   plugin?: string;
-  pcgPlugin?: string;
   /** what the install record names (default: this node and this CLI) */
   node?: string;
   cli?: string;
@@ -681,27 +701,35 @@ export function unrealSetup(project: string, o: UnrealSetupOptions = {}): string
   const proj = projectFolder(project);
   const uproject = uprojectOf(proj);
   const source = o.plugin ?? PLUGIN_SOURCE;
-  if (!isFile(path.join(source, `${PLUGIN_NAME}.uplugin`))) throw new SetupError(`this TopoTopo (${TOPOTOPO_VERSION}) carries no Unreal plugin at ${source}`);
+  const descriptor = path.join(source, `${PLUGIN_NAME}.uplugin`);
+  if (!isFile(descriptor)) throw new SetupError(`this TopoTopo (${TOPOTOPO_VERSION}) carries no Unreal plugin at ${source}`);
   const said: string[] = [];
-  const n = copyPlugin(source, path.join(proj, 'Plugins', PLUGIN_NAME));
+  const plugins = path.join(proj, 'Plugins');
+  const retired: string[] = [];
+  const localPlugins = !fs.lstatSync(plugins, { throwIfNoEntry: false })?.isSymbolicLink();
+  for (const name of LEGACY_PLUGINS) {
+    const folder = path.join(plugins, name);
+    if (!fs.lstatSync(folder, { throwIfNoEntry: false })) continue;
+    if (localPlugins && isLegacyInstall(folder, name)) retired.push(name);
+    else said.push(`warning: left Plugins/${name}/ alone. Move it out of Plugins if it defines any of the same Unreal modules as TopoTopo.`);
+  }
+  const enable = o.enable !== false;
+  const projectUpdate = enable || retired.length
+    ? updateUproject(fs.readFileSync(uproject, 'utf8'), enable ? PLUGIN_NAME : undefined, pluginPlatforms(descriptor), retired)
+    : null;
+  const n = copyPlugin(source, path.join(plugins, PLUGIN_NAME));
   said.push(`copied the plugin (${n} files) into Plugins/${PLUGIN_NAME}/`);
-  const names: [string, string][] = [[PLUGIN_NAME, source]];
-  if (o.pcg) {
-    const pcg = o.pcgPlugin ?? PCG_PLUGIN_SOURCE;
-    if (!isFile(path.join(pcg, `${PCG_PLUGIN_NAME}.uplugin`))) throw new SetupError(`this TopoTopo (${TOPOTOPO_VERSION}) carries no ${PCG_PLUGIN_NAME} plugin at ${pcg}`);
-    said.push(`copied ${PCG_PLUGIN_NAME} (${copyPlugin(pcg, path.join(proj, 'Plugins', PCG_PLUGIN_NAME))} files) into Plugins/${PCG_PLUGIN_NAME}/: it places terrain outputs in a level`);
-    names.push([PCG_PLUGIN_NAME, pcg]);
+  if (projectUpdate?.text) writeAtomic(uproject, projectUpdate.text);
+  if (retired.length) {
+    for (const name of retired) fs.rmSync(path.join(plugins, name), { recursive: true });
+    said.push(`removed earlier TopoTopo plugins: ${retired.map((name) => `Plugins/${name}/`).join(', ')}`);
   }
   const node = o.node ?? process.execPath, cli = o.cli ?? CLI_PATH;
   const cfg = setInstall({ node, cli });
   said.push(`recorded where TopoTopo is (node ${node}, ${cli}) in ${cfg} "install"`);
-  if (o.enable !== false) {
-    for (const [name, from] of names) {
-      const text = fs.readFileSync(uproject, 'utf8'), next = enableInUproject(text, name, pluginPlatforms(path.join(from, `${name}.uplugin`)));
-      if (next !== null) { writeAtomic(uproject, next); said.push(`enabled ${name} in ${path.basename(uproject)}`); }
-      else said.push(`${name} is enabled in ${path.basename(uproject)} already`);
-    }
-  } else said.push(`left ${path.basename(uproject)} as it is (--no-enable): enable the plugin in Edit > Plugins > TopoTopo Import`);
+  if (projectUpdate?.enabled) said.push(`enabled ${PLUGIN_NAME} in ${path.basename(uproject)}`);
+  else if (enable) said.push(`${PLUGIN_NAME} is enabled in ${path.basename(uproject)} already`);
+  else said.push('enable the plugin in Edit > Plugins > TopoTopo when ready (--no-enable)');
   const iniFile = path.join(proj, ...REIMPORT_INI.split('/'));
   let ini = '';
   try { ini = fs.readFileSync(iniFile, 'utf8'); } catch { /* new */ }
@@ -723,9 +751,9 @@ export async function unrealCommand(argv: string[], io: Io): Promise<number> {
   const [sub, ...rest] = argv;
   try {
     if (sub === 'setup') {
-      const { set, rest: pos } = parseArgs(rest, [], ['--no-enable', '--with-pcg'], usage);
+      const { set, rest: pos } = parseArgs(rest, [], ['--no-enable'], usage);
       if (pos.length !== 1) throw new SetupError(`unreal setup needs the Unreal project folder\n${usage()}`);
-      for (const l of unrealSetup(pos[0], { enable: !set.has('--no-enable'), pcg: set.has('--with-pcg') })) io.out(l);
+      for (const l of unrealSetup(pos[0], { enable: !set.has('--no-enable') })) io.out(l);
       return 0;
     }
     if (sub === 'status') {

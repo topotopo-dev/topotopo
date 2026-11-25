@@ -1362,9 +1362,9 @@ The plugin's contract (jobs file, progress lines, record schema, freshness): int
 
 THE CLI COMMANDS:
 ${GODOT_COMMANDS.map((c) => `  topotopo ${c.usage}\n      ${c.what}`).join('\n')}`,
-  unreal: `UNREAL (packages inside an Unreal project's Content/, imported by the TopoTopoImport plugin)
+  unreal: `UNREAL (packages inside an Unreal project's Content/, imported by the TopoTopo plugin)
 A package in a folder of its own under the project's Content/ (not a plugin's, for now) imports as <id>.topo, a source asset: the plugin (topotopo unreal setup puts it in
-Plugins/TopoTopoImport/; Unreal 5.8; C++ source, which Unreal builds on opening) cooks each published output and brings it in as
+Plugins/TopoTopo/; Unreal 5.8; C++ source, which Unreal builds on opening) cooks each published output and brings it in as
 Unreal assets, kept current by Auto Reimport. Levels use those assets, never the package asset, which stays in the editor.
 
 WHAT IS COOKED: the package's published outputs, by the rule of the cook for Godot (help topic "godot"), at frame 1 with var defaults,
@@ -1377,7 +1377,7 @@ WHAT EACH KIND BECOMES (a report's outputs carry the steps as "import"):
               hierarchical instanced static meshes; <id>_Points, a PCG Data Asset whose attribute MeshPath names each mesh
   points      <id>_Points, a PCG Data Asset; every extra column an attribute
   textures    one Texture per image
-  terrain     the unreal_landscape bundle on disk; Place Terrain in Level on the package asset brings it in (needs TopoTopoPCG: --with-pcg)
+  terrain     the unreal_landscape bundle on disk. Choose Place Terrain in Level on the package asset to import it.
   scene       with a heightfield as terrain, else as mesh and instances
   curves, material, volume   not imported yet: listed as skipped, with why
 Axes: Unreal X = x, Y = z, Z = y, in centimetres, for meshes (Interchange converts the GLB), rows and sockets.
@@ -1803,7 +1803,8 @@ UNREAL LANDSCAPE BUNDLE: export {format:"unreal_landscape", path:"exports/level"
   TopoTopo.ImportScene reads tiled manifests directly: partitioned levels use Landscape streaming proxies; plain
   levels use one Landscape with the tile components. Each tile gets its own HISM actor, with shared meshes,
   LandscapeLayerInfo assets and generated landscape material. npm run export:demo -- --tiles 2 writes a 2×2 demo
-  to out/unreal_demo_tiled/ (126 quads / 127 samples per tile, no padding); in PowerShell, use npm.cmd to pass --tiles.
+  from examples/unreal_landscape.json to out/unreal_landscape_tiled/ (126 quads / 127 samples per tile, no padding).
+  In PowerShell, use npm.cmd to pass --tiles.
   Export keeps the dense source and root/tile file bytes in memory; standard heightfield nodes retain their existing
   4097×4097 total-sample cap. Unreal imports a full assembled grid before proxy splitting; large-grid memory is not bounded by tile_size.
   Manual single-landscape import (Unreal 5.8, tile_size:0): 1. Landscape mode (Shift+2) > Manage > New > Import from File, heightmap.png. 2. Section

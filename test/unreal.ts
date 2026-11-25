@@ -20,7 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'src', 'cli.ts');
 const FIXTURE = path.join(ROOT, 'test', 'data', 'cook', 'props');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-unreal-'));
-process.env.TOPOTOPO_CONFIG = path.join(tmp, 'config.json');
+process.env.TOPOTOPO_CONFIG = process.env.TOPOTOPO_UNREAL_TEST_CONFIG ?? path.join(tmp, 'config.json');
 process.env.TOPOTOPO_CACHE = path.join(tmp, 'cache');
 
 let fail = 0, pass = 0;
@@ -46,6 +46,8 @@ async function run(fn: (argv: string[], io: { out: (s: string) => void; err: (s:
 const cook = (argv: string[]) => run(cookCommand as any, argv);
 const unreal = (argv: string[]) => run(unrealCommand as any, argv);
 const readJson = (f: string) => JSON.parse(fs.readFileSync(f, 'utf8'));
+const moduleNames = ['TopoTopoPCG', 'TopoTopoPCGEditor', 'TopoTopoImport', 'TopoTopoImportEditor'];
+const legacyPlugins = ['TopoTopoImport', 'TopoTopoPCG'];
 
 /** A small package in a project's Content/<name>: one graph, its outputs, and an import file when given. */
 function pkg(game: string, name: string, nodes: Record<string, unknown>, outputs: Record<string, unknown>, importText?: string): string {
@@ -82,9 +84,12 @@ section('unreal setup');
   const game = project('setupgame', false);
   const s = await unreal(['setup', game]);
   const copied = path.join(game, 'Plugins', PLUGIN_NAME);
-  check(s.code === 0 && fs.existsSync(path.join(copied, `${PLUGIN_NAME}.uplugin`)), `the plugin is copied into Plugins/ (${s.out.split('\n')[0]})`);
+  check(s.code === 0 && fs.readdirSync(path.join(game, 'Plugins')).join() === 'TopoTopo', `setup installs only Plugins/TopoTopo (${s.out.split('\n')[0]})`);
+  const descriptor = readJson(path.join(copied, 'TopoTopo.uplugin'));
+  check(descriptor.Modules.map((m: any) => m.Name).join() === moduleNames.join(), 'the installed descriptor lists all four modules');
   check(fs.existsSync(path.join(copied, 'Source', 'TopoTopoImportEditor', 'Private', 'TopoTopoImporter.cpp')) && fs.existsSync(path.join(copied, 'README.md')), 'with its source and README');
-  check(readJson(path.join(game, 'setupgame.uproject')).Plugins.some((p: any) => p.Name === PLUGIN_NAME && p.Enabled === true), 'it is enabled in the .uproject');
+  const entry = readJson(path.join(game, 'setupgame.uproject')).Plugins.find((p: any) => p.Name === PLUGIN_NAME);
+  check(entry?.Enabled === true && entry.SupportedTargetPlatforms?.join() === 'Win64', 'TopoTopo is enabled in the .uproject for Win64');
   check(readJson(path.join(game, 'setupgame.uproject')).Plugins.some((p: any) => p.Name === 'PythonScriptPlugin'), "the .uproject's other plugins stay");
   check(readJson(process.env.TOPOTOPO_CONFIG!).install?.cli && readJson(process.env.TOPOTOPO_CONFIG!).install?.node, 'where TopoTopo is goes in the install record');
   const ini = fs.readFileSync(path.join(game, ...REIMPORT_INI.split('/')), 'utf8');
@@ -106,15 +111,29 @@ section('unreal setup');
   const off = project('noenable', false);
   const n = await unreal(['setup', off, '--no-enable']);
   check(n.code === 0 && !readJson(path.join(off, 'noenable.uproject')).Plugins.some((p: any) => p.Name === PLUGIN_NAME), '--no-enable leaves the .uproject');
-  const pcg = project('withpcg', false);
-  const w = await unreal(['setup', pcg, '--with-pcg']);
-  const pcgPlugin = readJson(path.join(pcg, 'withpcg.uproject')).Plugins.find((p: any) => p.Name === 'TopoTopoPCG');
-  check(w.code === 0 && fs.existsSync(path.join(pcg, 'Plugins', 'TopoTopoPCG', 'TopoTopoPCG.uplugin')) && pcgPlugin?.Enabled === true, '--with-pcg installs TopoTopoPCG too');
-  const pcgDescriptor = readJson(path.join(pcg, 'Plugins', 'TopoTopoPCG', 'TopoTopoPCG.uplugin'));
-  check(JSON.stringify(pcgPlugin?.SupportedTargetPlatforms) === JSON.stringify(pcgDescriptor.SupportedTargetPlatforms) && pcgDescriptor.SupportedTargetPlatforms?.length > 0,
-    `its entry names the descriptor's platforms, so 5.8 does not warn (${pcgPlugin?.SupportedTargetPlatforms})`);
-  const bare = '{"Plugins":[{"Name":"TopoTopoPCG","Enabled":true}]}';
-  check(JSON.parse(enableInUproject(bare, 'TopoTopoPCG', ['Win64'])!).Plugins[0].SupportedTargetPlatforms?.join() === 'Win64' && enableInUproject(enableInUproject(bare, 'TopoTopoPCG', ['Win64'])!, 'TopoTopoPCG', ['Win64']) === null,
+  const legacy = project('legacy', false);
+  const legacyProject = path.join(legacy, 'legacy.uproject');
+  const legacyDescriptor = (projectDir: string, name: string) => path.join(projectDir, 'Plugins', name, `${name}.uplugin`);
+  for (const name of legacyPlugins) write(legacyDescriptor(legacy, name), '{"CreatedByURL":"https://topotopo.dev"}');
+  write(legacyProject, JSON.stringify({ Plugins: legacyPlugins.map((Name) => ({ Name, Enabled: true })) }));
+  const legacyStatus = await unreal(['status', legacy]);
+  check(legacyStatus.out.includes('no TopoTopo plugin') && !unrealStatus(legacy).plugin, 'status requires the unified plugin descriptor');
+  const upgraded = await unreal(['setup', legacy]);
+  const removed = upgraded.out.split('\n').filter((line) => line.startsWith('removed earlier TopoTopo plugins:'));
+  check(upgraded.code === 0 && removed.length === 1 && legacyPlugins.every((name) => removed[0].includes(`Plugins/${name}/`))
+    && fs.readdirSync(path.join(legacy, 'Plugins')).join() === 'TopoTopo' && readJson(legacyProject).Plugins.map((p: any) => p.Name).join() === 'TopoTopo',
+    'setup removes both earlier TopoTopo installs and their project references');
+  const foreign = project('foreign', false);
+  const foreignFile = legacyDescriptor(foreign, legacyPlugins[0]);
+  const foreignText = '{"CreatedByURL":"https://example.com"}';
+  write(foreignFile, foreignText);
+  const warned = await unreal(['setup', foreign]);
+  check(warned.code === 0 && warned.out.includes(`warning: left Plugins/${legacyPlugins[0]}/ alone`)
+    && fs.existsSync(foreignFile) && fs.readFileSync(foreignFile, 'utf8') === foreignText, 'setup warns and leaves a plugin installed by another creator alone');
+
+  const bare = '{"Plugins":[{"Name":"TopoTopo","Enabled":true}]}';
+  const withPlatforms = enableInUproject(bare, PLUGIN_NAME, ['Win64'])!;
+  check(JSON.parse(withPlatforms).Plugins[0].SupportedTargetPlatforms?.join() === 'Win64' && enableInUproject(withPlatforms, PLUGIN_NAME, ['Win64']) === null,
     'an enabled entry without the platforms gains them, once');
 
   const notAProject = path.join(tmp, 'nothing');
@@ -126,7 +145,7 @@ section('unreal setup');
   let threw = '';
   try { enableInUproject('not json', PLUGIN_NAME); } catch (x: any) { threw = x.message; }
   check(/no JSON/.test(threw), 'a broken .uproject is said, not overwritten');
-  check(enableInUproject('{"Plugins":[{"Name":"TopoTopoImport","Enabled":true}]}', PLUGIN_NAME) === null, 'an enabled plugin stays as it is');
+  check(enableInUproject(bare, PLUGIN_NAME) === null, 'an enabled plugin stays as it is');
 
   // an ini that already has an entry of its own keeps it
   const own = '[/Script/UnrealEd.EditorLoadingSavingSettings]\n+AutoReimportDirectorySettings=(SourceDirectory="/Game/",MountPoint="",Wildcards=((Wildcard="Mine/*",bInclude=False)))\n';
@@ -258,7 +277,7 @@ section('the cook');
   check(strict.code === 1 && /exposed/.test(strict.out), '--strict exits 1 for it');
   await unreal(['setup', game]);
   const fine = await unreal(['status', game, '--strict']);
-  check(fine.code === 0 && /every package is current/.test(fine.out), `after setup, --strict exits 0 (${fine.out.split('\n').at(-1)})`);
+  check(fine.code === 0 && /TopoTopo plugin installed/.test(fine.out) && /every package is current/.test(fine.out), `after setup, --strict reports TopoTopo and exits 0 (${fine.out.split('\n').at(-1)})`);
   check(readJson(path.join(tmp, 'report.json')).protocol === COOK_PROTOCOL && JSON.parse((await unreal(['status', game, '--json'])).out).plugin === true, '--json reports the plugin');
 
   // options and flags
@@ -394,13 +413,27 @@ section('the plugin speaks this TopoTopo');
   const kinds = [...importer.matchAll(/Step\.As == TEXT\("([a-z_]+)"\)/g)].map((m) => m[1]);
   check(['static_mesh', 'texture', 'instances', 'points', 'landscape'].every((k) => kinds.includes(k)), `it carries out every kind of step (${[...new Set(kinds)].join(', ')})`);
   const uplugin = readJson(path.join(PLUGIN_SOURCE, `${PLUGIN_NAME}.uplugin`));
-  check(uplugin.EngineVersion === '5.8.0' && uplugin.Modules.map((m: any) => m.Name).join() === 'TopoTopoImport,TopoTopoImportEditor', 'its descriptor is for 5.8, with both modules');
-  check(!('SupportedTargetPlatforms' in uplugin), 'no target platforms, so a .uproject entry of name and Enabled gives no warning');
+  check(uplugin.EngineVersion === '5.8.0' && uplugin.Version === 7 && uplugin.VersionName === '0.2.0' && uplugin.FriendlyName === 'TopoTopo', 'the descriptor names TopoTopo 0.2.0 for Unreal 5.8');
+  check(uplugin.SupportedTargetPlatforms?.join() === 'Win64', 'the descriptor targets Win64');
   const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
   const banned = walk(PLUGIN_SOURCE).filter((f) => /\.(py|uasset)$/i.test(f));
   check(!banned.length, 'no Python and no Blueprints in it');
   const pkg = readJson(path.join(ROOT, 'package.json'));
-  check(pkg.files.includes('integrations/unreal/TopoTopoImport/**') && pkg.files.includes('integrations/unreal/TopoTopoPCG/**'), 'the npm package carries the plugins');
+  check(pkg.files.filter((f: string) => f.startsWith('integrations/unreal/')).join() === 'integrations/unreal/TopoTopo/**', 'the npm package carries one Unreal plugin');
+}
+
+section('unreal_landscape demo export');
+{
+  const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'export-demo.ts')], { cwd: ROOT, encoding: 'utf8' });
+  const out = path.join(ROOT, 'out', 'unreal_landscape');
+  check(result.status === 0, result.status === 0 ? 'the export script writes out/unreal_landscape/' : String(result.error ?? result.stderr).trim());
+  if (result.status === 0) {
+    const info = readJson(path.join(out, 'demo.json'));
+    const files = ['landscape.json', 'heightmap.png', 'instances.csv', 'instances.meshes.json', 'objects_static.glb',
+      'layers/rock.png', 'layers/grass.png', 'layers/road.png', ...['pine', 'fir', 'oak', 'boulder', 'slab', 'stone'].map((n) => `meshes/${n}.glb`)];
+    check(info.graph === 'examples/unreal_landscape.json' && info.instances === 1418 && files.every((f) => fs.statSync(path.join(out, 'landscape', f), { throwIfNoEntry: false })?.size),
+      'the demo bundle has the heightmap, weights, stream and six prototype meshes used by the editor tests');
+  }
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
