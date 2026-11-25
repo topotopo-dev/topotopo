@@ -1214,13 +1214,15 @@ workspace) is reported, and the others still count. The tools never list a libra
 {action:"libraries", add} (CLI: topotopo workspace library add|remove) does it when the person names one. A package
 manifest lists no libraries ("libraries" there is refused, saying where each entry goes). Only a package's graphs use packages: in a folder that
 is none, naming one fails and says so, and workspace {action:"init"} (CLI: topotopo init) makes it a package, when the
-person says so.
+person says so. Run topotopo init --example <name> [folder] to start with an example in graphs/main.json and install
+the packages it uses. Add --name owner/name if you plan to publish the package.
 - First use: a build or edit whose graph names a package this package does not use yet adds its newest version once the
   graph validates (a graph they reject adds nothing and writes nothing), and the response says so. A dry run (build
   {dry_run:true}) checks the graph against that version, read where its place holds it, copies and writes nothing,
   and a note says what build or edit would add. A graph-file cook (topotopo graph.json) adds it too and says so;
-  --locked fails instead, for a build machine. workspace {action:"use", package:"studio/trees", version?} (CLI: topotopo
-  use studio/trees [--version 1.1]) adds one explicitly; workspace {action:"remove", package} (CLI: topotopo remove) drops
+  --locked fails instead, for a build machine. workspace {action:"use", package:"studio/trees", version?} adds one
+  explicitly. The CLI can add several in order (topotopo use topotopo/street topotopo/nature [folder]). An existing
+  folder can come last. Pass --version to request the same version number for every name. workspace {action:"remove", package} (CLI: topotopo remove) drops
   one no graph of the package names any more, with the copies nothing else uses.
 - workspace {action:"packages"} (CLI: topotopo packages) lists what the package uses, one line each (version, outputs, up
   to date or "1.3 is out"), the other packages the places it looks in give (each with its place, and "also in …, not
@@ -1232,8 +1234,9 @@ person says so.
   package uses, one another package uses) cook side by side. Its result names the version's texture files by paths
   relative to the package's folder (absolute only for a followed working folder outside the package), so exports name
   no folder of this machine.
-- Errors never guess: a package not in "uses" says how to add it, an unknown output lists the package's outputs, a
-  missing copy says which and which package's use copies it again, and in a workspace a package found only in a
+- Opening a package restores missing copies of pinned versions from the same libraries as use. In a workspace that
+  shares copies, it restores the shared copies. If a copy cannot be restored, the error names the use command to try.
+- Errors never guess: a package not in "uses" says how to add it, an unknown output lists the package's outputs, and in a workspace a package found only in a
   registered library the workspace does not list names that library and the command that lists it.
 
 SEARCH: workspace {action:"search", query?, kind?, tag?} (CLI: topotopo search [words] [folder] --kind k --tag t, the
@@ -1324,8 +1327,8 @@ viewer, an agent over MCP, by hand). Levels place and load the GLBs, never the .
 WHAT IS COOKED: the package's published outputs, the rule publishing uses: every named output of every graph without
 "publish": false, plus the default output (named after the package id when it is no named output), minus the skip
 list; each at frame 1 with its graph's var defaults, from the working folder, the packages it uses from their pinned
-copies (working folders are never followed). Nothing of the package is written but its outputs and its record: a graph
-naming a package it does not use, or a missing or edited copy, fails that output (as --locked does).
+copies (working folders are never followed). Missing pinned copies are restored when their versions are available.
+A graph naming a package it does not use, an unavailable copy or an edited copy fails that output.
   mesh, scene, instances, curves, points   <folder>/<id>/<id>.glb (per-output folders) or <folder>/<id>.glb (--flat)
   textures                                  one PNG per image in that folder
   terrain, material, volume                 not imported yet: listed as skipped, with why (a warning)
