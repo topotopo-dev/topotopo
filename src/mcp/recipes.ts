@@ -63,6 +63,45 @@ export const RECIPES: Recipe[] = [
     ],
   },
   {
+    name: 'smooth_body_from_a_drawing',
+    title: 'Smooth body with openings, from a drawing',
+    in: 'Section sizes read from a drawing, named outlines for the openings, and the bands for each opening',
+    out: 'An exact NURBS skin with the openings cut, made into a quad game mesh with a seal and frame round the windows and a recess round the vent',
+    graph: {
+      nodes: {
+        profile: { type: 'circle', params: { plane: 'xy', radius: 1, segments: 24 } },
+        skin: { type: 'loft', in: ['profile'], params: {
+          output: 'surface', fit: 'approximate', tolerance: 0.002, smoothing: 1,
+          sections: [
+            { offset: [0, 0.16, -0.62], scale: [0.004, 0.004] }, { offset: [0, 0.17, -0.5], scale: [0.12, 0.1] },
+            { offset: [0, 0.19, -0.2], scale: [0.2, 0.16] }, { offset: [0, 0.2, 0.15], scale: [0.21, 0.18] },
+            { offset: [0, 0.18, 0.45], scale: [0.15, 0.13] }, { offset: [0, 0.15, 0.62], scale: [0.004, 0.004] },
+          ],
+        } },
+        window: { type: 'curve', params: { closed: true, points: [[0, 0.13, -0.2], [0, 0.23, -0.14], [0, 0.23, 0.1], [0, 0.13, 0.17]] } },
+        window_name: { type: 'attrib_create', in: ['window'], params: { name: 'name', class: 'prim', type: 'string', value: 'window' } },
+        vent: { type: 'curve', params: { closed: true, points: [[-0.05, 0, 0.26], [0.05, 0, 0.26], [0.05, 0, 0.38], [-0.05, 0, 0.38]] } },
+        vent_name: { type: 'attrib_create', in: ['vent'], params: { name: 'name', class: 'prim', type: 'string', value: 'vent' } },
+        side_cut: { type: 'trim_surface', in: ['skin', 'window_name'], params: { direction: [1, 0, 0], hits: 'all', edges: false } },
+        top_cut: { type: 'trim_surface', in: ['side_cut', 'vent_name'], params: { direction: [0, 1, 0], hits: 'front', edges: false } },
+        mesh: { type: 'surface_to_mesh', in: ['top_cut'], params: { size: 0.02, tolerance: 0.001, bands: {
+          window: [{ width: 0.006, depth: -0.004, group: 'seal' }, { width: 0.01, group: 'frame' }],
+          vent: [{ width: 0.004, depth: -0.008, group: 'recess' }],
+        } } },
+      },
+      output: 'mesh',
+    },
+    notes: [
+      'From a drawing sheet, blueprint gives the side, top, front and rear outlines as curves at one scale. Read each section’s width from the top view and its height from the side view.',
+      'Long lines such as the profile and the plan edge can guide the skin as rails: loft input 1, each rail crossing every section once.',
+      'Measured sections wobble in the highlights. Fit approximate with a tolerance of a few millimetres and smoothing around 1, and check the skin with shading "zebra". A few clean sections read smoother than many rough ones.',
+      'For a symmetric body, give loft positive-x half sections and mirror x.',
+      'Draw each opening as a closed outline in the view where it looks flat, name it, and cut along that view’s axis with trim_surface. Hits all cuts both sides, and hits front only the near one. An outline may run past an open edge of the skin.',
+      'Keep both on trim_surface also gives the cut-out patches, for glass or lids.',
+      'Keep the skin exact until the end and let surface_to_mesh make the game mesh. Size is the edge length in metres, and bands map outline names to rings round each opening. The quad_share, min_angle and thin_faces stats report the mesh quality.',
+    ],
+  },
+  {
     name: 'rocks_on_terrain',
     title: 'Rocks on terrain',
     in: 'Nothing to read: the terrain is generated; the scatter count, the seed and the rocks\' size range',
