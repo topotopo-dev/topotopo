@@ -2039,8 +2039,8 @@ section('a workspace: one shared copy of each package for every package in it');
   const warned = await (await open(A)).ws.cook('main');
   check(warned.ok && warned.warnings.some((w) => /the "engine:" prefix is gone/.test(w.message)), `a cook warns and still cooks (${warned.warnings.map((w) => w.message).join(' | ').slice(0, 160)})`);
   const all = spawnCli([path.join(A, 'graphs', 'main.json'), '--export-all']);
-  check(all.code === 1 && /--export-all: "main": export path "engine:props\/stones\.glb": the "engine:" prefix is gone/.test(all.out) && !exists(A, 'exports', 'props') && !exists(A, 'exports', 'stones.glb'),
-    `--export-all refuses it and writes nothing (${all.out.split('\n').filter((l) => /export-all/.test(l)).join(' | ')})`);
+  check(all.code === 1 && /"main" FAILED: export path "engine:props\/stones\.glb": the "engine:" prefix is gone/.test(all.out) && !exists(A, 'exports', 'props') && !exists(A, 'exports', 'stones.glb'),
+    `--export-all refuses it and writes nothing (${all.out.trim().replace(/\r?\n/g, ' | ')})`);
   // the MCP export tool writes a graph's targets through the same step a viewer's Export does: refused there too
   const mcpA = await open(A), exportTool = makeTools(mcpA.ws).find((t) => t.name === 'export')!;
   const exportSaid = async (a: any) => { try { const r = await exportTool.run(a); return `${r.isError ? 'ERR ' : ''}${r.content.map((c: any) => c.text ?? '').join('\n')}`; } catch (e: any) { return `ERR ${e.message}`; } };
@@ -2049,14 +2049,14 @@ section('a workspace: one shared copy of each package for every package in it');
     `the MCP export tool refuses it and writes nothing (${one.split('\n')[0].slice(0, 160)})`);
   setGraph(A, 'main', scene('ws/stones'));
 
-  // check: the workspace's own packages (the versions of those that publish, the graphs of the others)
+  // check: working outputs of each package and the versions those packages have published
   // a fragment another graph or a script completes is skipped
   json(path.join(B, 'graphs', 'piece.json'), { nodes: { m: { type: 'merge', in: ['relief', 'roads'] } }, output: 'm', fragment: true });
   const fine = await checkAll(A);
   const names = fine.items.map((i) => i.name).sort().join(', ');
-  check(names === 'scenes/a, scenes/b, scenes/c, ws/sticks 1.0, ws/stones 1.2' && fine.items.every((i) => !i.failures.length && i.cooked > 0) && /nothing broke; nothing was changed$/.test(checkText(fine))
+  check(names === 'art/lib/sticks, art/lib/stones, scenes/a, scenes/b, scenes/c, ws/sticks 1.0, ws/stones 1.2' && fine.items.every((i) => !i.failures.length && i.cooked > 0) && /nothing broke; nothing was changed$/.test(checkText(fine))
     && /skipped, fragments \("fragment": true\) that another graph or a script completes: scenes\/b piece/.test(checkText(fine)),
-    `check cooks the newest version of each package that publishes and the graphs of the others (${names}; ${fine.items.filter((i) => i.failures.length).map((i) => `${i.name}: ${i.failures.map((f) => f.error).join('; ')}`).join(' | ')})`);
+    `check cooks working outputs and the newest published versions (${names}; ${fine.items.filter((i) => i.failures.length).map((i) => `${i.name}: ${i.failures.map((f) => f.error).join('; ')}`).join(' | ')})`);
   // a published version an engine change broke (here: a param its graph sets that the node does not have)
   const vgraph = path.join(STICKS, 'versions', '1.0', 'graphs', 'main.json'), keptGraph = fs.readFileSync(vgraph);
   json(vgraph, { nodes: { b: { type: 'box', params: { size: [1, 3, 1], strength: 2 } } }, output: 'b' });
@@ -2064,9 +2064,22 @@ section('a workspace: one shared copy of each package for every package in it');
   const broken = await checkAll(GAME), report = checkText(broken);
   const cli = spawnCli(['check', GAME]);
   fs.writeFileSync(vgraph, keptGraph);
-  check(/BROKEN {2}ws\/sticks 1\.0: 1 failure\n {2}ws\/sticks: \[b\] unknown param "strength" for box/.test(report) && /1 of 5 broke; nothing was changed/.test(report) && !/BROKEN {2}package/.test(report)
+  check(/BROKEN {2}ws\/sticks 1\.0: 1 failure\n {2}ws\/sticks: \[b\] unknown param "strength" for box/.test(report) && /1 of 7 broke; nothing was changed/.test(report) && !/BROKEN {2}package/.test(report)
     && shown(GAME).join() === before && cli.code === 1 && /BROKEN {2}ws\/sticks 1\.0/.test(cli.out),
     `check names the broken version and why; the workspace's own copy still cooks; it changes nothing, and the CLI exits 1 (${report.split('\n').slice(0, 4).join(' | ')})`);
+
+  const workingGraph = path.join(STICKS, 'graphs', 'main.json'), keptWorking = fs.readFileSync(workingGraph);
+  const working = readJSON(workingGraph);
+  setGraph(STICKS, 'main', {
+    ...working,
+    nodes: { ...working.nodes, guard: { type: 'assert', in: [working.output], params: { on_fail: 'error', label: 'Size guard', expr: 'false' } } },
+    outputs: { ...working.outputs, guarded: { node: 'guard', label: 'Guarded output' } },
+  });
+  try {
+    const current = await checkAll(GAME), said = checkText(current);
+    check(/BROKEN {2}package .+\n {2}Guarded output: \[guard\] Size guard/.test(said) && !/BROKEN {2}ws\/sticks 1\.0/.test(said),
+      `check names the working output that fails its assert (${said.split('\n').slice(0, 4).join(' | ')})`);
+  } finally { fs.writeFileSync(workingGraph, keptWorking); }
   const { removeLibrary } = await import('../src/config.ts');
   removeLibrary('wsart');
 }

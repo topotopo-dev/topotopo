@@ -78,6 +78,8 @@ export interface RenderOptions {
   footer?: boolean;
   /** pixels per view: n (square) or [width, height]; the views fit the bounds to that aspect (default 800 single, 512 several) */
   size?: number | [number, number];
+  /** Interpret an explicit size as the whole canvas, including gutters and footer (CLI --size). */
+  canvasSize?: boolean;
   /** background pixels (no surface, line or point) get alpha 0; the ground grid is off; the footer stays opaque */
   transparent?: boolean;
   /** a reference image behind the 3D views: a PNG path, read by renderGeometryAsync */
@@ -578,9 +580,6 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
   const sz0 = o.size ?? (views.length === 1 ? 800 : 512);
   const [sw, sh] = Array.isArray(sz0) ? sz0 : [sz0, sz0];
   if (!(Number.isFinite(sw) && Number.isFinite(sh))) throw new Error(`render: size expects pixels per view, n or [width, height], got ${JSON.stringify(o.size)}`);
-  const TW = Math.max(128, Math.min(1600, Math.round(sw))) * ui, TH = Math.max(128, Math.min(1600, Math.round(sh))) * ui;
-  let ss = Math.max(1, Math.min(3, Math.round(o.ssaa ?? 2)));
-  if (ui > 1) ss = Math.max(1, Math.min(ss, Math.floor(4096 / Math.max(TW, TH))));
   const transparent = !!o.transparent;
   const cols = views.length === 1 ? 1 : views.length <= 4 ? 2 : 3;
   const rows = Math.ceil(views.length / cols);
@@ -613,7 +612,15 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
   const showFooter = o.footer !== false;
   const footerH = showFooter ? 22 * ui + (annotate || hfFooter ? 16 * ui : 0) : 0;
   const viewLabels = o.viewLabels ?? true;
-  const outW = cols * TW + (cols - 1) * 2, outH = rows * TH + (rows - 1) * 2 + footerH;
+  const fixedCanvas = o.canvasSize && o.size !== undefined;
+  const guttersW = (cols - 1) * 2, guttersH = (rows - 1) * 2;
+  const tile = (s: number) => Math.max(128, Math.min(1600, Math.round(s))) * ui;
+  const outW = fixedCanvas ? Math.round(sw) * ui : cols * tile(sw) + guttersW;
+  const outH = fixedCanvas ? Math.round(sh) * ui : rows * tile(sh) + guttersH + footerH;
+  const TW = Math.floor((outW - guttersW) / cols), TH = Math.floor((outH - guttersH - footerH) / rows);
+  if (TW < 1 || TH < 1 || Math.max(TW, TH) > 1600 * ui) throw new Error('render: --size must leave room for every view and the footer, with at most 1600 pixels per view side before --render-scale');
+  let ss = Math.max(1, Math.min(3, Math.round(o.ssaa ?? 2)));
+  if (ui > 1) ss = Math.max(1, Math.min(ss, Math.floor(4096 / Math.max(TW, TH))));
   const notes: string[] = hfShown.map((x) =>
     `heightfield "${x.v.name}" shown at ${x.shown[0]}×${x.shown[1]} of ${x.v.width}×${x.v.height} samples (1 in ${x.step} per side); heightfield_res "full" (CLI --heightfield-res full) draws every sample`);
   notes.push(...hfNotes);
