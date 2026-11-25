@@ -194,11 +194,17 @@ const RENDER_PROPS = {
 };
 
 export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string> } = {}): ToolDef[] {
-  // One file per graph node, overwritten by each render: agents render after most edits, so a new file per render
-  // would pile up in exports/renders (save_to keeps a copy elsewhere).
-  const renderDestination = (name: string, node: string) =>
-    path.join(ws.exportDir, 'renders', `${name}-${node}`.replace(/[^A-Za-z0-9_.-]/g, '_') + '.png');
   const engine = ws.engine;
+
+  const renderResult = async (geo: Geometry, name: string, r: CookReport, a: any): Promise<Content[]> => {
+    const { img, notes, png } = await pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`, ws.dir), engine.host);
+    const p = a.save_to ? path.resolve(ws.dir, a.save_to)
+      : path.resolve(ws.exportDir, 'renders', `${name}-${r.target}`.replace(/[^A-Za-z0-9_.-]/g, '_') + '.png');
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, png);
+    new ArtifactStore(ws.exportDir).record([p], { graph: name, node: r.target, format: 'png' });
+    return [img, { type: 'text', text: [...notes, `saved ${p}`].join('\n') }];
+  };
 
   /**
    * The named outputs of a cooked graph that cook to another kind than their author pinned ("kind" in its outputs, help
@@ -221,15 +227,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
   /** The text (+ optional render) of a cook report. */
   const reportResult = async (name: string, r: CookReport, a: any, extraNotes: string[] = []): Promise<ToolResult> => {
     const content: Content[] = [{ type: 'text', text: reportText(name, r, engine.scriptTimeoutMs, extraNotes, await kindWarnings(name, r, a.frame)) }];
-    if (r.geo && a.render) {
-      const ro = renderOpts(typeof a.render === 'object' ? a.render : {}, r.geo, `${name}/${r.target}${atFrame(r)}`, ws.dir);
-      const { img, notes, png } = await pngContent(r.geo, ro, engine.host);
-      const renderPath = renderDestination(name, r.target);
-      fs.mkdirSync(path.dirname(renderPath), { recursive: true }); fs.writeFileSync(renderPath, png);
-      new ArtifactStore(ws.exportDir).record([renderPath], { graph: name, node: r.target, format: 'png' });
-      content.push(img);
-      if (notes.length) content.push({ type: 'text', text: 'render: ' + notes.join('; ') });
-    }
+    if (r.geo && a.render) content.push(...await renderResult(r.geo, name, r, typeof a.render === 'object' ? a.render : {}));
     return { content, isError: !r.ok };
   };
 
@@ -355,7 +353,7 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
           name: { type: 'string', description: 'graph name (default "main")' },
           mode: { type: 'string', enum: ['replace', 'merge', 'refresh'] },
           dry_run: { type: 'boolean' },
-          render: { description: 'true or render options (views, color_by, …)', anyOf: [{ type: 'boolean' }, { type: 'object' }] },
+          render: { description: 'true or render options (views, color_by, save_to, …)', anyOf: [{ type: 'boolean' }, { type: 'object' }] },
           ...FRAME_PROP,
         },
       },
@@ -453,25 +451,13 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
         properties: {
           graph: { type: 'string', description: 'graph name (default "main")' }, node: { type: 'string', description: 'node to look at (default: the graph output)' },
           ...RENDER_PROPS,
-          save_to: { type: 'string', description: 'also write the PNG to this path (relative to the package)' },
+          save_to: { type: 'string', description: 'write the PNG to this absolute or package-relative path and report where it was saved' },
           ...FRAME_PROP,
         },
       },
       run: async (a) => {
         const { geo, name, r } = await resolveNodeGeo(a);
-        const { img, notes, png } = await pngContent(geo, renderOpts(a, geo, `${name}/${r.target}${atFrame(r)}`, ws.dir), engine.host);
-        const content: Content[] = [img];
-        const info: string[] = [];
-        {
-          const p = a.save_to ? path.resolve(ws.dir, a.save_to) : renderDestination(name, r.target);
-          fs.mkdirSync(path.dirname(p), { recursive: true });
-          fs.writeFileSync(p, png);
-          new ArtifactStore(ws.exportDir).record([p], { graph: name, node: r.target, format: 'png' });
-          info.push(`saved ${p}`);
-        }
-        if (notes.length) info.push(notes.join('; '));
-        if (info.length) content.push({ type: 'text', text: info.join('\n') });
-        return { content };
+        return { content: await renderResult(geo, name, r, a) };
       },
     },
     {
@@ -671,7 +657,11 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
       ws.packages?.refresh();
       const result = await run(args);
       const note = inputsNote(t.name);
-      if (note) result.content.push({ type: 'text', text: note });
+      if (note) {
+        // A render ends with its save path, after any notes.
+        const rendered = ['render', 'build', 'edit'].includes(t.name) && result.content.at(-2)?.type === 'image';
+        result.content.splice(rendered ? -1 : result.content.length, 0, { type: 'text', text: note });
+      }
       return result;
     };
   }

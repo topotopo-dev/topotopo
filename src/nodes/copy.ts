@@ -752,7 +752,7 @@ defineNode({
     copy_attrib: { type: 'string', default: 'copynum', desc: 'prim int attribute with the copy index ("" = none)' },
     variants: { type: 'enum', options: ['none', 'name', 'piece'], default: 'none', desc: 'split the source into variants: name = by prim "name", piece = by connectivity (none = only when piece_attrib is set)' },
     piece_attrib: { type: 'string', default: '', desc: 'variants: source prim attribute that splits the geometry into pieces (e.g. "name" or "class")' },
-    variant_attrib: { type: 'string', default: 'variant', desc: 'variants: template point attribute choosing a piece (int index into sorted piece values, or the exact value)' },
+    variant_attrib: { type: 'string', default: 'variant', desc: 'For name variants, a point string picks the exact name and an integer indexes names from zero in text order ("barrel" < "crate" < "lamp", so 1 picks "crate").' },
     variant_weights: { type: 'json', default: [], desc: 'variants: weights for a seeded weighted random pick when the template has no variant_attrib attribute: by piece value, e.g. {"tree": 3, "bush": 1}, or a list in piece order (names sorted alphabetically, connectivity pieces in prim order), e.g. [3, 1, 1]; missing weights are 0', aliases: ['weights', 'variant_probabilities'] },
     seed: { type: 'float', default: 0, desc: 'variant_weights: random seed' },
     scale_attrib: { type: 'string', default: '', desc: 'template point attribute multiplying the copy scale (float = uniform, vec3 = per axis), on top of pscale and scale', aliases: ['scale_by'] },

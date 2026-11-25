@@ -11,7 +11,8 @@ import { Engine } from '../src/graph/engine.ts';
 import { createNodeHost } from '../src/host/node.ts';
 import { exportGeometry, exportGeometryAsync } from '../src/io/export.ts';
 import { importGeometryAsync } from '../src/io/import.ts';
-import { topologyReport } from '../src/core/topology.ts';
+import { resolveVertexNormals, topologyReport, triangulate } from '../src/core/topology.ts';
+import { cornerTangents, loadMikkTSpace, vertexUV } from '../src/core/tangents.ts';
 import { Geometry } from '../src/core/geometry.ts';
 import { Heightfield, heightfieldsOf } from '../src/core/heightfield.ts';
 import { Image } from '../src/core/image.ts';
@@ -26,7 +27,7 @@ import { decodePNG } from '../src/io/png-decode.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { importCSV } from '../src/io/points.ts';
 import { canonicalJSON, exportSource, graphSha256, nodesRead, nodesSha256, sameSource } from '../src/io/source.ts';
-import { publishedOutputs } from '../src/io/targets.ts';
+import { publishedOutputs, resolveTarget, targetError } from '../src/io/targets.ts';
 import { parseVarArg, parseVarValue, withVars } from '../src/graph/vars.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { ExportConflict, prepareTarget, unchangedTarget, writeTargets } from '../src/host/export-targets.ts';
@@ -46,6 +47,59 @@ const r = await engine.cook({
 const g = r.geo!;
 let fail = 0;
 const check = (ok: boolean, msg: string) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`); if (!ok) fail++; };
+{
+  const spec: GraphSpec = { nodes: { b: { type: 'box' } }, outputs: { mesh: { node: 'b', export: { path: 'x.glb' } } } };
+  const cooked = await engine.cook(spec);
+  const target = publishedOutputs('scene', spec, 'b').find((o) => o.output === 'mesh')?.target;
+  check(cooked.ok && target?.format === 'glb' && target.path === 'x.glb',
+    `named output infers glb from x.glb (${cooked.errors.map((e) => e.message).join('; ') || target?.format})`);
+  check(resolveTarget({ path: 'a.USD' }, 'mesh').format === 'usda' && resolveTarget({ path: 'a.raw' }, 'mesh').format === 'r16'
+    && resolveTarget({ path: 'a.points.json' }, 'mesh').format === 'pointsjson', 'export target recognizes aliases and compound extensions');
+  const png = targetError({ path: 'terrain.png' }), json = targetError({ path: 'terrain.json' });
+  check(!!png && png.includes('png16, mask_png') && png.includes('Set "format"')
+    && !!json && ['json', 'pointsjson', 'unreal_landscape', 'Set "format"'].every((f) => json.includes(f)),
+    'export targets name the possible formats for ambiguous extensions');
+  check(!!targetError({}) && /No export formats.*Set "format"/.test(targetError({ path: 'mesh.bin' }) ?? ''),
+    'export targets require a format if the path is missing or its extension is unknown');
+
+  const heightmap: GraphSpec = { nodes: { h: { type: 'heightfield' } }, outputs: { land: { node: 'h', export: { format: 'png16', path: 'exports/terrain.png' } } } };
+  const land = await engine.cook(heightmap);
+  const output = publishedOutputs('scene', heightmap, 'h').find((o) => o.output === 'land')?.target;
+  const files = land.geo && output && await exportFilesAsync(land.geo, output.format, output.path);
+  check(files?.files.map((f) => f.path).join() === 'terrain.png,terrain.json', 'the documented PNG heightmap target writes terrain.png and terrain.json');
+}
+{
+  await loadMikkTSpace();
+  const { geo } = await engine.cook({ nodes: { grid: { type: 'grid' } } });
+  const grid = geo!.clone();
+  for (const mirrored of [false, true]) {
+    const mesh = grid.clone();
+    const uv = mesh.points.get('uv')!;
+    if (mirrored) for (let i = 0; i < mesh.numPoints; i++) uv.data[i * uv.size] = 1 - Number(uv.data[i * uv.size]);
+    const { tris } = triangulate(mesh);
+    const expected = cornerTangents(mesh, tris, resolveVertexNormals(mesh, 60), vertexUV(mesh)!).tangents[3];
+    const tangent = mesh.points.add('tangent', 'float', 3);
+    for (let i = 0; i < mesh.numPoints; i++) tangent.set(i, [0, 0, 1]);
+    const warnings: string[] = [];
+    const bytes = await exportGeometryAsync(mesh, 'glb', { warn: (w) => warnings.push(w) }) as Uint8Array;
+    const json = JSON.parse(Buffer.from(bytes.subarray(20, 20 + new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true))).toString());
+    const accessor = json.accessors[json.meshes[0].primitives[0].attributes.TANGENT];
+    const back = (await importGeometryAsync(bytes, 'glb')).points.get('tangent');
+    check(warnings.length === 0 && accessor?.type === 'VEC4' && Math.abs(expected) === 1 && !!back
+      && (back.data as Float64Array).every((v, k) => v === [0, 0, 1, expected][k % 4]),
+      `glb keeps float[3] tangent xyz and adds the generated w ${expected} (${warnings.join('; ') || accessor?.type})`);
+  }
+  grid.points.delete('uv');
+  const tangent = grid.vertices.add('tangent', 'float', 3);
+  for (let i = 0; i < grid.numVertices; i++) tangent.set(i, [0, 0, 1]);
+  for (const tangents of ['auto', 'preserve'] as const) {
+    const warnings: string[] = [];
+    const bytes = await exportGeometryAsync(grid, 'glb', { tangents, warn: (w) => warnings.push(w) }) as Uint8Array;
+    const back = await importGeometryAsync(bytes, 'glb');
+    check(!back.points.has('tangent') && warnings.some((w) => w.includes('mesh has no UVs')),
+      `glb tangents "${tangents}" skips a float[3] tangent without UVs (${warnings.join('; ')})`);
+  }
+}
 for (const fmt of ['json', 'obj', 'ply', 'glb', 'stl', 'geo'] as const) {
   const bytes = await exportGeometryAsync(g, fmt, { custom: true });
   const back = await importGeometryAsync(bytes, fmt);

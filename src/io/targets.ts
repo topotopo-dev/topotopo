@@ -1,5 +1,5 @@
 // Export targets: where a graph's published outputs export to. graph.export is the default output's target and
-// graph.outputs[id].export a named output's: a format name ("glb"), or {format, path?, ...the export tool's options},
+// graph.outputs[id].export a named output's: a format name ("glb"), or an object with a format or path and export options,
 // with the path inside the package's exports/ folder (a workspace inside the engine project has exports/ inside it, and
 // the engine imports from there). The viewer's Export buttons, the MCP export tool and the CLI's --export-all resolve
 // targets here, so one target writes the same files everywhere. Pure: no file system.
@@ -15,15 +15,46 @@ export const FORMAT_LABELS: Record<ExportFormat, string> = {
 };
 export const TARGET_FORMATS = Object.keys(FORMAT_LABELS) as ExportFormat[];
 
-const EXTENSIONS: Partial<Record<ExportFormat, string>> = { unreal_landscape: '', textures: '', png16: '.png', mask_png: '.png', pointsjson: '.points.json' };
+// The first extension is the default. An empty default means the target is normally a folder.
+const EXTENSIONS: Partial<Record<ExportFormat, [string, ...string[]]>> = {
+  usda: ['.usda', '.usd'], r16: ['.r16', '.raw'], pointsjson: ['.points.json', '.json'],
+  unreal_landscape: ['', '.json'], textures: [''], png16: ['.png'], mask_png: ['.png'],
+};
 /** The extension a target's file gets: '' for unreal_landscape and textures, which write a folder. */
-export const targetExtension = (format: ExportFormat) => EXTENSIONS[format] ?? '.' + format;
+export const targetExtension = (format: ExportFormat) => EXTENSIONS[format]?.[0] ?? '.' + format;
+
+const FORMATS_BY_EXTENSION = new Map<string, ExportFormat[]>();
+for (const format of TARGET_FORMATS) {
+  for (const ext of EXTENSIONS[format] ?? [targetExtension(format)]) {
+    if (!ext) continue;
+    const formats = FORMATS_BY_EXTENSION.get(ext);
+    if (formats) formats.push(format);
+    else FORMATS_BY_EXTENSION.set(ext, [format]);
+  }
+}
+const KNOWN_EXTENSIONS = [...FORMATS_BY_EXTENSION.keys()].sort((a, b) => b.length - a.length);
 
 /** A format name in canonical form ("USD" → usda), or null. */
 export function targetFormat(f: unknown): ExportFormat | null {
   const s = typeof f === 'string' ? f.trim().toLowerCase() : '';
   const c = s === 'usd' ? 'usda' : s;
   return Object.hasOwn(FORMAT_LABELS, c) ? (c as ExportFormat) : null;
+}
+
+function targetFormatOrError(format: unknown, path: unknown): { format: ExportFormat } | { error: string } {
+  if (format !== undefined) {
+    const f = targetFormat(format);
+    return f ? { format: f } : { error: `export format "${format}" is not one of ${TARGET_FORMATS.join(', ')} (or usd)` };
+  }
+  if (typeof path !== 'string' || !path) return { error: 'Set an export "format" or give the export a "path" with a supported extension.' };
+  const file = (path.split(/[\\/]/).pop() ?? '').toLowerCase();
+  const ext = KNOWN_EXTENSIONS.find((e) => file.endsWith(e)) ?? /\.[^.]+$/.exec(file)?.[0];
+  const formats = ext && FORMATS_BY_EXTENSION.get(ext);
+  if (formats && formats.length === 1) return { format: formats[0] };
+  if (formats) return { error: `Export path "${path}" matches these formats for "${ext}": ${formats.join(', ')}. Set "format".` };
+  return { error: ext
+    ? `No export formats write extension "${ext}" for path "${path}". Set "format".`
+    : `Export path "${path}" has no file extension. Set "format".` };
 }
 
 // the export tool's options (src/mcp/tools.ts), by value type
@@ -167,8 +198,9 @@ export function targetRefusal(t: unknown): string | null {
 /** Why a target is invalid, or null when it is valid (a path written with the prefix that is gone only warns: targetWarning). */
 export function targetError(t: unknown): string | null {
   const o: any = typeof t === 'string' ? { format: t } : t;
-  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'export must be a format name ("glb") or {format, path?, ...options}';
-  if (!targetFormat(o.format)) return `export format "${o.format}" is not one of ${TARGET_FORMATS.join(', ')} (or usd)`;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'Export must be a format name ("glb") or an object with a format or path.';
+  const resolved = targetFormatOrError(o.format, o.path);
+  if ('error' in resolved) return resolved.error;
   if (gonePrefix(o.path)) { /* a warning (targetWarning), refused where a file would be written */ }
   else if (o.path !== undefined && !pathOk(o.path)) return `export path "${o.path}" must stay inside exports/: relative, without "..", a drive or a leading slash`;
   for (const [k, v] of Object.entries(o)) {
@@ -200,7 +232,9 @@ export const fileStem = (s: string) => s.replace(/[^A-Za-z0-9_.-]+/g, '_').repla
 /** A valid target with its path filled in: <stem><extension> unless it names one. */
 export function resolveTarget(t: ExportTarget, stem: string): ResolvedTarget {
   const { format, path, ...options } = typeof t === 'string' ? { format: t } : t;
-  const f = targetFormat(format)!;
+  const resolved = targetFormatOrError(format, path);
+  if ('error' in resolved) throw new Error(resolved.error);
+  const f = resolved.format;
   const p = typeof path === 'string' ? path : '', gone = gonePrefix(path);
   // the prefix that is gone stays refused; a leading exports/ is dropped (targetWarning says so)
   const rest = p.startsWith(GONE_PREFIX) ? p.slice(GONE_PREFIX.length) : p.replace(EXPORTS_PREFIX, '');

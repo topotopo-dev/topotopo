@@ -229,11 +229,12 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   its textures/layers. In a package that publishes versions they are its outputs; "publish": false keeps one (a viewer-only
   preview) out of the package, "tags" and "description" say what it is to search, and "kind" pins what it cooks to
   (help topic "packages"). Rename/remove edits maintain references. The latest render of each graph node is saved as
-  exports/renders/<graph>-<node>.png (each render overwrites it) unless save_to is supplied; explicit render/export
-  destinations are registered in the viewer too.
+  exports/renders/<graph>-<node>.png (each render overwrites it) unless save_to is supplied. Render and build replies
+  end with the absolute path they saved. Explicit render/export destinations are registered in the viewer too.
 - Optional "export" (on the graph for the default output, or on an entry of "outputs") is where that output
-  exports: a format ("glb" → exports/<graph or output id>.glb) or {"format":"obj","path":"parts/a.obj","up_axis":"z"}
-  (the export tool's options), always inside the package's exports/ (a workspace inside the engine project has it
+  exports: a format ("glb" → exports/<graph or output id>.glb) or {"path":"parts/a.obj","up_axis":"z"}
+  (the export tool's options). The target infers the format from an unambiguous extension. Set "format" for .png,
+  .json and paths without a supported extension. Targets are always inside the package's exports/ (a workspace inside the engine project has it
   inside the project, where the engine imports from; a path starting with "exports/" drops it, with a warning, so it
   never lands in exports/exports/; an "engine:" path prefix is gone: it warns, and exporting it is refused). The person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
   targets; set one with edit {op:"export", output?, export}.
@@ -709,7 +710,7 @@ RENDER / INSPECT: render draws heightfields as a shaded grid with the mask in re
   quads per side by default (a 2 km field at 2 m every 2nd sample) and its "terrain detail" setting draws finer, up to
   every sample, so instances scattered on the surface sit on it exactly; it is remembered per browser. inspect and
   every cook summary list the grid and each layer's min/max/mean.
-UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes the heightmap plus terrain.json with
+UNREAL LANDSCAPE: export {format: "png16", path: "exports/terrain.png"} or {path: "exports/terrain.r16"} writes the heightmap plus terrain.json with
   height_min / height_max and the import settings. Pixel column = X, row = Z (row 0 at min Z); Unreal X = X,
   Unreal Y = Z, Unreal Z = Y, centimetres.
   value v → h = height_min + v / 65535 × range.  Unreal: Z_cm = location.z + (v − 32768) × scale.z / 128, so
@@ -1025,7 +1026,9 @@ prune {mode}: overlap (spheres radius × pscale, priority largest | smallest | r
   density (keep with probability attrib × fraction) | expression ("@mask<0.5" removed) | near_geometry (within distance
   of input 1, inside its closed polygons). invert keeps the others.
 cluster {method kmeans (count, iterations) | radius, center, color}: int cluster per point; color:true for a debug render.
-copy_to_points: variants "name"/"piece" + variant_attrib (exact pick) or variant_weights [3, 1, 1] (seeded weighted pick);
+copy_to_points: variants "name"/"piece" + variant_attrib or variant_weights [3, 1, 1] (seeded weighted pick).
+  For name variants, a point string picks the exact piece name and an integer indexes names from zero in text order
+  ("barrel" < "crate" < "lamp", so 1 picks "crate").
   scale_attrib (e.g. "mask": bigger where the mask is high), rotate_attrib (float yaw degrees, vec3 Euler, vec4 quaternion).
   pack:true for anything above a few thousand copies.
 Houdini ↔ Unreal PCG: mask ≈ Density Filter inputs / Mask by Feature; scatter ≈ Surface/Spline/Volume Sampler; orient ≈
@@ -1556,7 +1559,8 @@ CLI: --inspect uv --uv-resolution 1024 [--uv-attrib uv2] [--uv-per-piece] [--jso
 Export: uv → glTF TEXCOORD_0 (v flipped), OBJ vt, USD primvars:st.`,
 
   render: `RENDER (pick the overlay that answers your question; everything is off by default)
-render {node?, views, …} returns a PNG; build/edit take the same options as render:{…}. The footer names the active
+render {node?, views, …} returns a PNG. Build and edit take the same options in render:{…}. Use save_to for an
+absolute or package-relative path. Replies that save a render end with its absolute path. The footer names the active
 overlays and notes pieces, open edges and back-facing % (also returned as text notes).
 VIEWS: "quad" (persp/front/right/top, default) · "turntable" (persp at azimuth 0/90/180/270) · "quad_uv" · a list of
   persp, front (looking from +Z, at an asset's front), back (from −Z), left (−X), right (+X), top (+Y), bottom (−Y),
@@ -1738,9 +1742,11 @@ glTF layout: one node+mesh per "name", one primitive per material. Polygons → 
   MATERIALS below). TANGENT (tangents "auto", the default): MikkTSpace
   tangents (xyz + handedness w) for every primitive whose material has a normal map, computed per corner before
   vertices are welded (uv seams, hard normals and mirrored islands keep their own frames), the same frame bake_normal
-  bakes in; a valid point/vertex "tangent" float[4] (from an import) is written on other primitives. "preserve" writes
-  the supplied attribute wherever it exists (malformed = error), "none" never writes TANGENT. Collapsed uvs are
-  reported. Import reads TANGENT back as point "tangent" (transforms keep it: xyz rotated, w flipped by mirrors).
+  bakes in. Other primitives use the point/vertex "tangent" attribute. A float[3] tangent gets its w from MikkTSpace.
+  Zero-length or non-finite directions use the generated tangent. A float[3] without UVs is skipped with a warning.
+  "preserve" uses the supplied attribute even on normal-mapped primitives (invalid float[4] values are an error). "none" omits
+  TANGENT. Collapsed uvs on normal-mapped primitives are reported. Import reads TANGENT as point "tangent"
+  (transforms keep it: xyz rotated, w flipped by mirrors).
   Custom attributes (custom_attribs true): every other numeric point/vertex attribute of size 1-4 → _NAME (upper-cased,
   float or the smallest int type), mesh extras keep the original names and types, and packed instances carry their
   anchor attributes as per-instance accessors (carrying lot / edge / source ids there: help topic "instancing",
@@ -1871,8 +1877,8 @@ IMPORT (file node): obj, stl, ply, glb/gltf (meshopt; Draco with draco3dgltf; ex
 5. INSPECT {detail} (CLI --inspect <detail>):
    summary (default)  one screen: counts and triangles, bbox in metres to the millimetre, parts (prim "name"),
                       materials and their maps, images, uv state (charts, in-tile overlap, tiling, utilization), closed
-                      or open edges (after welding seam splits). Over 200,000 triangles it leaves the uv overlap test and
-                      utilization to detail "uv", and says so
+                      or open edges (after welding seam splits). It says when the UV overlap check exceeds the summary
+                      budget or the mesh exceeds 200,000 triangles. Use detail "uv" for the detailed check.
    budget             triangles per part (prim "name": each exports as its own mesh), split per LOD when the names
                       end in _lod0, _lod1 …, and per node (the triangles each node adds over its inputs), sorted, with
                       totals; packed instances count expanded. json:true (CLI --json) appends it as JSON
