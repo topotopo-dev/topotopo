@@ -88,10 +88,19 @@ const graph = {
   },
   vars: { n: 120 },
 };
-const b = await call('build', { graph, render: { views: 'persp', size: 400 } });
+const buildPath = path.join(wsDir, 'shots', 'build.png');
+const freshInput = path.join(wsDir, 'inputs', 'reference.txt');
+fs.mkdirSync(path.dirname(freshInput), { recursive: true });
+fs.writeFileSync(freshInput, 'reference');
+const b = await call('build', { graph, render: { views: 'persp', size: 400, save_to: 'shots/build.png' } });
+fs.unlinkSync(freshInput);
 check(!b.isError && b.txt.includes('✓ graph "main"'), 'build ok');
 check(b.img && b.img.mimeType === 'image/png' && b.img.data.length > 1000, 'build returns png');
-if (b.img) fs.writeFileSync(path.join(wsDir, 'build.png'), Buffer.from(b.img.data, 'base64'));
+const buildSaved = fs.existsSync(buildPath);
+check(buildSaved && b.img && fs.readFileSync(buildPath).equals(Buffer.from(b.img.data, 'base64')) && b.txt.endsWith(`saved ${buildPath}`),
+  `build render.save_to writes the returned PNG and ends with its absolute path (file exists: ${buildSaved})`);
+check(b.txt.includes('new or changed in inputs/') && b.txt.indexOf('inputs/reference.txt') < b.txt.lastIndexOf(`saved ${buildPath}`),
+  'build render keeps the saved path after the input notice');
 console.log(b.txt.split('\n').slice(0, 4).join('\n'));
 
 const e = await call('edit', { ops: [{ op: 'vars', vars: { n: 300 } }, { op: 'insert', node: 'smooth1', type: 'smooth', after: 'terrain', params: { iterations: 3 } }] });
@@ -107,9 +116,11 @@ check(!insBud.isError && /^budget: [\d,]+ triangles/m.test(insBud.txt) && /^by n
 const insScene = await call('inspect', { node: 'rocks', detail: 'scene', export_options: { split_by_name: false } });
 check(!insScene.isError && /^scene \(the glb export, read back\): 1 nodes, 1 meshes/m.test(insScene.txt), `inspect detail "scene": the glb export read back (${insScene.txt.split('\n')[1]?.slice(0, 100)})`);
 
-const rnd = await call('render', { node: 'terrain', color_by: 'height', views: ['top', 'persp'] });
+const renderPath = path.join(wsDir, 'render.png');
+const rnd = await call('render', { node: 'terrain', color_by: 'height', views: ['top', 'persp'], save_to: renderPath });
 check(!!rnd.img, 'render tool image');
-if (rnd.img) fs.writeFileSync(path.join(wsDir, 'render.png'), Buffer.from(rnd.img.data, 'base64'));
+check(fs.existsSync(renderPath) && rnd.img && fs.readFileSync(renderPath).equals(Buffer.from(rnd.img.data, 'base64')) && rnd.txt.endsWith(`saved ${renderPath}`),
+  'render save_to accepts an absolute path and reports the saved PNG');
 const ov = await call('render', { node: 'rocks', views: ['persp', 'section'], section_axis: 'x', wireframe: 'hard', glyphs: 'N', max_glyphs: 50, label_pieces: true, max_labels: 5, shading: 'matcap', size: 256 });
 check(!!ov.img && !ov.isError && /overlays: shading matcap .*section x=.*wire hard>30/.test(ov.txt) && /label_pieces: first 5 of/.test(ov.txt), `render tool overlays: ${ov.txt.split('\n').find((l) => l.includes('overlays'))?.slice(0, 120)}`);
 const pngSize = (img: any) => { const b = Buffer.from(img.data, 'base64'); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };

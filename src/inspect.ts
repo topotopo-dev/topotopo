@@ -18,13 +18,14 @@ import { fmtNum } from './render/raster.ts';
 import { expandedTriangles, packedSummaryLine } from './core/packed.ts';
 import { packedSourceNames } from './io/common.ts';
 import { primMaterials, readMaterials } from './core/materials.ts';
-import { lodOf } from './core/uvreport.ts';
+import { chartRoots, lodOf, uvReport, uvReportText } from './core/uvreport.ts';
+import { trianglesUV, uvTriangleAreas } from './core/uvoverlap.ts';
+import { vertexUV } from './core/tangents.ts';
 import { heightfieldSummary, volumeCounts } from './core/heightfield.ts';
 import { imageSummary, imagesOf } from './core/image.ts';
 import { sdfGridSummary } from './core/sdfgrid.ts';
 import { surfaceLayout, surfaceTrims } from './core/nurbssurface.ts';
 import { evaluateSplines, splinesToPolylinesDeep } from './core/splines.ts';
-import { uvReport, uvReportText } from './core/uvreport.ts';
 import { openEdgesText, partsOf, primWhere, solidCauses, solidReport } from './core/report.ts';
 
 const n = (x: number) => x.toLocaleString('en-US');
@@ -281,8 +282,77 @@ function surfaceDescription(g: Geometry, p: number): string {
  * materials with their maps, images, the uv state (charts, in-tile overlap, outside 0..1, tiling, utilization) and
  * whether it is a closed solid (open edges after welding seam splits), then attributes and groups.
  */
-/** The summary tests uv overlaps up to this many polygon triangles; inspect detail "uv" tests any mesh. */
+/** Largest mesh the summary sends through the UV overlap scan. Dense layouts can hit the work budget sooner. */
 export const SUMMARY_UV_TRIANGLES = 200_000;
+const SUMMARY_UV_PAIR_TESTS = 500_000;
+const SUMMARY_UV_GRID_PAIRS = 8_000_000;
+const SUMMARY_UV_RASTER_SIZE = 256;
+const SUMMARY_UV_RASTER_SAMPLES = 16_000_000;
+
+/** Bound the shared UV scan's cell visits and coverage raster before running it. */
+function summaryUVWork(g: Geometry, tris: Uint32Array, uv: Float64Array): boolean {
+  const U = trianglesUV(uv, tris), nt = tris.length / 3;
+  const { ok, signed } = uvTriangleAreas(U, nt);
+  const boxes: { t: number; u0: number; v0: number; u1: number; v1: number }[] = [];
+  const bounds = () => ({ u0: Infinity, v0: Infinity, u1: -Infinity, v1: -Infinity });
+  const extend = (a: ReturnType<typeof bounds>, b: ReturnType<typeof bounds>) => {
+    a.u0 = Math.min(a.u0, b.u0); a.v0 = Math.min(a.v0, b.v0);
+    a.u1 = Math.max(a.u1, b.u1); a.v1 = Math.max(a.v1, b.v1);
+  };
+  const all = bounds(), S = SUMMARY_UV_RASTER_SIZE;
+  const samples = (lo: number, hi: number) => Math.max(0, Math.min(S - 1, Math.ceil(hi * S)) - Math.max(0, Math.floor(lo * S)) + 1);
+  let pos = 0, raster = 0;
+  for (let t = 0; t < nt; t++) {
+    if (!ok[t]) continue;
+    const u = t * 6, v = u + 1;
+    const b = { t, u0: Math.min(U[u], U[u + 2], U[u + 4]), v0: Math.min(U[v], U[v + 2], U[v + 4]),
+      u1: Math.max(U[u], U[u + 2], U[u + 4]), v1: Math.max(U[v], U[v + 2], U[v + 4]) };
+    raster += samples(b.u0, b.u1) * samples(b.v0, b.v1);
+    if (raster > SUMMARY_UV_RASTER_SAMPLES) return false;
+    boxes.push(b); extend(all, b);
+    if (signed[t] > 0) pos++;
+  }
+  if (boxes.length < 2) return true;
+  const kept = bounds();
+  let canWrap = false;
+  if (pos > 0 && pos < boxes.length) {
+    // Wrap seams can remove minority triangles from a chart. The rest bound the scan's span and triangle count.
+    const root = chartRoots(g.vertexPoint, tris, U, nt), votes = new Int32Array(nt);
+    for (const { t } of boxes) votes[root(t)] += signed[t] > 0 ? 1 : -1;
+    for (const b of boxes) {
+      if (votes[root(b.t)] * signed[b.t] >= 0) extend(kept, b);
+      else canWrap = true;
+    }
+  } else extend(kept, all);
+  const cells = (count: number) => Math.ceil(Math.sqrt(count / 2));
+  const span = (b: ReturnType<typeof bounds>) => Math.max(1e-12, b.u1 - b.u0, b.v1 - b.v0);
+  const width = span(kept) / cells(boxes.length);
+  const pad = canWrap ? span(all) / cells(Math.ceil(boxes.length / 2)) : 0;
+  if (!Number.isFinite(width) || !Number.isFinite(pad)) return false;
+  const nx = Math.floor((all.u1 - all.u0 + pad) / width) + 2, ny = Math.floor((all.v1 - all.v0 + pad) / width) + 2;
+  if (nx * ny > 256_000) return false;
+  // Count boxes per cell with rectangle sums. With possible wrap seams, map each scan cell's origin to a cell
+  // here. Scan cells are at least as wide as ours, and padding includes any box the scan cell could meet.
+  const counts = new Int32Array(nx * ny);
+  for (const b of boxes) {
+    const x0 = Math.floor((b.u0 - all.u0) / width), y0 = Math.floor((b.v0 - all.v0) / width);
+    const x1 = Math.floor((b.u1 - all.u0 + pad) / width) + 1, y1 = Math.floor((b.v1 - all.v0 + pad) / width) + 1;
+    counts[y0 * nx + x0]++; counts[y0 * nx + x1]--;
+    counts[y1 * nx + x0]--; counts[y1 * nx + x1]++;
+  }
+  let pairs = 0;
+  for (let y = 0; y < ny; y++) {
+    let row = 0;
+    for (let x = 0; x < nx; x++) {
+      const i = y * nx + x;
+      row += counts[i];
+      const count = counts[i] = row + (y ? counts[i - nx] : 0);
+      pairs += count * (count - 1) / 2;
+      if (pairs > SUMMARY_UV_GRID_PAIRS) return false;
+    }
+  }
+  return true;
+}
 
 export function summaryLines(g: Geometry): string[] {
   const short = summarize(g).split('\n');
@@ -317,14 +387,21 @@ export function summaryLines(g: Geometry): string[] {
   if (uvA && mesh.numPrims) {
     let polyTris = 0;
     for (let p = 0; p < mesh.numPrims; p++) if (!mesh.primKind?.[p] && mesh.primClosed[p]) polyTris += Math.max(0, mesh.primSize(p) - 2);
-    const tested = polyTris <= SUMMARY_UV_TRIANGLES;
-    const r = uvReport(mesh, { maxPairTests: 500_000, maxExamples: 1, rasterSize: 256, overlaps: tested });
+    const tri = polyTris <= SUMMARY_UV_TRIANGLES ? triangulate(mesh) : undefined;
+    const uv = tri && vertexUV(mesh);
+    const tested = !!(tri && uv && summaryUVWork(mesh, tri.tris, uv));
+    const r = uvReport(mesh, { maxPairTests: SUMMARY_UV_PAIR_TESTS, maxExamples: 1, rasterSize: SUMMARY_UV_RASTER_SIZE, overlaps: tested }, tri);
     const ov = r.overlap;
-    const overlap = tested
-      ? `in-tile overlap ${n(ov.inTile.pairs)} pairs${ov.inTile.pairs && ov.examples[0] ? ` (first ${ov.examples[0].where[0]})` : ''}${ov.acrossLods.pairs ? `, across LODs ${n(ov.acrossLods.pairs)}` : ''}`
-      : `overlap not tested (over ${n(SUMMARY_UV_TRIANGLES)} triangles: inspect detail "uv" tests it)`;
-    const use = tested ? `; utilization ${(r.utilization.value * 100).toFixed(1)}%${r.utilization.method === 'raster-estimate' ? ' (estimate)' : ''}${r.complete ? '' : ' (INCOMPLETE: inspect detail "uv")'}` : '';
-    out.push(`uv: ${n(r.charts)} charts${r.tiling ? `, TILING (${n(r.tilingCharts)} charts run across tile borders)` : ''}; ${overlap}; ${n(r.outOfTile)} triangles outside 0..1; ${n(r.collapsed)} collapsed${r.wrapSeam.prims ? `; ${n(r.wrapSeam.prims)} faces span a wrap seam (first ${r.wrapSeam.examples[0]})` : ''}${use}`);
+    const complete = tested && r.complete;
+    const overlap = complete
+      ? `; in-tile overlap ${n(ov.inTile.pairs)} pairs${ov.inTile.pairs && ov.examples[0] ? ` (first ${ov.examples[0].where[0]})` : ''}${ov.acrossLods.pairs ? `, across LODs ${n(ov.acrossLods.pairs)}` : ''}`
+      : '';
+    const use = complete ? `; utilization ${(r.utilization.value * 100).toFixed(1)}%${r.utilization.method === 'raster-estimate' ? ' (estimate)' : ''}` : '';
+    out.push(`uv: ${n(r.charts)} charts${r.tiling ? `, TILING (${n(r.tilingCharts)} charts run across tile borders)` : ''}${overlap}; ${n(r.outOfTile)} triangles outside 0..1; ${n(r.collapsed)} collapsed${r.wrapSeam.prims ? `; ${n(r.wrapSeam.prims)} faces span a wrap seam (first ${r.wrapSeam.examples[0]})` : ''}${use}`);
+    if (!complete && !r.missing) {
+      const limit = tri ? 'within the summary work budget' : `above ${n(SUMMARY_UV_TRIANGLES)} triangles`;
+      out.push(`UV overlap was not checked ${limit}. Run --inspect uv or use inspect detail "uv" for the detailed check.`);
+    }
   } else if (g.numPrims) out.push('uv: none');
   if (mesh.numPrims && mesh.primClosed.some((c) => c === 1)) {
     const sr = solidReport(mesh, { flips: false });

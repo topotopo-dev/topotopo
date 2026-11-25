@@ -149,9 +149,9 @@ export interface GraphMeta {
 
 /**
  * Where a published output exports to: a format name ("glb"), written as exports/<output>.<ext>, or an object with
- * the format, an optional path inside exports/ and the export tool's options ({format: "obj", up_axis: "z"}).
+ * an explicit format or a path inside exports/ with an unambiguous extension, plus the export tool's options.
  */
-export type ExportTarget = string | { format: string; path?: string; [option: string]: unknown };
+export type ExportTarget = string | ({ format: string; path?: string } | { format?: undefined; path: string }) & { [option: string]: unknown };
 
 /** A value shaped like a graph: an object with a nodes object (a nested graph in a node's params). */
 export const isGraph = (v: unknown): v is GraphSpec => !!v && typeof v === 'object' && !Array.isArray(v) && !!(v as GraphSpec).nodes && typeof (v as GraphSpec).nodes === 'object';

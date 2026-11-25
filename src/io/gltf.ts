@@ -13,8 +13,8 @@
 //   TANGENT (option tangents, default 'auto'): MikkTSpace tangents (core/tangents.ts) computed per triangle corner from
 //   the exported positions, normals and uv BEFORE vertices are welded, so uv seams, hard normals and mirrored islands
 //   keep their own frames, for every primitive whose material has a normal map; a supplied point/vertex "tangent"
-//   float[4] attribute is written on the others ('preserve': everywhere it exists). Collapsed or missing uvs are
-//   reported, never written as invalid tangents.
+//   attribute is written on the others ('preserve': everywhere it exists). A float[3] gets its w from the generated
+//   frame and requires uv. Collapsed or missing uvs are reported where needed.
 //   Custom attributes (option custom, default off): every other numeric point/vertex attribute of size 1–4 becomes
 //   `_NAME` (upper-cased; float, or the smallest integer type that holds an int attribute). The original names and
 //   types are kept in mesh extras (topotopo.attributes), so imports restore them exactly. POINTS always carry pscale
@@ -617,6 +617,33 @@ export function gltfDocument(g: Geometry, o: ExportOptions = {}): Document {
       const supplied = geo.findAttrib(TANGENT_ATTRIB, ['vertex', 'point']);
       const where = `mesh "${piece}"${mat ? ` material "${mat}"` : ''}`;
       if (supplied && (tangentMode === 'preserve' || !normalMapped)) {
+        const { attr, cls } = supplied;
+        if (attr.type === 'float' && !attr.isArray && attr.size === 3) {
+          const uv = vertexUV(geo);
+          if (!uv) {
+            o.warn?.(`glTF: ${where}: supplied tangent attribute not written because the mesh has no UVs for its handedness`);
+            return null;
+          }
+          if (!nrm) {
+            o.warn?.(`glTF: ${where}: tangent attribute without NORMAL (normals: false): no TANGENT written`);
+            return null;
+          }
+          const { tangents } = cornerTangents(geo, tris, nrm, uv);
+          const values = attr.data as Float64Array;
+          return {
+            semantic: 'TANGENT', size: 4, int: false, perPoint: false,
+            read(v, pt, _pr, out, oo, k) {
+              const i = (cls === 'vertex' ? v : pt) * 3, j = k * 4;
+              const x = values[i], y = values[i + 1], z = values[i + 2];
+              const length = Math.hypot(x, y, z);
+              // Merge can fill an absent tangent with zeroes. Use the generated tangent at those corners.
+              const suppliedDirection = length > 0 && Number.isFinite(length);
+              const d = suppliedDirection ? xfDir(x / length, y / length, z / length, o)
+                : xfDir(tangents[j], tangents[j + 1], tangents[j + 2], o);
+              out[oo] = d[0]; out[oo + 1] = d[1]; out[oo + 2] = d[2]; out[oo + 3] = tangents[j + 3];
+            },
+          };
+        }
         const bad = tangentProblem(geo);
         if (bad && tangentMode === 'preserve') throw new Error(`glTF: tangents "preserve": ${where}: ${bad}`);
         if (bad) o.warn?.(`glTF: ${where}: supplied tangent attribute not written (${bad})`);

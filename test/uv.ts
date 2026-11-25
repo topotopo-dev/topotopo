@@ -11,6 +11,8 @@ import { importGeometryAsync } from '../src/io/import.ts';
 import { renderGeometry } from '../src/render/raster.ts';
 import { uvReport } from '../src/core/uvreport.ts';
 import { encodePNG } from '../src/render/png.ts';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { getNodeDef } from '../src/graph/registry.ts';
@@ -675,6 +677,44 @@ for (const [fixture, halves] of [['NOISY_ROCK', true], ['NOISY_QUAD_ROCK', false
   check(same || geo.numVertices !== before.numVertices, `and keeps uv as it was (${b?.cls} uv, ${geo.numVertices} vertices)`);
   const r2 = uvReport(geo, { resolution: 512, attribute: 'uv2' });
   check(r2.overlap.pairs === 0, `the second set has no overlaps (${r2.overlap.pairs})`);
+}
+
+// A small shared atlas retains the exact summary overlap count.
+{
+  const { inspect } = await import('../src/inspect.ts');
+  const { geo } = await cook({
+    tile: { type: 'grid', params: { divisions: [1, 1] } },
+    out: { type: 'copy_xform', in: ['tile'], params: { count: 4, translate: [2, 0, 0] } },
+  });
+  const pairs = uvReport(geo).overlap.inTile.pairs;
+  const summary = inspect(geo);
+  check(pairs === 12 && summary.includes(`in-tile overlap ${pairs} pairs`), 'inspect summary preserves the exact overlap count for four overlapping UV tiles');
+}
+
+// Four copies of a house with many boards sharing the same UV tile.
+{
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import './src/nodes/index.ts';
+    import { Engine } from './src/graph/engine.ts';
+    import { createNodeHost } from './src/host/node.ts';
+    import { inspect } from './src/inspect.ts';
+    const engine = new Engine(createNodeHost());
+    await engine.init();
+    const r = await engine.cook({ nodes: {
+      walls: { type: 'box', params: { size: [5, 3, 4] } },
+      board: { type: 'box', params: { size: [0.04, 3, 0.05], center: [-2.5, 0, 2.05] } },
+      siding: { type: 'copy_xform', in: ['board'], params: { count: 120, translate: [0.04, 0, 0] } },
+      roof: { type: 'box', params: { size: [5.4, 0.2, 4.4], center: [0, 1.6, 0] } },
+      house: { type: 'merge', in: ['walls', 'siding', 'roof'] },
+      sites: { type: 'points', params: { positions: [[-8, 0, -6], [8, 0, -6], [-8, 0, 6], [8, 0, 6]] } },
+      out: { type: 'copy_to_points', in: ['house', 'sites'] },
+    } });
+    if (!r.geo) throw new Error(JSON.stringify(r.errors));
+    console.log('inspecting ' + r.geo.numPrims + ' polygons');
+    console.log(inspect(r.geo));
+  `], { cwd: fileURLToPath(new URL('../', import.meta.url)), encoding: 'utf8', timeout: 20_000 });
+  check(result.status === 0 && /^UV overlap was not checked .*inspect detail "uv"/m.test(result.stdout ?? ''),
+    `inspect summary on four UV-mapped houses finishes within 20 s and reports the overlap budget (${result.error?.message ?? (result.stderr.trim() || `exit ${result.status}`)}; ${result.stdout?.split('\n')[0]})`);
 }
 
 console.log(fail ? `\n${fail} uv check(s) failed` : '\nuv: all checks passed');
