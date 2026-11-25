@@ -2,52 +2,28 @@
   "errors": [],
   "fingerprint": {
     "attributes": {
-      "detail": ["materials:string:1"],
-      "point": ["P:float:3", "slope:float:1"],
-      "prim": ["copynum:int:1", "material:string:1", "name:string:1"],
-      "vertex": ["uv:float:3"]
+      "detail": [],
+      "point": ["P:float:3"],
+      "prim": [],
+      "vertex": []
     },
-    "bbox": {
-      "max": [125.8414, 45.2566, 125.8615],
-      "min": [-125.509, 0.2543, -125.867]
-    },
+    "bbox": null,
     "counts": {
-      "points": 2683,
-      "prims": 2426,
-      "vertices": 5450,
+      "points": 0,
+      "prims": 0,
+      "vertices": 0,
       "volumes": 1
     },
     "groups": {
       "edge": [],
       "point": [],
-      "prim": ["caps", "sides"],
+      "prim": [],
       "vertex": []
     },
     "hashes": {
-      "P": "447d26605361d9c2",
-      "attributes": {
-        "detail.materials": "6db9822e88c6b554",
-        "group.prim.caps": "9498f1ccd4f6c7da",
-        "group.prim.sides": "cb9c778c5e8cad3a",
-        "point.slope": "7eaeb95d1ae60527",
-        "prim.copynum": "40bf18812a06d60b",
-        "prim.material": "791534e11b627f33",
-        "prim.name": "ef9221a15880d333",
-        "vertex.uv": "a9347b791832563b"
-      },
-      "topology": "2ccf7748b1c4bd12"
-    },
-    "packed": {
-      "hash": "2de68880b993d36a",
-      "instances": 1418,
-      "sources": [
-        "0f754ea26cc073c4",
-        "edece4853b51c19f",
-        "69230dd2df3948c4",
-        "df8cd7b34e994465",
-        "90dcfdbbdcfc46c1",
-        "a9ca2b6c9ce6c8f6"
-      ]
+      "P": "811c9dc5050c5d1f",
+      "attributes": {},
+      "topology": "c6aecfc4fbcb4a1e"
     },
     "volumes": [
       {

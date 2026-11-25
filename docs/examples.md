@@ -257,7 +257,7 @@ A town quarter built from a plan: the ground is cut into irregular lots along st
 A landscape for Unreal Engine: an eroded terrain sized to fit an Unreal Landscape exactly, with paint layers, a road, and trees and rocks as instances.
 
 - In: `samples`, `spacing`, `height`, `tree_density`, `rock_density`, `road`, `seed`
-- Out: `landscape` (terrain), `trees` (instances), `rocks` (instances), `road` (mesh), `level` (scene)
+- Out: `landscape` (terrain), `trees` (instances), `rocks` (instances), `road` (mesh)
 
 ### [Weathered cabinet](../examples/weathered_cabinet.md) (`weathered_cabinet`)
 
