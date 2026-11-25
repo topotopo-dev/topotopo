@@ -1500,9 +1500,19 @@ section('output cards: what an output is, its formats and downloads');
   const inside = { ...glb, writes: 'binary glTF with its textures and how it was made inside (+ .source.json in exports/)' };
   check(pop.writesLine(inside, true) === 'binary glTF with its textures and how it was made inside' && /in exports\//.test(pop.writesLine(inside)), 'a download does not say what an export adds in exports/');
   check(typeof pop.exportPathError === 'function' && /the "engine:" prefix is gone: write the path inside exports\/ \("props\/crate\.glb"\)/.test(pop.exportPathError('engine:props/crate.glb'))
-    && pop.exportPathError('props/crate.glb') === '' && /without "\.\." or a drive/.test(pop.exportPathError('../x.glb')) && /without "\.\." or a drive/.test(pop.exportPathError('C:/x.glb'))
+    && pop.exportPathError('props/crate.glb') === '' && /without "\.\." or a drive/.test(pop.exportPathError('../x.glb'))
     && pop.targetPathShown('engine:props/crate.glb') === 'props/crate.glb' && pop.targetPathShown('a.glb') === 'a.glb',
     'the Export popover refuses an "engine:" path, saying the path without it, and shows a refused target\'s path without the prefix');
+  const saveCopy = 'To save a copy anywhere else, use Download. It saves where your browser saves files.';
+  check(['C:/x.glb', 'C:\\x.glb', '/x.glb', '\\\\server\\share\\x.glb'].every((p) => pop.exportPathError(p) === saveCopy),
+    `absolute export paths point to Download (${pop.exportPathError('C:/x.glb')})`);
+  const warning = 'glTF: tangent attribute skipped';
+  const receipt = { file: 'exports/crate.glb', files: 2, warnings: [warning] };
+  const notice = status.exportNotice(receipt);
+  check(notice?.text === 'Exported exports/crate.glb (2 files)' && notice?.kind === 'warn'
+    && notice?.warnings?.[0] === warning && !notice?.text.includes(warning)
+    && status.exportNotice({ ...receipt, warnings: [] }).kind === 'ok',
+    `an export that wrote files has an Exported message with separate warnings (${notice?.kind ?? 'no warning notice'})`);
   check(pop.downloadName(card, glb) === 'land.glb' && pop.downloadName(card, png) === 'land.zip' && pop.downloadName({ ...card, target: { format: 'glb', path: 'parts/rock.glb' } }, glb) === 'rock.glb'
     && pop.downloadName({ ...card, output: 'trees', target: { format: 'csv', path: 'pcg/trees.points.json' } }, { ...png, format: 'csv' }) === 'trees.zip', 'download names: the target\'s file, else the output\'s stem; a zip unless one file');
   check(pop.downloadSpec({ target: { format: 'obj', path: 'a/b.obj', options: { up_axis: 'z' } } }, 'obj').up_axis === 'z' && pop.downloadSpec({ target: { format: 'obj', path: 'a.obj', options: {} } }, 'glb') === 'glb',

@@ -7,6 +7,29 @@ const page = document.body.dataset.page;
 const data = document.body.dataset.json ? JSON.parse(document.body.dataset.json) : {};
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
+if (page === 'new-package') {
+  const form = document.getElementById('new-package');
+  const submit = form.querySelector('button[type="submit"]'), error = form.querySelector('[role="alert"]');
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const fields = Object.fromEntries(new FormData(form));
+    submit.disabled = true;
+    error.hidden = true;
+    try {
+      const res = await fetch(form.action, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-topotopo-open': '1' }, body: JSON.stringify(fields),
+      });
+      const result = await res.json();
+      if (res.ok && result.url) { location.assign(result.url); return; }
+      error.textContent = result.error || 'Could not create the package. Try again.';
+    } catch {
+      error.textContent = 'Could not reach TopoTopo. Open it again, then try again.';
+    }
+    error.hidden = false;
+    submit.disabled = false;
+  });
+}
+
 if (page === 'front') {
   const search = document.getElementById('search'), clear = document.getElementById('clear');
   const results = document.getElementById('results'), found = document.getElementById('found');

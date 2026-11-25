@@ -85,6 +85,8 @@ button:disabled { opacity: .45; cursor: default; }
 .export-field { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 8px; }
 .export-field select, .export-field input { width: 100%; min-width: 0; padding: 4px 6px; }
 .export-where { font: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.export-copy { line-height: 1.6; }
+.export-copy button { padding: 1px 6px; }
 .export-about { font-size: 11px; overflow-wrap: anywhere; }
 /* what the chosen format writes; a format that writes only part of the output says what it leaves out */
 .export-writes { font-size: 11px; color: var(--text); overflow-wrap: anywhere; }

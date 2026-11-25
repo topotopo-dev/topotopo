@@ -57,19 +57,32 @@ const ctx = {
 const notesEl = $('notes'), msgEl = $('msg');
 let heldUntil = 0, noteTimer = 0, connectionNotice = false;
 /** A message; `hold` ms keeps it over routine ones, `duration` sets an exact lifetime, and '' clears it. */
-ctx.message = (text, kind = '', hold = 0, duration) => {
+ctx.message = (text, kind = '', hold = 0, duration, warnings = []) => {
   if (connectionNotice) return;
   const now = performance.now();
   if (text && !hold && kind !== 'err' && now < heldUntil) return;
   heldUntil = hold ? now + hold : 0;
   clearTimeout(noteTimer);
   msgEl.textContent = text; msgEl.title = text; notesEl.className = kind;
+  if (warnings.length) {
+    const details = document.createElement('details'), summary = document.createElement('summary'), list = document.createElement('ul');
+    summary.textContent = `${warnings.length} warning${warnings.length === 1 ? '' : 's'}`;
+    for (const warning of warnings) {
+      const item = document.createElement('li');
+      item.textContent = warning;
+      list.append(item);
+    }
+    details.append(summary, list);
+    msgEl.append(details);
+  }
   notesEl.hidden = !text && $('ask').hidden;
   const life = duration ?? messageLife(text, kind, hold);
-  if (text && Number.isFinite(life)) noteTimer = setTimeout(() => {
-    if (duration !== undefined || !notesEl.matches(':hover')) ctx.message('');
+  const clear = () => {
+    if (msgEl.querySelector('details[open]')) noteTimer = setTimeout(clear, 3000);
+    else if (duration !== undefined || !notesEl.matches(':hover')) ctx.message('');
     else noteTimer = setTimeout(() => ctx.message(''), 3000);
-  }, life);
+  };
+  if (text && Number.isFinite(life)) noteTimer = setTimeout(clear, life);
 };
 $('msg-close').onclick = () => { $('msg-close').blur(); connectionNotice = false; ctx.message(''); };
 // ------------------------------------------------------------------------------------------- cook state

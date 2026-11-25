@@ -105,8 +105,13 @@ topotopo setup --remove    # puts the registry and the Start menu back as they w
 
 After `setup`, double-clicking a package (`.topo`) or a workspace (`.topows`) opens it in your browser, through a
 local web app that starts unseen the first time and is reused after that. Right-clicking a folder offers **Open in
-TopoTopo** (on Windows 11 under *Show more options*), and **TopoTopo** is in the Start menu (the home page). Everything
-`setup` writes belongs to your user: your registry's `Software\Classes` and your Start menu. It records what it
+TopoTopo** (on Windows 11 under *Show more options*), and **TopoTopo** is in the Start menu (the home page).
+Choose **Make it a package** after opening a plain folder, or use
+**New package** on the home page to create a folder under `Documents/TopoTopo` or a parent folder you choose.
+Both actions open the new package in the editor. If a file or folder fails to open, the browser shows what happened
+and what to try next.
+
+Everything `setup` writes belongs to your user: your registry's `Software\Classes` and your Start menu. It records what it
 replaced in `~/.topotopo/setup.json` and `setup --remove` restores from that record; running `setup` twice changes
 nothing. Run it again after moving TopoTopo or changing the Node.js it runs with. If Windows already holds your own
 choice of program for `.topo` or `.topows` (an earlier "Always use this app"), `setup` says so and does not touch it:
@@ -255,6 +260,7 @@ From a clone, run the sources instead: `"command": "node"`, `"args": ["C:/path/t
 Options: `--viewer` (start the live preview immediately), or set `TOPOTOPO_PORT`, `TOPOTOPO_PACKAGE`,
 `TOPOTOPO_SCRIPT_TIMEOUT_MS`, `TOPOTOPO_SIM_TIMEOUT_MS`, `TOPOTOPO_WORKERS` and `TOPOTOPO_CACHE_MB` (the memory kept for cooked
 results; default a quarter of the machine's memory). The server exits when the client closes its stdin.
+`TOPOTOPO_PORT` sets the editor's port. Set `TOPOTOPO_WEB_PORT` for the web app used by `topotopo open` and `topotopo web`.
 
 The server and the command line keep the result of every node that took half a second or more to cook in a cache folder
 (`topotopo/nodes` in your OS cache folder: `%LOCALAPPDATA%` on Windows, `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
@@ -533,7 +539,10 @@ set up the demo project with `topotopo godot setup integrations/godot/demo` and 
 ## Web app
 
 `topotopo web` is a file explorer of your workspaces and libraries with TopoTopo's knowledge on top, at
-http://127.0.0.1:7340. Every folder is a page that mirrors the folder on disk, so you audit a game where its files are.
+http://127.0.0.1:7340 by default. Every folder is a page that mirrors the folder on disk, so you audit a game where its files are.
+`TOPOTOPO_WEB_PORT` sets the port for both `topotopo open` and `topotopo web`. With that variable unset, `topotopo web`
+also accepts `--port`. If the requested port is occupied when `open` starts the app, it picks a free port, prints the
+address it actually opens, and records its port in `web.lock`.
 
 ```bash
 topotopo workspace add D:/games/my-game
@@ -544,13 +553,15 @@ topotopo web
 `topotopo open <file.topo | file.topows | folder>` opens one package or workspace in your browser: it finds the web
 app of your user (a small lock file, `web.lock`, in `~/.topotopo`), starts one unseen when none runs, lists the
 package or workspace for that run when the config does not (the config is not changed) and opens its page. With no
-path it opens the home page; `topotopo open --stop` asks the web app it started to stop (running bakes finish, editors end) and waits for it; a web app from another version of TopoTopo is used as it is, and its pages say at the top that TopoTopo has changed since it started, with a button that stops it. A web app that has been asked to stop (a running bake finishes first) is waited for to leave, and another is started. A lock whose port accepts connections but never answers is given up after about 15 seconds. All the waits of `open` share 75 seconds. A package in no workspace or library is listed by itself, nothing around it is read. A path that does not exist, or a folder holding neither file, is one sentence on stderr
-and exit code 1. `TOPOTOPO_HOME` names the TopoTopo folder instead of `~/.topotopo`; `TOPOTOPO_BROWSER_LOG` names a
+path it opens the home page; `topotopo open --stop` asks the web app it started to stop (running bakes finish, editors end) and waits for it; a web app from another version of TopoTopo is used as it is, and its pages say at the top that TopoTopo has changed since it started, with a button that stops it. A web app that has been asked to stop (a running bake finishes first) is waited for to leave, and another is started. A lock whose port accepts connections but never answers is given up after about 15 seconds. All the waits of `open` share 75 seconds. A package in no workspace or library is listed by itself, nothing around it is read. A folder holding neither file offers **Make it a package**.
+A file or folder that cannot open shows an error page and still exits with code 1 and a message on stderr.
+`TOPOTOPO_HOME` names the TopoTopo folder instead of `~/.topotopo`; `TOPOTOPO_BROWSER_LOG` names a
 file the address is written to instead of opening a browser (scripts and tests). On Windows, `topotopo setup` makes a double-click run it (see Setup).
 
 - **Front page**: each registered workspace and library as a card with a few pictures from inside and its counts of
   packages, folders, files and flags; TopoTopo's built-in library last. The search finds every package by name, tag
-  and the packages it uses, and their outputs by name, kind and tag.
+  and the packages it uses, and their outputs by name, kind and tag. A built-in package opens read-only. Its
+  **Use in a new package** action starts the new package form and names what to find in the editor's **Packages** tab.
 - **Folder pages** at `/w/<workspace>/<path>/` and `/l/<library>/<path>/` lead with what there is to look at: a card
   per subfolder (with a picture and counts) and the folder's files by type: images to view large, sounds and videos in
   players, models (`.glb`, `.gltf`) in 3D on a click, the rest to open or download. Below one divider come its notes
@@ -577,6 +588,8 @@ file the address is written to instead of opening a browser (scripts and tests).
   **Pause** lets the current preview finish and holds the rest. **Skip** keeps the previous preview until the
   package changes or you press **Re-bake**, which moves its preview to the front of the line. After a failed bake
   the last good preview stays, marked.
+  The editor's **Export** dialog writes to `exports/`. To save a copy through your browser, use **Download** next to
+  the file field. Warnings from a successful export are folded under the warning count in the success message.
 - **Flags**, one line below a page's divider that opens to the list, and counted on the cards of the folders above
   it: a link in a note to a missing file, a preview that did not cook (with why), a package that publishes versions
   and has none or has changes no version holds, an export older than its graph (its recorded source no longer matches

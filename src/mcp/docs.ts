@@ -158,8 +158,15 @@ says what the open package's workspace holds: its packages as the scan finds the
   and why; it changes nothing but missing .gdignore files. Run it after a TopoTopo update.
 
 LIBRARIES AND THE WEB APP: a library holds packages in folders below it; the parent folders ("props") are a package's
-collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340; \`topotopo open <file.topo|file.topows|folder>\` opens one package or
-workspace in the browser, starting the web app unseen when none runs and listing it for that run) mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries: the front page
+collection, and an id is unique in its library or workspace. The web app (\`topotopo web\`, http://127.0.0.1:7340 by default)
+mirrors the folders of the registered workspaces (CLI: topotopo workspace add <folder>) and libraries.
+\`topotopo open <file.topo|file.topows|folder>\` starts the web app when needed and opens the path in the browser.
+On Windows, double-click a .topo or .topows file after setup, or right-click a folder and choose Open in TopoTopo.
+The home page has New package. Opening a plain folder offers Make it a package. Both open the new package in the editor.
+File and folder errors show in the browser, and open still exits with code 1 and a message on stderr.
+TOPOTOPO_WEB_PORT sets the web app's port for open and web. TOPOTOPO_PORT sets the editor's port.
+If the requested port is occupied when open starts the app, it prints the actual address and records its port in web.lock.
+The front page
 shows each as a card (TopoTopo's built-in library last) and searches every package and output; every folder is a page
 (/w/<workspace>/<path>/, /l/<library>/<path>/) that leads with what a person looks at: its package when it holds a
 .topo file (preview, outputs with their kinds and tags, exports, pictures, versions, the packages that use it and those
@@ -173,7 +180,8 @@ version holds, an export older than its graph, published outputs no package of t
 a stable address (/p/<library or workspace>/<id>, leading to its folder page), a thumbnail (…/thumb.png) and an iframe
 embed (/embed/<library or workspace>/<id>) that the person's board pastes. It bakes the previews by itself after
 graphs, assets or inputs change, from the graph named in "graph" (or "bake": another graph, a node, a frame);
-TopoTopo's own packages show the thumbnails they keep of their outputs.`,
+TopoTopo's own packages open read-only and show the thumbnails they keep of their outputs. Use in a new package
+opens the new package form and names the built-in package to find in the editor's Packages tab.`,
   graph: `GRAPH FORMAT
 {
   "nodes": {
@@ -240,6 +248,8 @@ TopoTopo's own packages show the thumbnails they keep of their outputs.`,
   The CLI's --export-all also exports published outputs without a target when the editor offers a fitting format.
   The viewer's Download buttons need no target: they offer the formats that fit the output (a heightfield: png16,
   r16, mask_png, unreal_landscape; a mesh: glb, gltf, usda, obj …) and hand the person the files, with their record.
+  The Export dialog also offers Download to save a copy through the browser. A successful export names what it wrote
+  and folds any warnings under their count.
 - Node names: letters, digits, _ . -  Node types & params are case/underscore-insensitive and accept Houdini-style aliases.
   CLI --help-node accepts node aliases. CLI graph-file cooks and refresh accept a leading UTF-8 BOM in graph JSON.
 - "bypass": true passes input 0 through. "note": free text. "ui": {x,y} reserved for the future GUI.

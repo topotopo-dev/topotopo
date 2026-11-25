@@ -109,37 +109,65 @@ try {
   // ---- the path given
   check(resolveTarget(undefined).kind === 'home' && resolveTarget(path.join(shared, 'rock.topo')).kind === 'package' && resolveTarget(shared).kind === 'package'
     && resolveTarget(path.join(ws, 'my-world.topows')).kind === 'workspace' && resolveTarget(ws).kind === 'workspace', 'a package or workspace file, or the folder that holds one, is what is opened; no path is the home page');
+  const wanted = await freePort();
+  process.env.TOPOTOPO_WEB_PORT = String(wanted);
   const missing = await opened(path.join(tmp, 'nowhere', 'gone.topo'));
-  check(missing.code === 1 && missing.err.length === 1 && /nowhere.gone\.topo does not exist$/.test(missing.err[0]) && !urls.length && !lockOf(home), `a path that does not exist fails with one sentence, opens nothing and starts nothing (${missing.err[0]})`);
-  const other = await opened(path.join(ws, 'props'));
-  check(other.code === 1 && other.err.length === 1 && /holds no \.topo or \.topows file$/.test(other.err[0]) && !urls.length && !lockOf(home), `a folder that holds neither says so (${other.err[0]})`);
+  const errorPage = missing.url ? await get(missing.url) : null;
+  check(missing.code === 1 && missing.err.length === 1 && /nowhere.gone\.topo does not exist$/.test(missing.err[0])
+    && !!missing.url && !new URL(missing.url).search && !!lockOf(home) && /gone\.topo does not exist/.test(errorPage?.text ?? '')
+    && errorPage?.text.includes('Check the file or folder, then open it again.'),
+    `a missing file starts the web app and opens a readable error page, while still exiting 1 (${missing.url ?? missing.err[0]})`);
   fs.writeFileSync(path.join(tmp, 'notes.txt'), 'x');
   const text = await opened(path.join(tmp, 'notes.txt'));
-  check(text.code === 1 && /is neither a package \(\.topo\) nor a workspace \(\.topows\) file$/.test(text.err[0] ?? '') && !urls.length, `a file of another kind says so (${text.err[0]})`);
+  check(text.code === 1 && /is neither a package \(\.topo\) nor a workspace \(\.topows\) file$/.test(text.err[0] ?? ''), `a file of another kind says so (${text.err[0]})`);
   const oldWs = path.join(tmp, 'old-ws');
   fs.mkdirSync(oldWs);
   fs.writeFileSync(path.join(oldWs, 'topotopo-workspace.json'), JSON.stringify({ name: 'old-ws' }));
   const oldSaid = await opened(oldWs);
-  check(oldSaid.code === 1 && /rename it to old-ws\.topows/.test(oldSaid.err[0] ?? '') && !urls.length && !lockOf(home), `a folder with the old workspace file name is told the new name (${oldSaid.err[0]})`);
+  check(oldSaid.code === 1 && /rename it to old-ws\.topows/.test(oldSaid.err[0] ?? ''), `a folder with the old workspace file name is told the new name (${oldSaid.err[0]})`);
   const both = path.join(tmp, 'both');
   fs.mkdirSync(both);
   fs.writeFileSync(path.join(both, 'a.topo'), '{}'); fs.writeFileSync(path.join(both, 'b.topows'), '{}');
   const bothSaid = await opened(both);
   check(bothSaid.code === 1 && /holds both a\.topo and b\.topows: open the file you mean$/.test(bothSaid.err[0] ?? ''), `a folder holding a package file and a workspace file asks which (${bothSaid.err[0]})`);
 
-  // ---- start: no web app runs, so one starts, and the package's page answers
+  // ---- once the web app starts it lists the package and gives its page
   const t0 = Date.now();
   const first = await opened(path.join(loose, 'demo-kit.topo'));
   const lock1 = lockOf(home);
-  check(first.code === 0 && !!lock1 && spawnedPids.length === 1 && lock1.pid === spawnedPids[0] && alive(lock1.pid) && first.url === `http://127.0.0.1:${lock1.port}/l/demo-kit/`, `start: no web app runs, so one starts and its lock names its port and pid (${first.url}, ${Date.now() - t0} ms)`);
+  check(first.code === 0 && !!lock1 && spawnedPids.length === 1 && lock1.pid === spawnedPids[0] && alive(lock1.pid) && first.url === `http://127.0.0.1:${lock1.port}/l/demo-kit/`, `the web app's lock names its port and pid, and opening the package reuses it (${first.url}, ${Date.now() - t0} ms)`);
   const page = first.url ? await get(first.url) : { status: 0, text: '' };
   check(page.status === 200 && /demo-kit/.test(page.text), `the package's page answers 200 (${page.status})`);
-  check(lock1 && lock1.port === JSON.parse(cfgText).web.port && fs.existsSync(path.join(home, 'web.log')), 'the web app took the config\'s port (it was free) and wrote its output to web.log in the TopoTopo folder');
+  check(lock1?.port === wanted && first.out.includes(`opening ${first.url}`) && fs.existsSync(path.join(home, 'web.log')),
+    `open listens on TOPOTOPO_WEB_PORT when it is free and prints its address (wanted ${wanted}, got ${lock1?.port})`);
+  delete process.env.TOPOTOPO_WEB_PORT;
   check(fs.readFileSync(cfgFile, 'utf8') === cfgText, 'the config is as it was: the package was listed for the run only');
   const health = await probe(lock1!.port, 5000);
   check(health.state === 'live' && health.health.pid === lock1!.pid && health.health.version === TOPOTOPO_VERSION && health.health.engine === engineSha256() && health.health.open === true, '/api/health says the pid, the version and the engine code hash of the web app');
   const base = `http://127.0.0.1:${lock1!.port}`;
   const ownPackages = async () => (JSON.parse((await get(`${base}/api/packages`)).text).packages as { lib: string; id: string }[]).filter((p) => p.lib !== 'topotopo').map((p) => `${p.lib}/${p.id}`).sort();
+
+  const create = async (body: object) => {
+    const r = await fetch(`${base}/api/package/new`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-topotopo-open': '1' }, body: JSON.stringify(body) });
+    return { status: r.status, data: await r.json().catch(() => null) as { url?: string } | null };
+  };
+  const empty = path.join(tmp, 'My Garden');
+  fs.mkdirSync(empty);
+  const beforeEmpty = urls.length, other = await opened(empty);
+  const emptyPage = urls.length > beforeEmpty && other.url ? await get(other.url) : null;
+  check(other.code === 0 && !!emptyPage && emptyPage.status === 200 && /This folder is not a TopoTopo package yet/.test(emptyPage.text)
+    && /Make it a package/.test(emptyPage.text), `open on an empty folder offers Make it a package (${other.code === 0 ? other.url : other.err[0]})`);
+  const token = /name="folder" value="([^"]+)"/.exec(emptyPage?.text ?? '')?.[1];
+  const made = await create({ folder: token });
+  check(made.status === 200 && made.data?.url === '/p/my-garden/my-garden/edit' && fs.existsSync(path.join(empty, 'my-garden.topo')),
+    `Make it a package creates the init manifest and returns its editor (${made.status})`);
+  const form = await get(`${base}/new-package`);
+  check((await get(`${base}/`)).text.includes('href="/new-package"') && form.status === 200 && /name="name"/.test(form.text)
+    && /name="parent" value="[^"]*Documents[\\/]TopoTopo"/.test(form.text), 'New package leads to a form with a name and a prefilled parent folder');
+  const parent = path.join(tmp, 'Projects');
+  const newPackage = await create({ name: 'My Crate', parent });
+  check(newPackage.status === 200 && newPackage.data?.url === '/p/my-crate/my-crate/edit' && fs.existsSync(path.join(parent, 'My Crate', 'my-crate.topo')),
+    `New package creates a folder under the chosen parent, initializes it and returns its editor (${newPackage.status})`);
 
   // ---- a package opened by itself: nothing around it is listed, baked or served
   const sib = path.join(tmp, 'siblings');
@@ -194,9 +222,11 @@ try {
   fs.mkdirSync(copy, { recursive: true });
   fs.writeFileSync(path.join(copy, 'rocks.topo'), '{}');
   const before = await ownPackages();
-  const copied = await opened(path.join(copy, 'rocks.topo'));
+  const beforeCopy = urls.length, copied = await opened(path.join(copy, 'rocks.topo'));
   check(copied.code === 1 && copied.err.length === 1 && /is a copy of studio\/rocks that the workspace "my-world" uses \(its topotopo-packages folder\)/.test(copied.err[0])
     && JSON.stringify(await ownPackages()) === JSON.stringify(before) && (await get(`${base}/l/rocks/`)).status === 404, `a copy in a workspace's topotopo-packages folder fails with one sentence and lists nothing (${copied.err[0]})`);
+  check(urls.length > beforeCopy && copied.url && !new URL(copied.url).search
+    && (await get(copied.url)).text.includes('is a copy of studio/rocks that the workspace'), 'a file the web app refuses also opens a readable error page');
 
   // ---- paths with spaces and letters beyond ASCII
   const spaced = mkPkg('Mano projektai ąčę', 'demo pakuotė', 'kit-one');
@@ -348,10 +378,14 @@ try {
   // ---- stale lock: the port answers, but not as TopoTopo's web app (and the process in the lock lives: this one)
   const dummy = await fake({ hello: 'not topotopo' });
   fs.writeFileSync(lockFile(home), JSON.stringify({ port: dummy.port, pid: process.pid }) + '\n');
+  process.env.TOPOTOPO_WEB_PORT = String(dummy.port);
   const afterOther = await opened(path.join(shared, 'rock.topo'));
+  delete process.env.TOPOTOPO_WEB_PORT;
   const lock4 = lockOf(home);
   check(afterOther.code === 0 && !!lock4 && lock4.port !== dummy.port && lock4.pid === spawnedPids.at(-1) && alive(process.pid) && (await get(afterOther.url!)).status === 200 && (await get(`http://127.0.0.1:${dummy.port}/`)).status === 200,
     `stale lock (its port is answered by something else): replaced, and that other program is left alone (port ${dummy.port} still answers)`);
+  check(lock4 && afterOther.url?.startsWith(`http://127.0.0.1:${lock4.port}/`) && afterOther.out.includes(`opening ${afterOther.url}`),
+    'when TOPOTOPO_WEB_PORT is taken, open prints the actual address and puts its port in the lock');
   dummy.close(); killOwn(lock4!.pid); await waitGone(lock4!.pid);
 
   // ---- a busy web app is waited for, never replaced: it answers its health check only 8 s after it was made
@@ -406,9 +440,12 @@ try {
   fs.rmSync(log, { force: true });
   const run = (args: string[]) => spawnSync(process.execPath, [CLI, 'open', ...args], { encoding: 'utf8', timeout: 90_000, env: { ...process.env, TOPOTOPO_BROWSER_LOG: log } });
   const cliMissing = run([path.join(tmp, 'nothing.topo')]);
-  check(cliMissing.status === 1 && cliMissing.stdout === '' && /^.*nothing\.topo does not exist\n$/.test(cliMissing.stderr), `the CLI: a missing path exits 1 with one sentence on stderr (${cliMissing.stderr.trim()})`);
+  const missingAddress = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '';
+  check(cliMissing.status === 1 && /^.*nothing\.topo does not exist\n$/.test(cliMissing.stderr) && missingAddress
+    && cliMissing.stdout.trim() === `opening ${missingAddress}` && (await get(missingAddress)).text.includes('nothing.topo does not exist'),
+    `the CLI: a missing path opens the error page and exits 1 with one sentence on stderr (${cliMissing.stderr.trim()})`);
   const cliOk = run([path.join(spaced, 'kit-one.topo')]);
-  const recorded = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '';
+  const recorded = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/).at(-1)! : '';
   check(cliOk.status === 0 && recorded === `http://127.0.0.1:${lock7!.port}/l/kit-one/` && (await get(recorded)).status === 200 && cliOk.stderr === '', `the CLI: opens a package in a folder with spaces and non-ASCII letters (exit ${cliOk.status}, address recorded: ${recorded})`);
   const cliWs = run([wsSpaced]);
   const recorded2 = fs.readFileSync(log, 'utf8').trim().split(/\r?\n/);

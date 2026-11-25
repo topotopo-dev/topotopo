@@ -254,7 +254,12 @@ input:focus, select:focus { outline: 1px solid var(--faint); outline-offset: -1p
 #msg, #unread-note { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 6.5em; overflow: hidden; }
 #unread-note { padding-right: 10px; border-color: var(--err); color: var(--err); }
 #notes.err { border-color: var(--err); } #notes.err #msg { color: var(--err); }
-#notes.ok #msg { color: var(--ok); }
+#notes.ok #msg, #notes.warn #msg { color: var(--ok); }
+#notes.warn { border-color: var(--sel); }
+#notes.warn #msg { max-height: none; }
+#msg details { color: var(--sel); }
+#msg summary { cursor: pointer; }
+#msg ul { max-height: min(36vh, 16em); overflow: auto; margin: 4px 0 0; padding-left: 1.5em; }
 #notes.busy #msg { color: var(--sel); }
 #ask { display: flex; gap: 6px; align-items: center; color: var(--text); }
 #ask[hidden] { display: none; }
