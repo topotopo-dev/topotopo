@@ -22,6 +22,7 @@
   "files": [
     "dist",
     "library/*/versions/**",
+    "library/*/thumbs/*.png",
     "examples/*.json",
     "examples/*.md",
     "examples/*/*.topo",

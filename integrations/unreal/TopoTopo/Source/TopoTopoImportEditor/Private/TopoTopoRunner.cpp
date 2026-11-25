@@ -14,7 +14,6 @@
 #include "TopoTopoImporter.h"
 #include "TopoTopoPackage.h"
 #include "UObject/Package.h"
-#include "UObject/StrongObjectPtr.h"
 
 #define LOCTEXT_NAMESPACE "TopoTopoImport"
 
@@ -27,15 +26,6 @@ namespace
     /** The background cook, and the packages waiting for one with when they last changed. */
     TUniquePtr<TopoTopo::FCookProcess> Live;
     TMap<FString, double> Waiting;
-
-    struct FCommandCook
-    {
-        TStrongObjectPtr<UTopoTopoPackage> Package;
-        bool bForce;
-        bool bImported;
-    };
-    TArray<FCommandCook> CommandQueue;
-    TOptional<FCommandCook> LiveCommand;
 
     /** Whether importing now would not get in anyone's way. */
     bool EditorIsFree()
@@ -58,15 +48,7 @@ namespace
     void FinishLive()
     {
         const TUniquePtr<TopoTopo::FCookProcess> Done = MoveTemp(Live);
-        if (LiveCommand)
-        {
-            const FCommandCook Request = MoveTemp(LiveCommand.GetValue());
-            LiveCommand.Reset();
-            UTopoTopoPackage* Package = Request.Package.Get();
-            const TopoTopo::FCookResult Result = TopoTopo::ApplyCook(Package, Done->ExitCode(), Done->ReportFile(), Done->Errors(), Request.bForce);
-            TopoTopo::ReportCommandCook(Package, Result, Request.bImported);
-        }
-        else if (UTopoTopoPackage* Package = PackageOf(Done->Topo()))
+        if (UTopoTopoPackage* Package = PackageOf(Done->Topo()))
         {
             TopoTopo::ApplyCook(Package, Done->ExitCode(), Done->ReportFile(), Done->Errors(), false);
         }
@@ -80,29 +62,7 @@ namespace
             if (!Live->Poll() && EditorIsFree()) { FinishLive(); }
             return true;
         }
-        if ((CommandQueue.IsEmpty() && Waiting.IsEmpty()) || !EditorIsFree()) { return true; }
-        if (!CommandQueue.IsEmpty())
-        {
-            FCommandCook Request = MoveTemp(CommandQueue[0]);
-            CommandQueue.RemoveAt(0);
-            UTopoTopoPackage* Package = Request.Package.Get();
-            const FString Topo = Package->SourceFile();
-            Waiting.Remove(Topo);
-            FString Error;
-            TUniquePtr<TopoTopo::FCookProcess> Process = MakeUnique<TopoTopo::FCookProcess>();
-            if (Topo.IsEmpty() || !FPaths::FileExists(Topo))
-            {
-                Error = FString::Printf(TEXT("its source file %s is not there"), *Topo);
-            }
-            else if (Process->Start(Topo, Request.bForce, Error))
-            {
-                Live = MoveTemp(Process);
-                LiveCommand.Emplace(MoveTemp(Request));
-                return true;
-            }
-            TopoTopo::ReportCommandCook(Package, TopoTopo::FailCook(Package, Error), Request.bImported);
-            return true;
-        }
+        if (Waiting.IsEmpty() || !EditorIsFree()) { return true; }
         const double Now = FPlatformTime::Seconds();
         for (auto It = Waiting.CreateIterator(); It; ++It)
         {
@@ -141,11 +101,6 @@ void TopoTopo::CookLater(const FString& Topo)
     Waiting.Add(Topo, FPlatformTime::Seconds());
 }
 
-void TopoTopo::QueueCommandCook(UTopoTopoPackage* Package, bool bForce, bool bImported)
-{
-    CommandQueue.Add({ TStrongObjectPtr<UTopoTopoPackage>(Package), bForce, bImported });
-}
-
 TopoTopo::ECookState TopoTopo::ReportCommandCook(UTopoTopoPackage* Package, FCookResult Result, bool bImported)
 {
     if (Package->GetOutermost()->IsDirty() && !UEditorLoadingAndSavingUtils::SavePackages({ Package->GetOutermost() }, true))
@@ -180,12 +135,7 @@ TopoTopo::FCookResult TopoTopo::CookNow(UTopoTopoPackage* Package, bool bForce)
         const FString Other = Live->Topo();
         Live->Cancel();
         Live.Reset();
-        if (LiveCommand)
-        {
-            CommandQueue.Insert(MoveTemp(LiveCommand.GetValue()), 0);
-            LiveCommand.Reset();
-        }
-        else if (!FPaths::IsSamePath(Other, Topo)) { CookLater(Other); }
+        if (!FPaths::IsSamePath(Other, Topo)) { CookLater(Other); }
         UE_LOG(LogTopoTopo, Log, TEXT("TopoTopo: ended the background cook of %s for %s"), *Other, *Topo);
     }
     Waiting.Remove(Topo);
@@ -222,8 +172,6 @@ void TopoTopo::StopRunner()
 {
     FTSTicker::RemoveTicker(Tick);
     Live.Reset();
-    LiveCommand.Reset();
-    CommandQueue.Reset();
     Waiting.Reset();
     StopViewers();
 }

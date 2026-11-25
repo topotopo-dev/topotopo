@@ -411,7 +411,7 @@ function needsCopies(packages: string, pkg: string, v: string, lock: Lock): bool
 function readGraphs(dir: string, problems: string[]): Map<string, GraphSpec> {
   const out = new Map<string, GraphSpec>();
   for (const [name, file] of graphFiles(dir)) {
-    try { out.set(name, JSON.parse(fs.readFileSync(file, 'utf8'))); }
+    try { out.set(name, JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))); }
     catch (e: any) { problems.push(`${path.relative(dir, file).split(path.sep).join('/')}: ${e.message}`); }
   }
   return out;
@@ -2583,7 +2583,7 @@ export async function publishPackage(pk: PackageUses, o: PublishOptions): Promis
   Object.assign(r, { version, outputs, default: def });
   if (bytes > MAX_VERSION_BYTES) r.warnings.push(`the version holds ${(bytes / 2 ** 20).toFixed(0)} MB (above ${MAX_VERSION_BYTES / 2 ** 20} MB): every package that uses it keeps a copy`);
   const sources = new Map<string, GraphSpec>([...[...graphs].map(([k, g]) => [`graphs/${k}.json`, g] as [string, GraphSpec])]);
-  try { for (const f of fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json'))) sources.set(`assets/${f}`, JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8'))); } catch { /* no assets */ }
+  try { for (const f of fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json'))) sources.set(`assets/${f}`, JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8').replace(/^\uFEFF/, ''))); } catch { /* no assets */ }
   r.warnings.push(...unheldFiles(sources));
 
   // 5. write it: through a .part folder renamed into place, never over a version that is there

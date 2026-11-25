@@ -880,10 +880,10 @@ section('CLI arguments');
   const cat = cli('--catalog');
   check(cat.status === 0 && /\[package\]/.test(cat.stdout) && /^\s+topotopo\/architecture\/house — House built from a footprint polygon/m.test(cat.stdout), `--catalog lists the outputs of TopoTopo's own packages (status ${cat.status}, ${cat.stdout.length} chars)`);
   const hn = cli('--help-node', 'topotopo/architecture/house');
-  check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout) && /\nin this folder: package topotopo\/architecture: this graph is in no package/.test(hn.stdout),
+  check(hn.status === 0 && /footprint/.test(hn.stdout) && /floors/.test(hn.stdout) && /\nin this folder: run node src\/cli\.ts init <folder> first: only a package can use packages \(this graph needs topotopo\/architecture\)/.test(hn.stdout),
     '--help-node documents one, and says what naming it does in a folder that is in no package');
   check(/unknown node "nope_node"/.test(cli('--help-node', 'nope_node').stdout), '--help-node names an unknown type');
-  check(/--help-node <type> for a node's params; --help-topic <name> for a topic: overview, examples, workspace, graph.*; --help-example <name> for an example's card and graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
+  check(/--help-node <type or alias> for a node's params; --help-topic <name> for a topic: overview, examples, workspace, graph.*; --help-example <name> for an example's card and graph/.test(cat.stdout) && !/Use help \{nodes/.test(cat.stdout),
     '--catalog ends with the command line\'s help flags and the topic names');
   const topic = cli('--help-topic', 'export');
   check(topic.status === 0 && topic.stdout.trim() === TOPICS.export.trim(), '--help-topic prints an MCP help topic');
@@ -1134,22 +1134,23 @@ section('CLI --export-all: a line per output, the unchanged ones kept, --force')
   });
   fs.writeFileSync(g, JSON.stringify(graph(2)));
   const mtimes = () => ['crate.glb', 'sign.obj'].map((f) => fs.statSync(ex(f)).mtimeMs).join();
-  const lines = (r: ReturnType<typeof cli>) => r.stdout.split('\n').filter((l) => /^\[\d+\/\d+\]|^exported/.test(l));
+  const lines = (r: ReturnType<typeof cli>) => r.stdout.split('\n').filter((l) => /^\[\d+\/\d+\]|^--export-all:/.test(l));
   const first = cli(g, '--export-all');
-  check(first.status === 0 && /^\[1\/2\] crate, mesh: \d+\.\d s, [\d.]+ KB → \S*crate\.glb — glb, /.test(lines(first)[0] ?? '') && /^\[2\/2\] sign, mesh: .* → \S*sign\.obj/.test(lines(first)[1] ?? '')
-    && /^exported 2 of 2 outputs into \S*exports in \d+\.\d s$/.test(lines(first)[2] ?? '') && !/^cooked /m.test(first.stdout),
-    `a line per output (name, kind, time, size, file), then the count; the default output is not cooked first (${lines(first).join(' | ')})`);
+  check(first.status === 0 && /^\[1\/3\] "crate" written: \S*crate\.glb — mesh, glb, [\d.]+ KB, \d+\.\d s/.test(lines(first)[0] ?? '') && /^\[2\/3\] "sign" written: \S*sign\.obj — mesh, obj/.test(lines(first)[1] ?? '')
+    && /^\[3\/3\] "look" written: \S*look\.glb \(default format: glb\)/.test(lines(first)[2] ?? '')
+    && lines(first)[3] === '--export-all: 3 written, 0 unchanged, 0 failed' && !/^cooked /m.test(first.stdout),
+    `a line per output (name, file, kind, format, size, time; an output with no target in the editor's first format), then the count; the default output is not cooked first (${lines(first).join(' | ')})`);
   const stamp = mtimes();
   const second = cli(g, '--export-all');
-  check(second.status === 0 && /^\[1\/2\] crate: unchanged since its last export, \S*crate\.glb kept$/.test(lines(second)[0] ?? '') && /^\[2\/2\] sign: unchanged/.test(lines(second)[1] ?? '')
-    && /exported 0 of 2 outputs .*; 2 unchanged since their last export, kept \(--force exports them too\)/.test(second.stdout) && mtimes() === stamp,
+  check(second.status === 0 && /^\[1\/3\] "crate" unchanged: \S*crate\.glb kept$/.test(lines(second)[0] ?? '') && /^\[2\/3\] "sign" unchanged/.test(lines(second)[1] ?? '')
+    && /--export-all: 0 written, 3 unchanged, 0 failed/.test(second.stdout) && mtimes() === stamp,
     `run again, both are kept as they are (${lines(second).join(' | ')})`);
   // moving a node in an editor changes nothing it cooks; another value of a node only crate reads re-exports crate alone
   fs.writeFileSync(g, JSON.stringify(graph(2, { x: 40, y: 80 })));
   const moved = cli(g, '--export-all');
   fs.writeFileSync(g, JSON.stringify({ ...graph(2), nodes: { ...graph(2).nodes, lift: { type: 'transform', in: ['b'], params: { translate: [0, 2, 0] } } } }));
   const edited = cli(g, '--export-all');
-  check(/exported 0 of 2/.test(moved.stdout) && /^\[1\/2\] crate, mesh: /.test(lines(edited)[0] ?? '') && /^\[2\/2\] sign: unchanged/.test(lines(edited)[1] ?? '') && /exported 1 of 2 outputs .*; 1 unchanged/.test(edited.stdout),
+  check(/--export-all: 0 written/.test(moved.stdout) && /^\[1\/3\] "crate" written/.test(lines(edited)[0] ?? '') && /^\[2\/3\] "sign" unchanged/.test(lines(edited)[1] ?? '') && /--export-all: 1 written, 2 unchanged/.test(edited.stdout),
     `a node moved: nothing exported; a node only crate reads changed: crate alone (${lines(edited).join(' | ')})`);
   // a file of inputs/, a var, a missing export file, another option: exported again
   fs.writeFileSync(path.join(dir, 'inputs', 'tri.obj'), 'v 0 0 0\nv 2 0 0\nv 0 2 0\nf 1 2 3\n');
@@ -1158,11 +1159,11 @@ section('CLI --export-all: a line per output, the unchanged ones kept, --force')
   fs.rmSync(ex('sign.obj'));
   const missing = cli(g, '--var', 'h=3', '--export-all');
   const frame = cli(g, '--var', 'h=3', '--frame', '2', '--export-all');
-  check(/exported 2 of 2/.test(input.stdout) && /exported 2 of 2/.test(withVar.stdout) && /^\[1\/2\] crate: unchanged/.test(lines(missing)[0] ?? '') && /^\[2\/2\] sign, mesh/.test(lines(missing)[1] ?? '')
-    && /exported 2 of 2/.test(frame.stdout),
+  check(/--export-all: 3 written/.test(input.stdout) && /--export-all: 3 written/.test(withVar.stdout) && /^\[1\/3\] "crate" unchanged/.test(lines(missing)[0] ?? '') && /^\[2\/3\] "sign" written/.test(lines(missing)[1] ?? '')
+    && /--export-all: 3 written/.test(frame.stdout),
     `an inputs/ file, a var, a deleted export file, another frame: exported again (${[input, withVar, missing, frame].map((r) => lines(r).slice(-1)[0]).join(' | ')})`);
   const forced = cli(g, '--var', 'h=3', '--frame', '2', '--export-all', '--force');
-  check(/exported 2 of 2 outputs/.test(forced.stdout) && !/unchanged/.test(forced.stdout), '--force exports the unchanged outputs too');
+  check(/--export-all: 3 written, 0 unchanged/.test(forced.stdout) && !/" unchanged/.test(forced.stdout), '--force exports the unchanged outputs too');
   const rec = JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source;
   check(/^[0-9a-f]{64}$/.test(rec.nodes_sha256) && /^[0-9a-f]{64}$/.test(rec.files_sha256) && /^[0-9a-f]{64}$/.test(rec.engine_sha256),
     `the record holds the hashes it is compared by: nodes_sha256, files_sha256, engine_sha256 (${rec.nodes_sha256.slice(0, 12)}, ${rec.files_sha256.slice(0, 12)}, ${String(rec.engine_sha256).slice(0, 12)})`);
@@ -1177,7 +1178,7 @@ section('CLI --export-all: a line per output, the unchanged ones kept, --force')
   fs.appendFileSync(path.join(copy, 'src', 'nodes', 'generate.ts'), '\n// an engine edit that keeps the version\n');
   const editedCode = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
   const after = copyCli(g, '--var', 'h=3', '--frame', '2', '--export-all');
-  check(/exported 0 of 2 outputs .*; 2 unchanged/.test(sameCode.stdout) && /exported 2 of 2 outputs/.test(editedCode.stdout) && !/unchanged/.test(editedCode.stdout) && /exported 0 of 2 outputs/.test(after.stdout)
+  check(/--export-all: 0 written, 3 unchanged/.test(sameCode.stdout) && /--export-all: 3 written, 0 unchanged/.test(editedCode.stdout) && !/" unchanged/.test(editedCode.stdout) && /--export-all: 0 written/.test(after.stdout)
     && JSON.parse(fs.readFileSync(ex('crate.glb.source.json'), 'utf8')).source.engine_sha256 !== rec.engine_sha256,
     `the same engine code elsewhere keeps the exports; an engine file edited under the same version exports every output again (${[sameCode, editedCode, after].map((r) => lines(r).slice(-1)[0] ?? r.stderr.slice(0, 200)).join(' | ')})`);
   // the links first (unlinking leaves the checkout's folders alone), then the copy
@@ -1189,7 +1190,7 @@ section('CLI --export-all: a line per output, the unchanged ones kept, --force')
   fs.writeFileSync(lg, JSON.stringify({ nodes: { b: { type: 'box' } }, output: 'b', export: 'glb' }));
   cli(lg, '--export-all');
   const looseAgain = cli(lg, '--export-all');
-  check(/exported 1 of 1/.test(looseAgain.stdout) && !JSON.parse(fs.readFileSync(path.join(loose, 'exports', 'one.glb.source.json'), 'utf8')).source.files_sha256,
+  check(/--export-all: 1 written/.test(looseAgain.stdout) && !JSON.parse(fs.readFileSync(path.join(loose, 'exports', 'one.glb.source.json'), 'utf8')).source.files_sha256,
     `a graph in no package exports every time (${lines(looseAgain).slice(-1)[0]})`);
 }
 
@@ -1203,8 +1204,8 @@ section('CLI heightfield render resolution');
   check(preview.status === 0 && /heightfield "heightfield" shown at 257×257 of 513×513 samples \(1 in 2 per side\); heightfield_res "full" \(CLI --heightfield-res full\)/.test(preview.stdout),
     `a 513 × 513 heightfield renders at 257 × 257 and the notes say so (${preview.stdout.split('\n').find((l) => l.startsWith('rendered')) ?? preview.stderr.slice(0, 200)})`);
   const full = cli(big, '--views', 'top', '--size', '160', '--heightfield-res', 'full', '--render', path.join(tmp, 'hf_full.png'));
-  check(full.status === 0 && !/shown at/.test(full.stdout) && sizeOf(path.join(tmp, 'hf_preview.png'))[1] === sizeOf(path.join(tmp, 'hf_full.png'))[1] + 16,
-    '--heightfield-res full draws every sample: no note, and no second footer line');
+  check(full.status === 0 && !/shown at/.test(full.stdout) && sizeOf(path.join(tmp, 'hf_preview.png')).join() === '160,160' && sizeOf(path.join(tmp, 'hf_full.png')).join() === '160,160',
+    '--heightfield-res full draws every sample: no note; --size is the whole PNG either way');
   const bad = cli(big, '--heightfield-res', 'lots', '--render', path.join(tmp, 'hf_bad.png'));
   check(bad.status === 1 && /heightfield_res expects quads per side/.test(bad.stderr), '--heightfield-res rejects a value that is not a number or "full"');
 }

@@ -13,7 +13,7 @@ namespace TopoTopo
     /** Cook a package with progress and import the result before returning. */
     FCookResult CookNow(UTopoTopoPackage* Package, bool bForce);
 
-    void QueueCommandCook(UTopoTopoPackage* Package, bool bForce, bool bImported);
+    /** Save the package asset and print one line: imported, cooked, unchanged or failed with the reason. */
     ECookState ReportCommandCook(UTopoTopoPackage* Package, FCookResult Result, bool bImported);
 
     /** Cook a package in the background soon, once changes have settled and the editor is free. */

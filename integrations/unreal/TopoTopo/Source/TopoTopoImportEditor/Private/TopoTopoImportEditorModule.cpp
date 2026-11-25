@@ -203,14 +203,13 @@ namespace
     {
         for (const FString& Arg : Args)
         {
-            if (!Arg.Equals(TEXT("force")) && !Arg.Equals(TEXT("wait")))
+            if (!Arg.Equals(TEXT("force")))
             {
-                Ar.Log(TEXT("Usage: TopoTopo.CookAll [force] [wait]"));
+                Ar.Log(TEXT("Usage: TopoTopo.CookAll [force]"));
                 return;
             }
         }
         const bool bForce = Args.Contains(TEXT("force"));
-        const bool bWait = Args.Contains(TEXT("wait"));
         const TArray<UTopoTopoPackage*> Existing = DiscoverPackageAssets();
         TArray<TStrongObjectPtr<UTopoTopoPackage>> Packages;
         for (UTopoTopoPackage* Package : Existing) { Packages.Emplace(Package); }
@@ -225,11 +224,6 @@ namespace
         {
             UTopoTopoPackage* Package = Packages[I].Get();
             const bool bImported = I >= NumExisting;
-            if (!bWait)
-            {
-                TopoTopo::QueueCommandCook(Package, bForce, bImported);
-                continue;
-            }
             const TopoTopo::FCookResult Result = TopoTopo::CookNow(Package, bForce);
             const TopoTopo::ECookState State = TopoTopo::ReportCommandCook(Package, Result, bImported);
             if (State == TopoTopo::ECookState::Failed) { ++Failed; }
@@ -240,10 +234,7 @@ namespace
                 ++Unchanged;
             }
         }
-        if (bWait)
-        {
-            UE_LOG(LogTopoTopo, Display, TEXT("TopoTopo: CookAll finished: %d imported, %d cooked, %d unchanged, %d failed"), NumImported, Cooked, Unchanged, Failed);
-        }
+        UE_LOG(LogTopoTopo, Display, TEXT("TopoTopo: CookAll finished: %d imported, %d cooked, %d unchanged, %d failed"), NumImported, Cooked, Unchanged, Failed);
     }
 
     bool MatchesPackage(const UTopoTopoPackage& Package, const FString& Name)
@@ -280,7 +271,7 @@ namespace
         if (Matches.IsEmpty())
         {
             if (Name.IsEmpty()) { Ar.Log(TEXT("TopoTopo: no packages with terrain in this project")); }
-            else { Ar.Logf(TEXT("TopoTopo: package %s was not found; run TopoTopo.CookAll wait first"), *Name); }
+            else { Ar.Logf(TEXT("TopoTopo: package %s was not found; run TopoTopo.CookAll first"), *Name); }
             return;
         }
         TArray<TStrongObjectPtr<UTopoTopoPackage>> Packages;
@@ -336,7 +327,7 @@ public:
 
         UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&RegisterMenus));
         CookAll = IConsoleManager::Get().RegisterConsoleCommand(TEXT("TopoTopo.CookAll"),
-            TEXT("TopoTopo.CookAll [force] [wait]: import missing package assets and cook every package. Use force to ignore the record and cache, and wait to finish before the next command."),
+            TEXT("TopoTopo.CookAll [force]: import missing package assets and cook every package before the next command runs. Use force to ignore the record and cache."),
             FConsoleCommandWithArgsAndOutputDeviceDelegate::CreateStatic(&CookAllPackages));
         Place = IConsoleManager::Get().RegisterConsoleCommand(TEXT("TopoTopo.PlaceTerrain"),
             TEXT("TopoTopo.PlaceTerrain [package] [save]: place one package by asset name or path, or every package with terrain. Use save to save the level and new assets."),
@@ -373,14 +364,14 @@ bool FTopoTopoHeadlessCommandsTest::RunTest(const FString& Parameters)
     FStringOutputDevice Output;
     IConsoleManager& Console = IConsoleManager::Get();
     TestTrue(TEXT("CookAll is registered"), Console.ProcessUserConsoleInput(TEXT("TopoTopo.CookAll unknown"), Output, nullptr));
-    TestTrue(TEXT("CookAll reports its options"), Output.Contains(TEXT("Usage: TopoTopo.CookAll [force] [wait]")));
+    TestTrue(TEXT("CookAll reports its options"), Output.Contains(TEXT("Usage: TopoTopo.CookAll [force]")));
     Output.Reset();
     TestTrue(TEXT("PlaceTerrain is registered"), Console.ProcessUserConsoleInput(TEXT("TopoTopo.PlaceTerrain first second"), Output, nullptr));
     TestTrue(TEXT("PlaceTerrain accepts at most one package"), Output.Contains(TEXT("Usage: TopoTopo.PlaceTerrain [package] [save]")));
     Output.Reset();
     const FString Missing = TEXT("/Game/TopoTopo/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
     Console.ProcessUserConsoleInput(*(TEXT("TopoTopo.PlaceTerrain ") + Missing + TEXT(" save")), Output, nullptr);
-    TestTrue(TEXT("PlaceTerrain reports that the requested package is missing"), Output.Contains(TEXT("was not found; run TopoTopo.CookAll wait first")));
+    TestTrue(TEXT("PlaceTerrain reports that the requested package is missing"), Output.Contains(TEXT("was not found; run TopoTopo.CookAll first")));
     return true;
 }
 

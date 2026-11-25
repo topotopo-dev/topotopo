@@ -1415,7 +1415,7 @@ background and imports when the editor is free (Editor Preferences > Plugins > T
 cook, only steps whose files' hashes changed import, assets update where they are, instance actors in open levels rebuild. A failed
 output keeps its last good assets; the error is on the package asset and in Message Log > TopoTopo. An output no longer published
 leaves its assets; they are listed as orphans. Right-click the package asset: Reimport, Recook (everything again), Open in TopoTopo
-(the live viewer), Show Cook Report, Place Terrain in Level. TopoTopo.CookAll [force] [wait] imports missing package assets and cooks every package.
+(the live viewer), Show Cook Report, Place Terrain in Level. TopoTopo.CookAll [force] imports missing package assets and cooks every package before the next command runs.
 TopoTopo.PlaceTerrain [package] [save] places terrain in the current level by asset name or path. Omit the package for all packages with terrain.
 The unreal_landscape example publishes the landscape, road, trees and rocks separately (topotopo init --example unreal_landscape <folder>
 makes it a package). Its level_out node makes the combined bundle: topotopo graphs/main.json --node level_out --format unreal_landscape --export out/level
@@ -1429,7 +1429,7 @@ folder whose outputs would make two assets of one name fails the second.
 AUTO REIMPORT skips folders named graphs, assets, inputs, exports, versions, packages, attachments, .topotopo or topotopo-packages
 anywhere under Content/ (the exclusions setup writes): a folder of yours with such a name is imported by hand.
 CI: topotopo unreal status <project> --strict exits 1 when a package is stale, failed or never cooked or Auto Reimport still sees its folders.
-OFFSCREEN: Build the Editor target first, then use UnrealEditor-Cmd.exe <project>.uproject <map> -unattended -nosplash -RenderOffscreen -ExecCmds="TopoTopo.CookAll wait,TopoTopo.PlaceTerrain <package> save,QUIT_EDITOR"
+OFFSCREEN: Build the Editor target first, then use UnrealEditor-Cmd.exe <project>.uproject <map> -unattended -nosplash -RenderOffscreen -ExecCmds="TopoTopo.CookAll,TopoTopo.PlaceTerrain <package> save,QUIT_EDITOR"
 Use QUIT_EDITOR to exit and -ExecCmds="py <file>" for Python. Edit the graph's vars block to change the result before the next launch.
 The plugin's contract (import steps, what differs from the cook for Godot): integrations/unreal/PROTOCOL.md.
 

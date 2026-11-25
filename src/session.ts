@@ -217,7 +217,7 @@ export function graphFiles(dir: string): Map<string, string> {
 
 /** A graph file as JSON, or the error from reading it. */
 export function readGraphFile(file: string): { graph: GraphSpec } | { error: Error } {
-  try { return { graph: JSON.parse(fs.readFileSync(file, 'utf8')) }; }
+  try { return { graph: JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) }; }
   catch (e) { return { error: e instanceof Error ? e : new Error(String(e)) }; }
 }
 
@@ -882,7 +882,7 @@ export class Session {
     ]);
     const assetsBack = child(this.assetDir, (name, file) => {
       if (!fs.existsSync(file)) return;
-      const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const spec = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
       const before = this.engine.asset(name)?.hash;
       this.engine.registerAsset(name, spec);
       if (this.engine.asset(name)?.hash === before) return;
@@ -919,7 +919,7 @@ export function registerAssets(engine: Engine, scope: Scope, dir: string, proble
   let files: string[] = [];
   try { files = fs.readdirSync(path.join(dir, 'assets')).filter((f) => f.endsWith('.json')).sort(); } catch { /* no assets */ }
   for (const f of files) {
-    try { pending.push({ name: f.slice(0, -5), graph: JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8')) }); }
+    try { pending.push({ name: f.slice(0, -5), graph: JSON.parse(fs.readFileSync(path.join(dir, 'assets', f), 'utf8').replace(/^\uFEFF/, '')) }); }
     catch (e: any) { problems.push(`assets/${f}: ${e.message}`); }
   }
   for (let pass = 0; pending.length; pass++) {

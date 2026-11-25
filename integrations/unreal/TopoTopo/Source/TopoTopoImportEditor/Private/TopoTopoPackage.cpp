@@ -13,6 +13,7 @@
 #include "Engine/World.h"
 #include "FileHelpers.h"
 #include "Misc/App.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
 #include "TopoTopoCook.h"
@@ -210,6 +211,12 @@ void UTopoTopoPackage::PlaceTerrain(bool bSave)
     }
     UE_LOG(LogTopoTopo, Display, TEXT("TopoTopo: %s: placed %d Landscape output(s), %d separate mesh actor(s), and %d separate instances"), *GetPathName(), Landscapes, Meshes, Instances);
     if (!bSave) { return; }
+    // a level that was never saved would ask for a file name, which no one answers in an unattended editor
+    if (FPackageName::IsTempPackage(Level->GetOutermost()->GetName()))
+    {
+        Warn(TEXT("the level was never saved, so it is not saved now: open a saved map (the map argument of the command line)"));
+        return;
+    }
     Level->MarkPackageDirty();
     ToSave.Add(Level->GetOutermost());
     for (UPackage* External : Level->GetLoadedExternalObjectPackages())

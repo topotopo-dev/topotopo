@@ -60,12 +60,14 @@ Build.bat <Project>Editor Win64 Development -Project="<project>.uproject" -WaitM
 Put the package folder under `Content/` and use an existing map, such as `/Game/Maps/Empty`.
 
 ```text
-UnrealEditor-Cmd.exe <project>.uproject <map> -unattended -nosplash -RenderOffscreen -ExecCmds="TopoTopo.CookAll wait,TopoTopo.PlaceTerrain <package> save,QUIT_EDITOR"
+UnrealEditor-Cmd.exe <project>.uproject <map> -unattended -nosplash -RenderOffscreen -ExecCmds="TopoTopo.CookAll,TopoTopo.PlaceTerrain <package> save,QUIT_EDITOR"
 ```
 
-`CookAll wait` reports each package and waits for all its cooks and imports before printing the final counts.
-`PlaceTerrain` accepts an asset name or a path such as `/Game/Terrain/terrain`. Omit the package to place all packages
-with terrain. `save` saves the level and the assets made by placement.
+`CookAll` reports each package and finishes all its cooks and imports before the next command runs, then prints the
+counts. `PlaceTerrain` accepts an asset name or a path such as `/Game/Terrain/terrain`. Omit the package to place all
+packages with terrain. `save` saves the level and the assets made by placement; the map must have been saved before.
+Place the terrain once: each `PlaceTerrain` adds a new set. On later starts `TopoTopo.CookAll` alone updates the placed
+road and instances; place the ground again only after its heights or paint weights change.
 
 Use `QUIT_EDITOR` to exit. `quit` hangs the offscreen editor. To run Python, use `-ExecCmds="py <file>"` with the
 Python Editor Script Plugin enabled. To change a graph's values before the next start, edit the values in the graph's

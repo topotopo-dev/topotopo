@@ -274,7 +274,7 @@ if (argv.includes('--catalog') || opt('--help-node')) {
     const name = opt('--help-node')!;
     // an output of a package this one does not use yet is read where its library holds it (nothing is copied)
     const resolved = engine.resolveDef(name);
-    const d = resolved ?? (name.includes('/') ? pk.describe(name) : null);
+    const d = defs.find((x) => x.type === name) ?? resolved ?? (name.includes('/') ? pk.describe(name) : null);
     // a package output this folder cannot cook as it is (one of TopoTopo's own it does not use, a folder in no package)
     const why = name.includes('/') && !resolved ? engine.packageIssue(name) : null;
     const said = why ? issueText(why.error, why.hint, '') : '';
