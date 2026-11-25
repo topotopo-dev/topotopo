@@ -5,6 +5,7 @@
 //   node test/docs.ts
 import fs from 'node:fs';
 import path from 'node:path';
+import { marked } from 'marked';
 import { EXAMPLES_MD, examplesMarkdown, readDoc, readNodesMd, referenceMarkdown } from '../scripts/gen-docs.ts';
 import { allNodeDefs } from '../src/graph/registry.ts';
 import { topicText } from '../src/mcp/docs.ts';
@@ -70,5 +71,40 @@ const unrealTopic = topicText('unreal') ?? '';
 const unsaidUnreal = UNREAL_COMMANDS.filter((c) => !unrealTopic.includes(`topotopo ${c.usage}`) || !readme.includes(`topotopo ${c.usage}`)).map((c) => c.usage.split(' ').slice(0, 2).join(' '));
 if (!unrealTopic || unsaidUnreal.length) { fail++; console.log(`FAIL the help topic "unreal" or README.md misses ${unsaidUnreal.join(', ') || 'the topic itself'}`); }
 else console.log(`docs: the help topic "unreal" and README.md list all ${UNREAL_COMMANDS.length} Unreal commands`);
+
+// The README also lives in node_modules/topotopo, where only shipped files are available.
+const { files }: { files: string[] } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const include = files.filter((p) => !p.startsWith('!')).map((p) =>
+  fs.statSync(path.join(ROOT, p), { throwIfNoEntry: false })?.isDirectory() ? `${p}/**` : p);
+const exclude = files.filter((p) => p.startsWith('!')).map((p) => p.slice(1));
+const shipped = fs.globSync(include, { cwd: ROOT, exclude }).map((p) => p.split(path.sep).join('/'))
+  .filter((p) => fs.statSync(path.join(ROOT, p)).isFile());
+const links = new Set<string>();
+marked.walkTokens(marked.lexer(readme), (t) => {
+  if (t.type === 'link' || t.type === 'image') links.add(t.href);
+  if (t.type === 'html') for (const m of t.text.matchAll(/<(?:img|a)\b[^>]*?\s(?:src|href)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi))
+    links.add(m[1] ?? m[2] ?? m[3]);
+});
+const unshipped = [...links].filter((href) => {
+  if (!href || /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(href)) return false;
+  const target = path.posix.normalize(decodeURIComponent(href.split(/[?#]/, 1)[0])).replace(/\/$/, '');
+  return !shipped.some((p) => p === target || p.startsWith(target + '/'));
+});
+if (unshipped.length) {
+  fail++;
+  for (const href of unshipped) console.log(`FAIL README.md links to "${href}", which the npm package does not ship`);
+} else console.log('docs: README.md relative links and images point to shipped paths');
+
+const ciReadme = readme.split('\n## Build in CI\n')[1]?.split('\n## ')[0].trim();
+const ciTopic = topicText('ci');
+const ciProse = (s: string) => s.replace(/`/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+if (!ciReadme || !ciTopic) {
+  fail++;
+  console.log('FAIL README.md needs a Build in CI section and help needs a "ci" topic');
+} else if (ciReadme.split('\n').length >= 25 || ciTopic.split('\n').length > 25 ||
+    ciProse(ciReadme) !== ciProse(ciTopic.split('\n').slice(1).join('\n').trim())) {
+  fail++;
+  console.log('FAIL README.md and help topic "ci" need the same CI instructions in at most 25 lines each');
+} else console.log('docs: README.md and help topic "ci" give the same CI instructions');
 
 process.exit(fail ? 1 : 0);

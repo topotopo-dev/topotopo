@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import '../src/nodes/index.ts';
@@ -27,7 +28,7 @@ import { Session } from '../src/session.ts';
 import { makeTools } from '../src/mcp/tools.ts';
 import type { GraphSpec } from '../src/graph/types.ts';
 import { SHOWN, checkBuiltin, lineupGraph, lineupText, readBuiltin } from '../scripts/gen-builtin.ts';
-import { BUILTIN_INPUTS, checkGeo, builtinFixtureGraph, useBuiltin } from './fixtures.ts';
+import { ROOT, BUILTIN_INPUTS, checkGeo, builtinFixtureGraph, useBuiltin } from './fixtures.ts';
 import { flat, namingProblems, paramProblems, sweepOf, watertightProblem } from './asset-checks.ts';
 
 setFlagsFromString('--expose-gc');
@@ -246,6 +247,19 @@ if (!filter || 'stairs house'.includes(filter)) {
   openPackages(loose, looseDir);
   const outside = (await loose.cook({ nodes: { s: { type: 'stairs' } }, output: 's' })).errors.map((e) => e.message).join('; ');
   check(/^unknown node type "stairs" — did you mean topotopo\/architecture\/stairs[,?]/.test(outside), `outside a package as well: ${outside}`);
+}
+
+if (!filter || 'crate'.includes(filter)) {
+  const crate = 'topotopo/props/crate';
+  const line = 'Size at its defaults: 1.00 × 0.80 × 0.80 m (x × y × z)';
+  const file = path.join(ROOT, 'library', 'props', 'sizes.json');
+  check(fs.existsSync(file) && JSON.stringify(JSON.parse(fs.readFileSync(file, 'utf8')).crate) === '[1,0.8,0.8]',
+    'library/props/sizes.json records the default crate bounds in metres');
+  const help = makeTools(new Session(packageDir, engine)).find((t) => t.name === 'help')!;
+  const mcp = await help.run({ nodes: [crate] });
+  check(mcp.content.some((c) => c.type === 'text' && c.text.split('\n').includes(line)), `MCP help for ${crate} includes "${line}"`);
+  const cli = spawnSync(process.execPath, [path.join(ROOT, 'src', 'cli.ts'), '--help-node', crate], { cwd: tmp, encoding: 'utf8' });
+  check(cli.status === 0 && cli.stdout.split(/\r?\n/).includes(line), `CLI help for ${crate} includes "${line}"`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -1,4 +1,4 @@
-# <img src="docs/brand/mark.svg" alt="" width="44" height="44" align="top"> TopoTopo
+# <img src="https://raw.githubusercontent.com/topotopo-dev/topotopo/main/docs/brand/mark.svg" alt="" width="44" height="44" align="top"> TopoTopo
 
 TopoTopo is an open-source procedural geometry engine. You describe geometry as a node graph in JSON; the engine
 cooks it headless and deterministic, and exports it to Unreal, Blender and Houdini. Built for LLM agents through MCP,
@@ -66,7 +66,7 @@ graph and its seeds, and the core is browser-ready.
 **Documentation:** [topotopo.dev](https://topotopo.dev) has the node reference, TopoTopo's own packages, the example
 renders and the release notes, generated from this repository (`npm run site`).
 
-![market street](examples/renders/market_street.png)
+![market street](https://raw.githubusercontent.com/topotopo-dev/topotopo/main/examples/renders/market_street.png)
 
 ## Setup
 
@@ -88,11 +88,7 @@ npx topotopo refresh graph.json generated.json             # a regenerated graph
 npx topotopo mcp --package parts                            # connect an AI client over stdio
 ```
 
-**In CI.** Run `topotopo check parts` to cook the working graphs' published outputs, including their assertions, and
-check the newest published versions in scope. The check covers each package when run on a workspace. Run
-`topotopo parts/graphs/main.json --locked --export-all` for each graph you ship. It exports published outputs into
-the package's `exports/`, uses the editor's first fitting format when an output has no target, and reports written,
-unchanged or failed for each. Both commands exit 1 on a failed output.
+For headless builds, see [Build in CI](#build-in-ci).
 
 **Open by double-click (Windows).** Install TopoTopo (`npm install -g topotopo`), then link the files once:
 
@@ -111,18 +107,31 @@ Both actions open the new package in the editor. If a file or folder fails to op
 and what to try next.
 
 Everything `setup` writes belongs to your user: your registry's `Software\Classes` and your Start menu. It records what it
-replaced in `~/.topotopo/setup.json` and `setup --remove` restores from that record; running `setup` twice changes
+replaced in `setup.json` in the TopoTopo home folder and `setup --remove` restores from that record; running `setup` twice changes
 nothing. Run it again after moving TopoTopo or changing the Node.js it runs with. If Windows already holds your own
 choice of program for `.topo` or `.topows` (an earlier "Always use this app"), `setup` says so and does not touch it:
 right-click a file, choose *Open with*, then TopoTopo, then *Always*. File links exist for Windows only so far.
 
-The current release is v0.4 ([release notes](docs/release/v0.4-release-notes.md)); earlier ones:
-[v0.3](docs/release/v0.3-release-notes.md), [v0.2](docs/release/v0.2-release-notes.md), the first tagged release. To try unreleased changes, build the tarball from a clone: `npm pack`, then
+Run `topotopo --version` for the installed version or `npm view topotopo version` for the latest on npm. See the
+[release notes](https://github.com/topotopo-dev/topotopo/blob/main/docs/release/). To try unreleased changes, build the tarball from a clone: `npm pack`, then
 `npm install -g ./topotopo-<version>.tgz` (or, without `-g`, into a folder of your own).
 `import { Engine } from 'topotopo'` gives the engine API (`src/index.ts`) with its type declarations, and
 `import { createNodeHost, openPackage } from 'topotopo/node'` the Node host and packages with the packages they use, for a
 script that cooks package outputs itself (a world generator): `openPackage(engine, dir)` puts the packages a package uses, its
 graphs and assets in the engine's root scope, and `packages.addFor(graph)` adds what a graph names on first use.
+
+**Uninstall.** If you ran `topotopo setup` on Windows, run `topotopo setup --remove` before uninstalling to restore
+the file associations, folder context menu and Start menu shortcut. Use the same `TOPOTOPO_HOME` as during setup.
+Stop a running web app with `topotopo open --stop`, then run `npm uninstall -g topotopo`. If you only used `npx`,
+there is no global install to remove.
+
+Delete the TopoTopo home folder (`~/.topotopo` or `TOPOTOPO_HOME`) and the config file (`~/.topotopo/config.json`
+or `TOPOTOPO_CONFIG`) to remove settings and logs. The cook cache is at `~/.topotopo/cache/cook` or
+`$TOPOTOPO_CACHE/cook`. The node cache is at `topotopo/nodes` under `%LOCALAPPDATA%` on Windows,
+`~/Library/Caches` on macOS or `$XDG_CACHE_HOME` (default `~/.cache`) elsewhere, unless moved by
+`TOPOTOPO_NODE_CACHE_DIR`. Delete those cache folders to clear them. You can also delete local caches in
+`.cache/blend/` for converted Blender files, `.web/` for package previews and `packages/.cache.json` for file hashes.
+Your packages, inputs and exports stay where you saved them.
 
 **From a clone.** Development runs the TypeScript sources directly (Node type stripping); there is no build step for
 working on the code or running the tests. `npm run build` (run by `npm pack`) compiles `src/` to `dist/` for the package.
@@ -201,7 +210,7 @@ exists). The scene cooks again after a guide edit, and an agent reads the same f
 named `house…` houses on that footprint, `forest…` woods; volumes clear the woods, and nulls named `bench…`, `lamp…`
 or `tree…` place one.
 
-![guides: before and after](docs/guides-before-after.png)
+![guides: before and after](https://raw.githubusercontent.com/topotopo-dev/topotopo/main/docs/guides-before-after.png)
 
 With `topotopo view graph.json` the graph file stays as you wrote it: the values you tune are kept by the viewer,
 through exports, output switches and saves of the file (a value goes back to the file's only when its declaration in
@@ -228,13 +237,19 @@ off). Threads start on first use and stop after 30 s idle (`TOPOTOPO_WORKERS_IDL
 thread.
 
 ### Connect to Claude Code
-With the package, the server is the `mcp` subcommand of the `topotopo` command:
+With TopoTopo installed globally and on `PATH`:
+
+```bash
+claude mcp add topotopo -- topotopo mcp --package /absolute/path/to/package
+```
+
+To run the server through `npx`:
 
 ```bash
 claude mcp add topotopo -- npx -y topotopo mcp --package /absolute/path/to/package
 ```
 
-From a clone, the repository includes [.mcp.json](.mcp.json) (it runs `node src/mcp/server.ts`), so opening a Claude
+From a clone, the repository includes [.mcp.json](https://github.com/topotopo-dev/topotopo/blob/main/.mcp.json) (it runs `node src/mcp/server.ts`), so opening a Claude
 Code session in this folder offers the `topotopo` server. To register a clone from anywhere, use an absolute path:
 
 ```bash
@@ -242,7 +257,18 @@ claude mcp add topotopo -- node /absolute/path/to/topotopo/src/mcp/server.ts --p
 ```
 
 ### Other MCP clients (Claude Desktop, …)
-With the package:
+With TopoTopo installed globally and on the client's `PATH`:
+```json
+{
+  "mcpServers": {
+    "topotopo": {
+      "command": "topotopo",
+      "args": ["mcp", "--package", "C:/path/to/package"]
+    }
+  }
+}
+```
+To run the server through `npx`:
 ```json
 {
   "mcpServers": {
@@ -281,12 +307,28 @@ Houdini or Unreal (glTF, OBJ, STL, PLY, .geo, CSV, PNG). The agent's `inputs` to
 `file` node reads one as `inputs/<file>` (a PNG as an image for the texture nodes). Naming objects `path.river`, `zone.park`, `site.well`, `volume.no_trees` or
 `blockout.house` tells the agent what they mean (help topic `inputs`).
 
-When the server starts, it makes its folder a package (an `<id>.topo` and a starter `graphs/main.json`, so that its
-graphs can use packages, TopoTopo's own among them) if the folder is in no package and holds nothing but these four
-folders, or nothing at all, as a new one does; the default folder, `<cwd>/topotopo`, takes the name of the
-folder it is in. A folder with anything else in it, such as a repository or a folder of your own files, stays as it is
-until you say so: `workspace {action: "init"}` (or `topotopo init <folder>`) makes it a package. A folder inside a package
-works in that package's folder. The first reply the agent gets says which of these happened.
+On startup, `--package` uses the root of any containing package, creates a package in a missing or empty folder
+or one holding only `graphs/`, `assets/`, `inputs/` and `exports/` (ignoring OS metadata files), or opens a session
+in a folder with other contents, creating any missing standard folders and leaving package creation to
+`workspace {action: "init"}` or `topotopo init <folder>`.
+The default folder, `<cwd>/topotopo`, takes the name of the folder it is in. The first tool reply says what happened.
+
+## Build in CI
+
+Pin `topotopo` to an exact version in `devDependencies`, commit `package-lock.json`, and run `npm ci`.
+Run the TopoTopo commands in an npm script so the local `topotopo` command is on `PATH`.
+Set `TOPOTOPO_HOME`, `TOPOTOPO_CONFIG`, `TOPOTOPO_CACHE` and `TOPOTOPO_NODE_CACHE_DIR` to paths
+inside the CI workspace. `TOPOTOPO_CONFIG` takes a file path. The other three take directory paths.
+
+- `topotopo check <package>` cooks the working graphs' published outputs and the newest published versions
+  in scope. Use `topotopo check .` from the package folder. It exits 1 if a package or output check fails,
+  including a failing assertion.
+- In the package folder, run `topotopo graphs/main.json --locked --export-all` for each graph you ship,
+  substituting its path. It writes each published output into `exports/` using its export target or the first
+  fitting format. It exits 1 on a graph, cook or export error, including missing or changed locked dependencies.
+  Add `--force` to rewrite unchanged outputs.
+
+For a build that also runs Unreal, see [Without a window (CI) in the Unreal plugin README](integrations/unreal/TopoTopo/README.md#without-a-window-ci).
 
 ## MCP tools
 
@@ -369,7 +411,7 @@ boundary. Do not cook graphs from untrusted sources in a privileged process.
 
 ## Node types
 
-Image cutouts and atlases: [workflow guide](docs/image-cutouts.md), [example graph](examples/image_cutouts.json).
+Image cutouts and atlases: [workflow guide](https://github.com/topotopo-dev/topotopo/blob/main/docs/image-cutouts.md), [example graph](examples/image_cutouts.json).
 Four general nodes crop images, trace masks, extend edge pixels and pack aligned maps. Material alpha masking
 is preserved in GLB and shown in the live and headless previews.
 
@@ -397,7 +439,7 @@ is preserved in GLB and shown in the live and headless previews.
 | package | the outputs of packages by full name, TopoTopo's own among them: `topotopo/architecture/stairs` `topotopo/architecture/house` `topotopo/architecture/roof_skeleton` `topotopo/props/crate` `topotopo/nature/tree_lowpoly` `topotopo/nature/forest_patch` `topotopo/street/road_strip` …; every one is listed with its thumbnail under [TopoTopo's own packages](#topotopos-own-packages) |
 
 Every node's inputs, parameters (types, defaults, ranges, options, aliases) and outputs are listed in the generated
-[node reference](docs/nodes.md).
+[node reference](https://github.com/topotopo-dev/topotopo/blob/main/docs/nodes.md).
 
 ## Examples
 
@@ -407,10 +449,10 @@ outputs and their kinds, what it promises and how it looks), and a graph, `examp
 to do it: the card is the contract, and `npm test` checks the graph against it, so the graph can be rebuilt whenever
 there is a better way. Agents get them from the MCP `help` tool (topic `examples` lists them, `{examples: ["name"]}`
 gives a card and its graph, ready to build), the command line from `topotopo --help-example <name>`, and the npm
-package ships them. [docs/examples.md](docs/examples.md) has the house rules, the card format and the list.
+package ships them. [docs/examples.md](https://github.com/topotopo-dev/topotopo/blob/main/docs/examples.md) has the house rules, the card format and the list.
 
 [examples/](examples) holds 20 examples, each rendered by `npm run showcase` into
-[examples/renders](examples/renders) (a graph's `meta.render` takes any `render` tool option, its `meta.frame` the frame
+[examples/renders](https://github.com/topotopo-dev/topotopo/blob/main/examples/renders) (a graph's `meta.render` takes any `render` tool option, its `meta.frame` the frame
 an animation is shown at):
 - Streets and towns: `market_street` (a street with houses, lamp posts and a park, from TopoTopo's own packages),
   `town_from_lots` (irregular lots along streets, each with a house that follows its shape) and `guided_town`
@@ -495,7 +537,7 @@ topotopo cook <.topo | package folder | folder>... --for unreal [--into </Game/f
 `unreal setup` copies the plugin to `Plugins/TopoTopo/`, removes older installs made by TopoTopo, and enables the plugin.
 It records where TopoTopo is, excludes its working folders from Auto Reimport and adds the cooked files to `.gitignore`.
 Unreal builds the C++ plugin when the project opens. `unreal status --strict` exits 1 when a package is stale, failed,
-never cooked or still seen by Auto Reimport. See `--help-topic unreal` and the [cook protocol](integrations/unreal/PROTOCOL.md).
+never cooked or still seen by Auto Reimport. See `--help-topic unreal` and the [cook protocol](https://github.com/topotopo-dev/topotopo/blob/main/integrations/unreal/PROTOCOL.md).
 
 The plugin reads CSV or `points.json` directly into PCG and provides a **TopoTopo Instance Spawner**. Use
 **Tools > Import TopoTopo scene** to import a bundle's meshes, instances and Landscape. Generate the
@@ -525,7 +567,7 @@ every export preset. `godot status --strict` exits 1 when a package is stale, fa
 folders: run it in CI after `godot --headless --import`. `topotopo cook --for godot` writes exactly what the plugin
 writes (options from `<id>.topo.import`, flags override them). Exit codes: 0 ok, 1 an output or package failed, 2 a
 usage or setup error. `--help-topic godot` has the details; the plugin's contract is
-[integrations/godot/PROTOCOL.md](integrations/godot/PROTOCOL.md).
+[integrations/godot/PROTOCOL.md](https://github.com/topotopo-dev/topotopo/blob/main/integrations/godot/PROTOCOL.md).
 
 In the editor, the plugin ([integrations/godot/addons/topotopo](integrations/godot/addons/topotopo/README.md)) cooks
 in the background while you work: save a graph in TopoTopo's viewer (right-click a `.topo` or one of its outputs:
@@ -534,7 +576,7 @@ failed output shows Godot's ImportFail icon on the `.topo`, an Output line namin
 **TopoTopo** panel, while levels keep the last good GLB. Without TopoTopo on a machine, the committed outputs are used
 and `godot --headless --path <project> --script res://addons/topotopo/tools/check.gd` checks them in CI. To try it,
 set up the demo project with `topotopo godot setup integrations/godot/demo` and follow its
-[README](integrations/godot/demo/README.md).
+[README](https://github.com/topotopo-dev/topotopo/blob/main/integrations/godot/demo/README.md).
 
 ## Web app
 
@@ -775,7 +817,7 @@ graph that names an output copies its package's version into the package's `pack
 and a newer version in a TopoTopo release shows as an update (`topotopo outdated`) instead of changing a scene by
 itself. A graph outside a package cannot use them: `topotopo init` makes its folder one (the MCP server makes a
 folder one that holds nothing but TopoTopo's own folders). Each output documents its typed parameters (`help {nodes: ["topotopo/architecture/stairs"]}`, or
-[docs/nodes.md](docs/nodes.md#package-nodes)), puts its pivot at the base (Y up, metres), and tags every piece with
+[docs/nodes.md](https://github.com/topotopo-dev/topotopo/blob/main/docs/nodes.md#package-nodes)), puts its pivot at the base (Y up, metres), and tags every piece with
 `name` and `material` attributes, so exports split and shade cleanly. Outputs that follow a curve (`railing`, `fence`,
 `pipe_run`, `road_strip`) take it as input 0 and those that dress a surface (`scatter_rocks`, `forest_patch`,
 `grass_clumps`) take the surface as input 0; without an input they build a default one, which is what the thumbnails
@@ -786,9 +828,10 @@ street-furniture`. `assets {action: "fork", name: "topotopo/architecture/stairs"
 an output's graph into the package's assets to edit. [examples/market_street.json](examples/market_street.json) builds a
 street with the built-in packages' road, lamp posts, walls and roofs, fence, benches, trees and bushes:
 
-![market street](examples/renders/market_street.png)
+![market street](https://raw.githubusercontent.com/topotopo-dev/topotopo/main/examples/renders/market_street.png)
 
-`npm run builtin` rewrites the built-in packages' line-ups, their thumbnails and the tables below. `npm run builtin -- --publish nature
+Help for built-in outputs also shows their bounding box size in metres at the defaults when the output has a bounding box.
+`npm run builtin` rewrites the built-in packages' line-ups, sizes, thumbnails and the tables below. `npm run builtin -- --publish nature
 --note "..."` publishes a built-in package's next version, numbered as for any package (TopoTopo's own packages are published there
 and nowhere else), and `npm test` fails while a built-in package's working folder differs from its newest version.
 `node test/builtin.ts` cooks every output at its defaults and at the ends of every numeric range.
@@ -853,7 +896,7 @@ and nowhere else), and `npm test` fails while a built-in package's working folde
 | heightfield | `node test/heightfield.ts` | heightfields: the volume model, every heightfield node's behaviour (round trips, masks, crops and tiles that match the whole map, erosion determinism and mass conservation, the same erosion settings at three spacings, roads, scattering), the erosion speed target (512² × 100 iterations), png16/r16/mask_png export through the PNG decoder, render/inspect hooks, MCP export |
 | pcg | `npm run test:pcg` | scatter v2 (density counts, density attribute and mask ratios, relaxation, exact min_distance, per-prim cap, emitted attributes, prim uv, seeds, legacy defaults), every mask feature and combine mode, attribute_from_map on generated 8/16-bit and RGB PNGs (projections, filters, wrap, file stamp), orient modes against surface normals and copy_to_points, points_along_curve arc spacing, cluster k-means/radius, prune overlap/density/expression/near geometry, copy_to_points variant weights and packed = real copies |
 | splines | `npm run test:splines` | Bezier against its closed form, a rational NURBS circle, de Boor = de Casteljau, arc length, closest point, exact Bezier ⇄ NURBS conversions, interpolation and fitting; spline prims through clone/merge/subsets/JSON; auto-conversion and its warning; every spline node's behaviour (fillet arcs, constant 3D offset along a helix, projection onto a plane and a heightfield, monotonic curveu); render and export; every node type fed spline prims |
-| cards | `npm run test:cards [-- filter]` | every example graph against its card (`examples/<name>.md`): the card's params and named outputs are the graph's, with its ranges, defaults and kinds; each promise is an `assert` upstream of an output; every output cooks at the defaults to its kind with no warnings, every piece named and with a material, and again across the params' ranges, options and switches ([docs/examples.md](docs/examples.md)); `npm test` runs it without that sweep, CI runs both |
+| cards | `npm run test:cards [-- filter]` | every example graph against its card (`examples/<name>.md`): the card's params and named outputs are the graph's, with its ranges, defaults and kinds; each promise is an `assert` upstream of an output; every output cooks at the defaults to its kind with no warnings, every piece named and with a material, and again across the params' ranges, options and switches ([docs/examples.md](https://github.com/topotopo-dev/topotopo/blob/main/docs/examples.md)); `npm test` runs it without that sweep, CI runs both |
 | builtin | `npm run test:builtin [-- filter]` | every output of TopoTopo's own packages, cooked as a package that uses it: typed, documented params; cooks at its defaults (cold cache, under 1 s), at both ends of every numeric range, with every enum option and flipped bool, and on its fixture curve or surface; `name` and `material` on every prim; pivot; promised watertightness; each package's line-up, thumbnails and README table current, and its working folder its newest version; `assets` fork / list / get / delete; the catalog and help |
 | textures | `npm run test:textures` | texture nodes and bakes: generators deterministic and tileable (every noise basis repeats at u + 1), blend modes against known values, blur keeps the mean, normal maps (flat = (0.5, 0.5, 1), slope directions, OpenGL/DirectX, resolution-independent strength), AO of a plane white and of a box interior dark, curvature bright on bevels, padding, island ids = xatlas charts, normals and height from a high-res mesh, texture_to_material and ORM packing, glTF embeds PNGs (validator), USD writes files, the textures format, the texture view and texture sampling, merge/clone/JSON, fingerprints, pool on/off identical, 2048² noise timing |
 | particles | `npm run test:particles` | the particles node: emission counts and lifetimes, attribute and group carry, determinism, pool on/off bit-identical (noise, fields, mesh and floor collisions, trails), particles never below the floor or a mesh and never inside a closed one, spheres kept pscale off a mesh, trail lengths/curveu/ages, max_particles, max_births (step cap, batched runs = one run), frames = one long run (resume, jump back, substeps, moving emitter), point/heightfield/SDF fields, wind, attraction, analytic Perlin gradients and divergence-free curl noise, 100k particles × 200 steps |
@@ -891,7 +934,7 @@ node defaults to the bundled `assets/fonts/DejaVuSans.ttf`, so its fingerprint i
 the graph JSON and the `--seed S --only I` flags to reproduce it. `--strict` also fails on node errors that look like
 internal JS errors. `node test/fuzz.ts --count 500` runs more wrangle snippets.
 
-**Node reference.** `npm run docs` regenerates [docs/nodes.md](docs/nodes.md) from the `NodeDef`s. Commit it with any
+**Node reference.** `npm run docs` regenerates [docs/nodes.md](https://github.com/topotopo-dev/topotopo/blob/main/docs/nodes.md) from the `NodeDef`s. Commit it with any
 node or param change; `npm test` fails while it is stale.
 
 **Benchmarks.** `npm run bench` times named cooks (scatter, copy, packed copy, unpack, subdivide, boolean, noise,
@@ -909,7 +952,7 @@ depend on the locale, exact file-name case, a symlinked checkout and LF line end
 directory and uses it from there: the `topotopo` bin (help, cooking an example with a render), the library import and
 its types, the built-in library of TopoTopo's own packages (a package's first use copies a built-in package from it), the bundled font,
 the worker pool, the WASM kernels and the MCP server over stdio. It takes about a minute and is not part of
-`npm test`; run it before a release (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+`npm test`; run it before a release (see [CONTRIBUTING.md](https://github.com/topotopo-dev/topotopo/blob/main/CONTRIBUTING.md)).
 
 ## Layout
 
@@ -931,4 +974,4 @@ For releases and new packs, about once a month, join the [mailing list](https://
 ## Licence
 
 Apache-2.0 (see [LICENSE](LICENSE)). Third-party components and their licence texts are listed in [NOTICE](NOTICE).
-Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md).
+Contributions follow [CONTRIBUTING.md](https://github.com/topotopo-dev/topotopo/blob/main/CONTRIBUTING.md) and the [code of conduct](https://github.com/topotopo-dev/topotopo/blob/main/CODE_OF_CONDUCT.md).

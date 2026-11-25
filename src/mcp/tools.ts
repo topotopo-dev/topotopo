@@ -7,7 +7,7 @@ import type { EditOp } from '../session.ts';
 import type { CookReport } from '../graph/engine.ts';
 import { timingLines } from '../graph/timing.ts';
 import { refreshGraph, refreshNotes } from '../graph/refresh.ts';
-import type { GraphSpec } from '../graph/types.ts';
+import type { GraphSpec, NodeDef } from '../graph/types.ts';
 import { allNodeDefs } from '../graph/registry.ts';
 import { didYouMean } from '../graph/params.ts';
 import { catalogText, nodeDoc, topicList, topicText, INSTRUCTIONS } from './docs.ts';
@@ -36,6 +36,20 @@ import { evalGroup } from '../core/groups.ts';
 import { Geometry } from '../core/geometry.ts';
 import { verifyTools } from './verify.ts';
 import { inputsTool } from './inputs.ts';
+import { BUILTIN_LIBRARY } from '../config.ts';
+
+/** CLI and MCP node help include the shipped default size for TopoTopo's own package outputs. */
+export function nodeHelpText(def: NodeDef): string {
+  const doc = nodeDoc(def), output = def.package?.output;
+  const [owner, name] = def.package?.package.split('/') ?? [];
+  if (owner !== BUILTIN_LIBRARY.name || !name || !output) return doc;
+  try {
+    const size = JSON.parse(fs.readFileSync(path.join(BUILTIN_LIBRARY.path, name, 'sizes.json'), 'utf8'))[output];
+    if (Array.isArray(size) && size.length === 3 && size.every(Number.isFinite))
+      return `${doc}\nSize at its defaults: ${size.map((n: number) => n.toFixed(2)).join(' × ')} m (x × y × z)`;
+  } catch { /* Sizes are optional metadata. */ }
+  return doc;
+}
 
 export type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export interface ToolResult { content: Content[]; isError?: boolean }
@@ -332,11 +346,11 @@ export function makeTools(ws: Session, opts: { onPreview?: () => Promise<string>
             // a package this package does not use yet (TopoTopo's own, or one search found in a library it lists): its
             // docs, read where its library holds it, and what naming it does here
             const offered = engine.packageDefs().find((x) => x.type === n) ?? ws.packages?.describe(String(n)) ?? undefined;
-            out.push(offered ? `${nodeDoc(offered)}\nin this package: ${p.error}${p.hint ? ` (hint: ${p.hint})` : ''}` : `${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`);
+            out.push(offered ? `${nodeHelpText(offered)}\nin this package: ${p.error}${p.hint ? ` (hint: ${p.hint})` : ''}` : `${p.error}${p.hint ? `\n  hint: ${p.hint}` : ''}`);
             continue;
           }
           if (!d) { const s = didYouMean(n, engine.allTypeNames()); out.push(`unknown node "${n}"${s.length ? ` — did you mean ${s.join(', ')}?` : ''}`); continue; }
-          out.push(nodeDoc(d));
+          out.push(nodeHelpText(d));
         }
         if (!out.length) out.push(INSTRUCTIONS, '', 'Topics: ' + topicList().join(', '));
         return text(out.join('\n\n'));

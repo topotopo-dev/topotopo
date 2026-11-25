@@ -6,12 +6,13 @@
 //   library/<name>/graphs/lineup.json     the line-up: every output at its defaults, side by side along +X, also
 //                                        published as the output "lineup" (its kind pinned, tagged)
 //   library/<name>/thumbs/<output>.png    a 256 px matcap thumbnail of each output cooked at its defaults
+//   library/<name>/sizes.json             each output's bounding box size in metres at its defaults
 //   README.md                            the thumbnail tables between the built-in packages markers
 //
-//   node scripts/gen-builtin.ts                           write all three from the built-in packages' working folders, print times
+//   node scripts/gen-builtin.ts                           write the derived files from the built-in packages' working folders, print times
 //   node scripts/gen-builtin.ts stairs                    only re-render thumbnails whose names contain "stairs"
-//   node scripts/gen-builtin.ts --check                   exit 1 when the README table or a thumbnail is stale, a
-//                                                         version's files changed, or a built-in package's working folder differs
+//   node scripts/gen-builtin.ts --check                   exit 1 when a sizes file or the README table is stale, a thumbnail
+//                                                         is missing, a version's files changed, or a built-in package's working folder differs
 //                                                         from its newest version (test/builtin.ts runs it)
 //   node scripts/gen-builtin.ts --publish nature --note "…" [--big]
 //                                                         publish the next version of topotopo/nature: the version
@@ -177,13 +178,8 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
     if (nr === null) console.log(`README.md: add the built-in packages markers to get the thumbnail tables:\n${START}\n${END}`);
     else if (nr !== readme) fs.writeFileSync(README, nr);
   };
-  if (args.includes('--check')) {
-    const problems = checkBuiltin(all);
-    for (const p of problems) console.log('FAIL ' + p);
-    if (!problems.length) console.log(`built-in packages: thumbnails, README table and versions are up to date (${all.length} packages, ${all.reduce((s, k) => s + k.outputs.length, 0)} outputs)`);
-    process.exit(problems.length ? 1 : 0);
-  }
-  if (args.includes('--publish')) {
+  const checking = args.includes('--check');
+  if (!checking && args.includes('--publish')) {
     const name = opt('--publish'), k = all.find((x) => x.name === name);
     if (!k) { console.log(`--publish needs a built-in package: ${all.map((x) => x.name).join(', ')}`); process.exit(1); }
     // publishing cooks each output as a package that uses the built-in package does, in the package's own scope
@@ -195,11 +191,14 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
     process.exit(r.ok ? 0 : 1);
   }
   const filter = args.find((a) => !a.startsWith('--'));
-  let failed = 0;
+  const problems = checking ? checkBuiltin(all) : [];
+  for (const p of problems) console.log('FAIL ' + p);
+  let failed = problems.length;
   for (const k of all) {
     const { engine } = await builtinEngine(k);
     const sizes = new Map<string, [number, number]>();
-    fs.mkdirSync(path.join(k.dir, 'thumbs'), { recursive: true });
+    const dimensions: Record<string, number[]> = Object.create(null);
+    if (!checking) fs.mkdirSync(path.join(k.dir, 'thumbs'), { recursive: true });
     for (const o of k.outputs) {
       engine.cache.clear();
       const r = await engine.cook({ nodes: { o: { type: o.type } }, output: 'o' });
@@ -210,21 +209,36 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
       }
       const bb = r.geo.bbox(true);
       sizes.set(o.name, [bb.min[0], bb.max[0]]);
-      if (filter && !o.name.includes(filter)) continue;
+      if (!bb.empty) dimensions[o.name] = bb.max.map((max, axis) => +(max - bb.min[axis]).toFixed(2));
+      if (checking || (filter && !o.name.includes(filter))) continue;
       const t0 = performance.now();
       fs.writeFileSync(path.join(k.dir, 'thumbs', `${o.name}.png`), thumbnailPNG(r.geo, o.graph));
       const warn = r.warnings.length ? `, ${r.warnings.length} warnings: ${r.warnings.slice(0, 2).map((w) => `[${w.node}] ${w.message}`).join('; ')}` : '';
       console.log(`ok   ${o.type.padEnd(36)} cook ${r.ms.toFixed(0).padStart(4)} ms, thumb ${(performance.now() - t0).toFixed(0).padStart(3)} ms, ${r.geo.numPoints} pts ${r.geo.numPrims} prims${warn}`);
     }
     if (sizes.size === k.outputs.length) {
-      const file = path.join(k.dir, 'graphs', `${SHOWN}.json`), text = lineupText(lineupGraph(k, sizes));
-      if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n') !== text) { fs.writeFileSync(file, text); console.log(`wrote library/${k.name}/graphs/${SHOWN}.json (the line-up)`); }
+      const sizesFile = path.join(k.dir, 'sizes.json');
+      const sizesText = JSON.stringify(dimensions, null, 2) + '\n';
+      if (!fs.existsSync(sizesFile) || fs.readFileSync(sizesFile, 'utf8').replace(/\r\n/g, '\n') !== sizesText) {
+        if (checking) {
+          failed++;
+          console.log(`FAIL library/${k.name}/sizes.json is stale: run npm run builtin`);
+        } else fs.writeFileSync(sizesFile, sizesText);
+      }
+      if (!checking) {
+        const file = path.join(k.dir, 'graphs', `${SHOWN}.json`), text = lineupText(lineupGraph(k, sizes));
+        if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n') !== text) { fs.writeFileSync(file, text); console.log(`wrote library/${k.name}/graphs/${SHOWN}.json (the line-up)`); }
+      }
     }
     await engine.host.pool?.close();
   }
+  if (checking) {
+    console.log(`built-in packages: ${failed ? `${failed} check(s) failed` : `sizes, thumbnails, README table and versions are up to date (${all.length} packages, ${all.reduce((s, k) => s + k.outputs.length, 0)} outputs)`}`);
+    process.exit(failed ? 1 : 0);
+  }
   writeReadme(all);
   const stale = all.filter((k) => k.versions.at(-1)?.hash !== workingHash(k.dir)).map((k) => k.name);
-  console.log(`\nbuilt-in packages: ${all.length} packages, ${all.reduce((s, k) => s + k.outputs.length, 0)} outputs, thumbnails, line-ups and README table written${failed ? `, ${failed} failed` : ''}`);
+  console.log(`\nbuilt-in packages: ${all.length} packages, ${all.reduce((s, k) => s + k.outputs.length, 0)} outputs, sizes, thumbnails, line-ups and README table written${failed ? `, ${failed} failed` : ''}`);
   if (stale.length) console.log(`not published yet: ${stale.join(', ')} (npm run builtin -- --publish <name> --note "what changed")`);
   process.exit(failed ? 1 : 0);
 }
