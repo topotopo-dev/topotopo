@@ -36,7 +36,9 @@
 import { isGraph } from '../graph/types.ts';
 import type { GraphSpec } from '../graph/types.ts';
 import { norm } from '../graph/params.ts';
+import { varsRead } from '../graph/packages.ts';
 import { sha256Hex } from '../core/sha256.ts';
+import { pickVars } from '../core/usercode.ts';
 import { dirOf } from './common.ts';
 
 export interface ExportSource {
@@ -191,16 +193,34 @@ export function nodesSha256(spec: GraphSpec, node: string): string {
   return sha256Hex(canonicalJSON({ nodes, strict: spec.strict ?? false }));
 }
 
+/** A different engine cannot keep an export unchanged, whatever its graph and package files say. */
+export function sameSourceEngine(prev: unknown, now: Pick<ExportSource, 'topotopo' | 'engine_sha256'>): boolean {
+  if (!now.engine_sha256 || !prev || typeof prev !== 'object') return false;
+  const before = prev as ExportSource;
+  return before.topotopo === now.topotopo && before.engine_sha256 === now.engine_sha256;
+}
+
 /**
  * Whether an export recorded with the block `prev` would be made the same now, as `now`: every field the same but the
- * whole graph's hash and seeds (an edit to other nodes of the graph; its own nodes and seeds are in nodes_sha256).
+ * whole graph's hash and seeds (the output's nodes and seeds are in nodes_sha256). When `graph` gives the saved graph,
+ * compare only the vars the node reads. The source block still holds every var so the export can be replayed.
  * Never without files_sha256 (a graph in no package, whose files are not known) or engine_sha256 (the engine's code,
  * which may have changed under the same version).
  */
-export function sameSource(prev: unknown, now: ExportSource): boolean {
-  if (!now.files_sha256 || !now.engine_sha256 || !prev || typeof prev !== 'object') return false;
-  const key = (s: object) => { const { graph_sha256: _g, seeds: _s, ...rest } = s as ExportSource; return canonicalJSON(rest); };
-  return key(prev) === key(now);
+export function sameSource(prev: unknown, now: ExportSource, graph?: () => GraphSpec | undefined): boolean {
+  if (!now.files_sha256 || !sameSourceEngine(prev, now)) return false;
+  const key = (s: ExportSource) => {
+    const { graph_sha256: _g, seeds: _s, vars: _v, topotopo: _t, engine_sha256: _e, ...rest } = s;
+    return canonicalJSON(rest);
+  };
+  const before = prev as ExportSource;
+  if (key(before) !== key(now)) return false;
+  if (canonicalJSON(before.vars) === canonicalJSON(now.vars)) return true;
+  if (!before.vars || typeof before.vars !== 'object' || Array.isArray(before.vars)) return false;
+  const spec = graph?.();
+  if (!spec) return false;
+  const read = varsRead({ ...spec, vars: { ...before.vars, ...now.vars } }, now.node);
+  return canonicalJSON(pickVars(before.vars, read)) === canonicalJSON(pickVars(now.vars, read));
 }
 
 /** The source block with these export options (an export records the options it used, defaults included). */

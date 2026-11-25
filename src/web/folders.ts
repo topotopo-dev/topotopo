@@ -6,16 +6,28 @@
 // beside ours hidden and Unreal's assets counted; links in notes are resolved (relative to the note's folder, res://
 // to the Godot project, /Game/ to Unreal's Content/, YouTube and Vimeo to their privacy players); files are served
 // with ranges; and a tree is audited for its flags: links to missing files, previews that did not cook, versions not
-// published, exports older than their graphs, published outputs no package of the workspace uses.
+// published, exports their graphs would now make differently, published outputs no package of the workspace uses.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type http from 'node:http';
-import { MANIFEST_EXT, readGraphFile } from '../session.ts';
+import { graphFiles, MANIFEST_EXT, readGraphFile, registerAssets } from '../session.ts';
 import { engineAbove, engineTypeOf, godotProjectOf } from '../engines.ts';
 import type { EngineType } from '../engines.ts';
-import { canonicalJSON } from '../io/source.ts';
+import { Engine } from '../graph/engine.ts';
+import { packagesNamedIn, packagesUsed } from '../graph/packages.ts';
+import type { PackageResolver } from '../graph/scope.ts';
+import { isGraph } from '../graph/types.ts';
+import type { GraphSpec } from '../graph/types.ts';
+import { currentExportSource, filesShaFor, matchesCurrentExportEngine } from '../host/export-targets.ts';
+import { createNodeHost, packageBaseDir } from '../host/node.ts';
+import { EXPORT_FORMATS } from '../io/export.ts';
+import type { ExportFormat } from '../io/export.ts';
+import { canonicalJSON, sameSource } from '../io/source.ts';
+import type { ExportSource } from '../io/source.ts';
 import { jsonFormat, SIDECAR_FORMATS, SIDECAR_HEAD_BYTES } from '../io/sidecars.ts';
+import { publishedOutputs } from '../io/targets.ts';
+import { openPackages } from '../packages/registry.ts';
 import { skippedName, isCheckout } from '../scan.ts';
 import { workspaceFileIn } from '../package.ts';
 import { escHtml, markdownLinks, renderMarkdown, slug } from './markdown.ts';
@@ -294,7 +306,7 @@ export interface FileEntry {
 }
 
 /** What an export's recorded source says (src/io/source.ts). */
-export interface ExportMade { graph: string; output: string | null; node: string; graph_sha256: string; vars: Record<string, unknown> }
+export interface ExportMade { graph: string; output: string | null; node: string; graph_sha256: string; vars: Record<string, unknown>; source?: ExportSource }
 
 export interface FolderEntry {
   name: string;
@@ -444,13 +456,13 @@ const MAX_KEPT = 50_000;
  * What `read` makes of a file, kept while the file is unchanged (its size and time): the walks and pages read each file
  * again only when it changed; `none` when it is not there.
  */
-function keptWhileUnchanged<T>(kept: Map<string, { key: string; value: T }>, file: string, none: T, read: () => T): T {
+function keptWhileUnchanged<T>(kept: Map<string, { key: string; value: T }>, file: string, none: T, read: () => T, limit = MAX_KEPT): T {
   const st = statOf(file);
   if (!st) return none;
   const key = fileKey(st), have = kept.get(file);
   if (have?.key === key) return have.value;
   const value = read();
-  if (kept.size >= MAX_KEPT) kept.clear();
+  if (kept.size >= limit) kept.clear();
   kept.set(file, { key, value });
   return value;
 }
@@ -470,10 +482,15 @@ function readSourceNow(file: string): ExportMade | null {
   } catch { return null; }
 }
 
-const madeOf = (s: any): ExportMade | null =>
-  s && typeof s === 'object' && typeof s.graph === 'string' && typeof s.graph_sha256 === 'string'
-    ? { graph: s.graph, output: typeof s.output === 'string' ? s.output : null, node: String(s.node ?? ''), graph_sha256: s.graph_sha256, vars: s.vars && typeof s.vars === 'object' ? s.vars : {} }
-    : null;
+function madeOf(s: any): ExportMade | null {
+  if (!s || typeof s !== 'object' || typeof s.graph !== 'string' || typeof s.graph_sha256 !== 'string') return null;
+  const output = typeof s.output === 'string' ? s.output : null;
+  const vars = s.vars && typeof s.vars === 'object' ? s.vars : {};
+  const complete = typeof s.node === 'string' && typeof s.nodes_sha256 === 'string' && typeof s.files_sha256 === 'string'
+    && typeof s.engine_sha256 === 'string' && EXPORT_FORMATS.includes(s.export?.format) && s.export.options && typeof s.export.options === 'object'
+    && (s.followed === undefined || Array.isArray(s.followed) && s.followed.every((p: unknown) => typeof p === 'string'));
+  return { graph: s.graph, output, node: String(s.node ?? ''), graph_sha256: s.graph_sha256, vars, ...(complete ? { source: s } : {}) };
+}
 
 const modelSourcesKept = new Map<string, { key: string; value: ExportMade | null }>();
 /**
@@ -511,11 +528,81 @@ const hasVars = (g: any) => !!(g && typeof g === 'object' && g.vars && typeof g.
 /** SHA-256 of a graph's canonical JSON as exports record it (src/io/source.ts), by Node's own hash: the same digest, sooner. */
 const graphSha = (canonical: string) => crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
 
+interface GraphSourceCheck { spec: GraphSpec; results: WeakMap<ExportMade, { key: string; stale: ExportStale }> }
+const sourceGraphs = new Map<string, { key: string; value: GraphSourceCheck | null }>();
+const graphForSourceCheck = (file: string) => keptWhileUnchanged(sourceGraphs, file, null, () => {
+  const read = readGraphFile(file);
+  return 'graph' in read && isGraph(read.graph) ? { spec: read.graph, results: new WeakMap() } : null;
+}, MAX_GRAPHS);
+
+let sourceHost: ReturnType<typeof createNodeHost> | undefined;
+function exportDependencies(graphFile: string, spec: GraphSpec, source: ExportSource, copies: Map<string, PackageResolver>) {
+  const files = filesShaFor(graphFile);
+  if (!files) return null;
+  const usesPackages = source.packages || packagesNamedIn(spec).length;
+  if (!usesPackages && !spec.export) return { files };
+  const dir = packageBaseDir(path.dirname(graphFile));
+  const host = sourceHost ??= createNodeHost({ baseDir: dir, workers: 0 });
+  const engine = new Engine({ ...host, ...host.filesAt!(dir) });
+  const pk = usesPackages ? openPackages(engine, dir, { follow: source.followed, restore: false }) : null;
+  const graphs = graphFiles(dir);
+  engine.root.graphs = (name) => { const file = graphs.get(name); return file ? graphForSourceCheck(file)?.spec : undefined; };
+  registerAssets(engine, engine.root, dir, []);
+  const scope = pk?.published(source.followed) ?? engine.root;
+  // Private workspace packages resolve the same pinned copies. Share that lookup during the audit. A package's
+  // own published name and explicitly followed working folders need their own resolution.
+  if (pk?.dir && !pk.error && !pk.manifest?.name && !source.followed?.length && scope.packages) {
+    const key = pk.lookStore().packages, have = copies.get(key);
+    if (have) scope.packages = have;
+    else copies.set(key, scope.packages);
+  }
+  const packages = usesPackages ? packagesUsed(engine, spec, scope) : undefined;
+  const defaultNode = spec.export ? engine.findOutput(spec).name : undefined;
+  return { files, packages, defaultNode };
+}
+
+export const exportStalenessReads = () => ({
+  dependencies: new Map<string, ReturnType<typeof exportDependencies>>(), copies: new Map<string, PackageResolver>(),
+});
+
 /**
- * Whether the graph an export was made from changed since (the hash it recorded is not the graph file's, with the
- * vars it was made with); null when the graph cannot be read.
+ * Why an export would be made differently now: "graph" (what it was made from changed), "engine" (it was made by
+ * other TopoTopo code), false (it would be made the same) or null (its graph cannot be read).
  */
-export function exportStale(graphFile: string, m: ExportMade): boolean | null {
+export type ExportStale = 'graph' | 'engine' | false | null;
+
+/** The same source comparison as export-all. Reuse dependency reads within one audit or file listing. */
+export function exportStale(graphFile: string, m: ExportMade, reads = exportStalenessReads()): ExportStale {
+  const source = m.source;
+  if (!source) return legacyExportStale(graphFile, m);
+  const graph = graphForSourceCheck(graphFile);
+  if (!graph) return null;
+  if (!matchesCurrentExportEngine(source)) return 'engine';
+  const { spec } = graph;
+  const depKey = canonicalJSON([graphFile, source.followed ?? [], !!source.packages]);
+  let deps = reads.dependencies.get(depKey);
+  if (deps === undefined) {
+    try { deps = exportDependencies(graphFile, spec, source, reads.copies); } catch { return 'graph'; }
+    reads.dependencies.set(depKey, deps);
+  }
+  if (!deps) return legacyExportStale(graphFile, m);
+  const key = canonicalJSON(deps), have = graph.results.get(m);
+  if (have?.key === key) return have.stale;
+  const outputs = Object.fromEntries(Object.entries(spec.outputs ?? {}).filter(([, o]) => o && o.publish !== false));
+  const output = m.output === null ? undefined : publishedOutputs(m.graph, { ...spec, outputs }, deps.defaultNode ?? '').find((p) => p.output === m.output);
+  const node = output?.node ?? m.node, target = output?.target;
+  const stale: ExportStale = ((m.output !== null && !output) || !Object.hasOwn(spec.nodes, node) || !!target?.refused || !sameSource(source, currentExportSource({
+    graph: m.graph, spec, node, output: m.output, frame: source.frame, fps: source.fps, format: target?.format ?? source.export.format as ExportFormat,
+    options: target?.options ?? source.export.options, packages: deps.packages, files: deps.files,
+  }), () => spec)) ? 'graph' : false;
+  graph.results.set(m, { key, stale });
+  return stale;
+}
+
+/**
+ * For a record without the fields export-all compares, keep its whole-graph check with the vars it was made with.
+ */
+function legacyExportStale(graphFile: string, m: ExportMade): ExportStale {
   const st = statOf(graphFile);
   if (!st) return null;
   const key = fileKey(st);
@@ -533,7 +620,7 @@ export function exportStale(graphFile: string, m: ExportMade): boolean | null {
   }
   if (h.plain === null) return null;
   if (h.plain === m.graph_sha256) return false;
-  if (!h.vars) return true;
+  if (!h.vars) return 'graph';
   const varsKey = canonicalJSON(m.vars);
   let withVars = h.withVars.get(varsKey);
   if (withVars === undefined) {
@@ -546,7 +633,7 @@ export function exportStale(graphFile: string, m: ExportMade): boolean | null {
     if (h.withVars.size >= MAX_VARS_SETS) h.withVars.clear();
     h.withVars.set(varsKey, withVars);
   }
-  return withVars !== m.graph_sha256;
+  return withVars !== m.graph_sha256 ? 'graph' : false;
 }
 
 // ---------------------------------------------------------------------------------------------------------- links

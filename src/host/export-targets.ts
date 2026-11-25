@@ -14,12 +14,12 @@ import { sha256Hex } from '../core/sha256.ts';
 import type { ExportFormat } from '../io/export.ts';
 import { exportFilesAsync } from '../io/files.ts';
 import type { ExportFile, ExportFiles } from '../io/files.ts';
-import { exportSource, sameSource, withExportOptions } from '../io/source.ts';
+import { canonicalJSON, exportSource, sameSource, sameSourceEngine, withExportOptions } from '../io/source.ts';
 import { prefixGone, resolvedExportOptions } from '../io/targets.ts';
-import type { ExportSource } from '../io/source.ts';
+import type { ExportSource, SourceInput } from '../io/source.ts';
 import type { PublishedOutput, ResolvedTarget } from '../io/targets.ts';
 import { packageFilesHash } from '../packages/registry.ts';
-import { topoFiles } from '../session.ts';
+import { graphFiles, readGraphFile, topoFiles } from '../session.ts';
 import { ArtifactStore } from './artifacts.ts';
 import type { Host } from './types.ts';
 import { TOPOTOPO_VERSION } from './version.ts';
@@ -198,6 +198,15 @@ export interface PreparedTarget {
  */
 export interface TargetCook { frame?: number; fps?: number; packages?: Record<string, string>; files?: string }
 
+/** What an export would record now, with resolved export options and the running engine's identity. */
+export function currentExportSource(i: Omit<SourceInput, 'version' | 'engine' | 'format'> & { format: ExportFormat }): ExportSource {
+  return exportSource({ ...i, options: resolvedExportOptions(i.format, i.options ?? {}), version: TOPOTOPO_VERSION, engine: engineSha256() });
+}
+
+/** Check the engine first when reading the graph's dependencies can be skipped. */
+export const matchesCurrentExportEngine = (source: unknown): boolean =>
+  sameSourceEngine(source, { topotopo: TOPOTOPO_VERSION, engine_sha256: engineSha256() });
+
 type TargetPaths = Pick<PreparedTarget, 'graph' | 'label' | 'root'> & { files: Pick<ExportFile, 'path' | 'shared'>[] };
 
 /**
@@ -231,22 +240,28 @@ export function unchangedTargetFiles(graph: string, p: PublishedOutput & { targe
   if (p.target.refused || !cook.files) return null;
   const last = new ArtifactStore(exportsDir).records().filter((a) => a.label === p.target.path && a.graph === graph && (a.output ?? '') === (p.output ?? '')).pop();
   if (!last || !last.files.every((f) => fs.statSync(f, { throwIfNoEntry: false })?.isFile())) return null;
-  const options = resolvedExportOptions(p.target.format, p.target.options);
-  const now = withExportOptions(exportSource({
+  const now = currentExportSource({
     graph, spec: p.spec, node: p.node, output: p.output, frame: cook.frame, fps: cook.fps,
-    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files, version: TOPOTOPO_VERSION, engine: engineSha256(),
-  }), options);
+    format: p.target.format, options: p.target.options, packages: cook.packages, files: cook.files,
+  });
+  // A saved graph edit only affects the outputs that read it. An explicit run with overridden vars keeps the full
+  // vars comparison used for replay. Only read the saved graph when the source comparison finds different vars.
+  const savedGraph = () => {
+    const file = graphFiles(path.dirname(exportsDir)).get(graph);
+    const read = file && readGraphFile(file);
+    if (read && 'graph' in read && canonicalJSON(read.graph?.vars ?? {}) === canonicalJSON(p.spec.vars ?? {})) return p.spec;
+  };
   // the record: the file among them that holds a source block (<file>.source.json or the format's sidecar)
   for (const f of last.files) {
     if (!/\.json$/i.test(f)) continue;
     const record = readExportRecord(f);
     if (!record) continue;
-    const same = sameSource(record.source, now) && (!('sha256' in record) || !!record.sha256 && typeof record.sha256 === 'object' && !Array.isArray(record.sha256)
+    const same = sameSource(record.source, now, savedGraph) && (!('sha256' in record) || !!record.sha256 && typeof record.sha256 === 'object' && !Array.isArray(record.sha256)
       && Object.entries(record.sha256).every(([name, hash]) => matchesHash(path.resolve(path.dirname(f), name), hash)));
     if (!same) return null;
     const maps = path.join(exportsDir, 'maps');
     return { graph, label: p.label, root: exportsDir, files: last.files.map((file, i) => ({
-      path: file, shared: i > 0 && options.maps === 'external' && path.dirname(file) === maps && /\.(?:png|jpg)$/i.test(file),
+      path: file, shared: i > 0 && now.export.options.maps === 'external' && path.dirname(file) === maps && /\.(?:png|jpg)$/i.test(file),
     })) };
   }
   return null;

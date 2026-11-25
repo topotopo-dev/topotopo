@@ -176,7 +176,7 @@ file of a folder is a box on its page, in file name order; markdown renders, and
 image inline, a sound or video in a player, a .glb in 3D, a folder as a card, a YouTube or Vimeo address in its
 player), relative to the note's folder, res:// from the Godot project, /Game/ from Unreal's Content/; a link to a
 missing file is a flag. The other flags: a preview that did not cook, a package with no version or with changes no
-version holds, an export older than its graph, published outputs no package of the workspace uses. Each package keeps
+version holds, an export its graph would now make differently, published outputs no package of the workspace uses. Each package keeps
 a stable address (/p/<library or workspace>/<id>, leading to its folder page), a thumbnail (…/thumb.png) and an iframe
 embed (/embed/<library or workspace>/<id>) that the person's board pastes. It bakes the previews by itself after
 graphs, assets or inputs change, from the graph named in "graph" (or "bake": another graph, a node, a frame);

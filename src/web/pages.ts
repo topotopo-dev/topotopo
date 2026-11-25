@@ -71,7 +71,7 @@ export interface PackageData extends CardData {
   /** its attachments/ files: images and the rest, each with its URL (a model's 3D view as `model`) */
   attachments: (FileRow & { url: string; model?: string })[];
   /** its exports/ files, each with its URL (a model's 3D view as `model`) and, when its graph changed since, `stale` */
-  exports: (FileRow & { url: string; model?: string; stale?: boolean })[];
+  exports: (FileRow & { url: string; model?: string; stale?: 'graph' | 'engine' })[];
   glb: boolean;
   /** it has a preview picture (a baked thumb.png, a built-in package's output's) */
   thumb: boolean;
@@ -594,8 +594,13 @@ export function packageAttachments(p: PackageData): string {
     ${other.length ? `<details class="allatt"${other.length <= 8 ? ' open' : ''}><summary>${other.length} other file${other.length === 1 ? '' : 's'}</summary>${fileList(other)}</details>` : ''}`;
 }
 
-const fileList = (rows: (FileRow & { url: string; model?: string; stale?: boolean })[]) =>
-  `<ul class="flist">${rows.map((f) => `<li><a href="${esc(f.url)}"${f.image ? ` data-view="image" data-name="${esc(f.path)}"` : f.model ? ` data-view="model" data-src="${esc(f.model)}" data-name="${esc(f.path)}"` : ''}>${esc(f.path)}</a>${f.stale ? ' <span class="stale" title="its graph changed since it was exported">older than its graph</span>' : ''}<span>${size(f.size)}</span></li>`).join('')}</ul>`;
+/** The mark of an export its graph or TopoTopo would now make differently (folders.ts exportStale). */
+export const staleMark = (why: unknown) => !why ? '' : why === 'engine'
+  ? ' <span class="stale" title="TopoTopo changed since this export was made: export it again to bring it up to date">made by an earlier TopoTopo</span>'
+  : ' <span class="stale" title="Its graph would make this export differently now">older than its graph</span>';
+
+const fileList = (rows: (FileRow & { url: string; model?: string; stale?: 'graph' | 'engine' })[]) =>
+  `<ul class="flist">${rows.map((f) => `<li><a href="${esc(f.url)}"${f.image ? ` data-view="image" data-name="${esc(f.path)}"` : f.model ? ` data-view="model" data-src="${esc(f.model)}" data-name="${esc(f.path)}"` : ''}>${esc(f.path)}</a>${staleMark(f.stale)}<span>${size(f.size)}</span></li>`).join('')}</ul>`;
 
 /**
  * The page a board embeds in an iframe (and a package's folder page shows): the baked preview.glb under an orbit
