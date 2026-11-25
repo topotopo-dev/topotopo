@@ -25,6 +25,7 @@
 #include "InterchangeManager.h"
 #include "InterchangeSourceData.h"
 #include "Logging/MessageLog.h"
+#include "Misc/App.h"
 #include "Materials/MaterialInterface.h"
 #include "Metadata/PCGMetadata.h"
 #include "Misc/DefaultValueHelper.h"
@@ -649,6 +650,7 @@ namespace
         const FString Line = FString::Printf(TEXT("TopoTopo: %s: %s"), *Name, *Package->Status);
         UE_LOG(LogTopoTopo, Log, TEXT("%s"), *Line);
         Log.Info(FText::FromString(Line));
+        if (FApp::IsUnattended()) { return; }
         if (bErrors) { Log.Notify(FText::FromString(Line), EMessageSeverity::Error, true); }
         else
         {
@@ -659,7 +661,7 @@ namespace
     }
 }
 
-void TopoTopo::FailCook(UTopoTopoPackage* Package, const FString& Why)
+TopoTopo::FCookResult TopoTopo::FailCook(UTopoTopoPackage* Package, const FString& Why)
 {
     if (Package->Status != Why)
     {
@@ -669,23 +671,22 @@ void TopoTopo::FailCook(UTopoTopoPackage* Package, const FString& Why)
         SaveSoon(Package);
     }
     ShowOutcome(Package, { Why });
+    return { ECookState::Failed, Why };
 }
 
-bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FString& ReportFile, const FString& Errors, bool bForce)
+TopoTopo::FCookResult TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FString& ReportFile, const FString& Errors, bool bForce)
 {
     const TSharedPtr<FJsonObject> Report = ReadJson(ReportFile);
     if (!Report)
     {
         const FString Said = Errors.TrimStartAndEnd();
-        FailCook(Package, Said.IsEmpty() ? FString::Printf(TEXT("the cook ended with code %d and wrote no report"), ExitCode) : Said);
-        return false;
+        return FailCook(Package, Said.IsEmpty() ? FString::Printf(TEXT("the cook ended with code %d and wrote no report"), ExitCode) : Said);
     }
     int32 Spoken = 0;
     Report->TryGetNumberField(TEXT("protocol"), Spoken);
     if (Spoken != Protocol)
     {
-        FailCook(Package, FString::Printf(TEXT("this plugin speaks protocol %d and TopoTopo %d: run topotopo unreal setup on this project"), Protocol, Spoken));
-        return false;
+        return FailCook(Package, FString::Printf(TEXT("this plugin speaks protocol %d and TopoTopo %d: run topotopo unreal setup on this project"), Protocol, Spoken));
     }
 
     // the asset is saved only when the cook changed it: every package cooks at editor start, and an unchanged one must not
@@ -711,7 +712,7 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
     FSession Session;
     TMap<FString, FString> Imported;
     int32 NumUpdated = 0, NumSame = 0, NumFailed = 0;
-    bool bAllOk = true;
+    bool bCooked = false;
     const TArray<TSharedPtr<FJsonValue>>* Outputs = nullptr;
     Report->TryGetArrayField(TEXT("outputs"), Outputs);
     const int32 Count = Outputs ? Outputs->Num() : 0;
@@ -741,11 +742,11 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
                 if (const FString* Hash = Package->ImportedFiles.Find(File)) { Imported.Add(File, *Hash); }
             }
             NumFailed++;
-            bAllOk = false;
             Package->Outputs.Add(MoveTemp(Output));
             continue;
         }
         Output.State = TEXT("ok");
+        bCooked |= State != TEXT("unchanged");
         if (Previous) { Output.Materials = Previous->Materials; }
         bool bChanged = false;
         const TArray<TSharedPtr<FJsonValue>>* Steps = nullptr;
@@ -794,7 +795,6 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
                 // like a failed output: the last good asset stays, with the hashes it was made from
                 Output.Errors.Add(Error);
                 Output.State = TEXT("failed");
-                bAllOk = false;
                 for (const FString& File : Files)
                 {
                     if (const FString* Hash = Package->ImportedFiles.Find(File)) { Imported.Add(File, *Hash); }
@@ -814,7 +814,6 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
         Package->Outputs.Add(MoveTemp(Output));
     }
     Package->ImportedFiles = MoveTemp(Imported);
-    bAllOk = bAllOk && PackageErrors.IsEmpty();
     Package->Status = FString::Printf(TEXT("%d imported, %d unchanged, %d failed, %d skipped"), NumUpdated, NumSame, NumFailed, Package->Skipped.Num());
     if (!Session.ToSave.IsEmpty()) { UEditorLoadingAndSavingUtils::SavePackages(Session.ToSave.Array(), true); }
     if (StateOf(Package) != StateBefore)
@@ -824,7 +823,17 @@ bool TopoTopo::ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FStrin
         SaveSoon(Package);
     }
     ShowOutcome(Package, PackageErrors);
-    return bAllOk;
+    if (!PackageErrors.IsEmpty()) { return { ECookState::Failed, PackageErrors[0] }; }
+    if (NumFailed)
+    {
+        const FTopoTopoOutputStatus* Failed = Package->Outputs.FindByPredicate([](const FTopoTopoOutputStatus& Output)
+        {
+            return Output.State == TEXT("failed");
+        });
+        const FString Reason = Failed && !Failed->Errors.IsEmpty() ? Failed->Id + TEXT(": ") + Failed->Errors[0] : Package->Status;
+        return { ECookState::Failed, Reason };
+    }
+    return { bCooked || NumUpdated ? ECookState::Cooked : ECookState::Unchanged, FString() };
 }
 
 void TopoTopo::SaveSoon(UObject* Asset)

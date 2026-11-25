@@ -4,13 +4,17 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "TopoTopoImporter.h"
 
 class UTopoTopoPackage;
 
 namespace TopoTopo
 {
-    /** Cook a package with a progress dialog and import the result. True when every output is fine. */
-    bool CookNow(UTopoTopoPackage* Package, bool bForce);
+    /** Cook a package with progress and import the result before returning. */
+    FCookResult CookNow(UTopoTopoPackage* Package, bool bForce);
+
+    void QueueCommandCook(UTopoTopoPackage* Package, bool bForce, bool bImported);
+    ECookState ReportCommandCook(UTopoTopoPackage* Package, FCookResult Result, bool bImported);
 
     /** Cook a package in the background soon, once changes have settled and the editor is free. */
     void CookLater(const FString& Topo);

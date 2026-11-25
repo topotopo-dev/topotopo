@@ -1,5 +1,5 @@
 // Export examples/unreal_landscape.json for the Unreal 5.8 / Houdini / Blender round trip:
-//   landscape/         unreal_landscape bundle of the Level output: heightmap.png + .json, layers/*.png, landscape.json
+//   landscape/         unreal_landscape bundle of the level_out node: heightmap.png + .json, layers/*.png, landscape.json
 //                      (import settings + steps), objects.glb (road + instances), instances.csv + instances.meshes.json
 //                      + meshes/*.glb
 //   scene.glb          node "showcase": terrain mesh, road and EXT_mesh_gpu_instancing instances with per-instance attributes
@@ -54,7 +54,7 @@ const cook = async (target: string): Promise<Geometry> => {
   if (!r.ok || !r.geo) throw new Error(`unreal_landscape: node "${target}" failed: ${r.errors.map((e) => `[${e.node}] ${e.message}`).join('; ')}`);
   return r.geo;
 };
-const scene = await cook('showcase'), landscape = await cook(graph.outputs.level.node), instances = await cook('demo_instances');
+const scene = await cook('showcase'), landscape = await cook('level_out'), instances = await cook('demo_instances');
 const cookMs = performance.now() - t0;
 let tileSize = 0;
 if (tiles) {

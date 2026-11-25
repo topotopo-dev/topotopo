@@ -422,7 +422,7 @@ node src/cli.ts examples/machined_bracket.json --views front --size 1600x700 --u
 node src/cli.ts examples/market_street.json --inspect budget   # triangles per part, per LOD and per node
 node src/cli.ts examples/market_street.json --inspect scene   # what the glb export holds: nodes, sockets, materials, images
 node src/cli.ts examples/eroded_valley.json --output terrain --export out/terrain.png   # 16-bit heightmap + terrain.json (Unreal)
-node src/cli.ts examples/unreal_landscape.json --output level --format unreal_landscape --export out/level   # Landscape bundle
+node src/cli.ts examples/unreal_landscape.json --node level_out --format unreal_landscape --export out/level   # Landscape bundle
 node src/cli.ts examples/forest_on_terrain.json --output trees --export out/trees.csv --pcg   # instance rows + trees.meshes.json + trees_meshes/*.glb
 node src/cli.ts examples/forest_on_terrain.json --var seed=11 --var rock_density=0.8 --render out/forest.png   # vars for one run
 node src/cli.ts view examples/unreal_landscape.json   # live viewer at http://127.0.0.1:7341: node list, per-node geometry, re-cook on save
@@ -484,8 +484,9 @@ never cooked or still seen by Auto Reimport. See `--help-topic unreal` and the [
 
 The plugin reads CSV or `points.json` directly into PCG and provides a **TopoTopo Instance Spawner**. Use
 **Tools > Import TopoTopo scene** to import a bundle's meshes, instances and Landscape. Generate the
-`unreal_landscape` demo with `npm run export:demo`. The [plugin README](integrations/unreal/TopoTopo/README.md)
-covers setup, PCG and editor tests.
+`unreal_landscape` demo with `npm run export:demo`. If you use the example as a package, it publishes the landscape,
+road, trees and rocks separately. Place them together with **Place Terrain in Level** or `TopoTopo.PlaceTerrain`.
+The [plugin README](integrations/unreal/TopoTopo/README.md) covers setup, headless cooking and placement, PCG and editor tests.
 
 ## Godot 4.7
 

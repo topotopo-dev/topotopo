@@ -7,6 +7,8 @@
 
 class UAssetImportData;
 
+DECLARE_DELEGATE_RetVal_FourParams(bool, FTopoTopoPlaceLandscape, const FString&, const FString&, TSet<UPackage*>*, FString&);
+
 UENUM()
 enum class ETopoTopoInstanceMode : uint8
 {
@@ -132,6 +134,12 @@ public:
     /** Place the package's terrain outputs in the open level. */
     UFUNCTION(CallInEditor, Category = "TopoTopo")
     void PlaceTerrainInLevel();
+
+    bool HasTerrain() const;
+    void PlaceTerrain(bool bSave);
+
+    /** Bound by the scene importer, which also handles landscape bundle placement. */
+    static FTopoTopoPlaceLandscape ImportLandscapeBundle;
 
     virtual void PostInitProperties() override;
     virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;

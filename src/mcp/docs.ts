@@ -720,7 +720,7 @@ UNREAL LANDSCAPE: export {path: "exports/terrain.png"} (png16) or ".r16" writes 
   Tiles: pass the same height_min / height_max to every export.
   Whole scene: export {format: "unreal_landscape", path: "exports/level"} of a merge(heightfield, meshes, instances) →
   heightmap + every layer + landscape.json (the exact Landscape import settings and steps) + objects.glb + the instance
-  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). help {examples:["unreal_landscape"]} is a complete scene.`,
+  stream; help topic "export" (UNREAL LANDSCAPE BUNDLE). The unreal_landscape example's level_out node combines the four published parts for this export.`,
 
   textures: `PROCEDURAL TEXTURES AND BAKES (Substance Designer / Houdini COP style; category "texture")
 An image is a volume carried in the geometry (like a heightfield): a 2D grid of float pixels with named layers of 1
@@ -1394,7 +1394,10 @@ background and imports when the editor is free (Editor Preferences > Plugins > T
 cook, only steps whose files' hashes changed import, assets update where they are, instance actors in open levels rebuild. A failed
 output keeps its last good assets; the error is on the package asset and in Message Log > TopoTopo. An output no longer published
 leaves its assets; they are listed as orphans. Right-click the package asset: Reimport, Recook (everything again), Open in TopoTopo
-(the live viewer), Show Cook Report, Place Terrain in Level. The console command TopoTopo.CookAll [force] does every package.
+(the live viewer), Show Cook Report, Place Terrain in Level. TopoTopo.CookAll [force] [wait] imports missing package assets and cooks every package.
+TopoTopo.PlaceTerrain [package] [save] places terrain in the current level by asset name or path. Omit the package for all packages with terrain.
+The unreal_landscape example publishes the landscape, road, trees and rocks separately. Use level_out for the combined bundle:
+  topotopo examples/unreal_landscape.json --node level_out --format unreal_landscape --export out/level
 
 THE RECORD <package>/.topotopo/unreal.json (commit it with the .uasset files) is the same record as Godot's; a checkout without
 Saved/TopoTopo/ is still current.
@@ -1405,6 +1408,8 @@ folder whose outputs would make two assets of one name fails the second.
 AUTO REIMPORT skips folders named graphs, assets, inputs, exports, versions, packages, attachments, .topotopo or topotopo-packages
 anywhere under Content/ (the exclusions setup writes): a folder of yours with such a name is imported by hand.
 CI: topotopo unreal status <project> --strict exits 1 when a package is stale, failed or never cooked or Auto Reimport still sees its folders.
+OFFSCREEN: Build the Editor target first, then use UnrealEditor-Cmd.exe <project>.uproject <map> -unattended -nosplash -RenderOffscreen -ExecCmds="TopoTopo.CookAll wait,TopoTopo.PlaceTerrain <package> save,QUIT_EDITOR"
+Use QUIT_EDITOR to exit and -ExecCmds="py <file>" for Python. Edit the graph's vars block to change the result before the next launch.
 The plugin's contract (import steps, what differs from the cook for Godot): integrations/unreal/PROTOCOL.md.
 
 THE CLI COMMANDS:

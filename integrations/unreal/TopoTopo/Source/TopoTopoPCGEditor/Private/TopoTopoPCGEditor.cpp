@@ -30,6 +30,7 @@
 #include "TopoTopoStream.h"
 #include "TopoTopoAssetFolderPipeline.h"
 #include "TopoTopoLandscapeImport.h"
+#include "TopoTopoPackage.h"
 #include "TopoTopoTileInstances.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/Input/SButton.h"
@@ -417,6 +418,24 @@ class FTopoTopoPCGEditorModule : public IModuleInterface
 public:
     virtual void StartupModule() override
     {
+        UTopoTopoPackage::ImportLandscapeBundle.BindLambda([](const FString& Directory, const FString& Destination, TSet<UPackage*>* ToSave, FString& Message)
+        {
+            TopoTopoImport::FOptions Options;
+            Options.Directory = Directory;
+            Options.Destination = Destination;
+            Options.bLandscape = true;
+            if (!TopoTopoImport::Run(Options, Message)) { return false; }
+            if (ToSave)
+            {
+                TArray<FAssetData> Assets;
+                FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().GetAssetsByPath(FName(*Destination), Assets, true);
+                for (const FAssetData& Entry : Assets)
+                {
+                    if (UPackage* Package = FindPackage(nullptr, *Entry.PackageName.ToString())) { ToSave->Add(Package); }
+                }
+            }
+            return true;
+        });
         UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FTopoTopoPCGEditorModule::RegisterMenus));
         Command = MakeUnique<FAutoConsoleCommand>(TEXT("TopoTopo.ImportScene"),
             TEXT("TopoTopo.ImportScene \"absolute bundle directory\" /Game/TopoTopo/NewSet [landscape=0|1] [objects=0|1] [layers=0|1] [material=0|1] [lighting=0|1]. Imports into the current editor level, without saving."),
@@ -447,6 +466,7 @@ public:
 
     virtual void ShutdownModule() override
     {
+        UTopoTopoPackage::ImportLandscapeBundle.Unbind();
         Command.Reset();
         UToolMenus::UnRegisterStartupCallback(this);
         UToolMenus::UnregisterOwner(this);

@@ -8,7 +8,7 @@ export const UNREAL_COMMANDS: { usage: string; what: string }[] = [
   },
   {
     usage: 'unreal setup <unreal project folder or .uproject> [--no-enable]',
-    what: 'install and enable the TopoTopo plugin in Plugins/TopoTopo/. Setup removes earlier TopoTopo plugin installs, records the CLI location, configures Auto Reimport exclusions and updates .gitignore',
+    what: 'install and enable the TopoTopo plugin in Plugins/TopoTopo/. Setup removes earlier TopoTopo plugin installs, records the CLI location, configures Auto Reimport exclusions and updates .gitignore. Build the Editor target before running Unreal without a window',
   },
   {
     usage: 'unreal status <unreal project folder or .uproject> [--strict] [--json]',

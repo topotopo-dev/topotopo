@@ -8,15 +8,21 @@ class UTopoTopoPackage;
 
 namespace TopoTopo
 {
+    enum class ECookState { Cooked, Unchanged, Failed };
+
+    struct FCookResult
+    {
+        ECookState State;
+        FString Reason;
+    };
     /**
      * Carry out a finished cook: every step whose cooked files changed since they were imported, whose asset is missing, or
-     * all of them with bForce. A failed output keeps its last good assets. The package asset gets the outcome. True when
-     * every output is fine.
+     * all of them with bForce. A failed output keeps its last good assets. The package asset gets the outcome.
      */
-    bool ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FString& ReportFile, const FString& Errors, bool bForce);
+    FCookResult ApplyCook(UTopoTopoPackage* Package, int32 ExitCode, const FString& ReportFile, const FString& Errors, bool bForce);
 
     /** A cook that could not run: the reason goes on the asset and to the message log. */
-    void FailCook(UTopoTopoPackage* Package, const FString& Why);
+    FCookResult FailCook(UTopoTopoPackage* Package, const FString& Why);
 
     /** Open the import options the package's <id>.topo.import holds, if it has one. */
     void ReadImportOptions(UTopoTopoPackage* Package);
