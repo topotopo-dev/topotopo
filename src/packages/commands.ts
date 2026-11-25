@@ -352,7 +352,7 @@ export async function useCommand(argv: string[], prog: string, io: Io = consoleI
     const folder = last !== undefined && isDir(path.resolve(last)) ? a.rest.pop() : undefined;
     if (!a.rest.length) fail(usage);
     if (a.rest.some((name) => isDir(path.resolve(name)))) fail(`The folder must come after the package names.\n${usage}`);
-    const v = a.rest.find((x) => /^\d+(\.\d+)?$/.test(x));
+    const v = a.rest.slice(1).find((x) => /^\d+(\.\d+)?$/.test(x));
     if (v) versionGiven(v, `a version is named with --version, ${prog} use ${a.rest[0]} --version ${/^\d+$/.test(v) ? `${v}.0` : v}`);
     const { pk, close } = await usesOfPackage(packageOf(folder, prog), { restore: false });
     try {
