@@ -18,11 +18,11 @@ and trees and rocks as instances.
 - rocks (instances): rocks on the steep slopes, packed.
 - road (mesh): the road surface winding along the mountain's +Z flank in TopoTopo (+Y in Unreal).
 
-When using the graph in a package, run `topotopo use topotopo/nature` in the package folder. In Unreal, **Place Terrain in Level** places the four outputs together.
-To export the entire scene as one Landscape bundle, select the `level_out` node:
+`topotopo init --example unreal_landscape <folder>` makes it a package that uses `topotopo/nature`. In Unreal, **Place Terrain in Level** (or `TopoTopo.PlaceTerrain`) places the four outputs together.
+To export the entire scene as one Landscape bundle, select the `level_out` node, in the package folder:
 
 ```text
-topotopo examples/unreal_landscape.json --node level_out --format unreal_landscape --export out/level
+topotopo graphs/main.json --node level_out --format unreal_landscape --export out/level
 ```
 
 ## Promises

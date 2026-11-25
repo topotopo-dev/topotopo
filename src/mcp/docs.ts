@@ -1414,8 +1414,8 @@ output keeps its last good assets; the error is on the package asset and in Mess
 leaves its assets; they are listed as orphans. Right-click the package asset: Reimport, Recook (everything again), Open in TopoTopo
 (the live viewer), Show Cook Report, Place Terrain in Level. TopoTopo.CookAll [force] [wait] imports missing package assets and cooks every package.
 TopoTopo.PlaceTerrain [package] [save] places terrain in the current level by asset name or path. Omit the package for all packages with terrain.
-The unreal_landscape example publishes the landscape, road, trees and rocks separately. Use level_out for the combined bundle:
-  topotopo examples/unreal_landscape.json --node level_out --format unreal_landscape --export out/level
+The unreal_landscape example publishes the landscape, road, trees and rocks separately (topotopo init --example unreal_landscape <folder>
+makes it a package). Its level_out node makes the combined bundle: topotopo graphs/main.json --node level_out --format unreal_landscape --export out/level
 
 THE RECORD <package>/.topotopo/unreal.json (commit it with the .uasset files) is the same record as Godot's; a checkout without
 Saved/TopoTopo/ is still current.

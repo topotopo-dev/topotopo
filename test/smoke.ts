@@ -74,7 +74,7 @@ if (!filter) {
   const basic = path.join(dir, 'box.json');
   fs.writeFileSync(basic, JSON.stringify({ nodes: { b: box }, output: 'b' }));
   const help = cli('--help'), opening = help.stdout.split(/\r?\n/).slice(0, 8).join('\n');
-  check(help.status === 0 && /init/.test(opening) && /--help-topic examples/.test(opening) && /--help-example/.test(opening)
+  check(help.status === 0 && /init/.test(opening) && /--help-topic examples/.test(opening) && /init --example/.test(opening)
     && /--render/.test(opening) && /--export/.test(opening) && /\bedit\b/.test(opening) && /\bmcp\b/.test(opening),
   '--help starts with the first job', opening);
   const alias = cli('--help-node', 'heightfield_road');

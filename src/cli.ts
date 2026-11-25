@@ -139,9 +139,8 @@ if (['-v', '-V', '--version'].includes(argv[0] ?? '')) {
 if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
   console.log([
     'First job',
-    `  ${prog} init parts    Make a package for your graphs and the packages they use.`,
-    `  ${prog} --help-topic examples    Find a graph to try.`,
-    `  ${prog} --help-example <name>    Copy its graph JSON to parts/graphs/main.json.`,
+    `  ${prog} --help-topic examples    Find an example to start from.`,
+    `  ${prog} init --example <name> parts    Make a package from it (or init parts for an empty one).`,
     `  ${prog} parts/graphs/main.json --render preview.png`,
     `  ${prog} parts/graphs/main.json --export part.glb`,
     `  ${prog} edit parts    Open the package in the editor.`,
@@ -259,6 +258,8 @@ if (argv.includes('--help-example')) {
   const text = exampleText(name!);
   if (text.startsWith('unknown example')) fail(text);
   console.log(text);
+  console.log(`
+To start a package from it: ${prog} init --example ${name} <folder>`);
   process.exit(0);
 }
 if (argv.includes('--catalog') || opt('--help-node')) {

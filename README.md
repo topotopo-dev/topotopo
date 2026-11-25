@@ -76,9 +76,8 @@ Requires Node ≥ 22.18.
 
 ```bash
 npx topotopo --help                                         # first job and full command reference
-npx topotopo init parts                                     # make a package before using built-in packages
-npx topotopo --help-topic examples                          # find a graph to try
-npx topotopo --help-example machined_bracket                # copy its graph JSON to parts/graphs/main.json
+npx topotopo --help-topic examples                          # find an example to start from
+npx topotopo init --example machined_bracket parts          # a package made from it (init parts: an empty one)
 npx topotopo --catalog                                      # node types by category
 npx topotopo --help-node heightfield_road                   # node help also accepts aliases
 npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
