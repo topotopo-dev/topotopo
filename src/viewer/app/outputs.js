@@ -8,6 +8,7 @@
 import { createImageView } from './image-view.js';
 import { fmtBytes } from './units.js';
 import { exportPopover, defaultPath, downloadSpec, filenameOf, inFolder } from './export-popover.js';
+import { exportNotice } from './status.js';
 import { kindLine, detailLine, kindBadge, kindTagsLine, liveText, layerChoices, shownLayer, detailChoices, PREVIEW_RES } from './output-info.js';
 import { inputImageURL } from './layers.js';
 import { progressLine, waitLine } from './cooking.js';
@@ -169,28 +170,29 @@ export function createOutputPanel(ctx) {
     if (change || !item.target) {
       choice = await exportPopover({ anchor: button, item, formats, directory });
       if (!choice) return;
+      if (choice.download) return downloadItem(item, button, choice.format);
     }
     busy = true; render();
     ctx.message(`exporting ${item.label}…`, 'busy');
     try {
       const j = await exportWithConfirmation('export', { id: item.id, ...(choice ? { export: targetSpec(item, choice, formats) } : {}) });
       if (!j) return;
-      ctx.message(`exported ${item.label} → ${j.file ?? 'exports/' + j.path}${j.files > 1 ? ` (${j.files} files)` : ''}${j.warnings?.length ? ' · ' + j.warnings.join('; ') : ''}`, j.warnings?.length ? 'err' : 'ok', 7000);
+      showExport(exportNotice(j));
     } catch (e) { ctx.message(e.message, 'err', 10000); }
     finally { busy = false; await P.refresh(); render(); }
   }
   /** A card's Download: a published output in a format of choice, a texture as a PNG, a saved file as it is. */
-  async function downloadItem(item, button) {
+  async function downloadItem(item, button, format) {
     if (!item.exportable) {
       if (item.generated && item.view === 'image') save(url('image', item, { mode: 'RGBA', download: '1' }), item.label + '.png');
       else if (item.download) save(item.download.zip ? url('zip', item) : url('file', item, { download: '1' }), item.download.name);
       return;
     }
-    const choice = await exportPopover({ anchor: button, item, formats, directory, mode: 'download' });
-    if (!choice) return;
+    const chosen = format ?? (await exportPopover({ anchor: button, item, formats, directory, mode: 'download' }))?.format;
+    if (!chosen) return;
     ctx.message(`preparing the download of ${item.label}…`, 'busy');
     try {
-      const r = await fetch('/api/output/download', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: item.id, export: downloadSpec(item, choice.format) }) });
+      const r = await fetch('/api/output/download', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: item.id, export: downloadSpec(item, chosen) }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `download failed (${r.status})`);
       const blob = await r.blob(), name = filenameOf(r.headers.get('content-disposition')) ?? `${item.label}.zip`, n = Number(r.headers.get('x-file-count') ?? 1);
       const href = URL.createObjectURL(blob);
@@ -203,14 +205,20 @@ export function createOutputPanel(ctx) {
     catch (e) { ctx.message(e.message, 'err', 10000); }
     await P.refresh();
   }
+  const showExport = ({ text, kind, warnings }) => ctx.message(text, kind, 7000, undefined, warnings);
   all.onclick = async () => {
     if (busy) return;
     busy = true; render(); ctx.message('exporting all outputs with a target…', 'busy');
     try {
       const j = await exportWithConfirmation('export-all', {});
       if (!j) return;
-      const warnings = j.written.flatMap((w) => w.warnings ?? []);
-      ctx.message(`exported ${j.written.length} output${j.written.length === 1 ? '' : 's'} into ${directory}${j.skipped.length ? ` · ${j.skipped.length} without a target (their Export button sets one)` : ''}${warnings.length ? ' · ' + warnings.join('; ') : ''}`, warnings.length ? 'err' : 'ok', 8000);
+      const [first, ...rest] = j.written;
+      const skipped = j.skipped.length ? ` · ${j.skipped.length} without a target (their Export button sets one)` : '';
+      if (first) showExport(exportNotice({
+        file: inFolder(directory, first.path), warnings: j.written.flatMap((w) => w.warnings ?? []),
+        extra: `${rest.length ? ` and ${rest.length} more output${rest.length === 1 ? '' : 's'}` : ''}${skipped}`,
+      }));
+      else ctx.message(`No outputs were exported${skipped}`);
     } catch (e) { ctx.message(e.message, 'err', 10000); }
     finally { busy = false; await P.refresh(); render(); }
   };

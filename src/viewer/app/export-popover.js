@@ -31,10 +31,13 @@ export function inFolder(folder, p) {
  * without it said), and a path stays inside exports/.
  */
 export function exportPathError(p) {
+  p = p.replace(/\\/g, '/');
   if (p.startsWith(GONE)) return `the "${GONE}" prefix is gone: write the path inside exports/ ("${p.slice(GONE.length)}")`;
-  if (!p || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').some((s) => !s || s === '.' || s === '..')) return 'a path inside exports/, without ".." or a drive';
+  if (p.startsWith('/') || /^[A-Za-z]:/.test(p)) return SAVE_COPY;
+  if (!p || p.split('/').some((s) => !s || s === '.' || s === '..')) return 'a path inside exports/, without ".." or a drive';
   return '';
 }
+const SAVE_COPY = 'To save a copy anywhere else, use Download. It saves where your browser saves files.';
 /** The export path prefix that is gone (io/targets.ts), kept only to refuse it. */
 const GONE = 'engine' + ':';
 
@@ -93,7 +96,8 @@ export function filenameOf(header) {
 /**
  * Open the popover under `anchor`. item: an output entry (label, graph, output, target, formats); formats: every format
  * [{format, label, extension}] from /api/outputs; directory: the exports folder; mode "export" (a format and a file in
- * exports/) or "download" (a format). Resolves to {format, path} (export) or {format} (download), or null (cancelled).
+ * exports/) or "download" (a format). Resolves to {format, path}, {format, download: true} from the file field's
+ * Download button, {format} from the Download popover, or null (cancelled).
  */
 export function exportPopover({ anchor, item, formats, directory, mode = 'export' }) {
   document.querySelector('.export-popover')?.dispatchEvent(new Event('cancel'));
@@ -119,6 +123,10 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     const where = el('div', 'export-where dim');
     const error = el('div', 'export-error err');
     const cancel = el('button', '', 'Cancel'), go = el('button', 'primary', download ? 'Download' : 'Export');
+    const copy = el('button', '', 'Download'); copy.type = 'button';
+    const hint = el('div', 'export-copy dim');
+    const [before, after] = SAVE_COPY.split('Download');
+    hint.append(before, copy, after);
     cancel.type = 'button'; go.type = 'submit';
     const field = (label, input) => { const l = el('label', 'export-field'); l.append(el('span', 'dim', label), input); return l; };
     const actions = el('div', 'export-actions'); actions.append(cancel, go);
@@ -129,7 +137,7 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     else box.append(el('div', 'export-writes err', item.kind === 'volume'
       ? 'no format writes an SDF volume of functions: sdf_to_mesh makes it a mesh to export'
       : 'no format writes this output: it holds nothing to export'));
-    if (!download && offered.length) box.append(field('File', file), where);
+    if (!download && offered.length) box.append(field('File in exports/', file), where, hint);
     box.append(error, actions);
     go.disabled = !offered.length;
     let previous = format.value;
@@ -139,7 +147,9 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
       writes.textContent = writesLine(f, download);
       writes.classList.toggle('err', !!f?.misfit);
       writes.classList.toggle('part', !!f?.leaves?.length);
-      where.textContent = download ? '' : inFolder(directory, file.value.trim() || '…');
+      const p = file.value.trim();
+      where.textContent = download || (p && exportPathError(p)) ? '' : inFolder(directory, p || '…');
+      copy.disabled = !item.formats?.some((option) => option.format === format.value);
       if (download && f) go.textContent = `Download ${downloadName(item, f)}`;
       error.textContent = '';
     };
@@ -149,6 +159,7 @@ export function exportPopover({ anchor, item, formats, directory, mode = 'export
     const outside = (e) => { if (!box.contains(e.target)) close(null); };
     box.addEventListener('cancel', () => close(null));
     cancel.onclick = () => close(null);
+    copy.onclick = () => close({ format: format.value, download: true });
     box.onkeydown = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
     box.onsubmit = (e) => {
       e.preventDefault();

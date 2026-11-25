@@ -22,6 +22,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createPackage } from '../src/web/library.ts';
+import { BUILTIN_LIBRARY } from '../src/config.ts';
 import type { WebConfig } from '../src/config.ts';
 import { startWeb, runningWeb } from '../src/web/server.ts';
 import type { WebServer } from '../src/web/server.ts';
@@ -94,6 +95,32 @@ const page = async (p: string, port = g.port): Promise<Res & { url: string }> =>
 };
 
 try {
+  section('the installed built-in library');
+  {
+    const source = BUILTIN_LIBRARY.path;
+    const installed = path.join(tmp, 'installed', 'library');
+    const nature = path.join(installed, 'nature');
+    fs.cpSync(path.join(source, 'nature', 'versions'), path.join(nature, 'versions'), { recursive: true });
+    // A release has no working manifest. Stage the thumbnails separately so this also exercises serving them.
+    fs.cpSync(path.join(source, 'nature', 'thumbs'), path.join(nature, 'thumbs'), { recursive: true });
+    BUILTIN_LIBRARY.path = installed;
+    try {
+      f = await startWeb({ config: { ...cfg, libraries: [], workspaces: [] }, port: 0, bake: false, auditWait: 60_000 });
+      const home = (await reqAt(f.port, '/')).body.toString();
+      const search = /href="([^"]+)" data-key="topotopo\/nature"[\s\S]*?data-hay="topotopo\/nature\/tree_lowpoly/.exec(home);
+      const found = search && await page(search[1], f.port);
+      const version = await page('/l/topotopo/nature/versions/1.0/', f.port);
+      check(found?.status === 200 && /<h1>Nature<\/h1>/.test(found.body.toString())
+        && /<img class="othumb" src="\/p\/topotopo\/nature\/thumbs\/tree_lowpoly\.png"/.test(found.body.toString())
+        && /Use in a new package/.test(found.body.toString()) && !/Open in editor|data-post="[^"]*bake"/.test(found.body.toString()),
+        `the search link for tree_lowpoly opens a read-only built-in package page with previews (${found?.url})`);
+      check(version.url === found?.url && !version.body.includes('none of the packages of the library'),
+        `a published version folder leads to its built-in package page (${version.url}${version.body.includes('none of the packages of the library') ? ': none of the packages of the library' : ''})`);
+      const thumb = await reqAt(f.port, '/p/topotopo/nature/thumb.png');
+      check(thumb.status === 200 && thumb.body.length > 1000, 'the search card serves the packaged thumbnail when it is present');
+    } finally { f?.close(); f = null; BUILTIN_LIBRARY.path = source; }
+  }
+
   section('the running bar and the status');
   {
     const res = await req('/api/status');

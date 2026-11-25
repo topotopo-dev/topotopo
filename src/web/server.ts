@@ -11,6 +11,7 @@
 // package or workspace, which it lists for its run when the config does not (src/host/open.ts).
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
@@ -23,7 +24,7 @@ import { MIME, appDir, threeDir } from '../viewer/server.ts';
 import { bakeKey, webDir, listFiles, placeNamed, readBakeState, scanAll, scanLibrary } from './library.ts';
 import { BUILTIN_LIBRARY, loadConfig } from '../config.ts';
 import { readWorkspace, engineFile } from '../workspace.ts';
-import { VERSION_RE, WORKSPACE_PACKAGES, locate, manifestAt, packageDirOf, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
+import { VERSION_RE, WORKSPACE_PACKAGES, initPackage, locate, manifestAt, oldWorkspace, packageDirOf, slugify, workspaceAt, workspaceFilePath } from '../package.ts';
 import type { WorkspaceManifest } from '../workspace.ts';
 import { folderKey, forgetScans, forgetScansOf, scanSingle, scanTree, unscanned } from '../scan.ts';
 import { engineTypeOf } from '../engines.ts';
@@ -33,12 +34,13 @@ import type { LibraryRef, WebConfig } from '../config.ts';
 import { builtinLibrary, compareVersions, copyRecord, isDefaultOutput, publishedVersions, startsBigVersion, workingHash } from '../packages/registry.ts';
 import type { VersionInfo } from '../packages/registry.ts';
 import { engineSha256 } from '../host/engine-code.ts';
+import { webPort } from '../host/open.ts';
 import { isPublishedCopy } from '../host/godot.ts';
 import { CACHE_MAX_BYTES, cacheClear, cacheRoot, cacheUsage } from '../host/cook.ts';
 import { NODE_CACHE_MAX_BYTES, clearNodeCache, nodeCacheFolder, nodeCacheUsage } from '../host/diskcache.ts';
 import { TOPOTOPO_VERSION, fetchLatestVersion, isNewerVersion } from '../host/version.ts';
 import { BakeQueue } from './bake.ts';
-import { editorPage, embedPage, esc, folderBakeWords, frontPage, importMap, modelPage, previewPlaceholder, previewsPage, previewSummary, previewView, runningWords, shell, count, storagePage } from './pages.ts';
+import { editorPage, embedPage, esc, folderBakeWords, frontPage, importMap, modelPage, newPackagePage, openErrorPage, previewPlaceholder, previewsPage, previewSummary, previewView, runningWords, shell, count, storagePage } from './pages.ts';
 import type { CardData, OutputRow, PackageData, PreviewItem, PreviewsData, RootCardData, Urls, UserRow } from './pages.ts';
 import { PICTURE_STRIP, folderPage } from './folder-page.ts';
 import type { FileItem, FolderCard, FolderPageData, NoteBox } from './folder-page.ts';
@@ -139,7 +141,7 @@ async function packageStorage(listed: Package[]) {
 }
 
 export interface WebOptions {
-  /** default: the config's web.port (7340); 0 picks a free port (tests) */
+  /** default: the config's web.port (7340); TOPOTOPO_WEB_PORT overrides it; 0 picks a free port */
   port?: number;
   config?: WebConfig;
   /** bake packages whose previews are missing or stale (default true) */
@@ -189,6 +191,8 @@ const firstLine = (s: string | undefined) => { const l = (s ?? '').trim().split(
 
 export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const cfg = o.config ?? loadConfig();
+  const requestedPort = o.port ?? cfg.web.port;
+  const port = webPort(requestedPort);
   const log = o.log ?? (() => {});
   const bakeOn = o.bake ?? true;
   const storage = { nodes: o.storage?.nodes ?? nodeCacheFolder(), cooks: o.storage?.cooks ?? cacheRoot() };
@@ -208,7 +212,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
    * The built-in library's packages, by folder: where their graphs are read (the working folder in TopoTopo's
    * repository, else the newest version) and the output whose thumbnail stands for each.
    */
-  const builtinAt = new Map<string, { from: string; thumb: string | null }>();
+  const builtinAt = new Map<string, { from: string; thumb: string | null; versions: VersionInfo[] }>();
   /** TopoTopo's built-in library as a library: its packages' manifests from their working folders or newest versions */
   const scanBuiltin = (): LibraryScan => {
     builtinAt.clear();
@@ -216,7 +220,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     for (const b of list) {
       const newest = b.versions.at(-1);
       const thumb = newest ? Object.keys(newest.outputs).find((x) => fs.existsSync(path.join(b.dir, 'thumbs', `${x}.png`))) ?? null : null;
-      builtinAt.set(b.dir, { from: b.from, thumb });
+      builtinAt.set(b.dir, { from: b.from, thumb, versions: b.versions });
     }
     return {
       name: BUILTIN_LIBRARY.name, root: BUILTIN_LIBRARY.path, problems: [], workspaces: [],
@@ -567,6 +571,13 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     singles.push({ name, dir });
     addScan(scan);
   };
+  /** Installed packages keep their manifests in versions/. Those folders share the built-in package's page. */
+  const builtinVersionAt = (dir: string) => {
+    const parent = path.dirname(dir);
+    if (path.basename(parent).toLowerCase() !== 'versions') return;
+    const p = byDir.get(folderKey(path.dirname(parent)));
+    if (p && builtinAt.get(p.dir)?.versions.some((v) => v.version === path.basename(dir))) return p;
+  };
   /** The page of a package folder or a workspace folder, listed first when it is not. */
   const openPage = (kind: 'package' | 'workspace', dir: string): string => {
     if (kind === 'workspace') {
@@ -585,6 +596,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       if (ws && rel[0]?.toLowerCase() === WORKSPACE_PACKAGES)
         throw new HttpError(409, `${dir} is a copy of ${rel[1] && rel[2] ? `${rel[1]}/${rel[2]}` : 'a package'} that the workspace "${wsName}" uses (its ${WORKSPACE_PACKAGES} folder), which has no page: open the package itself, in the folder of the workspace or library that holds it`);
       if (copy) {
+        const builtin = builtinVersionAt(copy);
+        if (builtin) return pageOf(builtin);
         const parent = path.dirname(copy), source = path.dirname(parent), version = path.basename(copy);
         if (path.basename(parent).toLowerCase() === 'versions' && VERSION_RE.test(version)) {
           const original = manifestAt(source);
@@ -614,6 +627,60 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     }
     if (!p) throw new HttpError(409, `${dir} is a package the web app cannot list (another package there uses its id, or its manifest cannot be read): see its folder page`);
     return pageOf(p);
+  };
+
+  // Local open requests carry only a random page address back to the browser. The details stay here.
+  const openPages = new Map<string, { dir: string } | { error: string }>();
+  const rememberOpenPage = (p: { dir: string } | { error: string }) => {
+    if (openPages.size >= 100) openPages.delete(openPages.keys().next().value!);
+    const token = crypto.randomUUID();
+    openPages.set(token, p);
+    return `/open/${token}`;
+  };
+
+  /** Check the existing ancestor too, so a link to the built-in library cannot be used to write into it. */
+  const checkPackageLocation = (dir: string) => {
+    let ancestor = dir;
+    while (path.dirname(ancestor) !== ancestor && !fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
+    if (!fs.existsSync(BUILTIN_LIBRARY.path)) return;
+    const relative = path.relative(fs.realpathSync.native(BUILTIN_LIBRARY.path), fs.realpathSync.native(ancestor));
+    if (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+      throw new HttpError(400, 'Choose a folder outside the built-in library.');
+    }
+  };
+
+  const makePackage = (ask: { folder?: unknown; name?: unknown; parent?: unknown } | null) => {
+    let dir: string;
+    let createdFolder = false;
+    if (typeof ask?.folder === 'string') {
+      const pending = openPages.get(ask.folder);
+      if (!pending || !('dir' in pending) || !isDir(pending.dir)) throw new HttpError(404, 'Open the folder again to make it a package.');
+      dir = pending.dir;
+      if (workspaceAt(dir) || oldWorkspace(dir)) throw new HttpError(400, 'This folder is a workspace. Choose a different folder for the package.');
+      checkPackageLocation(dir);
+    } else {
+      const name = typeof ask?.name === 'string' ? ask.name.trim() : '';
+      const parent = typeof ask?.parent === 'string' ? ask.parent.trim() : '';
+      if (!slugify(name) || /[<>:"/\\|?*\x00-\x1f]|\.$/.test(name)) throw new HttpError(400, 'Enter a folder name with letters or digits and no slashes or other reserved characters.');
+      if (!path.isAbsolute(parent)) throw new HttpError(400, 'Enter the full path of the parent folder.');
+      dir = path.join(parent, name);
+      checkPackageLocation(dir);
+      if (packageDirOf(parent)) throw new HttpError(400, 'Choose a parent folder outside any existing package.');
+      fs.mkdirSync(parent, { recursive: true });
+      try { fs.mkdirSync(dir); } catch (e: any) {
+        if (e?.code === 'EEXIST') throw new HttpError(409, 'That name is already taken in this parent folder. Choose another name.');
+        throw e;
+      }
+      createdFolder = true;
+    }
+    try { initPackage(dir); }
+    catch (e) {
+      if (createdFolder) try { fs.rmdirSync(dir); } catch { /* keep anything that was written */ }
+      throw e;
+    }
+    openPage('package', dir);
+    const p = byDir.get(folderKey(dir))!;
+    return urls.edit(p.lib, p.id);
   };
 
   // ---------------------------------------------------------------- editors
@@ -1007,8 +1074,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     const audit = await shownAudit(r), wait = waitOf(r, audit);
     const engines = audit?.walk.engines ?? [];
     const engineAt = engines.find((e) => rel === e || rel.startsWith(e + '/'));
-    const found = listing.topo.length ? byDir.get(folderKey(abs)) : undefined;
-    const p = found && !publishedPackage(found) ? found : null;
+    const found = byDir.get(folderKey(abs));
+    const p = found && (isBuiltin(found) || (listing.topo.length && !publishedPackage(found))) ? found : null;
     const name = rel ? rel.split('/').pop()! : r.name;
     const crumbs = [{ name: r.name, url: urls.folder(r.kind, r.name, '') }, ...rel.split('/').filter(Boolean).map((s, i, a) => ({ name: s, url: urls.folder(r.kind, r.name, a.slice(0, i + 1).join('/')) }))];
     // a .topo here that is none of the tree's packages: why the scan leaves it out
@@ -1035,7 +1102,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       return { name: n.name, id: noteId(n.name), url: urls.raw(r.kind, r.name, n.rel), html: h.html, long: h.long, ...(n.name === askedNote ? { asked: true } : {}) };
     });
     const unboxed = ranked.filter((n) => !boxed.has(n.name));
-    const folders: FolderCard[] = listing.folders.map((f) => {
+    const folders: FolderCard[] = listing.folders.filter((f) => !(p && isBuiltin(p) && f.name === 'versions')).map((f) => {
       const fabs = path.join(abs, f.name);
       const url = urls.folder(r.kind, r.name, f.rel);
       if (f.engine) return { name: f.name, url, kind: 'engine', title: f.engine.title, sub: `${f.engine.type === 'godot' ? 'Godot' : 'Unreal'} project`, ...(f.image ? { thumb: urls.raw(r.kind, r.name, f.image) } : {}), flags: 0, packages: 0 };
@@ -1177,6 +1244,17 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           problems: libraryScans().filter((s) => s.name !== BUILTIN_LIBRARY.name && !fs.existsSync(s.root)).map((s) => `library "${s.name}": no folder ${s.root}`),
         }, urls));
       }
+      if (u.pathname === '/new-package') {
+        if (write) throw new HttpError(405, 'GET');
+        const use = packages.get(`${BUILTIN_LIBRARY.name}/${u.searchParams.get('use')}`)?.manifest.name;
+        return html(newPackagePage(urls, { parent: path.join(os.homedir(), 'Documents', 'TopoTopo'), use }));
+      }
+      if (seg[0] === 'open' && seg.length === 2) {
+        if (write) throw new HttpError(405, 'GET');
+        const p = openPages.get(seg[1]);
+        if (!p) return html(openErrorPage(urls, 'This link has expired.'), false, 404);
+        return 'error' in p ? html(openErrorPage(urls, p.error), false, 400) : html(newPackagePage(urls, { dir: p.dir, token: seg[1] }));
+      }
       if (u.pathname === '/storage') {
         if (write) throw new HttpError(405, 'GET');
         return html(storagePage(urls, { nodes: { dir: storage.nodes, limit: NODE_CACHE_MAX_BYTES }, cooks: { dir: storage.cooks, limit: CACHE_MAX_BYTES } }));
@@ -1228,8 +1306,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       }
       const storageAction = u.pathname === '/api/storage/clear' || u.pathname === '/api/storage/reveal';
       const bakeAction = u.pathname === '/api/bakes';
+      const packageAction = u.pathname === '/api/package/new';
       if (bakeAction && !write) return json(200, bakeData());
-      if (u.pathname === '/api/open' || u.pathname === '/api/stop' || storageAction || bakeAction) {
+      if (u.pathname === '/api/open' || u.pathname === '/api/stop' || storageAction || bakeAction || packageAction) {
         // what only the program that starts the web app (and the page's own button) asks: a POST with a header that a page
         // of another origin cannot send without a preflight, which is refused (the Host and Origin checks above apply too)
         if (req.method !== 'POST') throw new HttpError(405, 'POST');
@@ -1270,14 +1349,22 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           return;
         }
         if (stopRequested) throw new HttpError(503, 'this web app is stopping: open the file again in a moment');
-        // `topotopo open`: the page of a package or workspace, which the web app lists for this run when the config does not
+        // `topotopo open`: the page of a package, workspace or folder, which the web app can list for this run
         // (nothing is written to the config). The program tells its version and engine code: when they are not this web
         // app's, every page says so (changedSince)
         let ask: any;
-        try { ask = JSON.parse(text); } catch { throw new HttpError(400, 'a JSON body {"kind", "dir"} is expected'); }
-        if ((ask?.kind !== 'package' && ask?.kind !== 'workspace') || typeof ask.dir !== 'string') throw new HttpError(400, 'a JSON body {"kind": "package" | "workspace", "dir": folder} is expected');
-        if ((typeof ask.version === 'string' && ask.version !== TOPOTOPO_VERSION) || (typeof ask.engine === 'string' && ask.engine !== engine)) changedSince = true;
-        return json(200, { url: openPage(ask.kind, path.resolve(ask.dir)) });
+        try { ask = JSON.parse(text); } catch { throw new HttpError(400, 'A JSON request is required.'); }
+        if (packageAction) return json(200, { url: makePackage(ask) });
+        if ((typeof ask?.version === 'string' && ask.version !== TOPOTOPO_VERSION) || (typeof ask?.engine === 'string' && ask.engine !== engine)) changedSince = true;
+        if (ask?.kind === 'error' && typeof ask.error === 'string') return json(200, { url: rememberOpenPage({ error: ask.error }) });
+        if ((ask?.kind !== 'package' && ask?.kind !== 'workspace' && ask?.kind !== 'folder') || typeof ask.dir !== 'string') throw new HttpError(400, 'Choose a package, workspace or folder to open.');
+        const dir = path.resolve(ask.dir);
+        if (ask.kind === 'folder') {
+          if (!isDir(dir)) throw new HttpError(404, `${dir} does not exist`);
+          const p = byDir.get(folderKey(dir));
+          return json(200, { url: p ? pageOf(p) : rememberOpenPage({ dir }) });
+        }
+        return json(200, { url: openPage(ask.kind, dir) });
       }
       if (u.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
@@ -1329,7 +1416,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
           if (req.method === 'POST' && u.searchParams.has('reveal')) { reveal(found.abs); return json(200, { ok: true }); }
           // a folder's address ends with a slash, in the letter case on disk
           if (!slash || found.rel !== found.parts.join('/')) return redirect(301, `${urls.folder(r.kind, r.name, found.rel)}${u.search}`);
-          if (r.builtin) refreshBuiltin();
+          if (r.builtin) {
+            refreshBuiltin();
+            const published = builtinVersionAt(found.abs);
+            if (published) return redirect(302, pageOf(published));
+          }
           const asked = u.searchParams.get('note');
           return html(folderPage(await folderData(r, found.rel, found.abs, asked && kindOf(asked) === 'note' && !/[\\/]/.test(asked) ? asked : null, u.searchParams.get('copy')), urls));
         }
@@ -1430,14 +1521,23 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     }
   });
 
-  for (const p of packages.values()) bakeIfStale(p);
-  const port = o.port ?? cfg.web.port;
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => resolve());
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => resolve());
+    });
+  } catch (e) {
+    clearInterval(periodic);
+    for (const w of watchers) w.close();
+    queue.close();
+    if ((e as NodeJS.ErrnoException).code === 'EADDRINUSE' && port !== requestedPort) {
+      throw new Error(`Port ${port} is already in use. Set TOPOTOPO_WEB_PORT to a free port.`);
+    }
+    throw e;
+  }
   const actual = (server.address() as any).port as number;
   base = `http://127.0.0.1:${actual}`;
+  for (const p of packages.values()) bakeIfStale(p);
   const keepAlive = setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000);
   keepAlive.unref();
   // the audits of the trees, made now so that the first page does not wait for them

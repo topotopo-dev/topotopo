@@ -1,4 +1,4 @@
-// `topotopo open [<file|folder>]`: open a package (<id>.topo) or a workspace (<name>.topows) in the browser, the command
+// `topotopo open [<file|folder>]`: open a package, workspace or folder in the browser, the command
 // a double-clicked file runs (launcher/, which has no timeout: all the waits share one deadline, 75 seconds, and a
 // failure is one plain sentence on stderr with exit code 1). `topotopo open --stop` stops the web app it started.
 //   - A web app of this user is found through a lock file, <TopoTopo folder>/web.lock: {"port": 7340, "pid": 1234}. The
@@ -14,7 +14,8 @@
 //   - Without one, the web app starts detached, silent and windowless (`topotopo web`, src/web/server.ts), with the
 //     TopoTopo folder as its working folder and its output in <TopoTopo folder>/web.log. It stays up to be reused.
 //   - The web app is asked for the page (POST /api/open): it lists the package or workspace for its run when the config
-//     does not (nothing is written to the config), and answers the address of the page.
+//     does not (nothing is written to the config), and answers the address of the page. Empty folders and file errors
+//     get their own pages. A file error still exits with a sentence on stderr and code 1.
 //   - The default browser opens on that address and `open` ends. $TOPOTOPO_BROWSER_LOG names a file that the address is
 //     appended to instead (scripts and tests: no window opens).
 //   - `open --stop` asks the web app to stop (POST /api/stop: bakes finish, editors end, the process leaves) and waits for
@@ -50,6 +51,15 @@ export const topotopoHome = () => path.resolve(process.env.TOPOTOPO_HOME ?? path
 /** The lock file of the web app `open` starts and reuses. */
 export const lockFile = (home = topotopoHome()) => path.join(home, 'web.lock');
 
+/** The web app's port override. The editor uses TOPOTOPO_PORT separately. */
+export function webPort(fallback: number): number {
+  const value = process.env.TOPOTOPO_WEB_PORT?.trim();
+  if (!value) return fallback;
+  const port = Number(value);
+  if (!/^\d+$/.test(value) || port > 65535) throw new Error('Set TOPOTOPO_WEB_PORT to a port number from 0 to 65535.');
+  return port;
+}
+
 export interface OpenOptions {
   /** the person's TopoTopo folder (default: topotopoHome()) */
   home?: string;
@@ -76,13 +86,13 @@ class Deadline {
   }
 }
 
-/** What was asked for: a package's or a workspace's folder, or nothing (the home page). */
-export type Target = { kind: 'package' | 'workspace'; dir: string; what: string } | { kind: 'home' };
+/** What was asked for: a package, a workspace, a folder to initialize, or the home page. */
+export type Target = { kind: 'package' | 'workspace' | 'folder'; dir: string; what: string } | { kind: 'home' };
+type PageRequest = Exclude<Target, { kind: 'home' }> | { kind: 'error'; error: string };
 
 /**
  * The package or workspace a file or folder names. A .topo or .topows file is itself; a folder is the package or
- * workspace it holds. Throws one sentence for a path that is not there, a file of another kind, and a folder that
- * holds neither (or both, or two of a kind).
+ * workspace it holds, or a folder to initialize. Throws for missing paths, other kinds of file and ambiguous folders.
  */
 export function resolveTarget(given: string | undefined): Target {
   if (given === undefined) return { kind: 'home' };
@@ -95,11 +105,14 @@ export function resolveTarget(given: string | undefined): Target {
     if (name.endsWith(WORKSPACE_EXT) && name.length > WORKSPACE_EXT.length) { workspaceAt(dir); return { kind: 'workspace', dir, what: name }; }
     throw new Error(`${abs} is neither a package (${MANIFEST_EXT}) nor a workspace (${WORKSPACE_EXT}) file`);
   }
+  if (!stat.isDirectory()) throw new Error(`${abs} is not a file or folder`);
   const pkgs = topoFiles(abs), wss = topowsFiles(abs);
   if (pkgs.length && wss.length) throw new Error(`${abs} holds both ${pkgs[0]} and ${wss[0]}: open the file you mean`);
   if (pkgs.length) { manifestAt(abs); return { kind: 'package', dir: abs, what: pkgs[0] }; }
   if (wss.length) { workspaceAt(abs); return { kind: 'workspace', dir: abs, what: wss[0] }; }
-  throw new Error(oldWorkspace(abs) ?? oldManifest(abs) ?? `${abs} holds no ${MANIFEST_EXT} or ${WORKSPACE_EXT} file`);
+  const old = oldWorkspace(abs) ?? oldManifest(abs);
+  if (old) throw new Error(old);
+  return { kind: 'folder', dir: abs, what: abs };
 }
 
 // ------------------------------------------------------------------------------------------------------- the web app
@@ -185,14 +198,17 @@ function freePort(preferred: number): Promise<number> {
 /** Start the web app detached, silent and windowless; resolves once it answers, with its lock written. */
 async function startServer(home: string, lockPath: string, o: OpenOptions, dl: Deadline): Promise<Lock> {
   fs.mkdirSync(home, { recursive: true });
-  const port = await freePort(loadConfig().web.port);
+  const port = await freePort(webPort(loadConfig().web.port));
   const logFile = path.join(home, 'web.log');
   const fd = fs.openSync(logFile, 'w');
   let exited: number | null | undefined;
   let child;
   try {
     // the web app's working folder is the TopoTopo folder: never the folder of what is being opened
-    child = spawn(process.execPath, [cli, 'web', '--port', String(port)], { cwd: home, detached: true, windowsHide: true, stdio: ['ignore', fd, fd] });
+    const env = { ...process.env };
+    // The explicit port is already resolved. In particular, keep the fallback when the override was occupied.
+    delete env.TOPOTOPO_WEB_PORT;
+    child = spawn(process.execPath, [cli, 'web', '--port', String(port)], { cwd: home, env, detached: true, windowsHide: true, stdio: ['ignore', fd, fd] });
   } finally { fs.closeSync(fd); }
   child.on('exit', (code) => { exited = code ?? -1; });
   child.on('error', (e) => { exited = -1; fs.appendFileSync(logFile, `${e.message}\n`); });
@@ -281,22 +297,24 @@ async function stopCommand(home: string, io: { out(s: string): void }, dl: Deadl
 }
 
 /** Ask the web app for the page (it lists the package or workspace first when it does not): its path. */
-async function pageFor(server: Lock, target: Exclude<Target, { kind: 'home' }>, dl: Deadline): Promise<string> {
+async function pageFor(server: Lock, target: PageRequest, dl: Deadline): Promise<string> {
+  const { kind } = target;
+  const what = kind === 'error' ? 'the error page' : target.what;
   let res: Response;
   try {
     res = await fetch(`http://127.0.0.1:${server.port}/api/open`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-topotopo-open': '1', connection: 'close' },
-      body: JSON.stringify({ kind: target.kind, dir: target.dir, version: TOPOTOPO_VERSION, engine: engineSha256() }),
+      body: JSON.stringify({ kind, ...(kind === 'error' ? { error: target.error } : { dir: target.dir }), version: TOPOTOPO_VERSION, engine: engineSha256() }),
       signal: AbortSignal.timeout(dl.left('the web app to list the page')),
     });
   } catch (e: any) {
-    if (e?.name === 'TimeoutError') throw new Error(`gave up waiting for the web app to list ${target.what}`);
+    if (e?.name === 'TimeoutError') throw new Error(`gave up waiting for the web app to list ${what}`);
     throw new Error(`the web app did not answer: ${e?.message ?? e}`);
   }
   const body: any = await res.json().catch(() => null);
   if (res.status === 503 && body?.error) throw Object.assign(new Error(body.error), { stopping: true }); // asked to stop between the check and this request
-  if (res.status === 404 || res.status === 405) throw new Error(`the running web app (port ${server.port}) cannot open files: run topotopo open --stop, then open ${target.what} again`);
+  if (res.status === 404 || res.status === 405) throw new Error(`the running web app (port ${server.port}) cannot open files: run topotopo open --stop, then open ${what} again`);
   if (!res.ok || typeof body?.url !== 'string') throw new Error(body?.error ?? `the web app answered ${res.status}`);
   return body.url;
 }
@@ -322,25 +340,35 @@ export async function openBrowser(url: string): Promise<void> {
  * page when no path is given.
  */
 export async function openCommand(argv: string[], prog: string, io: { out(s: string): void; err(s: string): void }, o: OpenOptions = {}): Promise<number> {
+  let failure: string | undefined;
+  const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
   try {
     const usage = `usage: ${prog} open [<file.topo | file.topows | folder>] | open --stop`;
     const dl = new Deadline(o.timeoutMs ?? OPEN_MS);
     const home = o.home ?? topotopoHome();
     if (argv.length === 1 && argv[0] === '--stop') { await stopCommand(home, io, new Deadline(OPEN_MS + STOP_MS), o.busyMs); return 0; }
     if (argv.length > 1 || argv[0]?.startsWith('--')) throw new Error(usage);
-    const target = resolveTarget(argv[0]);
+    let target: Target | undefined;
+    try { target = resolveTarget(argv[0]); } catch (e) { failure = errorText(e); }
     // a web app that was asked to stop between the check and the request is waited for to leave, and another is started
     let server = await ensureServer(home, o, dl), where = '/';
-    for (let tries = 0; target.kind !== 'home'; tries++) {
-      try { where = await pageFor(server, target, dl); break; }
-      catch (e: any) { if (!e?.stopping || tries >= 3) throw e; server = await ensureServer(home, o, dl); }
+    const ask = async (request: PageRequest) => {
+      for (let tries = 0; ; tries++) {
+        try { return await pageFor(server, request, dl); }
+        catch (e: any) { if (!e?.stopping || tries >= 3) throw e; server = await ensureServer(home, o, dl); }
+      }
+    };
+    if (target && target.kind !== 'home') {
+      try { where = await ask(target); } catch (e) { failure = errorText(e); }
     }
+    if (failure !== undefined) where = await ask({ kind: 'error', error: failure });
     const url = `http://127.0.0.1:${server.port}${where}`;
     await (o.browser ?? openBrowser)(url);
     io.out(`opening ${url}`);
+    if (failure !== undefined) { io.err(failure.split('\n')[0]); return 1; }
     return 0;
-  } catch (e: any) {
-    io.err(String(e?.message ?? e).split('\n')[0]);
+  } catch (e) {
+    io.err((failure ?? errorText(e)).split('\n')[0]);
     return 1;
   }
 }

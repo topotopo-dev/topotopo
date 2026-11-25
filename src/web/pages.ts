@@ -372,6 +372,7 @@ export function frontPage(d: WebData, u: Urls): string {
   <a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a>
   <input id="search" type="search" placeholder="Search ${total} package${total === 1 ? '' : 's'}${outputs ? ` and ${outputs} output${outputs === 1 ? '' : 's'}` : ''}" autocomplete="off" aria-label="Search packages${outputs ? ' and their outputs' : ''}">
   <button id="clear" class="btn" type="button" hidden title="clear the search">Clear</button>
+  <a class="btn primary" href="/new-package">New package</a>
   <a href="/previews">Previews</a>
   <a class="news" href="https://topotopo.kit.com/54b6b32c3f" target="_blank" rel="noopener" title="releases and new packs, about once a month">Get TopoTopo news</a>
 </header>
@@ -391,6 +392,31 @@ export function frontPage(d: WebData, u: Urls): string {
 </section>
 ${d.problems.length ? `<details class="problems"><summary>${d.problems.length} problem${d.problems.length > 1 ? 's' : ''}</summary><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
 </main>`, { page: 'front', data: { statusWords: STATUS } });
+}
+
+export function newPackagePage(u: Urls, target: { parent: string; use?: string } | { dir: string; token: string }) {
+  const existing = 'dir' in target;
+  const title = existing ? 'This folder is not a TopoTopo package yet' : 'New package';
+  return shell(`${title} · TopoTopo`, u, `<header class="bar"><a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a></header>
+<main class="wrap folder"><div class="head"><h1>${title}</h1>
+${existing ? `<p class="hstats">${esc(target.dir)}</p>` : `
+<p>You can also right-click any folder and choose <b>Open in TopoTopo</b>.</p>
+${target.use ? `<p>Find <code>${esc(target.use)}</code> in your new package’s Packages tab.</p>` : ''}`}</div>
+<form id="new-package" class="new-package" action="/api/package/new" method="post">
+  ${existing ? `<input type="hidden" name="folder" value="${esc(target.token)}">` : `
+  <label>Name <input name="name" required></label>
+  <label>Parent folder <input name="parent" value="${esc(target.parent)}" required></label>`}
+  <p class="new-package-error" role="alert" hidden></p>
+  <div class="actions"><button class="btn primary" type="submit">${existing ? 'Make it a package' : 'Create package'}</button>
+  <a class="btn" href="${esc(u.home)}">Cancel</a></div>
+</form></main>`, { page: 'new-package' });
+}
+
+export function openErrorPage(u: Urls, error: string) {
+  const title = 'Could not open in TopoTopo';
+  return shell(`${title} · TopoTopo`, u, `<header class="bar"><a class="brand" href="${esc(u.home)}"><b>TopoTopo</b></a></header>
+<main class="wrap folder"><div class="head"><h1>${title}</h1><p class="open-error">${esc(error)}</p>
+<p>Check the file or folder, then open it again.</p></div><p><a class="btn" href="${esc(u.home)}">Back to TopoTopo</a></p></main>`, { page: 'open-error' });
 }
 
 /** The outputs a package's newest version publishes, with their thumbnails, kinds and tags ('' before its first version). */
@@ -485,6 +511,7 @@ export function packageBlock(p: PackageData, u: Urls): string {
     ${p.links.length ? `<ul class="links">${p.links.map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a></li>`).join('')}</ul>` : ''}
     <div class="actions">
       ${edit ? `<a class="btn primary" href="${esc(edit)}" target="_blank" rel="noopener">Open in editor</a>` : ''}
+      ${p.builtin ? `<a class="btn primary" href="/new-package?use=${encodeURIComponent(p.id)}">Use in a new package</a>` : ''}
       ${p.builtin || p.status === 'empty' || p.status === 'unread' ? '' : `<button class="btn" type="button" data-post="${esc(`${u.package(p.lib, p.id)}/bake`)}">Re-bake</button>`}
       <span class="bakenow" id="bakenow" aria-live="polite">${FOLDER_BAKE[p.status] ?? ''}</span>
     </div>
