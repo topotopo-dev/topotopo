@@ -244,7 +244,7 @@ opens the new package form and names the built-in package to find in the editor'
   (the export tool's options). The target infers the format from an unambiguous extension. Set "format" for .png,
   .json and paths without a supported extension. Write paths relative to the package's exports/ folder.
   Use "path": "lamp.glb" for exports/lamp.glb and leave off the "exports/" prefix. TopoTopo drops that prefix with a
-  warning and refuses the old "engine:" prefix. In a workspace inside an engine project, the engine imports from
+  warning. The old "engine:" prefix is gone: a path with it is refused. In a workspace inside an engine project, the engine imports from
   the package's exports/ folder. The person's Export buttons in the viewer, export {output} / export {all:true} and the CLI's --export-all write these
   targets; set one with edit {op:"export", output?, export}.
   The CLI's --export-all also exports published outputs without a target when the editor offers a fitting format.
