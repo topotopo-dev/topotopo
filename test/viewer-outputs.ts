@@ -424,8 +424,8 @@ cli('--render', path.join(tmp, 'elsewhere.png'));
 check(!fs.existsSync(cliExports), 'a CLI render outside exports/ leaves no exports folder beside the graph');
 cli('--render', path.join(cliExports, 'shot.png'));
 check(new ArtifactStore(cliExports).records().some((a) => a.files.some((p) => path.basename(p) === 'shot.png')), 'a CLI render inside exports/ is registered for the viewer');
-let noTargets = ''; try { cli('--export-all'); } catch (e: any) { noTargets = String(e.stderr); }
-check(/no output of .* has an export target/.test(noTargets), 'CLI --export-all without targets says where to add one');
+const noTargets = String(cli('--export-all'));
+check(/"g" written: .*g\.glb \(default format: glb\)/.test(noTargets) && fs.existsSync(path.join(cliExports, 'g.glb')), 'CLI --export-all without targets writes the default output in its default format and says so');
 fs.writeFileSync(cliGraph, JSON.stringify({ nodes: { b: { type: 'box' }, s: { type: 'sphere' } }, output: 'b', export: 'glb', outputs: { ball: { node: 's', export: { format: 'obj', path: 'parts/ball.obj' } } } }));
 cli('--export-all');
 check(fs.existsSync(path.join(cliExports, 'g.glb')) && fs.existsSync(path.join(cliExports, 'parts', 'ball.obj')), 'CLI --export-all writes every target into exports/ beside a graph that is in no package');

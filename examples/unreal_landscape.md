@@ -13,17 +13,11 @@ and trees and rocks as instances.
 - seed: 0–9999, default 1. Changes the mountains and the layout, not the look.
 
 ## Out
-- landscape (terrain): the ground, with the weight layers grass, rock and road.
+- landscape (terrain): the ground, with the weight layers grass, rock and road. In Unreal, Place Terrain in Level places it
+  with the trees, rocks and road; the graph's `level_out` node holds all four for one Landscape bundle export.
 - trees (instances): pine, fir and oak trees on gentle ground away from the road, packed.
 - rocks (instances): rocks on the steep slopes, packed.
 - road (mesh): the road surface winding along the mountain's +Z flank in TopoTopo (+Y in Unreal).
-
-`topotopo init --example unreal_landscape <folder>` makes it a package that uses `topotopo/nature`. In Unreal, **Place Terrain in Level** (or `TopoTopo.PlaceTerrain`) places the four outputs together.
-To export the entire scene as one Landscape bundle, select the `level_out` node, in the package folder:
-
-```text
-topotopo graphs/main.json --node level_out --format unreal_landscape --export out/level
-```
 
 ## Promises
 - fits_unreal: the ground has a size Unreal Landscape takes as it is, without resampling.

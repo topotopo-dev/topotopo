@@ -202,7 +202,7 @@ const quad = (x: number, z: number, u0: number, v0: number, u1: number, v1: numb
     polys.push({ P: [[i, 0, j], [i + 1, 0, j], [i + 1, 0, j + 1], [i, 0, j + 1]], uv: [[0, 0], [1, 0], [1, 1], [0, 1]] });
   const big = mesh(polys), start = performance.now(), text = inspect(big), ms = performance.now() - start;
   const line = text.split('\n').find((l) => l.startsWith('uv:')) ?? '';
-  check(/overlap not tested \(over 200,000 triangles: inspect detail "uv" tests it\)/.test(line) && !/utilization/.test(line),
+  check(/UV overlap was not checked above 200,000 triangles\. Run --inspect uv or use inspect detail "uv"/.test(text) && !/overlap|utilization/.test(line),
     `summary of ${(side * side * 2).toLocaleString('en-US')} triangles leaves the overlap test to detail "uv" and says so (${ms.toFixed(0)} ms): ${line}`);
   const off = uvReport(big, { overlaps: false });
   check(off.reasons.includes('overlaps not tested (overlaps: false)') && !off.complete && off.utilization.method === 'none',
