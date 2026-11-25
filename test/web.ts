@@ -1272,19 +1272,19 @@ try {
     try {
       const stale = () => exportSources(kit).map((e) => `${e.rel.replace(/-\d+\.glb$/, '')}:${exportStale(graphFile, e.made)}`);
       const first = new Set(stale()), firstReads = reads.n;
-      check(first.size === 3 && first.has('a-fresh:false') && first.has('b-old:true') && first.has('c-vars:false') && firstReads === 2,
+      check(first.size === 3 && first.has('a-fresh:false') && first.has('b-old:graph') && first.has('c-vars:false') && firstReads === 2,
         `30 exports of one graph: it is read twice, once for its hash and once for the other vars set (${firstReads} reads; ${[...first].join(', ')})`);
       stale();
       check(reads.n === firstReads, `checked again, unchanged: it is not read again (${reads.n - firstReads} reads)`);
       write(graphFile, { ...graph, nodes: { b: { type: 'sphere' } } });
       const after = new Set(stale());
-      check(after.size === 3 && after.has('a-fresh:true') && after.has('b-old:true') && after.has('c-vars:true') && reads.n - firstReads === 2,
+      check(after.size === 3 && after.has('a-fresh:graph') && after.has('b-old:graph') && after.has('c-vars:graph') && reads.n - firstReads === 2,
         `the graph changed: read again once per vars set, and every export is older than it (${reads.n - firstReads} reads; ${[...after].join(', ')})`);
       write(graphFile, '{ not json');
       const broken = new Set(stale());
       write(graphFile, graph);
       const back = new Set(stale());
-      check(broken.size === 3 && [...broken].every((x) => x.endsWith(':null')) && back.has('a-fresh:false') && back.has('c-vars:false') && back.has('b-old:true'),
+      check(broken.size === 3 && [...broken].every((x) => x.endsWith(':null')) && back.has('a-fresh:false') && back.has('c-vars:false') && back.has('b-old:graph'),
         `a graph that cannot be read says so for each export, and when it is mended they are as before (${[...broken].join(', ')} / ${[...back].join(', ')})`);
     } finally { (fs as any).readFileSync = readFile; }
 
@@ -1485,6 +1485,75 @@ try {
     const webp = Buffer.concat([Buffer.from('RIFF\0\0\0\0WEBPVP8X', 'latin1'), Buffer.alloc(8), Buffer.from([0x3f, 0x01, 0x00, 0xef, 0x00, 0x00])]);
     check(JSON.stringify([img('a.jpg', jpeg), img('a.gif', gif), img('a.webp', webp), imageSize(path.resolve('library/props/thumbs/crate.png'))]) === '[{"w":800,"h":600},{"w":320,"h":240},{"w":320,"h":240},{"w":256,"h":256}]',
       'an image\'s size from its header (JPEG past a large EXIF block, GIF, WebP, PNG): a note\'s pictures keep their place while they load');
+  }
+  section('the package page and export-all agree on changed outputs');
+  {
+    const ws = path.join(tmp, 'output-freshness');
+    write(path.join(ws, 'outputs.topows'), { libraries: [] });
+    const graph = {
+      vars: { x: 1, y: 2 },
+      nodes: { a: { type: 'sphere', params: { radius: '=x' } }, b: { type: 'sphere', params: { radius: '=y' } } },
+      output: 'a',
+      outputs: {
+        a: { node: 'a', export: { format: 'glb', path: 'a.glb' } },
+        b: { node: 'b', export: { format: 'glb', path: 'b.glb' } },
+      },
+    };
+    const p = createPackage({ name: 'outputs', path: ws }, 'kit', { title: 'Kit', graph });
+    const graphFile = path.join(p.dir, 'graphs', 'main.json');
+    const cli = (...args: string[]) => execFileSync(process.execPath, [path.resolve('src/cli.ts'), graphFile, ...args], { encoding: 'utf8' }).trim().split(/\r?\n/).at(-1);
+    const first = cli('--export-all');
+    check(first === '--export-all: 2 written, 0 unchanged, 0 failed', `export-all writes both published outputs (${first})`);
+    const nodeFile = path.join(p.dir, 'exports', 'node.glb');
+    cli('--node', 'b', '--export', nodeFile);
+
+    const web = await startWeb({ config: { ...cfg, libraries: [], workspaces: [{ name: 'outputs', path: ws }] }, port: 0, bake: false, auditWait: 60_000 });
+    try {
+      const status = async (expected: string, message: string) => {
+        const pkg = await reqAt(web.port, '/w/outputs/kit/');
+        const list = await reqAt(web.port, '/w/outputs/kit/exports/');
+        const badges = [...pkg.body.toString().matchAll(/>([\w]+)\.glb<\/a> <span class="stale"/g)].map((m) => m[1]).join(',');
+        const audit = [...pkg.body.toString().matchAll(/class="fwhat">exports\/([\w]+)\.glb /g)].map((m) => m[1]).join(',');
+        const files = [...list.body.toString().matchAll(/<span class="mname">([\w]+)\.glb<\/span>(?:(?!<\/button>)[\s\S])*?<span class="stale"/g)].map((m) => m[1]).join(',');
+        check(pkg.status === 200 && list.status === 200 && badges === expected && audit === expected && files === expected,
+          `${message} (package: ${badges || 'none'}, audit: ${audit || 'none'}, files: ${files || 'none'})`);
+      };
+      await status('', 'the exports are current when first written');
+
+      graph.nodes.a.params.radius = '=x * 2';
+      write(graphFile, graph);
+      web.rescan();
+      await status('a', 'changing a node only output a reads marks only a');
+
+      graph.nodes.a.params.radius = '=x';
+      graph.vars.x = 3;
+      write(graphFile, graph);
+      web.rescan();
+      await status('a', 'changing x marks only output a');
+      const a = cli('--export-all');
+      check(a === '--export-all: 1 written, 1 unchanged, 0 failed', `export-all rewrites only the changed output (${a})`);
+
+      graph.vars.y = 4;
+      write(graphFile, graph);
+      web.rescan();
+      await status('b,node', 'changing y marks output b and the direct export of its node');
+      cli('--export-all');
+      web.rescan();
+      await status('node', 'export-all clears both published outputs');
+      cli('--node', 'b', '--export', nodeFile);
+      web.rescan();
+      await status('', 'exporting the node again clears its mark');
+
+      // an export made by other TopoTopo code says so, not that its graph changed
+      const record = path.join(p.dir, 'exports', 'a.glb.source.json'), made = JSON.parse(fs.readFileSync(record, 'utf8'));
+      made.source.engine_sha256 = '0'.repeat(64);
+      fs.writeFileSync(record, JSON.stringify(made, null, 2));
+      web.rescan();
+      await status('a', 'an export made by other TopoTopo code is marked');
+      const page = (await reqAt(web.port, '/w/outputs/kit/')).body.toString();
+      check(/>a\.glb<\/a> <span class="stale"[^>]*>made by an earlier TopoTopo</.test(page) && /exports\/a\.glb was made by an earlier TopoTopo/.test(page) && !/older than its graph/.test(page),
+        'and its mark and flag say an earlier TopoTopo made it');
+    } finally { web.close(); }
   }
 } catch (e: any) {
   check(false, `the run stopped: ${e?.cause?.code ?? e?.code ?? ''} ${e?.message ?? e}`.trim());

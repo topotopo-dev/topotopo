@@ -44,7 +44,7 @@ import { editorPage, embedPage, esc, folderBakeWords, frontPage, importMap, mode
 import type { CardData, OutputRow, PackageData, PreviewItem, PreviewsData, RootCardData, Urls, UserRow } from './pages.ts';
 import { PICTURE_STRIP, folderPage } from './folder-page.ts';
 import type { FileItem, FolderCard, FolderPageData, NoteBox } from './folder-page.ts';
-import { PathError, byName, engineTitle, exportSources, exportStale, graphSummary, graphTypes, headingPrefix, kindOf, listFolder, noteHtml, noteId, plumbing, realBelow, resolveIn, rootKey, sendFile, walkTree } from './folders.ts';
+import { PathError, byName, engineTitle, exportSources, exportStale, exportStalenessReads, type ExportStale, graphSummary, graphTypes, headingPrefix, kindOf, listFolder, modelSource, noteHtml, noteId, plumbing, realBelow, resolveIn, rootKey, sendFile, walkTree } from './folders.ts';
 import type { Flag, NoteEnv, NoteLinks, Root, Walk, WalkLimits } from './folders.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -430,11 +430,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   // waits for a large tree's audit. An audit gives the event loop a turn every few milliseconds: pages, files and the
   // event stream keep answering while a large tree is audited
   /**
-   * `stale`: each package's exports older than their graphs (by the package's folderKey; its page marks them); `gen`: the
+   * `stale`: each package's exports its graphs would now make differently (by folderKey; its page marks them); `gen`: the
    * tree's count of changes when the audit began; `dir`: the tree's folder; `n`: its number, counted up as audits are
    * kept (a page made from an audit that is not of the tree as it is waits for one with a higher number)
    */
-  type Audit = { walk: Walk; flags: Flag[]; stale: Map<string, Set<string>>; at: number; gen: number; dir: string; n: number };
+  type Audit = { walk: Walk; flags: Flag[]; stale: Map<string, Map<string, ExportStale>>; at: number; gen: number; dir: string; n: number };
   /** the newest audit of each tree: kept after a change, until the next one is made */
   const audits = new Map<string, Audit>();
   let auditCount = 0;
@@ -847,15 +847,15 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     return rows;
   };
   /**
-   * The exports of a package older than the graph they were made from, by path below exports/; the event loop gets a
-   * turn every few milliseconds (a graph read and hashed for the first time can take a while).
+   * The exports a package's graphs would now make differently, by path below exports/; the event loop gets a turn
+   * every few milliseconds.
    */
-  const staleExports = async (p: Package) => {
-    const graphs = graphsOf(p), out = new Set<string>(), pause = slicer();
-    for (const e of exportSources(p.dir)) { const f = graphs.get(e.made.graph); if (f && exportStale(f, e.made)) out.add(e.rel); await pause(); }
+  const staleExports = async (p: Package, reads: ReturnType<typeof exportStalenessReads>) => {
+    const graphs = graphsOf(p), out = new Map<string, ExportStale>(), pause = slicer();
+    for (const e of exportSources(p.dir)) { const f = graphs.get(e.made.graph), why = f && exportStale(f, e.made, reads); if (why) out.set(e.rel, why); await pause(); }
     return out;
   };
-  /** A package's page data; its exports older than their graphs as the audit shown says (none before the first audit). */
+  /** A package's page data; its stale exports as the audit shown says (none before the first audit). */
   const packageData = (p: Package, audit: Audit | null): PackageData => {
     const builtin = isBuiltin(p), s = builtin ? null : readBakeState(p.dir);
     const graphs = [...graphsOf(p)].map(([name, file]) => { const { nodes, vars, error } = graphSummary(file); return { name, nodes, vars, error }; });
@@ -870,11 +870,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
     });
     const at = (sub: string, f: string) => urls.raw(r.kind, r.name, `${p.rel}/${sub}/${f}`);
     const model = (sub: string, f: string) => (/\.(glb|gltf)$/i.test(f) ? { model: urls.model(r.kind, r.name, `${p.rel}/${sub}/${f}`) } : {});
-    const stale = builtin ? new Set<string>() : audit?.stale.get(folderKey(p.dir)) ?? new Set<string>();
+    const stale = builtin ? new Map<string, ExportStale>() : audit?.stale.get(folderKey(p.dir)) ?? new Map<string, ExportStale>();
     return {
       ...cardOf(p), builtin, rel: p.rel, place: games.some((g) => g.scan.packages.includes(p)) ? `in the workspace "${p.lib}"` : builtin ? 'in TopoTopo\'s built-in library' : `in library "${p.lib}"`, links: m.links, graph: m.bake.graph ?? m.graph, graphs, unread, created: m.created,
       attachments: builtin ? [] : listFiles(path.join(p.dir, 'attachments')).map((f) => ({ ...f, url: at('attachments', f.path), ...model('attachments', f.path) })),
-      exports: builtin ? [] : listFiles(path.join(p.dir, 'exports')).filter((f) => !/\.json$/i.test(f.path) || !/(^|\/)(source|landscape)\.json$|\.(source|meshes)\.json$/i.test(f.path)).map((f) => ({ ...f, url: at('exports', f.path), ...model('exports', f.path), ...(stale.has(f.path) ? { stale: true } : {}) })),
+      exports: builtin ? [] : listFiles(path.join(p.dir, 'exports')).filter((f) => !/\.json$/i.test(f.path) || !/(^|\/)(source|landscape)\.json$|\.(source|meshes)\.json$/i.test(f.path)).map((f) => ({ ...f, url: at('exports', f.path), ...model('exports', f.path), ...(stale.get(f.path) ? { stale: stale.get(f.path) as 'graph' | 'engine' } : {}) })),
       glb: !builtin && fs.existsSync(path.join(webDir(p.dir), 'preview.glb')), thumb: !!previewOf(p), bake: s,
       share: { link: abs(urls.package(p.lib, p.id)), thumb: abs(urls.thumb(p.lib, p.id)), embed: abs(urls.embed(p.lib, p.id)) },
       package: m.name ? {
@@ -900,11 +900,11 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
   const packagesOf = (r: Root): Package[] => (r.builtin ? [] : scans.find((s) => s.root === r.dir && s.name === r.name)?.packages ?? []);
   /**
    * What is wrong with a package that TopoTopo can tell from its files: its preview did not cook; it publishes versions
-   * and has none, or changes no version holds; an export older than its graph; published outputs that no other package
+   * and has none, or changes no version holds; an export its graph would now make differently; published outputs that no other package
    * of the workspace uses (`used`: node type → the folders of the packages whose graphs use it; null outside a workspace;
-   * `stale`: its exports older than their graphs, staleExports).
+   * `stale`: the exports its graphs would now make differently, from staleExports).
    */
-  const packageFlags = (p: Package, used: Map<string, Set<string>> | null, stale: Set<string>): Flag[] => {
+  const packageFlags = (p: Package, used: Map<string, Set<string>> | null, stale: Map<string, ExportStale>): Flag[] => {
     const out: Flag[] = [], at = p.rel, m = p.manifest;
     const s = readBakeState(p.dir);
     if (s && !s.ok && status(p, s) === 'failed') out.push({ kind: 'bake', at, what: `The preview of ${m.title} did not cook: ${firstLine(s.error) || 'no reason given'}`, todo: 'Open it in the editor to see why; it bakes again when the graph is saved, or press Re-bake' });
@@ -930,7 +930,7 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         }
       }
     }
-    for (const e of stale) out.push({ kind: 'export', at, what: `exports/${e} was made from an older version of its graph`, todo: 'Export it again with the Export button in the editor' });
+    for (const [e, why] of stale) out.push({ kind: 'export', at, what: why === 'engine' ? `exports/${e} was made by an earlier TopoTopo` : `exports/${e} was made from an older version of its graph`, todo: 'Export it again with the Export button in the editor' });
     return out;
   };
   /** Whether an audit is of the tree as it is (made since its last change; TopoTopo's own library: recently). */
@@ -996,9 +996,9 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
         await pause();
       }
     }
-    const stale = new Map<string, Set<string>>();
+    const stale = new Map<string, Map<string, ExportStale>>(), reads = exportStalenessReads();
     for (const p of pk) {
-      const s = await staleExports(p);
+      const s = await staleExports(p, reads);
       stale.set(folderKey(p.dir), s);
       flags.push(...packageFlags(p, used, s));
       await pause();
@@ -1123,12 +1123,16 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
       const empty = !f.folders && !f.files && !f.unreal;
       return { name: f.name, url, kind: 'folder', title: f.name, sub: empty ? 'empty' : what, thumb: pictureOf(r, f.rel, fabs, f.image), flags, packages: inside, ...(empty ? { empty } : {}) };
     });
-    // exports TopoTopo made: the package above them says whether their graph changed since
+    // exports TopoTopo made: check whether their graphs would now make them differently
     let above: Package | null = null;
     for (let d = abs; within(d, r.dir); d = path.dirname(d)) { const q = byDir.get(folderKey(d)); if (q) { above = q; break; } if (folderKey(d) === folderKey(r.dir)) break; }
     const graphs = above ? graphsOf(above) : null;
+    const inExports = above && within(abs, path.join(above.dir, 'exports'));
+    const reads = exportStalenessReads();
     const files: FileItem[] = [...listing.files, ...unboxed.map((n) => ({ ...n, kind: 'other' as const }))].map((f) => {
-      const made = f.made ? { graph: f.made.graph, output: f.made.output, stale: graphs?.get(f.made.graph) ? exportStale(graphs.get(f.made.graph)!, f.made) : null } : undefined;
+      const source = f.made ?? (inExports && /\.(glb|gltf)$/i.test(f.name) ? modelSource(path.join(abs, f.name)) : null);
+      const graph = source && graphs?.get(source.graph);
+      const made = source ? { graph: source.graph, output: source.output, stale: graph ? exportStale(graph, source, reads) : null } : undefined;
       return { name: f.name, url: urls.raw(r.kind, r.name, f.rel), size: f.size, mtime: f.mtime, kind: f.kind, ...(f.kind === 'model' ? { model: urls.model(r.kind, r.name, f.rel) } : {}), ...(made ? { made } : {}) };
     });
     // a package's folders of images (previews/, renders/…): its page shows their first pictures with its attachments.
@@ -1422,7 +1426,8 @@ export async function startWeb(o: WebOptions = {}): Promise<WebServer> {
             if (published) return redirect(302, pageOf(published));
           }
           const asked = u.searchParams.get('note');
-          return html(folderPage(await folderData(r, found.rel, found.abs, asked && kindOf(asked) === 'note' && !/[\\/]/.test(asked) ? asked : null, u.searchParams.get('copy')), urls));
+          const markup = folderPage(await folderData(r, found.rel, found.abs, asked && kindOf(asked) === 'note' && !/[\\/]/.test(asked) ? asked : null, u.searchParams.get('copy')), urls);
+          return html(markup);
         }
         if (slash) return redirect(301, urls.raw(r.kind, r.name, found.rel));
         if (write) throw new HttpError(405, 'files are read only here');

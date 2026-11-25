@@ -5,7 +5,7 @@
 // notes as boxes (folded, shorter when the page has pictures, folders or a package), a package's graphs and how its
 // preview baked, the flags as one line that opens, a package's board snippets and where it is. A pure function of its
 // data (src/web/server.ts gathers it, src/web/folders.ts reads the folder) and a URL builder.
-import { count, esc, flagBadge, mosaic, packageAttachments, packageBlock, packageDetails, packageEnd, packageOutputs, packageRelations, shell, size, usesSection, when } from './pages.ts';
+import { count, esc, flagBadge, staleMark, mosaic, packageAttachments, packageBlock, packageDetails, packageEnd, packageOutputs, packageRelations, shell, size, usesSection, when } from './pages.ts';
 import type { CardData, PackageData, Urls } from './pages.ts';
 import type { FileKind, Flag } from './folders.ts';
 
@@ -41,7 +41,7 @@ export interface FileItem {
   /** a model's 3D view */
   model?: string;
   /** an export TopoTopo made: its graph and output, and whether the graph changed since */
-  made?: { graph: string; output: string | null; stale: boolean | null };
+  made?: { graph: string; output: string | null; stale: 'graph' | 'engine' | false | null };
 }
 
 export interface NoteBox {
@@ -109,7 +109,7 @@ function flagList(flags: Flag[]) {
 function kinds(flags: Flag[]) {
   const n = new Map<string, number>();
   for (const f of flags) n.set(f.kind, (n.get(f.kind) ?? 0) + 1);
-  const word: Record<string, [string, string]> = { link: ['broken link', 'broken links'], bake: ['preview that did not cook', 'previews that did not cook'], publish: ['package to publish', 'packages to publish'], export: ['export older than its graph', 'exports older than their graph'], unused: ['package with unused outputs', 'packages with unused outputs'], workspace: ['workspace problem', 'workspace problems'] };
+  const word: Record<string, [string, string]> = { link: ['broken link', 'broken links'], bake: ['preview that did not cook', 'previews that did not cook'], publish: ['package to publish', 'packages to publish'], export: ['export to make again', 'exports to make again'], unused: ['package with unused outputs', 'packages with unused outputs'], workspace: ['workspace problem', 'workspace problems'] };
   return [...n].map(([k, c]) => `${c} ${(word[k] ?? [k, k])[c === 1 ? 0 : 1]}`).join(', ');
 }
 
@@ -193,7 +193,7 @@ function picturesSection(d: FolderPageData, p: PackageData, images: FileItem[]) 
 function filesSection(d: FolderPageData, u: Urls, withImages: boolean) {
   const by = (k: FileKind) => d.files.filter((f) => f.kind === k);
   const images = by('image'), audio = by('audio'), video = by('video'), models = by('model'), other = by('other');
-  const made = (f: FileItem) => (f.made ? `<span class="made" title="${esc(`exported from graph "${f.made.graph}"${f.made.output ? `, output "${f.made.output}"` : ''}`)}">from ${esc(f.made.graph)}${f.made.output ? ` · ${esc(f.made.output)}` : ''}</span>${f.made.stale ? '<span class="stale" title="its graph changed since it was exported">older than its graph</span>' : ''}` : '');
+  const made = (f: FileItem) => (f.made ? `<span class="made" title="${esc(`exported from graph "${f.made.graph}"${f.made.output ? `, output "${f.made.output}"` : ''}`)}">from ${esc(f.made.graph)}${f.made.output ? ` · ${esc(f.made.output)}` : ''}</span>${staleMark(f.made.stale).trimStart()}` : '');
   const parts: string[] = [];
   if (withImages && images.length) parts.push(imagesPart(images));
   if (audio.length) {
