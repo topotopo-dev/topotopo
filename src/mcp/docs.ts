@@ -1803,7 +1803,7 @@ UNREAL LANDSCAPE BUNDLE: export {format:"unreal_landscape", path:"exports/level"
   TopoTopo.ImportScene reads tiled manifests directly: partitioned levels use Landscape streaming proxies; plain
   levels use one Landscape with the tile components. Each tile gets its own HISM actor, with shared meshes,
   LandscapeLayerInfo assets and generated landscape material. npm run export:demo -- --tiles 2 writes a 2×2 demo
-  from examples/unreal_landscape.json to out/unreal_landscape_tiled/ (126 quads / 127 samples per tile, no padding).
+  of the unreal_landscape example to out/unreal_landscape_tiled/ (126 quads / 127 samples per tile, no padding).
   In PowerShell, use npm.cmd to pass --tiles.
   Export keeps the dense source and root/tile file bytes in memory; standard heightfield nodes retain their existing
   4097×4097 total-sample cap. Unreal imports a full assembled grid before proxy splitting; large-grid memory is not bounded by tile_size.
