@@ -856,6 +856,9 @@ check(mirrored > 0 && mirrored < 30, `test scene has mirrored instances (${mirro
       `export:demo: ${files.length} files, ${info.scene.instances} instances of ${info.scene.sources} sources in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     const man = JSON.parse(fs.readFileSync(path.join(tmp, 'landscape', 'landscape.json'), 'utf8'));
     check(man.landscape.exact_fit && man.landscape.components.join() === '2,2' && ['grass', 'rock', 'road'].every((l) => man.layers.some((x: any) => x.name === l)), 'export:demo: the landscape fits Unreal exactly (2×2 components) with grass/rock/road layers');
+    check(man.instances.count === 1418 && man.instances.sources.length === 6 && man.objects_static === 'objects_static.glb'
+      && fs.statSync(path.join(tmp, 'landscape', man.objects_static)).size > 0,
+      'export:demo: the level_out bundle includes the road and all six instance sources');
     await validate(new Uint8Array(fs.readFileSync(path.join(tmp, 'scene.glb'))), 'export:demo scene.glb');
     const sg = importGeometry(new Uint8Array(fs.readFileSync(path.join(tmp, 'scene.geo'))), 'geo');
     check(sg.numPacked === info.scene.instances, `export:demo scene.geo re-imports ${sg.numPacked} packed instances`);

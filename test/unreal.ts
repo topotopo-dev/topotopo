@@ -15,6 +15,7 @@ import { COOK_PROTOCOL, RECORD_SCHEMA } from '../src/host/cook.ts';
 import { GITIGNORE_LINES, PLUGIN_NAME, PLUGIN_SOURCE, REIMPORT_INI, UNREAL_EXCLUDES, assetName, contentPathOf, enableInUproject, isContentPath, missingExcludes, normalContentPath, unrealCommand, unrealPlan, unrealStatus, withExcludes } from '../src/host/unreal.ts';
 import { UNREAL_COMMANDS } from '../src/host/unreal-commands.ts';
 import { topicText } from '../src/mcp/docs.ts';
+import { packageOutputs } from '../src/packages/registry.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'src', 'cli.ts');
@@ -424,6 +425,12 @@ section('the plugin speaks this TopoTopo');
 
 section('unreal_landscape demo export');
 {
+  const game = project('terrain', false);
+  const dir = path.join(game, 'Content', 'terrain');
+  write(path.join(dir, 'terrain.topo'), JSON.stringify({ title: 'Terrain', graph: 'main' }));
+  write(path.join(dir, 'graphs', 'main.json'), fs.readFileSync(path.join(ROOT, 'examples', 'unreal_landscape.json'), 'utf8'));
+  const published = packageOutputs(dir).outputs.map((output) => output.id).join(', ');
+  check(published === 'landscape, road, rocks, trees', `the landscape package publishes four separate parts (${published})`);
   const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'export-demo.ts')], { cwd: ROOT, encoding: 'utf8' });
   const out = path.join(ROOT, 'out', 'unreal_landscape');
   check(result.status === 0, result.status === 0 ? 'the export script writes out/unreal_landscape/' : String(result.error ?? result.stderr).trim());

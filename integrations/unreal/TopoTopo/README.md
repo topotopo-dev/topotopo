@@ -34,7 +34,8 @@ In a PCG graph, use **Load Data Asset** to load an imported `<id>_Points` asset.
 
 Auto Reimport tracks changes to `.topo`. **Editor Preferences > Plugins > TopoTopo > Live Cook** also tracks graphs,
 inputs and assets while the editor is open. Right-click the package to **Reimport** or **Recook**, or run `TopoTopo.CookAll`
-in the console. A failed output keeps its last good assets and reports the error on the package and in the TopoTopo Message Log.
+in the console to import missing package assets and start a cook for each package. A failed output keeps its last good
+assets and reports the error on the package and in the TopoTopo Message Log.
 
 Edit **Output Folder**, **Per Output Folders**, **Skip Outputs** and **Instance Mode** on the package asset. Commit the
 package, `.uasset` files and `<package>/.topotopo/unreal.json`. Keep the intermediate files in `Saved/TopoTopo/` local.
@@ -44,8 +45,31 @@ Run `topotopo unreal status <project> --strict` to check package freshness and A
 
 Right-click a package asset with a terrain output and choose **Place Terrain in Level**. The heightfield must fit
 Unreal's component grid. Common sizes are 127, 253, 505, 1009, 2017 or 4033 samples per side. Use `heightfield_resample`
-to fit the grid. The plugin imports height, paint weights and a starter material. Place terrain again after reimporting
-its package. The [editor workflow](EDITOR_WORKFLOW.md) describes weight layers and tiled imports.
+to fit the grid. The plugin imports height, paint weights and a starter material. When the package publishes terrain
+separately, placement also adds its mesh and instance outputs. Re-place the ground after its height or paint weights
+change. The [editor workflow](EDITOR_WORKFLOW.md) describes weight layers and tiled imports.
+
+## Without a window (CI)
+
+After `topotopo unreal setup`, build the Editor target using `Build.bat` from the engine's `Engine/Build/BatchFiles/` folder.
+
+```text
+Build.bat <Project>Editor Win64 Development -Project="<project>.uproject" -WaitMutex -NoHotReloadFromIDE
+```
+
+Put the package folder under `Content/` and use an existing map, such as `/Game/Maps/Empty`.
+
+```text
+UnrealEditor-Cmd.exe <project>.uproject <map> -unattended -nosplash -RenderOffscreen -ExecCmds="TopoTopo.CookAll wait,TopoTopo.PlaceTerrain <package> save,QUIT_EDITOR"
+```
+
+`CookAll wait` reports each package and waits for all its cooks and imports before printing the final counts.
+`PlaceTerrain` accepts an asset name or a path such as `/Game/Terrain/terrain`. Omit the package to place all packages
+with terrain. `save` saves the level and the assets made by placement.
+
+Use `QUIT_EDITOR` to exit. `quit` hangs the offscreen editor. To run Python, use `-ExecCmds="py <file>"` with the
+Python Editor Script Plugin enabled. To change a graph's values before the next start, edit the values in the graph's
+`vars` block. The defaults in `params` describe its controls.
 
 ## Read a point stream in PCG
 

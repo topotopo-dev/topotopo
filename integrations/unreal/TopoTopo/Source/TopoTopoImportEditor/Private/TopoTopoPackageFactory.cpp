@@ -46,7 +46,7 @@ UObject* UTopoTopoPackageFactory::FactoryCreateFile(UClass* InClass, UObject* In
     if (!Package) { Package = NewObject<UTopoTopoPackage>(InParent, InClass, InName, Flags | RF_Transactional); }
     Package->AssetImportData->Update(Topo);
     TopoTopo::ReadImportOptions(Package);
-    TopoTopo::CookNow(Package, false);
+    if (bCookOnImport) { TopoTopo::CookNow(Package, false); }
     GEditor->GetEditorSubsystem<UImportSubsystem>()->BroadcastAssetPostImport(this, Package);
     return Package;
 }
@@ -76,5 +76,5 @@ EReimportResult::Type UTopoTopoPackageFactory::Reimport(UObject* Obj)
     // the hash of the source, which Auto Reimport compares against
     Package->AssetImportData->Update(Package->SourceFile());
     TopoTopo::ReadImportOptions(Package);
-    return TopoTopo::CookNow(Package, false) ? EReimportResult::Succeeded : EReimportResult::Failed;
+    return TopoTopo::CookNow(Package, false).State == TopoTopo::ECookState::Failed ? EReimportResult::Failed : EReimportResult::Succeeded;
 }

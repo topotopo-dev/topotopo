@@ -94,7 +94,7 @@ decided here, on TopoTopo's side, and tested without the editor.
 | `texture` | `file`, `folder`, `name` | imports the PNG as a Texture |
 | `instances` | `file`, `folder`, `name`, `meshes` | writes a TopoTopo Instances asset from the rows, its groups by the `Mesh` column (every row is read before the asset changes); `meshes` maps each value to an asset; rebuilds actors in open levels |
 | `points` | `file`, `folder`, `name`, optional `meshes` | writes a PCG Data Asset; the columns that are no native point property become attributes (whole numbers, numbers or strings), and `meshes` adds a `MeshPath` attribute |
-| `landscape` | `file`, `folder`, `name` | keeps the bundle's path on the package asset. Place Terrain in Level calls `TopoTopo.ImportScene` |
+| `landscape` | `file`, `folder`, `name` | keeps the bundle's path on the package asset. Place Terrain in Level and `TopoTopo.PlaceTerrain` use the same bundle importer as `TopoTopo.ImportScene` |
 
 A step runs when a file it names has another hash in the record than when it last ran, when its asset is missing, or on Recook.
 An output whose `state` is `failed` runs no steps: its assets stay. A step the plugin does not know fails that output and asks

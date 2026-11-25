@@ -15,6 +15,9 @@ class UTopoTopoPackageFactory : public UFactory, public FReimportHandler
 public:
     UTopoTopoPackageFactory();
 
+    /** CookAll schedules the cook itself after importing the asset. */
+    bool bCookOnImport = true;
+
     virtual bool FactoryCanImport(const FString& Filename) override;
     virtual UObject* FactoryCreateFile(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, const FString& Filename, const TCHAR* Parms, FFeedbackContext* Warn, bool& bOutOperationCanceled) override;
 

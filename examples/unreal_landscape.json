@@ -1,5 +1,5 @@
 {
-  "description": "A landscape for Unreal Engine: an eroded massif on a heightfield of samples × samples heights, spacing apart (127, 253 or 505 a side: sizes Unreal Landscape takes as they are, 63 or 127 quads a section), with the weight layers grass, rock and road, a road on it, and trees and rocks as packed instances. The massif rises a little off the centre towards -Z: a peak with concave flanks under ridged noise, on gentle foothills; gullies are cut where the rain gathers (heightfield_flow), and a light droplet erosion, scaled to the map, wears it all; the ground runs from 0 to height. The road winds across the map along X over the massif's +Z flank: heightfield_path cuts a flat bed 6 m wide (at least 3 samples) with shoulders and a little banking, and marks it as the layer road; rock covers the slopes steeper than about 32 degrees off the road, grass the rest, so the three add up to 1. Trees (pine, fir and oak; oaks low down, conifers higher up, none above a tree line) stand in patches on the gentle grass, as full as tree_density says; rocks of three shapes lie in clusters on the rock layer, leaning with the slope, as many as rock_density says. Both are scattered on Unreal's own triangles (each cell cut along its (0,0)-(1,1) diagonal), so they stand exactly on the imported Landscape, and they keep the corners of their boxes, turned, tilted and scaled as placed, off the road surface. The road output is a ribbon along the road lying 5 cm above the ground. Asserts check that the landscape has samples × samples heights (fits_unreal), that no tree or rock reaches onto the road (clear_road) and that every one stands on the ground within 1 cm (grounded). Output level is all of it together, for the unreal_landscape export; node showcase (not an output) paints the landscape by its weight layers and puts the road, trees and rocks on it.",
+  "description": "A landscape for Unreal Engine: an eroded massif on a heightfield of samples × samples heights, spacing apart (127, 253 or 505 a side: sizes Unreal Landscape takes as they are, 63 or 127 quads a section), with the weight layers grass, rock and road, a road on it, and trees and rocks as packed instances. The massif rises a little off the centre towards -Z: a peak with concave flanks under ridged noise, on gentle foothills; gullies are cut where the rain gathers (heightfield_flow), and a light droplet erosion, scaled to the map, wears it all; the ground runs from 0 to height. The road winds across the map along X over the massif's +Z flank: heightfield_path cuts a flat bed 6 m wide (at least 3 samples) with shoulders and a little banking, and marks it as the layer road; rock covers the slopes steeper than about 32 degrees off the road, grass the rest, so the three add up to 1. Trees (pine, fir and oak; oaks low down, conifers higher up, none above a tree line) stand in patches on the gentle grass, as full as tree_density says; rocks of three shapes lie in clusters on the rock layer, leaning with the slope, as many as rock_density says. Both are scattered on Unreal's own triangles (each cell cut along its (0,0)-(1,1) diagonal), so they stand exactly on the imported Landscape, and they keep the corners of their boxes, turned, tilted and scaled as placed, off the road surface. The road output is a ribbon along the road lying 5 cm above the ground. Asserts check that the landscape has samples × samples heights (fits_unreal), that no tree or rock reaches onto the road (clear_road) and that every one stands on the ground within 1 cm (grounded). The published outputs are the landscape, road, trees and rocks. The level_out node combines them for the Unreal Landscape bundle export. The showcase node paints the landscape by its weight layers and puts the road, trees and rocks on it.",
   "params": {
     "samples": {
       "type": "enum",
@@ -885,7 +885,7 @@
       ]
     }
   },
-  "output": "level_out",
+  "output": "landscape_out",
   "outputs": {
     "landscape": {
       "node": "landscape_out",
@@ -936,18 +936,6 @@
         "mesh"
       ],
       "description": "The road surface: a ribbon along the road, lying 5 cm above the ground; empty when road is off."
-    },
-    "level": {
-      "node": "level_out",
-      "label": "Level",
-      "kind": "scene",
-      "tags": [
-        "unreal",
-        "landscape",
-        "level",
-        "scene"
-      ],
-      "description": "The landscape with the road, trees and rocks on it, for the Unreal Landscape export."
     }
   }
 }
