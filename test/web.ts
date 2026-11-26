@@ -1341,8 +1341,9 @@ try {
     const reSource = (graphSha: string) => ({ format: 'topotopo-export-source', version: 1, files: ['crate.glb'], source: { graph: 'main', graph_sha256: graphSha, output: null, node: 'b', frame: 1, fps: 24, vars: {}, seeds: {}, export: { format: 'glb', options: {} }, topotopo: '0' } });
     write(path.join(reCrate.dir, 'exports', 'crate.glb'), 'glTF');
     write(path.join(reCrate.dir, 'exports', 'crate.glb.source.json'), reSource(sha256Hex(canonicalJSON({ nodes: { b: { type: 'sphere' } }, output: 'b' }))));
-    // a slow disk: each look at a path of the trees takes a moment (the audits still give the event loop their turns)
-    const slow: [string, number][] = [[big, 0.2], [re, 2]];
+    // a slow disk: each look at a path of the trees takes a moment (the audits still give the event loop their turns).
+    // The walks look at real paths, which differ from tmp's when it has a short name (C:\Users\RUNNER~1\…)
+    const slow: [string, number][] = [big, re].flatMap((d, i) => [...new Set([d, fs.realpathSync.native(d)])].map((x): [string, number] => [x, i ? 2 : 0.2]));
     const lstat = fs.lstatSync;
     (fs as any).lstatSync = (...a: Parameters<typeof lstat>) => { const s = slow.find(([d]) => String(a[0]).startsWith(d)); if (s) { const t = performance.now(); while (performance.now() - t < s[1]) { /* a slow disk */ } } return (lstat as any)(...a); };
     const bw = await startWeb({ config: { file: path.join(tmp, 'config.json'), libraries: [], workspaces: [{ name: 'big', path: big }, { name: 're', path: re }], web: { port: 0, cors: [] } }, port: 0, bake: false, auditWait: 0 });

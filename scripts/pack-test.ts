@@ -130,7 +130,7 @@ try {
   check(exampleFiles.length > 30 && !exampleMissing.length, `tarball has the examples and their cards (${exampleFiles.length} files)${exampleMissing.length ? `; missing: ${exampleMissing.slice(0, 5).join(', ')}` : ''}`);
   const shippedExample = (f: string) => /^examples\/[\w-]+\.(json|md)$/.test(f) || /^examples\/[\w-]+\/([\w-]+\.topo|(graphs|inputs)\/[^/]+)$/.test(f);
   const stray = files.filter((f) => /^(src|test|out|bench|scripts|docs|package|tmp|kernels\/(src|target|tests|benches))\//.test(f) || (/^examples\//.test(f) && !shippedExample(f)) ||
-    (/^library\//.test(f) && !/^library\/[\w-]+\/versions\//.test(f)) ||
+    (/^library\//.test(f) && !/^library\/[\w-]+\/(versions\/|thumbs\/[^/]+\.png$|sizes\.json$)/.test(f)) ||
     (/^launcher\//.test(f) && f !== 'launcher/win32-x64/topotopo-open.exe') || /^assets\/icons\/src\//.test(f) || (/\.ts$/.test(f) && !/\.d\.ts$/.test(f)) || /\.tgz$/.test(f));
   check(!stray.length, `tarball has no sources, tests, example renders or package copies, build output or working folders of the built-in library${stray.length ? `; found: ${stray.slice(0, 10).join(', ')}` : ''}`);
   // every file of every version of TopoTopo's own packages: a version has the same files wherever it is
@@ -160,7 +160,7 @@ try {
   // ------------------------------------------------------------------------------------------------ CLI
   step(`CLI: npm exec --no -- ${BIN}`);
   const help = sh(`npm exec --no -- ${BIN} --help`, app);
-  check(help.startsWith(`usage: ${BIN} `) && help.includes(`${BIN} mcp`), `--help prints the usage (${help.split('\n')[0].slice(0, 60)}…)`);
+  check(help.startsWith('First job\n') && help.includes(`\nusage: ${BIN} `) && help.includes(`${BIN} mcp`), `--help prints the first job and the usage (${help.split('\n')[0].slice(0, 60)}…)`);
   fs.copyFileSync(path.join(ROOT, 'examples', 'town_from_lots.json'), path.join(app, 'roofs.json'));
   // the example names topotopo/architecture's outputs: only a package's graphs use packages
   const init = sh(`npm exec --no -- ${BIN} init .`, app);
