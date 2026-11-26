@@ -18,7 +18,8 @@ const check = (ok: unknown, msg: string) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
 };
 
-const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-setup-test-')));
+// native: a temp folder with a short name (C:\Users\RUNNER~1\…) gets its long name, the one a shortcut stores
+const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'topotopo-setup-test-')));
 const WIN = process.platform === 'win32';
 const SYSTEM32 = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
 const REG = path.join(SYSTEM32, 'reg.exe');
