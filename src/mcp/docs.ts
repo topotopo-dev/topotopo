@@ -1638,6 +1638,18 @@ BACKGROUND: transparent:true gives a PNG with alpha (background pixels 0; no gro
   rectangle the bounds cover in that view, keeping its aspect, so a reference cropped to the object lines up with it),
   "width" / "height" (its width or height spans the bounds'), "view" (the whole view). Pick the view that matches the
   picture: render {views:"front", underlay:"inputs/side.png", size:"1600x500"}.
+ENVIRONMENT sets up a presentation render with a backdrop, floor, cast shadows and reflections.
+  "plain" (default) gives the usual inspection render.
+  "studio" uses a light warm-neutral sweep and a soft key shadow.
+  "studio_dark" uses a charcoal sweep, a pool of light on the floor and a stronger rim.
+  "daylight" uses a warm sun, blue sky above the world horizon and warm-neutral ground below it. Both meet in soft haze.
+  The three presentation presets apply to perspective views and need shading:"pbr". Omit shading to use PBR in those views.
+  The floor sits at the lowest Y of the geometry's box or the supplied bounds. The grid defaults to off. Set grid:true
+  to draw it over the floor. Use transparent:true for lighting, reflections and shadows on the subject with alpha.
+  Studio keys follow the camera, so the shadow keeps its screen direction as the subject turns. Daylight's sun stays
+  fixed in world space, so the shadow stays on the ground as the camera orbits.
+  MCP example: render {views:"persp", environment:"studio_dark", size:"1280x720", view_labels:false, footer:false}
+  CLI example: topotopo g.json --render out.png --views persp --environment studio --size 1280x720 --no-view-labels --no-footer
 SOCKETS: sockets:true draws scene empties (scene_null: attachment points) as dots with their name and orient axes
   (X red, Y green, Z blue), through the surface. pbr renders hide empties unless sockets is set.
 QUESTION → OPTION
@@ -1666,8 +1678,8 @@ QUESTION → OPTION
                    shading:"zebra" reflects black and white stripes to show how smoothly surfaces flow.
   How do the materials read? Roughness, metal, maps?  shading:"pbr": the metallic-roughness material glTF export writes
                    (base colour factor or map, tangent-space normal map in the exported MikkTSpace frame, orm or
-                   roughness map, metallic, emissive, unlit) under a fixed camera-relative studio rig (key, fill, rim and a
-                   sky/ground environment), GGX specular, ACES, exposure (stops, default 0). Deterministic: the same graph
+                   roughness map, metallic, emissive, unlit). PBR uses key, fill, rim and sky/ground light, with GGX
+                   specular and ACES tone mapping. The plain rig follows the camera. Exposure is in stops (default 0). The same graph
                    gives the same PNG. Texture files are read from disk; missing or non-PNG maps are not evaluated
                    (named in the notes). Transparency follows the exported alpha mode: alpha_mode "mask" cuts out
                    pixels below alpha_cutoff (alpha × base colour map alpha), "blend" (or alpha below 1 under "auto")
@@ -1678,7 +1690,7 @@ QUESTION → OPTION
                    Cd is not shown, a note says so), Cd colours prims without a material. cd:"multiply" also tints a
                    named material with Cd (vertex paint), cd:"ignore" never shows Cd; cd:"auto" is the default.
   Are the values right (light and dark, without colour)?  grey:true works with "pbr" and "matcap" and defaults to "pbr".
-                   Pbr uses neutral 18% grey under the studio rig at its luminance. Roughness, metallic, normal and
+                   PBR uses neutral 18% grey with the rig and environment at their luminance. Roughness, metallic, normal and
                    ORM maps, alpha and emissive still apply in pbr. Matcap uses uniform clay in place of material
                    colours, vertex colours and base colour maps.
 POLYGON EDGES: wireframe "auto" (the default) draws polygon edges on meshes under 6,000 polygons, never under shading

@@ -298,5 +298,49 @@ const RED = [0.8, 0.25, 0.2];
   check(!tinted.notes.some((n) => /not shown/.test(n) && /color_by/.test(n)), 'no note that color_by is dropped');
 }
 
+// ---------------------------------------------------------------- environment
+{
+  // A flat plate tipped slightly down, so at the default elevation the viewer sees the floor reflected in it.
+  const g = new Geometry({
+    positions: [-1, -1, -0.22, 1, -1, -0.22, 1, 1, 0.22, -1, 1, 0.22],
+    prims: [[0, 1, 2, 3]],
+  });
+  const plate = withMaterial({ baseColor: [0.74, 0.74, 0.74], metallic: 1, roughness: 0.35 }, [], g);
+  const o: RenderOptions = { views: ['persp'], footer: false, transparent: true };
+  const mean = (r: RenderResult) => {
+    let sum = 0, n = 0;
+    for (let i = 0; i < r.rgba.length; i += 4) if (r.rgba[i + 3] === 255) {
+      sum += 0.2126 * r.rgba[i] + 0.7152 * r.rgba[i + 1] + 0.0722 * r.rgba[i + 2];
+      n++;
+    }
+    return sum / n;
+  };
+  const plain = mean(await shot(plate, { ...o, environment: 'plain' }));
+  const studio = mean(await shot(plate, { ...o, environment: 'studio' }));
+  check(plain < 60 && studio > 60 && studio > plain + 25,
+    `flat metal at the default elevation is dark under plain and lit under studio (mean ${plain.toFixed(0)} → ${studio.toFixed(0)})`);
+}
+{
+  // A downward-facing card. The camera sees the cast shadow clear of the card itself.
+  const g = new Geometry({
+    positions: [-0.5, 1, -0.55, 0.5, 1, -0.55, 0.5, 1, 0.55, -0.5, 1, 0.55],
+    prims: [[0, 1, 2, 3]],
+  });
+  const uv = g.vertices.add('uv', 'float', 3);
+  uv.set(0, [0, 0, 0]); uv.set(1, [1, 0, 0]); uv.set(2, [1, 1, 0]); uv.set(3, [0, 1, 0]);
+  const o: RenderOptions = {
+    views: ['persp'], size: [320, 240], environment: 'studio', footer: false,
+    bounds: [[-1, 0, -1], [1, 1, 1]], camera: { from: [0, 2.35, 5], to: [0, 0.5, 0], fov: 49 },
+  };
+  const card = (m: Record<string, any>, images: Image[] = []) => shot(withMaterial(m, images, g), o);
+  const opaque = await card({ alphaMode: 'OPAQUE' });
+  const mask = await card({ alphaMode: 'MASK', textures: { baseColor: 'image:hole' } }, [constImage('hole', [1, 1, 1, 0])]);
+  const blend = await card({ alphaMode: 'BLEND', alpha: 0.7 });
+  const clear = await shot(new Geometry(), o);
+  const floor = (r: RenderResult) => r.rgba[(150 * r.width + 220) * 4];
+  check(floor(opaque) + 20 < floor(clear) && floor(mask) === floor(clear) && floor(blend) === floor(clear),
+    `a back-facing card casts when opaque and the floor stays lit through zero mask alpha and blend (${[opaque, mask, blend, clear].map(floor).join(', ')})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -635,5 +635,83 @@ const sphere = await cook({ s: { type: 'sphere', params: { type: 'ico', level: 2
   check(one > 0 && openOf(big[0]) === scene.numPrims * one, `the open edges of the ${scene.numPrims} cards are still counted: ${openOf(big[0])} = ${scene.numPrims} × ${one}`);
 }
 
+// ---------------------------------------------------------------- environment
+{
+  const { renderGeometryAsync: shot } = await import('../src/render/raster.ts');
+  check(same(render(box, {}), render(box, { environment: 'plain' })), 'environment plain preserves the default quad');
+  const width = 360;
+  const opts: RenderOptions = { views: ['persp'], size: [width, 240], shading: 'pbr', footer: false, viewLabels: false };
+  for (const transparent of [false, true]) {
+    check(same(await shot(box, { ...opts, transparent }), await shot(box, { ...opts, transparent, environment: 'plain' })),
+      `environment plain preserves perspective PBR with transparent ${transparent}`);
+  }
+  const camera = (az: 0 | 90): NonNullable<RenderOptions['camera']> =>
+    ({ from: az === 0 ? [0, 2.35, 5] : [5, 2.35, 0], to: [0, 0, 0], fov: 49 });
+  const studio: RenderOptions = { ...opts, camera: camera(0), environment: 'studio' };
+  const a = await shot(box, studio), empty = await shot(new Geometry(), studio);
+  check(same(a, await shot(box, studio)), 'studio is byte-identical on repeat');
+  check(same(a, await shot(box, { ...studio, shading: undefined, grid: false })), 'studio implies PBR and defaults to grid off');
+  const x = 10;
+  let maxStep = 0;
+  for (let y = 1; y < empty.height; y++) for (let c = 0; c < 3; c++) {
+    maxStep = Math.max(maxStep, Math.abs(px(empty, x, y)[c] - px(empty, x, y - 1)[c]));
+  }
+  check(px(empty, x, 0)[0] !== px(empty, x, empty.height - 1)[0] && maxStep <= 2,
+    `studio backdrop varies vertically and changes by at most two levels per pixel (largest step ${maxStep})`);
+  const transparent = await shot(box, { ...studio, transparent: true });
+  const mask = await shot(box, { ...studio, environment: 'plain', transparent: true });
+  check(transparent.rgba.every((v, i) => i % 4 !== 3 || v === mask.rgba[i]) && transparent.rgba[3] === 0,
+    'studio with transparency preserves the box coverage and keeps the backdrop and floor at alpha zero');
+  for (const shading of ['pbr', undefined] as const) {
+    const mix: RenderOptions = { ...opts, shading, views: ['persp', 'front'] };
+    const s = await shot(box, { ...mix, environment: 'studio' }), p = await shot(box, mix);
+    check(diff(s, p, 0, width + 2, 0, s.width, s.height) === 0,
+      `the front tile matches plain when shading is ${shading ?? 'omitted'}`);
+  }
+  // Project world-space floor probes into two cameras a quarter turn apart.
+  const ground = (r: RenderResult, az: 0 | 90, x: number, z: number) => {
+    const right = az === 0 ? x : -z, forward = az === 0 ? z : x;
+    const l = Math.hypot(2.35, 5), up = (-2.5 - forward * 2.35) / l;
+    const depth = l - (5 * forward - 0.5 * 2.35) / l;
+    const focal = r.width / (2 * Math.tan(49 * Math.PI / 360));
+    return px(r, Math.floor(r.width / 2 + right * focal / depth), Math.floor(r.height / 2 - up * focal / depth))[0];
+  };
+  const near = ground(a, 0, 0.78, 0), far = ground(a, 0, 1.5, 0);
+  check(near + 10 < far, `a floor pixel in the cast shadow is darker than one far from the box (${near} < ${far})`);
+  const s90 = await shot(box, { ...studio, camera: camera(90) });
+  check(ground(a, 0, 0.78, 0) + 10 < ground(a, 0, -0.78, 0) &&
+    ground(s90, 90, 0, -0.78) + 10 < ground(s90, 90, 0, 0.78), 'studio keeps the cast shadow on the same screen side through a 90-degree turn');
+  const d0 = await shot(box, { ...studio, environment: 'daylight' });
+  const d90 = await shot(box, { ...studio, environment: 'daylight', camera: camera(90) });
+  check([d0, d90].every((r, i) => {
+    const az = i === 0 ? 0 : 90;
+    return ground(r, az, 0.9, -0.77) + 10 < ground(r, az, 1.8, -0.77);
+  }), 'daylight keeps the cast shadow at the same world-space probe through a 90-degree orbit');
+  // An empty scene with fixed bounds exposes every backdrop pixel at a known world horizon.
+  const pitch = 8 * Math.PI / 180, fov = 64;
+  const low = await shot(new Geometry(), {
+    ...opts, environment: 'daylight', bounds: [[-1, 0, -1], [1, 1, 1]],
+    camera: { from: [0, 6 * Math.tan(pitch), 6], to: [0, 0, 0], fov },
+  });
+  const horizon = low.height / 2 - (low.width / (2 * Math.tan(fov * Math.PI / 360))) * Math.tan(pitch);
+  const blueBias = ([r, , b]: RGB) => b - r;
+  const above = Math.floor(horizon / 3), below = Math.ceil(horizon + 20);
+  const rowBias = (y: number) => {
+    let sum = 0;
+    for (let x = 0; x < low.width; x++) sum += blueBias(px(low, x, y));
+    return sum / low.width;
+  };
+  check(rowBias(above) > 8 && rowBias(above) > rowBias(below) + 12,
+    'daylight at 8 degrees has a bluer sky row above the world horizon');
+  check(count(low, (c) => blueBias(c) > 3, 0, Math.ceil(horizon), low.width, low.height) === 0,
+    'daylight at 8 degrees has no sky-coloured backdrop pixels below the world horizon');
+  let unknown = '', incompatible = '';
+  try { render(box, { environment: 'outside' as any }); } catch (e: any) { unknown = e.message; }
+  try { render(box, { environment: 'studio', shading: 'matcap' }); } catch (e: any) { incompatible = e.message; }
+  check(unknown.includes('plain, studio, studio_dark, daylight'), 'an unknown environment lists the four presets');
+  check(incompatible.includes('environment "studio" needs shading "pbr"'), 'studio rejects explicit matcap and says it needs PBR');
+  check(renderArgs({ environment: 'studio' }).environment === 'studio', 'renderArgs passes through environment');
+}
+
 console.log(fail ? `\n${fail} render check(s) failed` : '\nrender: all checks passed');
 process.exit(fail ? 1 : 0);

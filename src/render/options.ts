@@ -5,6 +5,7 @@ import { UNDERLAY_FITS, checkCamera, parseViews } from './raster.ts';
 import type { Axis, ClipOptions, RenderOptions, UnderlayFit } from './raster.ts';
 import { VERTEX_COLOR_MODES } from './pbr.ts';
 import type { VertexColorMode } from './pbr.ts';
+import { checkEnvironment } from './environment.ts';
 
 const num = (v: unknown, key: string): number => {
   const n = typeof v === 'string' ? Number(v) : v;
@@ -73,6 +74,10 @@ export function renderArgs(a: Record<string, any>, { canvasSize = false } = {}):
     ['heightfield_layer', 'heightfieldLayer'], ['underlay', 'underlay']] as const) {
     const v = pick(s, c);
     if (v !== undefined) (o as any)[c] = String(v);
+  }
+  if (a.environment !== undefined) {
+    checkEnvironment(a.environment);
+    o.environment = a.environment;
   }
   // heightfields: quads per side (default 256), or "full" for every sample
   const hr = pick('heightfield_res', 'heightfieldRes');

@@ -1,5 +1,5 @@
 // Deterministic PBR preview (render option shading "pbr"): the metallic-roughness model glTF export writes, shaded in
-// software under one fixed studio light rig, so roughness, metallic, occlusion and normal maps can be checked
+// software under a deterministic light rig, so roughness, metallic, occlusion and normal maps can be checked
 // headlessly and the same graph always gives the same PNG bytes.
 //
 // Material evaluation follows the exporter (io/gltf.ts) slot by slot:
@@ -22,8 +22,8 @@
 // Linear maps (normal, orm, roughness) are filtered as stored. Sampling: repeat wrap, mip chains with trilinear
 // filtering at a per-pixel level of detail from the perspective-correct uv derivatives.
 //
-// Lighting: GGX / Smith (height-correlated) / Schlick specular and Lambert diffuse under three camera-relative
-// directional lights (key, fill, rim), plus a world-up sky/ground environment for indirect diffuse and specular
+// Lighting: GGX / Smith (height-correlated) / Schlick specular and Lambert diffuse under three directional lights
+// (key, fill, rim), plus a world-up sky/ground environment for indirect diffuse and specular
 // (Karis' analytic environment BRDF). Linear radiance × 2^exposure, the ACES curve (Narkowicz fit) on the brightest
 // channel with the hue kept, sRGB encoding.
 //
@@ -45,6 +45,7 @@ import { imageRowOfV } from '../core/texcoord.ts';
 import { resolveVertexNormals } from '../core/topology.ts';
 import { decodePNG, lfsPointerNote } from '../io/png-decode.ts';
 import { imageFromPNG } from '../io/textures.ts';
+import type { placeEnvironment } from './environment.ts';
 
 /** External texture files read for a PBR render: path → image, or the reason it is not available. */
 export type PBRTextures = Map<string, Image | string>;
@@ -183,16 +184,18 @@ export interface PBRScene {
   /** materials evaluated, maps used, problems: footer and notes */
   summary: string;
   /** shade a pixel; writes display RGB (0..1) into out[0..2] and the coverage (alpha, 1 on opaque triangles) into out[3] */
-  shade(t: number, w0: number, w1: number, w2: number, dudx: number, dvdx: number, dudy: number, dvdy: number, view: number[], back: boolean, out: number[]): void;
+  shade(t: number, w0: number, w1: number, w2: number, dudx: number, dvdx: number, dudy: number, dvdy: number, view: number[], back: boolean, out: number[], keyVisibility?: number): void;
   /** per triangle: ALPHA_OPAQUE, ALPHA_MASK (discard below cutoff(t)) or ALPHA_BLEND (composited after the opaque pass) */
   triAlpha: Uint8Array;
   /** the MASK cutoff of triangle t's material */
   cutoff(t: number): number;
+  /** Coverage of a cutout triangle, sampled with the shadow map's UV derivatives. */
+  maskAlpha(t: number, w0: number, w1: number, w2: number, dudx: number, dvdx: number, dudy: number, dvdy: number): number;
   /** uv of triangle t at (perspective-correct) weights, for the derivatives */
   uvAt(t: number, w0: number, w1: number, w2: number, out: number[]): void;
   hasUV: boolean;
   /** place the camera-relative light rig for a view (camera right, up, forward in world space) */
-  camera(r: number[], u: number[], f: number[]): void;
+  camera(r: number[], u: number[], f: number[], environment?: ReturnType<typeof placeEnvironment>): void;
 }
 
 const norm = (v: number[]) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
@@ -221,13 +224,16 @@ function env(dy: number, rough: number, out: number[], { sky, horizon, ground } 
 /** ACES filmic curve (Narkowicz fit). */
 const acesCurve = (x: number) => Math.max(0, Math.min(1, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
 
+const SHOULDER = acesCurve(2);
+
 /**
  * Tone map linear radiance in place and encode to sRGB: the ACES curve on the brightest channel, the others scaled by
  * the same factor, so bright coloured highlights (a red metal) keep their hue instead of washing out to white.
  */
-function tone(c: number[]) {
+function tone(c: number[], softHighlights = false) {
   const m = Math.max(c[0], c[1], c[2]);
-  const k = m > 0 ? acesCurve(m) / m : 0;
+  // Continue the ACES shoulder with a smooth roll-off for the brighter presentation rigs.
+  const k = m > 0 ? (softHighlights && m > 2 ? SHOULDER + (0.985 - SHOULDER) * (m - 2) / (m - 2 + 1.25) : acesCurve(m)) / m : 0;
   for (let i = 0; i < 3; i++) c[i] = linearToSrgb(Math.max(0, c[i] * k));
 }
 
@@ -360,7 +366,8 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
   for (const pr of new Set(problems)) notes.push(`pbr: ${pr}`);
 
   // grey: the rig and environment at their luminance, so a value check carries no hue from the lights either
-  const rig = grey ? GREY_RIG : RIG, envC = grey ? GREY_ENV : ENV;
+  const rig = grey ? GREY_RIG : RIG, plainEnv = grey ? GREY_ENV : ENV;
+  let envC = plainEnv, lobes: ReturnType<typeof placeEnvironment>['lobes'] | undefined;
   let camL = rig.map((l) => ({ d: l.d, c: l.c }));
   const gain = 2 ** exposure;
   const n = [0, 0, 0], f = new Float64Array(9), tx = [0, 0, 0, 0], base = [0, 0, 0], e = [0, 0, 0], c3 = [0, 0, 0], vcRGB = [0, 0, 0];
@@ -369,6 +376,10 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
     out[0] = uv![a] * w0 + uv![b] * w1 + uv![c] * w2; out[1] = uv![a + 1] * w0 + uv![b + 1] * w1 + uv![c + 1] * w2;
   };
   const uvp = [0, 0];
+  const mapLod = (sz: Mip[], dudx: number, dvdx: number, dudy: number, dvdy: number) =>
+    0.5 * Math.log2(Math.max(1e-30, Math.max((dudx * sz[0].w) ** 2 + (dvdx * sz[0].h) ** 2, (dudy * sz[0].w) ** 2 + (dvdy * sz[0].h) ** 2)));
+  const vertexAlpha = (t: number, a: number, b: number, c: number, w0: number, w1: number, w2: number) =>
+    alphaAt(a, triPrim[t]) * w0 + alphaAt(b, triPrim[t]) * w1 + alphaAt(c, triPrim[t]) * w2;
   const mapsUsed = new Set<string>();
   for (const m of mats.values()) {
     if (m.baseMap) mapsUsed.add('base colour'); if (m.normalMap) mapsUsed.add('normal');
@@ -379,11 +390,26 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
   return {
     summary, hasUV: !!uv, uvAt, triAlpha,
     cutoff: (t) => triMat[t].cutoff,
-    camera(r, u, fw) { camL = rig.map((l) => ({ d: [0, 1, 2].map((k) => r[k] * l.d[0] + u[k] * l.d[1] - fw[k] * l.d[2]), c: l.c })); },
-    shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, view, back, out) {
+    maskAlpha(t, w0, w1, w2, dudx, dvdx, dudy, dvdy) {
+      const m = triMat[t];
+      let cov = m.alpha;
+      if (m.baseMap && uv) {
+        uvAt(t, w0, w1, w2, uvp);
+        sampleTri(m.baseMap, uvp[0], uvp[1], mapLod(m.baseMap, dudx, dvdx, dudy, dvdy), tx);
+        cov *= tx[3];
+      }
+      if (triVA[t]) cov *= vertexAlpha(t, tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2], w0, w1, w2);
+      return Math.max(0, Math.min(1, cov));
+    },
+    camera(r, u, fw, environment) {
+      camL = environment?.lights ?? rig.map((l) => ({ d: [0, 1, 2].map((k) => r[k] * l.d[0] + u[k] * l.d[1] - fw[k] * l.d[2]), c: l.c }));
+      envC = environment?.radiance ?? plainEnv;
+      lobes = environment?.lobes;
+    },
+    shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, view, back, out, keyVisibility = 1) {
       const m = triMat[t], a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
       if (uv) uvAt(t, w0, w1, w2, uvp);
-      const lod = (sz: Mip[]) => 0.5 * Math.log2(Math.max(1e-30, Math.max((dudx * sz[0].w) ** 2 + (dvdx * sz[0].h) ** 2, (dudy * sz[0].w) ** 2 + (dvdy * sz[0].h) ** 2)));
+      const lod = (sz: Mip[]) => mapLod(sz, dudx, dvdx, dudy, dvdy);
       // base colour
       const vc = triVcol[t];
       if (vc) {
@@ -399,7 +425,7 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
         sampleTri(m.baseMap, uvp[0], uvp[1], lod(m.baseMap), tx); base[0] *= tx[0]; base[1] *= tx[1]; base[2] *= tx[2];
         if (triAlpha[t] !== ALPHA_OPAQUE) cov *= tx[3];
       }
-      if (triVA[t]) cov *= alphaAt(a, triPrim[t]) * w0 + alphaAt(b, triPrim[t]) * w1 + alphaAt(c, triPrim[t]) * w2;
+      if (triVA[t]) cov *= vertexAlpha(t, a, b, c, w0, w1, w2);
       out[3] = Math.max(0, Math.min(1, cov));
       if (vc === 2) { base[0] *= vcRGB[0]; base[1] *= vcRGB[1]; base[2] *= vcRGB[2]; }
       if (grey) base[0] = base[1] = base[2] = GREY_ALBEDO;
@@ -434,6 +460,8 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       const diff = [0, 1, 2].map((k) => (base[k] * (1 - metal)) / Math.PI);
       let r = 0, gg = 0, bb = 0;
       for (const L of camL) {
+        const visibility = L === camL[0] ? keyVisibility : 1;
+        if (visibility === 0) continue;
         const NoL = n[0] * L.d[0] + n[1] * L.d[1] + n[2] * L.d[2];
         if (NoL <= 0) continue;
         const hx = L.d[0] + view[0], hy = L.d[1] + view[1], hz = L.d[2] + view[2], hl = Math.hypot(hx, hy, hz) || 1;
@@ -443,7 +471,8 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
         const fw = (1 - VoH) ** 5;
         for (let k = 0; k < 3; k++) {
           const F = F0[k] + (1 - F0[k]) * fw;
-          const v = ((1 - F) * diff[k] + D * Vis * F) * L.c[k] * NoL;
+          let v = ((1 - F) * diff[k] + D * Vis * F) * L.c[k] * NoL;
+          if (visibility !== 1) v *= visibility;
           if (k === 0) r += v; else if (k === 1) gg += v; else bb += v;
         }
       }
@@ -452,6 +481,18 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
       const ir = [e[0], e[1], e[2]];
       const RdotN = 2 * NoV, ry = RdotN * n[1] - view[1];
       env(ry, rough, e, envC);
+      if (lobes) {
+        const rx = RdotN * n[0] - view[0], rz = RdotN * n[2] - view[2];
+        const spread = rough * rough;
+        for (const l of lobes) {
+          const along = rx * l.d[0] + ry * l.d[1] + rz * l.d[2];
+          const across = rx * l.side[0] + ry * l.side[1] + rz * l.side[2];
+          const width = l.width + spread;
+          const shape = Math.max(0, 1 - (2 * (1 - along) + l.strip * across * across / (1 + 5 * spread)) / width);
+          const weight = shape * shape * l.width / width;
+          for (let k = 0; k < 3; k++) e[k] += l.c[k] * weight;
+        }
+      }
       // Karis' analytic environment BRDF
       const c0 = [-1, -0.0275, -0.572, 0.022], c1 = [1, 0.0425, 1.04, -0.04];
       const q = [rough * c0[0] + c1[0], rough * c0[1] + c1[1], rough * c0[2] + c1[2], rough * c0[3] + c1[3]];
@@ -461,7 +502,7 @@ export function pbrScene(g: Geometry, tris: Uint32Array, triPrim: Uint32Array, f
         const ind = (base[k] * (1 - metal) * ir[k] + e[k] * (F0[k] * A + B)) * ao;
         out[k] = ((k === 0 ? r : k === 1 ? gg : bb) + ind + m.emissive[k]) * gain;
       }
-      tone(out);
+      tone(out, !!lobes);
     },
   };
 }

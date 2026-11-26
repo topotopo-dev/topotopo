@@ -32,6 +32,8 @@ import { withSdfGridPreview } from '../core/sdfgrid.ts';
 import { drawTextureView, textureSampler, withMaterialPreview } from './texview.ts';
 import { EMPTY_ATTRIB } from '../core/scene.ts';
 import { ALPHA_BLEND, ALPHA_MASK, pbrScene, preparePBR } from './pbr.ts';
+import { checkEnvironment, drawEnvironment, environmentPreset, environmentShadow, placeEnvironment } from './environment.ts';
+import type { EnvironmentName } from './environment.ts';
 import { loadMikkTSpace } from '../core/tangents.ts';
 import { decodePNG, lfsPointerNote } from '../io/png-decode.ts';
 import type { PBRScene, PBRTextures, VertexColorMode } from './pbr.ts';
@@ -106,7 +108,7 @@ export interface RenderOptions {
   highlight?: { cls: 'point' | 'prim'; mask: Uint8Array; label?: string } | null;
   /** true: every point (sized by pscale when present); 'auto': only loose points */
   points?: boolean | 'auto';
-  /** the persp ground grid on y = 0 (default true; off with transparent) */
+  /** the persp ground grid (default off with transparent or a non-plain environment, on otherwise) */
   grid?: boolean;
   /** persp camera azimuth in degrees around +Y: 0 = on +Z looking at the front, 90 = on +X (right side), 180 = back (default 35) */
   azimuth?: number;
@@ -174,6 +176,8 @@ export interface RenderOptions {
   shading?: ShadingMode;
   /** shading 'pbr': exposure in stops (default 0) */
   exposure?: number;
+  /** Perspective lighting and backdrop. Non-plain presets require PBR (implied in perspective if omitted). */
+  environment?: EnvironmentName;
   /** shading 'pbr': texture files read by renderGeometryAsync (preparePBR); image volumes need none */
   pbrTextures?: PBRTextures;
   /**
@@ -397,11 +401,13 @@ function makeCam(name: ViewName, bmin: Vec3, bmax: Vec3, W: number, H: number, o
  * Host.readFile); every other mode renders exactly as renderGeometry does.
  */
 export async function renderGeometryAsync(g: Geometry, o: RenderOptions = {}, readFile?: (path: string) => Promise<Uint8Array>): Promise<RenderResult> {
+  const environment = renderEnvironment(o);
   o = greyShading(o);
-  if (o.shading === 'pbr' && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
+  const pbr = o.shading === 'pbr' || !!environment;
+  if (pbr && !o.pbrTextures) o = { ...o, pbrTextures: await preparePBR(g, readFile) };
   if (o.underlay && !o.underlayImage) o = { ...o, underlayImage: await readUnderlay(o.underlay, readFile) };
   // last, so no other task replaces the MikkTSpace instance between this and the synchronous render
-  if (o.shading === 'pbr') await loadMikkTSpace();
+  if (pbr) await loadMikkTSpace();
   return renderGeometry(g, o);
 }
 
@@ -432,6 +438,16 @@ function greyShading(o: RenderOptions): RenderOptions {
   if (!o.grey || o.shading === 'pbr' || o.shading === 'matcap') return o;
   if (o.shading && o.shading !== 'default') throw new Error(`render: grey works with shading "pbr" or "matcap" (given "${o.shading}"). Leave shading out to use "pbr".`);
   return { ...o, shading: 'pbr' };
+}
+
+function renderEnvironment(o: RenderOptions) {
+  const name = o.environment === undefined ? 'plain' : o.environment;
+  checkEnvironment(name);
+  if (name === 'plain') return undefined;
+  if (o.shading !== undefined && o.shading !== 'pbr') {
+    throw new Error(`render: environment "${name}" needs shading "pbr". Leave shading out to use "pbr".`);
+  }
+  return environmentPreset(name);
 }
 
 interface CombSample { point: Vec3; offset: Vec3 | null }
@@ -538,6 +554,7 @@ export function renderGeometry(g: Geometry, o: RenderOptions = {}): RenderResult
 }
 
 function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curvatureCombs>): RenderResult {
+  const preset = renderEnvironment(o);
   o = greyShading(o);
   // packed instances are drawn expanded (within a triangle budget), spline curves as polylines, see core/packed.ts
   if (g.hasPacked() || g.hasSplines() || g.hasSurfaces()) {
@@ -575,6 +592,7 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
   const onlyImages = !g.numPoints && g.volumes.length > 0 && g.volumes.every((v) => v.kind === 'image');
   if (o.camera) checkCamera(o.camera);
   const views: ViewName[] = vlist?.length ? vlist : onlyImages ? ['texture'] : materialOnly || o.camera ? ['persp'] : ['persp', 'front', 'right', 'top'];
+  const environment = views.some(isPerspView) ? preset : undefined;
   const ui = Math.max(1, Math.min(4, Math.round(o.scale ?? 1)));
   // tile size: n (square) or [width, height] pixels per view, before scale
   const sz0 = o.size ?? (views.length === 1 ? 800 : 512);
@@ -605,7 +623,7 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
   if (secK < 0) throw new Error(`unknown section_axis "${o.sectionAxis}" (use x, y or z)`);
   const clipK = o.clip ? AXES.indexOf(o.clip.axis) : -1;
   if (o.clip && clipK < 0) throw new Error(`unknown clip axis "${o.clip.axis}" (use x, y or z)`);
-  const annotate = o.annotate ?? !!(wireMode || o.pointNumbers || o.primNumbers || hasSection || clipK >= 0 || glyphMode || o.labelGroups || o.labelPieces || o.labelAttrib || o.legend || shadingMode || o.sockets);
+  const annotate = o.annotate ?? !!(wireMode || o.pointNumbers || o.primNumbers || hasSection || clipK >= 0 || glyphMode || o.labelGroups || o.labelPieces || o.labelAttrib || o.legend || shadingMode || environment || o.sockets);
   // a heightfield drawn at fewer samples than it has: said on the second footer line (unless annotate is false)
   const hfLine = hfShown.map((x) => `HEIGHTFIELD ${hfShown.length > 1 ? x.v.name.toUpperCase() + ' ' : ''}SHOWN AT ${x.shown[0]}×${x.shown[1]} OF ${x.v.width}×${x.v.height}`).join('  ·  ');
   const hfFooter = !!hfLine && o.annotate !== false;
@@ -741,7 +759,6 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
   }
 
   const colorByActive = !!o.colorBy || !!hl;
-  const pbrTint = colorByActive && o.shading === 'pbr';
 
   // isolated points + polylines
   const used = new Uint8Array(np);
@@ -763,9 +780,9 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
   const wire = !wireMode && o.wireframe !== 'none' && (o.wireframe === true
     || (autoWire && closedPrims > 0 && closedPrims <= AUTO_WIRE_MAX && o.shading !== 'pbr' && o.shading !== 'zebra' && !o.textures));
   const flat = (v: ViewName) => v === 'uv' || v === 'sheet' || v === 'texture';
-  const autoEdgesShown = wire && autoWire && views.some((v) => !flat(v));
+  const autoEdgesShown = wire && autoWire && views.some((v) => !flat(v) && !(environment && isPerspView(v)));
   if (autoEdgesShown) notes.push('wireframe auto: polygon edges drawn (wireframe false hides them)');
-  const edges = wire ? buildEdges(g) : null;
+  const edges = wire && (!autoWire || autoEdgesShown || !environment) ? buildEdges(g) : null;
   // triangle-dominant meshes (boolean/remesh output): hide edges between coplanar faces so the
   // wireframe shows shape, not triangulation slivers
   let edgeVisible: Uint8Array | null = null;
@@ -832,22 +849,22 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
   };
   // shading
   const flatN = shadingMode === 'flat' && nTri ? primNormals(g) : null;
-  let pbrS: PBRScene | null = null;
-  const pbrBlend: { prim: number; tris: number[] }[] = [];
-  if (shadingMode === 'pbr' && nTri) {
+  let pbrSceneData: PBRScene | null = null;
+  const blendPrims: { prim: number; tris: number[] }[] = [];
+  if ((shadingMode === 'pbr' || environment) && nTri) {
     const ev = o.exposure ?? 0;
     if (!Number.isFinite(ev)) throw new Error(`render: exposure expects a number of stops, got ${o.exposure}`);
-    pbrS = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes, { vertexColors: o.vertexColors, grey: !!o.grey });
+    pbrSceneData = pbrScene(g, tris, triPrim, o.pbrTextures, ev, notes, { vertexColors: o.vertexColors, grey: !!o.grey });
     // color_by and highlight tint the shaded material (their colour, lit by its brightness); the checker is not shown
     if (o.checker) notes.push('pbr: checker is not shown under shading "pbr" (color_by and highlight tint the material)');
     const cdMode = o.vertexColors && o.vertexColors !== 'auto' ? ` CD ${o.vertexColors.toUpperCase()}` : '';
-    ovDesc.push(`SHADING PBR${o.grey ? ' GREY 18%' : ''} STUDIO EV ${fmtNum(ev)}${cdMode} (${pbrS.summary.toUpperCase()})`);
+    ovDesc.push(`SHADING PBR${o.grey ? ' GREY 18%' : ''} ${environment ? o.environment!.toUpperCase().replace('_', ' ') : 'STUDIO'} EV ${fmtNum(ev)}${cdMode} (${pbrSceneData.summary.toUpperCase()})`);
     // blend triangles grouped by prim, for the back-to-front pass of each view
     // (a prim's triangles are consecutive, so no Map by prim: a Map stops at 2^24 entries)
     for (let t = 0; t < nTri; t++) {
-      if (pbrS.triAlpha[t] !== ALPHA_BLEND) continue;
-      const last = pbrBlend[pbrBlend.length - 1];
-      if (last && last.prim === triPrim[t]) last.tris.push(t); else pbrBlend.push({ prim: triPrim[t], tris: [t] });
+      if (pbrSceneData.triAlpha[t] !== ALPHA_BLEND) continue;
+      const last = blendPrims[blendPrims.length - 1];
+      if (last && last.prim === triPrim[t]) last.tris.push(t); else blendPrims.push({ prim: triPrim[t], tris: [t] });
     }
   } else if (shadingMode) ovDesc.push(`SHADING ${shadingMode.toUpperCase()}`);
   // section / clip planes
@@ -1187,15 +1204,21 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
       return;
     }
     const kind = isPerspView(vname) ? 'persp' : vname;
+    const look = kind === 'persp' ? environment : undefined;
+    const pbr = shadingMode === 'pbr' || !!look;
+    const pbrS = pbr ? pbrSceneData : null;
+    const pbrBlend = pbr ? blendPrims : [];
+    const pbrTint = colorByActive && pbr;
     const azDeg = vname.startsWith('persp@') ? Number(vname.slice(6)) : NAMED_VIEWS[vname];
     const zb = new Float32Array(W * H).fill(-Infinity);
-    for (let y = 0; y < H; y++) {
+    if (!look || transparent) for (let y = 0; y < H; y++) {
       const t = y / H;
       const r = 0.44 - t * 0.2, gg = 0.46 - t * 0.2, b = 0.5 - t * 0.2;
       for (let x = 0; x < W; x++) { const i = (y * W + x) * 3; col[i] = r; col[i + 1] = gg; col[i + 2] = b; }
     }
     const cam = makeCam(vname, bmin, bmax, W, H, o, kind, azDeg, secK, kind === 'section' ? fitPts : combFitPts);
-    if (pbrS) pbrS.camera(cam.r, cam.u, cam.f);
+    const lights = look && placeEnvironment(look, cam.r, cam.u, cam.f, !!o.grey);
+    if (pbrS) pbrS.camera(cam.r, cam.u, cam.f, lights);
     // project points
     const sx = new Float32Array(np), sy = new Float32Array(np), cz = new Float32Array(np), vz = new Float32Array(np);
     const project = (x: number, y: number, z: number, outp: number[]) => {
@@ -1216,6 +1239,18 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
     const cC = kind === 'section' ? secC : clipC;
     const cS = kind === 'section' || cK < 0 || cam.eye[cK] >= cC ? 1 : -1;
     const clipOn = cK >= 0;
+    const floorY = look && !transparent && cam.eye[1] > bmin[1] ? bmin[1] : undefined;
+    const shadow = look && lights && pbrS ? environmentShadow(look, {
+      p: Pd, points: g.vertexPoint, tris, depth: vz, material: pbrS,
+      clip: clipOn ? { axis: cK, at: cC, sign: cS } : undefined,
+    }, [bb.min, bb.max], sceneR, bmax[1] - bmin[1], lights.lights[0].d, floorY) : undefined;
+    if (look && !transparent) {
+      drawEnvironment(col, W, H, ss, cam, look, !!o.grey, floorY,
+        [(bmin[0] + bmax[0]) / 2, bmin[1], (bmin[2] + bmax[2]) / 2], sceneR, shadow);
+    }
+    // A custom floor can sit above parts of the mesh. Bias it away slightly so coplanar geometry wins.
+    const floorDepth = floorY !== undefined && bb.min[1] < floorY ? Float32Array.from({ length: H }, (_, y) =>
+      Math.max(0, -(cam.f[1] + cam.u[1] * (cam.oy - y - 0.5) / cam.focal) / (cam.eye[1] - floorY + sceneR * 1e-6))) : null;
     const q0 = [0, 0, 0, 0], q1 = [0, 0, 0, 0];
     /** World segment clipped to the kept side, projected (SSAA px) into q0 / q1; false when nothing is left. */
     const clipProj = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): boolean => {
@@ -1247,7 +1282,7 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
     }
 
     // ground grid (persp only), drawn first without depth
-    if (kind === 'persp' && (o.grid ?? !transparent)) {
+    if (kind === 'persp' && (o.grid ?? (!transparent && !look))) {
       const step = Math.pow(10, Math.floor(Math.log10(sceneR * 0.5)));
       const ext = Math.ceil((sceneR * 1.6) / step) * step;
       const cx = Math.round(cam.c[0] / step) * step, czz = Math.round(cam.c[2] / step) * step;
@@ -1255,8 +1290,8 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
       for (let k = -ext; k <= ext + 1e-9; k += step) {
         const major = Math.abs(Math.round((k + (0 * cx)) / step) % 10) === 0;
         for (const dir of [0, 1]) {
-          const a = dir ? [cx + k, 0, czz - ext] : [cx - ext, 0, czz + k];
-          const b = dir ? [cx + k, 0, czz + ext] : [cx + ext, 0, czz + k];
+          const a = dir ? [cx + k, floorY ?? 0, czz - ext] : [cx - ext, floorY ?? 0, czz + k];
+          const b = dir ? [cx + k, floorY ?? 0, czz + ext] : [cx + ext, floorY ?? 0, czz + k];
           project(a[0], a[1], a[2], p0); project(b[0], b[1], b[2], p1);
           if (p0[3] <= 0 || p1[3] <= 0) continue;
           const isAxis = Math.abs((dir ? cx + k : czz + k)) < step * 1e-6;
@@ -1307,6 +1342,7 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
       const e1 = [Pd[b * 3] - Pd[a * 3], Pd[b * 3 + 1] - Pd[a * 3 + 1], Pd[b * 3 + 2] - Pd[a * 3 + 2]];
       const e2 = [Pd[c * 3] - Pd[a * 3], Pd[c * 3 + 1] - Pd[a * 3 + 1], Pd[c * 3 + 2] - Pd[a * 3 + 2]];
       const fnw = cross3(e1, e2);
+      const shadowSlope = shadow?.slope(fnw[0], fnw[1], fnw[2]);
       const toCam = cam.persp ? [cam.eye[0] - Pd[a * 3], cam.eye[1] - Pd[a * 3 + 1], cam.eye[2] - Pd[a * 3 + 2]] : [-cam.f[0], -cam.f[1], -cam.f[2]];
       const back = dot3(fnw, toCam) < 0;
       const material = materialNames ? materialTable[materialNames[triPrim[t]]] : undefined;
@@ -1361,6 +1397,7 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
           const depth = w0 * za + w1 * zb2 + w2 * zc;
           const zi = py * W + px;
           if (depth <= zb[zi]) continue;
+          if (floorDepth && depth < floorDepth[py]) continue;
           if (partial) {
             // per-pixel clip test on the perspective-correct world coordinate along the clip axis
             let p0 = w0, p1 = w1, p2 = w2;
@@ -1378,6 +1415,7 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
             if (alpha < (material!.alphaCutoff ?? 0.5)) continue;
           }
           if (pbrS) {
+            let keyVisibility = 1;
             let dudx = 0, dvdx = 0, dudy = 0, dvdy = 0;
             if (pbrS.hasUV) {
               const at = (q0: number, q1: number, out: number[]) => {
@@ -1392,8 +1430,9 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
               const px3 = Pd[a * 3] * w0 + Pd[b * 3] * w1 + Pd[c * 3] * w2, py3 = Pd[a * 3 + 1] * w0 + Pd[b * 3 + 1] * w1 + Pd[c * 3 + 1] * w2, pz3 = Pd[a * 3 + 2] * w0 + Pd[b * 3 + 2] * w1 + Pd[c * 3 + 2] * w2;
               const vx = cam.eye[0] - px3, vy = cam.eye[1] - py3, vz2 = cam.eye[2] - pz3, vl = Math.hypot(vx, vy, vz2) || 1;
               pbrV[0] = vx / vl; pbrV[1] = vy / vl; pbrV[2] = vz2 / vl;
+              if (shadow && shadowSlope) keyVisibility = shadow.visibility(px3, py3, pz3, shadowSlope[0], shadowSlope[1]);
             } else { pbrV[0] = -cam.f[0]; pbrV[1] = -cam.f[1]; pbrV[2] = -cam.f[2]; }
-            pbrS.shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, pbrV, back, pbrRGB);
+            pbrS.shade(t, w0, w1, w2, dudx, dvdx, dudy, dvdy, pbrV, back, pbrRGB, keyVisibility);
             if (pbrMask && pbrRGB[3] < pbrCut) continue;
             if (!blendPass) {
               zb[zi] = depth;
@@ -1506,8 +1545,11 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
     }
 
     const tol = (d: number) => (cam.persp ? Math.abs(d) * 0.004 + 1e-6 : sceneR * 0.004);
+    if (floorDepth) for (let py = 0; py < H; py++) {
+      for (let i = py * W; i < (py + 1) * W; i++) zb[i] = Math.max(zb[i], floorDepth[py]);
+    }
     // wireframe (polygon edges, depth-tested)
-    if (edges) {
+    if (edges && !(look && autoWire)) {
       for (let e = 0; e < edges.a.length; e++) {
         if (edgeVisible && !edgeVisible[e]) continue;
         const a = edges.a[e], b = edges.b[e];
@@ -1541,7 +1583,7 @@ function rasterize(g: Geometry, o: RenderOptions, comb?: ReturnType<typeof curva
     if (drawPts) {
       for (let i = 0; i < np; i++) {
         if (!showAllPts && used[i]) continue;
-        if (hideEmpties && isEmpty(i)) continue;
+        if ((hideEmpties || pbr) && isEmpty(i)) continue;
         if (cam.persp && vz[i] < 1e-4) continue;
         if (clipOn && !keptPt(i)) continue;
         const pc = pointColorOf(i) ?? (hl && hl.cls === 'point' ? (hl.mask[i] ? [1, 0.55, 0.1] : [0.5, 0.5, 0.5]) : [1, 0.85, 0.25]);

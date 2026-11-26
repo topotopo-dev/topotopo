@@ -3,7 +3,7 @@
 //   node src/cli.ts <graph.json> [--node name | --output name] [--var name=value]… [--frame N | --frames A-B[:step]] [--fps 24]
 //                   [--render out.png] [--views quad|quad_uv|turntable|persp|front_left|front,top|persp,uv|persp,section] [--checker] [--color-by attr]
 //                   [--wireframe all|hard|boundary|groups] [--section y:0.5] [--clip x:0.5] [--glyphs N|up|orient|v|comb] [--labels groups,pieces,points,prims,attrib:name]
-//                   [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--cd auto|ignore|multiply] [--grey] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
+//                   [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--environment plain|studio|studio_dark|daylight] [--cd auto|ignore|multiply] [--grey] [--legend] [--size 800|1600x600] [--render-scale 2] [--heightfield-res 256|full]
 //                   [--transparent] [--no-grid] [--underlay ref.png [--underlay-opacity 0.5] [--underlay-fit bounds|width|height|view]] [--sockets]
 //                   [--heightfield-layer mask|<layer>|none] [--export out.glb] [--export out.obj]
 //                   [--compress meshopt] [--maps embed|external|none] [--quantize] [--tangents auto|preserve|none] [--pcg | --pcg-struct] [--attributes P,N,pscale] [--up-axis z] [--scale 100]
@@ -179,6 +179,7 @@ if (!argv.length || argv.includes('-h') || argv.includes('--help')) {
     '         render overlays: [--wireframe all|hard|boundary|groups] [--hard-angle 30] [--section y:0.5] [--clip x:0.5[:abs]]',
     '                          [--glyphs N|up|orient|v|comb] [--glyph-attrib a] [--labels groups,pieces,points,prims,attrib:name] [--legend] [--points]',
     '                          [--shading flat|matcap|zebra|ao|pbr] [--exposure 0] [--size 800|1600x600] (whole PNG including footer) [--render-scale 2]',
+    '                          [--environment plain|studio|studio_dark|daylight] (plain is the default. Other presets add a backdrop, floor, shadows and reflections to perspective views and require pbr, implied if omitted.)',
     '                          Zebra reflects black and white stripes to show how smoothly surfaces flow.',
     '                          [--cd auto|ignore|multiply] (shading pbr: auto = a named material wins over Cd, Cd colours prims without one; multiply = Cd tints the material too)',
     '                          [--grey] works with pbr (neutral 18% grey, retaining roughness, metallic and normal maps) and matcap (uniform clay). It implies pbr if shading is omitted.',
@@ -528,7 +529,7 @@ async function cook() {
 
   /** Every render flag (renderFlags reads them, plus --views, --color-by, --checker). */
   const RENDER_FLAGS = ['--wireframe', '--hard-angle', '--section', '--clip', '--glyphs', '--glyph-attrib', '--glyph-scale', '--max-glyphs', '--labels', '--max-labels',
-    '--shading', '--ao-radius', '--size', '--render-scale', '--azimuth', '--elevation', '--zoom', '--look-at', '--bounds', '--ortho-scale', '--texture', '--max-triangles', '--exposure', '--cd',
+    '--shading', '--ao-radius', '--size', '--render-scale', '--azimuth', '--elevation', '--zoom', '--look-at', '--bounds', '--ortho-scale', '--texture', '--max-triangles', '--exposure', '--environment', '--cd',
     '--heightfield-res', '--heightfield-layer', '--underlay', '--underlay-opacity', '--underlay-fit', '--legend', '--points', '--annotate', '--textures', '--transparent',
     '--sockets', '--grey', '--no-view-labels', '--no-footer', '--no-grid', '--views', '--color-by', '--checker', '--from', '--to', '--fov'];
 
@@ -538,7 +539,7 @@ async function cook() {
     for (const [f, k] of [['--wireframe', 'wireframe'], ['--hard-angle', 'hard_angle'], ['--section', 'section'], ['--clip', 'clip'], ['--glyphs', 'glyphs'],
       ['--glyph-attrib', 'glyph_attrib'], ['--glyph-scale', 'glyph_scale'], ['--max-glyphs', 'max_glyphs'], ['--labels', 'labels'], ['--max-labels', 'max_labels'],
       ['--shading', 'shading'], ['--ao-radius', 'ao_radius'], ['--size', 'size'], ['--render-scale', 'scale'], ['--azimuth', 'azimuth'], ['--elevation', 'elevation'],
-      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--bounds', 'bounds'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'], ['--cd', 'cd'],
+      ['--zoom', 'zoom'], ['--look-at', 'look_at'], ['--bounds', 'bounds'], ['--ortho-scale', 'ortho_scale'], ['--texture', 'texture'], ['--max-triangles', 'max_triangles'], ['--exposure', 'exposure'], ['--environment', 'environment'], ['--cd', 'cd'],
       ['--heightfield-res', 'heightfield_res'], ['--heightfield-layer', 'heightfield_layer'], ['--underlay-opacity', 'underlay_opacity'], ['--underlay-fit', 'underlay_fit']]) if (get(f) !== undefined) a[k] = get(f);
     for (const [f, k] of [['--legend', 'legend'], ['--points', 'points'], ['--annotate', 'annotate'], ['--textures', 'textures'], ['--transparent', 'transparent'], ['--sockets', 'sockets'], ['--grey', 'grey']]) if (has(f)) a[k] = true;
     // a camera by position: --from x,y,z --to x,y,z [--fov 40]
