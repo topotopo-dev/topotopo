@@ -79,17 +79,20 @@ Requires Node ≥ 22.18.
 
 ```bash
 npx topotopo --help                                         # first job and full command reference
-npx topotopo --help-topic examples                          # find an example to start from
-npx topotopo init --example machined_bracket parts          # a package made from it (init parts: an empty one)
-npx topotopo --catalog                                      # node types by category
-npx topotopo --help-node heightfield_road                   # node help also accepts aliases
-npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
+npx topotopo init parts                                     # a package; its first graph, parts/graphs/main.json, is a box
 npx topotopo parts/graphs/main.json --render out.png --size 1000x650 --export out.glb
+npx topotopo --catalog                                      # node types by category
+npx topotopo --help-node erosion                            # node help also accepts aliases
+npx topotopo --help-topic export                            # a help topic (the MCP help tool's text)
 npx topotopo edit parts                                     # open the package in the editor
 npx topotopo view graph.json                                # open one graph in the live 3D viewer
-npx topotopo refresh graph.json generated.json             # a regenerated graph over graph.json, keeping the values a person tuned
 npx topotopo mcp --package parts                            # connect an AI client over stdio
 ```
+
+This page follows the main branch, which is ahead of the npm release (0.5.3). The commands above work on both.
+Starting a package from an example (`--help-topic examples`, then `init --example machined_bracket parts`),
+`refresh`, opening by double-click and the Unreal plugin come with the next release; to use them now, build
+TopoTopo from a clone (below).
 
 For headless builds, see [Build in CI](#build-in-ci).
 
