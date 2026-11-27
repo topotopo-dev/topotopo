@@ -413,24 +413,25 @@ defineNode({
   type: 'heightfield_to_mesh',
   category: 'heightfield',
   summary: 'Convert heightfields to a quad grid mesh (height as Y) with layers as point attributes, N, uv and optional colours.',
-  description: 'Houdini: HeightField Convert to polygons. Points are row-major like the layers (point = j × width + i at step 1), quads face +Y. Every layer becomes a point float attribute of the same name (mask, flow, sediment …) for attribute-driven shading, scattering or export. color writes Cd: mask (white → red), height (ramp), terrain (grass, rock on slopes, sand where sediment/debris settled, darker where water flows, snow on high flat ground, asphalt on a "path" layer).',
+  description: 'Houdini: HeightField Convert to polygons. Terrain points are row-major like the layers (point = j × width + i at step 1), and terrain quads face +Y. Every layer becomes a point float attribute of the same name (mask, flow, sediment …) for attribute-driven shading, scattering or export. color writes Cd: mask (white → red), height (ramp), terrain (grass, rock on slopes, sand where sediment/debris settled, darker where water flows, snow on high flat ground, asphalt on a "path" layer). Set base to add vertical walls and a flat bottom in prim group "base". Later nodes that paint or texture every prim also paint the walls unless they leave group "base" out.',
   aliases: ['heightfield_convert', 'hf_to_mesh', 'heightfield_to_polygons', 'convert_heightfield'],
   inputs: [{ name: 'heightfield', desc: 'geometry with heightfields' }],
   params: {
     step: { type: 'int', default: 1, min: 1, max: 64, desc: 'use every Nth sample (2 = a quarter of the quads)', aliases: ['decimate', 'lod'] },
+    base: { type: 'float', default: 0, min: 0, desc: 'metres of solid ground under the lowest sample to close the terrain into a block with vertical sides and a flat bottom (0 = open sheet). Use for pictures and prints. Leave at 0 for game terrain.' },
     layers: { type: 'bool', default: true, desc: 'copy every layer to a point float attribute' },
-    normals: { type: 'bool', default: true, desc: 'point N from the field gradient' },
-    uv: { type: 'bool', default: true, desc: 'point uv 0..1 over the field (each tile uses its own extent); v = 1 at the −Z edge, at the top of a heightfield_to_tex image' },
-    color: { type: 'enum', options: ['none', 'mask', 'height', 'terrain'], default: 'none', desc: 'point Cd from the layers' },
+    normals: { type: 'bool', default: true, desc: 'point N from the field gradient on the terrain, outward on the walls and down on the bottom' },
+    uv: { type: 'bool', default: true, desc: 'point uv 0..1 over the field and bottom (each tile uses its own extent), with v = 1 at the −Z edge at the top of a heightfield_to_tex image. On the walls, u follows the perimeter and v rises from the bottom to the rim.' },
+    color: { type: 'enum', options: ['none', 'mask', 'height', 'terrain'], default: 'none', desc: 'point Cd from the layers on the terrain and a single cut-earth colour on the base' },
     keep_heightfield: { type: 'bool', default: false, desc: 'keep the heightfield volume alongside the mesh' },
   },
-  outputs: 'quads; point N, uv, Cd and one float attribute per layer',
+  outputs: 'terrain quads, optional wall quads and flat bottom in prim group "base", and point N, uv, Cd and one float attribute per layer',
   example: { nodes: { hf: { type: 'heightfield' }, n: { type: 'heightfield_noise', in: ['hf'], params: { amplitude: 2 } }, m: { type: 'heightfield_to_mesh', in: ['n'], params: { color: 'terrain' } } }, output: 'm' },
   cook: ({ input, p, type }) => {
     const g = input(0);
     const hfs = heightfieldsOf(g);
     if (!hfs.length) throw new NodeError(`${type}: input has no heightfield`, NO_FIELD);
-    const meshes = hfs.map((hf) => heightfieldToMesh(hf, { step: p.step, layers: p.layers, normals: p.normals, uv: p.uv, color: p.color }));
+    const meshes = hfs.map((hf) => heightfieldToMesh(hf, { step: p.step, base: p.base, layers: p.layers, normals: p.normals, uv: p.uv, color: p.color }));
     const rest = p.keep_heightfield ? g.clone() : withoutFields(g);
     return rest.numPoints || rest.volumes.length ? Geometry.merge([rest, ...meshes]) : meshes.length === 1 ? meshes[0] : Geometry.merge(meshes);
   },

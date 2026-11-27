@@ -9390,7 +9390,7 @@ category: `heightfield` · aliases: `heightfield_convert`, `hf_to_mesh`, `height
 
 Convert heightfields to a quad grid mesh (height as Y) with layers as point attributes, N, uv and optional colours.
 
-Houdini: HeightField Convert to polygons. Points are row-major like the layers (point = j × width + i at step 1), quads face +Y. Every layer becomes a point float attribute of the same name (mask, flow, sediment …) for attribute-driven shading, scattering or export. color writes Cd: mask (white → red), height (ramp), terrain (grass, rock on slopes, sand where sediment/debris settled, darker where water flows, snow on high flat ground, asphalt on a "path" layer).
+Houdini: HeightField Convert to polygons. Terrain points are row-major like the layers (point = j × width + i at step 1), and terrain quads face +Y. Every layer becomes a point float attribute of the same name (mask, flow, sediment …) for attribute-driven shading, scattering or export. color writes Cd: mask (white → red), height (ramp), terrain (grass, rock on slopes, sand where sediment/debris settled, darker where water flows, snow on high flat ground, asphalt on a "path" layer). Set base to add vertical walls and a flat bottom in prim group "base". Later nodes that paint or texture every prim also paint the walls unless they leave group "base" out.
 
 **Inputs**
 
@@ -9403,13 +9403,14 @@ Houdini: HeightField Convert to polygons. Points are row-major like the layers (
 | name | type | default | min..max | options | aliases | description |
 |---|---|---|---|---|---|---|
 | `step` | int | `1` | 1..64 |  | `decimate`, `lod` | use every Nth sample (2 = a quarter of the quads) |
+| `base` | float | `0` | 0.. |  |  | metres of solid ground under the lowest sample to close the terrain into a block with vertical sides and a flat bottom (0 = open sheet). Use for pictures and prints. Leave at 0 for game terrain. |
 | `layers` | bool | `true` |  |  |  | copy every layer to a point float attribute |
-| `normals` | bool | `true` |  |  |  | point N from the field gradient |
-| `uv` | bool | `true` |  |  |  | point uv 0..1 over the field (each tile uses its own extent); v = 1 at the −Z edge, at the top of a heightfield_to_tex image |
-| `color` | enum | `"none"` |  | `none`, `mask`, `height`, `terrain` |  | point Cd from the layers |
+| `normals` | bool | `true` |  |  |  | point N from the field gradient on the terrain, outward on the walls and down on the bottom |
+| `uv` | bool | `true` |  |  |  | point uv 0..1 over the field and bottom (each tile uses its own extent), with v = 1 at the −Z edge at the top of a heightfield_to_tex image. On the walls, u follows the perimeter and v rises from the bottom to the rim. |
+| `color` | enum | `"none"` |  | `none`, `mask`, `height`, `terrain` |  | point Cd from the layers on the terrain and a single cut-earth colour on the base |
 | `keep_heightfield` | bool | `false` |  |  |  | keep the heightfield volume alongside the mesh |
 
-**Writes:** quads; point N, uv, Cd and one float attribute per layer
+**Writes:** terrain quads, optional wall quads and flat bottom in prim group "base", and point N, uv, Cd and one float attribute per layer
 
 **Example**
 

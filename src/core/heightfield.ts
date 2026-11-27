@@ -471,6 +471,8 @@ export function cropHeightfield(src: HeightfieldVolume, i0: number, i1: number, 
 export interface ToMeshOptions {
   /** take every step-th sample (1 = full resolution); the last row and column are always included */
   step?: number;
+  /** metres of solid ground below the lowest sample (0 = open sheet) */
+  base?: number;
   /** copy every layer to a point float attribute of the same name */
   layers?: boolean;
   /** point N from the field gradient */
@@ -525,8 +527,12 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
   const step = Math.max(1, Math.round(o.step ?? 1));
   const I = steps(hf.width, step), J = steps(hf.height, step);
   const nx = I.length, nz = J.length, np = nx * nz;
+  const base = o.base ?? 0;
+  const wallSamples = base > 0 ? 2 * (nx + nz) : 0;
+  const perimeter = base > 0 ? wallSamples - 4 : 0;
   const H = hf.read('height');
-  const pos = new Float64Array(np * 3);
+  const stats = base > 0 ? layerStats(H)! : null;
+  const pos = new Float64Array((np + 2 * wallSamples + perimeter) * 3);
   const src = new Int32Array(np);
   for (let b = 0; b < nz; b++)
     for (let a = 0; a < nx; a++) {
@@ -536,7 +542,8 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
     }
   const g = new Geometry({ positions: pos });
   const nq = (nx - 1) * (nz - 1);
-  const vp = new Int32Array(nq * 4);
+  const numPrims = nq + perimeter + (base > 0 ? 1 : 0);
+  const vp = new Int32Array((nq + perimeter) * 4 + perimeter);
   let q = 0;
   for (let b = 0; b < nz - 1; b++)
     for (let a = 0; a < nx - 1; a++) {
@@ -545,10 +552,11 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
       vp[q++] = p; vp[q++] = p + nx; vp[q++] = p + nx + 1; vp[q++] = p + 1;
     }
   g.vertexPoint = vp;
-  g.primStart = Int32Array.from({ length: nq + 1 }, (_, i) => i * 4);
-  g.primClosed = new Uint8Array(nq).fill(1);
-  g.vertices = new AttribTable(nq * 4);
-  g.prims = new AttribTable(nq);
+  g.primStart = Int32Array.from({ length: numPrims + 1 }, (_, i) => i * 4);
+  g.primStart[numPrims] = vp.length;
+  g.primClosed = new Uint8Array(numPrims).fill(1);
+  g.vertices = new AttribTable(vp.length);
+  g.prims = new AttribTable(numPrims);
   if (o.layers)
     for (const [name, a] of hf.layers) {
       if (name === 'P' || name === 'N' || name === 'Cd' || name === 'uv') continue;
@@ -571,7 +579,7 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
   const color = o.color ?? 'none';
   if (color !== 'none') {
     const Cd = g.points.add('Cd', 'float', 3).data as Float64Array;
-    const st = layerStats(H)!;
+    const st = stats ?? layerStats(H)!;
     const span = st.max - st.min || 1;
     // the layer drawn in red (the mask unless colorLayer names another)
     const tint = color === 'mask' || color === 'preview' ? layerTint(hf, o.colorLayer === undefined ? 'mask' : o.colorLayer) : null;
@@ -602,6 +610,48 @@ export function heightfieldToMesh(hf: Heightfield, o: ToMeshOptions = {}): Geome
       }
       Cd[p * 3] = c[0]; Cd[p * 3 + 1] = c[1]; Cd[p * 3 + 2] = c[2];
     }
+  }
+  if (stats) {
+    const floor = stats.min - base;
+    const P = g.P;
+    const N = g.points.get('N')?.data as Float64Array | undefined;
+    const uv = g.points.get('uv')?.data as Float64Array | undefined;
+    const Cd = g.points.get('Cd')?.data as Float64Array | undefined;
+    const layers = [...g.points.map.values()].filter((a) => a.size === 1).map((a) => a.data as Float64Array);
+    const capStart = np + 2 * wallSamples;
+    const loopLength = 2 * (hf.width + hf.height - 2);
+    const sides: [start: number, stride: number, samples: number[], normal: Vec3][] = [
+      [0, 1, I, [0, 0, -1]], [nx - 1, nx, J, [1, 0, 0]],
+      [np - 1, -1, I, [0, 0, 1]], [np - nx, -nx, J, [-1, 0, 0]],
+    ];
+    let p = np, cap = capStart, capVertex = (nq + perimeter) * 4, along = 0;
+    for (const [start, stride, samples, normal] of sides) {
+      const last = samples.length - 1, length = samples[last];
+      for (let i = 0; i <= last; i++, p += 2) {
+        const rim = start + i * stride, t = rim * 3;
+        const u = (along + (stride > 0 ? samples[i] : length - samples[last - i])) / loopLength;
+        P.set([P[t], P[t + 1], P[t + 2], P[t], floor, P[t + 2]], p * 3);
+        N?.set(normal, p * 3);
+        N?.set(normal, (p + 1) * 3);
+        uv?.set([u, 1], p * 3);
+        uv?.set([u, 0], (p + 1) * 3);
+        for (const layer of layers) layer[p] = layer[p + 1] = layer[rim];
+        if (i > 0) {
+          vp[q++] = p - 2; vp[q++] = p; vp[q++] = p + 1; vp[q++] = p - 1;
+        }
+        // Keep every floor edge in the cap, including the collinear samples along each side.
+        if (i < last) {
+          P.set([P[t], floor, P[t + 2]], cap * 3);
+          N?.set([0, -1, 0], cap * 3);
+          if (uv) uv.set([uv[t], uv[t + 1]], cap * 3);
+          vp[capVertex++] = cap++;
+        }
+      }
+      along += length;
+    }
+    for (const layer of layers) layer.fill(0, capStart);
+    if (Cd) for (let i = np; i < g.numPoints; i++) Cd.set([0.22, 0.20, 0.18], i * 3);
+    g.addGroup('prim', 'base').fill(1, nq);
   }
   return g;
 }

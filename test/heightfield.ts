@@ -963,6 +963,107 @@ section('render, inspect, fingerprints, MCP export');
   check(same(dt.d2, [4, 1, 0, 1, 4]) && same(dt.nearest, [2, 2, 2, 2, 2]), 'distance transform (exact, with nearest site)');
 }
 
+section('heightfield_to_mesh base');
+{
+  const { primNormals, triangulate } = await import('../src/core/topology.ts');
+  const nodes: Record<string, NodeSpec> = {
+    hf: { type: 'heightfield', params: { size: [17, 10], resolution: 1 } },
+    n: NOISE(4, { element_size: 6 }),
+    low: { type: 'heightfield_layer', in: ['n'], params: { expression: 'value - (x === 0.5 && z === 0 ? 3 : 0)' } },
+    field: { type: 'heightfield_layer', in: ['low'], params: { layer: 'pscale', expression: 'x + z + 15' } },
+  };
+  const mesh = (params: NodeSpec['params'], input = 'field'): NodeSpec =>
+    ({ type: 'heightfield_to_mesh', in: [input], params: { color: 'terrain', ...params } });
+  const omitted = await geo({ ...nodes, m: mesh({}) }, 'm');
+  const open = await geo({ ...nodes, m: mesh({ base: 0 }) }, 'm');
+  check(JSON.stringify(fingerprint(omitted)) === JSON.stringify(fingerprint(open)), 'base 0 and the omitted parameter give identical geometry');
+
+  const hf = await field(nodes, 'field');
+  const bottomY = Math.min(...hf.read('height')) - 5;
+  const block = await geo({ ...nodes, m: mesh({ base: 5 }) }, 'm');
+  const np = hf.width * hf.height, nq = open.numPrims, walls = 2 * (hf.width + hf.height - 2);
+  const baseGroup = block.primGroups.get('base');
+  check(open.numPoints === np && open.points.names().every((name) => {
+    const a = open.points.get(name)!, b = block.points.get(name)!;
+    const data = a.data as Float64Array;
+    return a.type === b.type && a.size === b.size && same(data, (b.data as Float64Array).subarray(0, data.length));
+  }) && same(open.vertexPoint, block.vertexPoint.subarray(0, open.numVertices)) &&
+    same(open.primStart, block.primStart.subarray(0, nq + 1)) &&
+    same(open.primClosed, block.primClosed.subarray(0, nq)), 'the first points, their attributes and the quads match the open sheet');
+  check(Math.abs(block.bbox().min[1] - bottomY) < 1e-6, 'the base sits 5 m below the lowest sample');
+  check(block.numPrims === nq + walls + 1 && !!baseGroup && baseGroup.every((on, p) => on === Number(p >= nq)) &&
+    block.vertexPoint.subarray(open.numVertices).every((p) => p >= np), 'only the added prims are in group base and they have their own points');
+
+  const normals = primNormals(block), pointNormals = block.points.get('N')!.data as Float64Array;
+  const uv = block.points.get('uv')!.data as Float64Array, layer = block.points.get('pscale')!.data as Float64Array;
+  const [cx, cz] = hf.center;
+  const sourceByXZ = new Map<string, number>();
+  const xz = (g: Geometry, p: number) => `${g.P[p * 3]},${g.P[p * 3 + 2]}`;
+  for (let p = 0; p < np; p++) sourceByXZ.set(xz(open, p), p);
+  let wallNormals = true, wallUVs = true, wallLayers = true;
+  for (let prim = nq; prim < nq + walls; prim++) {
+    const pts = block.primPoints(prim), normal = normals.subarray(prim * 3, prim * 3 + 3);
+    const first = pts[0] * 3;
+    wallNormals &&= normal[1] === 0 && normal[0] * (block.P[first] - cx) + normal[2] * (block.P[first + 2] - cz) > 0 &&
+      pts.every((p) => same(normal, pointNormals.subarray(p * 3, p * 3 + 3)));
+    wallUVs &&= uv[first] < uv[pts[1] * 3] && pts.every((p) =>
+      uv[p * 3] >= 0 && uv[p * 3] <= 1 && uv[p * 3 + 1] === (block.P[p * 3 + 1] === bottomY ? 0 : 1));
+    wallLayers &&= pts.every((p) => layer[p] === layer[sourceByXZ.get(xz(block, p))!]);
+  }
+  const cap = block.primPoints(nq + walls);
+  check(wallNormals && same(normals.subarray((nq + walls) * 3), [0, -1, 0]) &&
+    cap.every((p) => block.P[p * 3 + 1] === bottomY && same(pointNormals.subarray(p * 3, p * 3 + 3), [0, -1, 0])),
+    'all wall face and point normals face horizontally outward and the flat bottom faces down');
+  check(wallLayers && cap.every((p) => layer[p] === 0), 'wall layers match the rim samples and bottom layers are zero');
+  check(wallUVs && cap.every((p) => {
+    const t = sourceByXZ.get(xz(block, p))! * 3;
+    return same(uv.subarray(p * 3, p * 3 + 3), uv.subarray(t, t + 3));
+  }), 'wall UVs run around the rim and up from the floor, and cap UVs span the field extent');
+
+  // Check all triangle edges by position so the split normals at the rim, corners and floor can meet.
+  const closed = (g: Geometry) => {
+    const { tris } = triangulate(g);
+    const edges = new Map<string, { count: number; direction: number }>();
+    for (let k = 0; k < tris.length; k += 3) {
+      const pts = [0, 1, 2].map((i) => {
+        const p = g.vertexPoint[tris[k + i]] * 3;
+        return g.P.subarray(p, p + 3).join(',');
+      });
+      for (let i = 0; i < 3; i++) {
+        const a = pts[i], b = pts[(i + 1) % 3];
+        if (a === b) return false;
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        const edge = edges.get(key) ?? { count: 0, direction: 0 };
+        edge.count++;
+        edge.direction += a < b ? 1 : -1;
+        edges.set(key, edge);
+      }
+    }
+    return edges.size > 0 && [...edges.values()].every((e) => e.count === 2 && e.direction === 0);
+  };
+  check(closed(block), 'every terrain border edge meets a wall at the same positions and the triangulated block is closed');
+  const decimated = await geo({ ...nodes, m: mesh({ base: 5, step: 4 }) }, 'm');
+  check(decimated.primGroups.get('base')?.filter(Boolean).length === 17 && closed(decimated) &&
+    Math.abs(decimated.bbox().min[1] - bottomY) < 1e-6, 'step 4 closes the decimated rim and uses the lowest full-resolution sample');
+
+  const colour = block.points.get('Cd')!.data as Float64Array, earth = colour.subarray(np * 3, np * 3 + 3);
+  check(colour.subarray(0, np * 3).some((v, i) => v !== earth[i % 3]) &&
+    colour.subarray(np * 3).every((v, i) => v === earth[i % 3]), 'the base has one cut-earth Cd distinct from the terrain');
+  const plainBlock = await geo({ ...nodes, m: mesh({ base: 5, layers: false, normals: false, uv: false, color: 'none' }) }, 'm');
+  check(plainBlock.points.names().join() === 'P' && closed(plainBlock), 'a closed block also works with all optional attributes disabled');
+
+  const two: Record<string, NodeSpec> = {
+    ...nodes,
+    other: { type: 'heightfield', params: { size: [2, 3], resolution: 1, center: [30, 0, 4], height: 12 } },
+    both: { type: 'merge', in: ['field', 'other'] },
+    m: mesh({ base: 5 }, 'both'),
+  };
+  const pair = await geo(two, 'm');
+  check(pair.primGroups.get('base')?.filter(Boolean).length === walls + 1 + 11 && closed(pair) &&
+    pair.P[np * 3 + 4] === bottomY && pair.P[(block.numPoints + 12) * 3 + 4] === 7,
+    'two input heightfields each get a closed block at their own height');
+}
+
 console.log(`\nheightfield: ${pass} passed, ${fail} failed`);
 fs.rmSync(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);
